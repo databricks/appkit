@@ -373,6 +373,75 @@ describe("SQLWarehouseConnector", () => {
       }
     });
 
+    test("deduplicates concurrent cold-start waiters onto one poll loop", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STOPPED" })
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const start = vi.fn().mockResolvedValue(undefined);
+      const wsClient = { warehouses: { get, start } };
+      const updates1: { state: string }[] = [];
+      const updates2: { state: string }[] = [];
+      const updates3: { state: string }[] = [];
+
+      const promise = Promise.all([
+        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
+          onStatus: (u) => updates1.push(u),
+          timeoutMs: 60_000,
+        }),
+        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
+          onStatus: (u) => updates2.push(u),
+          timeoutMs: 60_000,
+        }),
+        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
+          onStatus: (u) => updates3.push(u),
+          timeoutMs: 60_000,
+        }),
+      ]);
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(3);
+      const states = ["STARTING", "RUNNING"];
+      expect(updates1.map((u) => u.state)).toEqual(states);
+      expect(updates2.map((u) => u.state)).toEqual(states);
+      expect(updates3.map((u) => u.state)).toEqual(states);
+    });
+
+    test("one waiter aborting does not cancel the shared readiness loop", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const controller = new AbortController();
+
+      const aborted = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-partial-abort",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      const survivor = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-partial-abort",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+
+      controller.abort();
+
+      const runPromise = vi.runAllTimersAsync();
+      await expect(aborted).rejects.toThrow(/canceled/i);
+      await runPromise;
+      await expect(survivor).resolves.toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(2);
+    });
+
     test("continues the readiness loop when onStatus callback throws", async () => {
       // A consumer crash mid-poll must not abort the readiness contract;
       // the emitter swallows the throw onto the OTel span and the loop

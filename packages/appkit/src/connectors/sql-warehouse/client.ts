@@ -88,6 +88,16 @@ interface EnsureWarehouseRunningOptions {
   autoStart?: boolean;
 }
 
+/** In-flight warehouse readiness work shared across concurrent callers. */
+interface WarehouseReadinessInFlight {
+  promise: Promise<void>;
+  refCount: number;
+  sharedController: AbortController;
+  subscribers: Set<(update: WarehouseStatusUpdate) => void>;
+  /** Last emitted update; replayed to late joiners. */
+  lastUpdate: WarehouseStatusUpdate | null;
+}
+
 export class SQLWarehouseConnector {
   private readonly name = "sql-warehouse";
 
@@ -102,6 +112,8 @@ export class SQLWarehouseConnector {
    * {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}.
    */
   private _recentlyRunning = new Map<string, number>();
+  /** Per-warehouse readiness singleflight — one poll loop per cold start. */
+  private _readinessInFlight = new Map<string, WarehouseReadinessInFlight>();
   // telemetry
   private readonly telemetry: TelemetryProvider;
   private readonly telemetryMetrics: {
@@ -355,6 +367,10 @@ export class SQLWarehouseConnector {
    * immediately without any SDK round-trip or status emission. This keeps
    * cache-hit analytics requests off the Databricks control plane.
    *
+   * Concurrent callers for the same `warehouseId` share a single in-flight
+   * poll loop (singleflight): only the owner issues `get`/`start`; joiners
+   * receive broadcast `onStatus` updates and share the result promise.
+   *
    * Behaviour by initial state:
    * - `RUNNING`: emits one update, caches the observation, returns.
    * - `STOPPED`: emits a synthetic `STARTING` update, calls
@@ -383,102 +399,215 @@ export class SQLWarehouseConnector {
     if (!warehouseId) throw ValidationError.missingField("warehouse_id");
     if (this._isRecentlyRunning(warehouseId)) return;
 
-    return this.telemetry.startActiveSpan(
-      "sql.warehouseReady",
-      {
-        kind: SpanKind.CLIENT,
-        attributes: {
-          "db.system": "databricks",
-          "db.warehouse_id": warehouseId,
-          "db.warehouse.startup_timeout_ms": timeoutMs,
-        },
-      },
-      async (span: Span) => {
-        const startTime = Date.now();
-        const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
-        let didStart = false;
-        const backoff = new WarehousePollBackoff();
+    const existing = this._readinessInFlight.get(warehouseId);
+    if (existing && !existing.sharedController.signal.aborted) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      existing.refCount++;
+      this._subscribeReadiness(existing, onStatus);
+      return this._joinWarehouseReadiness(existing, signal);
+    }
 
+    const sharedController = new AbortController();
+    const entry: WarehouseReadinessInFlight = {
+      promise: undefined as unknown as Promise<void>,
+      refCount: 1,
+      sharedController,
+      subscribers: new Set(),
+      lastUpdate: null,
+    };
+    this._subscribeReadiness(entry, onStatus);
+
+    const broadcast = (update: WarehouseStatusUpdate): void => {
+      entry.lastUpdate = update;
+      for (const subscriber of entry.subscribers) {
         try {
-          while (true) {
-            if (signal?.aborted) throw ExecutionError.canceled();
-            if (Date.now() - startTime > timeoutMs) {
-              throw ExecutionError.statementFailed(
-                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
-              );
-            }
+          subscriber(update);
+        } catch {
+          // Individual SSE consumers must not abort the shared poll loop.
+        }
+      }
+    };
 
-            const info = await workspaceClient.warehouses.get(
+    entry.promise = this.telemetry
+      .startActiveSpan(
+        "sql.warehouseReady",
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            "db.system": "databricks",
+            "db.warehouse_id": warehouseId,
+            "db.warehouse.startup_timeout_ms": timeoutMs,
+          },
+        },
+        async (span: Span) => {
+          try {
+            await this._pollUntilWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                onStatus: broadcast,
+                signal: sharedController.signal,
+                timeoutMs,
+                autoStart,
+              },
+              span,
+            );
+            span.setStatus({ code: SpanStatusCode.OK });
+          } catch (error) {
+            this._throwSanitizedReadinessError(error, warehouseId, span);
+          } finally {
+            span.end();
+          }
+        },
+        { name: this.name, includePrefix: true },
+      )
+      .finally(() => {
+        if (this._readinessInFlight.get(warehouseId) === entry) {
+          this._readinessInFlight.delete(warehouseId);
+        }
+      });
+
+    entry.promise.catch(() => {});
+
+    this._readinessInFlight.set(warehouseId, entry);
+    return this._joinWarehouseReadiness(entry, signal);
+  }
+
+  private _subscribeReadiness(
+    entry: WarehouseReadinessInFlight,
+    onStatus: (update: WarehouseStatusUpdate) => void,
+  ): void {
+    entry.subscribers.add(onStatus);
+    if (entry.lastUpdate) onStatus(entry.lastUpdate);
+  }
+
+  /**
+   * Await shared readiness work. Decrements refCount on caller abort; aborts
+   * the shared poll loop only when every waiter has left.
+   */
+  private _joinWarehouseReadiness(
+    entry: WarehouseReadinessInFlight,
+    callerSignal?: AbortSignal,
+  ): Promise<void> {
+    if (callerSignal?.aborted) {
+      return Promise.reject(ExecutionError.canceled());
+    }
+    if (!callerSignal) return entry.promise;
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        callerSignal.removeEventListener("abort", onAbort);
+        this._releaseReadinessWaiter(entry);
+        reject(ExecutionError.canceled());
+      };
+
+      callerSignal.addEventListener("abort", onAbort, { once: true });
+
+      entry.promise.then(
+        () => {
+          if (settled) return;
+          settled = true;
+          callerSignal.removeEventListener("abort", onAbort);
+          resolve();
+        },
+        (error) => {
+          if (settled) return;
+          settled = true;
+          callerSignal.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private _releaseReadinessWaiter(entry: WarehouseReadinessInFlight): void {
+    if (entry.refCount > 0) entry.refCount--;
+    if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+      entry.sharedController.abort("all warehouse readiness waiters aborted");
+    }
+  }
+
+  private async _pollUntilWarehouseRunning(
+    workspaceClient: WorkspaceClient,
+    warehouseId: string,
+    opts: EnsureWarehouseRunningOptions,
+    span: Span,
+  ): Promise<void> {
+    const {
+      onStatus,
+      signal,
+      timeoutMs = DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+      autoStart = true,
+    } = opts;
+    const startTime = Date.now();
+    const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
+    let didStart = false;
+    const backoff = new WarehousePollBackoff();
+
+    while (true) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      if (Date.now() - startTime > timeoutMs) {
+        throw ExecutionError.statementFailed(
+          `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+        );
+      }
+
+      const info = await workspaceClient.warehouses.get(
+        { id: warehouseId },
+        this._createContext(signal),
+      );
+      const state = info?.state;
+      const summary = info?.health?.summary;
+
+      switch (state) {
+        case "RUNNING":
+          emitter.emit(state, summary);
+          this._recentlyRunning.set(warehouseId, Date.now());
+          span.setAttribute("db.warehouse.attempts", emitter.attempt);
+          return;
+        case "DELETED":
+        case "DELETING":
+          throw ConfigurationError.resourceNotFound(
+            "Warehouse ID",
+            `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
+          );
+        case "STOPPED":
+          if (!autoStart) {
+            throw new ConfigurationError(
+              "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
+            );
+          }
+          if (!didStart) {
+            emitter.emit("STARTING", summary);
+            await workspaceClient.warehouses.start(
               { id: warehouseId },
               this._createContext(signal),
             );
-            const state = info?.state;
-            const summary = info?.health?.summary;
-
-            switch (state) {
-              case "RUNNING":
-                emitter.emit(state, summary);
-                this._recentlyRunning.set(warehouseId, Date.now());
-                span.setAttribute("db.warehouse.attempts", emitter.attempt);
-                span.setStatus({ code: SpanStatusCode.OK });
-                return;
-              case "DELETED":
-              case "DELETING":
-                throw ConfigurationError.resourceNotFound(
-                  "Warehouse ID",
-                  `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
-                );
-              case "STOPPED":
-                if (!autoStart) {
-                  // The warehouse exists, it's just in the wrong state and
-                  // policy forbids auto-starting it — use the base
-                  // ConfigurationError directly so the message isn't
-                  // prefixed with "not found".
-                  throw new ConfigurationError(
-                    "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
-                  );
-                }
-                if (!didStart) {
-                  emitter.emit("STARTING", summary);
-                  await workspaceClient.warehouses.start(
-                    { id: warehouseId },
-                    this._createContext(signal),
-                  );
-                  didStart = true;
-                } else {
-                  // Warehouse fell back to STOPPED after our start attempt —
-                  // surface the state and keep polling.
-                  emitter.emit(state, summary);
-                }
-                break;
-              case "STARTING":
-              case "STOPPING":
-                emitter.emit(state, summary);
-                break;
-              default:
-                throw ExecutionError.unknownState(String(state ?? "unknown"));
-            }
-
-            // Preempt the next timeout check: if sleeping the full backoff
-            // would push us past `timeoutMs`, throw now rather than waste
-            // up to ~30s sleeping past the deadline (`backoff.next()` caps
-            // at WAREHOUSE_POLL_MAX_MS).
-            const sleepMs = backoff.next();
-            if (Date.now() + sleepMs - startTime >= timeoutMs) {
-              throw ExecutionError.statementFailed(
-                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
-              );
-            }
-            await this._sleepRespectingAbort(sleepMs, signal);
+            didStart = true;
+          } else {
+            emitter.emit(state, summary);
           }
-        } catch (error) {
-          this._throwSanitizedReadinessError(error, warehouseId, span);
-        } finally {
-          span.end();
-        }
-      },
-      { name: this.name, includePrefix: true },
-    );
+          break;
+        case "STARTING":
+        case "STOPPING":
+          emitter.emit(state, summary);
+          break;
+        default:
+          throw ExecutionError.unknownState(String(state ?? "unknown"));
+      }
+
+      const sleepMs = backoff.next();
+      if (Date.now() + sleepMs - startTime >= timeoutMs) {
+        throw ExecutionError.statementFailed(
+          `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+        );
+      }
+      await this._sleepRespectingAbort(sleepMs, signal);
+    }
   }
 
   /**
