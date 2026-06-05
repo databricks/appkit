@@ -14,25 +14,25 @@ import {
  * describes at all: it skips the warehouse probe AND every DESCRIBE, emits
  * best-available types (cache where the SQL hash matches, else `result: unknown`)
  * and returns immediately, never blocking on — or failing because of — a
- * warehouse, even a RUNNING one. Pass `--block` (commander sets `block: true`)
+ * warehouse, even a RUNNING one. Pass `--wait` (commander sets `wait: true`)
  * for a deliberate/CI invocation that should wait for a starting warehouse and
  * fail fast on a stopped one.
  */
 export function resolveTypegenMode(options?: {
-  block?: boolean;
+  wait?: boolean;
 }): "non-blocking" | "blocking" {
-  return options?.block ? "blocking" : "non-blocking";
+  return options?.wait ? "blocking" : "non-blocking";
 }
 
 /** Options parsed by commander for the generate-types command. */
 interface GenerateTypesOptions {
   noCache?: boolean;
-  block?: boolean;
+  wait?: boolean;
   /**
    * Internal: present only on the detached worker invocation. Carries the path
    * of the single-flight lock this worker must release when it finishes. Its
    * presence is what marks an invocation as "the worker" — workers always run
-   * with `--block`, so they never spawn another worker (only non-blocking runs
+   * with `--wait`, so they never spawn another worker (only non-blocking runs
    * spawn), which terminates the recursion.
    */
   workerLock?: string;
@@ -124,7 +124,7 @@ async function runGenerateTypes(
  * after the foreground non-blocking generate has already written degraded types.
  *
  * Re-invokes THIS CLI (`process.execPath` + `process.argv[1]` — the bin entry
- * that launched us) with `generate-types --block --worker-lock <lockPath>` plus
+ * that launched us) with `generate-types --wait --worker-lock <lockPath>` plus
  * the same positional target options the foreground used, so the worker writes
  * to the same out file / reads the same query folder. The worker is:
  *  - `detached: true` + `.unref()` so it outlives this process (install/dev-setup
@@ -168,7 +168,7 @@ export function spawnTypegenWorker(
     ...process.execArgv,
     cliEntry,
     "generate-types",
-    "--block",
+    "--wait",
     "--worker-lock",
     lockPath,
     ...positionals,
@@ -229,7 +229,7 @@ async function generateTypesAction(
   }
 
   // Only a non-blocking, non-worker invocation spawns. A worker is always
-  // --block (so resolveTypegenMode → "blocking"), which both prevents recursion
+  // --wait (so resolveTypegenMode → "blocking"), which both prevents recursion
   // and means we never get here for a worker.
   if (!isWorker && resolveTypegenMode(options) === "non-blocking") {
     const resolvedRootDir = rootDir || process.cwd();
@@ -254,8 +254,8 @@ export const generateTypesCommand = new Command("generate-types")
   .argument("[warehouseId]", "Databricks warehouse ID")
   .option("--no-cache", "Disable caching for type generation")
   .option(
-    "--block",
-    "Block on warehouse readiness instead of degrading (use for CI)",
+    "--wait",
+    "Wait for warehouse readiness instead of degrading (use for CI)",
   )
   // Internal: marks the detached background worker and carries the lock it must
   // release. Hidden from --help; users should never pass it.
@@ -273,6 +273,6 @@ Examples:
   $ appkit generate-types . shared/appkit-types/analytics.d.ts
   $ appkit generate-types . shared/appkit-types/analytics.d.ts my-warehouse-id
   $ appkit generate-types --no-cache
-  $ appkit generate-types --block   # CI: wait for the warehouse and fail on a cold one`,
+  $ appkit generate-types --wait   # CI: wait for the warehouse and fail on a cold one`,
   )
   .action(generateTypesAction);

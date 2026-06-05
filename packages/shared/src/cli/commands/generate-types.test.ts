@@ -70,14 +70,14 @@ import { generateTypesCommand, resolveTypegenMode } from "./generate-types";
 
 /**
  * Drive the real commander command the way the bin does, so argv parsing
- * (`--block`, `--worker-lock <path>` → camelCase, positionals) is exercised
+ * (`--wait`, `--worker-lock <path>` → camelCase, positionals) is exercised
  * end-to-end. `from: "user"` means args are the user-supplied tokens only.
  */
 async function runCli(args: string[]): Promise<void> {
   await generateTypesCommand.parseAsync(args, { from: "user" });
 }
 
-describe("resolveTypegenMode (generate-types --block)", () => {
+describe("resolveTypegenMode (generate-types --wait)", () => {
   test("defaults to non-blocking when no options/flag are given", () => {
     // A one-shot CLI never describes by default — it emits cached/`unknown` types
     // and exits 0 instead of blocking on (or failing because of) a warehouse,
@@ -86,15 +86,15 @@ describe("resolveTypegenMode (generate-types --block)", () => {
     expect(resolveTypegenMode({})).toBe("non-blocking");
   });
 
-  test("stays non-blocking when block is false (flag absent)", () => {
-    expect(resolveTypegenMode({ block: false })).toBe("non-blocking");
+  test("stays non-blocking when wait is false (flag absent)", () => {
+    expect(resolveTypegenMode({ wait: false })).toBe("non-blocking");
   });
 
-  test("switches to blocking when --block sets block to true", () => {
-    // commander maps `--block` to `{ block: true }`. A deliberate/CI invocation
+  test("switches to blocking when --wait sets wait to true", () => {
+    // commander maps `--wait` to `{ wait: true }`. A deliberate/CI invocation
     // opts in to waiting for a starting warehouse and failing fast on a stopped
     // one.
-    expect(resolveTypegenMode({ block: true })).toBe("blocking");
+    expect(resolveTypegenMode({ wait: true })).toBe("blocking");
   });
 });
 
@@ -141,7 +141,7 @@ describe("generate-types foreground spawn orchestration", () => {
       expect.objectContaining({ mode: "non-blocking" }),
     );
 
-    // Exactly one detached worker, re-invoking this CLI with --block and the
+    // Exactly one detached worker, re-invoking this CLI with --wait and the
     // worker lock, forwarding the same positional targets.
     expect(spawn).toHaveBeenCalledTimes(1);
     const [bin, argv, opts] = spawn.mock.calls[0];
@@ -156,7 +156,7 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(argv.slice(entryIdx)).toEqual([
       process.argv[1], // CLI entry
       "generate-types",
-      "--block",
+      "--wait",
       "--worker-lock",
       getSpawnLockPath(tmpRoot),
       tmpRoot,
@@ -205,8 +205,8 @@ describe("generate-types foreground spawn orchestration", () => {
     );
   });
 
-  test("--block (deliberate/CI) generates blocking and never spawns", async () => {
-    await runCli([tmpRoot, "--block"]);
+  test("--wait (deliberate/CI) generates blocking and never spawns", async () => {
+    await runCli([tmpRoot, "--wait"]);
 
     expect(generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "blocking" }),
