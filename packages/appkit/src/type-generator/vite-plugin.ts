@@ -174,19 +174,29 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   }
 
   /**
-   * DEV-only: warm a stopped/cold-starting warehouse in the background and
-   * regenerate once it reaches RUNNING, so fresh (non-degraded) types land in
-   * the editor — without blocking dev startup.
+   * DEV-only: get the warehouse to RUNNING in the background and regenerate with
+   * real (non-degraded) types once it is — without blocking dev startup. The
+   * foreground build only ever degrades in dev (instant `unknown`/cached types),
+   * so this is what lands actual DESCRIBE results in the editor for EVERY
+   * reachable warehouse state, not just one that happens to already be warm.
    *
    * Post-probe behaviour by state:
-   *  - RUNNING → return (the initial build already produced fresh types).
-   *  - DELETED / DELETING → return (a deleted warehouse can't be started).
-   *  - STOPPED / STOPPING → kick off a start, then wait for RUNNING.
-   *  - STARTING → it's already coming up; just wait for RUNNING.
+   *  - RUNNING → describe right away (the dev foreground degraded, so a running
+   *    warehouse would otherwise never get real types — this is the case Phase 3
+   *    restores). `waitUntilRunning` returns immediately for an already-running
+   *    warehouse, then the blocking regenerate fires.
+   *  - STARTING → it's already coming up; just wait for RUNNING, then describe.
+   *  - STOPPED / STOPPING → kick off a start, wait for RUNNING, then describe.
+   *  - DELETED / DELETING → return (a deleted warehouse can't be started, and
+   *    blocking typegen would treat it as fatal); leave the degraded types.
    *
    * No-op in production or without a warehouse id. Replaces any previously-armed
    * watch (aborting it first). Fully self-contained: it never throws into the
-   * caller and never re-arms itself.
+   * caller and never re-arms itself. The whole lifecycle is abortable via the
+   * shared {@link watchController} — its signal is threaded into
+   * `waitUntilRunning`, so a dev-server shutdown cancels a pending wait — and the
+   * regenerate routes through {@link runGenerate} so it can't race-write the
+   * .d.ts with the foreground degrade or a `.sql` re-trigger.
    *
    * The regenerate runs in "blocking" mode (not the foreground's non-blocking)
    * so it actually DESCRIBEs the now-RUNNING warehouse and lands real types —
@@ -209,20 +219,19 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         const client = new WorkspaceClient({});
         const state = await getWarehouseState(client, warehouseId);
 
-        // RUNNING already produced fresh types on the initial build; a deleted
-        // warehouse can't be started. Neither is worth watching.
-        if (
-          state === "RUNNING" ||
-          state === "DELETED" ||
-          state === "DELETING"
-        ) {
+        // A deleted/deleting warehouse can't be started and blocking typegen
+        // would treat it as fatal — leave the degraded types and stop. Every
+        // other state (including RUNNING) proceeds to wait-then-describe so the
+        // dev editor gets real types, not just the foreground's degraded ones.
+        if (state === "DELETED" || state === "DELETING") {
           return;
         }
 
-        // Stopped/stopping won't reach RUNNING on its own — nudge it. STARTING
-        // is already coming up, so don't issue a redundant start. A failed start
-        // is non-fatal: give up silently rather than throw out of the detached
-        // task (the developer still has degraded/cached types).
+        // Stopped/stopping won't reach RUNNING on its own — nudge it. RUNNING and
+        // STARTING need no start (RUNNING is already up; STARTING is coming up),
+        // so don't issue a redundant one. A failed start is non-fatal: give up
+        // silently rather than throw out of the detached task (the developer
+        // still has degraded/cached types).
         let startedByUs = false;
         if (state === "STOPPED" || state === "STOPPING") {
           try {
@@ -234,20 +243,26 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           }
         }
 
+        // Wait for RUNNING. For an already-RUNNING warehouse this returns on the
+        // first poll; for STARTING/STOPPED it polls (abortably) until the
+        // warehouse warms up, a terminal state, or the deadline.
         const final = await waitUntilRunning(client, warehouseId, {
           maxMs: DEV_WAREHOUSE_WATCH_MAX_MS,
           signal,
           // We just issued the start, so the first poll(s) often still report
           // STOPPED/STOPPING before the start propagates. Poll through those
           // instead of bailing, or the regenerate would never fire. When we
-          // didn't start it (STARTING branch), keep the default terminal states.
+          // didn't start it (RUNNING/STARTING branch), keep the default terminal
+          // states.
           treatStoppedAsTransient: startedByUs,
         });
 
         if (final === "RUNNING" && !signal.aborted) {
-          logger.debug("Warehouse reached RUNNING; regenerating types.");
+          logger.debug("Warehouse is RUNNING; regenerating types.");
           // Blocking: the warehouse is RUNNING now, so describe it and emit real
           // (non-degraded) types — unlike the foreground dev run, which degraded.
+          // Routed through the single-flight guard so it coalesces with the
+          // foreground degrade / any `.sql` re-trigger instead of racing them.
           await runGenerate("blocking");
         }
       } catch {
@@ -295,9 +310,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
       // Dev: don't block startup waiting on typegen. The foreground generate runs
       // non-blocking — it skips the warehouse entirely and writes degraded
-      // (cached/`unknown`) types instantly. Then arm the warehouse watch so a
-      // cold-starting warehouse gets a one-shot BLOCKING regenerate (real types)
-      // once it's RUNNING.
+      // (cached/`unknown`) types instantly. Then arm the warehouse watch so the
+      // warehouse gets a one-shot BLOCKING regenerate (real types) in the
+      // background for EVERY reachable state: RUNNING describes right away, while
+      // STARTING/STOPPED are waited (and started) until they reach RUNNING.
       void runGenerate("non-blocking");
       armWarehouseWatch();
     },
@@ -314,8 +330,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           // Route through the single-flight runner (was fire-and-forget
           // generate(), which could race the initial build / watch). This is a
           // dev-only hook, so degrade instantly (non-blocking), then re-arm the
-          // warehouse watch: editing a query against a still-starting warehouse
-          // should pick up fresh (blocking-described) types once it warms up.
+          // warehouse watch so the edited query is re-described in the background
+          // against the running warehouse (or once a still-starting one warms
+          // up), landing fresh blocking-described types.
           void runGenerate("non-blocking");
           armWarehouseWatch();
         }

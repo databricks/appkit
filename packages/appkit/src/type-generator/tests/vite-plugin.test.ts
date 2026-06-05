@@ -115,9 +115,12 @@ describe("appKitTypesPlugin — generation mode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.generateFromEntryPoint.mockResolvedValue(undefined);
-    // Default the warehouse watch to a no-op (RUNNING => no wait) so tests that
-    // don't exercise it aren't perturbed by a background regenerate.
-    mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    // Default the warehouse watch to a no-op so tests that don't exercise it
+    // aren't perturbed by a background regenerate. DELETED is the only state the
+    // watch leaves alone (it can't be started and blocking would be fatal), so
+    // it never starts/waits/regenerates — unlike RUNNING, which now describes in
+    // the background.
+    mocks.getWarehouseState.mockResolvedValue("DELETED" as WarehouseState);
     mocks.startWarehouse.mockResolvedValue(undefined);
     mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
     // A non-empty warehouse ID is required or generate() short-circuits before
@@ -140,7 +143,7 @@ describe("appKitTypesPlugin — generation mode", () => {
     await runPlugin();
 
     // Dev foreground degrades instantly: it never blocks and never describes.
-    // (The warehouse watch is a RUNNING no-op here, so there's no background
+    // (The warehouse watch is a DELETED no-op here, so there's no background
     // regenerate — exactly one foreground call.)
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
@@ -174,8 +177,9 @@ describe("appKitTypesPlugin — single-flight generate", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Watch is a no-op here (RUNNING) so it can't add stray generate calls.
-    mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    // Watch is a no-op here (DELETED leaves the degraded types alone) so it can't
+    // add stray generate calls — RUNNING would now describe in the background.
+    mocks.getWarehouseState.mockResolvedValue("DELETED" as WarehouseState);
     mocks.startWarehouse.mockResolvedValue(undefined);
     mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
     process.env.NODE_ENV = "development";
@@ -343,18 +347,88 @@ describe("appKitTypesPlugin — background warehouse watch", () => {
     );
   });
 
-  test("RUNNING state does not start, wait, or regenerate", async () => {
+  test("RUNNING → describes in the background after the dev foreground degrade", async () => {
+    // Phase 3 regression fix: in dev the foreground only degrades, so a RUNNING
+    // warehouse must still get REAL types from a background describe — it must
+    // NOT be skipped just because it's already warm.
     process.env.NODE_ENV = "development";
     mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
 
     await runPlugin();
     await flush();
 
-    // Already RUNNING: the watch returns before starting or waiting, leaving
-    // only the single initial generate.
+    // Already RUNNING: no start. The wait is still issued (it returns on the
+    // first poll for a running warehouse), and we didn't start it, so the
+    // default terminal states apply.
+    expect(mocks.startWarehouse).not.toHaveBeenCalled();
+    expect(mocks.waitUntilRunning).toHaveBeenCalledTimes(1);
+    expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
+      expect.anything(),
+      "wh-test",
+      expect.objectContaining({ treatStoppedAsTransient: false }),
+    );
+    // Call 1: initial buildStart foreground (degraded). Call 2: the background
+    // regenerate that DESCRIBEs the running warehouse and lands real types.
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ mode: "non-blocking" }),
+    );
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ mode: "blocking" }),
+    );
+  });
+
+  test("DELETED → leaves degraded types, no start/wait/regenerate, no crash", async () => {
+    process.env.NODE_ENV = "development";
+    // A deleted warehouse can't be started and blocking typegen would treat it
+    // as fatal, so the watch must leave the foreground's degraded types in place.
+    mocks.getWarehouseState.mockResolvedValue("DELETED" as WarehouseState);
+
+    await expect(runPlugin()).resolves.toBeUndefined();
+    await flush();
+
+    expect(mocks.startWarehouse).not.toHaveBeenCalled();
+    expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
+    // Only the initial (degraded) foreground generate ran; nothing threw.
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+  });
+
+  test("DELETING → leaves degraded types, no start/wait/regenerate", async () => {
+    process.env.NODE_ENV = "development";
+    mocks.getWarehouseState.mockResolvedValue("DELETING" as WarehouseState);
+
+    await runPlugin();
+    await flush();
+
     expect(mocks.startWarehouse).not.toHaveBeenCalled();
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+  });
+
+  test("background regenerate errors are swallowed (no crash), degraded remains", async () => {
+    // Even when the warehouse is RUNNING and the blocking regenerate THROWS
+    // (e.g. DESCRIBE surfaced a syntax/fatal error), nothing escapes into dev
+    // startup: in dev generateOnce catches+logs the throw (and the detached
+    // IIFE's catch is a further backstop), so the process never crashes and the
+    // degraded types written by the foreground remain.
+    process.env.NODE_ENV = "development";
+    mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
+    // First call = foreground (degraded) succeeds; second = background blocking
+    // describe rejects.
+    mocks.generateFromEntryPoint
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("warehouse exploded"));
+
+    await expect(runPlugin()).resolves.toBeUndefined();
+    await flush();
+
+    // The background regenerate was attempted (2 calls) but its rejection never
+    // escaped into the caller.
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
   });
 
   test("no watch in production (armWarehouseWatch no-ops)", async () => {
