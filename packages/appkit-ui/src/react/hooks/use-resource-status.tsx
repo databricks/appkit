@@ -133,15 +133,11 @@ class ResourceStatusStore {
     kindHint?: string,
   ): void {
     this.entries.set(id, { label, status, kindHint });
-    this.version += 1;
-    this.recompute();
+    this.bump();
   }
 
   unpublish(id: string): void {
-    if (this.entries.delete(id)) {
-      this.version += 1;
-      this.recompute();
-    }
+    if (this.entries.delete(id)) this.bump();
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -161,10 +157,9 @@ class ResourceStatusStore {
     return this.entries;
   }
 
-  private recompute(): void {
-    const next = { ...aggregate(this.entries), version: this.version };
-    if (snapshotsEqual(this.snapshot, next)) return;
-    this.snapshot = next;
+  private bump(): void {
+    this.version += 1;
+    this.snapshot = aggregate(this.entries, this.version);
     for (const l of this.listeners) l();
   }
 }
@@ -177,18 +172,12 @@ function isWorse(a: ResourceStatus, b: ResourceStatus): boolean {
   return a.startedAt < b.startedAt;
 }
 
-/**
- * Pure derivation of the aggregate fields from `entries`. The store wraps
- * the result with the monotonic `version` counter to produce the full
- * {@link AggregatedResourceStatus} snapshot.
- */
+/** Pure derivation of the snapshot from `entries` at a given `version`. */
 function aggregate(
   entries: Map<string, RegistryEntry>,
-): Omit<AggregatedResourceStatus, "version"> {
-  if (entries.size === 0) {
-    const { version: _, ...rest } = EMPTY_SNAPSHOT;
-    return rest;
-  }
+  version: number,
+): AggregatedResourceStatus {
+  if (entries.size === 0) return { ...EMPTY_SNAPSHOT, version };
 
   let worst: ResourceStatus | null = null;
   const byKind: Record<string, ResourceStatus> = {};
@@ -213,34 +202,8 @@ function aggregate(
     affectedLabels: [...affectedLabels].sort(),
     activeCount: entries.size,
     elapsedMs: worst ? Math.max(0, Date.now() - worst.startedAt) : 0,
+    version,
   };
-}
-
-function recordsEqual(
-  a: Record<string, ResourceStatus>,
-  b: Record<string, ResourceStatus>,
-): boolean {
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length) return false;
-  for (const k of aKeys) {
-    if (a[k] !== b[k]) return false;
-  }
-  return true;
-}
-
-function snapshotsEqual(
-  a: AggregatedResourceStatus,
-  b: AggregatedResourceStatus,
-): boolean {
-  if (a.version !== b.version) return false;
-  if (a.worst !== b.worst) return false;
-  if (a.activeCount !== b.activeCount) return false;
-  if (a.elapsedMs !== b.elapsedMs) return false;
-  if (a.affectedLabels.length !== b.affectedLabels.length) return false;
-  for (let i = 0; i < a.affectedLabels.length; i++) {
-    if (a.affectedLabels[i] !== b.affectedLabels[i]) return false;
-  }
-  return recordsEqual(a.byKind, b.byKind);
 }
 
 interface ResourceStatusContextValue {
@@ -272,6 +235,7 @@ export interface ResourceStatusProviderProps {
  * @example
  * ```tsx
  * <ResourceStatusProvider>
+ *   <Toaster />
  *   <ResourceStatusIndicator />
  *   <App />
  * </ResourceStatusProvider>

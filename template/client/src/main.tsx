@@ -12,13 +12,11 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       {/*
-       * ResourceStatusProvider aggregates readiness signals (e.g. SQL
-       * warehouse cold-starts, Lakebase warm-ups) published by AppKit hooks
-       * across the whole tree. ResourceStatusIndicator surfaces them as a
-       * single floating affordance in the corner — no per-component wiring
-       * required. Both are no-ops when nothing's pending. Remove or replace
-       * with a custom indicator if you'd rather render the aggregate
-       * yourself via useResourceStatus().
+       * Surfaces resource readiness (e.g. SQL warehouse cold-starts) as a
+       * single sonner toast across the whole tree. Both are no-ops when
+       * nothing's pending; remove them to render the aggregate yourself
+       * via useResourceStatus(). Apps that already mount their own
+       * <Toaster /> can swap the indicator for useResourceStatusToaster().
        */}
       <ResourceStatusProvider>
         <ResourceStatusIndicator />

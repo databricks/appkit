@@ -5,9 +5,32 @@ import {
   renderHook,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { toast } from "sonner";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { ResourceStatusIndicator } from "../../resource-status-indicator";
+
+// Sonner queries `window.matchMedia` to pick up the system color scheme on
+// mount. JSDOM doesn't implement it by default — stub a minimal "no-match"
+// MediaQueryList so the indicator's <Toaster /> can mount in tests.
+beforeAll(() => {
+  if (!window.matchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+  }
+});
+
 import {
   type ResourceStatus,
   ResourceStatusProvider,
@@ -17,7 +40,24 @@ import {
 
 afterEach(() => {
   cleanup();
+  // Sonner's toast store is a module-level singleton; flush every toast
+  // between tests so leftover state doesn't leak across cases.
+  toast.dismiss();
 });
+
+/** Find the (single) indicator toast in the document, or null. */
+function queryIndicatorToast(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-sonner-toast]");
+}
+
+/** Wait until exactly one indicator toast is mounted and return it. */
+async function findIndicatorToast(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const node = queryIndicatorToast();
+    if (!node) throw new Error("indicator toast not mounted yet");
+    return node;
+  });
+}
 
 function makeStatus(
   overrides: Partial<ResourceStatus> & Pick<ResourceStatus, "kind" | "state">,
@@ -271,13 +311,13 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
 });
 
 describe("ResourceStatusIndicator", () => {
-  test("renders nothing when the aggregate is empty", () => {
-    const { container } = render(
+  test("mounts no toast when the aggregate is empty", () => {
+    render(
       <ResourceStatusProvider>
         <ResourceStatusIndicator />
       </ResourceStatusProvider>,
     );
-    expect(container.children.length).toBe(0);
+    expect(queryIndicatorToast()).toBeNull();
   });
 
   test("renders kind-specific copy for known kinds (warehouse)", async () => {
@@ -300,7 +340,7 @@ describe("ResourceStatusIndicator", () => {
       );
     }
 
-    const { getByTestId, getByRole } = render(
+    const { getByTestId } = render(
       <ResourceStatusProvider>
         <Trigger />
         <ResourceStatusIndicator />
@@ -311,9 +351,8 @@ describe("ResourceStatusIndicator", () => {
       getByTestId("pub").click();
     });
 
-    const node = await waitFor(() => getByRole("status"));
-    expect(node.dataset.resourceKind).toBe("warehouse");
-    expect(node.dataset.resourceState).toBe("STARTING");
+    const node = await findIndicatorToast();
+    expect(node.getAttribute("data-type")).toBe("loading");
     expect(node.textContent).toMatch(/warming up|warehouse/i);
   });
 
@@ -337,7 +376,7 @@ describe("ResourceStatusIndicator", () => {
       );
     }
 
-    const { getByTestId, getByRole } = render(
+    const { getByTestId } = render(
       <ResourceStatusProvider>
         <Trigger />
         <ResourceStatusIndicator />
@@ -348,13 +387,12 @@ describe("ResourceStatusIndicator", () => {
       getByTestId("pub").click();
     });
 
-    const node = await waitFor(() => getByRole("status"));
-    expect(node.dataset.resourceKind).toBe("model-endpoint");
+    const node = await findIndicatorToast();
     // Humanized kind name (Model Endpoint) appears in the title.
     expect(node.textContent).toMatch(/Model Endpoint/i);
   });
 
-  test("uses the destructive treatment for error severity", async () => {
+  test("uses the error treatment for error severity", async () => {
     function Trigger() {
       const { publish } = useResourceStatusPublisher("a", "my_thing");
       return (
@@ -375,7 +413,7 @@ describe("ResourceStatusIndicator", () => {
       );
     }
 
-    const { getByTestId, getByRole } = render(
+    const { getByTestId } = render(
       <ResourceStatusProvider>
         <Trigger />
         <ResourceStatusIndicator />
@@ -386,9 +424,9 @@ describe("ResourceStatusIndicator", () => {
       getByTestId("pub").click();
     });
 
-    const node = await waitFor(() => getByRole("alert"));
-    expect(node.dataset.resourceSeverity).toBe("error");
-    expect(node.dataset.resourceState).toBe("DELETED");
+    const node = await findIndicatorToast();
+    expect(node.getAttribute("data-type")).toBe("error");
+    expect(node.textContent).toMatch(/unavailable|It is gone/i);
   });
 
   test("kind prop scopes to a single kind", async () => {
@@ -427,25 +465,25 @@ describe("ResourceStatusIndicator", () => {
       );
     }
 
-    const { getByTestId, queryByRole, getByRole } = render(
+    const { getByTestId } = render(
       <ResourceStatusProvider>
         <Trigger />
         <ResourceStatusIndicator kind="warehouse" />
       </ResourceStatusProvider>,
     );
 
-    // Lakebase pending — warehouse-scoped indicator stays hidden.
+    // Lakebase pending — warehouse-scoped indicator stays silent.
     act(() => {
       getByTestId("pub-lake").click();
     });
-    expect(queryByRole("status")).toBeNull();
+    expect(queryIndicatorToast()).toBeNull();
 
-    // Warehouse pending — indicator appears.
+    // Warehouse pending — toast appears.
     act(() => {
       getByTestId("pub-wh").click();
     });
-    const node = await waitFor(() => getByRole("status"));
-    expect(node.dataset.resourceKind).toBe("warehouse");
+    const node = await findIndicatorToast();
+    expect(node.textContent).toMatch(/warehouse|warming/i);
   });
 
   test("supports a full custom render override", async () => {
@@ -489,7 +527,11 @@ describe("ResourceStatusIndicator", () => {
   });
 
   test("ticks the elapsed counter at ~1Hz while a wait is active", async () => {
-    vi.useFakeTimers({ now: 0 });
+    // Pin Date.now without faking timers: fake `setInterval` interacts
+    // poorly with sonner's internal rAF/setTimeout-driven mount lifecycle,
+    // so we drive the clock manually and let the indicator's real
+    // setInterval re-issue toast updates against an advancing Date.now().
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
     function Trigger() {
       const { publish } = useResourceStatusPublisher("a", "my_chart");
@@ -510,7 +552,7 @@ describe("ResourceStatusIndicator", () => {
     }
 
     try {
-      const { getByTestId, getByRole } = render(
+      const { getByTestId } = render(
         <ResourceStatusProvider>
           <Trigger />
           <ResourceStatusIndicator />
@@ -521,19 +563,22 @@ describe("ResourceStatusIndicator", () => {
         getByTestId("pub").click();
       });
 
-      // First render lands at startedAt; elapsed reads as 0s.
-      expect(getByRole("status").textContent).toMatch(/0s/);
+      const initial = await findIndicatorToast();
+      expect(initial.textContent).toMatch(/0s/);
 
-      // No further `publish` calls — the backend de-dups equal successive
-      // states. The indicator's internal interval should still advance
-      // the visible counter.
-      await act(async () => {
-        vi.advanceTimersByTime(3_500);
-      });
+      // Advance Date.now by 3.5s; the indicator's real-time setInterval
+      // (~1Hz) will fire within ~1.1s and re-issue toast.loading with the
+      // newly-computed `elapsedMs`, which sonner patches in place.
+      dateNowSpy.mockReturnValue(1_000_000 + 3_500);
 
-      expect(getByRole("status").textContent).toMatch(/3s/);
+      await waitFor(
+        () => {
+          expect(queryIndicatorToast()?.textContent).toMatch(/3s/);
+        },
+        { timeout: 2_000 },
+      );
     } finally {
-      vi.useRealTimers();
+      dateNowSpy.mockRestore();
     }
   });
 });

@@ -146,6 +146,8 @@ If the warehouse is `DELETED`/`DELETING` or fails to reach `RUNNING` within the 
 
 For dashboards with many charts a per-component spinner isn't enough — wiring the same "warehouse warming up" UI into every skeleton is repetitive. AppKit ships a small generic context (`ResourceStatusProvider`) + drop-in indicator (`ResourceStatusIndicator`) that any plugin can publish into; analytics warehouses are wired up automatically.
 
+The indicator surfaces the worst pending status as a [sonner](https://sonner.emilkowal.ski/) toast, so it inherits sonner's animations, theming, and stacking. The component mounts its own `<Toaster />` (top-right by default) and forwards its props (`position`, `theme`, `richColors`, …):
+
 ```tsx
 import {
   ResourceStatusIndicator,
@@ -162,18 +164,35 @@ export function AppShell({ children }) {
 }
 ```
 
-`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders nothing while every resource is healthy; it pops up as a floating card (top-right by default) the moment a publisher reports a non-ready state, and disappears when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
+`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders only the `<Toaster />` mount point while every resource is healthy; it pops a single sticky toast — `toast.loading` for cold starts, `toast.error` for unrecoverable states — keyed by the worst kind, and dismisses it when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
 
-The default card is rendered through a React portal into `document.body` so its `position: fixed` anchoring is immune to ancestor `transform` / `filter` / `will-change` / `contain` (which would otherwise turn it into the containing block) and to ancestor stacking contexts (which would otherwise trap `z-index`). Pass `container={someElement}` to portal into a custom node, or `container={null}` to opt out and render inline.
+If you already render your own `<Toaster />` for unrelated app toasts, drop the indicator and call `useResourceStatusToaster()` instead so resource-status toasts share that single Toaster:
 
-The default UI is intentionally minimal. For a fully custom render, pass `render`:
+```tsx
+import {
+  useResourceStatusToaster,
+  Toaster,
+} from "@databricks/appkit-ui/react";
+
+function App() {
+  useResourceStatusToaster();
+  return (
+    <>
+      <Toaster position="top-right" />
+      <Routes />
+    </>
+  );
+}
+```
+
+For a fully custom toast body, pass `render` (rendered through `toast.custom`):
 
 ```tsx
 <ResourceStatusIndicator
   render={(agg) => (
-    <FloatingToast variant={agg.worst?.severity === "error" ? "destructive" : "default"}>
+    <div className="rounded-lg border bg-background p-3 shadow">
       {agg.worst?.kind} {agg.worst?.state.toLowerCase()} ({agg.activeCount} waiting)
-    </FloatingToast>
+    </div>
   )}
 />
 ```
@@ -189,7 +208,6 @@ To override copy for a specific kind without rewriting the whole UI, pass `rende
         `${agg.affectedLabels.length} chart(s) waiting`,
     },
   }}
-  position="top-right"
 />
 ```
 
