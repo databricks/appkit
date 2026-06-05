@@ -10,6 +10,7 @@ import {
   TypegenFatalError,
   TypegenSyntaxError,
 } from "./index";
+import type { PreflightMode } from "./preflight";
 import {
   getWarehouseState,
   startWarehouse,
@@ -52,8 +53,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   // (latest-wins — coalesces any number of overlapping triggers into a single
   // rerun). `queued` is read/cleared synchronously inside the drain loop so a
   // trigger landing in any window is caught before the drain exits.
+  //
+  // `pendingMode` is the mode the next generate should run in (latest-wins, like
+  // `queued`): the foreground build runs non-blocking in dev (instant degrade)
+  // while the background warehouse watch runs blocking (real DESCRIBEs). A
+  // blocking watch trigger that lands while a non-blocking foreground run is in
+  // flight therefore still describes when its trailing run fires.
   let inFlight: Promise<void> | null = null;
   let queued = false;
+  let pendingMode: PreflightMode = "non-blocking";
 
   // The currently-armed DEV background warehouse watch, if any. Aborting it
   // stops a pending waitUntilRunning (server shutdown, or a newer arm replacing
@@ -61,12 +69,17 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let watchController: AbortController | null = null;
 
   /**
-   * Generate types once. Never throws in dev (logs instead); in production it
-   * rethrows so the build fails. This is the un-guarded core — callers should
-   * go through {@link runGenerate} so concurrent triggers can't race-write the
-   * .d.ts.
+   * Generate types once in the given preflight {@link PreflightMode}. Never
+   * throws in dev (logs instead); in production it rethrows so the build fails.
+   * This is the un-guarded core — callers should go through {@link runGenerate}
+   * so concurrent triggers can't race-write the .d.ts.
+   *
+   * @param mode - preflight policy for this run. The foreground build passes a
+   *   NODE_ENV-derived mode (blocking in production, non-blocking in dev so it
+   *   degrades instantly); the background warehouse watch passes "blocking" so
+   *   its regenerate actually DESCRIBEs and lands real (non-degraded) types.
    */
-  async function generateOnce() {
+  async function generateOnce(mode: PreflightMode) {
     try {
       const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
 
@@ -80,10 +93,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         queryFolder: watchFolders[0],
         warehouseId,
         noCache: false,
-        // Production build blocks for warehouse readiness and fails fast on a
-        // stopped/deleted warehouse; dev rolls forward (degrades) and never
-        // blocks startup.
-        mode: process.env.NODE_ENV === "production" ? "blocking" : "dev",
+        mode,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -113,17 +123,24 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    * .sql watcher, and the DEV warehouse watch all route through here so they can
    * never run typegen concurrently (which would race-write the .d.ts).
    *
-   * If a run is already in flight, this does NOT start a second one — it sets a
-   * trailing flag so exactly one more run fires after the current finishes,
-   * coalescing any number of overlapping triggers (latest-wins).
+   * If a run is already in flight, this does NOT start a second one — it records
+   * the requested mode and sets a trailing flag so exactly one more run fires
+   * after the current finishes, coalescing any number of overlapping triggers
+   * (latest-wins, including the mode: a blocking watch trigger that arrives mid
+   * non-blocking foreground run still describes when its trailing run fires).
    *
+   * @param mode - preflight policy for this run. Recorded into `pendingMode`,
+   *   which the drain reads for each generate (latest trigger wins).
    * @returns A promise that resolves when this trigger's work (including any
    *   trailing run it scheduled) has completed.
    */
-  function runGenerate(): Promise<void> {
+  function runGenerate(mode: PreflightMode): Promise<void> {
+    pendingMode = mode;
+
     if (inFlight) {
       // A run is active: remember that another trigger arrived and ride out the
-      // current run. One trailing run then covers all coalesced triggers.
+      // current run. One trailing run then covers all coalesced triggers and
+      // runs in the latest requested mode (recorded above).
       queued = true;
       return inFlight;
     }
@@ -139,7 +156,11 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
     const drain = async (): Promise<void> => {
       while (true) {
         queued = false;
-        await generateOnce();
+        // Snapshot the mode synchronously alongside clearing `queued` so a
+        // trigger landing during this generate is observed (via `queued`) on the
+        // next loop with its own mode, not silently dropped.
+        const runMode = pendingMode;
+        await generateOnce(runMode);
         // Synchronous check + clear, atomic w.r.t. other (synchronous) callers.
         if (!queued) {
           inFlight = null;
@@ -166,6 +187,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    * No-op in production or without a warehouse id. Replaces any previously-armed
    * watch (aborting it first). Fully self-contained: it never throws into the
    * caller and never re-arms itself.
+   *
+   * The regenerate runs in "blocking" mode (not the foreground's non-blocking)
+   * so it actually DESCRIBEs the now-RUNNING warehouse and lands real types —
+   * the whole point of warming the warehouse in the background.
    */
   function armWarehouseWatch(): void {
     if (process.env.NODE_ENV === "production") return;
@@ -221,7 +246,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
         if (final === "RUNNING" && !signal.aborted) {
           logger.debug("Warehouse reached RUNNING; regenerating types.");
-          await runGenerate();
+          // Blocking: the warehouse is RUNNING now, so describe it and emit real
+          // (non-degraded) types — unlike the foreground dev run, which degraded.
+          await runGenerate("blocking");
         }
       } catch {
         // Detached background task: any failure (timeout, abort, connectivity,
@@ -263,13 +290,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       // Production: block the build on this generate (and surface failures).
       // The watch is a dev-only no-op, so just run typegen.
       if (process.env.NODE_ENV === "production") {
-        return runGenerate();
+        return runGenerate("blocking");
       }
 
-      // Dev: don't block startup waiting on typegen. Kick off the initial
-      // generate, then arm the warehouse watch so a cold-starting warehouse gets
-      // a one-shot regenerate once it's RUNNING.
-      void runGenerate();
+      // Dev: don't block startup waiting on typegen. The foreground generate runs
+      // non-blocking — it skips the warehouse entirely and writes degraded
+      // (cached/`unknown`) types instantly. Then arm the warehouse watch so a
+      // cold-starting warehouse gets a one-shot BLOCKING regenerate (real types)
+      // once it's RUNNING.
+      void runGenerate("non-blocking");
       armWarehouseWatch();
     },
 
@@ -283,10 +312,11 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
         if (isWatchedFile && changedFile.endsWith(".sql")) {
           // Route through the single-flight runner (was fire-and-forget
-          // generate(), which could race the initial build / watch). Re-arm the
-          // warehouse watch too: editing a query against a still-starting
-          // warehouse should also pick up fresh types once it warms up.
-          void runGenerate();
+          // generate(), which could race the initial build / watch). This is a
+          // dev-only hook, so degrade instantly (non-blocking), then re-arm the
+          // warehouse watch: editing a query against a still-starting warehouse
+          // should pick up fresh (blocking-described) types once it warms up.
+          void runGenerate("non-blocking");
           armWarehouseWatch();
         }
       });

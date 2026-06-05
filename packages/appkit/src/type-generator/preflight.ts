@@ -2,15 +2,14 @@ import type { WarehouseState } from "./warehouse-status";
 
 /**
  * How aggressively typegen should react to a not-ready warehouse.
- *  - `dev`: never block the developer; degrade to `unknown`/cached types, but a
- *    RUNNING warehouse is still described (fast path / background fire-and-forget).
+ *  - `non-blocking`: never describe and never probe the warehouse — emit
+ *    best-available types (cache where the SQL hash matches, else `unknown`) and
+ *    return at once. The default for interactive/foreground runs that can't
+ *    afford to block on (or fail because of) a warehouse, even a RUNNING one.
  *  - `blocking`: a startable warehouse is worth waiting for, and a stopped one
  *    is a hard failure.
- *  - `degrade`: never describe and never probe the warehouse — emit best-available
- *    types (cache where the SQL hash matches, else `unknown`) and return at once.
- *    For a one-shot CLI (`--no-block`) that can't describe in the background.
  */
-export type PreflightMode = "dev" | "blocking" | "degrade";
+export type PreflightMode = "non-blocking" | "blocking";
 
 /**
  * What the caller should do given a warehouse state and mode.
@@ -36,19 +35,22 @@ export function decidePreflight(
   state: WarehouseState,
   mode: PreflightMode,
 ): PreflightDecision {
-  // `degrade` never describes regardless of state: emit cached/`unknown` types
-  // and return. The caller short-circuits before probing, so this is only a
-  // belt-and-suspenders mapping, but it keeps the policy total and self-contained.
-  if (mode === "degrade") return "degradeAll";
+  // `non-blocking` never describes regardless of state: emit cached/`unknown`
+  // types and return. The caller short-circuits before probing, so this is only
+  // a belt-and-suspenders mapping, but it keeps the policy total and
+  // self-contained.
+  if (mode === "non-blocking") return "degradeAll";
 
+  // `blocking`: a startable warehouse is worth waiting for, a stopped one is
+  // fatal, and a deleted one is always fatal.
   switch (state) {
     case "RUNNING":
       return "proceed";
     case "STARTING":
-      return mode === "blocking" ? "waitThenProceed" : "degradeAll";
+      return "waitThenProceed";
     case "STOPPED":
     case "STOPPING":
-      return mode === "blocking" ? "fatal" : "degradeAll";
+      return "fatal";
     case "DELETED":
     case "DELETING":
       return "fatal";

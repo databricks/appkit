@@ -420,11 +420,10 @@ export function inferParameterTypes(
  * @param warehouseId - the warehouse id to use for schema analysis
  * @param options - options for the query generation
  * @param options.noCache - if true, skip the cache and regenerate all types
- * @param options.mode - preflight policy: "dev" never blocks the developer
- *   (degrades a not-ready warehouse, but still describes a RUNNING one),
- *   "blocking" waits for a startable warehouse and treats a stopped one as fatal,
- *   "degrade" never probes the warehouse and never describes (emits cached/`unknown`
- *   types and returns immediately). Defaults to "dev".
+ * @param options.mode - preflight policy: "non-blocking" never probes the
+ *   warehouse and never describes (emits cached/`unknown` types and returns
+ *   immediately), "blocking" waits for a startable warehouse and treats a
+ *   stopped one as fatal. Defaults to "non-blocking".
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
@@ -439,7 +438,7 @@ export async function generateQueriesFromDescribe(
   const {
     noCache = false,
     concurrency: rawConcurrency = 10,
-    mode = "dev",
+    mode = "non-blocking",
   } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
@@ -583,11 +582,12 @@ export async function generateQueriesFromDescribe(
     // not-ready warehouse degrades exactly like a per-query outage.
     let decision: ReturnType<typeof decidePreflight> = "proceed";
     let fatalMessage = "";
-    if (mode === "degrade") {
-      // `degrade` never describes and must make ZERO warehouse round-trips: skip
-      // the probe entirely (no getWarehouseState) and go straight to degradeAll.
-      // A one-shot CLI (`--no-block`) can't describe in the background, so it
-      // emits best-available types (reused cache or `unknown`) and returns now.
+    if (mode === "non-blocking") {
+      // `non-blocking` never describes and must make ZERO warehouse round-trips:
+      // skip the probe entirely (no getWarehouseState) and go straight to
+      // degradeAll. A foreground/one-shot run can't describe in the background,
+      // so it emits best-available types (reused cache or `unknown`) and returns
+      // now.
       decision = "degradeAll";
     } else {
       try {

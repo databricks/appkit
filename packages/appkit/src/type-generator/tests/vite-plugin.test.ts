@@ -134,14 +134,17 @@ describe("appKitTypesPlugin — generation mode", () => {
     else process.env.DATABRICKS_WAREHOUSE_ID = savedWarehouseId;
   });
 
-  test('passes mode: "dev" when NODE_ENV is not production', async () => {
+  test('foreground passes mode: "non-blocking" when NODE_ENV is not production', async () => {
     process.env.NODE_ENV = "development";
 
     await runPlugin();
 
+    // Dev foreground degrades instantly: it never blocks and never describes.
+    // (The warehouse watch is a RUNNING no-op here, so there's no background
+    // regenerate — exactly one foreground call.)
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "dev" }),
+      expect.objectContaining({ mode: "non-blocking" }),
     );
   });
 
@@ -296,6 +299,16 @@ describe("appKitTypesPlugin — background warehouse watch", () => {
     // Call 1: initial buildStart generate. Call 2: the watch's regenerate once
     // the warehouse reached RUNNING.
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+    // Foreground (dev) degrades instantly; the background watch regenerate must
+    // DESCRIBE the now-RUNNING warehouse, so it runs blocking.
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ mode: "non-blocking" }),
+    );
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ mode: "blocking" }),
+    );
   });
 
   test("STARTING → waits without starting, then RUNNING regenerates in dev", async () => {
@@ -318,6 +331,16 @@ describe("appKitTypesPlugin — background warehouse watch", () => {
       expect.objectContaining({ treatStoppedAsTransient: false }),
     );
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+    // Foreground (dev) degrades instantly; the background watch regenerate runs
+    // blocking so it describes the now-RUNNING warehouse.
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ mode: "non-blocking" }),
+    );
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ mode: "blocking" }),
+    );
   });
 
   test("RUNNING state does not start, wait, or regenerate", async () => {

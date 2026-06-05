@@ -3,19 +3,19 @@ import path from "node:path";
 import { Command } from "commander";
 
 /**
- * Resolve the typegen pre-flight mode for the CLI. Defaults to "blocking" — a
- * deliberate/CI invocation should wait for a starting warehouse and fail fast on
- * a stopped one. `--no-block` (commander sets `block: false`) switches to
- * "degrade": a one-shot CLI can't describe in the background, so this mode never
- * describes at all — it skips the warehouse probe AND every DESCRIBE, emits
+ * Resolve the typegen pre-flight mode for the CLI. Defaults to "non-blocking" —
+ * a one-shot CLI can't describe in the background, so by default it never
+ * describes at all: it skips the warehouse probe AND every DESCRIBE, emits
  * best-available types (cache where the SQL hash matches, else `result: unknown`)
- * and returns immediately. The scaffolded template's postinstall/predev use it so
- * they never block on — or get slowed by — a warehouse, even a RUNNING one.
+ * and returns immediately, never blocking on — or failing because of — a
+ * warehouse, even a RUNNING one. Pass `--block` (commander sets `block: true`)
+ * for a deliberate/CI invocation that should wait for a starting warehouse and
+ * fail fast on a stopped one.
  */
 export function resolveTypegenMode(options?: {
   block?: boolean;
-}): "dev" | "blocking" | "degrade" {
-  return options?.block === false ? "degrade" : "blocking";
+}): "non-blocking" | "blocking" {
+  return options?.block ? "blocking" : "non-blocking";
 }
 
 /**
@@ -108,8 +108,8 @@ export const generateTypesCommand = new Command("generate-types")
   .argument("[warehouseId]", "Databricks warehouse ID")
   .option("--no-cache", "Disable caching for type generation")
   .option(
-    "--no-block",
-    "Degrade instead of blocking on warehouse readiness (use for postinstall)",
+    "--block",
+    "Block on warehouse readiness instead of degrading (use for CI)",
   )
   .addHelpText(
     "after",
@@ -119,6 +119,6 @@ Examples:
   $ appkit generate-types . shared/appkit-types/analytics.d.ts
   $ appkit generate-types . shared/appkit-types/analytics.d.ts my-warehouse-id
   $ appkit generate-types --no-cache
-  $ appkit generate-types --no-block   # postinstall: never block/fail on a cold warehouse`,
+  $ appkit generate-types --block   # CI: wait for the warehouse and fail on a cold one`,
   )
   .action(runGenerateTypes);

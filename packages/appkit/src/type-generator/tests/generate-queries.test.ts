@@ -45,6 +45,21 @@ vi.mock("../cache", async (importOriginal) => {
 const { generateQueriesFromDescribe } = await import("../query-registry");
 const { CACHE_VERSION, hashSQL } = await import("../cache");
 
+// The default mode is "non-blocking", which never probes the warehouse and never
+// describes. The bulk of these tests exercise the DESCRIBE / classify path, so
+// they run in "blocking" mode (probe → proceed → describe) by default. Tests
+// that specifically assert the non-blocking short-circuit pass an explicit mode.
+function describeQueries(
+  queryFolder: string,
+  warehouseId: string,
+  options: Parameters<typeof generateQueriesFromDescribe>[2] = {},
+) {
+  return generateQueriesFromDescribe(queryFolder, warehouseId, {
+    mode: "blocking",
+    ...options,
+  });
+}
+
 // Sentinel for a previously-generated good type. The code passes cached types
 // through verbatim, so equality proves reuse rather than regeneration.
 const CACHED_GOOD_TYPE = "RESULT_REUSED_FROM_CACHE";
@@ -86,8 +101,10 @@ describe("generateQueriesFromDescribe", () => {
       ]),
     );
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
@@ -112,7 +129,7 @@ describe("generateQueriesFromDescribe", () => {
       },
     });
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("bad_table");
@@ -129,7 +146,7 @@ describe("generateQueriesFromDescribe", () => {
       status: { state: "FAILED" },
     });
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("query");
@@ -154,7 +171,7 @@ describe("generateQueriesFromDescribe", () => {
         },
       });
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(2);
 
@@ -183,8 +200,10 @@ describe("generateQueriesFromDescribe", () => {
         status: { state: "FAILED", error: { message: "Table not found" } },
       });
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(2);
     expect(schemas[0].name).toBe("a");
@@ -196,6 +215,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
     // a = connectivity (rejected) → NOT a syntax error; b = FAILED → syntax error
     expect(syntaxErrors).toEqual([{ name: "b", message: "Table not found" }]);
+    // neither a connectivity failure nor a SQL error is classified as fatal
+    expect(fatalErrors).toEqual([]);
     // neither failure is persisted to the cache
     expect(lastSavedQueries()).not.toHaveProperty("a");
     expect(lastSavedQueries()).not.toHaveProperty("b");
@@ -214,13 +235,9 @@ describe("generateQueriesFromDescribe", () => {
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]));
 
-    const { schemas } = await generateQueriesFromDescribe(
-      "/queries",
-      "wh-123",
-      {
-        concurrency: 2,
-      },
-    );
+    const { schemas } = await describeQueries("/queries", "wh-123", {
+      concurrency: 2,
+    });
 
     expect(schemas).toHaveLength(3);
     expect(schemas[0].name).toBe("q1");
@@ -240,7 +257,7 @@ describe("generateQueriesFromDescribe", () => {
       Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }),
     );
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].type).toContain("status: SQLStringMarker");
@@ -267,8 +284,10 @@ describe("generateQueriesFromDescribe", () => {
       }),
     );
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas[0].type).not.toBe(CACHED_GOOD_TYPE);
     expect(schemas[0].type).toContain("result: unknown");
@@ -290,7 +309,7 @@ describe("generateQueriesFromDescribe", () => {
       new Error("PERMISSION_DENIED: missing warehouse permission"),
     );
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -313,7 +332,7 @@ describe("generateQueriesFromDescribe", () => {
       Object.assign(new Error("Service unavailable"), { statusCode: 503 }),
     );
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -343,7 +362,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readFile.mockResolvedValue("SELECT id FROM users");
     mocks.executeStatement.mockRejectedValueOnce(error);
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -367,8 +386,10 @@ describe("generateQueriesFromDescribe", () => {
       })
       .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(2);
     expect(syntaxErrors).toEqual([
@@ -388,7 +409,7 @@ describe("generateQueriesFromDescribe", () => {
       }),
     );
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -409,7 +430,7 @@ describe("generateQueriesFromDescribe", () => {
       ),
     );
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -425,10 +446,7 @@ describe("generateQueriesFromDescribe", () => {
       new Error("unable to verify the first certificate"),
     );
 
-    const { fatalErrors } = await generateQueriesFromDescribe(
-      "/queries",
-      "wh-123",
-    );
+    const { fatalErrors } = await describeQueries("/queries", "wh-123");
 
     expect(fatalErrors).toEqual([]);
   });
@@ -448,7 +466,7 @@ describe("generateQueriesFromDescribe", () => {
         }),
       );
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -475,7 +493,7 @@ describe("generateQueriesFromDescribe", () => {
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
       .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
 
-    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+    const { schemas, fatalErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -494,7 +512,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readFile.mockResolvedValue("SELECT 1");
     mocks.executeStatement.mockResolvedValue(succeededResult([]));
 
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+    const { schemas, syntaxErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -515,8 +533,10 @@ describe("generateQueriesFromDescribe", () => {
       status: { state: "PENDING" },
     });
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
@@ -543,10 +563,13 @@ describe("generateQueriesFromDescribe", () => {
         status: { state: "RUNNING" },
       });
 
-    const { schemas, syntaxErrors, fatalErrors } =
-      await generateQueriesFromDescribe("/queries", "wh-123", {
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+      {
         concurrency: 1,
-      });
+      },
+    );
 
     expect(schemas).toHaveLength(2);
     // both entries resolve to the good type — the PENDING one reuses the cache
@@ -570,7 +593,7 @@ describe("generateQueriesFromDescribe", () => {
       },
     });
 
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+    const { schemas, syntaxErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -593,7 +616,7 @@ describe("generateQueriesFromDescribe", () => {
       },
     });
 
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+    const { schemas, syntaxErrors } = await describeQueries(
       "/queries",
       "wh-123",
     );
@@ -618,7 +641,7 @@ describe("generateQueriesFromDescribe", () => {
       succeededResult([["id", "INT", null]]),
     );
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await describeQueries("/queries", "wh-123");
 
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(schemas[0].type).toContain("id: number");
@@ -650,16 +673,19 @@ describe("generateQueriesFromDescribe", () => {
       expect(schemas[1].type).toContain("result: unknown");
     });
 
-    test("STOPPED + dev mode — degrades silently, never describes", async () => {
+    test("non-blocking mode — degrades silently without probing, even when STOPPED", async () => {
       mocks.readdir.mockResolvedValue(["a.sql"]);
       mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      // Even a STOPPED warehouse is irrelevant: non-blocking never probes.
       mocks.getWarehouse.mockReturnValue({ state: "STOPPED" });
 
       const { schemas, syntaxErrors, fatalErrors } =
         await generateQueriesFromDescribe("/queries", "wh-123", {
-          mode: "dev",
+          mode: "non-blocking",
         });
 
+      // ZERO warehouse round-trips: no probe (getWarehouse) and no DESCRIBE.
+      expect(mocks.getWarehouse).not.toHaveBeenCalled();
       expect(mocks.executeStatement).not.toHaveBeenCalled();
       expect(fatalErrors).toEqual([]);
       expect(syntaxErrors).toEqual([]);
@@ -742,18 +768,18 @@ describe("generateQueriesFromDescribe", () => {
       expect(fatalErrors).toEqual([]);
     });
 
-    test("degrade mode — skips probe + describes even when warehouse is RUNNING", async () => {
+    test("non-blocking mode — skips probe + describe even when warehouse is RUNNING", async () => {
       mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
       mocks.readFile
         .mockResolvedValueOnce("SELECT id FROM a")
         .mockResolvedValueOnce("SELECT id FROM b");
       // A RUNNING warehouse would normally take the proceed path and describe
-      // every query. In `degrade` mode the warehouse is never even probed.
+      // every query. In `non-blocking` mode the warehouse is never even probed.
       mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
 
       const { schemas, syntaxErrors, fatalErrors } =
         await generateQueriesFromDescribe("/queries", "wh-123", {
-          mode: "degrade",
+          mode: "non-blocking",
         });
 
       // ZERO warehouse round-trips: no probe (getWarehouse) and no DESCRIBE.
@@ -770,11 +796,11 @@ describe("generateQueriesFromDescribe", () => {
       expect(fatalErrors).toEqual([]);
     });
 
-    test("degrade mode — reuses the cached type when the SQL hash matches", async () => {
+    test("non-blocking mode — reuses the cached type when the SQL hash matches", async () => {
       const sql = "SELECT id FROM users";
       mocks.readdir.mockResolvedValue(["users.sql"]);
       mocks.readFile.mockResolvedValue(sql);
-      // Seed a last-good cached type under the current SQL hash. degrade mode
+      // Seed a last-good cached type under the current SQL hash. non-blocking
       // serves it via the normal cache HIT path — still no probe, no DESCRIBE.
       mocks.loadCache.mockReturnValueOnce({
         version: CACHE_VERSION,
@@ -786,7 +812,7 @@ describe("generateQueriesFromDescribe", () => {
 
       const { schemas, syntaxErrors, fatalErrors } =
         await generateQueriesFromDescribe("/queries", "wh-123", {
-          mode: "degrade",
+          mode: "non-blocking",
         });
 
       expect(mocks.getWarehouse).not.toHaveBeenCalled();

@@ -208,7 +208,13 @@ export async function generateFromEntryPoint(options: {
   noCache?: boolean;
   mode?: PreflightMode;
 }) {
-  const { outFile, queryFolder, warehouseId, noCache, mode = "dev" } = options;
+  const {
+    outFile,
+    queryFolder,
+    warehouseId,
+    noCache,
+    mode = "non-blocking",
+  } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");

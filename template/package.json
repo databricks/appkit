@@ -24,8 +24,8 @@
     "prebuild": "npm run sync && npm run typegen",
     "predev": "npm run sync && npm run typegen:no-block",
     "sync": "appkit plugin sync --write --silent",
-    "typegen": "appkit generate-types",
-    "typegen:no-block": "appkit generate-types --no-block",
+    "typegen": "appkit generate-types --block",
+    "typegen:no-block": "appkit generate-types",
     "setup": "appkit setup --write"
   },
   "keywords": [],
