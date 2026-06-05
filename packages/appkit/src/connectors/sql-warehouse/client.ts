@@ -404,7 +404,7 @@ export class SQLWarehouseConnector {
             if (signal?.aborted) throw ExecutionError.canceled();
             if (Date.now() - startTime > timeoutMs) {
               throw ExecutionError.statementFailed(
-                `Warehouse ${warehouseId} did not reach RUNNING within ${timeoutMs}ms`,
+                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
               );
             }
 
@@ -426,13 +426,16 @@ export class SQLWarehouseConnector {
               case "DELETING":
                 throw ConfigurationError.resourceNotFound(
                   "Warehouse ID",
-                  `Warehouse ${warehouseId} is ${state}. Configure DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
+                  `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
                 );
               case "STOPPED":
                 if (!autoStart) {
-                  throw ConfigurationError.resourceNotFound(
-                    "SQL warehouse",
-                    `Warehouse ${warehouseId} is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.`,
+                  // The warehouse exists, it's just in the wrong state and
+                  // policy forbids auto-starting it — use the base
+                  // ConfigurationError directly so the message isn't
+                  // prefixed with "not found".
+                  throw new ConfigurationError(
+                    "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
                   );
                 }
                 if (!didStart) {
@@ -456,7 +459,17 @@ export class SQLWarehouseConnector {
                 throw ExecutionError.unknownState(String(state ?? "unknown"));
             }
 
-            await this._sleepRespectingAbort(backoff.next(), signal);
+            // Preempt the next timeout check: if sleeping the full backoff
+            // would push us past `timeoutMs`, throw now rather than waste
+            // up to ~30s sleeping past the deadline (`backoff.next()` caps
+            // at WAREHOUSE_POLL_MAX_MS).
+            const sleepMs = backoff.next();
+            if (Date.now() + sleepMs - startTime >= timeoutMs) {
+              throw ExecutionError.statementFailed(
+                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+              );
+            }
+            await this._sleepRespectingAbort(sleepMs, signal);
           }
         } catch (error) {
           this._throwSanitizedReadinessError(error, warehouseId, span);
@@ -482,10 +495,14 @@ export class SQLWarehouseConnector {
 
   /**
    * Final landing for any error thrown by the readiness poll loop. Records
-   * the original on the span (so server-side debugging keeps the raw text)
-   * and rethrows either the structured AppKitError unchanged or a curated
+   * the original on the span and (at debug level) on the logger, then
+   * rethrows either the structured AppKitError unchanged or a curated
    * ExecutionError — never the raw SDK message, which can contain operator
    * internals.
+   *
+   * The `logger.debug` covers environments where OTel isn't configured
+   * (common in dev) so the raw error isn't lost just because no span
+   * exporter is hooked up.
    */
   private _throwSanitizedReadinessError(
     error: unknown,
@@ -500,8 +517,13 @@ export class SQLWarehouseConnector {
     span.recordException(
       error instanceof Error ? error : new Error(String(error)),
     );
+    logger.debug(
+      "Warehouse readiness check raw error for %s: %O",
+      warehouseId,
+      error,
+    );
     const wrapped = ExecutionError.statementFailed(
-      `Warehouse readiness check failed for ${warehouseId}`,
+      "Warehouse readiness check failed",
     );
     span.setStatus({ code: SpanStatusCode.ERROR, message: wrapped.code });
     throw wrapped;

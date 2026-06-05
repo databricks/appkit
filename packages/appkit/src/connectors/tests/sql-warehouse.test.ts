@@ -218,7 +218,23 @@ describe("SQLWarehouseConnector", () => {
         connector.ensureWarehouseRunning(wsClient as any, "wh-4", {
           onStatus: (u) => updates.push(u),
         }),
-      ).rejects.toThrow(/wh-4 is DELETED/);
+      ).rejects.toThrow(/configured SQL warehouse is DELETED/);
+
+      expect(start).not.toHaveBeenCalled();
+      expect(updates).toHaveLength(0);
+    });
+
+    test("rejects when warehouse is DELETING", async () => {
+      const get = vi.fn().mockResolvedValue({ state: "DELETING" });
+      const start = vi.fn();
+      const wsClient = { warehouses: { get, start } };
+      const updates: any[] = [];
+
+      await expect(
+        connector.ensureWarehouseRunning(wsClient as any, "wh-deleting", {
+          onStatus: (u) => updates.push(u),
+        }),
+      ).rejects.toThrow(/configured SQL warehouse is DELETING/);
 
       expect(start).not.toHaveBeenCalled();
       expect(updates).toHaveLength(0);
@@ -345,7 +361,7 @@ describe("SQLWarehouseConnector", () => {
         connector.ensureWarehouseRunning(wsClient as any, "wh-leak", {
           onStatus: () => {},
         }),
-      ).rejects.toThrow(/Warehouse readiness check failed for wh-leak/);
+      ).rejects.toThrow(/Warehouse readiness check failed/);
       // Verify the raw SDK text didn't survive into the thrown error.
       try {
         await connector.ensureWarehouseRunning(wsClient as any, "wh-leak", {
@@ -355,6 +371,35 @@ describe("SQLWarehouseConnector", () => {
         expect((err as Error).message).not.toContain(sensitive);
         expect((err as Error).message).not.toContain("ENOTFOUND");
       }
+    });
+
+    test("continues the readiness loop when onStatus callback throws", async () => {
+      // A consumer crash mid-poll must not abort the readiness contract;
+      // the emitter swallows the throw onto the OTel span and the loop
+      // keeps polling until the warehouse reports RUNNING.
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      let callCount = 0;
+
+      const promise = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-throw",
+        {
+          onStatus: () => {
+            callCount += 1;
+            throw new Error("consumer crashed");
+          },
+          timeoutMs: 60_000,
+        },
+      );
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toBeUndefined();
+
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(callCount).toBe(2);
     });
   });
 });
