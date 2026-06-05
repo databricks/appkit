@@ -1,12 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
+import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
   resolveProjectRoot,
 } from "./migration";
+import type { PreflightMode } from "./preflight";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
 import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
@@ -14,6 +16,83 @@ import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 dotenv.config();
 
 const logger = createLogger("type-generator");
+
+type TypegenFailure = QuerySyntaxError | QueryFatalError;
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`) {
+  return count === 1 ? singular : pluralForm;
+}
+
+function formatFailureRows(
+  label: string,
+  queries: TypegenFailure[],
+  color: (value: string) => string,
+) {
+  if (queries.length === 0) return [];
+
+  // Group by message so a shared failure — e.g. a warehouse-level fatal that
+  // hits every query identically — prints once instead of repeating per row.
+  const byMessage = new Map<string, string[]>();
+  for (const { name, message } of queries) {
+    const names = byMessage.get(message);
+    if (names) names.push(name);
+    else byMessage.set(message, [name]);
+  }
+
+  const maxNameLen = Math.max(...queries.map((query) => query.name.length));
+  const tag = color(label.padEnd(7));
+  const rows: string[] = [];
+  for (const [message, names] of byMessage) {
+    // Unique message → keep the compact one-line `tag name message` form.
+    if (names.length === 1) {
+      rows.push(
+        `  ${tag}  ${pc.bold(names[0].padEnd(maxNameLen))}  ${pc.dim(message)}`,
+      );
+      continue;
+    }
+    // Shared message → print it once, then list the affected query names.
+    rows.push(
+      `  ${tag}  ${pc.dim(message)} ${pc.dim(`(${names.length} ${plural(names.length, "query", "queries")})`)}`,
+    );
+    rows.push(
+      `           ${names.map((name) => pc.bold(name)).join(pc.dim(", "))}`,
+    );
+  }
+  return rows;
+}
+
+function formatTypegenFailureMessage(options: {
+  syntaxErrors: QuerySyntaxError[];
+  fatalErrors?: QueryFatalError[];
+  warehouseId?: string;
+  title: string;
+  causes: string[];
+  nextStep: string;
+}) {
+  const { syntaxErrors, fatalErrors = [], warehouseId, title } = options;
+  const total = syntaxErrors.length + fatalErrors.length;
+  const separator = pc.dim("─".repeat(60));
+  const warehouse = warehouseId
+    ? ` against ${pc.dim(`warehouse ${warehouseId}`)}`
+    : "";
+
+  return [
+    `  ${pc.bold(pc.red("Type generation failed"))}`,
+    `  ${separator}`,
+    `  ${title}: ${total} ${plural(total, "query", "queries")} could not be described${warehouse}.`,
+    `  AppKit wrote generated types with ${pc.bold("result: unknown")} for the failed ${plural(total, "query", "queries")}.`,
+    "",
+    ...formatFailureRows("SQL ERR", syntaxErrors, pc.red),
+    ...(syntaxErrors.length > 0 && fatalErrors.length > 0 ? [""] : []),
+    ...formatFailureRows("FATAL", fatalErrors, pc.red),
+    "",
+    `  ${pc.bold("Common causes")}`,
+    ...options.causes.map((cause) => `  - ${cause}`),
+    "",
+    `  ${pc.bold("Next step")}`,
+    `  ${options.nextStep}`,
+  ].join("\n");
+}
 
 /**
  * Thrown when one or more queries fail `DESCRIBE QUERY` against a *reachable*
@@ -31,22 +110,21 @@ export class TypegenSyntaxError extends Error {
     warehouseId?: string,
     fatalQueries: QueryFatalError[] = [],
   ) {
-    const names = queries.map((q) => q.name).join(", ");
-    const fatalNames = fatalQueries.map((q) => q.name).join(", ");
     super(
-      [
-        `Type generation failed: ${queries.length} ${queries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
-        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
-        fatalQueries.length > 0
-          ? `Additionally, ${fatalQueries.length} ${fatalQueries.length === 1 ? "query" : "queries"} could not request DESCRIBE QUERY because of non-SQL fatal errors: ${fatalNames}.`
-          : undefined,
-        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
-        warehouseId
-          ? `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`
-          : `To debug: run the failing query directly in a SQL editor.`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      formatTypegenFailureMessage({
+        syntaxErrors: queries,
+        fatalErrors: fatalQueries,
+        warehouseId,
+        title: "DESCRIBE QUERY failed",
+        causes: [
+          "SQL syntax errors",
+          "missing tables or views",
+          "warehouse format incompatibilities",
+        ],
+        nextStep: warehouseId
+          ? `Run each SQL ERR query directly in a Databricks SQL editor against warehouse ${pc.bold(warehouseId)}.`
+          : "Run each SQL ERR query directly in a Databricks SQL editor.",
+      }),
     );
     this.name = "TypegenSyntaxError";
     this.queries = queries;
@@ -64,16 +142,22 @@ export class TypegenFatalError extends Error {
   readonly queries: QueryFatalError[];
 
   constructor(queries: QueryFatalError[], warehouseId?: string) {
-    const names = queries.map((q) => q.name).join(", ");
     super(
-      [
-        `Type generation failed: ${queries.length} ${queries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
-        `DESCRIBE QUERY could not be requested for these queries — see the error details above.`,
-        `Common causes: missing warehouse permissions, invalid warehouse ID, authentication failure, or SDK configuration errors.`,
-        warehouseId
-          ? `To debug: verify access to warehouse ${warehouseId} and rerun type generation.`
-          : `To debug: verify warehouse access and rerun type generation.`,
-      ].join("\n"),
+      formatTypegenFailureMessage({
+        syntaxErrors: [],
+        fatalErrors: queries,
+        warehouseId,
+        title: "DESCRIBE QUERY could not be requested",
+        causes: [
+          "missing warehouse permissions",
+          "invalid warehouse ID",
+          "authentication failure",
+          "SDK configuration errors",
+        ],
+        nextStep: warehouseId
+          ? `Verify access to warehouse ${pc.bold(warehouseId)} and rerun type generation.`
+          : "Verify warehouse access and rerun type generation.",
+      }),
     );
     this.name = "TypegenFatalError";
     this.queries = queries;
@@ -122,8 +206,9 @@ export async function generateFromEntryPoint(options: {
   queryFolder?: string;
   warehouseId: string;
   noCache?: boolean;
+  mode?: PreflightMode;
 }) {
-  const { outFile, queryFolder, warehouseId, noCache } = options;
+  const { outFile, queryFolder, warehouseId, noCache, mode = "dev" } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
@@ -134,6 +219,7 @@ export async function generateFromEntryPoint(options: {
   if (queryFolder) {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
+      mode,
     });
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];

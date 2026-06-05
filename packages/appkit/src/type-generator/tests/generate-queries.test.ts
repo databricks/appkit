@@ -4,6 +4,10 @@ const mocks = vi.hoisted(() => ({
   readdir: vi.fn(),
   readFile: vi.fn(),
   executeStatement: vi.fn(),
+  // Warehouse preflight probe. Defaults to RUNNING so every existing describe
+  // test takes the "proceed" path unchanged; override per-test to exercise
+  // stopped/starting/unreachable preflight branches.
+  getWarehouse: vi.fn(() => ({ state: "RUNNING" })),
   spinnerStop: vi.fn(),
   spinnerPrintDetail: vi.fn(),
   loadCache: vi.fn(() => ({ version: "2", queries: {} })),
@@ -20,6 +24,7 @@ vi.mock("node:fs/promises", () => ({
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: vi.fn(() => ({
     statementExecution: { executeStatement: mocks.executeStatement },
+    warehouses: { get: mocks.getWarehouse },
   })),
 }));
 
@@ -64,6 +69,9 @@ function succeededResult(columns: [string, string, string | null][]) {
 describe("generateQueriesFromDescribe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-establish the RUNNING default so a per-test preflight override (e.g.
+    // mockReturnValue/mockImplementation) never leaks into the next test.
+    mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
   });
 
   test("success path — returns query schema", async () => {
@@ -389,6 +397,27 @@ describe("generateQueriesFromDescribe", () => {
     expect(fatalErrors).toEqual([]);
   });
 
+  test("SDK DNS wrapper (Can't connect to ..., code 500) is classified as connectivity", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Can't connect to https://x.cloud.databricks.com/api/2.0/sql/statements",
+        ),
+        { code: 500 },
+      ),
+    );
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([]);
+  });
+
   test("TLS certificate message is classified as connectivity", async () => {
     mocks.readdir.mockResolvedValue(["users.sql"]);
     mocks.readFile.mockResolvedValue("SELECT id FROM users");
@@ -475,6 +504,61 @@ describe("generateQueriesFromDescribe", () => {
     expect(lastSavedQueries()).not.toHaveProperty("empty");
   });
 
+  test("PENDING (non-terminal, warehouse not ready) degrades to unknown, not empty, not cached", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    // Warehouse stopped/cold-starting: hybrid DESCRIBE returns a non-terminal
+    // state with no result rows. Must degrade like a transient outage, not be
+    // misreported as EMPTY (which would discard a good cached type).
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-1",
+      status: { state: "PENDING" },
+    });
+
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123");
+
+    expect(schemas).toHaveLength(1);
+    expect(schemas[0].name).toBe("users");
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
+    // a non-ready warehouse must never persist `result: unknown`
+    expect(lastSavedQueries()).not.toHaveProperty("users");
+  });
+
+  test("PENDING reuses a prior good cached type when the SQL hash matches", async () => {
+    // `users.sql` and `users.obo.sql` normalize to the same query name and hold
+    // identical SQL (same hash). With concurrency=1 the first DESCRIBE SUCCEEDS
+    // and its batch commits a good cached type; the second batch comes back
+    // non-terminal (warehouse not ready) and must reuse that freshly-cached good
+    // type rather than overwrite it with unknown.
+    const sql = "SELECT id FROM users";
+    mocks.readdir.mockResolvedValue(["users.sql", "users.obo.sql"]);
+    mocks.readFile.mockResolvedValue(sql);
+    mocks.executeStatement
+      .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
+      .mockResolvedValueOnce({
+        statement_id: "stmt-pending",
+        status: { state: "RUNNING" },
+      });
+
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123", {
+        concurrency: 1,
+      });
+
+    expect(schemas).toHaveLength(2);
+    // both entries resolve to the good type — the PENDING one reuses the cache
+    expect(schemas[0].type).toContain("id: number");
+    expect(schemas[1].type).toContain("id: number");
+    expect(schemas[1].type).not.toContain("result: unknown");
+    expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
+    // the good cached type persists; PENDING never overwrites it with unknown
+    expect(lastSavedQueries()?.users.type).toContain("id: number");
+  });
+
   test("syntax error (FAILED) is recorded in syntaxErrors and not cached", async () => {
     mocks.readdir.mockResolvedValue(["broken.sql"]);
     mocks.readFile.mockResolvedValue("SELECT * FROM missing");
@@ -539,5 +623,178 @@ describe("generateQueriesFromDescribe", () => {
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[0].type).not.toBe("STALE_UNKNOWN");
+  });
+
+  describe("warehouse preflight", () => {
+    test("STOPPED + blocking mode — fatal per query, never describes", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
+      mocks.readFile
+        .mockResolvedValueOnce("SELECT id FROM a")
+        .mockResolvedValueOnce("SELECT id FROM b");
+      mocks.getWarehouse.mockReturnValue({ state: "STOPPED" });
+
+      const { schemas, syntaxErrors, fatalErrors } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+
+      // One fatal entry per uncached query; the whole describe batch is skipped.
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(fatalErrors).toEqual([
+        { name: "a", message: "warehouse wh-123 is STOPPED" },
+        { name: "b", message: "warehouse wh-123 is STOPPED" },
+      ]);
+      expect(syntaxErrors).toEqual([]);
+      expect(schemas).toHaveLength(2);
+      expect(schemas[0].type).toContain("result: unknown");
+      expect(schemas[1].type).toContain("result: unknown");
+    });
+
+    test("STOPPED + dev mode — degrades silently, never describes", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockReturnValue({ state: "STOPPED" });
+
+      const { schemas, syntaxErrors, fatalErrors } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "dev",
+        });
+
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(fatalErrors).toEqual([]);
+      expect(syntaxErrors).toEqual([]);
+      expect(schemas[0].type).toContain("result: unknown");
+      // degraded, never a fatal failure
+      expect(lastSavedQueries()).toBeUndefined();
+    });
+
+    test("STARTING + blocking — waits for RUNNING, then describes normally", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // Preflight sees STARTING (→ waitThenProceed); waitUntilRunning polls
+        // STARTING once more, then RUNNING. After that, DESCRIBE runs.
+        mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STARTING" })
+          .mockReturnValueOnce({ state: "STARTING" })
+          .mockReturnValue({ state: "RUNNING" });
+        mocks.executeStatement.mockResolvedValue(
+          succeededResult([["id", "INT", null]]),
+        );
+
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+        // Drive the wait loop's backoff sleep(s) so it can re-poll and observe
+        // RUNNING. Run pending timers until the work settles.
+        await vi.runAllTimersAsync();
+        const { schemas, syntaxErrors, fatalErrors } = await promise;
+
+        expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+        expect(schemas).toHaveLength(1);
+        expect(schemas[0].type).toContain("id: number");
+        expect(syntaxErrors).toEqual([]);
+        expect(fatalErrors).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("preflight connectivity error — degradeAll, never describes", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockImplementation(() => {
+        throw Object.assign(
+          new Error("Can't connect to https://x.cloud.databricks.com"),
+          { code: 500 },
+        );
+      });
+
+      const { schemas, syntaxErrors, fatalErrors } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+
+      // Unreachable warehouse degrades silently — even in blocking mode.
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(fatalErrors).toEqual([]);
+      expect(syntaxErrors).toEqual([]);
+      expect(schemas[0].type).toContain("result: unknown");
+    });
+
+    test("RUNNING preflight — describes normally", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+      mocks.executeStatement.mockResolvedValue(
+        succeededResult([["id", "INT", null]]),
+      );
+
+      const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+        "/queries",
+        "wh-123",
+        { mode: "blocking" },
+      );
+
+      expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+      expect(schemas[0].type).toContain("id: number");
+      expect(fatalErrors).toEqual([]);
+    });
+
+    test("degrade mode — skips probe + describes even when warehouse is RUNNING", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
+      mocks.readFile
+        .mockResolvedValueOnce("SELECT id FROM a")
+        .mockResolvedValueOnce("SELECT id FROM b");
+      // A RUNNING warehouse would normally take the proceed path and describe
+      // every query. In `degrade` mode the warehouse is never even probed.
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+
+      const { schemas, syntaxErrors, fatalErrors } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "degrade",
+        });
+
+      // ZERO warehouse round-trips: no probe (getWarehouse) and no DESCRIBE.
+      expect(mocks.getWarehouse).not.toHaveBeenCalled();
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      // Best-available types: no cache seeded → every query degrades to unknown.
+      expect(schemas).toHaveLength(2);
+      expect(schemas[0].name).toBe("a");
+      expect(schemas[0].type).toContain("result: unknown");
+      expect(schemas[1].name).toBe("b");
+      expect(schemas[1].type).toContain("result: unknown");
+      // Degraded, never a failure.
+      expect(syntaxErrors).toEqual([]);
+      expect(fatalErrors).toEqual([]);
+    });
+
+    test("degrade mode — reuses the cached type when the SQL hash matches", async () => {
+      const sql = "SELECT id FROM users";
+      mocks.readdir.mockResolvedValue(["users.sql"]);
+      mocks.readFile.mockResolvedValue(sql);
+      // Seed a last-good cached type under the current SQL hash. degrade mode
+      // serves it via the normal cache HIT path — still no probe, no DESCRIBE.
+      mocks.loadCache.mockReturnValueOnce({
+        version: CACHE_VERSION,
+        queries: {
+          users: { hash: hashSQL(sql), type: CACHED_GOOD_TYPE, retry: false },
+        },
+      });
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+
+      const { schemas, syntaxErrors, fatalErrors } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "degrade",
+        });
+
+      expect(mocks.getWarehouse).not.toHaveBeenCalled();
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(schemas).toHaveLength(1);
+      expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
+      expect(syntaxErrors).toEqual([]);
+      expect(fatalErrors).toEqual([]);
+    });
   });
 });

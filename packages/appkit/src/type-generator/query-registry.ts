@@ -4,6 +4,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
+import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import {
   type DatabricksStatementExecutionResponse,
@@ -14,8 +15,16 @@ import {
   sqlTypeToHelper,
   sqlTypeToMarker,
 } from "./types";
+import { getWarehouseState, waitUntilRunning } from "./warehouse-status";
 
 const logger = createLogger("type-generator:query-registry");
+
+/**
+ * Upper bound on how long a `blocking`-mode preflight will wait for a starting
+ * warehouse to reach RUNNING before giving up (~5 min). Generous enough to ride
+ * out a cold start without hanging an interactive CLI invocation indefinitely.
+ */
+const PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 /**
  * Regex breakdown:
@@ -171,6 +180,7 @@ function isConnectivityMessage(message: string): boolean {
     /\bconnection (?:refused|reset|timed out)\b/i.test(message) ||
     /\bsocket hang up\b/i.test(message) ||
     /\bnetwork error\b/i.test(message) ||
+    /\bcan'?t connect to\b/i.test(message) ||
     /\bcertificate has expired\b/i.test(message) ||
     /\bunable to verify the first certificate\b/i.test(message) ||
     /\bupstream connect error or disconnect\/reset before headers\b/i.test(
@@ -316,6 +326,25 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
   }`;
 }
 
+/**
+ * Degrade gracefully when DESCRIBE can't produce a fresh schema (transient
+ * connectivity outage, or a warehouse that's reachable but not ready). Reuse
+ * the last-good cached type when the SQL hash is unchanged, otherwise emit
+ * `unknown` from SQL alone. Never persists `result: unknown`.
+ */
+function degradedType(
+  cache: Awaited<ReturnType<typeof loadCache>>,
+  queryName: string,
+  sql: string,
+  sqlHash: string,
+): string {
+  const prior = cache.queries[queryName];
+  const canReusePrior = prior?.hash === sqlHash && !prior.retry;
+  return canReusePrior
+    ? prior.type
+    : generateUnknownResultQuery(sql, queryName);
+}
+
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
   // Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the
@@ -391,14 +420,27 @@ export function inferParameterTypes(
  * @param warehouseId - the warehouse id to use for schema analysis
  * @param options - options for the query generation
  * @param options.noCache - if true, skip the cache and regenerate all types
+ * @param options.mode - preflight policy: "dev" never blocks the developer
+ *   (degrades a not-ready warehouse, but still describes a RUNNING one),
+ *   "blocking" waits for a startable warehouse and treats a stopped one as fatal,
+ *   "degrade" never probes the warehouse and never describes (emits cached/`unknown`
+ *   types and returns immediately). Defaults to "dev".
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
   queryFolder: string,
   warehouseId: string,
-  options: { noCache?: boolean; concurrency?: number } = {},
+  options: {
+    noCache?: boolean;
+    concurrency?: number;
+    mode?: PreflightMode;
+  } = {},
 ): Promise<QueryGenerationResult> {
-  const { noCache = false, concurrency: rawConcurrency = 10 } = options;
+  const {
+    noCache = false,
+    concurrency: rawConcurrency = 10,
+    mode = "dev",
+  } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
       ? Math.max(1, Math.floor(rawConcurrency))
@@ -517,6 +559,14 @@ export async function generateQueriesFromDescribe(
         status: "empty";
         index: number;
         schema: QuerySchema;
+      }
+    | {
+        // Warehouse reachable but returned a non-terminal state (PENDING/
+        // RUNNING) with no rows — stopped/cold-starting/busy. Degrade like a
+        // transient outage (reuse cache or `unknown`); not cached, not empty.
+        status: "unavailable";
+        index: number;
+        schema: QuerySchema;
       };
 
   const freshResults: Array<{ index: number; schema: QuerySchema }> = [];
@@ -526,161 +576,260 @@ export async function generateQueriesFromDescribe(
   const fatalErrors: QueryFatalError[] = [];
 
   if (uncachedQueries.length > 0) {
-    let completed = 0;
-    const total = uncachedQueries.length;
-    spinner.start(
-      `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
-    );
-
-    const describeOne = async ({
-      index,
-      queryName,
-      sql,
-      sqlHash,
-      cleanedSql,
-    }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-      const result = (await client.statementExecution.executeStatement({
-        statement: `DESCRIBE QUERY ${cleanedSql}`,
-        warehouse_id: warehouseId,
-      })) as DatabricksStatementExecutionResponse;
-
-      completed++;
-      spinner.update(
-        `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
-      );
-
-      logger.debug(
-        "DESCRIBE result for %s: state=%s, rows=%d",
-        queryName,
-        result.status.state,
-        result.result?.data_array?.length ?? 0,
-      );
-
-      if (result.status.state === "FAILED") {
-        // The warehouse was reachable and ran DESCRIBE, but the statement
-        // failed — a genuine SQL error (bad table, syntax, incompatible type).
-        const sqlError =
-          result.status.error?.message || "Query execution failed";
-        logger.warn("DESCRIBE failed for %s: %s", queryName, sqlError);
-        const type = generateUnknownResultQuery(sql, queryName);
-        return {
-          status: "syntax",
-          index,
-          schema: { name: queryName, type },
-          error: parseError(sqlError),
-        };
-      }
-
-      const { type, hasResults } = convertToQueryType(result, sql, queryName);
-      if (!hasResults) {
-        // Described, but no result columns. Emit `unknown` and retry next run;
-        // do not cache (we never persist `result: unknown`).
-        return { status: "empty", index, schema: { name: queryName, type } };
-      }
-      return {
-        status: "ok",
-        index,
-        schema: { name: queryName, type },
-        cacheEntry: { hash: sqlHash, type, retry: false },
-      };
-    };
-
-    // Process in chunks, saving cache after each chunk
-    const processBatchResults = (
-      settled: PromiseSettledResult<DescribeResult>[],
-      batchOffset: number,
-    ) => {
-      for (let i = 0; i < settled.length; i++) {
-        const entry = settled[i];
-        const { queryName } = uncachedQueries[batchOffset + i];
-
-        if (entry.status === "fulfilled") {
-          const res = entry.value;
-          freshResults.push({ index: res.index, schema: res.schema });
-
-          if (res.status === "ok") {
-            // Only a successful describe with a result schema is cached.
-            cache.queries[queryName] = res.cacheEntry;
-            logEntries.push({ queryName, status: "MISS" });
-          } else if (res.status === "syntax") {
-            // Genuine SQL error — record it for the caller's prod/dev gate.
-            // Not cached: re-described next run so a fixed query recovers.
-            syntaxErrors.push({ name: queryName, message: res.error.message });
-            logEntries.push({
-              queryName,
-              status: "MISS",
-              kind: "syntax",
-              error: res.error,
-            });
+    // One-time warehouse preflight (before issuing any DESCRIBE). A single
+    // warehouses.get classifies the warehouse so we can skip the whole describe
+    // batch when it can't serve this run, instead of letting every query fail
+    // (and re-fail next run). Reuses this file's degrade/classify helpers so a
+    // not-ready warehouse degrades exactly like a per-query outage.
+    let decision: ReturnType<typeof decidePreflight> = "proceed";
+    let fatalMessage = "";
+    if (mode === "degrade") {
+      // `degrade` never describes and must make ZERO warehouse round-trips: skip
+      // the probe entirely (no getWarehouseState) and go straight to degradeAll.
+      // A one-shot CLI (`--no-block`) can't describe in the background, so it
+      // emits best-available types (reused cache or `unknown`) and returns now.
+      decision = "degradeAll";
+    } else {
+      try {
+        const state = await getWarehouseState(client, warehouseId);
+        decision = decidePreflight(state, mode);
+        if (decision === "fatal") {
+          fatalMessage = `warehouse ${warehouseId} is ${state}`;
+        }
+        if (decision === "waitThenProceed") {
+          const final = await waitUntilRunning(client, warehouseId, {
+            maxMs: PREFLIGHT_WAIT_MAX_MS,
+          });
+          if (final === "RUNNING") {
+            decision = "proceed";
           } else {
-            // status === "empty": described, no columns. Soft unknown, not cached.
-            logEntries.push({ queryName, status: "MISS", kind: "empty" });
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
           }
+        }
+      } catch (err) {
+        if (isConnectivityError(err)) {
+          // Warehouse unreachable (transient outage): degrade silently like a
+          // per-query connectivity failure — never fail a build on a blip.
+          decision = "degradeAll";
         } else {
-          // executeStatement rejected without a normal StatementExecution result.
-          // Only structured transport/connectivity failures are treated as
-          // offline; auth, bad warehouse IDs, malformed requests, and SDK/config
-          // failures stay fatal so users fix the underlying setup issue.
-          completed++;
-          spinner.update(
-            `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
-          );
+          // Auth, bad warehouse id, malformed config, or a timed-out wait: fatal.
+          decision = "fatal";
+          fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+        }
+      }
+    }
 
-          const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
-          const reason = getErrorDiagnostic(entry.reason);
-          const error = parseError(reason);
-          const prior = cache.queries[queryName];
-          const canReusePrior = prior?.hash === sqlHash && !prior.retry;
-          const type = canReusePrior
-            ? prior.type
-            : generateUnknownResultQuery(sql, queryName);
-          freshResults.push({ index, schema: { name: queryName, type } });
-
-          if (!isConnectivityError(entry.reason)) {
-            fatalErrors.push({ name: queryName, message: error.message });
-            logEntries.push({
-              queryName,
-              status: "MISS",
-              kind: "fatal",
-              error,
-            });
-            continue;
-          }
-
-          logger.warn(
-            "DESCRIBE unreachable for %s: %s — %s",
-            queryName,
-            reason,
-            canReusePrior
-              ? "reusing last cached type"
-              : "emitting unknown (no matching cache)",
-          );
+    if (decision !== "proceed") {
+      // degradeAll or fatal: skip DESCRIBE entirely. Every uncached query gets a
+      // degraded schema (reused cache or `unknown`); fatal additionally records
+      // a fatalError per query so the caller fails the build after writing.
+      const kind = decision === "fatal" ? "fatal" : "connectivity";
+      for (const { index, queryName, sql, sqlHash } of uncachedQueries) {
+        freshResults.push({
+          index,
+          schema: {
+            name: queryName,
+            type: degradedType(cache, queryName, sql, sqlHash),
+          },
+        });
+        if (decision === "fatal") {
+          fatalErrors.push({ name: queryName, message: fatalMessage });
           logEntries.push({
             queryName,
             status: "MISS",
-            kind: "connectivity",
-            error,
+            kind,
+            error: { message: fatalMessage },
           });
+        } else {
+          logEntries.push({ queryName, status: "MISS", kind });
         }
       }
-    };
+    } else {
+      let completed = 0;
+      const total = uncachedQueries.length;
+      spinner.start(
+        `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
+      );
 
-    if (uncachedQueries.length > concurrency) {
-      for (let b = 0; b < uncachedQueries.length; b += concurrency) {
-        const batch = uncachedQueries.slice(b, b + concurrency);
-        const batchResults = await Promise.allSettled(batch.map(describeOne));
-        processBatchResults(batchResults, b);
+      const describeOne = async ({
+        index,
+        queryName,
+        sql,
+        sqlHash,
+        cleanedSql,
+      }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
+        const result = (await client.statementExecution.executeStatement({
+          statement: `DESCRIBE QUERY ${cleanedSql}`,
+          warehouse_id: warehouseId,
+        })) as DatabricksStatementExecutionResponse;
+
+        completed++;
+        spinner.update(
+          `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
+        );
+
+        logger.debug(
+          "DESCRIBE result for %s: state=%s, rows=%d",
+          queryName,
+          result.status.state,
+          result.result?.data_array?.length ?? 0,
+        );
+
+        if (result.status.state === "FAILED") {
+          // The warehouse was reachable and ran DESCRIBE, but the statement
+          // failed — a genuine SQL error (bad table, syntax, incompatible type).
+          const sqlError =
+            result.status.error?.message || "Query execution failed";
+          logger.warn("DESCRIBE failed for %s: %s", queryName, sqlError);
+          const type = generateUnknownResultQuery(sql, queryName);
+          return {
+            status: "syntax",
+            index,
+            schema: { name: queryName, type },
+            error: parseError(sqlError),
+          };
+        }
+
+        if (result.status.state !== "SUCCEEDED") {
+          // Non-terminal state (PENDING/RUNNING) with no result rows: the
+          // warehouse is reachable but not ready (stopped, cold-starting, or
+          // busy). Degrade like a transient outage — reuse the last-good cached
+          // type when the SQL is unchanged, else emit `unknown`. Never "empty":
+          // treating this as empty would emit `result: unknown` AND discard the
+          // good cached type, silently throwing away working types.
+          return {
+            status: "unavailable",
+            index,
+            schema: {
+              name: queryName,
+              type: degradedType(cache, queryName, sql, sqlHash),
+            },
+          };
+        }
+
+        const { type, hasResults } = convertToQueryType(result, sql, queryName);
+        if (!hasResults) {
+          // Described, but no result columns. Emit `unknown` and retry next run;
+          // do not cache (we never persist `result: unknown`).
+          return { status: "empty", index, schema: { name: queryName, type } };
+        }
+        return {
+          status: "ok",
+          index,
+          schema: { name: queryName, type },
+          cacheEntry: { hash: sqlHash, type, retry: false },
+        };
+      };
+
+      // Process in chunks, saving cache after each chunk
+      const processBatchResults = (
+        settled: PromiseSettledResult<DescribeResult>[],
+        batchOffset: number,
+      ) => {
+        for (let i = 0; i < settled.length; i++) {
+          const entry = settled[i];
+          const { queryName } = uncachedQueries[batchOffset + i];
+
+          if (entry.status === "fulfilled") {
+            const res = entry.value;
+            freshResults.push({ index: res.index, schema: res.schema });
+
+            if (res.status === "ok") {
+              // Only a successful describe with a result schema is cached.
+              cache.queries[queryName] = res.cacheEntry;
+              logEntries.push({ queryName, status: "MISS" });
+            } else if (res.status === "syntax") {
+              // Genuine SQL error — record it for the caller's prod/dev gate.
+              // Not cached: re-described next run so a fixed query recovers.
+              syntaxErrors.push({
+                name: queryName,
+                message: res.error.message,
+              });
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "syntax",
+                error: res.error,
+              });
+            } else if (res.status === "empty") {
+              // status === "empty": described, no columns. Soft unknown, not cached.
+              logEntries.push({ queryName, status: "MISS", kind: "empty" });
+            } else {
+              // status === "unavailable": non-terminal DESCRIBE (warehouse
+              // stopped/cold-starting/busy). Degrade like a transient outage:
+              // tag OFFLINE, count as degraded, never cache.
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "connectivity",
+              });
+            }
+          } else {
+            // executeStatement rejected without a normal StatementExecution result.
+            // Only structured transport/connectivity failures are treated as
+            // offline; auth, bad warehouse IDs, malformed requests, and SDK/config
+            // failures stay fatal so users fix the underlying setup issue.
+            completed++;
+            spinner.update(
+              `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
+            );
+
+            const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
+            const reason = getErrorDiagnostic(entry.reason);
+            const error = parseError(reason);
+            const priorEntry = cache.queries[queryName];
+            const canReusePrior =
+              priorEntry?.hash === sqlHash && !priorEntry.retry;
+            const type = degradedType(cache, queryName, sql, sqlHash);
+            freshResults.push({ index, schema: { name: queryName, type } });
+
+            if (!isConnectivityError(entry.reason)) {
+              fatalErrors.push({ name: queryName, message: error.message });
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "fatal",
+                error,
+              });
+              continue;
+            }
+
+            logger.warn(
+              "DESCRIBE unreachable for %s: %s — %s",
+              queryName,
+              reason,
+              canReusePrior
+                ? "reusing last cached type"
+                : "emitting unknown (no matching cache)",
+            );
+            logEntries.push({
+              queryName,
+              status: "MISS",
+              kind: "connectivity",
+              error,
+            });
+          }
+        }
+      };
+
+      if (uncachedQueries.length > concurrency) {
+        for (let b = 0; b < uncachedQueries.length; b += concurrency) {
+          const batch = uncachedQueries.slice(b, b + concurrency);
+          const batchResults = await Promise.allSettled(batch.map(describeOne));
+          processBatchResults(batchResults, b);
+          await saveCache(cache);
+        }
+      } else {
+        const settled = await Promise.allSettled(
+          uncachedQueries.map(describeOne),
+        );
+        processBatchResults(settled, 0);
         await saveCache(cache);
       }
-    } else {
-      const settled = await Promise.allSettled(
-        uncachedQueries.map(describeOne),
-      );
-      processBatchResults(settled, 0);
-      await saveCache(cache);
-    }
 
-    spinner.stop("");
+      spinner.stop("");
+    }
   }
 
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
@@ -742,7 +891,7 @@ export async function generateQueriesFromDescribe(
       parts.push(
         `${syntaxCount} SQL ${syntaxCount === 1 ? "error" : "errors"}`,
       );
-    if (offlineCount > 0) parts.push(`${offlineCount} unreachable`);
+    if (offlineCount > 0) parts.push(`${offlineCount} degraded`);
     if (emptyCount > 0) parts.push(`${emptyCount} empty`);
     if (fatalCount > 0)
       parts.push(
