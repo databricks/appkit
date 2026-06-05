@@ -703,7 +703,9 @@ export async function generateQueriesFromDescribe(
           // failed — a genuine SQL error (bad table, syntax, incompatible type).
           const sqlError =
             result.status.error?.message || "Query execution failed";
-          logger.warn("DESCRIBE failed for %s: %s", queryName, sqlError);
+          // The failure is surfaced once, formatted, by the aggregated
+          // TypegenSyntaxError (and the summary table) — don't also log the raw
+          // message here or every SQL error prints twice in dev.
           const type = generateUnknownResultQuery(sql, queryName);
           return {
             status: "syntax",
