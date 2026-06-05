@@ -1,6 +1,12 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { Command } from "commander";
+import { Command, Option } from "commander";
+import {
+  acquireSpawnLock,
+  getSpawnLockPath,
+  releaseSpawnLock,
+} from "./spawn-lock.js";
 
 /**
  * Resolve the typegen pre-flight mode for the CLI. Defaults to "non-blocking" —
@@ -18,14 +24,30 @@ export function resolveTypegenMode(options?: {
   return options?.block ? "blocking" : "non-blocking";
 }
 
+/** Options parsed by commander for the generate-types command. */
+interface GenerateTypesOptions {
+  noCache?: boolean;
+  block?: boolean;
+  /**
+   * Internal: present only on the detached worker invocation. Carries the path
+   * of the single-flight lock this worker must release when it finishes. Its
+   * presence is what marks an invocation as "the worker" — workers always run
+   * with `--block`, so they never spawn another worker (only non-blocking runs
+   * spawn), which terminates the recursion.
+   */
+  workerLock?: string;
+}
+
 /**
- * Generate types command implementation
+ * Generate types command implementation. Runs the library generate (which, in
+ * non-blocking mode, writes degraded types and returns immediately). This is the
+ * SAME work the worker performs in blocking mode in the background.
  */
 async function runGenerateTypes(
   rootDir?: string,
   outFile?: string,
   warehouseId?: string,
-  options?: { noCache?: boolean; block?: boolean },
+  options?: GenerateTypesOptions,
 ) {
   try {
     const resolvedRootDir = rootDir || process.cwd();
@@ -97,6 +119,123 @@ async function runGenerateTypes(
   }
 }
 
+/**
+ * Spawn the detached blocking worker that refreshes real types in the background
+ * after the foreground non-blocking generate has already written degraded types.
+ *
+ * Re-invokes THIS CLI (`process.execPath` + `process.argv[1]` — the bin entry
+ * that launched us) with `generate-types --block --worker-lock <lockPath>` plus
+ * the same positional target options the foreground used, so the worker writes
+ * to the same out file / reads the same query folder. The worker is:
+ *  - `detached: true` + `.unref()` so it outlives this process (install/dev-setup
+ *    can finish and exit while the worker keeps warming the warehouse).
+ *  - `stdio: "ignore"` so it never holds the parent's pipes open or interleaves
+ *    output into the install/dev log.
+ *
+ * Spawning is wrapped so any failure is non-fatal: the caller still has degraded
+ * types and exits 0.
+ *
+ * @param lockPath - the acquired single-flight lock; passed to the worker so it
+ *   releases the SAME lock when it finishes.
+ * @param targets - the foreground's positional args, forwarded verbatim.
+ * @returns true if the worker was spawned, false if spawning threw.
+ */
+export function spawnTypegenWorker(
+  lockPath: string,
+  targets: { rootDir?: string; outFile?: string; warehouseId?: string },
+): boolean {
+  // The script the runtime launched us with (the `appkit` bin shim). Re-running
+  // it under the same node binary reproduces this exact CLI in the worker.
+  const cliEntry = process.argv[1];
+
+  // Forward the positionals in declaration order (rootDir, outFile,
+  // warehouseId). Stop at the first undefined so we never pass a literal
+  // "undefined" — commander would treat it as a positional value. (rootDir is
+  // effectively always set by commander's default, but guard anyway.)
+  const positionals: string[] = [];
+  for (const value of [targets.rootDir, targets.outFile, targets.warehouseId]) {
+    if (value === undefined) break;
+    positionals.push(value);
+  }
+
+  const args = [
+    cliEntry,
+    "generate-types",
+    "--block",
+    "--worker-lock",
+    lockPath,
+    ...positionals,
+  ];
+
+  try {
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return true;
+  } catch (error) {
+    // Non-fatal: the foreground already wrote degraded types. Log and move on.
+    console.error(
+      `Could not start background type refresh: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
+}
+
+/**
+ * The command action. Orchestrates the non-blocking foreground contract:
+ *  1. Run the library generate (writes degraded types immediately in non-blocking
+ *     mode; does the full blocking lifecycle when this is the worker).
+ *  2. If this is a non-blocking, non-worker invocation, try to spawn the detached
+ *     blocking worker behind the single-flight lock. If the lock is already held
+ *     by a live worker, skip (single-flight) with a one-line note. Either way the
+ *     foreground returns normally (exit 0).
+ *  3. If this IS the worker (`--worker-lock` present), it ran blocking above and
+ *     releases the lock here (and via a process-exit guard, so a hard failure /
+ *     process.exit still frees it).
+ */
+async function generateTypesAction(
+  rootDir: string | undefined,
+  outFile: string | undefined,
+  warehouseId: string | undefined,
+  options: GenerateTypesOptions,
+) {
+  const isWorker = typeof options.workerLock === "string";
+
+  // A worker must always free its lock, even if the blocking generate throws or
+  // calls process.exit (TypegenFatalError → exit 1). The exit handler covers the
+  // process.exit / uncaught paths; the finally covers the normal return.
+  if (isWorker && options.workerLock) {
+    const lockPath = options.workerLock;
+    process.once("exit", () => releaseSpawnLock(lockPath));
+  }
+
+  try {
+    await runGenerateTypes(rootDir, outFile, warehouseId, options);
+  } finally {
+    if (isWorker && options.workerLock) {
+      releaseSpawnLock(options.workerLock);
+    }
+  }
+
+  // Only a non-blocking, non-worker invocation spawns. A worker is always
+  // --block (so resolveTypegenMode → "blocking"), which both prevents recursion
+  // and means we never get here for a worker.
+  if (!isWorker && resolveTypegenMode(options) === "non-blocking") {
+    const resolvedRootDir = rootDir || process.cwd();
+    const lockPath = getSpawnLockPath(resolvedRootDir);
+
+    if (acquireSpawnLock(lockPath)) {
+      spawnTypegenWorker(lockPath, { rootDir, outFile, warehouseId });
+    } else {
+      console.log("Type refresh already in progress, skipping.");
+    }
+  }
+}
+
 export const generateTypesCommand = new Command("generate-types")
   .description("Generate TypeScript types from SQL queries")
   .argument("[rootDir]", "Root directory of the project", process.cwd())
@@ -111,6 +250,14 @@ export const generateTypesCommand = new Command("generate-types")
     "--block",
     "Block on warehouse readiness instead of degrading (use for CI)",
   )
+  // Internal: marks the detached background worker and carries the lock it must
+  // release. Hidden from --help; users should never pass it.
+  .addOption(
+    new Option(
+      "--worker-lock <path>",
+      "Internal: detached worker lock path",
+    ).hideHelp(),
+  )
   .addHelpText(
     "after",
     `
@@ -121,4 +268,4 @@ Examples:
   $ appkit generate-types --no-cache
   $ appkit generate-types --block   # CI: wait for the warehouse and fail on a cold one`,
   )
-  .action(runGenerateTypes);
+  .action(generateTypesAction);
