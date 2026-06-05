@@ -1,5 +1,23 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+
+beforeAll(() => {
+  if (!window.matchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+  }
+});
 
 const mockConnectSSE = vi.fn().mockImplementation((_opts: unknown) => {
   return new Promise<void>(() => {});
@@ -17,12 +35,17 @@ vi.mock("../use-query-hmr", () => ({
   useQueryHMR: () => {},
 }));
 
+import { ResourceStatusIndicator } from "../../resource-status-indicator";
 import { useAnalyticsQuery } from "../use-analytics-query";
 import {
   ResourceStatusProvider,
   useResourceStatus,
   useResourceStatusPublisher,
 } from "../use-resource-status";
+
+function queryIndicatorToast(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-sonner-toast]");
+}
 
 /**
  * These tests cover the analytics-warehouse adapter end-to-end: the publisher
@@ -37,6 +60,60 @@ describe("useAnalyticsQuery + ResourceStatusProvider integration", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  test("does not show the indicator toast before a real warehouse status arrives", async () => {
+    mockConnectSSE.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    function Chart() {
+      useAnalyticsQuery("chart_one" as any);
+      return null;
+    }
+
+    render(
+      <ResourceStatusProvider>
+        <Chart />
+        <ResourceStatusIndicator />
+      </ResourceStatusProvider>,
+    );
+
+    await waitFor(() => {
+      expect(queryIndicatorToast()).toBeNull();
+    });
+  });
+
+  test("does not show the indicator toast when the first warehouse status is RUNNING", async () => {
+    let onMessage: ((msg: { id: string; data: string }) => void) | null = null;
+    mockConnectSSE.mockImplementationOnce((opts: any) => {
+      onMessage = opts.onMessage;
+      return new Promise<void>(() => {});
+    });
+
+    function Chart() {
+      useAnalyticsQuery("chart_one" as any);
+      return null;
+    }
+
+    render(
+      <ResourceStatusProvider>
+        <Chart />
+        <ResourceStatusIndicator />
+      </ResourceStatusProvider>,
+    );
+
+    act(() => {
+      onMessage?.({
+        id: "1",
+        data: JSON.stringify({
+          type: "warehouse_status",
+          status: { state: "RUNNING", elapsedMs: 0 },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(queryIndicatorToast()).toBeNull();
+    });
   });
 
   test("registers a warehouse-kind slot on mount even before any status arrives", async () => {

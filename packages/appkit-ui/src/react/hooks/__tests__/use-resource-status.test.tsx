@@ -218,7 +218,7 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
     expect(getByTestId("warehouse-active").textContent).toBe("1");
   });
 
-  test("kindHint registers a synthetic pending status before the first snapshot", async () => {
+  test("kindHint keeps null-status slots associated with their kind", async () => {
     function Publisher() {
       const { publish } = useResourceStatusPublisher("a", "x", {
         kindHint: "lakebase",
@@ -252,7 +252,7 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
     });
     await waitFor(() => {
       expect(getByTestId("lakebase-active").textContent).toBe("1");
-      expect(getByTestId("lakebase-state").textContent).toBe("PENDING");
+      expect(getByTestId("lakebase-state").textContent).toBe("none");
     });
   });
 

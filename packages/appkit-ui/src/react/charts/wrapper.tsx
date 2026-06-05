@@ -15,8 +15,7 @@ function isWarehouseWaiting(
   data: ChartData | null,
   warehouseStatus: WarehouseStatus | null,
 ): boolean {
-  if (!loading || data) return false;
-  if (!warehouseStatus) return true;
+  if (!loading || data || !warehouseStatus) return false;
   if (
     warehouseStatus.state === "RUNNING" ||
     WAREHOUSE_ERROR_STATES.has(warehouseStatus.state)

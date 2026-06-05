@@ -70,8 +70,6 @@ interface RegistryEntry {
   label: string;
   status: ResourceStatus | null;
   kindHint?: string;
-  /** Set on first register; drives synthetic pending before first status. */
-  registeredAt: number;
 }
 
 const EMPTY_SNAPSHOT: AggregatedResourceStatus = {
@@ -98,13 +96,7 @@ class ResourceStatusStore {
     status: ResourceStatus | null,
     kindHint?: string,
   ): void {
-    const prev = this.entries.get(id);
-    this.entries.set(id, {
-      label,
-      status,
-      kindHint,
-      registeredAt: prev?.registeredAt ?? Date.now(),
-    });
+    this.entries.set(id, { label, status, kindHint });
     this.bump();
   }
 
@@ -135,16 +127,6 @@ class ResourceStatusStore {
   }
 }
 
-function syntheticPending(entry: RegistryEntry): ResourceStatus | null {
-  if (entry.status || !entry.kindHint) return null;
-  return {
-    kind: entry.kindHint,
-    state: "PENDING",
-    severity: "pending",
-    startedAt: entry.registeredAt,
-  };
-}
-
 function isWorse(a: ResourceStatus, b: ResourceStatus): boolean {
   const aRank = SEVERITY_RANK[a.severity];
   const bRank = SEVERITY_RANK[b.severity];
@@ -165,9 +147,9 @@ function aggregate(
   const affectedLabels = new Set<string>();
 
   for (const entry of entries.values()) {
-    const status = entry.status ?? syntheticPending(entry);
+    const status = entry.status;
     if (!status) continue;
-    if (entry.status) affectedLabels.add(entry.label);
+    affectedLabels.add(entry.label);
     const existing = byKind[status.kind];
     if (!existing || isWorse(status, existing)) {
       byKind[status.kind] = status;
@@ -201,9 +183,9 @@ function aggregateForKind(
     const entryKind = entry.status?.kind ?? entry.kindHint;
     if (entryKind !== kind) continue;
     activeCount++;
-    const status = entry.status ?? syntheticPending(entry);
+    const status = entry.status;
     if (!status) continue;
-    if (entry.status) affectedLabels.add(entry.label);
+    affectedLabels.add(entry.label);
     if (!worst || isWorse(status, worst)) {
       worst = status;
     }
