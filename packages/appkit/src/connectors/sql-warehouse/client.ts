@@ -401,31 +401,42 @@ export class SQLWarehouseConnector {
 
     const existing = this._readinessInFlight.get(warehouseId);
     if (existing && !existing.sharedController.signal.aborted) {
-      if (signal?.aborted) throw ExecutionError.canceled();
-      existing.refCount++;
-      this._subscribeReadiness(existing, onStatus);
-      return this._joinWarehouseReadiness(existing, signal);
+      return this._waitOnReadiness(existing, onStatus, signal, true);
     }
 
+    const entry = this._spawnReadinessInFlight(workspaceClient, warehouseId, {
+      timeoutMs,
+      autoStart,
+    });
+    this._readinessInFlight.set(warehouseId, entry);
+    return this._waitOnReadiness(entry, onStatus, signal, false);
+  }
+
+  private _waitOnReadiness(
+    entry: WarehouseReadinessInFlight,
+    onStatus: (update: WarehouseStatusUpdate) => void,
+    signal: AbortSignal | undefined,
+    join: boolean,
+  ): Promise<void> {
+    if (signal?.aborted) throw ExecutionError.canceled();
+    if (join) entry.refCount++;
+    entry.subscribers.add(onStatus);
+    if (entry.lastUpdate) onStatus(entry.lastUpdate);
+    return this._joinWarehouseReadiness(entry, signal);
+  }
+
+  private _spawnReadinessInFlight(
+    workspaceClient: WorkspaceClient,
+    warehouseId: string,
+    opts: { timeoutMs: number; autoStart: boolean },
+  ): WarehouseReadinessInFlight {
     const sharedController = new AbortController();
     const entry: WarehouseReadinessInFlight = {
-      promise: undefined as unknown as Promise<void>,
       refCount: 1,
       sharedController,
       subscribers: new Set(),
       lastUpdate: null,
-    };
-    this._subscribeReadiness(entry, onStatus);
-
-    const broadcast = (update: WarehouseStatusUpdate): void => {
-      entry.lastUpdate = update;
-      for (const subscriber of entry.subscribers) {
-        try {
-          subscriber(update);
-        } catch {
-          // Individual SSE consumers must not abort the shared poll loop.
-        }
-      }
+      promise: Promise.resolve(),
     };
 
     entry.promise = this.telemetry
@@ -436,7 +447,7 @@ export class SQLWarehouseConnector {
           attributes: {
             "db.system": "databricks",
             "db.warehouse_id": warehouseId,
-            "db.warehouse.startup_timeout_ms": timeoutMs,
+            "db.warehouse.startup_timeout_ms": opts.timeoutMs,
           },
         },
         async (span: Span) => {
@@ -445,10 +456,10 @@ export class SQLWarehouseConnector {
               workspaceClient,
               warehouseId,
               {
-                onStatus: broadcast,
+                onStatus: (update) => this._broadcastReadiness(entry, update),
                 signal: sharedController.signal,
-                timeoutMs,
-                autoStart,
+                timeoutMs: opts.timeoutMs,
+                autoStart: opts.autoStart,
               },
               span,
             );
@@ -468,58 +479,48 @@ export class SQLWarehouseConnector {
       });
 
     entry.promise.catch(() => {});
-
-    this._readinessInFlight.set(warehouseId, entry);
-    return this._joinWarehouseReadiness(entry, signal);
+    return entry;
   }
 
-  private _subscribeReadiness(
+  private _broadcastReadiness(
     entry: WarehouseReadinessInFlight,
-    onStatus: (update: WarehouseStatusUpdate) => void,
+    update: WarehouseStatusUpdate,
   ): void {
-    entry.subscribers.add(onStatus);
-    if (entry.lastUpdate) onStatus(entry.lastUpdate);
+    entry.lastUpdate = update;
+    for (const subscriber of entry.subscribers) {
+      try {
+        subscriber(update);
+      } catch {
+        // One consumer must not block updates to the rest.
+      }
+    }
   }
 
-  /**
-   * Await shared readiness work. Decrements refCount on caller abort; aborts
-   * the shared poll loop only when every waiter has left.
-   */
+  /** Ref-counted await; shared poll aborts only when every waiter leaves. */
   private _joinWarehouseReadiness(
     entry: WarehouseReadinessInFlight,
     callerSignal?: AbortSignal,
   ): Promise<void> {
-    if (callerSignal?.aborted) {
-      return Promise.reject(ExecutionError.canceled());
-    }
     if (!callerSignal) return entry.promise;
 
     return new Promise<void>((resolve, reject) => {
-      let settled = false;
-
-      const onAbort = () => {
-        if (settled) return;
-        settled = true;
+      let done = false;
+      const finish = (outcome: "ok" | "abort" | "err", error?: unknown) => {
+        if (done) return;
+        done = true;
         callerSignal.removeEventListener("abort", onAbort);
-        this._releaseReadinessWaiter(entry);
-        reject(ExecutionError.canceled());
+        if (outcome === "ok") resolve();
+        else if (outcome === "abort") reject(ExecutionError.canceled());
+        else reject(error);
       };
-
+      const onAbort = () => {
+        this._releaseReadinessWaiter(entry);
+        finish("abort");
+      };
       callerSignal.addEventListener("abort", onAbort, { once: true });
-
       entry.promise.then(
-        () => {
-          if (settled) return;
-          settled = true;
-          callerSignal.removeEventListener("abort", onAbort);
-          resolve();
-        },
-        (error) => {
-          if (settled) return;
-          settled = true;
-          callerSignal.removeEventListener("abort", onAbort);
-          reject(error);
-        },
+        () => finish("ok"),
+        (error) => finish("err", error),
       );
     });
   }

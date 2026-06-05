@@ -381,33 +381,23 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "RUNNING" });
       const start = vi.fn().mockResolvedValue(undefined);
       const wsClient = { warehouses: { get, start } };
-      const updates1: { state: string }[] = [];
-      const updates2: { state: string }[] = [];
-      const updates3: { state: string }[] = [];
+      const allUpdates = [0, 1, 2].map(() => [] as { state: string }[]);
 
-      const promise = Promise.all([
+      const waits = allUpdates.map((updates) =>
         connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
-          onStatus: (u) => updates1.push(u),
+          onStatus: (u) => updates.push(u),
           timeoutMs: 60_000,
         }),
-        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
-          onStatus: (u) => updates2.push(u),
-          timeoutMs: 60_000,
-        }),
-        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
-          onStatus: (u) => updates3.push(u),
-          timeoutMs: 60_000,
-        }),
-      ]);
+      );
       await vi.runAllTimersAsync();
-      await promise;
+      await Promise.all(waits);
 
       expect(start).toHaveBeenCalledTimes(1);
       expect(get).toHaveBeenCalledTimes(3);
       const states = ["STARTING", "RUNNING"];
-      expect(updates1.map((u) => u.state)).toEqual(states);
-      expect(updates2.map((u) => u.state)).toEqual(states);
-      expect(updates3.map((u) => u.state)).toEqual(states);
+      for (const updates of allUpdates) {
+        expect(updates.map((u) => u.state)).toEqual(states);
+      }
     });
 
     test("one waiter aborting does not cancel the shared readiness loop", async () => {
