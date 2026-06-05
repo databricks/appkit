@@ -170,9 +170,8 @@ describe("useAnalyticsQuery", () => {
     });
 
     test("surfaces an error when a warehouse_status event has no status payload", async () => {
-      // R2 mitigation: a malformed warehouse_status frame followed by a
-      // clean stream close used to strand the hook in `loading: true`
-      // forever. We now treat it as a malformed terminal frame.
+      // A malformed frame must terminate the stream so the hook doesn't
+      // stay stuck in `loading: true` after a clean stream close.
       let capturedOnMessage:
         | ((msg: { id: string; data: string }) => void)
         | null = null;

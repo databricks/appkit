@@ -133,8 +133,7 @@ export function useAnalyticsQuery<
     useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Stable id per hook instance so two charts using the same queryKey still
-  // register independently with the warehouse-status context (if mounted).
+  // Stable per-instance id so two charts sharing a queryKey register independently.
   const publisherId = useId();
   const {
     publish: publishWarehouseStatus,
@@ -188,11 +187,8 @@ export function useAnalyticsQuery<
     setError(null);
     setData(null);
     setWarehouseStatus(null);
-    // Register with the warehouse-status context (no-op when no provider).
-    // We register with `null` so the aggregate counts this hook as active
-    // even before the first status event arrives — useful e.g. to show a
-    // generic "warehouse warming up" affordance once the second slow query
-    // shows up.
+    // Register with no status yet so the aggregate counts this hook as
+    // active before the first warehouse_status event arrives.
     publishWarehouseStatus(null);
 
     const abortController = new AbortController();
@@ -206,15 +202,10 @@ export function useAnalyticsQuery<
         try {
           const parsed = JSON.parse(message.data);
 
-          // warehouse readiness progress — emitted by the analytics route
-          // while waiting for a STOPPED/STARTING warehouse to reach RUNNING.
-          // Loading stays true; data stays null.
+          // Warehouse readiness progress while waiting for RUNNING.
           if (parsed.type === "warehouse_status") {
-            // Treat a missing/invalid status payload as a malformed terminal
-            // frame instead of silently no-op'ing — otherwise a corrupted
-            // frame followed by a clean stream close strands the hook in
-            // `loading: true` forever (the global indicator would also stay
-            // pinned via the registered slot).
+            // Treat a malformed payload as a terminal error so a corrupted
+            // frame doesn't strand the hook in `loading: true` forever.
             if (
               !parsed.status ||
               typeof parsed.status !== "object" ||
@@ -239,8 +230,6 @@ export function useAnalyticsQuery<
           if (parsed.type === "result") {
             setLoading(false);
             setData(parsed.data as ResultType);
-            // Query reached a terminal state — drop our entry so the global
-            // banner stops counting this hook as waiting.
             unpublishWarehouseStatus();
             return;
           }
@@ -327,8 +316,7 @@ export function useAnalyticsQuery<
 
     return () => {
       abortControllerRef.current?.abort();
-      // Drop our entry from the global registry on unmount so a permanently
-      // STARTING warehouse doesn't keep the banner pinned after navigation.
+      // Drop our slot on unmount so a stuck STARTING doesn't pin the banner.
       unpublishWarehouseStatus();
     };
   }, [start, autoStart, unpublishWarehouseStatus]);

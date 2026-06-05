@@ -5,23 +5,12 @@ import {
   useResourceStatusPublisher,
 } from "./use-resource-status";
 
-/**
- * Resource-status `kind` used by the analytics warehouse adapter. Plugins
- * outside of analytics should publish under a different kind so the
- * indicator can show kind-specific copy.
- */
 const ANALYTICS_WAREHOUSE_RESOURCE_KIND = "warehouse";
 
 /**
- * Map a {@link WarehouseStatus} to the cross-kind severity used by the
- * generic resource-status store.
- *
- * - `RUNNING` → no severity; callers should `unpublish` instead of
- *   publishing a status.
- * - `STARTING` / `STOPPED` / `STOPPING` → `pending` (user is waiting on a
- *   cold start / restart).
- * - `DELETED` / `DELETING` → `error` (the configured warehouse is unusable
- *   and a config change is required).
+ * - `RUNNING` → `null`; callers `unpublish` instead.
+ * - `STARTING` / `STOPPED` / `STOPPING` → `pending`.
+ * - `DELETED` / `DELETING` → `error` (config change required).
  */
 function severityForWarehouseState(
   state: WarehouseStatus["state"],
@@ -38,13 +27,8 @@ function severityForWarehouseState(
 }
 
 /**
- * Internal hook used by `useAnalyticsQuery` to register/unregister and update
- * its current warehouse status with the nearest provider. Safe to call when
- * no provider is mounted — in that case the publish/unpublish calls are
- * no-ops.
- *
- * @returns A stable `publish(status)` callback. Pair with a cleanup effect
- *          that calls `unpublish()` on unmount.
+ * Internal hook used by `useAnalyticsQuery` to mirror its current warehouse
+ * status into the nearest provider. No-op when no provider is mounted.
  */
 export function useAnalyticsWarehousePublisher(
   id: string,
@@ -59,18 +43,14 @@ export function useAnalyticsWarehousePublisher(
     { kindHint: ANALYTICS_WAREHOUSE_RESOURCE_KIND },
   );
 
-  // Anchor `startedAt` to the *first* non-null status of a wait so the
-  // aggregate's `elapsedMs` counter advances monotonically. Without this,
-  // every successive `warehouse_status` event would recompute startedAt
-  // from a fresh `Date.now()`, causing the indicator's elapsed counter to
-  // jitter or briefly go backwards between events.
+  // Anchor `startedAt` to the first non-null status so `elapsedMs`
+  // advances monotonically across successive `warehouse_status` events.
   const startedAtRef = useRef<number | null>(null);
 
   const publish = useCallback(
     (status: WarehouseStatus | null) => {
-      // `null` payload covers both: (a) "register me, no status yet" and
-      // (b) RUNNING — both keep the slot registered without making this
-      // entry contribute to the aggregate's worst-status calculation.
+      // null covers "register with no status yet" *and* RUNNING — both
+      // keep the slot registered without contributing to the aggregate.
       const severity = status && severityForWarehouseState(status.state);
       if (!status || !severity) {
         startedAtRef.current = null;

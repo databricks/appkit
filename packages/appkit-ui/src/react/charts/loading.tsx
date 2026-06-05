@@ -11,15 +11,10 @@ export function LoadingSkeleton({
 }
 
 /**
- * Quiet placeholder shown while the chart is *waiting on a backing resource*
- * (e.g. a SQL warehouse cold-starting) rather than waiting on the SQL query
- * itself. Deliberately non-shimmery so the user understands the system is
- * stalled, not "any second now".
- *
- * Consumers typically prefer this over {@link LoadingSkeleton} when
- * `useAnalyticsQuery`/`useChartData` reports a non-null `warehouseStatus`,
- * because a shimmering skeleton during a 30s–2min cold start is misleading.
- * The {@link ResourceStatusIndicator} handles the global "why" affordance.
+ * Non-shimmery placeholder for cold-starting backing resources. Use this
+ * over {@link LoadingSkeleton} when `useChartData` reports a non-null
+ * `warehouseStatus` — a shimmer during a 30s–2min wait is misleading.
+ * The global {@link ResourceStatusIndicator} surfaces the "why".
  */
 export function ResourceWaitingPlaceholder({
   height = 300,

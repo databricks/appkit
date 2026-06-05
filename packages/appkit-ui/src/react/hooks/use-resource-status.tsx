@@ -11,72 +11,41 @@ import {
 const NOOP_SUBSCRIBE: (listener: () => void) => () => void = () => () => {};
 
 /**
- * Severity bucket used to aggregate readiness across resource kinds.
- *
- * Ordering, worst-first, is `error > warning > pending`. Anything other than
- * absence-of-status is "the user is waiting on something" — so callers should
- * not publish a status for healthy/ready resources (they should `unpublish`
- * instead).
+ * Cross-kind severity, ordered worst-first (`error > warning > pending`).
+ * Callers `unpublish` rather than publishing a status for ready resources.
  */
 export type ResourceSeverity = "pending" | "warning" | "error";
 
 /**
- * A snapshot of the readiness of a single resource (e.g. a SQL warehouse, a
- * Lakebase Postgres connection, a model-serving endpoint). Plugins publish
- * one of these whenever a user-visible cold start, warm-up, or unavailability
- * occurs, so the host app can surface a single global affordance instead of
- * each plugin painting its own indicator.
+ * Readiness snapshot for a single resource (SQL warehouse, Lakebase
+ * connection, model-serving endpoint, …). Plugins publish these while a
+ * user-visible cold start / warm-up / unavailability is in flight.
  */
 export interface ResourceStatus {
-  /**
-   * Resource family this status belongs to. Conventionally lowercase-kebab
-   * (`"warehouse"`, `"lakebase"`, `"model-endpoint"`, …). Consumers can
-   * filter the aggregate to a single kind.
-   */
+  /** Resource family, conventionally lowercase-kebab (`"warehouse"`, `"lakebase"`). */
   kind: string;
-  /**
-   * Resource-specific raw state — `"STARTING"`, `"DELETED"`, `"COLD_START"`,
-   * etc. Opaque to the aggregator; consumers cast it to a kind-specific union
-   * when rendering kind-specific copy.
-   */
+  /** Resource-specific raw state, e.g. `"STARTING"`, `"DELETED"`. Opaque to the aggregator. */
   state: string;
-  /**
-   * Cross-kind severity used to compute the "worst" status across all
-   * publishers. `pending` → user is waiting; `warning` → degraded but
-   * usable; `error` → resource is unusable and a config change is required.
-   */
   severity: ResourceSeverity;
-  /** Optional human-readable summary forwarded to the indicator UI. */
+  /** Human-readable summary forwarded to the indicator UI. */
   summary?: string;
-  /**
-   * Epoch ms when the publisher started waiting for this resource. The
-   * aggregator surfaces `elapsedMs` derived from this value.
-   */
+  /** Epoch ms when the publisher started waiting; drives `elapsedMs`. */
   startedAt: number;
 }
 
-/**
- * Aggregate view of every active publisher under a {@link ResourceStatusProvider}.
- *
- * Returned by {@link useResourceStatus}.
- */
+/** Aggregate view of every active publisher; returned by {@link useResourceStatus}. */
 export interface AggregatedResourceStatus {
   /** Highest-severity status across all publishers, or `null` when nothing is pending. */
   worst: ResourceStatus | null;
-  /** Worst status per `kind` — useful for showing per-resource-family copy. */
+  /** Worst status per `kind`. */
   byKind: Record<string, ResourceStatus>;
   /** De-duped, sorted labels of every publisher with a non-null status. */
   affectedLabels: string[];
-  /** Total number of currently-registered publishers (including those whose status is `null`). */
+  /** Total registered publishers (including those whose status is `null`). */
   activeCount: number;
-  /** Milliseconds elapsed since the worst entry's `startedAt`. `0` when nothing is pending. */
+  /** Milliseconds since the worst entry's `startedAt`; `0` when nothing is pending. */
   elapsedMs: number;
-  /**
-   * Monotonic counter bumped on every `publish`/`unpublish`. Lets
-   * {@link useResourceStatus}'s kind-filter consumers re-derive when
-   * entries change in ways that don't move any of the aggregated fields
-   * above (e.g. a status-less slot updating its `kindHint`).
-   */
+  /** Monotonic counter bumped on every `publish`/`unpublish`. */
   version: number;
 }
 
@@ -93,10 +62,9 @@ const SEVERITY_RANK: Record<ResourceSeverity, number> = {
 };
 
 /**
- * Internal registry record. `kindHint` lets adapter hooks (e.g. the analytics
- * warehouse adapter) keep slots associated with their resource kind even
- * before the first status payload arrives — so kind-scoped views can count
- * "registered but not yet reporting" publishers correctly.
+ * Internal registry record. `kindHint` keeps status-less slots associated
+ * with their kind so kind-scoped views can count "registered but not yet
+ * reporting" publishers (e.g. analytics charts before the first SSE event).
  */
 interface RegistryEntry {
   label: string;
@@ -115,11 +83,7 @@ const EMPTY_SNAPSHOT: AggregatedResourceStatus = {
 
 const GET_EMPTY_SNAPSHOT = (): AggregatedResourceStatus => EMPTY_SNAPSHOT;
 
-/**
- * Internal store: a flat map from a stable per-publisher id to its latest
- * status. We use `useSyncExternalStore` so subscribers re-render only when
- * the aggregate they actually consume changes.
- */
+/** Flat per-publisher map exposed to React via `useSyncExternalStore`. */
 class ResourceStatusStore {
   private entries = new Map<string, RegistryEntry>();
   private listeners = new Set<() => void>();
@@ -149,10 +113,7 @@ class ResourceStatusStore {
 
   getSnapshot = (): AggregatedResourceStatus => this.snapshot;
 
-  /** Used by {@link useResourceStatus}'s kind filter to count slots that
-   * registered with a matching `kindHint` but haven't reported a status
-   * yet (so the filtered aggregate can show "N waiting" before the first
-   * payload arrives). */
+  /** Exposed for the kind-filter path so it can pick up status-less `kindHint` slots. */
   getEntries(): Map<string, RegistryEntry> {
     return this.entries;
   }
@@ -168,7 +129,7 @@ function isWorse(a: ResourceStatus, b: ResourceStatus): boolean {
   const aRank = SEVERITY_RANK[a.severity];
   const bRank = SEVERITY_RANK[b.severity];
   if (aRank !== bRank) return aRank < bRank;
-  // Same severity → the longer-pending entry is "worse" from a UX standpoint.
+  // Same severity → longer-pending entry wins.
   return a.startedAt < b.startedAt;
 }
 
@@ -224,18 +185,16 @@ export interface ResourceStatusProviderProps {
 
 /**
  * Mount once near the root of your app to enable a global, cross-plugin
- * readiness aggregate. Plugins (or your own code) publish {@link ResourceStatus}
- * snapshots while a resource is warming up / unavailable; the provider
- * deduplicates them, picks the worst, and exposes the result via
- * {@link useResourceStatus} so a single indicator can surface it.
+ * readiness aggregate. Plugins publish {@link ResourceStatus} snapshots
+ * while a resource is warming up / unavailable; {@link useResourceStatus}
+ * exposes the worst across all of them.
  *
- * Without a provider, both `useResourceStatus` and `useResourceStatusPublisher`
+ * Without a provider, `useResourceStatus` and `useResourceStatusPublisher`
  * fall back to no-ops, so plugins are safe to call them unconditionally.
  *
  * @example
  * ```tsx
  * <ResourceStatusProvider>
- *   <Toaster />
  *   <ResourceStatusIndicator />
  *   <App />
  * </ResourceStatusProvider>
@@ -261,20 +220,15 @@ export function ResourceStatusProvider({
 
 /**
  * Returns the aggregated resource-readiness snapshot across every active
- * publisher under the nearest {@link ResourceStatusProvider}.
+ * publisher under the nearest {@link ResourceStatusProvider}. Falls back
+ * to the empty/idle aggregate when no provider is mounted.
  *
- * Returns the empty/idle aggregate when no provider is mounted, so callers
- * can render unconditionally without crashing.
- *
- * @param filter Optional `{ kind }` to restrict the aggregate to a single
- *               resource kind.
+ * @param filter Optional `{ kind }` to scope to a single resource kind.
  */
 export function useResourceStatus(
   filter?: ResourceStatusFilter,
 ): AggregatedResourceStatus {
   const ctx = useResourceStatusContext();
-  // `ctx.store.subscribe`/`getSnapshot` are arrow class fields, so they keep
-  // a stable identity across renders without a useMemo wrapper.
   const subscribe = ctx?.store.subscribe ?? NOOP_SUBSCRIBE;
   const getSnapshot = ctx?.store.getSnapshot ?? GET_EMPTY_SNAPSHOT;
 
@@ -284,11 +238,8 @@ export function useResourceStatus(
     if (!filter?.kind) return aggregate;
     const kind = filter.kind;
 
-    // Walk the underlying entries scoped to this kind so we capture both
-    // active publishers with a status *and* slots that registered with a
-    // matching `kindHint` but haven't reported yet (analytics-warehouse
-    // does this on mount so the indicator can show "0/N waiting" before
-    // the first SSE event lands).
+    // Walk entries directly to capture status-less `kindHint` slots
+    // (e.g. charts that registered before their first SSE event).
     const affectedLabels = new Set<string>();
     let activeCount = 0;
     let worst: ResourceStatus | null = null;
@@ -325,25 +276,10 @@ export function useResourceStatus(
 
 /**
  * Register a publisher with the nearest {@link ResourceStatusProvider}.
- * Plugins call this to push their resource readiness into the global
- * aggregate; the host app's {@link ResourceStatusIndicator} reads it.
+ * Safe to call without a provider — `publish`/`unpublish` are no-ops.
  *
- * Safe to call when no provider is mounted — `publish`/`unpublish` are
- * no-ops in that case.
- *
- * @param id    Stable identifier for this publisher (e.g. a `useId()` value).
- * @param label Human-readable label surfaced via `affectedLabels` (e.g. a
- *              query key, an endpoint alias).
- *
- * @example
- * ```tsx
- * const id = useId();
- * const { publish, unpublish } = useResourceStatusPublisher(id, "my_chart");
- * useEffect(() => {
- *   publish({ kind: "warehouse", state: "STARTING", severity: "pending", startedAt: Date.now() });
- *   return () => unpublish();
- * }, [publish, unpublish]);
- * ```
+ * @param id    Stable identifier (e.g. a `useId()` value).
+ * @param label Human-readable label surfaced via `affectedLabels`.
  */
 export function useResourceStatusPublisher(
   id: string,

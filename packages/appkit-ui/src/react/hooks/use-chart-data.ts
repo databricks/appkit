@@ -40,12 +40,10 @@ export interface UseChartDataResult {
   /** Whether the data is empty */
   isEmpty: boolean;
   /**
-   * Latest warehouse readiness status. `null` once the warehouse is RUNNING
-   * (or for cache hits where the readiness check is skipped).
-   *
-   * When non-null, the chart is *waiting on the warehouse*, not on the
-   * actual SQL query — consumers should render a quieter affordance than a
-   * normal "loading data" skeleton.
+   * Latest warehouse readiness status. `null` once RUNNING (or on cache
+   * hits that skip the readiness check). When non-null, the chart is
+   * waiting on the warehouse rather than the query — render a quieter
+   * affordance than a normal data-loading skeleton.
    */
   warehouseStatus: WarehouseStatus | null;
 }

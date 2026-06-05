@@ -275,18 +275,13 @@ describe("useAnalyticsQuery + ResourceStatusProvider integration", () => {
       });
     });
 
-    // All three events for the same wait must share the anchor — without
-    // stable startedAt, each Date.now() recomputation would jitter the
-    // value derived in the publisher.
+    // All three events share the same anchored startedAt.
     expect(seen).toHaveLength(1);
   });
 
   test("kindHint-only mutation notifies kind-filtered consumers via the version counter", async () => {
-    // Regression test for the reviewer's [medium] R-version finding: a
-    // mutation that doesn't change worst/byKind/affectedLabels/activeCount
-    // (e.g. toggling kindHint while status stays null) used to not notify
-    // subscribers; now version bumps on every publish so kind-filtered
-    // consumers re-derive correctly.
+    // A status-less publish (toggling kindHint) bumps `version` so
+    // kind-filtered consumers re-derive even when no aggregate field changes.
     function Probe() {
       const agg = useResourceStatus({ kind: "warehouse" });
       return <span data-testid="version">{agg.version}</span>;

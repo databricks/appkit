@@ -10,9 +10,7 @@ import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { ResourceStatusIndicator } from "../../resource-status-indicator";
 
-// Sonner queries `window.matchMedia` to pick up the system color scheme on
-// mount. JSDOM doesn't implement it by default — stub a minimal "no-match"
-// MediaQueryList so the indicator's <Toaster /> can mount in tests.
+// JSDOM doesn't implement window.matchMedia, which sonner reads on mount.
 beforeAll(() => {
   if (!window.matchMedia) {
     Object.defineProperty(window, "matchMedia", {
@@ -40,8 +38,7 @@ import {
 
 afterEach(() => {
   cleanup();
-  // Sonner's toast store is a module-level singleton; flush every toast
-  // between tests so leftover state doesn't leak across cases.
+  // Sonner's toast store is module-level; flush between tests.
   toast.dismiss();
 });
 
@@ -527,10 +524,9 @@ describe("ResourceStatusIndicator", () => {
   });
 
   test("ticks the elapsed counter at ~1Hz while a wait is active", async () => {
-    // Pin Date.now without faking timers: fake `setInterval` interacts
-    // poorly with sonner's internal rAF/setTimeout-driven mount lifecycle,
-    // so we drive the clock manually and let the indicator's real
-    // setInterval re-issue toast updates against an advancing Date.now().
+    // Pin Date.now without fake timers — fake setInterval conflicts with
+    // sonner's rAF/setTimeout-driven mount lifecycle. The indicator's
+    // real setInterval re-issues toast updates against the moving clock.
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
     function Trigger() {
@@ -566,9 +562,7 @@ describe("ResourceStatusIndicator", () => {
       const initial = await findIndicatorToast();
       expect(initial.textContent).toMatch(/0s/);
 
-      // Advance Date.now by 3.5s; the indicator's real-time setInterval
-      // (~1Hz) will fire within ~1.1s and re-issue toast.loading with the
-      // newly-computed `elapsedMs`, which sonner patches in place.
+      // Advance 3.5s; the indicator's ~1Hz tick re-issues toast.loading.
       dateNowSpy.mockReturnValue(1_000_000 + 3_500);
 
       await waitFor(

@@ -8,30 +8,17 @@ import {
 } from "./hooks/use-resource-status";
 import { Toaster } from "./ui/sonner";
 
-/**
- * How often the indicator recomputes the displayed elapsed time. The store
- * is event-driven and only notifies on `publish`/`unpublish`; the backend
- * de-duplicates equal successive states, so during a long cold start the
- * store may go quiet for tens of seconds. The indicator drives its own
- * ~1Hz tick so the toast description advances visibly even when no new
- * status events arrive.
- */
+/** ~1Hz tick driving the elapsed-time display between store events. */
 const ELAPSED_TICK_MS = 1000;
 
-/**
- * Per-kind UI overrides. Indicator authors register copy + an optional icon
- * for each resource kind they care about; the indicator falls back to a
- * generic "{kind} not ready" message for kinds that aren't registered.
- */
+/** Per-kind copy + icon overrides for {@link ResourceStatusIndicator}. */
 export interface ResourceKindRenderer {
-  /** Title shown when this kind is the worst pending status. */
   title: (status: ResourceStatus) => string;
-  /** Body copy shown when this kind is the worst pending status. */
   description: (
     status: ResourceStatus,
     aggregate: AggregatedResourceStatus,
   ) => string;
-  /** Override the icon (defaults to sonner's built-in loading/error icon). */
+  /** Defaults to sonner's built-in loading/error icon. */
   icon?: LucideIcon;
 }
 
@@ -41,13 +28,9 @@ export interface ResourceStatusToasterOptions {
   kind?: string;
   /** Per-kind copy + icon overrides. */
   renderers?: Record<string, ResourceKindRenderer>;
-  /** Class name applied to the indicator's toast (not the Toaster wrapper). */
+  /** Class name applied to the toast (not the Toaster wrapper). */
   toastClassName?: string;
-  /**
-   * Full custom render override. Receives the aggregate (already non-empty)
-   * and returns the JSX rendered inside a sonner `toast.custom`. Use this
-   * when the default loading/error toast doesn't fit your needs.
-   */
+  /** Full custom render override, rendered inside `toast.custom`. */
   render?: (aggregate: AggregatedResourceStatus) => React.ReactNode;
 }
 
@@ -74,27 +57,10 @@ const DEFAULT_KIND_RENDERERS: Record<string, ResourceKindRenderer> = {
 };
 
 /**
- * Subscribes to the nearest {@link ResourceStatusProvider} and drives a
- * sonner toast that mirrors the worst pending status. The hook does not
- * render anything — supply your own `<Toaster />` somewhere in the tree.
- *
- * Most apps should prefer {@link ResourceStatusIndicator}, which mounts a
- * `<Toaster />` for you. Use this hook only when you already have a
- * `<Toaster />` for unrelated app toasts and want resource-status toasts
- * to share it.
- *
- * @example
- * ```tsx
- * function App() {
- *   useResourceStatusToaster();
- *   return (
- *     <>
- *       <Toaster position="top-right" />
- *       <Routes />
- *     </>
- *   );
- * }
- * ```
+ * Drives a sticky sonner toast that mirrors the worst pending resource
+ * status. Does not render anything — supply your own `<Toaster />`. Most
+ * apps should prefer {@link ResourceStatusIndicator}; use this hook only
+ * to share an existing Toaster with unrelated app toasts.
  */
 export function useResourceStatusToaster(
   options: ResourceStatusToasterOptions = {},
@@ -102,17 +68,14 @@ export function useResourceStatusToaster(
   const { kind, renderers, toastClassName, render } = options;
   const aggregate = useResourceStatus(kind ? { kind } : undefined);
   const worst = aggregate.worst;
-  // Scope toast ids to this hook instance + the worst kind. Per-instance
-  // scoping means two hook callers in the same tree (e.g. one global, one
-  // kind-filtered) don't fight for the same id; per-kind scoping means a
-  // warehouse error replacing a lakebase wait dismisses-and-recreates rather
-  // than morphing one toast into another (which sonner can't do cleanly
-  // across types — `jsx`/`description` from the prior call leak through).
+  // Per-instance + per-kind toast id: instance scoping isolates multiple
+  // indicators in the same tree; kind scoping forces dismiss-and-recreate
+  // when severity flips between toast types (sonner can't morph
+  // jsx/description cleanly across `custom` ↔ `loading`/`error`).
   const instanceId = useId();
 
-  // Wall-clock tick that re-renders this component once per second while a
-  // wait is active. The store is event-driven, so without this tick the
-  // displayed `elapsedMs` would freeze between status emissions.
+  // The store is event-driven, so re-render at ~1Hz to keep the elapsed
+  // counter advancing between status emissions.
   const [, forceTick] = useState(0);
   useEffect(() => {
     if (!worst) return;
@@ -120,15 +83,9 @@ export function useResourceStatusToaster(
     return () => clearInterval(id);
   }, [worst]);
 
-  // Track the most recently shown toast id so we can dismiss it when the
-  // worst kind changes (e.g. warehouse error supersedes a lakebase wait)
-  // or when the aggregate clears entirely.
   const liveIdRef = useRef<string | null>(null);
 
-  // Drive sonner imperatively. This effect runs on every render where
-  // `worst` exists (intentionally no deps array): cheap because sonner
-  // dedups updates against the same id and just patches the existing
-  // toast in place — no re-animation, no flicker.
+  // Runs every render: cheap because sonner patches the same id in place.
   useEffect(() => {
     if (!worst) {
       if (liveIdRef.current) {
@@ -138,8 +95,7 @@ export function useResourceStatusToaster(
       return;
     }
 
-    // Recompute elapsed locally so the renderer sees the live value
-    // (the snapshot's `elapsedMs` only refreshes on store events).
+    // Live elapsed; the snapshot only refreshes on store events.
     const liveAggregate: AggregatedResourceStatus = {
       ...aggregate,
       elapsedMs: Math.max(0, Date.now() - worst.startedAt),
@@ -182,8 +138,7 @@ export function useResourceStatusToaster(
     }
   });
 
-  // Dismiss any live toast on unmount so the floating UI doesn't outlive
-  // the mount point (e.g. on route changes that swap the indicator out).
+  // Dismiss on unmount so the toast doesn't outlive its mount point.
   useEffect(() => {
     return () => {
       if (liveIdRef.current) {
@@ -204,18 +159,15 @@ export interface ResourceStatusIndicatorProps
 /**
  * Drop-in indicator that mounts a `<Toaster />` and surfaces the worst
  * pending {@link ResourceStatus} across every plugin/component publishing
- * into the nearest {@link ResourceStatusProvider} as a sonner toast.
- *
- * Renders nothing while the aggregate is empty (i.e. all resources ready).
- * Otherwise drives a single sticky `toast.loading` (or `toast.error` for
- * error severity) keyed by the worst kind, so only one indicator toast is
- * ever on screen.
+ * into the nearest {@link ResourceStatusProvider} as a sonner toast
+ * (`toast.loading` for cold starts, `toast.error` for unrecoverable
+ * states), keyed by the worst kind so only one indicator toast is on
+ * screen at a time.
  *
  * Forwards `Toaster` props (`position` defaults to `top-right`, plus
- * `theme`, `richColors`, …) so you don't need to mount sonner's
- * `<Toaster />` separately. Apps that already have their own `<Toaster />`
- * should drop this component and call {@link useResourceStatusToaster}
- * instead.
+ * `theme`, `richColors`, …). Apps that already mount their own
+ * `<Toaster />` should drop this component and call
+ * {@link useResourceStatusToaster} instead.
  *
  * @example
  * ```tsx
@@ -260,8 +212,7 @@ function defaultTitle(status: ResourceStatus): string {
 }
 
 function defaultDescription(status: ResourceStatus): string {
-  if (status.summary) return status.summary;
-  return `Current state: ${status.state}.`;
+  return status.summary ?? `Current state: ${status.state}.`;
 }
 
 function humanizeKind(kind: string): string {

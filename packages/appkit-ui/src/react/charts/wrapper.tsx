@@ -72,11 +72,8 @@ function QueryModeContent({
     transformer,
   });
 
-  // Distinguish "system not ready" (warehouse warming up) from "actually
-  // fetching data". A shimmering skeleton during a 30s–2min cold start is
-  // misleading — render a quieter, non-shimmery placeholder instead. The
-  // global `<ResourceStatusIndicator />` (when mounted) already explains the
-  // "why" once at the app level.
+  // Warehouse warming up → quieter placeholder; the global indicator
+  // (when mounted) already explains the "why" at the app level.
   if (
     loading &&
     warehouseStatus &&
