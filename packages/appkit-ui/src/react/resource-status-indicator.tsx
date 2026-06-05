@@ -101,7 +101,7 @@ export function useResourceStatusToaster(
       elapsedMs: Math.max(0, Date.now() - worst.startedAt),
     };
 
-    const nextId = `appkit-resource:${instanceId}:${worst.kind}`;
+    const nextId = `appkit-resource:${instanceId}:${worst.kind}:${worst.severity}`;
     if (liveIdRef.current && liveIdRef.current !== nextId) {
       toast.dismiss(liveIdRef.current);
     }

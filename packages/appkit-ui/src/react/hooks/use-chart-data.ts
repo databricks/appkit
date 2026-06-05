@@ -40,10 +40,10 @@ export interface UseChartDataResult {
   /** Whether the data is empty */
   isEmpty: boolean;
   /**
-   * Latest warehouse readiness status. `null` once RUNNING (or on cache
-   * hits that skip the readiness check). When non-null, the chart is
-   * waiting on the warehouse rather than the query — render a quieter
-   * affordance than a normal data-loading skeleton.
+   * Latest warehouse readiness status from SSE. Retains the last value
+   * (including `RUNNING`) until the next `start()`; `null` only before
+   * the first event. Use with `loading` to distinguish warehouse warm-up
+   * from in-flight SQL fetch.
    */
   warehouseStatus: WarehouseStatus | null;
 }

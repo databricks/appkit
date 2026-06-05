@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { WarehouseStatus } from "../hooks/types";
 import { useChartData } from "../hooks/use-chart-data";
 import { ChartErrorBoundary } from "./chart-error-boundary";
 import { EmptyState } from "./empty";
@@ -6,6 +7,24 @@ import { ErrorState } from "./error";
 import { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 import type { ChartData, DataFormat } from "./types";
 import { isArrowTable } from "./types";
+
+const WAREHOUSE_ERROR_STATES = new Set(["DELETED", "DELETING"]);
+
+function isWarehouseWaiting(
+  loading: boolean,
+  data: ChartData | null,
+  warehouseStatus: WarehouseStatus | null,
+): boolean {
+  if (!loading || data) return false;
+  if (!warehouseStatus) return true;
+  if (
+    warehouseStatus.state === "RUNNING" ||
+    WAREHOUSE_ERROR_STATES.has(warehouseStatus.state)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 // ============================================================================
 // Props Types
@@ -72,14 +91,7 @@ function QueryModeContent({
     transformer,
   });
 
-  // Warehouse warming up → quieter placeholder; the global indicator
-  // (when mounted) already explains the "why" at the app level.
-  if (
-    loading &&
-    warehouseStatus &&
-    warehouseStatus.state !== "RUNNING" &&
-    !data
-  ) {
+  if (isWarehouseWaiting(loading, data, warehouseStatus)) {
     return <ResourceWaitingPlaceholder height={height ?? 300} />;
   }
   if (loading) return <LoadingSkeleton height={height ?? 300} />;

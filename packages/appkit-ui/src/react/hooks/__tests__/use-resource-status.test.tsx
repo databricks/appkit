@@ -218,7 +218,7 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
     expect(getByTestId("warehouse-active").textContent).toBe("1");
   });
 
-  test("kindHint keeps null-status slots associated with their kind", async () => {
+  test("kindHint registers a synthetic pending status before the first snapshot", async () => {
     function Publisher() {
       const { publish } = useResourceStatusPublisher("a", "x", {
         kindHint: "lakebase",
@@ -227,6 +227,9 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
       return (
         <div>
           <span data-testid="lakebase-active">{lakebase.activeCount}</span>
+          <span data-testid="lakebase-state">
+            {lakebase.worst?.state ?? "none"}
+          </span>
           <button
             type="button"
             data-testid="register"
@@ -249,6 +252,7 @@ describe("useResourceStatus / useResourceStatusPublisher", () => {
     });
     await waitFor(() => {
       expect(getByTestId("lakebase-active").textContent).toBe("1");
+      expect(getByTestId("lakebase-state").textContent).toBe("PENDING");
     });
   });
 
@@ -424,6 +428,64 @@ describe("ResourceStatusIndicator", () => {
     const node = await findIndicatorToast();
     expect(node.getAttribute("data-type")).toBe("error");
     expect(node.textContent).toMatch(/unavailable|It is gone/i);
+  });
+
+  test("morphs from loading to error when severity flips within a kind", async () => {
+    function Trigger() {
+      const { publish } = useResourceStatusPublisher("a", "my_chart");
+      return (
+        <div>
+          <button
+            type="button"
+            data-testid="pub-pending"
+            onClick={() => {
+              publish(
+                makeStatus({
+                  kind: "warehouse",
+                  state: "STARTING",
+                  severity: "pending",
+                }),
+              );
+            }}
+          />
+          <button
+            type="button"
+            data-testid="pub-error"
+            onClick={() => {
+              publish(
+                makeStatus({
+                  kind: "warehouse",
+                  state: "DELETED",
+                  severity: "error",
+                  summary: "Gone",
+                }),
+              );
+            }}
+          />
+        </div>
+      );
+    }
+
+    const { getByTestId } = render(
+      <ResourceStatusProvider>
+        <Trigger />
+        <ResourceStatusIndicator />
+      </ResourceStatusProvider>,
+    );
+
+    act(() => {
+      getByTestId("pub-pending").click();
+    });
+    const loading = await findIndicatorToast();
+    expect(loading.getAttribute("data-type")).toBe("loading");
+
+    act(() => {
+      getByTestId("pub-error").click();
+    });
+    await waitFor(() => {
+      expect(queryIndicatorToast()?.getAttribute("data-type")).toBe("error");
+    });
+    expect(queryIndicatorToast()?.textContent).toMatch(/unavailable|Gone/i);
   });
 
   test("kind prop scopes to a single kind", async () => {

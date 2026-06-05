@@ -1,3 +1,10 @@
+export {
+  type ResourceKindRenderer,
+  ResourceStatusIndicator,
+  type ResourceStatusIndicatorProps,
+  type ResourceStatusToasterOptions,
+  useResourceStatusToaster,
+} from "../resource-status-indicator";
 export type {
   AnalyticsFormat,
   InferResultByFormat,
