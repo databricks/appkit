@@ -4,6 +4,7 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   type AggregatedResourceStatus,
@@ -12,6 +13,16 @@ import {
   useResourceStatus,
 } from "./hooks/use-resource-status";
 import { cn } from "./lib/utils";
+
+/**
+ * How often the indicator recomputes the displayed elapsed time. The store
+ * is event-driven and only notifies on `publish`/`unpublish`; the backend
+ * de-duplicates equal successive states, so during a long cold start the
+ * store may go quiet for tens of seconds. The indicator drives its own
+ * ~1Hz tick so the elapsed counter advances visibly even when no new
+ * status events arrive.
+ */
+const ELAPSED_TICK_MS = 1000;
 
 /**
  * Per-kind UI overrides. Indicator authors register copy + an optional icon
@@ -148,15 +159,33 @@ export function ResourceStatusIndicator({
 }: ResourceStatusIndicatorProps = {}) {
   const aggregate = useResourceStatus(kind ? { kind } : undefined);
   const worst = aggregate.worst;
+
+  // Wall-clock tick that re-renders this component once per second while a
+  // wait is active. The store is event-driven, so without this tick the
+  // displayed `elapsedMs` would freeze between status emissions.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!worst) return;
+    const id = setInterval(() => forceTick((n) => n + 1), ELAPSED_TICK_MS);
+    return () => clearInterval(id);
+  }, [worst]);
+
   if (!worst) return null;
 
-  if (render) return <>{render(aggregate)}</>;
+  // Recompute elapsed locally so the renderer sees the live value rather
+  // than the snapshot's `elapsedMs` (which only refreshes on store events).
+  const liveAggregate: AggregatedResourceStatus = {
+    ...aggregate,
+    elapsedMs: Math.max(0, Date.now() - worst.startedAt),
+  };
+
+  if (render) return <>{render(liveAggregate)}</>;
 
   const merged = { ...DEFAULT_KIND_RENDERERS, ...renderers };
   const renderer = merged[worst.kind];
   const title = renderer?.title(worst) ?? defaultTitle(worst);
   const description =
-    renderer?.description(worst, aggregate) ?? defaultDescription(worst);
+    renderer?.description(worst, liveAggregate) ?? defaultDescription(worst);
   const Icon = renderer?.icon ?? iconForSeverity(worst.severity);
   const isError = worst.severity === "error";
 

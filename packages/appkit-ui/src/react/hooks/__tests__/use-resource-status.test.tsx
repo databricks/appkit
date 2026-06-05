@@ -5,7 +5,7 @@ import {
   renderHook,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { ResourceStatusIndicator } from "../../resource-status-indicator";
 import {
@@ -486,5 +486,54 @@ describe("ResourceStatusIndicator", () => {
     });
     const custom = await findByTestId("custom");
     expect(custom.textContent).toBe("warehouse:STARTING:1");
+  });
+
+  test("ticks the elapsed counter at ~1Hz while a wait is active", async () => {
+    vi.useFakeTimers({ now: 0 });
+
+    function Trigger() {
+      const { publish } = useResourceStatusPublisher("a", "my_chart");
+      return (
+        <button
+          type="button"
+          data-testid="pub"
+          onClick={() => {
+            publish({
+              kind: "warehouse",
+              state: "STARTING",
+              severity: "pending",
+              startedAt: Date.now(),
+            });
+          }}
+        />
+      );
+    }
+
+    try {
+      const { getByTestId, getByRole } = render(
+        <ResourceStatusProvider>
+          <Trigger />
+          <ResourceStatusIndicator />
+        </ResourceStatusProvider>,
+      );
+
+      act(() => {
+        getByTestId("pub").click();
+      });
+
+      // First render lands at startedAt; elapsed reads as 0s.
+      expect(getByRole("status").textContent).toMatch(/0s/);
+
+      // No further `publish` calls — the backend de-dups equal successive
+      // states. The indicator's internal interval should still advance
+      // the visible counter.
+      await act(async () => {
+        vi.advanceTimersByTime(3_500);
+      });
+
+      expect(getByRole("status").textContent).toMatch(/3s/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
