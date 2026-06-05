@@ -146,8 +146,15 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
     const [bin, argv, opts] = spawn.mock.calls[0];
     expect(bin).toBe(process.execPath);
-    expect(argv[0]).toBe(process.argv[1]); // CLI entry
-    expect(argv.slice(1)).toEqual([
+    // The parent's node/loader flags (process.execArgv — e.g. tsx's
+    // --require/--import) are forwarded before the CLI entry so a worker spawned
+    // from a source/tsx run can still execute the .ts. Everything from the entry
+    // onward is the worker invocation.
+    const entryIdx = argv.indexOf(process.argv[1]);
+    expect(entryIdx).toBeGreaterThanOrEqual(0);
+    expect(argv.slice(0, entryIdx)).toEqual(process.execArgv);
+    expect(argv.slice(entryIdx)).toEqual([
+      process.argv[1], // CLI entry
       "generate-types",
       "--block",
       "--worker-lock",

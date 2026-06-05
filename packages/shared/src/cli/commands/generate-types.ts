@@ -159,6 +159,13 @@ export function spawnTypegenWorker(
   }
 
   const args = [
+    // Forward the parent's node/loader flags so the worker runs under the same
+    // runtime. Critically this carries tsx's `--require`/`--import` when the CLI
+    // is run from source (`tsx index.ts …`); without them the worker would be
+    // `node index.ts …`, which can't parse TypeScript and dies silently — the
+    // degraded types would then never refresh. Empty for the built bin (plain
+    // `node bin/appkit.js`), so production behaviour is unchanged.
+    ...process.execArgv,
     cliEntry,
     "generate-types",
     "--block",
