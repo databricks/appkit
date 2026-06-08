@@ -463,7 +463,17 @@ export async function generateQueriesFromDescribe(
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
   logger.debug("Found %d SQL queries", queryFiles.length);
 
-  const client = new WorkspaceClient({});
+  // Construct the SDK client lazily: only the blocking preflight and the DESCRIBE
+  // batch ever touch the warehouse, and a `non-blocking` run (the dev/install
+  // hot path) short-circuits to degraded types before either. Building a
+  // WorkspaceClient eagerly here made every keystroke-triggered, all-cached, or
+  // non-blocking run pay for a client (OAuth/config resolution) it never used.
+  // The accessor memoizes, so the blocking path still builds exactly one.
+  let client: WorkspaceClient | null = null;
+  const getClient = (): WorkspaceClient => {
+    client ??= new WorkspaceClient({});
+    return client;
+  };
   const spinner = new Spinner();
 
   // Read all SQL files in parallel
@@ -595,8 +605,11 @@ export async function generateQueriesFromDescribe(
       // now.
       decision = "degradeAll";
     } else {
+      // First warehouse round-trip of the run — build the client now (memoized,
+      // so the DESCRIBE batch below reuses this same instance).
+      const wh = getClient();
       try {
-        const state = await getWarehouseState(client, warehouseId);
+        const state = await getWarehouseState(wh, warehouseId);
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
@@ -606,8 +619,8 @@ export async function generateQueriesFromDescribe(
           // poll to RUNNING. treatStoppedAsTransient rides out the stale
           // pre-start STOPPED/STOPPING reading the start hasn't propagated past
           // yet — only DELETED/DELETING (or the deadline) ends the wait early.
-          await startWarehouse(client, warehouseId);
-          const final = await waitUntilRunning(client, warehouseId, {
+          await startWarehouse(wh, warehouseId);
+          const final = await waitUntilRunning(wh, warehouseId, {
             maxMs: PREFLIGHT_WAIT_MAX_MS,
             treatStoppedAsTransient: true,
           });
@@ -619,7 +632,7 @@ export async function generateQueriesFromDescribe(
           }
         }
         if (decision === "waitThenProceed") {
-          const final = await waitUntilRunning(client, warehouseId, {
+          const final = await waitUntilRunning(wh, warehouseId, {
             maxMs: PREFLIGHT_WAIT_MAX_MS,
           });
           if (final === "RUNNING") {
@@ -670,6 +683,9 @@ export async function generateQueriesFromDescribe(
     } else {
       let completed = 0;
       const total = uncachedQueries.length;
+      // Reuse the memoized client: in blocking mode the preflight above already
+      // built it; this is the same instance, never a second one.
+      const wh = getClient();
       spinner.start(
         `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
       );
@@ -681,7 +697,7 @@ export async function generateQueriesFromDescribe(
         sqlHash,
         cleanedSql,
       }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-        const result = (await client.statementExecution.executeStatement({
+        const result = (await wh.statementExecution.executeStatement({
           statement: `DESCRIBE QUERY ${cleanedSql}`,
           warehouse_id: warehouseId,
         })) as DatabricksStatementExecutionResponse;

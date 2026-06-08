@@ -64,9 +64,14 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let pendingMode: PreflightMode = "non-blocking";
 
   // The currently-armed DEV background warehouse watch, if any. Aborting it
-  // stops a pending waitUntilRunning (server shutdown, or a newer arm replacing
-  // an older one).
+  // stops a pending waitUntilRunning (server shutdown).
   let watchController: AbortController | null = null;
+  // Whether a warehouse watch is currently in flight. Used for one-waiter
+  // re-arm: rapid `.sql` saves must NOT each abort+recreate a watch (that fans
+  // out into one WorkspaceClient + one warehouses.get PER save). Instead, while
+  // a watch is running, new saves coalesce onto it — its trailing blocking
+  // regenerate re-reads the query folder, so it already covers the latest edits.
+  let watchInFlight = false;
 
   /**
    * Generate types once in the given preflight {@link PreflightMode}. Never
@@ -129,13 +134,29 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    * (latest-wins, including the mode: a blocking watch trigger that arrives mid
    * non-blocking foreground run still describes when its trailing run fires).
    *
-   * @param mode - preflight policy for this run. Recorded into `pendingMode`,
-   *   which the drain reads for each generate (latest trigger wins).
+   * @param mode - preflight policy for this run. Folded into `pendingMode`,
+   *   which the drain reads for each generate. The fold ESCALATES only: once a
+   *   blocking run is pending, a coalesced non-blocking trigger can't downgrade
+   *   it (see below).
    * @returns A promise that resolves when this trigger's work (including any
    *   trailing run it scheduled) has completed.
    */
   function runGenerate(mode: PreflightMode): Promise<void> {
-    pendingMode = mode;
+    // Sticky/escalate-only mode fold (NOT latest-wins): a "blocking" request
+    // outranks "non-blocking". The dev hot path fires a non-blocking foreground
+    // run on every `.sql` save AND arms a blocking background warm-up; without
+    // this, a save's non-blocking trigger landing while the blocking warm-up is
+    // queued would downgrade the trailing run back to non-blocking and the real
+    // (described) types would never land. Escalating means the trailing run
+    // still describes. Blocking → blocking; non-blocking only sticks if nothing
+    // blocking is already pending.
+    if (mode === "blocking") {
+      pendingMode = "blocking";
+    } else if (!inFlight) {
+      // Idle: a lone non-blocking trigger sets the baseline for its own drain.
+      // (When a run is in flight we leave a possibly-blocking pendingMode intact.)
+      pendingMode = "non-blocking";
+    }
 
     if (inFlight) {
       // A run is active: remember that another trigger arrived and ride out the
@@ -190,10 +211,14 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    *  - DELETED / DELETING → return (a deleted warehouse can't be started, and
    *    blocking typegen would treat it as fatal); leave the degraded types.
    *
-   * No-op in production or without a warehouse id. Replaces any previously-armed
-   * watch (aborting it first). Fully self-contained: it never throws into the
-   * caller and never re-arms itself. The whole lifecycle is abortable via the
-   * shared {@link watchController} — its signal is threaded into
+   * No-op in production or without a warehouse id. ONE-WAITER re-arm: if a watch
+   * is already in flight, this is a no-op — the running watch's trailing blocking
+   * regenerate re-reads the query folder and so already covers any `.sql` edits
+   * that landed while it was waiting. This is what keeps rapid saves from fanning
+   * out into one WorkspaceClient + one warehouses.get apiece; instead they
+   * coalesce onto the single in-flight watch. Fully self-contained: it never
+   * throws into the caller and never re-arms itself. The lifecycle is abortable
+   * via the shared {@link watchController} — its signal is threaded into
    * `waitUntilRunning`, so a dev-server shutdown cancels a pending wait — and the
    * regenerate routes through {@link runGenerate} so it can't race-write the
    * .d.ts with the foreground degrade or a `.sql` re-trigger.
@@ -208,10 +233,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
     const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
     if (!warehouseId) return;
 
-    // Supersede any in-flight watch so we never run two concurrently.
-    watchController?.abort();
+    // One-waiter: a watch is already running — let it cover this save too (its
+    // trailing blocking regenerate re-reads the folder). Recreating here would
+    // fan out a fresh client + probe per save, which is exactly the churn F2
+    // removes.
+    if (watchInFlight) return;
+
     const controller = new AbortController();
     watchController = controller;
+    watchInFlight = true;
     const { signal } = controller;
 
     void (async () => {
@@ -268,6 +298,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       } catch {
         // Detached background task: any failure (timeout, abort, connectivity,
         // auth) is non-fatal — the developer still has degraded/cached types.
+      } finally {
+        // Release the one-waiter latch so the NEXT save can arm a fresh watch.
+        // Only clear if we're still the current watch: a shutdown abort replaces
+        // nothing (no new watch arms while in flight), so an unconditional clear
+        // is safe here, but guarding on identity keeps it correct if that ever
+        // changes.
+        if (watchController === controller) {
+          watchInFlight = false;
+        }
       }
     })();
   }

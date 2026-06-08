@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   getWarehouseState: vi.fn(),
   startWarehouse: vi.fn(),
   waitUntilRunning: vi.fn(),
+  // Counts `new WorkspaceClient({})` constructions so the per-save perf tests can
+  // assert the watch builds exactly one client (not one per rapid save).
+  workspaceClientCtor: vi.fn(),
 }));
 
 // Mock the module vite-plugin.ts pulls generateFromEntryPoint from. The error
@@ -31,9 +34,14 @@ vi.mock("../warehouse-status", () => ({
 }));
 
 // armWarehouseWatch constructs `new WorkspaceClient({})`. Stub the SDK so that
-// constructor is inert in unit tests.
+// constructor is inert in unit tests, but route each construction through a spy
+// so the per-save perf tests can count how many clients the watch builds.
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: class {},
+  WorkspaceClient: class {
+    constructor() {
+      mocks.workspaceClientCtor();
+    }
+  },
 }));
 
 const { appKitTypesPlugin } = await import("../vite-plugin");
@@ -482,5 +490,182 @@ describe("appKitTypesPlugin — background warehouse watch", () => {
     wait.resolve();
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("appKitTypesPlugin — per-save perf collapse (F2)", () => {
+  const savedNodeEnv = process.env.NODE_ENV;
+  const savedWarehouseId = process.env.DATABRICKS_WAREHOUSE_ID;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+    mocks.startWarehouse.mockResolvedValue(undefined);
+    process.env.NODE_ENV = "development";
+    process.env.DATABRICKS_WAREHOUSE_ID = "wh-test";
+  });
+
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedNodeEnv;
+
+    if (savedWarehouseId === undefined)
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+    else process.env.DATABRICKS_WAREHOUSE_ID = savedWarehouseId;
+  });
+
+  test("a single .sql save builds one WorkspaceClient and issues one warehouses.get", async () => {
+    // RUNNING so the watch probes once, then immediately regenerates (its wait
+    // returns on the first poll). We isolate a single save by letting the initial
+    // build's watch fully settle first, then measuring the delta for one save.
+    mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    // Initial build arms + completes watch #1.
+    await buildStart();
+    await flush();
+
+    // Measure only the single save below.
+    mocks.workspaceClientCtor.mockClear();
+    mocks.getWarehouseState.mockClear();
+
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "q.sql"),
+    );
+    await flush();
+
+    // Exactly one client construction and one status RPC for the save — the
+    // F2 acceptance criterion.
+    expect(mocks.workspaceClientCtor).toHaveBeenCalledTimes(1);
+    expect(mocks.getWarehouseState).toHaveBeenCalledTimes(1);
+  });
+
+  test("five rapid saves do not fan out — one waiter, one client, one get", async () => {
+    // Hold the watch's wait pending so all five saves land while watch #1 is
+    // still in flight. One-waiter re-arm must coalesce them onto that single
+    // watch instead of spawning a client + probe per save.
+    mocks.getWarehouseState.mockResolvedValue("STARTING" as WarehouseState);
+    const wait = deferred();
+    mocks.waitUntilRunning.mockReturnValue(
+      wait.promise.then(() => "RUNNING" as WarehouseState),
+    );
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    // buildStart arms watch #1 (now parked on the pending wait).
+    await buildStart();
+    await flush();
+    expect(mocks.workspaceClientCtor).toHaveBeenCalledTimes(1);
+    expect(mocks.getWarehouseState).toHaveBeenCalledTimes(1);
+
+    // Five rapid .sql saves while watch #1 is still waiting.
+    const sqlFile = path.join(process.cwd(), "config", "queries", "q.sql");
+    for (let i = 0; i < 5; i++) watcher.emit("change", sqlFile);
+    await flush();
+
+    // No fan-out: still exactly one client + one status RPC despite six triggers.
+    expect(mocks.workspaceClientCtor).toHaveBeenCalledTimes(1);
+    expect(mocks.getWarehouseState).toHaveBeenCalledTimes(1);
+    // And only one warehouse wait is in flight, not five.
+    expect(mocks.waitUntilRunning).toHaveBeenCalledTimes(1);
+
+    // Let the watch finish so the trailing regenerate fires and no timer leaks.
+    wait.resolve();
+    await flush();
+  });
+
+  test("after a watch settles, the next save arms a fresh watch (latch released)", async () => {
+    // The one-waiter latch must release on completion, or saves after the first
+    // watch would be permanently ignored.
+    mocks.getWarehouseState.mockResolvedValue("RUNNING" as WarehouseState);
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    await buildStart();
+    await flush();
+    const ctorAfterBuild = mocks.workspaceClientCtor.mock.calls.length;
+
+    // A save after the first watch settled must arm a new watch (one more client
+    // + one more probe).
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "q.sql"),
+    );
+    await flush();
+
+    expect(mocks.workspaceClientCtor.mock.calls.length).toBe(
+      ctorAfterBuild + 1,
+    );
+  });
+
+  test("a non-blocking save during a blocking warm-up does not downgrade the pending describe", async () => {
+    // Sticky mode: while the background blocking regenerate is queued behind an
+    // in-flight foreground run, a coalesced non-blocking .sql save must NOT
+    // downgrade the trailing run to non-blocking — real (described) types still
+    // land.
+    //
+    // We drive the real path: the buildStart foreground runs non-blocking and is
+    // held in flight (deferred); the armed watch reaches RUNNING and enqueues a
+    // blocking trailing run; then a non-blocking .sql save lands. The save's
+    // re-armed watch sees DELETED (the 2nd getWarehouseState) so it does NOT
+    // inject another blocking trigger — proving the blocking trailing run
+    // survives purely because of sticky escalation, not a later re-escalation.
+    mocks.getWarehouseState
+      .mockResolvedValueOnce("RUNNING" as WarehouseState) // watch #1 → blocking regen
+      .mockResolvedValue("DELETED" as WarehouseState); // watch #2 (save) → no-op
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
+
+    const first = deferred();
+    const trailing = deferred();
+    mocks.generateFromEntryPoint
+      .mockReturnValueOnce(first.promise) // initial foreground (in flight)
+      .mockReturnValueOnce(trailing.promise); // the single trailing run
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    // Initial foreground non-blocking generate is now in flight (deferred), and
+    // watch #1 (RUNNING) has enqueued a blocking trailing run behind it.
+    await buildStart();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // A non-blocking .sql save lands while still in flight — must NOT downgrade
+    // the queued blocking trailing run.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "q.sql"),
+    );
+    await flush();
+    // Still only the one in-flight run; nothing started concurrently.
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // Release the in-flight run → the single trailing run fires, and it must be
+    // blocking (escalated), not downgraded to non-blocking by the later save.
+    first.resolve();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+    expect(mocks.generateFromEntryPoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ mode: "blocking" }),
+    );
+
+    trailing.resolve();
+    await flush();
   });
 });

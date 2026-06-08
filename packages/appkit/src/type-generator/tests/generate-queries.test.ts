@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   getWarehouse: vi.fn(() => ({ state: "RUNNING" })),
   // warehouses.start — only the blocking startWaitProceed path calls this.
   startWarehouse: vi.fn(),
+  // Counts `new WorkspaceClient({})` constructions so the lazy-client tests can
+  // assert non-blocking / all-cached runs build zero clients.
+  workspaceClientCtor: vi.fn(),
   spinnerStop: vi.fn(),
   spinnerPrintDetail: vi.fn(),
   loadCache: vi.fn(() => ({ version: "2", queries: {} })),
@@ -24,10 +27,15 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({
-    statementExecution: { executeStatement: mocks.executeStatement },
-    warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
-  })),
+  WorkspaceClient: vi.fn(() => {
+    // Record the construction so lazy-client tests can assert zero builds on the
+    // non-blocking / all-cached paths.
+    mocks.workspaceClientCtor();
+    return {
+      statementExecution: { executeStatement: mocks.executeStatement },
+      warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
+    };
+  }),
 }));
 
 vi.mock("../spinner", () => ({
@@ -767,6 +775,9 @@ describe("generateQueriesFromDescribe", () => {
       // ZERO warehouse round-trips: no probe (getWarehouse) and no DESCRIBE.
       expect(mocks.getWarehouse).not.toHaveBeenCalled();
       expect(mocks.executeStatement).not.toHaveBeenCalled();
+      // Lazy client (F2): a non-blocking run short-circuits before any warehouse
+      // work, so no WorkspaceClient is ever constructed.
+      expect(mocks.workspaceClientCtor).not.toHaveBeenCalled();
       expect(fatalErrors).toEqual([]);
       expect(syntaxErrors).toEqual([]);
       expect(schemas[0].type).toContain("result: unknown");
@@ -865,6 +876,8 @@ describe("generateQueriesFromDescribe", () => {
       // ZERO warehouse round-trips: no probe (getWarehouse) and no DESCRIBE.
       expect(mocks.getWarehouse).not.toHaveBeenCalled();
       expect(mocks.executeStatement).not.toHaveBeenCalled();
+      // Lazy client (F2): non-blocking builds no WorkspaceClient at all.
+      expect(mocks.workspaceClientCtor).not.toHaveBeenCalled();
       // Best-available types: no cache seeded → every query degrades to unknown.
       expect(schemas).toHaveLength(2);
       expect(schemas[0].name).toBe("a");
@@ -901,6 +914,48 @@ describe("generateQueriesFromDescribe", () => {
       expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
       expect(syntaxErrors).toEqual([]);
       expect(fatalErrors).toEqual([]);
+    });
+
+    test("blocking mode, all queries cached — builds zero WorkspaceClient", async () => {
+      // Lazy client (F2): even in blocking mode, if every query is a cache HIT
+      // there are no uncached queries, so the preflight/describe block is skipped
+      // entirely and no warehouse client is constructed.
+      const sql = "SELECT id FROM users";
+      mocks.readdir.mockResolvedValue(["users.sql"]);
+      mocks.readFile.mockResolvedValue(sql);
+      mocks.loadCache.mockReturnValueOnce({
+        version: CACHE_VERSION,
+        queries: {
+          users: { hash: hashSQL(sql), type: CACHED_GOOD_TYPE, retry: false },
+        },
+      });
+
+      const { schemas } = await describeQueries("/queries", "wh-123");
+
+      expect(mocks.workspaceClientCtor).not.toHaveBeenCalled();
+      expect(mocks.getWarehouse).not.toHaveBeenCalled();
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
+    });
+
+    test("blocking mode, uncached query — builds exactly one WorkspaceClient (preflight + describe share it)", async () => {
+      // Lazy client (F2): the blocking path still works — it constructs a single
+      // client that the preflight probe and the DESCRIBE batch both reuse (memoized),
+      // never two.
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+      mocks.executeStatement.mockResolvedValue(
+        succeededResult([["id", "INT", null]]),
+      );
+
+      const { schemas } = await describeQueries("/queries", "wh-123");
+
+      // One construction shared across probe + describe (not one each).
+      expect(mocks.workspaceClientCtor).toHaveBeenCalledTimes(1);
+      expect(mocks.getWarehouse).toHaveBeenCalledTimes(1);
+      expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+      expect(schemas[0].type).toContain("id: number");
     });
   });
 });
