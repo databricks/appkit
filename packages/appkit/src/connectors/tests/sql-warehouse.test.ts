@@ -432,7 +432,7 @@ describe("SQLWarehouseConnector", () => {
       expect(get).toHaveBeenCalledTimes(2);
     });
 
-    test("StrictMode remount rejoins in-flight readiness before shared abort", async () => {
+    test("late remount joins in-flight readiness without a grace window", async () => {
       const get = vi
         .fn()
         .mockResolvedValueOnce({ state: "STARTING" })
@@ -450,6 +450,10 @@ describe("SQLWarehouseConnector", () => {
         },
       );
       mount1.abort();
+      const firstOutcome = expect(first).rejects.toThrow(/canceled/i);
+
+      // Simulate an async remount (slower than any fixed grace period).
+      await vi.advanceTimersByTimeAsync(5_000);
 
       const remount = connector.ensureWarehouseRunning(
         wsClient as any,
@@ -457,9 +461,39 @@ describe("SQLWarehouseConnector", () => {
         { onStatus: () => {}, timeoutMs: 60_000 },
       );
 
-      await expect(first).rejects.toThrow(/canceled/i);
       await vi.runAllTimersAsync();
+      await firstOutcome;
       await expect(remount).resolves.toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(2);
+    });
+
+    test("shared readiness loop completes when every waiter aborts", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const controller = new AbortController();
+
+      const only = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      controller.abort();
+
+      await expect(only).rejects.toThrow(/canceled/i);
+      await vi.runAllTimersAsync();
+
+      // Poll still finished — warm-path cache is primed for the next caller.
+      await connector.ensureWarehouseRunning(wsClient as any, "wh-orphan", {
+        onStatus: () => {},
+        timeoutMs: 60_000,
+      });
       expect(get).toHaveBeenCalledTimes(2);
     });
 

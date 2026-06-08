@@ -299,13 +299,17 @@ export class StreamManager {
         // client cancellation is a normal control-flow signal, not a failure
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
-        } else {
-          logger.error(
-            "Stream execution failed: %s (code=%s)",
-            errorMsg,
-            errorCode,
-          );
+          streamEntry.isCompleted = true;
+          this._closeAllClients(streamEntry);
+          this._cleanupStream(streamEntry);
+          return;
         }
+
+        logger.error(
+          "Stream execution failed: %s (code=%s)",
+          errorMsg,
+          errorCode,
+        );
 
         // buffer error event
         streamEntry.eventBuffer.add({
@@ -419,6 +423,16 @@ export class StreamManager {
       }
 
       if (error.name === "AbortError") {
+        return SSEErrorCode.STREAM_ABORTED;
+      }
+
+      // Defense-in-depth: upstream layers (SQL client, cache) may wrap an
+      // AbortError into ExecutionError, losing `name` but keeping the message.
+      if (
+        message.includes("operation was aborted") ||
+        message.includes("the request was aborted") ||
+        message.includes("statement was canceled")
+      ) {
         return SSEErrorCode.STREAM_ABORTED;
       }
 
