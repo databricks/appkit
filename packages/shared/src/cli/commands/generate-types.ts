@@ -26,7 +26,13 @@ export function resolveTypegenMode(options?: {
 
 /** Options parsed by commander for the generate-types command. */
 interface GenerateTypesOptions {
-  noCache?: boolean;
+  /**
+   * Caching toggle. Commander stores the `--no-cache` boolean negation here as
+   * `cache` (NOT `noCache`): the option is `true` by default and `false` when
+   * `--no-cache` is passed. Reading `options.noCache` (which commander never
+   * populates) is why `--no-cache` used to be a silent no-op.
+   */
+  cache?: boolean;
   wait?: boolean;
   /**
    * Internal: present only on the detached worker invocation. Carries the path
@@ -51,7 +57,10 @@ async function runGenerateTypes(
 ) {
   try {
     const resolvedRootDir = rootDir || process.cwd();
-    const noCache = options?.noCache || false;
+    // Commander stores `--no-cache` as `cache: false` (the option defaults to
+    // true). `=== false` is deliberate: only an explicit `--no-cache` disables
+    // caching; an absent flag (undefined) leaves it on.
+    const noCache = options?.cache === false;
     const mode = resolveTypegenMode(options);
 
     const typeGen = await import("@databricks/appkit/type-generator");
@@ -138,11 +147,16 @@ async function runGenerateTypes(
  * @param lockPath - the acquired single-flight lock; passed to the worker so it
  *   releases the SAME lock when it finishes.
  * @param targets - the foreground's positional args, forwarded verbatim.
+ * @param noCache - whether the foreground ran with `--no-cache`; when true the
+ *   worker is launched with `--no-cache` too, so the background refresh bypasses
+ *   the cache exactly like the foreground did (otherwise the worker would re-read
+ *   the very cache the user asked to skip).
  * @returns true if the worker was spawned, false if spawning threw.
  */
 export function spawnTypegenWorker(
   lockPath: string,
   targets: { rootDir?: string; outFile?: string; warehouseId?: string },
+  noCache = false,
 ): boolean {
   // The script the runtime launched us with (the `appkit` bin shim). Re-running
   // it under the same node binary reproduces this exact CLI in the worker.
@@ -169,6 +183,10 @@ export function spawnTypegenWorker(
     cliEntry,
     "generate-types",
     "--wait",
+    // Mirror the foreground's cache choice: a `--no-cache` foreground must spawn
+    // a `--no-cache` worker, or the background refresh would re-read the cache
+    // the user explicitly opted out of.
+    ...(noCache ? ["--no-cache"] : []),
     "--worker-lock",
     lockPath,
     ...positionals,
@@ -236,7 +254,13 @@ async function generateTypesAction(
     const lockPath = getSpawnLockPath(resolvedRootDir);
 
     if (acquireSpawnLock(lockPath)) {
-      spawnTypegenWorker(lockPath, { rootDir, outFile, warehouseId });
+      // Carry the foreground's cache choice into the worker (commander stored
+      // `--no-cache` as `cache: false`).
+      spawnTypegenWorker(
+        lockPath,
+        { rootDir, outFile, warehouseId },
+        options.cache === false,
+      );
     } else {
       console.log("Type refresh already in progress, skipping.");
     }

@@ -231,3 +231,95 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(acquireSpawnLock).not.toHaveBeenCalled();
   });
 });
+
+describe("generate-types --no-cache (F5)", () => {
+  let tmpRoot: string;
+  const prevWarehouse = process.env.DATABRICKS_WAREHOUSE_ID;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    acquireSpawnLock.mockReturnValue(true);
+    // commander's `generateTypesCommand` is a module singleton whose parsed
+    // option values persist across parseAsync calls. Reset the flags these tests
+    // care about to their parse-time defaults so an absent flag in one test isn't
+    // polluted by an explicit flag in a previous one (e.g. a prior `--no-cache`
+    // leaving `cache:false`, or an earlier `--worker-lock` leaving workerLock set
+    // → no spawn).
+    generateTypesCommand.setOptionValue("cache", true);
+    generateTypesCommand.setOptionValue("wait", undefined);
+    generateTypesCommand.setOptionValue("workerLock", undefined);
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gentypes-nc-"));
+    fs.mkdirSync(path.join(tmpRoot, "config", "queries"), { recursive: true });
+    process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    if (prevWarehouse === undefined) {
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+    } else {
+      process.env.DATABRICKS_WAREHOUSE_ID = prevWarehouse;
+    }
+  });
+
+  test("foreground bypasses cache: noCache:true reaches generateFromEntryPoint AND generateServingTypes", async () => {
+    // The bug F5 fixes: the flag was read from `options.noCache` (which commander
+    // never sets), so `--no-cache` was a silent no-op. It must now flow as
+    // noCache:true into BOTH generators.
+    await runCli([tmpRoot, "--no-cache"]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ noCache: true }),
+    );
+    expect(generateServingTypes).toHaveBeenCalledWith(
+      expect.objectContaining({ noCache: true }),
+    );
+  });
+
+  test("without --no-cache the foreground keeps caching (noCache:false)", async () => {
+    // `=== false` semantics: an absent flag (undefined cache) must NOT disable
+    // the cache.
+    await runCli([tmpRoot]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ noCache: false }),
+    );
+    expect(generateServingTypes).toHaveBeenCalledWith(
+      expect.objectContaining({ noCache: false }),
+    );
+  });
+
+  test("spawned worker argv includes --no-cache when set, and still carries execArgv + --wait", async () => {
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+
+    await runCli([tmpRoot, outFile, "wh-123", "--no-cache"]);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [, argv] = spawn.mock.calls[0];
+
+    // De-stale guard: the parent's loader flags are still forwarded before the
+    // CLI entry (dropping them silently breaks a tsx-run worker).
+    const entryIdx = argv.indexOf(process.argv[1]);
+    expect(entryIdx).toBeGreaterThanOrEqual(0);
+    expect(argv.slice(0, entryIdx)).toEqual(process.execArgv);
+
+    // The worker invocation forwards --wait AND --no-cache (so the background
+    // refresh bypasses the cache exactly like the foreground).
+    const workerArgv = argv.slice(entryIdx);
+    expect(workerArgv).toContain("--wait");
+    expect(workerArgv).toContain("--no-cache");
+  });
+
+  test("spawned worker argv omits --no-cache when the flag is absent", async () => {
+    await runCli([tmpRoot]);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [, argv] = spawn.mock.calls[0];
+    expect(argv).not.toContain("--no-cache");
+    // But --wait is always present on the worker.
+    expect(argv).toContain("--wait");
+  });
+});
