@@ -1,11 +1,29 @@
 import type { ReactNode } from "react";
+import type { WarehouseStatus } from "../hooks/types";
 import { useChartData } from "../hooks/use-chart-data";
 import { ChartErrorBoundary } from "./chart-error-boundary";
 import { EmptyState } from "./empty";
 import { ErrorState } from "./error";
-import { LoadingSkeleton } from "./loading";
+import { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 import type { ChartData, DataFormat } from "./types";
 import { isArrowTable } from "./types";
+
+const WAREHOUSE_ERROR_STATES = new Set(["DELETED", "DELETING"]);
+
+function isWarehouseWaiting(
+  loading: boolean,
+  data: ChartData | null,
+  warehouseStatus: WarehouseStatus | null,
+): boolean {
+  if (!loading || data || !warehouseStatus) return false;
+  if (
+    warehouseStatus.state === "RUNNING" ||
+    WAREHOUSE_ERROR_STATES.has(warehouseStatus.state)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 // ============================================================================
 // Props Types
@@ -65,13 +83,16 @@ function QueryModeContent({
   testId,
   children,
 }: CommonProps & ChartWrapperQueryProps) {
-  const { data, loading, error, isEmpty } = useChartData({
+  const { data, loading, error, isEmpty, warehouseStatus } = useChartData({
     queryKey,
     parameters,
     format,
     transformer,
   });
 
+  if (isWarehouseWaiting(loading, data, warehouseStatus)) {
+    return <ResourceWaitingPlaceholder height={height ?? 300} />;
+  }
   if (loading) return <LoadingSkeleton height={height ?? 300} />;
   if (error) return <ErrorState error={error} />;
   if (isEmpty || !data) return <EmptyState />;

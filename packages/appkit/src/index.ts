@@ -19,13 +19,16 @@ export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
+  LakebasePool,
   LakebasePoolConfig,
+  LakebasePoolManager,
   RequestedClaims,
   RequestedResource,
 } from "./connectors/lakebase";
 // Lakebase Autoscaling connector
 export {
   createLakebasePool,
+  createLakebasePoolManager,
   generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,

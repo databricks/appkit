@@ -3,6 +3,10 @@ import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 import {
+  TEMPLATE_SCAFFOLDING,
+  templateFieldEntrySchema,
+} from "../../../../schemas/manifest";
+import {
   loadManifestFromFile,
   type ResolvedManifest,
   resolveManifestInDir,
@@ -37,7 +41,7 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
 }
 
 /**
- * Validates a parsed JSON object against the plugin-manifest JSON schema.
+ * Validates a parsed JSON object against the plugin-manifest schema.
  * Returns the manifest if valid, or null and logs schema errors.
  */
 function validateManifestWithSchema(
@@ -48,7 +52,7 @@ function validateManifestWithSchema(
   if (result.valid && result.manifest) return result.manifest;
   if (result.errors?.length) {
     console.warn(
-      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors, obj)}`,
+      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors)}`,
     );
   }
   return null;
@@ -93,6 +97,9 @@ async function loadPluginEntry(
         manifest.stability !== "ga" && {
           stability: manifest.stability,
         }),
+      ...(manifest.scaffolding && {
+        scaffolding: manifest.scaffolding,
+      }),
     },
   ];
 }
@@ -426,6 +433,9 @@ async function scanForPlugins(
           manifest.stability !== "ga" && {
             stability: manifest.stability,
           }),
+        ...(manifest.scaffolding && {
+          scaffolding: manifest.scaffolding,
+        }),
       } satisfies TemplatePlugin;
     }
   }
@@ -529,17 +539,40 @@ async function scanPluginsDir(
 
 /**
  * Write (or preview) the template plugins manifest to disk.
+ *
+ * Each resource field is parsed through `templateFieldEntrySchema` so the
+ * `origin` transform fires and produces canonical `origin` values, even
+ * when the input carries a stale `origin`. Parsing per-field (rather than
+ * the whole manifest) keeps the surrounding plugin/resource key order
+ * stable so the synced JSON's diff stays minimal.
  */
 function writeManifest(
   outputPath: string,
   { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
   options: { write?: boolean; silent?: boolean; json?: boolean },
 ) {
+  for (const plugin of Object.values(plugins)) {
+    for (const group of [
+      plugin.resources.required,
+      plugin.resources.optional,
+    ]) {
+      for (const resource of group) {
+        if (!resource.fields) continue;
+        for (const fieldName of Object.keys(resource.fields)) {
+          resource.fields[fieldName] = templateFieldEntrySchema.parse(
+            resource.fields[fieldName],
+          );
+        }
+      }
+    }
+  }
+
   const templateManifest: TemplatePluginsManifest = {
     $schema:
       "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.1",
+    version: "2.0",
     plugins,
+    scaffolding: TEMPLATE_SCAFFOLDING,
   };
 
   const serialized = JSON.stringify(templateManifest, null, 2);

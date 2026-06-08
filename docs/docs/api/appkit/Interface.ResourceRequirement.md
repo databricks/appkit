@@ -2,16 +2,14 @@
 
 Declares a resource requirement for a plugin.
 Can be defined statically in a manifest or dynamically via getResourceRequirements().
-Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union.
 
-## See
-
- - `packages/shared/src/schemas/plugin-manifest.generated.ts` `ResourceRequirement` — generated base
- - SharedResourceRequirement — shared re-export with runtime `fields` and `required`
-
-## Extends
-
-- `ResourceRequirement`
+Defined as a flat structural shape rather than narrowing the shared
+discriminated-union `ResourceRequirement`. The registry needs to construct
+and pass these values around at runtime where `type` and `permission` are
+looked up dynamically from a string; preserving per-variant tightness here
+would force every constructor to thread variant types end-to-end. The
+runtime guarantee (permission valid for type) is enforced by the manifest
+schema's parse, not by the registry's static types.
 
 ## Extended by
 
@@ -25,13 +23,7 @@ Narrows the generated base: type → ResourceType enum, permission → ResourceP
 alias: string;
 ```
 
-Human-readable label for UI/display only. Deduplication uses resourceKey, not alias.
-
-#### Inherited from
-
-```ts
-SharedResourceRequirement.alias
-```
+Human-readable label for UI/display only.
 
 ***
 
@@ -41,13 +33,7 @@ SharedResourceRequirement.alias
 description: string;
 ```
 
-Human-readable description of why this resource is needed
-
-#### Inherited from
-
-```ts
-SharedResourceRequirement.description
-```
+Human-readable description of why this resource is needed.
 
 ***
 
@@ -57,13 +43,7 @@ SharedResourceRequirement.description
 fields: Record<string, ResourceFieldEntry>;
 ```
 
-Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
-
-#### Inherited from
-
-```ts
-SharedResourceRequirement.fields
-```
+Map of field name to field entry. Required at runtime.
 
 ***
 
@@ -75,12 +55,6 @@ permission: ResourcePermission;
 
 Required permission level for the resource (narrowed to union)
 
-#### Overrides
-
-```ts
-SharedResourceRequirement.permission
-```
-
 ***
 
 ### required
@@ -89,11 +63,7 @@ SharedResourceRequirement.permission
 required: boolean;
 ```
 
-#### Inherited from
-
-```ts
-SharedResourceRequirement.required
-```
+Whether the resource is mandatory at runtime.
 
 ***
 
@@ -103,13 +73,7 @@ SharedResourceRequirement.required
 resourceKey: string;
 ```
 
-Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup.
-
-#### Inherited from
-
-```ts
-SharedResourceRequirement.resourceKey
-```
+Stable key for machine use: deduplication, env naming, composite keys, app.yaml.
 
 ***
 
@@ -120,9 +84,3 @@ type: ResourceType;
 ```
 
 Type of Databricks resource required (narrowed to enum)
-
-#### Overrides
-
-```ts
-SharedResourceRequirement.type
-```

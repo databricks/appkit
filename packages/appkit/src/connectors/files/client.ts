@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import { createLogger } from "../../logging/logger";
@@ -23,6 +24,37 @@ import {
 } from "./defaults";
 
 const logger = createLogger("connectors:files");
+
+/**
+ * Ambient span-attribute propagation for `FilesConnector.traced()`.
+ *
+ * Callers (e.g. the plugin's `_withAuthModeAttributes` wrapper) set extra
+ * span attributes here via `runWithFilesSpanAttributes(attrs, fn)`. The
+ * connector's `traced()` decorator reads them and merges them into the
+ * span it creates around the SDK call. This lets the plugin tag spans with
+ * `files.auth_mode` without opening a duplicate `files.<op>` span.
+ *
+ * AsyncLocalStorage is used so concurrent requests don't see each other's
+ * attributes. Outside an active scope, `getStore()` returns `undefined` and
+ * the connector falls back to the static attribute set.
+ */
+const filesSpanAttributesStorage = new AsyncLocalStorage<
+  Record<string, string>
+>();
+
+/**
+ * Run `fn` with the supplied attributes attached to whatever span the
+ * `FilesConnector` opens for its SDK call. Used to propagate request-scoped
+ * attributes (e.g. `files.auth_mode`) onto the connector's span without
+ * opening a parent span — avoids the 2x span allocation that
+ * `startActiveSpan` parented otherwise.
+ */
+export function runWithFilesSpanAttributes<T>(
+  attributes: Record<string, string>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return filesSpanAttributesStorage.run(attributes, fn);
+}
 
 interface FilesConnectorConfig {
   defaultVolume?: string;
@@ -102,12 +134,18 @@ export class FilesConnector {
     const startTime = Date.now();
     let success = false;
 
+    // Pull any ambient attributes set by `runWithFilesSpanAttributes` (e.g.
+    // `files.auth_mode` from the plugin layer). Static `attributes` win on
+    // collision so callers can override per-call.
+    const ambient = filesSpanAttributesStorage.getStore();
+
     return this.telemetry.startActiveSpan(
       `files.${operation}`,
       {
         kind: SpanKind.CLIENT,
         attributes: {
           "files.operation": operation,
+          ...(ambient ?? {}),
           ...attributes,
         },
       },

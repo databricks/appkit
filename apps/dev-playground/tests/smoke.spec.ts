@@ -9,7 +9,9 @@ test.describe("Smoke Tests", () => {
     ).toBeVisible();
 
     await expect(
-      page.getByText("Explore the capabilities of the AppKit"),
+      page.getByText("A living catalog of what AppKit can do", {
+        exact: false,
+      }),
     ).toBeVisible();
   });
 

@@ -32,7 +32,7 @@ describe("QueryProcessor", () => {
       expect(result.statement).toBe(query);
       expect(result.parameters).toHaveLength(2);
       expect(result.parameters).toEqual([
-        { name: "user_id", value: "123", type: "NUMERIC" },
+        { name: "user_id", value: "123", type: "INT" },
         { name: "name", value: "Alice", type: "STRING" },
       ]);
     });
@@ -167,14 +167,94 @@ describe("QueryProcessor", () => {
 
     test("should not override workspace_id if already provided", async () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
+      // 9876543210 exceeds INT_MAX (2^31 - 1) so inference falls through to
+      // BIGINT — appropriate for ID columns.
       const parameters = { workspaceId: sql.number("9876543210") };
 
       const result = await processor.processQueryParams(query, parameters);
 
       expect(result.workspaceId).toEqual({
-        __sql_type: "NUMERIC",
+        __sql_type: "BIGINT",
         value: "9876543210",
       });
+    });
+  });
+
+  describe("LIMIT / OFFSET bindings (regression for #323)", () => {
+    // Spark requires IntegerType for LIMIT/OFFSET; BIGINT/LongType is
+    // rejected with INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE. These tests
+    // pin INT inference so sql.number(req.query.n) works against the
+    // warehouse without explicit casting.
+    //
+    // These tests are MOCKED — they assert the wire-type string the
+    // helper emits, not warehouse round-trip behaviour. To re-validate
+    // that the mocked assertions still match production Spark semantics:
+    //
+    //   1. Pick any RUNNING SQL Warehouse you can reach
+    //      (`databricks warehouses list -p <profile>` and grep for RUNNING).
+    //   2. POST /api/2.0/sql/statements with the helper's wire-type strings
+    //      directly, using the same VALUES-based query so no table is
+    //      required:
+    //
+    //      databricks api post /api/2.0/sql/statements --json '{
+    //        "statement": "SELECT x FROM (VALUES (1),(2),(3),(4),(5)) AS t(x) ORDER BY x LIMIT :n OFFSET :m",
+    //        "warehouse_id": "<id>",
+    //        "wait_timeout": "30s",
+    //        "parameters": [
+    //          {"name": "n", "value": "2", "type": "INT"},
+    //          {"name": "m", "value": "1", "type": "INT"}
+    //        ]
+    //      }'
+    //
+    //   3. Expect: `status.state == "SUCCEEDED"`, `result.row_count == 2`.
+    //   4. Swap both parameter `type` values to `"BIGINT"` and re-run.
+    //      Expect: `status.state == "FAILED"`, error message
+    //      `[INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE] ... must be integer
+    //      type, but got "BIGINT". SQLSTATE: 42K0E`.
+    //
+    //   If (3) fails or (4) starts succeeding, Spark's LIMIT type contract
+    //   has changed and the INT-by-default inference should be re-evaluated.
+    test("sql.number(integer) binds as INT for LIMIT/OFFSET", () => {
+      const query = "SELECT * FROM events LIMIT :n OFFSET :m";
+      const parameters = {
+        n: sql.number(10),
+        m: sql.number(20),
+      };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "INT" },
+        { name: "m", value: "20", type: "INT" },
+      ]);
+    });
+
+    test("sql.number(integer-shaped string) binds as INT for LIMIT/OFFSET", () => {
+      // Express/URLSearchParams return strings — this is the common
+      // handler pattern: sql.number(req.query.n).
+      const query = "SELECT * FROM events LIMIT :n OFFSET :m";
+      const parameters = {
+        n: sql.number("10"),
+        m: sql.number("20"),
+      };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "INT" },
+        { name: "m", value: "20", type: "INT" },
+      ]);
+    });
+
+    test("sql.int(string) binds as INT for LIMIT/OFFSET (explicit form)", () => {
+      const query = "SELECT * FROM events LIMIT :n";
+      const parameters = { n: sql.int("10") };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "INT" },
+      ]);
     });
   });
 
@@ -229,7 +309,7 @@ describe("QueryProcessor", () => {
       expect(result.parameters[0]).toEqual({
         name: "age",
         value: "25",
-        type: "NUMERIC",
+        type: "INT",
       });
     });
 

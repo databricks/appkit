@@ -21,7 +21,10 @@ const { mockCacheInstance } = vi.hoisted(() => {
     getOrExecute: vi
       .fn()
       .mockImplementation(
-        async (_key: unknown[], fn: () => Promise<unknown>) => {
+        async (
+          _key: unknown[],
+          fn: (signal?: AbortSignal) => Promise<unknown>,
+        ) => {
           return await fn();
         },
       ),
@@ -184,6 +187,30 @@ describe("Genie Plugin", () => {
         "/:alias/conversations/:conversationId/messages/:messageId",
         expect.any(Function),
       );
+    });
+  });
+
+  describe("getAgentTools / executeAgentTool", () => {
+    test("produces independent tool entries per configured space", () => {
+      const plugin = new GeniePlugin(config);
+      const names = plugin.getAgentTools().map((t) => t.name);
+
+      expect(names).toContain("myspace.sendMessage");
+      expect(names).toContain("myspace.getConversation");
+      expect(names).toContain("salesbot.sendMessage");
+      expect(names).toContain("salesbot.getConversation");
+      expect(names).toHaveLength(4);
+    });
+
+    test("returns LLM-friendly error string for invalid tool args", async () => {
+      const plugin = new GeniePlugin(config);
+      const result = await plugin.executeAgentTool(
+        "myspace.getConversation",
+        {},
+      );
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Invalid arguments for myspace.getConversation");
+      expect(result).toContain("conversationId");
     });
   });
 
@@ -1107,6 +1134,50 @@ describe("Genie Plugin", () => {
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "Unknown space alias: default",
       });
+    });
+
+    test("should throw at construction when an alias maps to undefined (e.g. unset process.env.X)", () => {
+      // The IGenieConfig.spaces type accepts `string | undefined` so callers
+      // can pass process.env values directly without a TS hoist-and-narrow,
+      // but a missing env var is a code error — fail fast at construction
+      // with a clear message rather than letting it surface as a 404 later.
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
+          }),
+      ).toThrow(/"wanderbricks".*missing/i);
+    });
+
+    test("should throw at construction when an alias maps to an empty string", () => {
+      // `process.env.X ?? ""` is a common pattern; treat it the same as
+      // an undefined value rather than letting an empty ID hit the API.
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: "" },
+          }),
+      ).toThrow(/"wanderbricks".*missing/i);
+    });
+
+    test("should list all missing aliases in the construction error", () => {
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: {
+              foo: undefined,
+              bar: "valid-id",
+              baz: undefined,
+            },
+          }),
+      ).toThrow(/"foo".*"baz"/);
     });
   });
 

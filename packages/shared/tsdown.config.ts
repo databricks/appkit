@@ -21,14 +21,4 @@ export default defineConfig({
   exports: {
     devExports: "development",
   },
-  copy: [
-    {
-      from: "src/schemas/plugin-manifest.schema.json",
-      to: "dist/schemas",
-    },
-    {
-      from: "src/schemas/template-plugins.schema.json",
-      to: "dist/schemas",
-    },
-  ],
 });

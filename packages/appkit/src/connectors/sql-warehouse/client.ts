@@ -6,6 +6,7 @@ import {
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
+  ConfigurationError,
   ConnectionError,
   ExecutionError,
   ValidationError,
@@ -22,12 +23,69 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import { executeStatementDefaults } from "./defaults";
+import { WarehousePollBackoff } from "./warehouse-poll-backoff";
+import { WarehouseStatusEmitter } from "./warehouse-status-emitter";
 
 const logger = createLogger("connectors:sql-warehouse");
 
 interface SQLWarehouseConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
+}
+
+/**
+ * Default ceiling for how long {@link SQLWarehouseConnector.ensureWarehouseRunning}
+ * will wait for a warehouse to reach the RUNNING state before giving up.
+ *
+ * Five minutes covers a cold-start of a classic warehouse on most workspaces;
+ * serverless typically reaches RUNNING within ~30s.
+ */
+export const DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Window during which a recent `RUNNING` observation lets subsequent calls
+ * to {@link SQLWarehouseConnector.ensureWarehouseRunning} short-circuit
+ * without making any SDK calls. Sized to roughly the upper bound of how
+ * long Databricks keeps a warehouse "stickily" available between requests
+ * — past that, we re-verify.
+ */
+const WAREHOUSE_RUNNING_CACHE_TTL_MS = 30_000;
+
+/**
+ * A single observation of the warehouse state, emitted by
+ * {@link SQLWarehouseConnector.ensureWarehouseRunning} so callers can stream
+ * progress to clients (e.g. over SSE).
+ *
+ * Note: `health.summary` from the SDK is intentionally NOT exposed on this
+ * type. It's free-form operator-oriented diagnostic text (cluster IDs,
+ * capacity-failure reasons, internal RPC errors) that must not reach end
+ * users. The raw value stays in the OTel span attributes for server-side
+ * debugging only.
+ */
+export interface WarehouseStatusUpdate {
+  /** Current state from the SDK (RUNNING | STARTING | STOPPED | STOPPING | DELETED | DELETING). */
+  state: sql.State;
+  /** Milliseconds elapsed since `ensureWarehouseRunning` was called. */
+  elapsedMs: number;
+  /** 1-based attempt counter — useful for tests and telemetry. */
+  attempt: number;
+}
+
+/** Options for {@link SQLWarehouseConnector.ensureWarehouseRunning}. */
+interface EnsureWarehouseRunningOptions {
+  /** Invoked every time the warehouse state changes during the wait. */
+  onStatus: (update: WarehouseStatusUpdate) => void;
+  /** Aborts the wait. The connector treats abort as `ExecutionError.canceled()`. */
+  signal?: AbortSignal;
+  /** Hard ceiling on the total wait. Defaults to {@link DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS}. */
+  timeoutMs?: number;
+  /**
+   * When `true` (default), a `STOPPED` warehouse is auto-started.
+   * When `false`, `STOPPED` surfaces as `ConfigurationError` immediately —
+   * useful for cost-controlled deployments that don't want any caller to
+   * trigger billable warehouse starts.
+   */
+  autoStart?: boolean;
 }
 
 export class SQLWarehouseConnector {
@@ -37,6 +95,13 @@ export class SQLWarehouseConnector {
 
   // Lazy-initialized: only created when Arrow format is used
   private _arrowProcessor: ArrowStreamProcessor | null = null;
+
+  /**
+   * Per-warehouse cache of the last RUNNING observation timestamp. Used by
+   * {@link ensureWarehouseRunning} to short-circuit warm-path callers; see
+   * {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}.
+   */
+  private _recentlyRunning = new Map<string, number>();
   // telemetry
   private readonly telemetry: TelemetryProvider;
   private readonly telemetryMetrics: {
@@ -276,6 +341,216 @@ export class SQLWarehouseConnector {
       },
       { name: this.name, includePrefix: true },
     );
+  }
+
+  /**
+   * Wait until the SQL warehouse is in the `RUNNING` state, auto-starting it
+   * if currently `STOPPED`. Emits a {@link WarehouseStatusUpdate} whenever
+   * the observed state changes, so callers can surface progress (e.g. over
+   * SSE) instead of letting the UI freeze on a cold warehouse. Equal
+   * successive observations are de-duplicated.
+   *
+   * Fast path: if this connector recently observed the warehouse RUNNING
+   * (within {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}), the call returns
+   * immediately without any SDK round-trip or status emission. This keeps
+   * cache-hit analytics requests off the Databricks control plane.
+   *
+   * Behaviour by initial state:
+   * - `RUNNING`: emits one update, caches the observation, returns.
+   * - `STOPPED`: emits a synthetic `STARTING` update, calls
+   *   `workspaceClient.warehouses.start`, then polls until `RUNNING`.
+   *   When `autoStart: false`, throws `ConfigurationError` instead.
+   * - `STARTING` / `STOPPING`: polls until `RUNNING`.
+   * - `DELETED` / `DELETING`: throws `ConfigurationError.resourceNotFound`.
+   *
+   * Aborts and timeouts surface as `ExecutionError`. The poll loop uses
+   * exponential backoff with ±15% jitter (1s → 30s cap) and runs inside a
+   * `sql.warehouseReady` telemetry span.
+   */
+  async ensureWarehouseRunning(
+    workspaceClient: WorkspaceClient,
+    warehouseId: string,
+    opts: EnsureWarehouseRunningOptions,
+  ): Promise<void> {
+    const {
+      onStatus,
+      signal,
+      timeoutMs = DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+      autoStart = true,
+    } = opts;
+
+    if (signal?.aborted) throw ExecutionError.canceled();
+    if (!warehouseId) throw ValidationError.missingField("warehouse_id");
+    if (this._isRecentlyRunning(warehouseId)) return;
+
+    return this.telemetry.startActiveSpan(
+      "sql.warehouseReady",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "db.system": "databricks",
+          "db.warehouse_id": warehouseId,
+          "db.warehouse.startup_timeout_ms": timeoutMs,
+        },
+      },
+      async (span: Span) => {
+        const startTime = Date.now();
+        const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
+        let didStart = false;
+        const backoff = new WarehousePollBackoff();
+
+        try {
+          while (true) {
+            if (signal?.aborted) throw ExecutionError.canceled();
+            if (Date.now() - startTime > timeoutMs) {
+              throw ExecutionError.statementFailed(
+                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+              );
+            }
+
+            const info = await workspaceClient.warehouses.get(
+              { id: warehouseId },
+              this._createContext(signal),
+            );
+            const state = info?.state;
+            const summary = info?.health?.summary;
+
+            switch (state) {
+              case "RUNNING":
+                emitter.emit(state, summary);
+                this._recentlyRunning.set(warehouseId, Date.now());
+                span.setAttribute("db.warehouse.attempts", emitter.attempt);
+                span.setStatus({ code: SpanStatusCode.OK });
+                return;
+              case "DELETED":
+              case "DELETING":
+                throw ConfigurationError.resourceNotFound(
+                  "Warehouse ID",
+                  `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
+                );
+              case "STOPPED":
+                if (!autoStart) {
+                  // The warehouse exists, it's just in the wrong state and
+                  // policy forbids auto-starting it — use the base
+                  // ConfigurationError directly so the message isn't
+                  // prefixed with "not found".
+                  throw new ConfigurationError(
+                    "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
+                  );
+                }
+                if (!didStart) {
+                  emitter.emit("STARTING", summary);
+                  await workspaceClient.warehouses.start(
+                    { id: warehouseId },
+                    this._createContext(signal),
+                  );
+                  didStart = true;
+                } else {
+                  // Warehouse fell back to STOPPED after our start attempt —
+                  // surface the state and keep polling.
+                  emitter.emit(state, summary);
+                }
+                break;
+              case "STARTING":
+              case "STOPPING":
+                emitter.emit(state, summary);
+                break;
+              default:
+                throw ExecutionError.unknownState(String(state ?? "unknown"));
+            }
+
+            // Preempt the next timeout check: if sleeping the full backoff
+            // would push us past `timeoutMs`, throw now rather than waste
+            // up to ~30s sleeping past the deadline (`backoff.next()` caps
+            // at WAREHOUSE_POLL_MAX_MS).
+            const sleepMs = backoff.next();
+            if (Date.now() + sleepMs - startTime >= timeoutMs) {
+              throw ExecutionError.statementFailed(
+                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+              );
+            }
+            await this._sleepRespectingAbort(sleepMs, signal);
+          }
+        } catch (error) {
+          this._throwSanitizedReadinessError(error, warehouseId, span);
+        } finally {
+          span.end();
+        }
+      },
+      { name: this.name, includePrefix: true },
+    );
+  }
+
+  /**
+   * `true` if this connector observed `warehouseId` in the RUNNING state
+   * within the recent-cache TTL.
+   */
+  private _isRecentlyRunning(warehouseId: string): boolean {
+    const observedAt = this._recentlyRunning.get(warehouseId);
+    return (
+      observedAt !== undefined &&
+      Date.now() - observedAt < WAREHOUSE_RUNNING_CACHE_TTL_MS
+    );
+  }
+
+  /**
+   * Final landing for any error thrown by the readiness poll loop. Records
+   * the original on the span and (at debug level) on the logger, then
+   * rethrows either the structured AppKitError unchanged or a curated
+   * ExecutionError — never the raw SDK message, which can contain operator
+   * internals.
+   *
+   * The `logger.debug` covers environments where OTel isn't configured
+   * (common in dev) so the raw error isn't lost just because no span
+   * exporter is hooked up.
+   */
+  private _throwSanitizedReadinessError(
+    error: unknown,
+    warehouseId: string,
+    span: Span,
+  ): never {
+    if (error instanceof AppKitError) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.code });
+      throw error;
+    }
+    span.recordException(
+      error instanceof Error ? error : new Error(String(error)),
+    );
+    logger.debug(
+      "Warehouse readiness check raw error for %s: %O",
+      warehouseId,
+      error,
+    );
+    const wrapped = ExecutionError.statementFailed(
+      "Warehouse readiness check failed",
+    );
+    span.setStatus({ code: SpanStatusCode.ERROR, message: wrapped.code });
+    throw wrapped;
+  }
+
+  /**
+   * Sleep for `ms` milliseconds, but resolve early (and reject with
+   * `ExecutionError.canceled()`) if `signal` aborts mid-sleep. Used by the
+   * warehouse readiness loop so that client disconnects don't keep the loop
+   * polling for the full interval.
+   */
+  private _sleepRespectingAbort(
+    ms: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) return Promise.reject(ExecutionError.canceled());
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(ExecutionError.canceled());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   private async _pollForStatementResult(

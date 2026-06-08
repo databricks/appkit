@@ -8,21 +8,31 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import {
+  isInternalTelemetryEnabled,
+  TelemetryReporter,
+} from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
+import { isPlainObject } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
+  #context: PluginContext;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
+
+    this.#context = new PluginContext();
 
     const pluginEntries = Object.entries(plugins);
 
@@ -38,20 +48,24 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     for (const [name, pluginData] of corePlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of normalPlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of deferredPlugins) {
       if (pluginData) {
         this.createAndRegisterPlugin(globalConfig, name, pluginData, {
-          plugins: this.#pluginInstances,
+          context: this.#context,
         });
       }
     }
@@ -73,7 +87,19 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     const pluginInstance = new Plugin(baseConfig);
 
+    if (typeof pluginInstance.attachContext === "function") {
+      pluginInstance.attachContext({
+        context: this.#context,
+        telemetryConfig: baseConfig.telemetry,
+      });
+    }
+
     this.#pluginInstances[name] = pluginInstance;
+
+    this.#context.registerPlugin(name, pluginInstance);
+    if (isToolProvider(pluginInstance)) {
+      this.#context.registerToolProvider(name, pluginInstance);
+    }
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -101,7 +127,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       const val = exports[key];
       if (typeof val === "function") {
         exports[key] = (val as (...args: unknown[]) => unknown).bind(context);
-      } else if (AppKit.isPlainObject(val)) {
+      } else if (isPlainObject(val)) {
         this.bindExportMethods(val as Record<string, unknown>, context);
       }
     }
@@ -114,6 +140,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
    * When `exports()` returns a callable (function), it is returned as-is
    * since the plugin manages its own `asUser` per-call (e.g. files plugin).
    * When it returns a plain object, the standard `asUser` wrapper is added.
+   *
+   * The OBO-side wrapping lives inside `Plugin.asUser` — calling
+   * `plugin.asUser(req).exports()` returns exports whose functions already
+   * run inside the user's AsyncLocalStorage scope. AppKit only adapts the
+   * shape; it does not own the user-context concept.
    */
   private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
     // If plugin doesn't implement exports(), return empty object
@@ -139,27 +170,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
        * Returns user-scoped exports where all methods execute with the
        * user's Databricks credentials instead of the service principal.
        */
-      asUser: (req: import("express").Request) => {
-        const userPlugin = (plugin as any).asUser(req);
-        const userExports = (userPlugin.exports?.() ?? {}) as Record<
-          string,
-          unknown
-        >;
-        this.bindExportMethods(userExports, userPlugin);
-        return userExports;
-      },
+      asUser: (req: import("express").Request) =>
+        (plugin as any).asUser(req).exports() as Record<string, unknown>,
     };
-  }
-
-  /**
-   * Returns true if the value is a plain object (not an array, Date, etc.).
-   */
-  private static isPlainObject(
-    value: unknown,
-  ): value is Record<string, unknown> {
-    if (typeof value !== "object" || value === null) return false;
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
   }
 
   static async _createApp<
@@ -171,6 +184,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       cache?: CacheConfig;
       client?: WorkspaceClient;
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+      disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -203,6 +217,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const instance = new AppKit(mergedConfig);
 
     await Promise.all(instance.#setupPromises);
+    await instance.#context.emitLifecycle("setup:complete");
 
     const handle = instance as unknown as PluginMap<T>;
 
@@ -212,12 +227,28 @@ export class AppKit<TPlugins extends InputPluginMap> {
       logger.debug("onPluginsReady hook completed");
     }
 
+    if (isInternalTelemetryEnabled(config)) {
+      AppKit.bootstrapInternalTelemetry();
+    }
+
     const serverPlugin = instance.#pluginInstances.server;
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
       await (serverPlugin as any).start();
     }
 
     return handle;
+  }
+
+  private static bootstrapInternalTelemetry(): void {
+    const serviceCtx = ServiceContext.get();
+    const reporter = TelemetryReporter.initialize({
+      workspaceId: serviceCtx.workspaceId,
+      client: serviceCtx.client,
+      appId: process.env.DATABRICKS_CLIENT_ID || "",
+      appkitVersion: productVersion,
+    });
+    reporter.start();
+    reporter.sendStartup().catch(() => {});
   }
 
   private static preparePlugins(
@@ -279,6 +310,7 @@ export async function createApp<
     cache?: CacheConfig;
     client?: WorkspaceClient;
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+    disableInternalTelemetry?: boolean;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

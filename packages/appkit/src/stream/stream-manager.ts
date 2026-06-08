@@ -34,6 +34,7 @@ export class StreamManager {
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
     options?: StreamConfig,
+    ownerKey?: string,
   ): Promise<void> {
     const { streamId } = options || {};
 
@@ -48,21 +49,36 @@ export class StreamManager {
     // handle reconnection
     if (streamId && StreamValidator.validateStreamId(streamId)) {
       const existingStream = this.streamRegistry.get(streamId);
-      // if stream exists, attach to it
       if (existingStream) {
+        // Enforce per-user binding: the stream's owner key must match the
+        // requesting caller's owner key. This prevents cross-user stream
+        // takeover via guessed/leaked stream IDs (the SSE registry was
+        // previously a global lookup with no authorization step).
+        if (existingStream.ownerKey !== ownerKey) {
+          this.sseWriter.writeError(
+            res,
+            randomUUID(),
+            "Stream not found or access denied",
+            SSEErrorCode.STREAM_FORBIDDEN,
+          );
+          res.end();
+          return;
+        }
         return this._attachToExistingStream(res, existingStream, options);
       }
     }
 
     // if stream does not exist, create a new one
-    return this._createNewStream(res, handler, options);
+    return this._createNewStream(res, handler, options, ownerKey);
   }
 
   // abort all active operations
   abortAll(): void {
     this.activeOperations.forEach((operation) => {
       if (operation.heartbeat) clearInterval(operation.heartbeat);
-      operation.controller.abort("Server shutdown");
+      operation.controller.abort(
+        new DOMException("Server shutdown", "AbortError"),
+      );
     });
     this.activeOperations.clear();
     this.streamRegistry.clear();
@@ -126,7 +142,9 @@ export class StreamManager {
 
       // Stop the generator when no clients remain
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        streamEntry.abortController.abort("All clients disconnected");
+        streamEntry.abortController.abort(
+          new DOMException("All clients disconnected", "AbortError"),
+        );
       }
 
       // cleanup if stream is completed and no clients are connected
@@ -151,6 +169,7 @@ export class StreamManager {
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
     options?: StreamConfig,
+    ownerKey?: string,
   ): Promise<void> {
     const streamId = options?.streamId ?? randomUUID();
 
@@ -185,6 +204,7 @@ export class StreamManager {
     // create stream entry
     const streamEntry: StreamEntry = {
       streamId,
+      ownerKey,
       generator: handler(combinedSignal),
       eventBuffer,
       clients: new Set([res]),
@@ -211,7 +231,9 @@ export class StreamManager {
       // Stop the generator when no clients remain so polling loops
       // (e.g. jobs runAndWait) don't keep running in the background.
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        abortController.abort("Client disconnected");
+        abortController.abort(
+          new DOMException("Client disconnected", "AbortError"),
+        );
       }
     });
 

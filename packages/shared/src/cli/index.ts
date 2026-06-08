@@ -29,4 +29,4 @@ cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
 cmd.addCommand(codemodCommand);
 
-cmd.parse();
+await cmd.parseAsync();

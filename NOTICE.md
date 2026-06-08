@@ -49,10 +49,9 @@ This Software contains code from the following open source projects:
 | [@radix-ui/react-toggle](https://www.npmjs.com/package/@radix-ui/react-toggle) | 1.1.10 | MIT | https://radix-ui.com/primitives |
 | [@radix-ui/react-toggle-group](https://www.npmjs.com/package/@radix-ui/react-toggle-group) | 1.1.11 | MIT | https://radix-ui.com/primitives |
 | [@radix-ui/react-tooltip](https://www.npmjs.com/package/@radix-ui/react-tooltip) | 1.2.8 | MIT | https://radix-ui.com/primitives |
+| [@standard-schema/spec](https://www.npmjs.com/package/@standard-schema/spec) | 1.1.0 | MIT | https://standardschema.dev |
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@types/semver](https://www.npmjs.com/package/@types/semver) | 7.7.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/semver |
-| [ajv](https://www.npmjs.com/package/ajv) | 6.12.6, 8.17.1 | MIT | https://ajv.js.org |
-| [ajv-formats](https://www.npmjs.com/package/ajv-formats) | 2.1.1, 3.0.1 | MIT | https://github.com/ajv-validator/ajv-formats#readme |
 | [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
@@ -64,8 +63,11 @@ This Software contains code from the following open source projects:
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
 | [express](https://www.npmjs.com/package/express) | 4.22.0 | MIT | http://expressjs.com/ |
+| [get-port](https://www.npmjs.com/package/get-port) | 7.2.0 | MIT | https://github.com/sindresorhus/get-port#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
+| [js-yaml](https://www.npmjs.com/package/js-yaml) | 3.14.2, 4.1.1 | MIT | https://github.com/nodeca/js-yaml#readme |
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
+| [magic-string](https://www.npmjs.com/package/magic-string) | 0.30.21 | MIT | https://github.com/Rich-Harris/magic-string#readme |
 | [marked](https://www.npmjs.com/package/marked) | 16.4.2, 17.0.3 | MIT | https://marked.js.org |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
 | [obug](https://www.npmjs.com/package/obug) | 2.1.1 | MIT | https://github.com/sxzz/obug#readme |

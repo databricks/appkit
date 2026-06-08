@@ -27,13 +27,13 @@ AppKit's power comes from its plugin system. Each plugin adds a focused capabili
 
 ## Getting started
 
-Follow the [Getting Started](https://databricks.github.io/appkit/docs/) guide to get started with AppKit.
+Follow the [Getting Started](https://www.databricks.com/devhub/docs/appkit/v0/) guide to get started with AppKit.
 
-🤖 For AI/code assistants, see the [AI-assisted development](https://databricks.github.io/appkit/docs/development/ai-assisted-development) guide.
+🤖 For AI/code assistants, see the [AI-assisted development](https://www.databricks.com/devhub/docs/appkit/v0/development/ai-assisted-development) guide.
 
 ## Documentation
 
-📖 For full AppKit documentation, visit the [AppKit Documentation](https://databricks.github.io/appkit/) website.
+📖 For full AppKit documentation, visit the [AppKit Documentation](https://www.databricks.com/devhub/docs/appkit/v0/) website.
 
 ## Contributing
 

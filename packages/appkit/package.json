@@ -1,9 +1,12 @@
 {
   "name": "@databricks/appkit",
   "type": "module",
-  "version": "0.30.0",
+  "version": "0.40.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "appkit": "./bin/appkit.js"
+  },
   "packageManager": "pnpm@10.21.0",
   "license": "Apache-2.0",
   "repository": {
@@ -51,12 +54,13 @@
     "clean": "rm -rf dist tmp",
     "dist": "tsx ../../tools/dist-appkit.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
+    "tarball:prerelease": "rm -rf tmp && SHORTSHA=$(git rev-parse --short HEAD) && pnpm dist --prerelease $SHORTSHA && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ast-grep/napi": "0.37.0",
     "@databricks/lakebase": "workspace:*",
-    "@databricks/sdk-experimental": "0.16.0",
+    "@databricks/sdk-experimental": "0.17.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/api-logs": "0.208.0",
     "@opentelemetry/auto-instrumentations-node": "0.67.2",
@@ -75,6 +79,9 @@
     "@types/semver": "7.7.1",
     "dotenv": "16.6.1",
     "express": "4.22.0",
+    "get-port": "7.2.0",
+    "js-yaml": "4.1.1",
+    "magic-string": "0.30.21",
     "obug": "2.1.1",
     "pg": "8.18.0",
     "picocolors": "1.1.1",
@@ -87,6 +94,7 @@
   "devDependencies": {
     "@opentelemetry/context-async-hooks": "2.6.1",
     "@types/express": "4.17.25",
+    "@types/js-yaml": "4.0.9",
     "@types/json-schema": "7.0.15",
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",

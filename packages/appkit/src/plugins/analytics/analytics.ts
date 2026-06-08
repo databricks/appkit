@@ -1,13 +1,28 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  AgentToolDefinition,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
+  ToolProvider,
 } from "shared";
+import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
+import {
+  DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+  type WarehouseStatusUpdate,
+} from "../../connectors/sql-warehouse/client";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
+import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -16,13 +31,64 @@ import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
+  AnalyticsStreamMessage,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
+  WarehouseStatus,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
-export class AnalyticsPlugin extends Plugin {
+/**
+ * Bridges a callback-emitting async function into an async iterable.
+ *
+ * `start(emit)` runs concurrently; every value passed to `emit` is yielded
+ * in order. The iterable completes when `start`'s promise resolves and
+ * re-throws (after draining) if it rejects. Lets a callback-based progress
+ * API (e.g. SQL warehouse readiness) be consumed with `for await`.
+ */
+async function* streamCallbacks<T>(
+  start: (emit: (value: T) => void) => Promise<void>,
+): AsyncGenerator<T, void, unknown> {
+  const queue: T[] = [];
+  let wake: (() => void) | null = null;
+  let settled = false;
+  let error: unknown = null;
+
+  const notify = (): void => {
+    wake?.();
+    wake = null;
+  };
+
+  // The .then(_, err => ...) chain converts a rejection into a resolved
+  // promise; the consumer surfaces `error` after draining the queue.
+  void start((value) => {
+    queue.push(value);
+    notify();
+  }).then(
+    () => {
+      settled = true;
+      notify();
+    },
+    (err) => {
+      error = err;
+      settled = true;
+      notify();
+    },
+  );
+
+  while (!settled || queue.length > 0) {
+    while (queue.length > 0) yield queue.shift() as T;
+    if (settled) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+  }
+  if (error) throw error;
+}
+
+export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
 
@@ -118,7 +184,9 @@ export class AnalyticsPlugin extends Plugin {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format: rawFormat = "JSON_ARRAY" } =
+      req.body as IAnalyticsQueryRequest;
+    const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
@@ -154,21 +222,24 @@ export class AnalyticsPlugin extends Plugin {
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
     const queryParameters =
-      format === "ARROW"
+      format === "ARROW_STREAM"
         ? {
             formatParameters: {
               disposition: "EXTERNAL_LINKS",
               format: "ARROW_STREAM",
             },
-            type: "arrow",
+            type: "arrow" as const,
           }
         : {
-            type: "result",
+            type: "result" as const,
           };
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
-    const defaultConfig: PluginExecuteConfig = {
+    // Cache/retry/timeout are scoped to the SQL execution itself (inner
+    // `execute`) so the warehouse-readiness phase isn't subject to retries
+    // and the generator value never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
@@ -183,26 +254,79 @@ export class AnalyticsPlugin extends Plugin {
       },
     };
 
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // user-scoped trace context still apply.
     const streamExecutionSettings: StreamExecutionSettings = {
-      default: defaultConfig,
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
     };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
 
     await executor.executeStream(
       res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
+        );
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            },
+          };
+        }
+
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            const processedParams =
+              await self.queryProcessor.processQueryParams(query, parameters);
+            const result = await executor.query(
+              query,
+              processedParams,
+              queryParameters.formatParameters,
+              sig,
+            );
+            return { type: queryParameters.type, ...result };
+          },
+          { default: sqlConfig },
+          executorKey,
         );
 
-        const result = await executor.query(
-          query,
-          processedParams,
-          queryParameters.formatParameters,
-          signal,
-        );
+        if (!sqlResult.ok) {
+          // Surface a typed AppKitError so StreamManager can categorize via
+          // the structured `code`. The HTTP status code from `execute()`
+          // doesn't apply to SSE error frames.
+          throw ExecutionError.statementFailed(sqlResult.message);
+        }
 
-        return { type: queryParameters.type, ...result };
+        yield sqlResult.data as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,
@@ -263,6 +387,52 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  private tools = {
+    query: defineTool({
+      description:
+        "Execute a read-only SQL query against the Databricks SQL warehouse. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted; writes are rejected. Returns the query results as JSON.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            "The SQL query to execute. Must be a SELECT, WITH, SHOW, EXPLAIN, or DESCRIBE statement.",
+          ),
+      }),
+      annotations: {
+        effect: "read",
+        requiresUserContext: true,
+      },
+      autoInheritable: true,
+      execute: (args, signal) => {
+        assertReadOnlySql(args.query);
+        return this.query(args.query, undefined, undefined, signal);
+      },
+    }),
+  };
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  /**
+   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
+   * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
+   * a filtered, renamed view of the plugin's tools into an agent's tool
+   * index. Inside the function form of `AgentDefinition.tools`, callers
+   * reach this method via `plugins.analytics.toolkit(opts)`.
+   */
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   /**

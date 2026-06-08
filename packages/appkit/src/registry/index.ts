@@ -17,7 +17,7 @@ export { ResourceRegistry } from "./resource-registry";
 export * from "./types";
 
 /**
- * URL to the plugin manifest JSON Schema hosted on GitHub Pages.
+ * URL to the plugin manifest JSON Schema.
  * Can be used for validation or referenced in manifest files.
  *
  * @example
@@ -28,6 +28,8 @@ export * from "./types";
  *   ...
  * }
  * ```
+ *
+ * @see {@link https://www.databricks.com/devhub/docs/appkit/v0/ | AppKit Documentation}
  */
 // TODO: We may want to open a PR to https://github.com/SchemaStore/schemastore
 // export const MANIFEST_SCHEMA_ID =

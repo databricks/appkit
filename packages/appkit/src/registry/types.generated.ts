@@ -1,7 +1,7 @@
-// AUTO-GENERATED from packages/shared/src/schemas/plugin-manifest.schema.json
+// AUTO-GENERATED from packages/shared/src/schemas/manifest.ts (Zod canonical).
 // Do not edit. Run: pnpm exec tsx tools/generate-registry-types.ts
 
-/** Resource types from schema $defs.resourceType.enum */
+/** Resource types from resourceTypeSchema.options */
 export enum ResourceType {
   SECRET = "secret",
   JOB = "job",
@@ -19,7 +19,7 @@ export enum ResourceType {
 }
 
 // ============================================================================
-// Permissions per resource type (from schema permission $defs)
+// Permissions per resource type (from per-type permission enum schemas)
 // ============================================================================
 /** Permissions for SECRET resources */
 export type SecretPermission = "READ" | "WRITE" | "MANAGE";

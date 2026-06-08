@@ -14,12 +14,24 @@
         "fields": {
           "path": {
             "env": "DATABRICKS_VOLUME_FILES",
-            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "volume",
+              "select": "full_name"
+            }
           }
         }
       }
     ],
     "optional": []
+  },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "Before init, verify your Unity Catalog volume exists and you have WRITE_VOLUME permission"
+      ]
+    }
   },
   "config": {
     "schema": {

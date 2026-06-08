@@ -1,38 +1,31 @@
 /**
- * Resource types and permissions derived from plugin-manifest.schema.json.
- * Single source of truth so create, add-resource, and validate stay in sync with the schema.
+ * Resource types and permissions sourced from the canonical Zod schemas in
+ * `schemas/manifest.ts`. Single source of truth so create, add-resource, and
+ * validate stay in sync with the schema.
+ *
+ * Values are constant at module load (direct Zod imports, no runtime JSON-schema
+ * read), so no caching is needed.
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_NAME = "plugin-manifest.schema.json";
-// Try dist/schemas first (shared build + appkit pack), then dist/cli/schemas
-const SCHEMA_PATHS = [
-  path.join(__dirname, "..", "..", "..", "schemas", SCHEMA_NAME),
-  path.join(__dirname, "..", "..", "schemas", SCHEMA_NAME),
-];
+import {
+  appPermissionSchema,
+  databasePermissionSchema,
+  experimentPermissionSchema,
+  genieSpacePermissionSchema,
+  jobPermissionSchema,
+  postgresPermissionSchema,
+  resourceTypeSchema,
+  secretPermissionSchema,
+  servingEndpointPermissionSchema,
+  sqlWarehousePermissionSchema,
+  ucConnectionPermissionSchema,
+  ucFunctionPermissionSchema,
+  vectorSearchIndexPermissionSchema,
+  volumePermissionSchema,
+} from "../../../schemas/manifest";
 
 export interface ResourceTypeOption {
   value: string;
   label: string;
-}
-
-function loadSchema(): Record<string, unknown> | null {
-  for (const schemaPath of SCHEMA_PATHS) {
-    try {
-      if (fs.existsSync(schemaPath)) {
-        return JSON.parse(fs.readFileSync(schemaPath, "utf-8")) as Record<
-          string,
-          unknown
-        >;
-      }
-    } catch {
-      // try next path
-    }
-  }
-  return null;
 }
 
 /** Optional display overrides for acronyms (e.g. SQL, UC). Omitted entries use title-case of value. */
@@ -47,69 +40,47 @@ function humanize(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-let cachedOptions: ResourceTypeOption[] | null = null;
-let cachedPermissions: Record<string, string[]> | null = null;
+/**
+ * Map from resource type literal to its permission enum schema. Mirrors the
+ * `allOf + if/then` block in the previous hand-written JSON Schema, but driven
+ * directly from the Zod source. Add an entry here when extending
+ * `resourceTypeSchema`.
+ */
+const PERMISSION_SCHEMAS_BY_TYPE = {
+  secret: secretPermissionSchema,
+  job: jobPermissionSchema,
+  sql_warehouse: sqlWarehousePermissionSchema,
+  serving_endpoint: servingEndpointPermissionSchema,
+  volume: volumePermissionSchema,
+  vector_search_index: vectorSearchIndexPermissionSchema,
+  uc_function: ucFunctionPermissionSchema,
+  uc_connection: ucConnectionPermissionSchema,
+  database: databasePermissionSchema,
+  postgres: postgresPermissionSchema,
+  genie_space: genieSpacePermissionSchema,
+  experiment: experimentPermissionSchema,
+  app: appPermissionSchema,
+} as const;
 
 /**
- * Resource type options (value + label) from schema $defs.resourceType.enum.
+ * Resource type options (value + label) from `resourceTypeSchema.options`.
  */
 export function getResourceTypeOptions(): ResourceTypeOption[] {
-  if (cachedOptions) return cachedOptions;
-  const schema = loadSchema();
-  const defs = schema?.$defs as Record<string, unknown> | undefined;
-  const resourceType = defs?.resourceType as { enum?: string[] } | undefined;
-  const enumArr = resourceType?.enum;
-  if (!Array.isArray(enumArr)) {
-    cachedOptions = [];
-    return cachedOptions;
-  }
-  cachedOptions = enumArr.map((value) => ({
+  return resourceTypeSchema.options.map((value) => ({
     value,
     label: humanize(value),
   }));
-  return cachedOptions;
 }
 
 /**
- * Permissions per resource type from schema resourceRequirement.allOf (if/then).
+ * Permissions per resource type, derived from each type's per-type permission
+ * schema's `.options` array. Order is weakest-to-strongest (matches Zod enum
+ * declaration order, which the original JSON Schema also preserved).
  */
 export function getResourceTypePermissions(): Record<string, string[]> {
-  if (cachedPermissions) return cachedPermissions;
-  const schema = loadSchema();
   const out: Record<string, string[]> = {};
-  if (!schema?.$defs || typeof schema.$defs !== "object") {
-    cachedPermissions = out;
-    return out;
+  for (const [type, schema] of Object.entries(PERMISSION_SCHEMAS_BY_TYPE)) {
+    out[type] = [...schema.options];
   }
-  const defs = schema.$defs as Record<string, unknown>;
-  const resourceReq = defs.resourceRequirement as
-    | Record<string, unknown>
-    | undefined;
-  const allOf = resourceReq?.allOf as
-    | Array<{
-        if?: { properties?: { type?: { const?: string } } };
-        then?: { properties?: { permission?: { $ref?: string } } };
-      }>
-    | undefined;
-  if (!Array.isArray(allOf)) {
-    cachedPermissions = out;
-    return out;
-  }
-  for (const branch of allOf) {
-    const typeConst = branch?.if?.properties?.type?.const;
-    const ref = branch?.then?.properties?.permission?.$ref;
-    if (typeof typeConst !== "string" || typeof ref !== "string") continue;
-    const refSegments = ref.replace(/^#\//, "").split("/");
-    let def: unknown = schema;
-    for (const seg of refSegments) {
-      if (def == null || typeof def !== "object") break;
-      def = (def as Record<string, unknown>)[seg];
-    }
-    const enumArr = Array.isArray((def as { enum?: string[] })?.enum)
-      ? (def as { enum: string[] }).enum
-      : undefined;
-    if (enumArr?.length) out[typeConst] = enumArr;
-  }
-  cachedPermissions = out;
   return out;
 }

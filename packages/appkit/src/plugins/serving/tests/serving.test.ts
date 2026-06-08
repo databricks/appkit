@@ -20,7 +20,10 @@ const { mockCacheInstance } = vi.hoisted(() => {
     getOrExecute: vi
       .fn()
       .mockImplementation(
-        async (_key: unknown[], fn: () => Promise<unknown>) => {
+        async (
+          _key: unknown[],
+          fn: (signal?: AbortSignal) => Promise<unknown>,
+        ) => {
           return await fn();
         },
       ),

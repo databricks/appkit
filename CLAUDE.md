@@ -39,7 +39,7 @@ Examples:
 
 /docs/              - Docusaurus documentation site
 
-/template/          - App template used by `npx @databricks/appkit init`
+/template/          - App template used by `databricks apps init`
 
 /tools/
   - setup.sh                         - Initial repository setup

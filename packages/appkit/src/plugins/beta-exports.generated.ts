@@ -5,4 +5,4 @@
 // subpath ships each plugin. Editing this file by hand will drift it from the
 // manifests and the synced appkit.plugins.json.
 
-export {};
+export { agents } from "./agents";

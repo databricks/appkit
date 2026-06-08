@@ -72,6 +72,18 @@ npx @databricks/appkit generate-types [rootDir] [outFile] [warehouseId]
   npx @databricks/appkit generate-types --no-cache
   ```
 
+### Warehouse readiness and the `--wait` flag
+
+By default, `generate-types` is **non-blocking**: it never waits on — or fails because of — your SQL warehouse. It writes the best types it can immediately (reusing cached types where the query is unchanged, otherwise `result: unknown`) and then spawns a detached background worker that refreshes the real types once the warehouse is ready. This keeps `npm install` (postinstall) and `npm run dev` (predev) fast and resilient to a cold or briefly-unreachable warehouse. The dev Vite plugin behaves the same way: types appear instantly and refresh in place once the warehouse is live.
+
+Pass `--wait` for CI and production builds, where accurate types must be present before the build proceeds:
+
+```bash
+npx @databricks/appkit generate-types --wait
+```
+
+In blocking mode the generator starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes your queries. It fails only when the configured warehouse no longer exists (deleted/deleting), so a transient outage or a cold warehouse degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
+
 ## How it works
 
 The type generator:

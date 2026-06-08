@@ -14,12 +14,8 @@ import type {
 } from "shared";
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
-import {
-  getCurrentUserId,
-  runInUserContext,
-  ServiceContext,
-  type UserContext,
-} from "../context";
+import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
+import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -47,6 +43,49 @@ const logger = createLogger("plugin");
  * Set when asUser() is called in development mode without a user token.
  */
 const DEV_OBO_FALLBACK_KEY = createContextKey("appkit.devOboFallback");
+
+/**
+ * Returns true if `value` is a plain object literal (not an array, Date,
+ * class instance, etc.). Used to decide whether to recurse into nested
+ * export shapes when wrapping functions.
+ *
+ * @internal exported so the AppKit core can reuse the same predicate for
+ * its `bindExportMethods` walk; not part of the public package surface.
+ */
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Returns a deep copy of `exports` where every function has been replaced
+ * with `wrap(fn)`, walking into nested plain objects.
+ *
+ * Used by the asUser proxy to make the user context follow function
+ * references that escape the proxy via `exports()`. The original input is
+ * not mutated, so plugins that memoize `exports()` are safe — each call
+ * through the proxy yields an independent, freshly wrapped view.
+ */
+function wrapExportFunctions(
+  exports: Record<string, unknown>,
+  wrap: (fn: (...a: unknown[]) => unknown) => (...a: unknown[]) => unknown,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(exports)) {
+    const val = exports[key];
+    if (typeof val === "function") {
+      result[key] = wrap(val as (...a: unknown[]) => unknown);
+    } else if (isPlainObject(val)) {
+      result[key] = wrapExportFunctions(val, wrap);
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
+}
 
 /**
  * Returns true if the current execution is an OBO dev mode fallback
@@ -79,6 +118,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
+  "attachContext",
   "injectRoutes",
   "getEndpoints",
   "getSkipBodyParsingPaths",
@@ -178,11 +218,12 @@ export abstract class Plugin<
 > implements BasePlugin
 {
   protected isReady = false;
-  protected cache: CacheManager;
+  protected cache!: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
-  protected telemetry: ITelemetry;
+  protected telemetry!: ITelemetry;
+  protected context?: PluginContext;
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -208,12 +249,58 @@ export abstract class Plugin<
       config.name ??
       (this.constructor as { manifest?: { name: string } }).manifest?.name ??
       "plugin";
-    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
+    this.context = (config as Record<string, unknown>).context as
+      | PluginContext
+      | undefined;
 
+    // Eagerly bind telemetry + cache if the core services have already been
+    // initialized (normal createApp path, or tests that mock CacheManager).
+    // If they haven't, we leave these undefined and rely on `attachContext`
+    // being called later — this lets factories eagerly construct plugin
+    // instances at module top-level before `createApp` has run.
+    this.tryAttachContext();
+  }
+
+  private tryAttachContext(): void {
+    try {
+      this.cache = CacheManager.getInstanceSync();
+    } catch {
+      return;
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.isReady = true;
+  }
+
+  /**
+   * Binds runtime dependencies (telemetry provider, cache, plugin context) to
+   * this plugin. Called by `AppKit._createApp` after construction and before
+   * `setup()`. Idempotent: safe to call if the constructor already bound them
+   * eagerly. Kept separate so factories can eagerly construct plugin instances
+   * without running this before `TelemetryManager.initialize()` /
+   * `CacheManager.getInstance()` have run.
+   */
+  attachContext(
+    deps: {
+      context?: unknown;
+      telemetryConfig?: BasePluginConfig["telemetry"];
+    } = {},
+  ): void {
+    if (!this.cache) {
+      this.cache = CacheManager.getInstanceSync();
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      deps.telemetryConfig ?? this.config.telemetry,
+    );
+    if (deps.context !== undefined) {
+      this.context = deps.context as PluginContext;
+    }
     this.isReady = true;
   }
 
@@ -344,32 +431,21 @@ export abstract class Plugin<
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
     const userId = req.header("x-forwarded-user");
+    const userEmail = req.header("x-forwarded-email");
     const isDev = process.env.NODE_ENV === "development";
 
-    // In local development, skip user impersonation
-    // since there's no user token available
+    // In local development, skip user impersonation since there's no user
+    // token available. Mark execution as OBO dev fallback via OTel context
+    // so telemetry can distinguish intended OBO calls from regular SP calls.
     if (!token && isDev) {
       logger.warn(
         "asUser() called without user token in development mode. Skipping user impersonation.",
       );
 
-      // Return a proxy that marks execution as OBO dev fallback via OTel context,
-      // so telemetry spans can distinguish intended OBO calls from regular SP calls
-      return new Proxy(this, {
-        get: (target, prop, receiver) => {
-          const value = Reflect.get(target, prop, receiver);
-          if (typeof value !== "function") return value;
-          if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop))
-            return value;
-
-          return (...args: unknown[]) => {
-            const ctx = otelContext
-              .active()
-              .setValue(DEV_OBO_FALLBACK_KEY, true);
-            return otelContext.with(ctx, () => value.apply(target, args));
-          };
-        },
-      }) as this;
+      return this._createAsUserProxy((fn) => (...args) => {
+        const ctx = otelContext.active().setValue(DEV_OBO_FALLBACK_KEY, true);
+        return otelContext.with(ctx, () => fn(...args));
+      });
     }
 
     if (!token) {
@@ -385,33 +461,59 @@ export abstract class Plugin<
     const userContext = ServiceContext.createUserContext(
       token,
       effectiveUserId,
+      undefined,
+      userEmail ?? undefined,
     );
 
-    // Return a proxy that wraps method calls in user context
-    return this._createUserContextProxy(userContext);
+    return this._createAsUserProxy(
+      (fn) =>
+        (...args) =>
+          runInUserContext(userContext, () => fn(...args)),
+    );
   }
 
   /**
-   * Creates a proxy that wraps method calls in a user context.
-   * This allows all plugin methods to automatically use the user's
-   * Databricks credentials.
+   * Creates a proxy of `this` where every method call — and every function
+   * in the result of `exports()` — runs inside `wrapCall`.
+   *
+   * `wrapCall` decides the per-call scope. Two strategies are used today:
+   *   - real OBO:     fn => (...args) => runInUserContext(userContext, () => fn(...args))
+   *   - dev fallback: fn => (...args) => otelContext.with(DEV_OBO_FALLBACK_KEY=true, () => fn(...args))
+   *
+   * `exports` is intercepted because methods captured in the returned
+   * exports object never re-enter the proxy's `get` trap. Wrapping them
+   * here is the only way to make the user context follow function
+   * references back out of the plugin.
    */
-  private _createUserContextProxy(userContext: UserContext): this {
+  private _createAsUserProxy(
+    wrapCall: (
+      fn: (...a: unknown[]) => unknown,
+    ) => (...a: unknown[]) => unknown,
+  ): this {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver);
 
-        if (typeof value !== "function") {
+        if (typeof value !== "function") return value;
+        if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop))
           return value;
+
+        if (prop === "exports") {
+          return () => {
+            const raw = (value as () => unknown).call(target);
+            if (raw == null) return {};
+            // Callable exports (e.g. files, jobs) manage per-call asUser
+            // themselves; leave them untouched.
+            if (typeof raw === "function") return raw;
+            if (isPlainObject(raw)) {
+              return wrapExportFunctions(raw, wrapCall);
+            }
+            return raw;
+          };
         }
 
-        if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop)) {
-          return value;
-        }
-
-        return (...args: unknown[]) => {
-          return runInUserContext(userContext, () => value.apply(target, args));
-        };
+        const fn = (value as (...a: unknown[]) => unknown).bind(target);
+        return wrapCall(fn);
       },
     }) as this;
   }
@@ -480,8 +582,16 @@ export abstract class Plugin<
       }
     };
 
-    // stream the result to the client
-    await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
+    // stream the result to the client. The effective user key is forwarded
+    // to the stream manager so that reconnections to existing streamIds are
+    // bound to the original creator (prevents cross-user stream takeover via
+    // guessed/leaked IDs).
+    await this.streamManager.stream(
+      res,
+      asyncWrapperFn,
+      streamConfig,
+      effectiveUserKey,
+    );
   }
 
   /**

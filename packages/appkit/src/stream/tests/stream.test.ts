@@ -574,6 +574,121 @@ describe("StreamManager", () => {
       expect(hasNewStream).toBe(false);
     });
 
+    test("rejects reconnect from a different owner", async () => {
+      const streamId = "owner-bound-123";
+
+      const { mockRes: mockRes1 } = createMockResponse();
+
+      async function* generator1() {
+        for (let i = 0; i < 5; i++) {
+          yield { type: "message", data: `secret-${i}` };
+        }
+      }
+
+      await streamManager.stream(
+        mockRes1 as any,
+        generator1,
+        { streamId },
+        "user-alice",
+      );
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse();
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(
+        mockRes2 as any,
+        generator2,
+        { streamId },
+        "user-bob",
+      );
+
+      // Bob must not see any of Alice's events or replays.
+      expect(events2.some((e) => e.includes("secret-"))).toBe(false);
+      expect(events2.some((e) => e.includes("should-not-run"))).toBe(false);
+
+      // A STREAM_FORBIDDEN error must be emitted and the connection ended.
+      expect(events2.some((e) => e.includes("STREAM_FORBIDDEN"))).toBe(true);
+      expect(mockRes2.end).toHaveBeenCalled();
+    });
+
+    test("allows reconnect from the same owner", async () => {
+      const streamId = "owner-bound-456";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+
+      async function* generator1() {
+        yield { type: "message", data: "event-1" };
+        yield { type: "message", data: "event-2" };
+        yield { type: "message", data: "event-3" };
+      }
+
+      await streamManager.stream(
+        mockRes1 as any,
+        generator1,
+        { streamId },
+        "user-alice",
+      );
+
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": eventIds[1],
+      });
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(
+        mockRes2 as any,
+        generator2,
+        { streamId },
+        "user-alice",
+      );
+
+      const replayedData = events2
+        .filter((e) => e.startsWith("data: "))
+        .map((e) => e.replace("data: ", "").replace("\n\n", ""));
+      expect(replayedData.length).toBe(1);
+      expect(replayedData[0]).toContain("event-3");
+      expect(events2.some((e) => e.includes("STREAM_FORBIDDEN"))).toBe(false);
+    });
+
+    test("treats a missing owner as a distinct identity from a named owner", async () => {
+      const streamId = "owner-bound-789";
+
+      const { mockRes: mockRes1 } = createMockResponse();
+
+      async function* generator1() {
+        yield { type: "message", data: "scoped" };
+      }
+
+      await streamManager.stream(
+        mockRes1 as any,
+        generator1,
+        { streamId },
+        "user-alice",
+      );
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse();
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      // Caller without an owner key must not attach to a stream that
+      // was created with one.
+      await streamManager.stream(mockRes2 as any, generator2, { streamId });
+
+      expect(events2.some((e) => e.includes("scoped"))).toBe(false);
+      expect(events2.some((e) => e.includes("STREAM_FORBIDDEN"))).toBe(true);
+    });
+
     test("should replay successfully when within buffer capacity", async () => {
       const streamId = "no-overflow-test-456";
 

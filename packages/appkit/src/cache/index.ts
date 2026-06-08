@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
-import type { CacheConfig, CacheStorage } from "shared";
+import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import { createLakebasePool } from "../connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -11,6 +11,29 @@ import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
 
 const logger = createLogger("cache");
+
+/**
+ * Reference-counted in-flight cache execution entry.
+ *
+ * `sharedController` decouples the cached `fn()` from any single caller's
+ * abort signal. Callers join an in-flight entry by incrementing `refCount`;
+ * when a caller aborts, refCount is decremented. The shared controller is
+ * aborted only when refCount drops to 0 — i.e. all callers have abandoned
+ * the request. This prevents one caller's cancellation (e.g. React
+ * StrictMode unmount) from poisoning the in-flight result for other still-
+ * connected awaiters.
+ */
+interface InFlightEntry<T> {
+  promise: Promise<T>;
+  refCount: number;
+  sharedController: AbortController;
+  abortTimer?: ReturnType<typeof setTimeout>;
+}
+
+function createAbortError(signal: AbortSignal): unknown {
+  if (signal.reason !== undefined) return signal.reason;
+  return new DOMException("The operation was aborted.", "AbortError");
+}
 
 /**
  * Cache manager class to handle cache operations.
@@ -28,13 +51,14 @@ const logger = createLogger("cache");
  */
 export class CacheManager {
   private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
+  private static readonly ABORT_GRACE_PERIOD_MS = 100;
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
 
   private storage: CacheStorage;
   private config: CacheConfig;
-  private inFlightRequests: Map<string, Promise<unknown>>;
+  private inFlightRequests: Map<string, InFlightEntry<unknown>>;
   private cleanupInProgress: boolean;
   private lastCleanupAttempt: number;
 
@@ -174,20 +198,37 @@ export class CacheManager {
   }
 
   /**
-   * Get or execute a function and cache the result
-   * @param key - Cache key
-   * @param fn - Function to execute
-   * @param userKey - User key
+   * Get or execute a function and cache the result.
+   *
+   * Multiple concurrent callers with the same `cacheKey` are deduplicated
+   * onto a single in-flight execution. Each caller may pass its own
+   * `callerSignal`; the underlying `fn()` is run with a shared, internally
+   * managed `AbortSignal` that aborts only when *all* callers have
+   * abandoned the request (reference counted). This decouples a single
+   * caller's cancellation (e.g. React StrictMode unmount) from the shared
+   * result, so other still-connected callers receive the cached value
+   * normally.
+   *
+   * @param key - Cache key parts
+   * @param fn - Function to execute. Receives the cache-owned shared signal;
+   *   pass it through to the underlying I/O so the work is cancelled when
+   *   no caller is left waiting.
+   * @param userKey - User key for cache namespacing
    * @param options - Options for the cache
    * @returns Promise of the result
    */
   async getOrExecute<T>(
     key: (string | number | object)[],
-    fn: () => Promise<T>,
+    fn: (sharedSignal?: AbortSignal) => Promise<T>,
     userKey: string,
-    options?: { ttl?: number },
+    options?: { ttl?: number; callerSignal?: AbortSignal },
   ): Promise<T> {
-    if (!this.config.enabled) return fn();
+    if (!this.config.enabled) return fn(options?.callerSignal);
+
+    const callerSignal = options?.callerSignal;
+    if (callerSignal?.aborted) {
+      throw createAbortError(callerSignal);
+    }
 
     const cacheKey = this.generateKey(key, userKey);
 
@@ -202,8 +243,7 @@ export class CacheManager {
       },
       async (span) => {
         try {
-          // check if the value is in the cache
-          const cached = await this.storage.get<T>(cacheKey);
+          const cached = await this.getValid<T>(cacheKey);
           if (cached !== null) {
             span.setAttribute("cache.hit", true);
             span.setStatus({ code: SpanStatusCode.OK });
@@ -216,18 +256,27 @@ export class CacheManager {
               cache_key: cacheKey,
             });
 
-            return cached.value as T;
+            return cached.value;
           }
 
-          // check if the value is being processed by another request
-          const inFlight = this.inFlightRequests.get(cacheKey);
-          if (inFlight) {
+          // check if the value is being processed by another request — join
+          // the existing in-flight entry under reference counting so this
+          // caller's abort doesn't poison the shared result.
+          const existing = this.inFlightRequests.get(cacheKey) as
+            | InFlightEntry<T>
+            | undefined;
+          if (existing && !existing.sharedController.signal.aborted) {
+            existing.refCount++;
+            // Cancel any pending abort timer — a new caller has joined
+            if (existing.abortTimer) {
+              clearTimeout(existing.abortTimer);
+              existing.abortTimer = undefined;
+            }
             span.setAttribute("cache.hit", true);
             span.setAttribute("cache.deduplication", true);
             span.addEvent("cache.deduplication_used", {
               "cache.key": cacheKey,
             });
-            span.setStatus({ code: SpanStatusCode.OK });
             this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
@@ -239,11 +288,10 @@ export class CacheManager {
               cache_deduplication: true,
             });
 
-            span.end();
-            return inFlight as Promise<T>;
+            return await this._waitWithRefCount(existing, callerSignal);
           }
 
-          // cache miss - execute function
+          // cache miss - execute function under a shared abort controller
           span.setAttribute("cache.hit", false);
           span.addEvent("cache.miss", { "cache.key": cacheKey });
           this.telemetryMetrics.cacheMissCount.add(1, {
@@ -255,7 +303,14 @@ export class CacheManager {
             cache_key: cacheKey,
           });
 
-          const promise = fn()
+          const sharedController = new AbortController();
+          const entry: InFlightEntry<T> = {
+            promise: undefined as unknown as Promise<T>,
+            refCount: 1,
+            sharedController,
+          };
+
+          entry.promise = fn(sharedController.signal)
             .then(async (result) => {
               await this.set(cacheKey, result, options);
               span.addEvent("cache.value_stored", {
@@ -267,8 +322,13 @@ export class CacheManager {
             .catch((error) => {
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
-              // Preserve AppKit errors and Databricks API errors (with status codes)
-              // so route handlers can map them to proper HTTP responses.
+              // If the shared controller aborted, all callers have already
+              // abandoned the request (or are about to via their own signals)
+              // — propagate the original error without wrapping. No live
+              // awaiter will observe this rejection.
+              if (sharedController.signal.aborted) {
+                throw error;
+              }
               if (error instanceof AppKitError || error instanceof ApiError) {
                 throw error;
               }
@@ -277,12 +337,19 @@ export class CacheManager {
               );
             })
             .finally(() => {
-              this.inFlightRequests.delete(cacheKey);
+              if (this.inFlightRequests.get(cacheKey) === entry) {
+                this.inFlightRequests.delete(cacheKey);
+              }
             });
 
-          this.inFlightRequests.set(cacheKey, promise);
+          // Suppress unhandled rejection warnings when every caller bailed
+          // before fn() resolved (their own promises rejected via
+          // waitWithRefCount; the underlying entry.promise has no awaiter).
+          entry.promise.catch(() => {});
 
-          const result = await promise;
+          this.inFlightRequests.set(cacheKey, entry as InFlightEntry<unknown>);
+
+          const result = await this._waitWithRefCount(entry, callerSignal);
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error) {
@@ -298,6 +365,69 @@ export class CacheManager {
   }
 
   /**
+   * Wait on an in-flight entry, racing the underlying promise against the
+   * caller's abort signal. When the caller aborts, the entry's refCount is
+   * decremented; if it hits zero the shared controller is aborted so the
+   * underlying `fn()` can stop. Other callers continue to await the same
+   * entry and receive the result when it arrives.
+   */
+  private _waitWithRefCount<T>(
+    entry: InFlightEntry<T>,
+    callerSignal?: AbortSignal,
+  ): Promise<T> {
+    if (!callerSignal) return entry.promise;
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+
+      const release = () => {
+        if (entry.refCount > 0) entry.refCount--;
+        if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+          // Grace period: delay abort so a StrictMode remount can join
+          // the in-flight entry before the shared execution is cancelled.
+          entry.abortTimer = setTimeout(() => {
+            if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+              entry.sharedController.abort(
+                callerSignal.reason ?? "all cache callers aborted",
+              );
+            }
+          }, CacheManager.ABORT_GRACE_PERIOD_MS);
+        }
+      };
+
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        callerSignal.removeEventListener("abort", onAbort);
+        release();
+        reject(createAbortError(callerSignal));
+      };
+
+      if (callerSignal.aborted) {
+        onAbort();
+        return;
+      }
+
+      callerSignal.addEventListener("abort", onAbort, { once: true });
+
+      entry.promise.then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          callerSignal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (error) => {
+          if (settled) return;
+          settled = true;
+          callerSignal.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  /**
    * Get a cached value
    * @param key - Cache key
    * @returns Promise of the value or null if not found or expired
@@ -308,6 +438,18 @@ export class CacheManager {
     // probabilistic cleanup trigger
     this.maybeCleanup();
 
+    const entry = await this.getValid<T>(key);
+    return entry?.value ?? null;
+  }
+
+  /**
+   * Get a cached entry only if it has not expired.
+   * Returns null on miss or expired (and deletes the expired entry).
+   *
+   * Storage implementations return entries unconditionally — expiry handling
+   * lives at the CacheManager layer.
+   */
+  private async getValid<T>(key: string): Promise<CacheEntry<T> | null> {
     const entry = await this.storage.get<T>(key);
     if (!entry) return null;
 
@@ -315,7 +457,7 @@ export class CacheManager {
       await this.storage.delete(key);
       return null;
     }
-    return entry.value as T;
+    return entry;
   }
 
   /** Probabilistically trigger cleanup of expired entries (fire-and-forget) */
@@ -375,6 +517,9 @@ export class CacheManager {
   /** Clear the cache */
   async clear(): Promise<void> {
     await this.storage.clear();
+    for (const entry of this.inFlightRequests.values()) {
+      if (entry.abortTimer) clearTimeout(entry.abortTimer);
+    }
     this.inFlightRequests.clear();
   }
 
@@ -386,14 +531,8 @@ export class CacheManager {
   async has(key: string): Promise<boolean> {
     if (!this.config.enabled) return false;
 
-    const entry = await this.storage.get(key);
-    if (!entry) return false;
-
-    if (Date.now() > entry.expiry) {
-      await this.storage.delete(key);
-      return false;
-    }
-    return true;
+    const entry = await this.getValid(key);
+    return entry !== null;
   }
 
   /**

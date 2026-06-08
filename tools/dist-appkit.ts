@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const { values } = parseArgs({
+  options: {
+    prerelease: { type: "string" },
+  },
+});
+const prerelease = values.prerelease;
 
 // Read CLI dependencies from shared package
 const sharedPkgPath = path.join(__dirname, "../packages/shared/package.json");
@@ -15,6 +22,10 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 // Packages that are workspace-local but published separately — replace workspace:* with real version.
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
 const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
+
+if (prerelease) {
+  pkg.version = `${pkg.version}-pr.${prerelease}`;
+}
 
 delete pkg.dependencies.shared;
 
