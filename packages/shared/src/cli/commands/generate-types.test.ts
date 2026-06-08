@@ -38,8 +38,12 @@ const {
         unref,
       }),
     ),
-    acquireSpawnLock: vi.fn(() => true),
-    releaseSpawnLock: vi.fn(),
+    // Typed params so `.mock.calls` carry the (lockPath, token[, staleMs]) tuple
+    // the token-plumbing assertions read.
+    acquireSpawnLock: vi.fn(
+      (_lockPath: string, _token: string, _staleMs?: number) => true,
+    ),
+    releaseSpawnLock: vi.fn((_lockPath: string, _token: string) => {}),
     getSpawnLockPath: vi.fn(lockPathOf),
   };
 });
@@ -70,7 +74,7 @@ import { generateTypesCommand, resolveTypegenMode } from "./generate-types";
 
 /**
  * Drive the real commander command the way the bin does, so argv parsing
- * (`--wait`, `--worker-lock <path>` → camelCase, positionals) is exercised
+ * (`--wait`, `--worker-token <token>` → camelCase, positionals) is exercised
  * end-to-end. `from: "user"` means args are the user-supplied tokens only.
  */
 async function runCli(args: string[]): Promise<void> {
@@ -142,10 +146,15 @@ describe("generate-types foreground spawn orchestration", () => {
     );
 
     // Exactly one detached worker, re-invoking this CLI with --wait and the
-    // worker lock, forwarding the same positional targets.
+    // worker token, forwarding the same positional targets.
     expect(spawn).toHaveBeenCalledTimes(1);
     const [bin, argv, opts] = spawn.mock.calls[0];
     expect(bin).toBe(process.execPath);
+    // The same per-acquisition token written into the lock is handed to the
+    // worker (the lock PATH is no longer forwarded — the worker re-derives it).
+    const token = acquireSpawnLock.mock.calls[0][1];
+    expect(typeof token).toBe("string");
+    expect(token.length).toBeGreaterThan(0);
     // The parent's node/loader flags (process.execArgv — e.g. tsx's
     // --require/--import) are forwarded before the CLI entry so a worker spawned
     // from a source/tsx run can still execute the .ts. Everything from the entry
@@ -157,8 +166,8 @@ describe("generate-types foreground spawn orchestration", () => {
       process.argv[1], // CLI entry
       "generate-types",
       "--wait",
-      "--worker-lock",
-      getSpawnLockPath(tmpRoot),
+      "--worker-token",
+      token,
       tmpRoot,
       outFile,
       "wh-123",
@@ -215,17 +224,19 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  test("worker invocation (--worker-lock): runs blocking generate, releases lock, does NOT spawn", async () => {
+  test("worker invocation (--worker-token): runs blocking generate, releases its lock by derived path + token, does NOT spawn", async () => {
+    // The worker re-derives the lock path from its rootDir positional and
+    // releases with the token it was handed.
     const lockPath = getSpawnLockPath(tmpRoot);
 
-    await runCli([tmpRoot, "--worker-lock", lockPath]);
+    await runCli([tmpRoot, "--worker-token", "tok-xyz"]);
 
     // A worker is always blocking — it does the real DESCRIBE lifecycle.
     expect(generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "blocking" }),
     );
-    // It releases the SAME lock it was handed.
-    expect(releaseSpawnLock).toHaveBeenCalledWith(lockPath);
+    // It releases the lock it owns: the derived path AND its ownership token.
+    expect(releaseSpawnLock).toHaveBeenCalledWith(lockPath, "tok-xyz");
     // It must never spawn another worker (recursion would never terminate).
     expect(spawn).not.toHaveBeenCalled();
     expect(acquireSpawnLock).not.toHaveBeenCalled();

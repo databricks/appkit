@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Command, Option } from "commander";
@@ -29,13 +30,14 @@ interface GenerateTypesOptions {
   noCache?: boolean;
   wait?: boolean;
   /**
-   * Internal: present only on the detached worker invocation. Carries the path
-   * of the single-flight lock this worker must release when it finishes. Its
-   * presence is what marks an invocation as "the worker" — workers always run
-   * with `--wait`, so they never spawn another worker (only non-blocking runs
-   * spawn), which terminates the recursion.
+   * Internal: present only on the detached worker invocation. Carries the
+   * ownership token of the single-flight lock this worker must release when it
+   * finishes (the lock PATH is derived from `rootDir`, so it isn't forwarded
+   * separately). Its presence is what marks an invocation as "the worker" —
+   * workers always run with `--wait`, so they never spawn another worker (only
+   * non-blocking runs spawn), which terminates the recursion.
    */
-  workerLock?: string;
+  workerToken?: string;
 }
 
 /**
@@ -124,9 +126,10 @@ async function runGenerateTypes(
  * after the foreground non-blocking generate has already written degraded types.
  *
  * Re-invokes THIS CLI (`process.execPath` + `process.argv[1]` — the bin entry
- * that launched us) with `generate-types --wait --worker-lock <lockPath>` plus
- * the same positional target options the foreground used, so the worker writes
- * to the same out file / reads the same query folder. The worker is:
+ * that launched us) with `generate-types --wait --worker-token <token>` plus the
+ * same positional target options the foreground used, so the worker writes to
+ * the same out file / reads the same query folder (and re-derives the lock path
+ * from rootDir). The worker is:
  *  - `detached: true` + `.unref()` so it outlives this process (install/dev-setup
  *    can finish and exit while the worker keeps warming the warehouse).
  *  - `stdio: "ignore"` so it never holds the parent's pipes open or interleaves
@@ -135,13 +138,16 @@ async function runGenerateTypes(
  * Spawning is wrapped so any failure is non-fatal: the caller still has degraded
  * types and exits 0.
  *
- * @param lockPath - the acquired single-flight lock; passed to the worker so it
- *   releases the SAME lock when it finishes.
+ * @param token - the ownership token the foreground wrote into the lock; handed
+ *   to the worker (via `--worker-token`) so it releases only the lock it owns.
+ *   The lock PATH is NOT forwarded — the worker re-derives it from the `rootDir`
+ *   positional (deterministic via getSpawnLockPath), so the token is the single
+ *   release credential.
  * @param targets - the foreground's positional args, forwarded verbatim.
  * @returns true if the worker was spawned, false if spawning threw.
  */
 export function spawnTypegenWorker(
-  lockPath: string,
+  token: string,
   targets: { rootDir?: string; outFile?: string; warehouseId?: string },
 ): boolean {
   // The script the runtime launched us with (the `appkit` bin shim). Re-running
@@ -151,7 +157,8 @@ export function spawnTypegenWorker(
   // Forward the positionals in declaration order (rootDir, outFile,
   // warehouseId). Stop at the first undefined so we never pass a literal
   // "undefined" — commander would treat it as a positional value. (rootDir is
-  // effectively always set by commander's default, but guard anyway.)
+  // effectively always set by commander's default, and the worker needs it to
+  // re-derive the lock path, but guard anyway.)
   const positionals: string[] = [];
   for (const value of [targets.rootDir, targets.outFile, targets.warehouseId]) {
     if (value === undefined) break;
@@ -169,8 +176,8 @@ export function spawnTypegenWorker(
     cliEntry,
     "generate-types",
     "--wait",
-    "--worker-lock",
-    lockPath,
+    "--worker-token",
+    token,
     ...positionals,
   ];
 
@@ -200,9 +207,10 @@ export function spawnTypegenWorker(
  *     blocking worker behind the single-flight lock. If the lock is already held
  *     by a live worker, skip (single-flight) with a one-line note. Either way the
  *     foreground returns normally (exit 0).
- *  3. If this IS the worker (`--worker-lock` present), it ran blocking above and
- *     releases the lock here (and via a process-exit guard, so a hard failure /
- *     process.exit still frees it).
+ *  3. If this IS the worker (`--worker-token` present), it ran blocking above and
+ *     releases the lock here — by re-deriving the lock path from rootDir and
+ *     unlinking only if the lock still carries its token (and via a process-exit
+ *     guard, so a hard failure / process.exit still frees it).
  */
 async function generateTypesAction(
   rootDir: string | undefined,
@@ -210,21 +218,29 @@ async function generateTypesAction(
   warehouseId: string | undefined,
   options: GenerateTypesOptions,
 ) {
-  const isWorker = typeof options.workerLock === "string";
+  const workerToken = options.workerToken;
+  const isWorker = typeof workerToken === "string";
+
+  // A worker releases the lock by its derived PATH + the ownership TOKEN it was
+  // handed: the unlink only happens if the on-disk lock still carries that token,
+  // so a worker whose lock was stolen as stale can't delete the new owner's lock.
+  // The path is re-derived from the same rootDir the foreground used.
+  const workerLockPath = isWorker
+    ? getSpawnLockPath(rootDir || process.cwd())
+    : undefined;
 
   // A worker must always free its lock, even if the blocking generate throws or
   // calls process.exit (TypegenFatalError → exit 1). The exit handler covers the
   // process.exit / uncaught paths; the finally covers the normal return.
-  if (isWorker && options.workerLock) {
-    const lockPath = options.workerLock;
-    process.once("exit", () => releaseSpawnLock(lockPath));
+  if (isWorker && workerLockPath && workerToken) {
+    process.once("exit", () => releaseSpawnLock(workerLockPath, workerToken));
   }
 
   try {
     await runGenerateTypes(rootDir, outFile, warehouseId, options);
   } finally {
-    if (isWorker && options.workerLock) {
-      releaseSpawnLock(options.workerLock);
+    if (isWorker && workerLockPath && workerToken) {
+      releaseSpawnLock(workerLockPath, workerToken);
     }
   }
 
@@ -234,9 +250,12 @@ async function generateTypesAction(
   if (!isWorker && resolveTypegenMode(options) === "non-blocking") {
     const resolvedRootDir = rootDir || process.cwd();
     const lockPath = getSpawnLockPath(resolvedRootDir);
+    // A fresh per-acquisition credential: written into the lock body and handed
+    // to the worker so only it can release this lock.
+    const token = randomUUID();
 
-    if (acquireSpawnLock(lockPath)) {
-      spawnTypegenWorker(lockPath, { rootDir, outFile, warehouseId });
+    if (acquireSpawnLock(lockPath, token)) {
+      spawnTypegenWorker(token, { rootDir, outFile, warehouseId });
     } else {
       console.log("Type refresh already in progress, skipping.");
     }
@@ -257,12 +276,13 @@ export const generateTypesCommand = new Command("generate-types")
     "--wait",
     "Wait for warehouse readiness instead of degrading (use for CI)",
   )
-  // Internal: marks the detached background worker and carries the lock it must
-  // release. Hidden from --help; users should never pass it.
+  // Internal: marks the detached background worker and carries the ownership
+  // token it must present to release the lock. Hidden from --help; users should
+  // never pass it.
   .addOption(
     new Option(
-      "--worker-lock <path>",
-      "Internal: detached worker lock path",
+      "--worker-token <token>",
+      "Internal: detached worker lock ownership token",
     ).hideHelp(),
   )
   .addHelpText(

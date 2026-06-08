@@ -42,19 +42,25 @@ export function getSpawnLockPath(rootDir: string): string {
  * Atomic create via `fs.writeFileSync(lockPath, ..., { flag: "wx" })` — `wx`
  * fails (EEXIST) if the file already exists, so the create itself is the
  * mutual-exclusion primitive (no check-then-create race between two foreground
- * processes). The lock body records pid + timestamp purely for debugging.
+ * processes). The lock body is `${pid} ${ts} ${token}`: pid + timestamp for
+ * debugging, and the caller-supplied `token` as the ownership credential that
+ * {@link releaseSpawnLock} checks before unlinking.
  *
  * On EEXIST we stat the existing lock:
  *  - fresh (mtime within {@link staleMs}) → a worker is in flight, return false.
- *  - stale (mtime older than staleMs) → presumed orphaned; unlink and recreate.
- *    The recreate also uses `wx`, so if a competing process steals it first we
- *    lose the race cleanly and return false.
+ *  - stale (mtime older than staleMs) → presumed orphaned; unlink and recreate
+ *    with OUR token (so the displaced owner's release no longer matches and
+ *    can't delete our freshly-stolen lock). The recreate also uses `wx`, so if a
+ *    competing process steals it first we lose the race cleanly and return false.
  *
  * Any unexpected error (permission, ENOENT on a missing parent dir we couldn't
  * create, …) is swallowed and reported as "not acquired": failing to take the
  * lock must never break the foreground — at worst we skip the background refresh.
  *
  * @param lockPath - path returned by {@link getSpawnLockPath}.
+ * @param token - a per-acquisition random credential written into the lock body.
+ *   The same token must be handed to {@link releaseSpawnLock} (and, across
+ *   processes, to the spawned worker that releases on the foreground's behalf).
  * @param staleMs - age beyond which a held lock is stolen. Defaults to
  *   {@link SPAWN_LOCK_STALE_MS}.
  * @returns true if this caller now owns the lock (and must release it), false if
@@ -62,9 +68,10 @@ export function getSpawnLockPath(rootDir: string): string {
  */
 export function acquireSpawnLock(
   lockPath: string,
+  token: string,
   staleMs: number = SPAWN_LOCK_STALE_MS,
 ): boolean {
-  const body = `${process.pid} ${Date.now()}\n`;
+  const body = `${process.pid} ${Date.now()} ${token}\n`;
 
   try {
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -111,18 +118,41 @@ export function acquireSpawnLock(
 }
 
 /**
- * Release the spawn lock. Unlink, ignoring ENOENT (already gone — e.g. it was
- * stolen as stale by another process, or never existed). Any other error is
- * swallowed: a failed release at worst leaves a stale lock that the next caller
- * will steal after {@link SPAWN_LOCK_STALE_MS}.
+ * Release the spawn lock — but ONLY if it still belongs to this caller, i.e. its
+ * body carries `token`. This is the ownership guard: a worker whose lock was
+ * stolen as stale (and recreated with the new owner's token) must NOT delete the
+ * new owner's lock, and a stray call with a foreign/arbitrary path must not
+ * unlink a file it doesn't own.
+ *
+ * Reads the body first; unlinks only on a token match. A missing lock (ENOENT)
+ * or any read/unlink error is a silent no-op: releasing is best-effort, and a
+ * leftover lock is reclaimed by the next caller's stale-steal after
+ * {@link SPAWN_LOCK_STALE_MS}.
  *
  * @param lockPath - path returned by {@link getSpawnLockPath}.
+ * @param token - the credential this caller wrote in {@link acquireSpawnLock}.
+ *   The unlink happens only if the on-disk body contains exactly this token.
  */
-export function releaseSpawnLock(lockPath: string): void {
+export function releaseSpawnLock(lockPath: string, token: string): void {
+  let body: string;
+  try {
+    body = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    // ENOENT (already gone / stolen) or any read error — nothing to release.
+    return;
+  }
+
+  // Ownership check: only the writer of this token may unlink. Match on the
+  // whitespace-delimited token field so a token can't be a substring of the pid
+  // or timestamp by accident.
+  if (!body.split(/\s+/).includes(token)) {
+    return;
+  }
+
   try {
     fs.unlinkSync(lockPath);
   } catch {
-    // ENOENT or any other error — releasing is best-effort.
+    // Raced with a stale-steal or already gone — best-effort, swallow.
   }
 }
 
