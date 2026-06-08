@@ -86,6 +86,8 @@ interface EnsureWarehouseRunningOptions {
    * trigger billable warehouse starts.
    */
   autoStart?: boolean;
+  /** @internal Fired once when `warehouses.start` is issued for this poll. */
+  onWarehouseStartIssued?: () => void;
 }
 
 /** In-flight warehouse readiness work shared across concurrent callers. */
@@ -96,6 +98,8 @@ interface WarehouseReadinessInFlight {
   subscribers: Set<(update: WarehouseStatusUpdate) => void>;
   /** Last emitted update; replayed to late joiners. */
   lastUpdate: WarehouseStatusUpdate | null;
+  /** `true` once this poll has called `warehouses.start`. */
+  warehouseStartIssued: boolean;
 }
 
 export class SQLWarehouseConnector {
@@ -373,9 +377,10 @@ export class SQLWarehouseConnector {
    * Concurrent callers for the same `warehouseId` share a single in-flight
    * poll loop (singleflight): only the owner issues `get`/`start`; joiners
    * receive broadcast `onStatus` updates and share the result promise.
-   * The shared poll runs to completion (RUNNING, timeout, or hard error)
-   * even when every waiter disconnects — a late joiner or StrictMode remount
-   * can attach without racing a timed abort window.
+   * When every waiter disconnects before `warehouses.start`, the shared poll
+   * is aborted on the next microtask if still unclaimed (kills true orphans
+   * without a fixed grace window). After `start` is issued, the poll runs to
+   * completion even with no waiters.
    *
    * Behaviour by initial state:
    * - `RUNNING`: emits one update, caches the observation, returns.
@@ -442,6 +447,7 @@ export class SQLWarehouseConnector {
       sharedController,
       subscribers: new Set(),
       lastUpdate: null,
+      warehouseStartIssued: false,
       promise: Promise.resolve(),
     };
 
@@ -466,6 +472,9 @@ export class SQLWarehouseConnector {
                 signal: sharedController.signal,
                 timeoutMs: opts.timeoutMs,
                 autoStart: opts.autoStart,
+                onWarehouseStartIssued: () => {
+                  entry.warehouseStartIssued = true;
+                },
               },
               span,
             );
@@ -502,7 +511,7 @@ export class SQLWarehouseConnector {
     }
   }
 
-  /** Ref-counted await; caller abort rejects locally, shared poll keeps running. */
+  /** Ref-counted await; caller abort rejects locally. */
   private _joinWarehouseReadiness(
     entry: WarehouseReadinessInFlight,
     callerSignal?: AbortSignal,
@@ -533,9 +542,20 @@ export class SQLWarehouseConnector {
 
   private _releaseReadinessWaiter(entry: WarehouseReadinessInFlight): void {
     if (entry.refCount > 0) entry.refCount--;
-    // Intentionally do not abort the shared poll when the last waiter leaves.
-    // Cold-start polling is cheap relative to a failed remount and is bounded
-    // by `timeoutMs`; `_recentlyRunning` lets late joiners skip a second loop.
+    if (entry.refCount > 0 || entry.sharedController.signal.aborted) return;
+
+    if (entry.warehouseStartIssued) {
+      // Start already issued — finish warming for the process.
+      return;
+    }
+
+    // Defer abort to the next microtask so a synchronous StrictMode
+    // remount can rejoin before the shared poll is cancelled.
+    queueMicrotask(() => {
+      if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+        entry.sharedController.abort("all warehouse readiness waiters aborted");
+      }
+    });
   }
 
   private async _pollUntilWarehouseRunning(
@@ -549,6 +569,7 @@ export class SQLWarehouseConnector {
       signal,
       timeoutMs = DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
       autoStart = true,
+      onWarehouseStartIssued,
     } = opts;
     const startTime = Date.now();
     const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
@@ -590,6 +611,7 @@ export class SQLWarehouseConnector {
           }
           if (!didStart) {
             emitter.emit("STARTING", summary);
+            onWarehouseStartIssued?.();
             await workspaceClient.warehouses.start(
               { id: warehouseId },
               this._createContext(signal),

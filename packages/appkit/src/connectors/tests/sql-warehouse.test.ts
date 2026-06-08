@@ -432,7 +432,7 @@ describe("SQLWarehouseConnector", () => {
       expect(get).toHaveBeenCalledTimes(2);
     });
 
-    test("late remount joins in-flight readiness without a grace window", async () => {
+    test("synchronous remount rejoins before microtask orphan abort", async () => {
       const get = vi
         .fn()
         .mockResolvedValueOnce({ state: "STARTING" })
@@ -450,10 +450,6 @@ describe("SQLWarehouseConnector", () => {
         },
       );
       mount1.abort();
-      const firstOutcome = expect(first).rejects.toThrow(/canceled/i);
-
-      // Simulate an async remount (slower than any fixed grace period).
-      await vi.advanceTimersByTimeAsync(5_000);
 
       const remount = connector.ensureWarehouseRunning(
         wsClient as any,
@@ -461,23 +457,21 @@ describe("SQLWarehouseConnector", () => {
         { onStatus: () => {}, timeoutMs: 60_000 },
       );
 
+      const firstOutcome = expect(first).rejects.toThrow(/canceled/i);
       await vi.runAllTimersAsync();
       await firstOutcome;
       await expect(remount).resolves.toBeUndefined();
       expect(get).toHaveBeenCalledTimes(2);
     });
 
-    test("shared readiness loop completes when every waiter aborts", async () => {
-      const get = vi
-        .fn()
-        .mockResolvedValueOnce({ state: "STARTING" })
-        .mockResolvedValueOnce({ state: "RUNNING" });
+    test("orphan before warehouses.start is aborted on the next microtask", async () => {
+      const get = vi.fn().mockResolvedValue({ state: "STARTING" });
       const wsClient = { warehouses: { get, start: vi.fn() } };
       const controller = new AbortController();
 
       const only = connector.ensureWarehouseRunning(
         wsClient as any,
-        "wh-orphan",
+        "wh-orphan-pre-start",
         {
           onStatus: () => {},
           signal: controller.signal,
@@ -487,14 +481,46 @@ describe("SQLWarehouseConnector", () => {
       controller.abort();
 
       await expect(only).rejects.toThrow(/canceled/i);
+      await Promise.resolve();
+
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(wsClient.warehouses.start).not.toHaveBeenCalled();
+    });
+
+    test("orphan after warehouses.start runs poll to completion", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STOPPED" })
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const start = vi.fn().mockResolvedValue(undefined);
+      const wsClient = { warehouses: { get, start } };
+      const controller = new AbortController();
+
+      const only = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan-post-start",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      await Promise.resolve();
+      controller.abort();
+
+      await expect(only).rejects.toThrow(/canceled/i);
       await vi.runAllTimersAsync();
 
-      // Poll still finished — warm-path cache is primed for the next caller.
-      await connector.ensureWarehouseRunning(wsClient as any, "wh-orphan", {
-        onStatus: () => {},
-        timeoutMs: 60_000,
-      });
-      expect(get).toHaveBeenCalledTimes(2);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(3);
+
+      await connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan-post-start",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+      expect(get).toHaveBeenCalledTimes(3);
     });
 
     test("continues the readiness loop when onStatus callback throws", async () => {
