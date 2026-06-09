@@ -409,6 +409,75 @@ describe("ResourceRegistry", () => {
       }
     });
 
+    it("should not throw or warn in agentic mode when required resources are missing", () => {
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevAgentic = process.env.DATABRICKS_APPS_AGENTIC_MODE;
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      // Use production so the only thing preventing a throw is the agentic gate.
+      process.env.NODE_ENV = "production";
+      process.env.DATABRICKS_APPS_AGENTIC_MODE = "true";
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const registry = new ResourceRegistry();
+        registry.register("analytics", {
+          type: ResourceType.SQL_WAREHOUSE,
+          alias: "warehouse",
+          resourceKey: "warehouse",
+          description: "Warehouse",
+          permission: "CAN_USE",
+          required: true,
+          fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+        });
+        const result = registry.enforceValidation();
+        expect(result.valid).toBe(false);
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevAgentic !== undefined)
+          process.env.DATABRICKS_APPS_AGENTIC_MODE = prevAgentic;
+        else delete process.env.DATABRICKS_APPS_AGENTIC_MODE;
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+
+    it("agentic mode takes precedence over APPKIT_STRICT_VALIDATION", () => {
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevAgentic = process.env.DATABRICKS_APPS_AGENTIC_MODE;
+      const prevStrict = process.env.APPKIT_STRICT_VALIDATION;
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.NODE_ENV = "development";
+      process.env.DATABRICKS_APPS_AGENTIC_MODE = "1";
+      process.env.APPKIT_STRICT_VALIDATION = "true";
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      try {
+        const registry = new ResourceRegistry();
+        registry.register("analytics", {
+          type: ResourceType.SQL_WAREHOUSE,
+          alias: "warehouse",
+          resourceKey: "warehouse",
+          description: "Warehouse",
+          permission: "CAN_USE",
+          required: true,
+          fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+        });
+        // Strict would normally throw; agentic mode short-circuits first.
+        expect(() => registry.enforceValidation()).not.toThrow();
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevAgentic !== undefined)
+          process.env.DATABRICKS_APPS_AGENTIC_MODE = prevAgentic;
+        else delete process.env.DATABRICKS_APPS_AGENTIC_MODE;
+        if (prevStrict !== undefined)
+          process.env.APPKIT_STRICT_VALIDATION = prevStrict;
+        else delete process.env.APPKIT_STRICT_VALIDATION;
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+
     it("should not throw in production when all required resources are set", () => {
       const prevNodeEnv = process.env.NODE_ENV;
       const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;

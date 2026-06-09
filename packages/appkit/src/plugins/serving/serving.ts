@@ -85,11 +85,16 @@ export class ServingPlugin extends Plugin {
   static getResourceRequirements(
     config: IServingConfig,
   ): ResourceRequirement[] {
-    const endpoints = config.endpoints ?? {
-      default: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
-    };
+    // Default (unnamed) mode is already covered by the static manifest resource
+    // (serving-endpoint), which also drives scaffolding via `databricks apps
+    // init`. Emitting a default resource here too would register a second,
+    // non-deduping entry (serving-default) for the same env var. Only emit
+    // dynamic resources for explicitly named endpoints.
+    if (!config.endpoints) {
+      return [];
+    }
 
-    return Object.entries(endpoints).map(([alias, endpointConfig]) => ({
+    return Object.entries(config.endpoints).map(([alias, endpointConfig]) => ({
       type: ResourceType.SERVING_ENDPOINT,
       alias: `serving-${alias}`,
       resourceKey: `serving-${alias}`,

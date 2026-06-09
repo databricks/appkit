@@ -33,6 +33,22 @@ function getDedupKey(type: string, resourceKey: string): string {
 }
 
 /**
+ * Whether AppKit is running in agentic mode.
+ *
+ * The agent runtime runs the dev server in a sandbox where Databricks resource
+ * env vars are injected out-of-band (resolved from `app.yaml` `valueFrom`
+ * against bound resources) only once a resource is bound — so the
+ * resource-validation banner is noise during the build phase. The runtime sets
+ * this flag; it is not a public config knob.
+ */
+function isAgenticMode(): boolean {
+  return (
+    process.env.DATABRICKS_APPS_AGENTIC_MODE === "true" ||
+    process.env.DATABRICKS_APPS_AGENTIC_MODE === "1"
+  );
+}
+
+/**
  * Returns the most permissive permission for a given resource type.
  * Uses per-type hierarchy; unknown permissions are treated as least permissive.
  */
@@ -373,6 +389,15 @@ export class ResourceRegistry {
    */
   public enforceValidation(): ValidationResult {
     const validation = this.validate();
+
+    // In agentic mode, resource env vars are injected out-of-band once a
+    // resource is bound; an unbound resource at dev-server boot is expected, not
+    // an error. Suppress the warning/throw entirely. Checked before the
+    // dev/strict branch so it wins even if APPKIT_STRICT_VALIDATION is set.
+    if (isAgenticMode()) {
+      return validation;
+    }
+
     const isDevelopment = process.env.NODE_ENV === "development";
     const strictValidation =
       process.env.APPKIT_STRICT_VALIDATION === "true" ||

@@ -323,19 +323,11 @@ describe("Serving Plugin", () => {
   });
 
   describe("getResourceRequirements", () => {
-    test("generates requirements for default mode", () => {
+    test("emits no dynamic requirements in default mode (manifest covers it)", () => {
+      // The static manifest resource (serving-endpoint) covers the default
+      // endpoint; getResourceRequirements only adds explicitly named endpoints.
       const reqs = ServingPlugin.getResourceRequirements({});
-      expect(reqs).toHaveLength(1);
-      expect(reqs[0]).toMatchObject({
-        type: "serving_endpoint",
-        alias: "serving-default",
-        permission: "CAN_QUERY",
-        fields: {
-          name: {
-            env: "DATABRICKS_SERVING_ENDPOINT_NAME",
-          },
-        },
-      });
+      expect(reqs).toHaveLength(0);
     });
 
     test("generates requirements for named mode", () => {
