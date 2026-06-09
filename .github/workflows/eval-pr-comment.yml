@@ -38,7 +38,7 @@ jobs:
             });
             if (comments.some((c) => c.body?.includes(marker))) return;
 
-            const body = `${marker}\n> 🧪 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Start eval →**](${url})`;
+            const body = `${marker}\n> 🔬 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Go to Evals Monitor →**](${url})`;
 
             await github.rest.issues.createComment({
               owner,
