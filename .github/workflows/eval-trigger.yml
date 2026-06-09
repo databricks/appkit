@@ -1,0 +1,88 @@
+name: Eval Trigger
+
+# Launches the dogfood eval pipeline for a PR when the `run-evals` label is
+# present, and re-launches it on every new commit while the label stays on.
+#
+# Uses `pull_request` (not `pull_request_target`): the workflow file that runs
+# is the PR branch's version (so it's testable on the feature branch), and repo
+# secrets are withheld from fork PRs, so an external contributor cannot exfil
+# the Databricks credentials even by editing this file. Auth is OAuth M2M as the
+# `apps-mcp-evals-runner` service principal (DATABRICKS_CLIENT_ID/SECRET), and
+# those credentials are exposed only to the trigger step, never to the comment
+# step that runs PR-authored script code.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Latest push wins: a newer commit cancels the in-flight run for an older one,
+# so the sticky comment always reflects the most recently triggered commit.
+concurrency:
+  group: eval-trigger-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trigger-evals:
+    name: Trigger eval pipeline
+    # Run when the `run-evals` label is added, or on a new commit while the PR
+    # already carries the label.
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'run-evals') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'run-evals'))
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136 # v1.2.1
+
+      - name: Trigger eval pipeline
+        id: trigger
+        env:
+          DATABRICKS_HOST: https://dogfood.staging.databricks.com
+          # OAuth M2M as the apps-mcp-evals-runner service principal. The CLI
+          # auto-selects client-credentials auth when these are present.
+          DATABRICKS_CLIENT_ID: ${{ secrets.EVALS_DATABRICKS_CLIENT_ID_DOGFOOD }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.EVALS_DATABRICKS_CLIENT_SECRET_DOGFOOD }}
+          # The real PR head commit — never the synthetic merge commit — so the
+          # pipeline can pull the code.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        # --no-wait: fire-and-forget; run-now otherwise blocks until the eval
+        # finishes. The JSON response carries run_id, which we forward to the
+        # comment step to link the run (no extra API call).
+        run: |
+          run_json=$(databricks jobs run-now --no-wait --output json --json "$(cat <<EOF
+          {
+            "job_id": 398185277057549,
+            "job_parameters": {
+              "appkit_ref": "${HEAD_SHA}",
+              "prompt_preset": "custom-pr",
+              "tags": "appkit_pr:${PR_NUMBER}"
+            }
+          }
+          EOF
+          )")
+          echo "$run_json"
+          {
+            echo "run_json<<RUN_JSON_EOF"
+            echo "$run_json"
+            echo "RUN_JSON_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post / update "Eval running" comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_JSON: ${{ steps.trigger.outputs.run_json }}
+        with:
+          script: |
+            const upsert = require('./.github/scripts/upsert-eval-comment.cjs');
+            await upsert({ github, context });
