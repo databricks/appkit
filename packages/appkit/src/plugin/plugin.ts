@@ -413,9 +413,7 @@ export abstract class Plugin<
     const userId = req.header("x-forwarded-user")?.trim();
     if (userId) return userId;
     if (process.env.NODE_ENV === "development") return getCurrentUserId();
-    throw AuthenticationError.missingToken(
-      "Missing x-forwarded-user header. Cannot resolve user ID.",
-    );
+    throw AuthenticationError.missingUserId();
   }
 
   /**
@@ -429,7 +427,7 @@ export abstract class Plugin<
    *   In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
    */
   asUser(req: express.Request): this {
-    const token = req.header("x-forwarded-access-token");
+    const token = req.header("x-forwarded-access-token")?.trim();
     const userId = req.header("x-forwarded-user")?.trim();
     const userEmail = req.header("x-forwarded-email");
     const isDev = process.env.NODE_ENV === "development";

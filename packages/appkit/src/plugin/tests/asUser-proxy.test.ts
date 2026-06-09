@@ -182,6 +182,23 @@ function createReqWithUser(forwardedUser: string): express.Request {
   } as unknown as express.Request;
 }
 
+/**
+ * OBO request with a caller-supplied `x-forwarded-access-token` value (and a
+ * valid user). Used by the token-trim tests.
+ */
+function createReqWithToken(forwardedToken: string): express.Request {
+  return {
+    header: (name: string) => {
+      const map: Record<string, string> = {
+        "x-forwarded-access-token": forwardedToken,
+        "x-forwarded-user": "alice",
+        "x-forwarded-email": "alice@example.com",
+      };
+      return map[name.toLowerCase()];
+    },
+  } as unknown as express.Request;
+}
+
 describe("Plugin.asUser proxy", () => {
   let mockTelemetry: ITelemetry;
   let mockCache: CacheManager;
@@ -689,6 +706,12 @@ describe("Plugin.asUser proxy", () => {
         expect(() => plugin.resolve(createReqWithUser("   "))).toThrow(
           AuthenticationError,
         );
+        // The message must be the purpose-built missingUserId() text, not the
+        // doubled "Missing Missing … in request headers" the old missingToken()
+        // call produced.
+        expect(() => plugin.resolve(createReqWithUser("   "))).toThrow(
+          /User ID not available in request headers/,
+        );
       });
 
       test("resolveUserId falls back to the context user id in development", () => {
@@ -701,6 +724,50 @@ describe("Plugin.asUser proxy", () => {
         expect(resolved).not.toBe("   ");
         expect(resolved).toBe(serviceContextMock.serviceContext.serviceUserId);
       });
+    });
+  });
+
+  // `asUser` also trims `x-forwarded-access-token` at read time, so a
+  // whitespace-only token is treated as missing (not forwarded to the SDK as a
+  // bogus credential), and a padded token is normalized before it reaches
+  // ServiceContext.
+  describe("x-forwarded-access-token whitespace handling", () => {
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+    });
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("asUser throws in production when the token is whitespace-only", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = new ProbePlugin(config);
+
+      // "   " trims to "" (falsy) → treated as a missing token rather than
+      // being forwarded to ServiceContext.createUserContext as a bogus value.
+      expect(() => plugin.asUser(createReqWithToken("   "))).toThrow(
+        AuthenticationError,
+      );
+      expect(() => plugin.asUser(createReqWithToken("   "))).toThrow(
+        /Missing user token in request headers/,
+      );
+    });
+
+    test("asUser passes the trimmed token into ServiceContext.createUserContext", () => {
+      const plugin = new ProbePlugin(config);
+
+      plugin.asUser(createReqWithToken(" user-token-abc "));
+
+      // First positional arg is the token — it must be the trimmed value.
+      expect(serviceContextMock.createUserContextSpy).toHaveBeenCalledWith(
+        "user-token-abc",
+        "alice",
+        undefined,
+        "alice@example.com",
+      );
     });
   });
 });
