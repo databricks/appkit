@@ -373,6 +373,13 @@ export class ResourceRegistry {
    */
   public enforceValidation(): ValidationResult {
     const validation = this.validate();
+
+    // Agentic flows provision resource env vars out-of-band, so a missing
+    // resource at dev-server boot is expected — skip the warning/throw.
+    if (process.env.DATABRICKS_APPS_AGENTIC_MODE === "true") {
+      return validation;
+    }
+
     const isDevelopment = process.env.NODE_ENV === "development";
     const strictValidation =
       process.env.APPKIT_STRICT_VALIDATION === "true" ||
