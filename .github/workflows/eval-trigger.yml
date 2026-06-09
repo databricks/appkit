@@ -42,14 +42,37 @@ jobs:
       - name: Install Databricks CLI
         uses: databricks/setup-cli@772863b94473abd8b0cacbec8b6f80fa0cbe1136 # v1.2.1
 
+      # TEMPORARY diagnostic — remove once auth works. Disambiguates "cannot
+      # configure default credentials": is dogfood reachable + does OIDC
+      # discovery resolve, and does forced M2M auth produce a clearer error?
+      - name: Diagnose Databricks connectivity + auth
+        env:
+          DATABRICKS_HOST: https://dogfood.staging.databricks.com
+          DATABRICKS_CLIENT_ID: ${{ secrets.EVALS_DATABRICKS_CLIENT_ID_DOGFOOD }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.EVALS_DATABRICKS_CLIENT_SECRET_DOGFOOD }}
+          DATABRICKS_AUTH_TYPE: oauth-m2m
+        run: |
+          echo "::group::CLI version"
+          databricks --version
+          echo "::endgroup::"
+          echo "::group::Reachability"
+          curl -sS -m 20 -o /dev/null -w "host root:      HTTP %{http_code}\n" "$DATABRICKS_HOST/" || echo "host root: UNREACHABLE"
+          curl -sS -m 20 -w "\nworkspace OIDC: HTTP %{http_code}\n" "$DATABRICKS_HOST/oidc/.well-known/oauth-authorization-server" || echo "workspace OIDC: UNREACHABLE"
+          echo "::endgroup::"
+          echo "::group::Forced M2M auth (debug)"
+          # current-user me is a cheap authenticated call; --log-level debug
+          # surfaces the real auth-resolution error. Never fails the job.
+          databricks current-user me --log-level debug || true
+          echo "::endgroup::"
+
       - name: Trigger eval pipeline
         id: trigger
         env:
           DATABRICKS_HOST: https://dogfood.staging.databricks.com
-          # OAuth M2M as the apps-mcp-evals-runner service principal. The CLI
-          # auto-selects client-credentials auth when these are present.
+          # OAuth M2M as the apps-mcp-evals-runner service principal.
           DATABRICKS_CLIENT_ID: ${{ secrets.EVALS_DATABRICKS_CLIENT_ID_DOGFOOD }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.EVALS_DATABRICKS_CLIENT_SECRET_DOGFOOD }}
+          DATABRICKS_AUTH_TYPE: oauth-m2m
           # The real PR head commit — never the synthetic merge commit — so the
           # pipeline can pull the code.
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
