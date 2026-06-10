@@ -4,12 +4,17 @@
  * Single source of truth for `metric.json`
  * the config that activates the Analytics' metric-view path.
  *
- * `metric.json` declares UC Metric Views.
- * Each entry under `sp`/`obo` binds a metric key to a UC metric view FQN:
- * - `sp` entries are queried as the service principal (cache scope shared
- *   across all users).
- * - `obo` entries are queried as the requesting user (on-behalf-of; cache
- *   scope per-user).
+ * `metric.json` declares UC Metric Views under a single `metrics` map.
+ * Each entry binds a metric key to a UC metric view FQN plus the executor
+ * the query runs as:
+ * - `executor: "service_principal"` (default) — queried as the app service
+ *   principal (cache scope shared across all users).
+ * - `executor: "user"` — queried as the requesting user (on-behalf-of;
+ *   cache scope per-user).
+ *
+ * A single map (rather than per-executor sections) makes metric keys unique
+ * by construction — the same key cannot be declared twice with different
+ * executors.
  */
 
 import { z } from "zod";
@@ -21,10 +26,16 @@ export const metricKeySchema = z
     "Metric key. Must be a valid identifier (letters, digits, underscores; cannot start with a digit). Becomes the route key in POST /api/analytics/metric/:key, the hook argument in useMetricView('<key>', ...), and the MetricRegistry augmentation key.",
   );
 
+export const metricExecutorSchema = z
+  .enum(["service_principal", "user"])
+  .describe(
+    "Who the metric view is queried as. 'service_principal' (default) runs as the app service principal with a cache shared across all users; 'user' runs on-behalf-of the requesting user with a per-user cache.",
+  );
+
 /**
  * @note Entries are objects (rather than bare strings) at v1 so future per-entry
  * options (cacheTtl, defaultFilter, allowlists) can ship as additive
- * properties without a breaking change.
+ * properties without a breaking change. `executor` is the first such option.
  */
 export const metricEntrySchema = z
   .object({
@@ -42,10 +53,11 @@ export const metricEntrySchema = z
           "main.analytics.customer_metrics",
         ],
       }),
+    executor: metricExecutorSchema.default("service_principal"),
   })
   .strict()
   .describe(
-    "A single metric view source declaration. v1 only accepts the 'source' field; future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties.",
+    "A single metric view source declaration: the UC FQN to query and the executor to query it as. Future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties.",
   );
 
 export const metricSourceSchema = z
@@ -54,24 +66,19 @@ export const metricSourceSchema = z
       .string()
       .optional()
       .describe("Reference to the JSON Schema for validation"),
-    sp: z
+    metrics: z
       .record(metricKeySchema, metricEntrySchema)
       .optional()
       .describe(
-        "Metric views queried as the service principal. Cache scope is shared across all users.",
-      ),
-    obo: z
-      .record(metricKeySchema, metricEntrySchema)
-      .optional()
-      .describe(
-        "Metric views queried as the requesting user (on-behalf-of). Cache scope is per-user.",
+        "Metric view declarations, keyed by metric key. Each entry names the UC metric view to query and the executor it runs as.",
       ),
   })
   .strict()
   .describe(
-    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under sp/obo binds a metric key to a UC metric view FQN. Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
+    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metrics' binds a metric key to a UC metric view FQN and an executor ('service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
   );
 
 export type MetricKey = z.infer<typeof metricKeySchema>;
+export type MetricExecutor = z.infer<typeof metricExecutorSchema>;
 export type MetricEntry = z.infer<typeof metricEntrySchema>;
 export type MetricSource = z.infer<typeof metricSourceSchema>;

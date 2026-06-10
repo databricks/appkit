@@ -8,8 +8,8 @@
       "description": "Reference to the JSON Schema for validation",
       "type": "string"
     },
-    "sp": {
-      "description": "Metric views queried as the service principal. Cache scope is shared across all users.",
+    "metrics": {
+      "description": "Metric view declarations, keyed by metric key. Each entry names the UC metric view to query and the executor it runs as.",
       "type": "object",
       "propertyNames": {
         "type": "string",
@@ -27,40 +27,20 @@
               "appkit_demo.public.revenue_metrics",
               "main.analytics.customer_metrics"
             ]
-          }
-        },
-        "required": ["source"],
-        "additionalProperties": false,
-        "description": "A single metric view source declaration. v1 only accepts the 'source' field; future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties."
-      }
-    },
-    "obo": {
-      "description": "Metric views queried as the requesting user (on-behalf-of). Cache scope is per-user.",
-      "type": "object",
-      "propertyNames": {
-        "type": "string",
-        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
-        "description": "Metric key. Must be a valid identifier (letters, digits, underscores; cannot start with a digit). Becomes the route key in POST /api/analytics/metric/:key, the hook argument in useMetricView('<key>', ...), and the MetricRegistry augmentation key."
-      },
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "source": {
+          },
+          "executor": {
+            "default": "service_principal",
             "type": "string",
-            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$",
-            "description": "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
-            "examples": [
-              "appkit_demo.public.revenue_metrics",
-              "main.analytics.customer_metrics"
-            ]
+            "enum": ["service_principal", "user"],
+            "description": "Who the metric view is queried as. 'service_principal' (default) runs as the app service principal with a cache shared across all users; 'user' runs on-behalf-of the requesting user with a per-user cache."
           }
         },
         "required": ["source"],
         "additionalProperties": false,
-        "description": "A single metric view source declaration. v1 only accepts the 'source' field; future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties."
+        "description": "A single metric view source declaration: the UC FQN to query and the executor to query it as. Future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties."
       }
     }
   },
   "additionalProperties": false,
-  "description": "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under sp/obo binds a metric key to a UC metric view FQN. Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes."
+  "description": "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metrics' binds a metric key to a UC metric view FQN and an executor ('service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes."
 }
