@@ -9,7 +9,6 @@ describe("metricSourceSchema", () => {
       sp: {
         revenue: { source: "appkit_demo.public.revenue_metrics" },
       },
-      obo: {},
     };
     expect(metricSourceSchema.safeParse(config).success).toBe(true);
   });
