@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { metricSourceSchema } from "./metric-source";
 
 describe("metricSourceSchema", () => {
-  test("accepts a minimal configuration and defaults executor to service_principal", () => {
+  test("accepts a minimal configuration and defaults executor to app_service_principal", () => {
     const config = {
       $schema:
         "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
@@ -12,7 +12,9 @@ describe("metricSourceSchema", () => {
     };
     const result = metricSourceSchema.safeParse(config);
     expect(result.success).toBe(true);
-    expect(result.data?.metrics?.revenue.executor).toBe("service_principal");
+    expect(result.data?.metrics?.revenue.executor).toBe(
+      "app_service_principal",
+    );
   });
 
   test("accepts explicit executor values", () => {
@@ -20,7 +22,7 @@ describe("metricSourceSchema", () => {
       metrics: {
         revenue: {
           source: "demo.public.revenue",
-          executor: "service_principal",
+          executor: "app_service_principal",
         },
         my_orders: { source: "main.sales.orders_by_user", executor: "user" },
       },
@@ -53,7 +55,7 @@ describe("metricSourceSchema", () => {
   });
 
   test("rejects invalid executor values", () => {
-    for (const executor of ["sp", "obo", "app_service_principal", "USER"]) {
+    for (const executor of ["sp", "obo", "service_principal", "USER"]) {
       const config = {
         metrics: { revenue: { source: "a.b.c", executor } },
       };

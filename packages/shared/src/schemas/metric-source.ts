@@ -7,7 +7,7 @@
  * `metric.json` declares UC Metric Views under a single `metrics` map.
  * Each entry binds a metric key to a UC metric view FQN plus the executor
  * the query runs as:
- * - `executor: "service_principal"` (default) — queried as the app service
+ * - `executor: "app_service_principal"` (default) — queried as the app service
  *   principal (cache scope shared across all users).
  * - `executor: "user"` — queried as the requesting user (on-behalf-of;
  *   cache scope per-user).
@@ -27,9 +27,9 @@ export const metricKeySchema = z
   );
 
 export const metricExecutorSchema = z
-  .enum(["service_principal", "user"])
+  .enum(["app_service_principal", "user"])
   .describe(
-    "Who the metric view is queried as. 'service_principal' (default) runs as the app service principal with a cache shared across all users; 'user' runs on-behalf-of the requesting user with a per-user cache.",
+    "Who the metric view is queried as. 'app_service_principal' (default) runs as the app service principal with a cache shared across all users; 'user' runs on-behalf-of the requesting user with a per-user cache.",
   );
 
 /**
@@ -53,7 +53,7 @@ export const metricEntrySchema = z
           "main.analytics.customer_metrics",
         ],
       }),
-    executor: metricExecutorSchema.default("service_principal"),
+    executor: metricExecutorSchema.default("app_service_principal"),
   })
   .strict()
   .describe(
@@ -75,7 +75,7 @@ export const metricSourceSchema = z
   })
   .strict()
   .describe(
-    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metrics' binds a metric key to a UC metric view FQN and an executor ('service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
+    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metrics' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
   );
 
 export type MetricKey = z.infer<typeof metricKeySchema>;
