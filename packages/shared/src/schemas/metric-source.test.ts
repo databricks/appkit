@@ -6,20 +6,20 @@ describe("metricSourceSchema", () => {
     const config = {
       $schema:
         "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
-      metrics: {
+      metricViews: {
         revenue: { source: "appkit_demo.public.revenue_metrics" },
       },
     };
     const result = metricSourceSchema.safeParse(config);
     expect(result.success).toBe(true);
-    expect(result.data?.metrics?.revenue.executor).toBe(
+    expect(result.data?.metricViews?.revenue.executor).toBe(
       "app_service_principal",
     );
   });
 
   test("accepts explicit executor values", () => {
     const config = {
-      metrics: {
+      metricViews: {
         revenue: {
           source: "demo.public.revenue",
           executor: "app_service_principal",
@@ -29,17 +29,19 @@ describe("metricSourceSchema", () => {
     };
     const result = metricSourceSchema.safeParse(config);
     expect(result.success).toBe(true);
-    expect(result.data?.metrics?.my_orders.executor).toBe("user");
+    expect(result.data?.metricViews?.my_orders.executor).toBe("user");
   });
 
   test("accepts an empty configuration", () => {
     expect(metricSourceSchema.safeParse({}).success).toBe(true);
-    expect(metricSourceSchema.safeParse({ metrics: {} }).success).toBe(true);
+    expect(metricSourceSchema.safeParse({ metricViews: {} }).success).toBe(
+      true,
+    );
   });
 
   test("accepts metric keys with underscores", () => {
     const config = {
-      metrics: {
+      metricViews: {
         customer_metrics: { source: "demo.public.customer_metrics" },
       },
     };
@@ -57,7 +59,7 @@ describe("metricSourceSchema", () => {
   test("rejects invalid executor values", () => {
     for (const executor of ["sp", "obo", "service_principal", "USER"]) {
       const config = {
-        metrics: { revenue: { source: "a.b.c", executor } },
+        metricViews: { revenue: { source: "a.b.c", executor } },
       };
       expect(metricSourceSchema.safeParse(config).success).toBe(false);
     }
@@ -65,21 +67,21 @@ describe("metricSourceSchema", () => {
 
   test("rejects a bare-string entry (must be an object)", () => {
     const config = {
-      metrics: { revenue: "demo.public.revenue" },
+      metricViews: { revenue: "demo.public.revenue" },
     };
     expect(metricSourceSchema.safeParse(config).success).toBe(false);
   });
 
   test("rejects an entry without source", () => {
     const config = {
-      metrics: { revenue: {} },
+      metricViews: { revenue: {} },
     };
     expect(metricSourceSchema.safeParse(config).success).toBe(false);
   });
 
   test("rejects unknown fields on entries", () => {
     const config = {
-      metrics: {
+      metricViews: {
         revenue: {
           source: "a.b.c",
           ttl: 5, // future option, not in v1
@@ -92,20 +94,20 @@ describe("metricSourceSchema", () => {
   test("rejects unknown top-level keys", () => {
     expect(metricSourceSchema.safeParse({ foo: 1 }).success).toBe(false);
     expect(
-      metricSourceSchema.safeParse({ metrics: {}, unknown: {} }).success,
+      metricSourceSchema.safeParse({ metricViews: {}, unknown: {} }).success,
     ).toBe(false);
   });
 
   test("rejects metric keys that start with a digit", () => {
     const config = {
-      metrics: { "1bad": { source: "a.b.c" } },
+      metricViews: { "1bad": { source: "a.b.c" } },
     };
     expect(metricSourceSchema.safeParse(config).success).toBe(false);
   });
 
   test("rejects metric keys containing a hyphen", () => {
     const config = {
-      metrics: { "bad-key": { source: "a.b.c" } },
+      metricViews: { "bad-key": { source: "a.b.c" } },
     };
     expect(metricSourceSchema.safeParse(config).success).toBe(false);
   });
@@ -119,7 +121,7 @@ describe("metricSourceSchema", () => {
       "ends.with.dot.",
     ];
     for (const source of cases) {
-      const config = { metrics: { revenue: { source } } };
+      const config = { metricViews: { revenue: { source } } };
       expect(metricSourceSchema.safeParse(config).success).toBe(false);
     }
   });

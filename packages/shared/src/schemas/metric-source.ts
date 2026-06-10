@@ -4,7 +4,7 @@
  * Single source of truth for `metric.json`
  * the config that activates the Analytics' metric-view path.
  *
- * `metric.json` declares UC Metric Views under a single `metrics` map.
+ * `metric.json` declares UC Metric Views under a single `metricViews` map.
  * Each entry binds a metric key to a UC metric view FQN plus the executor
  * the query runs as:
  * - `executor: "app_service_principal"` (default) — queried as the app service
@@ -66,7 +66,7 @@ export const metricSourceSchema = z
       .string()
       .optional()
       .describe("Reference to the JSON Schema for validation"),
-    metrics: z
+    metricViews: z
       .record(metricKeySchema, metricEntrySchema)
       .optional()
       .describe(
@@ -75,7 +75,7 @@ export const metricSourceSchema = z
   })
   .strict()
   .describe(
-    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metrics' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
+    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
   );
 
 export type MetricKey = z.infer<typeof metricKeySchema>;
