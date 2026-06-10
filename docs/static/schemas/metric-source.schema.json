@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
+  "title": "AppKit Metric Source Configuration",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "Reference to the JSON Schema for validation",
+      "type": "string"
+    },
+    "metricViews": {
+      "description": "Metric view declarations, keyed by metric key. Each entry names the UC metric view to query and the executor it runs as.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+        "description": "Metric key. Must be a valid identifier (letters, digits, underscores; cannot start with a digit). Becomes the route key in POST /api/analytics/metric/:key, the hook argument in useMetricView('<key>', ...), and the MetricRegistry augmentation key."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$",
+            "description": "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
+            "examples": [
+              "appkit_demo.public.revenue_metrics",
+              "main.analytics.customer_metrics"
+            ]
+          },
+          "executor": {
+            "default": "app_service_principal",
+            "type": "string",
+            "enum": ["app_service_principal", "user"],
+            "description": "Who the metric view is queried as. 'app_service_principal' (default) runs as the app service principal with a cache shared across all users; 'user' runs on-behalf-of the requesting user with a per-user cache."
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false,
+        "description": "A single metric view source declaration: the UC FQN to query and the executor to query it as. Future per-entry options (cacheTtl, defaultFilter, allowlists) ship as additive properties."
+      }
+    }
+  },
+  "additionalProperties": false,
+  "description": "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes."
+}
