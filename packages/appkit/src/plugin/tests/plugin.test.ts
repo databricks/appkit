@@ -390,6 +390,7 @@ describe("Plugin", () => {
           ok: false,
           status: 500,
           message: "Server error",
+          code: "Error",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -415,6 +416,7 @@ describe("Plugin", () => {
           ok: false,
           status: 500,
           message: "detailed debug info",
+          code: "Error",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -435,6 +437,7 @@ describe("Plugin", () => {
         ok: false,
         status: 404,
         message: "Not found",
+        code: "ApiError",
       });
     });
 
@@ -452,6 +455,7 @@ describe("Plugin", () => {
         ok: false,
         status: 401,
         message: "Unauthorized",
+        code: "ApiError",
       });
     });
 
@@ -469,6 +473,7 @@ describe("Plugin", () => {
         ok: false,
         status: 403,
         message: "Forbidden",
+        code: "ApiError",
       });
     });
 
@@ -486,6 +491,7 @@ describe("Plugin", () => {
         ok: false,
         status: 502,
         message: "Bad gateway",
+        code: "ApiError",
       });
     });
 
@@ -506,6 +512,7 @@ describe("Plugin", () => {
           ok: false,
           status: 502,
           message: "Server error",
+          code: "ApiError",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -529,6 +536,7 @@ describe("Plugin", () => {
           ok: false,
           status: 403,
           message: "Forbidden",
+          code: "ApiError",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -555,6 +563,7 @@ describe("Plugin", () => {
           ok: false,
           status: 500,
           message: "Server error",
+          code: "SERVER_ERROR",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -579,6 +588,7 @@ describe("Plugin", () => {
           ok: false,
           status: 500,
           message: "internal server detail",
+          code: "SERVER_ERROR",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -603,6 +613,7 @@ describe("Plugin", () => {
           ok: false,
           status: 400,
           message: "bad input",
+          code: "VALIDATION_ERROR",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;
@@ -624,6 +635,7 @@ describe("Plugin", () => {
         ok: false,
         status: 401,
         message: expect.any(String),
+        code: "AUTHENTICATION_ERROR",
       });
     });
 
@@ -638,7 +650,12 @@ describe("Plugin", () => {
         { default: {} },
         false,
       );
-      expect(result).toEqual({ ok: false, status: 400, message: "bad input" });
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        message: "bad input",
+        code: "VALIDATION_ERROR",
+      });
     });
 
     test("should map ConnectionError to status 503", async () => {
@@ -656,6 +673,7 @@ describe("Plugin", () => {
         ok: false,
         status: 503,
         message: expect.any(String),
+        code: "CONNECTION_ERROR",
       });
     });
 
@@ -674,6 +692,7 @@ describe("Plugin", () => {
         ok: false,
         status: 502,
         message: "gateway failed",
+        code: "TUNNEL_ERROR",
       });
     });
 
@@ -692,7 +711,60 @@ describe("Plugin", () => {
         ok: false,
         status: 500,
         message: expect.any(String),
+        code: "EXECUTION_ERROR",
       });
+    });
+
+    test("should set code ABORTED for AbortError and keep it through production masking", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const abortError = new DOMException(
+          "The operation was aborted.",
+          "AbortError",
+        );
+        const mockFn = vi.fn().mockRejectedValue(abortError);
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        // The message is masked, but the machine-readable code survives so
+        // consumers can still detect aborts.
+        expect(result).toEqual({
+          ok: false,
+          status: 500,
+          message: "Server error",
+          code: "ABORTED",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("should keep EXECUTION_CANCELED code when masking ExecutionError.canceled() in production", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const mockFn = vi.fn().mockRejectedValue(ExecutionError.canceled());
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        expect(result).toEqual({
+          ok: false,
+          status: 500,
+          message: "Server error",
+          code: "EXECUTION_CANCELED",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 

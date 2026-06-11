@@ -24,7 +24,7 @@ import {
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
+import { ABORTED_ERROR_CODE, Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
@@ -86,6 +86,42 @@ async function* streamCallbacks<T>(
     });
   }
   if (error) throw error;
+}
+
+/**
+ * Re-throw a failed SQL {@link ExecutionResult} as the error the stream
+ * pipeline expects: an `AbortError` for user cancellations, otherwise an
+ * `ExecutionError.statementFailed(...)`.
+ *
+ * Branches on the machine-readable `code` first: in production, 5xx result
+ * messages are masked as "Server error", so message sniffing alone would
+ * misclassify cancellations as statement failures. Message sniffing is kept
+ * as a fallback for results that arrive without a code.
+ *
+ * Exported for testing.
+ */
+export function throwFromFailedSqlResult(result: {
+  message: string;
+  code?: string;
+}): never {
+  const msg = result.message;
+  const lower = msg.toLowerCase();
+  const isAborted =
+    result.code === ABORTED_ERROR_CODE ||
+    result.code === ExecutionError.CANCELED_CODE ||
+    lower.includes("operation was aborted") ||
+    lower.includes("the request was aborted") ||
+    lower.includes("statement was canceled");
+  if (isAborted) {
+    throw new DOMException(
+      lower.includes("canceled") ? msg : "The operation was aborted.",
+      "AbortError",
+    );
+  }
+  const inner = msg.startsWith("Statement failed: ")
+    ? msg.slice("Statement failed: ".length)
+    : msg;
+  throw ExecutionError.statementFailed(inner);
 }
 
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
@@ -320,23 +356,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         );
 
         if (!sqlResult.ok) {
-          const msg = sqlResult.message;
-          const lower = msg.toLowerCase();
-          if (
-            lower.includes("operation was aborted") ||
-            lower.includes("the request was aborted") ||
-            lower.includes("statement was canceled")
-          ) {
-            const err = new DOMException(
-              lower.includes("canceled") ? msg : "The operation was aborted.",
-              "AbortError",
-            );
-            throw err;
-          }
-          const inner = msg.startsWith("Statement failed: ")
-            ? msg.slice("Statement failed: ".length)
-            : msg;
-          throw ExecutionError.statementFailed(inner);
+          throwFromFailedSqlResult(sqlResult);
         }
 
         yield sqlResult.data as AnalyticsStreamMessage;

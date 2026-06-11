@@ -11,9 +11,29 @@ import { AppKitError } from "./base";
  * ```
  */
 export class ExecutionError extends AppKitError {
-  readonly code = "EXECUTION_ERROR";
+  /**
+   * Stable code carried by errors created via {@link ExecutionError.canceled}.
+   * Lets consumers detect cancellation programmatically without inspecting
+   * the message (which may be masked in production).
+   */
+  static readonly CANCELED_CODE = "EXECUTION_CANCELED";
+
+  readonly code: string;
   readonly statusCode = 500;
   readonly isRetryable = false;
+
+  constructor(
+    message: string,
+    options?: {
+      cause?: Error;
+      context?: Record<string, unknown>;
+      /** Stable machine-readable code (defaults to `"EXECUTION_ERROR"`). */
+      code?: string;
+    },
+  ) {
+    super(message, options);
+    this.code = options?.code ?? "EXECUTION_ERROR";
+  }
 
   /**
    * Create an execution error for statement failure
@@ -26,10 +46,14 @@ export class ExecutionError extends AppKitError {
   }
 
   /**
-   * Create an execution error for canceled operation
+   * Create an execution error for canceled operation.
+   * Carries the {@link ExecutionError.CANCELED_CODE} code so cancellation
+   * stays distinguishable even when the message is masked in production.
    */
   static canceled(): ExecutionError {
-    return new ExecutionError("Statement was canceled");
+    return new ExecutionError("Statement was canceled", {
+      code: ExecutionError.CANCELED_CODE,
+    });
   }
 
   /**

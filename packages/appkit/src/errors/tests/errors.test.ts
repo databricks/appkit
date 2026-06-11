@@ -284,6 +284,10 @@ describe("ExecutionError", () => {
   test("canceled should create proper error", () => {
     const error = ExecutionError.canceled();
     expect(error.message).toBe("Statement was canceled");
+    // Stable code lets consumers detect cancellation even when the message
+    // is masked in production.
+    expect(error.code).toBe(ExecutionError.CANCELED_CODE);
+    expect(error.code).toBe("EXECUTION_CANCELED");
   });
 
   test("resultsClosed should create proper error", () => {
