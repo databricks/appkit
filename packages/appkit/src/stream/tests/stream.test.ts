@@ -922,6 +922,185 @@ describe("StreamManager", () => {
     });
   });
 
+  describe("registry cleanup after stream termination", () => {
+    // default bufferTTL from streamDefaults
+    const BUFFER_TTL = 10 * 60 * 1000;
+
+    function getRegistry(manager: StreamManager) {
+      return (manager as any).streamRegistry as {
+        has(streamId: string): boolean;
+      };
+    }
+
+    function captureCloseHandler(mockRes: { on: ReturnType<typeof vi.fn> }) {
+      const handlers: (() => void)[] = [];
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") handlers.push(handler);
+      });
+      return () => {
+        for (const handler of handlers) {
+          handler();
+        }
+      };
+    }
+
+    test("removes a completed stream from the registry after buffer TTL once the client disconnects", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-completed-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "message", data: "result" };
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      // server ended the response; the close event fires asynchronously
+      fireClose();
+
+      // buffer is retained for reconnect replay during the TTL window
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL - 1);
+      expect(registry.has(streamId)).toBe(true);
+
+      // once the TTL elapses, the stream is removed from the registry
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("removes an errored stream from the registry after buffer TTL once the client disconnects", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-errored-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "start" };
+        throw new Error("Boom");
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      fireClose();
+
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL - 1);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("removes an errored stream even when the client disconnected before the error", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-errored-disconnected-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "start" };
+        // simulate client going away mid-stream
+        fireClose();
+        throw new Error("Boom");
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("keeps the buffer available for reconnect replay within the TTL window", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-replay-123";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+      const fireClose1 = captureCloseHandler(mockRes1);
+
+      async function* generator1() {
+        yield { type: "message", data: "event1" };
+        yield { type: "message", data: "event2" };
+      }
+
+      await streamManager.stream(mockRes1 as any, generator1, { streamId });
+      fireClose1();
+
+      // reconnect halfway through the TTL window
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": eventIds[0],
+      });
+      const fireClose2 = captureCloseHandler(mockRes2);
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(mockRes2 as any, generator2, { streamId });
+
+      // missed events are replayed from the buffer
+      const replayedData = events2
+        .filter((e) => e.startsWith("data: "))
+        .map((e) => e.replace("data: ", "").replace("\n\n", ""));
+      expect(replayedData.length).toBe(1);
+      expect(replayedData[0]).toContain("event2");
+
+      fireClose2();
+
+      // the timer from the first disconnect fires now but must no-op since
+      // the reconnect refreshed the stream's last access
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+      expect(registry.has(streamId)).toBe(true);
+
+      // a full TTL after the second disconnect, the stream is removed
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("does not remove a completed stream while a client is still connected", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-still-connected-123";
+      const { mockRes } = createMockResponse();
+
+      async function* generator() {
+        yield { type: "message", data: "result" };
+      }
+
+      // mockRes.on never fires "close", so the client stays connected
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL * 2);
+      expect(registry.has(streamId)).toBe(true);
+
+      vi.useRealTimers();
+    });
+  });
+
   describe("error categorization", () => {
     async function captureErrorEvent(
       manager: StreamManager,

@@ -155,13 +155,7 @@ export class StreamManager {
       }
 
       // cleanup if stream is completed and no clients are connected
-      if (streamEntry.isCompleted && streamEntry.clients.size === 0) {
-        setTimeout(() => {
-          if (streamEntry.clients.size === 0) {
-            this.streamRegistry.remove(streamEntry.streamId);
-          }
-        }, this.bufferTTL);
-      }
+      this._scheduleRemovalAfterTTL(streamEntry);
     });
 
     // if stream is completed, close connection
@@ -239,6 +233,11 @@ export class StreamManager {
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
         this._scheduleGraceAbort(streamEntry);
       }
+
+      // if the stream already finished (completed or errored), schedule
+      // registry removal once the buffer TTL elapses so completed streams
+      // don't accumulate in the registry forever
+      this._scheduleRemovalAfterTTL(streamEntry);
     });
 
     await this._processGeneratorInBackground(streamEntry);
@@ -295,8 +294,9 @@ export class StreamManager {
         // close all clients
         this._closeAllClients(streamEntry);
 
-        // cleanup if no clients are connected
-        this._cleanupStream(streamEntry);
+        // cleanup if no clients are connected (clients that are still
+        // connected schedule cleanup from their close handlers instead)
+        this._scheduleRemovalAfterTTL(streamEntry);
       } catch (error) {
         // Two distinct messages: a *raw* one for server-side logs (full
         // detail, statement fragments, correlation IDs) and a *client*
@@ -322,7 +322,7 @@ export class StreamManager {
           streamEntry.isCompleted = true;
           this._clearGraceTimer(streamEntry);
           this._closeAllClients(streamEntry);
-          this._cleanupStream(streamEntry);
+          this._scheduleRemovalAfterTTL(streamEntry);
           return;
         }
 
@@ -358,6 +358,10 @@ export class StreamManager {
         );
         streamEntry.isCompleted = true;
         this._clearGraceTimer(streamEntry);
+
+        // cleanup if no clients are connected (clients that are still
+        // connected schedule cleanup from their close handlers instead)
+        this._scheduleRemovalAfterTTL(streamEntry);
       }
     });
   }
@@ -464,15 +468,33 @@ export class StreamManager {
     }
   }
 
-  // cleanup stream if no clients are connected
-  private _cleanupStream(streamEntry: StreamEntry): void {
-    if (streamEntry.clients.size === 0) {
-      setTimeout(() => {
-        if (streamEntry.clients.size === 0) {
-          this.streamRegistry.remove(streamEntry.streamId);
-        }
-      }, this.bufferTTL);
+  // schedule registry removal once a finished (completed or errored) stream
+  // has no connected clients. The event buffer stays available for
+  // reconnect replay for `bufferTTL` after the last client disconnects;
+  // after that the stream entry is removed from the registry so it can be
+  // garbage collected.
+  private _scheduleRemovalAfterTTL(streamEntry: StreamEntry): void {
+    if (!streamEntry.isCompleted || streamEntry.clients.size > 0) {
+      return;
     }
+
+    // mark the moment the stream became idle so a reconnect during the TTL
+    // window (which refreshes lastAccess) makes the pending timer a no-op
+    streamEntry.lastAccess = Date.now();
+
+    const timer = setTimeout(() => {
+      // no-op if a client reconnected during the TTL window; the reconnect's
+      // own close handler schedules a fresh removal when it disconnects
+      if (
+        streamEntry.clients.size === 0 &&
+        Date.now() - streamEntry.lastAccess >= this.bufferTTL
+      ) {
+        this.streamRegistry.remove(streamEntry.streamId);
+      }
+    }, this.bufferTTL);
+
+    // don't keep the process alive just to clean up finished streams
+    timer.unref?.();
   }
 
   private _categorizeError(error: unknown): SSEErrorCode {
