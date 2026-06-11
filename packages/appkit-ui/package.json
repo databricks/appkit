@@ -3,6 +3,9 @@
   "type": "module",
   "version": "0.43.0",
   "license": "Apache-2.0",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/databricks/appkit.git"
