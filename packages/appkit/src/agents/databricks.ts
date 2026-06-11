@@ -413,6 +413,15 @@ export class DatabricksAdapter implements AgentAdapter {
           yield* this.executeToolCalls(parsed, messages, context, nameToWire);
           continue;
         }
+        // Terminal turn: no tool calls (structured or text-encoded), so `text`
+        // is the assistant's final answer. When tools were offered,
+        // streamCompletion buffered the text instead of streaming it live (to
+        // avoid duplicating it on tool-calling steps, #421) — surface it now,
+        // exactly once. With no tools it was already streamed live, so emitting
+        // again here would double it.
+        if (tools.length > 0 && text) {
+          yield { type: "message_delta", content: text };
+        }
         break;
       }
 
@@ -486,13 +495,14 @@ export class DatabricksAdapter implements AgentAdapter {
     { text: string; toolCalls: OpenAIToolCall[] },
     unknown
   > {
+    const hasTools = tools.length > 0;
     const body: Record<string, unknown> = {
       messages,
       stream: true,
       max_tokens: this.maxTokens,
     };
 
-    if (tools.length > 0) {
+    if (hasTools) {
       body.tools = tools;
     }
 
@@ -573,7 +583,18 @@ export class DatabricksAdapter implements AgentAdapter {
               this.maxStreamTextChars,
             );
             fullText += content;
-            yield { type: "message_delta" as const, content };
+            // Stream text live only when no tools are offered: such a turn is
+            // always terminal, so its text is the final answer. When tools are
+            // available the same turn may ALSO produce tool calls — Claude on
+            // Databricks Model Serving emits a full draft answer alongside its
+            // tool calls because the OpenAI-compatible layer lacks Claude's
+            // native tool-use prompt. Emitting that live would surface the draft
+            // on every ReAct step and duplicate it 3-4x (#421). Instead we buffer
+            // it into `fullText`; run() surfaces the text once, only on the
+            // terminal (no-tool) turn.
+            if (!hasTools) {
+              yield { type: "message_delta" as const, content };
+            }
           }
 
           const toolCallsRaw = deltaUnknown.tool_calls;

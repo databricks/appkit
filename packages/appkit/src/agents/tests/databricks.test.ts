@@ -252,6 +252,111 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
+  test("suppresses draft text emitted alongside tool calls, surfacing the final answer once (#421)", async () => {
+    const executeTool = vi.fn().mockResolvedValue([{ answer: 42 }]);
+    const draft = "The answer is 42.";
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // A single turn that contains BOTH a full draft answer AND a tool call —
+        // the shape Claude produces on Databricks Model Serving. The draft must
+        // not reach the consumer, or it duplicates on every ReAct step.
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([
+            textDelta(draft),
+            toolCallDelta(
+              0,
+              "call_1",
+              "analytics__query",
+              '{"query":"SELECT 1"}',
+            ),
+            sseChunk("[DONE]"),
+          ]),
+        });
+      }
+      // Final turn: the real answer, no tool calls.
+      return Promise.resolve({
+        ok: true,
+        body: createReadableStream([textDelta(draft), sseChunk("[DONE]")]),
+      });
+    });
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+    for await (const event of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool },
+    )) {
+      events.push(event);
+    }
+
+    // The draft on the tool-calling turn is suppressed; the answer appears once.
+    const messageDeltas = events.filter((e) => e.type === "message_delta");
+    expect(messageDeltas).toEqual([{ type: "message_delta", content: draft }]);
+
+    // The tool still ran (the draft was only suppressed from user-facing output).
+    expect(executeTool).toHaveBeenCalledWith("analytics.query", {
+      query: "SELECT 1",
+    });
+  });
+
+  test("does not duplicate the answer across multiple tool-calling steps (#421)", async () => {
+    const executeTool = vi.fn().mockResolvedValue([{ ok: true }]);
+    const draft = "Based on the data, revenue grew 12%.";
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount <= 2) {
+        // Two tool-calling turns, each leaking the full draft answer.
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([
+            textDelta(draft),
+            toolCallDelta(
+              0,
+              `call_${callCount}`,
+              "analytics__query",
+              '{"query":"SELECT 1"}',
+            ),
+            sseChunk("[DONE]"),
+          ]),
+        });
+      }
+      // Terminal turn with the final answer.
+      return Promise.resolve({
+        ok: true,
+        body: createReadableStream([textDelta(draft), sseChunk("[DONE]")]),
+      });
+    });
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+    for await (const event of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool },
+    )) {
+      events.push(event);
+    }
+
+    const answerDeltas = events.filter(
+      (e) => e.type === "message_delta" && e.content === draft,
+    );
+    expect(answerDeltas).toHaveLength(1);
+    expect(executeTool).toHaveBeenCalledTimes(2);
+  });
+
   describe("Vertex/Gemini thoughtSignature pass-through", () => {
     // Vertex AI's OpenAI-compatible surface attaches `thoughtSignature`
     // on every function call emitted by Gemini 2.x/3.x models. The next
