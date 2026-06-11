@@ -201,6 +201,7 @@ vi.mock("../client-config-sanitizer", () => ({
 
 import fs from "node:fs";
 import express from "express";
+import { CacheManager } from "../../../cache";
 import { TelemetryManager } from "../../../telemetry";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
@@ -920,7 +921,7 @@ describe("ServerPlugin", () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    test("runs phases in order: abort → closeIdle → plugin hooks → lifecycle emit → closeAll → flush → exit", async () => {
+    test("runs phases in order: abort → closeIdle → plugin hooks → lifecycle emit → closeAll → cache close + flush (concurrent) → exit", async () => {
       const order: string[] = [];
 
       const ctx = createContextWithPlugins({
@@ -956,18 +957,61 @@ describe("ServerPlugin", () => {
 
       const plugin = new ServerPlugin({ context: ctx } as any);
       (plugin as any).server = mockHttpServer;
+      // Set after construction: the Plugin constructor itself consumes one
+      // getInstanceSync() call when binding the cache eagerly.
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
+        close: vi.fn(async () => {
+          order.push("cache-close");
+        }),
+      } as any);
 
       await (plugin as any)._gracefulShutdown();
 
-      expect(order).toEqual([
+      expect(order.slice(0, 5)).toEqual([
         "abort",
         "closeIdle",
         "plugin-shutdown",
         "lifecycle",
         "closeAll",
-        "flush",
-        "exit",
       ]);
+      // The cache close and the telemetry flush run concurrently, so only
+      // assert that both happen after closeAll and before exit — their
+      // relative order is unspecified.
+      expect(order.slice(5, 7).sort()).toEqual(["cache-close", "flush"]);
+      expect(order[7]).toBe("exit");
+      expect(order).toHaveLength(8);
+    });
+
+    test("a hanging cache close cannot hang shutdown — the close timeout still exits 0", async () => {
+      vi.useFakeTimers();
+
+      const hangingClose = vi.fn(() => new Promise<never>(() => {}));
+
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      (plugin as any).server = mockHttpServer;
+      // Set after construction: the Plugin constructor itself consumes one
+      // getInstanceSync() call when binding the cache eagerly.
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
+        close: hangingClose,
+      } as any);
+
+      const done = (plugin as any)._gracefulShutdown();
+      // The per-phase budget (2s) is what unblocks the close — well before
+      // the 15s force-exit timer.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await done;
+
+      expect(hangingClose).toHaveBeenCalledTimes(1);
+      expect(
+        mockLoggerError.mock.calls.some(
+          (c) =>
+            String(c[0]).includes("Error closing cache storage") &&
+            String(c[1]).includes("timed out"),
+        ),
+      ).toBe(true);
+      expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     test("a plugin shutdown() that rejects after its timeout already won does not crash", async () => {

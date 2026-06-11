@@ -60,10 +60,16 @@ export class ServerPlugin extends Plugin {
    *
    * Budget arithmetic: plugin `shutdown()` hooks run concurrently and are
    * bounded by {@link PLUGIN_SHUTDOWN_TIMEOUT_MS} (10s); the lifecycle emit
-   * and the telemetry flush are each bounded by
-   * {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s). Worst case is 10s + 2s + 2s =
-   * 14s, leaving ~1s of margin for the remaining steps (aborts, socket
-   * teardown, awaiting `server.close()`) before this timer force-exits.
+   * is bounded by {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s); the cache storage
+   * close and the telemetry flush run concurrently, each bounded by
+   * {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s). Worst case is
+   * 10s + 2s + max(2s, 2s) = 14s, leaving ~1s of margin for the remaining
+   * steps (aborts, socket teardown) before this timer force-exits.
+   *
+   * The `server.close()` await (after `closeAllConnections()`) is unbounded
+   * by design: `closeAllConnections()` runs immediately before it, so it is
+   * expected to resolve promptly, and the force-exit timer is the backstop
+   * if it does not.
    */
   private static readonly SHUTDOWN_TIMEOUT_MS = 15_000;
   /**
@@ -73,8 +79,9 @@ export class ServerPlugin extends Plugin {
   private static readonly PLUGIN_SHUTDOWN_TIMEOUT_MS = 10_000;
   /**
    * Budget for each non-plugin shutdown phase (the `"shutdown"` lifecycle
-   * emit and the telemetry flush). Keeps the worst-case total under
-   * {@link SHUTDOWN_TIMEOUT_MS} — see the arithmetic there.
+   * emit, the cache storage close, and the telemetry flush). Keeps the
+   * worst-case total under {@link SHUTDOWN_TIMEOUT_MS} — see the arithmetic
+   * there.
    */
   private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
@@ -543,29 +550,45 @@ export class ServerPlugin extends Plugin {
       }
 
       // 6. close the cache manager's storage (drains the persistent
-      //    Lakebase pool; no-op for in-memory storage). Runs after the
-      //    lifecycle emit so subscribers can still read the cache.
-      this.shutdownPhase = "closing cache storage";
-      try {
-        await CacheManager.getInstanceSync().close();
-      } catch {
-        // Cache was never initialized (or already closed) — nothing to do.
-      }
-
-      // 7. flush telemetry inside the orchestrated shutdown instead of
+      //    Lakebase pool; no-op for in-memory storage) and flush telemetry.
+      //    Runs after the lifecycle emit so subscribers can still read the
+      //    cache. The two are independent (the flush never touches the
+      //    cache), so they run concurrently — each bounded so a stuck pool
+      //    drain or stalled OTLP export cannot eat the remaining budget.
+      //    The flush runs inside the orchestrated shutdown instead of
       //    racing a standalone TelemetryManager signal handler against
-      //    process.exit (see disownSignalHandlers in start()). Bounded so
-      //    a stalled OTLP export cannot eat the remaining budget.
-      this.shutdownPhase = "telemetry flush";
-      try {
-        await this.raceWithTimeout(
-          TelemetryManager.getInstance().shutdown(),
-          ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
-          "telemetry flush",
-        );
-      } catch (err) {
-        logger.error("Error flushing telemetry during shutdown: %O", err);
-      }
+      //    process.exit (see disownSignalHandlers in start()).
+      this.shutdownPhase = "cache storage close + telemetry flush";
+      const closeCacheStorage = async () => {
+        let cache: CacheManager;
+        try {
+          cache = CacheManager.getInstanceSync();
+        } catch {
+          // Cache was never initialized — nothing to close.
+          return;
+        }
+        try {
+          await this.raceWithTimeout(
+            cache.close(),
+            ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
+            "cache storage close",
+          );
+        } catch (err) {
+          logger.error("Error closing cache storage during shutdown: %O", err);
+        }
+      };
+      const flushTelemetry = async () => {
+        try {
+          await this.raceWithTimeout(
+            TelemetryManager.getInstance().shutdown(),
+            ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
+            "telemetry flush",
+          );
+        } catch (err) {
+          logger.error("Error flushing telemetry during shutdown: %O", err);
+        }
+      };
+      await Promise.all([closeCacheStorage(), flushTelemetry()]);
     } catch (err) {
       logger.error("Error during graceful shutdown: %O", err);
       clearTimeout(forceExitTimer);
