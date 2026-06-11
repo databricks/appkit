@@ -394,6 +394,116 @@ export function defaultForType(sqlType: string | undefined): string {
 }
 
 /**
+ * Format a user-supplied sample value as a SQL literal for substitution.
+ * String-like types are wrapped in single quotes (with `'` doubled) unless the
+ * value is already a quoted literal; numeric/boolean/binary values pass through
+ * verbatim so callers can write `= 5`, `= true`, or `= X'00'` directly.
+ */
+function formatSampleValue(sqlType: string | undefined, raw: string): string {
+  if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
+    return raw;
+  }
+  switch (sqlType?.toUpperCase()) {
+    case "STRING":
+    case "DATE":
+    case "TIMESTAMP":
+    case "TIMESTAMP_NTZ":
+      return `'${raw.replace(/'/g, "''")}'`;
+    default:
+      return raw;
+  }
+}
+
+/**
+ * Parse optional describe-time sample values from `@param` annotations, e.g.
+ * `-- @param target_catalog STRING = main`. The value is substituted into the
+ * SQL **only during DESCRIBE QUERY** so type generation can resolve queries
+ * whose shape depends on a parameter value — most notably dynamic table names
+ * via `IDENTIFIER(:target_catalog || '.schema.table')`, where the empty-string
+ * default would otherwise produce malformed SQL. Runtime binding is unaffected:
+ * the analytics plugin still binds the real parameter at execution time, so the
+ * query stays portable across environments.
+ *
+ * Returns a map of parameter name to the formatted SQL literal to substitute.
+ */
+export function extractParameterDefaults(sql: string): Record<string, string> {
+  const defaults: Record<string, string> = {};
+  // Mirrors extractParameterTypes' type alternation, then requires `= <value>`
+  // through end-of-line. Lines without a value are left to extractParameterTypes.
+  const regex =
+    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\s*=\s*(.+?)\s*$/gim;
+  for (const match of sql.matchAll(regex)) {
+    const [, paramName, paramType, rawValue] = match;
+    defaults[paramName] = formatSampleValue(paramType, rawValue);
+  }
+  return defaults;
+}
+
+/**
+ * Replace `:param` placeholders with describe-time literals so `DESCRIBE QUERY`
+ * can run without bound parameters. Resolution order per parameter:
+ *   1. An explicit `-- @param name TYPE = value` sample value (wins), which lets
+ *      dynamic table names via `IDENTIFIER(...)` resolve to a real table.
+ *   2. Otherwise a placeholder default derived from the annotated/inferred type.
+ * Placeholders inside string literals or comments are left untouched.
+ */
+export function substituteParametersForDescribe(sql: string): string {
+  const protectedRanges = getProtectedRanges(sql);
+  const annotatedTypes = extractParameterTypes(sql);
+  const inferredTypes = inferParameterTypes(sql, protectedRanges);
+  const parameterTypes = { ...inferredTypes, ...annotatedTypes };
+  const parameterDefaults = extractParameterDefaults(sql);
+  return sql.replace(
+    /(?<!:):([a-zA-Z_]\w*)/g,
+    (original, paramName, offset) => {
+      if (isInsideProtectedRange(offset, protectedRanges)) {
+        return original;
+      }
+      const sampleValue = parameterDefaults[paramName];
+      if (sampleValue !== undefined) {
+        return sampleValue;
+      }
+      return defaultForType(parameterTypes[paramName]);
+    },
+  );
+}
+
+/**
+ * Append a remediation hint when a DESCRIBE failure looks like a dynamic
+ * identifier that couldn't be resolved: the query calls `IDENTIFIER(...)` and
+ * has at least one parameter without a describe-time sample value. These fail
+ * because typegen substitutes a placeholder default (e.g. `''`) that yields a
+ * malformed or non-existent table name. Steering the user to the `= value`
+ * annotation turns the fatal error into a one-line fix.
+ */
+function withIdentifierHint(
+  error: { code?: string; message: string },
+  sql: string,
+): { code?: string; message: string } {
+  if (!/\bIDENTIFIER\s*\(/i.test(sql)) {
+    return error;
+  }
+  const protectedRanges = getProtectedRanges(sql);
+  const params = extractParameters(sql, protectedRanges);
+  const defaults = extractParameterDefaults(sql);
+  const unresolved = params.filter(
+    (p) => !SERVER_INJECTED_PARAMS.includes(p) && defaults[p] === undefined,
+  );
+  if (unresolved.length === 0) {
+    return error;
+  }
+  const example = unresolved[0];
+  return {
+    ...error,
+    message: `${error.message}\n  Hint: this query uses IDENTIFIER() with parameter(s) ${unresolved
+      .map((p) => `:${p}`)
+      .join(
+        ", ",
+      )}. Give type generation a sample value so it can resolve the table, e.g. \`-- @param ${example} STRING = my_catalog\`. The runtime query still binds the real parameter.`,
+  };
+}
+
+/**
  * Infer parameter types from positional context in SQL.
  * V1 only infers NUMERIC from patterns like LIMIT, OFFSET, TOP,
  * FETCH FIRST ... ROWS, and arithmetic operators.
@@ -512,20 +622,17 @@ export async function generateQueriesFromDescribe(
       const annotatedTypes = extractParameterTypes(sql);
       const inferredTypes = inferParameterTypes(sql, protectedRanges);
       const parameterTypes = { ...inferredTypes, ...annotatedTypes };
-      const sqlWithDefaults = sql.replace(
-        /(?<!:):([a-zA-Z_]\w*)/g,
-        (original, paramName, offset) => {
-          if (isInsideProtectedRange(offset, protectedRanges)) {
-            return original;
-          }
-          return defaultForType(parameterTypes[paramName]);
-        },
-      );
+      // Explicit describe-time sample values (`-- @param name TYPE = value`)
+      // take precedence over the type-based default so queries with dynamic
+      // table names (IDENTIFIER) can resolve a real table during DESCRIBE.
+      const parameterDefaults = extractParameterDefaults(sql);
+      const sqlWithDefaults = substituteParametersForDescribe(sql);
 
       // Warn about unresolved parameters
       const allParams = extractParameters(sql, protectedRanges);
       for (const param of allParams) {
         if (SERVER_INJECTED_PARAMS.includes(param)) continue;
+        if (parameterDefaults[param]) continue;
         if (parameterTypes[param]) continue;
         logger.warn(
           '%s: parameter ":%s" has no type annotation or inference. Add %s to the query file.',
@@ -711,7 +818,7 @@ export async function generateQueriesFromDescribe(
             status: "syntax",
             index,
             schema: { name: queryName, type },
-            error: parseError(sqlError),
+            error: withIdentifierHint(parseError(sqlError), sql),
           };
         }
 

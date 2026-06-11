@@ -2,12 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   convertToQueryType,
   defaultForType,
+  extractParameterDefaults,
   extractParameters,
   extractParameterTypes,
   getProtectedRanges,
   inferParameterTypes,
   normalizeTypeName,
   SERVER_INJECTED_PARAMS,
+  substituteParametersForDescribe,
 } from "../query-registry";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
@@ -588,5 +590,103 @@ describe("substitution skips protected ranges", () => {
     expect(result).toContain(":skip_me");
     expect(result).not.toContain(":keep");
     expect(result).toContain("id = ''");
+  });
+});
+
+describe("extractParameterDefaults", () => {
+  test("returns empty object when no sample values are present", () => {
+    const sql =
+      "-- @param startDate DATE\nSELECT * FROM t WHERE d = :startDate";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("quotes string-like sample values", () => {
+    const sql = [
+      "-- @param target_catalog STRING = main",
+      "-- @param since DATE = 2024-01-01",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      target_catalog: "'main'",
+      since: "'2024-01-01'",
+    });
+  });
+
+  test("passes numeric and boolean sample values through verbatim", () => {
+    const sql = [
+      "-- @param limit INT = 100",
+      "-- @param ratio DOUBLE = 0.5",
+      "-- @param active BOOLEAN = true",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      limit: "100",
+      ratio: "0.5",
+      active: "true",
+    });
+  });
+
+  test("leaves already-quoted values untouched and escapes embedded quotes", () => {
+    const sql = [
+      "-- @param a STRING = 'pre-quoted'",
+      "-- @param b STRING = O'Brien",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      a: "'pre-quoted'",
+      b: "'O''Brien'",
+    });
+  });
+
+  test("ignores @param lines without a value", () => {
+    const sql = "-- @param onlyType STRING\nSELECT 1";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+});
+
+describe("substituteParametersForDescribe (IDENTIFIER support, #383)", () => {
+  test("empty-string default produces malformed SQL for IDENTIFIER params", () => {
+    // Reproduces the bug: with no sample value, an untyped IDENTIFIER param
+    // collapses to '' and yields IDENTIFIER('' || '.schema.table'), a leading-dot
+    // identifier that Databricks rejects with PARSE_SYNTAX_ERROR.
+    const sql = "SELECT * FROM IDENTIFIER(:target_catalog || '.sales.nation')";
+    expect(substituteParametersForDescribe(sql)).toBe(
+      "SELECT * FROM IDENTIFIER('' || '.sales.nation')",
+    );
+  });
+
+  test("sample value resolves IDENTIFIER to a real, describable table", () => {
+    const sql = [
+      "-- @param target_catalog STRING = main",
+      "SELECT * FROM IDENTIFIER(:target_catalog || '.sales.nation')",
+    ].join("\n");
+    const out = substituteParametersForDescribe(sql);
+    expect(out).toContain("IDENTIFIER('main' || '.sales.nation')");
+    expect(out).not.toContain(":target_catalog");
+  });
+
+  test("sample value wins over the type-based default", () => {
+    const sql = [
+      "-- @param status STRING = active",
+      "SELECT * FROM t WHERE status = :status",
+    ].join("\n");
+    expect(substituteParametersForDescribe(sql)).toContain("status = 'active'");
+  });
+
+  test("falls back to the type default when no sample value is given", () => {
+    const sql = ["-- @param limit INT", "SELECT * FROM t LIMIT :limit"].join(
+      "\n",
+    );
+    expect(substituteParametersForDescribe(sql)).toBe(
+      "-- @param limit INT\nSELECT * FROM t LIMIT 0",
+    );
+  });
+
+  test("does not substitute placeholders inside string literals", () => {
+    const sql = "SELECT ':target_catalog' AS lit, :target_catalog AS p";
+    const sql2 = ["-- @param target_catalog STRING = main", sql].join("\n");
+    const out = substituteParametersForDescribe(sql2);
+    expect(out).toContain("':target_catalog' AS lit");
+    expect(out).toContain("'main' AS p");
   });
 });
