@@ -6,9 +6,10 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
-import type { PluginManifest } from "shared";
+import type { IAppResponse, IAppRouter, PluginManifest } from "shared";
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
+import { AuthenticationError } from "../../../errors";
 import { Plugin, toPlugin } from "../../../plugin";
 import { server as serverPlugin } from "../index";
 
@@ -275,6 +276,128 @@ describe("createApp with async onPluginsReady callback", () => {
 
     const data = await response.json();
     expect(data).toEqual({ asyncSetup: true });
+  });
+});
+
+describe("ServerPlugin error handling for rejected async handlers", () => {
+  let server: Server;
+  let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+  const TEST_PORT = 9879;
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+
+  beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    // Plugin whose handlers reject before writing a response — mirrors the
+    // genie/serving pattern of `await this.asUser(req)._handleX(req, res)`
+    // hit without forwarded auth headers.
+    class ThrowingPlugin extends Plugin {
+      static manifest = {
+        name: "throwing-plugin",
+        displayName: "Throwing Plugin",
+        description: "Test plugin whose handlers reject",
+        resources: { required: [], optional: [] },
+      } satisfies PluginManifest<"throwing-plugin">;
+
+      injectRoutes(router: IAppRouter) {
+        this.route(router, {
+          name: "authError",
+          method: "get",
+          path: "/auth-error",
+          handler: async (req, res) => {
+            // asUser() throws AuthenticationError when the request has no
+            // x-forwarded-access-token header (outside development mode).
+            await this.asUser(req)._whoAmI(res);
+          },
+        });
+
+        this.route(router, {
+          name: "genericError",
+          method: "get",
+          path: "/generic-error",
+          handler: async () => {
+            throw new Error("boom");
+          },
+        });
+      }
+
+      async _whoAmI(res: IAppResponse): Promise<void> {
+        res.json({ ok: true });
+      }
+    }
+
+    const throwingPlugin = toPlugin(ThrowingPlugin);
+
+    const app = await createApp({
+      plugins: [
+        serverPlugin({
+          port: TEST_PORT,
+          host: "127.0.0.1",
+        }),
+        throwingPlugin({}),
+      ],
+    });
+
+    server = app.server.getServer();
+    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
+  afterAll(async () => {
+    process.off("unhandledRejection", onUnhandledRejection);
+    serviceContextMock?.restore();
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+  });
+
+  test("handler throwing AuthenticationError returns 401 JSON without unhandled rejection", async () => {
+    const response = await fetch(
+      `${baseUrl}/api/throwing-plugin/auth-error`,
+      // No x-forwarded-access-token / x-forwarded-user headers.
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toContain("application/json");
+
+    const data = (await response.json()) as { error: string };
+    expect(data.error).toBe(
+      AuthenticationError.missingToken("user token").message,
+    );
+
+    // Give a potential unhandledRejection a chance to fire.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(unhandledRejections).toEqual([]);
+  });
+
+  test("handler throwing a generic error returns 500 JSON without unhandled rejection", async () => {
+    const response = await fetch(
+      `${baseUrl}/api/throwing-plugin/generic-error`,
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+
+    const data = (await response.json()) as { error: string };
+    // NODE_ENV is not "production" under vitest, so the original message
+    // is surfaced; in production it would be masked as "Server error".
+    expect(data.error).toBe("boom");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(unhandledRejections).toEqual([]);
   });
 });
 

@@ -666,7 +666,20 @@ export abstract class Plugin<
   ): void {
     const { name, method, path, handler } = config;
 
-    router[method](path, handler);
+    // Express 4 does not catch rejected promises from async handlers — a
+    // rejection (e.g. asUser() throwing AuthenticationError before any
+    // response is written) escapes as an unhandledRejection, which leaves
+    // the request hanging and crashes Node by default. Catch both sync
+    // throws and async rejections and forward them to the Express error
+    // middleware via next(err).
+    // The promise chain is returned so callers that invoke the handler
+    // directly (e.g. unit tests) can await completion; Express ignores it.
+    const safeHandler: express.RequestHandler = (req, res, next) =>
+      Promise.resolve()
+        .then(() => handler(req, res))
+        .catch(next);
+
+    router[method](path, safeHandler);
 
     const fullPath = `/api/${this.name}${path}`;
     this.registerEndpoint(name, fullPath);

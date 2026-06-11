@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
-import { ServerError } from "../../errors";
+import { AppKitError, ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -146,6 +146,12 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(this.remoteTunnelController.middleware);
 
     await this.setupFrontend(endpoints, pluginConfigs);
+
+    // Terminal error handler — registered after all routes, extensions, and
+    // frontend middleware so that errors forwarded via next(err) from any of
+    // them (e.g. async handler rejections forwarded by Plugin.route()) are
+    // turned into JSON error responses instead of hanging the request.
+    this.serverApplication.use(errorHandlerMiddleware);
 
     const listenPort = await this.resolveListenPort();
 
@@ -503,6 +509,72 @@ export function requestMetricsMiddleware(
     );
   });
   next();
+}
+
+/**
+ * Narrow an unknown thrown value to an Error that carries a numeric
+ * `statusCode` property in the HTTP error range (e.g. `ApiError` from
+ * `@databricks/sdk-experimental`).
+ */
+function hasHttpStatusCode(
+  error: unknown,
+): error is Error & { statusCode: number } {
+  if (!(error instanceof Error) || !("statusCode" in error)) return false;
+  const statusCode = (error as Record<string, unknown>).statusCode;
+  return (
+    typeof statusCode === "number" && statusCode >= 400 && statusCode <= 599
+  );
+}
+
+/**
+ * Terminal Express error-handling middleware.
+ *
+ * Converts errors forwarded via `next(err)` (including async handler
+ * rejections forwarded by `Plugin.route()`) into JSON error responses,
+ * following the same status/message conventions as `Plugin.execute()`:
+ * - `AppKitError` → its `statusCode` with its message
+ * - errors with an HTTP `statusCode` → that status; 5xx messages are
+ *   masked in production to avoid leaking internals
+ * - anything else → 500 with a generic message in production
+ *
+ * @internal Exported for unit tests.
+ */
+export function errorHandlerMiddleware(
+  err: unknown,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  logger.error(
+    "Unhandled error for %s %s: %O",
+    req.method,
+    req.originalUrl,
+    err,
+  );
+
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  if (err instanceof AppKitError) {
+    res.status(err.statusCode).json({ error: err.message });
+    return;
+  }
+
+  const isDev = process.env.NODE_ENV !== "production";
+
+  if (hasHttpStatusCode(err)) {
+    const isClientError = err.statusCode < 500;
+    res.status(err.statusCode).json({
+      error: isDev || isClientError ? err.message : "Server error",
+    });
+    return;
+  }
+
+  res.status(500).json({
+    error: isDev && err instanceof Error ? err.message : "Server error",
+  });
 }
 
 /**
