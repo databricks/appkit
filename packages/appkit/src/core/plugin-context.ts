@@ -24,6 +24,18 @@ interface RouteTarget {
 type ToolProviderPlugin = BasePlugin &
   ToolProvider & { asUser: (req: IAppRequest) => ToolProvider };
 
+/**
+ * Lifecycle events emitted through {@link PluginContext.emitLifecycle}.
+ *
+ * - `"setup:complete"` — emitted by AppKit core after every plugin's
+ *   `setup()` has finished.
+ * - `"server:ready"` — emitted when the HTTP server is listening.
+ * - `"shutdown"` — emitted by the server plugin during graceful shutdown,
+ *   AFTER all plugin `shutdown()` hooks have completed and BEFORE remaining
+ *   connections are force-closed. The emit is bounded by a short timeout
+ *   (see the server plugin's shutdown budget), so subscribers must not
+ *   start long-running async work — finish quickly or be cut off.
+ */
 type LifecycleEvent = "setup:complete" | "server:ready" | "shutdown";
 
 /**
@@ -222,6 +234,10 @@ export class PluginContext {
 
   /**
    * Register a lifecycle hook callback.
+   *
+   * See {@link LifecycleEvent} for event semantics. In particular,
+   * `"shutdown"` subscribers run inside a bounded shutdown phase and must
+   * not start long-running async work.
    */
   onLifecycle(event: LifecycleEvent, fn: () => void | Promise<void>): void {
     let hooks = this.lifecycleHooks.get(event);

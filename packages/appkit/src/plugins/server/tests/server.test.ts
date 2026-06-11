@@ -97,6 +97,7 @@ vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
     getInstance: vi.fn().mockReturnValue({
       shutdown: vi.fn().mockResolvedValue(undefined),
+      disownSignalHandlers: vi.fn(),
     }),
     getProvider: vi.fn().mockReturnValue({
       getTracer: vi.fn().mockReturnValue({ startActiveSpan: vi.fn() }),
@@ -120,6 +121,7 @@ vi.mock("../../../cache", () => ({
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
     }),
   },
 }));
@@ -199,6 +201,7 @@ vi.mock("../client-config-sanitizer", () => ({
 
 import fs from "node:fs";
 import express from "express";
+import { TelemetryManager } from "../../../telemetry";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
@@ -884,6 +887,117 @@ describe("ServerPlugin", () => {
 
       expect(exitSpy).toHaveBeenCalledWith(0);
       expect(mockHttpServer.close).not.toHaveBeenCalled();
+    });
+
+    test("a hanging telemetry flush cannot hang shutdown — the flush timeout still exits 0", async () => {
+      vi.useFakeTimers();
+
+      const hangingFlush = vi.fn(() => new Promise<never>(() => {}));
+      vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
+        shutdown: hangingFlush,
+        disownSignalHandlers: vi.fn(),
+      } as any);
+
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      (plugin as any).server = mockHttpServer;
+
+      const done = (plugin as any)._gracefulShutdown();
+      // The per-phase budget (2s) is what unblocks the flush — well before
+      // the 15s force-exit timer.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await done;
+
+      expect(hangingFlush).toHaveBeenCalledTimes(1);
+      expect(
+        mockLoggerError.mock.calls.some(
+          (c) =>
+            String(c[0]).includes("Error flushing telemetry") &&
+            String(c[1]).includes("timed out"),
+        ),
+      ).toBe(true);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    test("runs phases in order: abort → closeIdle → plugin hooks → lifecycle emit → closeAll → flush → exit", async () => {
+      const order: string[] = [];
+
+      const ctx = createContextWithPlugins({
+        a: {
+          name: "a",
+          abortActiveOperations: vi.fn(() => {
+            order.push("abort");
+          }),
+          shutdown: vi.fn(async () => {
+            order.push("plugin-shutdown");
+          }),
+        },
+      });
+      ctx.onLifecycle("shutdown", () => {
+        order.push("lifecycle");
+      });
+
+      mockHttpServer.closeIdleConnections.mockImplementationOnce(() => {
+        order.push("closeIdle");
+      });
+      mockHttpServer.closeAllConnections.mockImplementationOnce(() => {
+        order.push("closeAll");
+      });
+      vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
+        shutdown: vi.fn(async () => {
+          order.push("flush");
+        }),
+        disownSignalHandlers: vi.fn(),
+      } as any);
+      exitSpy.mockImplementationOnce(((_code?: number) => {
+        order.push("exit");
+      }) as any);
+
+      const plugin = new ServerPlugin({ context: ctx } as any);
+      (plugin as any).server = mockHttpServer;
+
+      await (plugin as any)._gracefulShutdown();
+
+      expect(order).toEqual([
+        "abort",
+        "closeIdle",
+        "plugin-shutdown",
+        "lifecycle",
+        "closeAll",
+        "flush",
+        "exit",
+      ]);
+    });
+
+    test("a plugin shutdown() that rejects after its timeout already won does not crash", async () => {
+      vi.useFakeTimers();
+
+      let rejectLate: ((err: Error) => void) | undefined;
+      const lateRejecting = vi.fn(
+        () =>
+          new Promise<void>((_, reject) => {
+            rejectLate = reject;
+          }),
+      );
+
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({
+          late: { name: "late", shutdown: lateRejecting },
+        }),
+      } as any);
+      (plugin as any).server = mockHttpServer;
+
+      const done = (plugin as any)._gracefulShutdown();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await done;
+
+      // The hook loses the race, then rejects afterwards — must be
+      // swallowed by the pre-attached no-op handler, not crash the process.
+      rejectLate?.(new Error("late rejection"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
     });
   });
 });

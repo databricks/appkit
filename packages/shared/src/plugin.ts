@@ -16,6 +16,12 @@ export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 export interface BasePlugin {
   name: string;
 
+  /**
+   * Cancel in-flight work (abort signals, SSE streams). Runs in the first
+   * phase of graceful shutdown, BEFORE any plugin's `shutdown()` hook —
+   * so it must not tear down shared resources (e.g. connection pools)
+   * that other plugins' hooks may still need. Put teardown in `shutdown()`.
+   */
   abortActiveOperations?(): void;
 
   /**

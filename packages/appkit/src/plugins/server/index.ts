@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { BasePlugin, PluginClientConfigs, PluginPhase } from "shared";
+import { CacheManager } from "../../cache";
 import { ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
@@ -54,15 +55,28 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
-  /** Overall graceful-shutdown budget before the process is force-exited. */
+  /**
+   * Overall graceful-shutdown budget before the process is force-exited.
+   *
+   * Budget arithmetic: plugin `shutdown()` hooks run concurrently and are
+   * bounded by {@link PLUGIN_SHUTDOWN_TIMEOUT_MS} (10s); the lifecycle emit
+   * and the telemetry flush are each bounded by
+   * {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s). Worst case is 10s + 2s + 2s =
+   * 14s, leaving ~1s of margin for the remaining steps (aborts, socket
+   * teardown, awaiting `server.close()`) before this timer force-exits.
+   */
   private static readonly SHUTDOWN_TIMEOUT_MS = 15_000;
   /**
    * Per-plugin budget for `shutdown()` hooks. Sized to cover the longest
-   * built-in drain (the files plugin waits up to 10s for in-flight writes)
-   * while leaving headroom inside {@link SHUTDOWN_TIMEOUT_MS} for closing
-   * connections and flushing telemetry.
+   * built-in drain (the files plugin waits up to 10s for in-flight writes).
    */
   private static readonly PLUGIN_SHUTDOWN_TIMEOUT_MS = 10_000;
+  /**
+   * Budget for each non-plugin shutdown phase (the `"shutdown"` lifecycle
+   * emit and the telemetry flush). Keeps the worst-case total under
+   * {@link SHUTDOWN_TIMEOUT_MS} — see the arithmetic there.
+   */
+  private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"server">;
@@ -75,8 +89,18 @@ export class ServerPlugin extends Plugin {
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
-  /** Guards against re-entrant shutdown (e.g. SIGTERM followed by SIGINT). */
+  /**
+   * Guards against re-entrant shutdown (e.g. SIGTERM followed by SIGINT).
+   * The flag set in `_gracefulShutdown` must remain synchronous and first —
+   * any `await` before it would open a window for a second signal to
+   * re-enter the sequence.
+   */
   private isShuttingDown = false;
+  /**
+   * Name of the shutdown phase currently in flight, so the force-exit log
+   * can say where shutdown got stuck without extra bookkeeping.
+   */
+  private shutdownPhase = "not started";
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -172,6 +196,11 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
+    // With a server present, this plugin owns the telemetry flush: it is
+    // awaited inside _gracefulShutdown() after plugin hooks have run.
+    // Remove the TelemetryManager's standalone signal handlers so they
+    // cannot start the flush early (see TelemetryManager.disownSignalHandlers).
+    TelemetryManager.getInstance().disownSignalHandlers();
     process.once("SIGTERM", () => this._gracefulShutdown());
     process.once("SIGINT", () => this._gracefulShutdown());
 
@@ -411,24 +440,30 @@ export class ServerPlugin extends Plugin {
   }
 
   private async _gracefulShutdown() {
+    // Must stay synchronous and first: any await before the flag is set
+    // would let a second signal re-enter the shutdown sequence.
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
 
     logger.info("Starting graceful shutdown...");
 
-    // Force exit once the overall budget is spent. This is a deliberate
-    // shutdown, not a crash, so exit 0 — orchestrators treat nonzero exits
-    // on routine deploys as crashes.
+    // Force exit once the overall budget is spent. Exit 0 is deliberate:
+    // a force-timeout still happens on a routine deploy (deliberate
+    // shutdown, not a crash), and orchestrators record nonzero exits on
+    // deploys as crashes. The error log below is the stuck-shutdown
+    // signal instead of the exit code.
     const forceExitTimer = setTimeout(() => {
-      logger.warn(
-        "Force shutdown after %dms timeout",
+      logger.error(
+        "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
         ServerPlugin.SHUTDOWN_TIMEOUT_MS,
+        this.shutdownPhase,
       );
       process.exit(0);
     }, ServerPlugin.SHUTDOWN_TIMEOUT_MS);
     forceExitTimer.unref();
 
     try {
+      this.shutdownPhase = "dev servers and tunnel cleanup";
       if (this.viteDevServer) {
         await this.viteDevServer.close();
       }
@@ -443,7 +478,11 @@ export class ServerPlugin extends Plugin {
         ? Array.from(this.context.getPlugins().values())
         : [];
 
-      // 1. abort active operations from plugins (in-flight executions, SSE streams)
+      // 1. abort active operations from plugins (in-flight executions,
+      //    SSE streams). Cancellation only — resource teardown (e.g. the
+      //    lakebase pools) belongs in plugin shutdown() hooks so other
+      //    plugins can still drain state through them.
+      this.shutdownPhase = "aborting active operations";
       for (const plugin of plugins) {
         if (plugin.abortActiveOperations) {
           try {
@@ -471,22 +510,30 @@ export class ServerPlugin extends Plugin {
       }
 
       // 3. run every plugin's shutdown() hook concurrently, each bounded
-      //    by a per-plugin timeout so one hung plugin cannot stall exit
+      //    by a per-plugin timeout so one hung plugin cannot stall exit.
+      this.shutdownPhase = "plugin shutdown() hooks";
       await Promise.all(
         plugins
           .filter((plugin) => typeof plugin.shutdown === "function")
           .map((plugin) => this.runPluginShutdown(plugin)),
       );
 
-      // 4. notify lifecycle subscribers
+      // 4. notify lifecycle subscribers, bounded so a slow subscriber
+      //    cannot eat the remaining budget.
+      this.shutdownPhase = "shutdown lifecycle emit";
       try {
-        await this.context?.emitLifecycle("shutdown");
+        await this.raceWithTimeout(
+          this.context?.emitLifecycle("shutdown"),
+          ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
+          "shutdown lifecycle emit",
+        );
       } catch (err) {
         logger.error("Error emitting shutdown lifecycle event: %O", err);
       }
 
       // 5. force-close whatever sockets remain (aborted SSE responses,
-      //    keep-alive connections) so `server.close()` can complete
+      //    keep-alive connections) so `server.close()` can complete.
+      this.shutdownPhase = "closing remaining connections";
       if (this.server) {
         this.server.closeAllConnections();
       }
@@ -495,9 +542,30 @@ export class ServerPlugin extends Plugin {
         logger.debug("Server closed gracefully");
       }
 
-      // 6. flush telemetry inside the orchestrated shutdown instead of
-      //    racing the TelemetryManager signal handler against process.exit
-      await TelemetryManager.getInstance().shutdown();
+      // 6. close the cache manager's storage (drains the persistent
+      //    Lakebase pool; no-op for in-memory storage). Runs after the
+      //    lifecycle emit so subscribers can still read the cache.
+      this.shutdownPhase = "closing cache storage";
+      try {
+        await CacheManager.getInstanceSync().close();
+      } catch {
+        // Cache was never initialized (or already closed) — nothing to do.
+      }
+
+      // 7. flush telemetry inside the orchestrated shutdown instead of
+      //    racing a standalone TelemetryManager signal handler against
+      //    process.exit (see disownSignalHandlers in start()). Bounded so
+      //    a stalled OTLP export cannot eat the remaining budget.
+      this.shutdownPhase = "telemetry flush";
+      try {
+        await this.raceWithTimeout(
+          TelemetryManager.getInstance().shutdown(),
+          ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
+          "telemetry flush",
+        );
+      } catch (err) {
+        logger.error("Error flushing telemetry during shutdown: %O", err);
+      }
     } catch (err) {
       logger.error("Error during graceful shutdown: %O", err);
       clearTimeout(forceExitTimer);
@@ -511,33 +579,50 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
+   * Race `work` against a timeout. Rejects with a labeled error when the
+   * timeout wins. A no-op rejection handler is attached to the work promise
+   * before racing so a branch that rejects after the timeout already won
+   * does not surface as an unhandledRejection.
+   */
+  private async raceWithTimeout<T>(
+    work: Promise<T> | T,
+    timeoutMs: number,
+    label: string,
+  ): Promise<T> {
+    const promise = Promise.resolve(work);
+    promise.catch(() => {});
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Run a single plugin's `shutdown()` hook bounded by
    * {@link ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS}. Errors and timeouts
    * are logged but never thrown so one misbehaving plugin cannot block
    * the rest of the shutdown sequence.
    */
   private async runPluginShutdown(plugin: BasePlugin): Promise<void> {
-    let timer: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
-        Promise.resolve(plugin.shutdown?.()),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `shutdown() timed out after ${ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS}ms`,
-                ),
-              ),
-            ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS,
-          );
-          timer.unref();
-        }),
-      ]);
+      await this.raceWithTimeout(
+        plugin.shutdown?.(),
+        ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS,
+        "shutdown()",
+      );
     } catch (err) {
       logger.error("Error shutting down plugin %s: %O", plugin.name, err);
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 

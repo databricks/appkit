@@ -36,6 +36,8 @@ export class TelemetryManager {
   private static instance?: TelemetryManager;
   private sdk?: NodeSDK;
   private shutdownPromise?: Promise<void>;
+  /** Signal handler installed by {@link registerShutdown}, kept so {@link disownSignalHandlers} can remove it. */
+  private signalShutdownFn?: () => Promise<void>;
 
   /**
    * Create a scoped telemetry provider for a specific plugin.
@@ -159,12 +161,38 @@ export class TelemetryManager {
     ];
   }
 
+  /**
+   * Install standalone signal handlers that flush telemetry on
+   * SIGTERM/SIGINT. These handlers own the flush only in server-less usage:
+   * when a ServerPlugin starts, it calls {@link disownSignalHandlers} and
+   * its orchestrated graceful shutdown becomes the single owner of the
+   * flush (awaiting {@link shutdown} after plugin hooks have run).
+   */
   private registerShutdown() {
     const shutdownFn = async () => {
       await TelemetryManager.getInstance().shutdown();
     };
+    this.signalShutdownFn = shutdownFn;
     process.once("SIGTERM", shutdownFn);
     process.once("SIGINT", shutdownFn);
+  }
+
+  /**
+   * Remove the signal handlers installed by {@link registerShutdown}.
+   *
+   * Called by the ServerPlugin when it starts: with a server present, the
+   * server's graceful shutdown owns the telemetry flush and awaits
+   * {@link shutdown} after plugin shutdown() hooks have run. Left in
+   * place, the standalone handler would start the flush at signal time —
+   * before plugin hooks have produced their final telemetry — defeating
+   * the orchestration. Server-less apps never call this, so the
+   * standalone handlers keep working for them. Idempotent.
+   */
+  disownSignalHandlers(): void {
+    if (!this.signalShutdownFn) return;
+    process.removeListener("SIGTERM", this.signalShutdownFn);
+    process.removeListener("SIGINT", this.signalShutdownFn);
+    this.signalShutdownFn = undefined;
   }
 
   /**
