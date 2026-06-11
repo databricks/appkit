@@ -642,6 +642,43 @@ describe("extractParameterDefaults", () => {
     const sql = "-- @param onlyType STRING\nSELECT 1";
     expect(extractParameterDefaults(sql)).toEqual({});
   });
+
+  test("rejects numeric sample values that aren't plain numbers (no injection)", () => {
+    const sql = [
+      "-- @param n INT = 0) UNION SELECT secret FROM creds --",
+      "-- @param r DOUBLE = 1; DROP TABLE x",
+      "SELECT 1",
+    ].join("\n");
+    // Both fail strict numeric validation and are dropped (not substituted),
+    // so they fall back to the safe type default during DESCRIBE.
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("rejects non-boolean BOOLEAN sample values", () => {
+    const sql = "-- @param flag BOOLEAN = 1 OR 1=1\nSELECT 1";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("accepts well-formed BINARY and rejects malformed BINARY", () => {
+    expect(
+      extractParameterDefaults("-- @param b BINARY = X'00'\nSELECT 1"),
+    ).toEqual({ b: "X'00'" });
+    expect(
+      extractParameterDefaults("-- @param b BINARY = X'00' OR 1=1\nSELECT 1"),
+    ).toEqual({});
+  });
+
+  test("neutralizes a string value that isn't a well-formed literal by escaping it", () => {
+    const sql = ["-- @param x STRING = 'a' OR 1=1 OR 'b'", "SELECT 1"].join(
+      "\n",
+    );
+    // The lone interior quotes mean this isn't a single well-formed literal, so
+    // it's treated as raw content and fully escaped — one inert string literal,
+    // no SQL break-out.
+    expect(extractParameterDefaults(sql)).toEqual({
+      x: "'''a'' OR 1=1 OR ''b'''",
+    });
+  });
 });
 
 describe("substituteParametersForDescribe (IDENTIFIER support, #383)", () => {
@@ -688,5 +725,19 @@ describe("substituteParametersForDescribe (IDENTIFIER support, #383)", () => {
     const out = substituteParametersForDescribe(sql2);
     expect(out).toContain("':target_catalog' AS lit");
     expect(out).toContain("'main' AS p");
+  });
+
+  test("rejects an injection attempt in a numeric param, falling back to the placeholder", () => {
+    const sql = [
+      "-- @param n INT = 1); DROP TABLE x --",
+      "SELECT * FROM t LIMIT :n",
+    ].join("\n");
+    const out = substituteParametersForDescribe(sql);
+    // The malicious value is dropped; :n falls back to the INT default 0, so the
+    // payload never reaches the executable LIMIT clause. (It survives only in the
+    // @param comment line, which is inert.)
+    expect(out).toContain("SELECT * FROM t LIMIT 0");
+    expect(out).not.toContain(":n");
+    expect(out).not.toContain("LIMIT 1)");
   });
 });

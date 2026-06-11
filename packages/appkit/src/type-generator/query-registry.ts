@@ -394,23 +394,61 @@ export function defaultForType(sqlType: string | undefined): string {
 }
 
 /**
- * Format a user-supplied sample value as a SQL literal for substitution.
- * String-like types are wrapped in single quotes (with `'` doubled) unless the
- * value is already a quoted literal; numeric/boolean/binary values pass through
- * verbatim so callers can write `= 5`, `= true`, or `= X'00'` directly.
+ * True when `raw` is already a single, well-formed SQL single-quoted string
+ * literal — i.e. it opens and closes with `'` and every interior quote is part
+ * of an escaped `''` pair. `'2024-01-01'` and `'O''Brien'` qualify;
+ * `'a' OR 1=1 OR 'b'` does not (it has lone interior quotes), so it is treated
+ * as raw content and re-escaped rather than trusted.
  */
-function formatSampleValue(sqlType: string | undefined, raw: string): string {
-  if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
-    return raw;
+function isWellFormedStringLiteral(raw: string): boolean {
+  if (raw.length < 2 || !raw.startsWith("'") || !raw.endsWith("'")) {
+    return false;
   }
+  const inner = raw.slice(1, -1);
+  return !inner.replace(/''/g, "").includes("'");
+}
+
+/**
+ * Format a user-supplied sample value as a SQL literal for substitution into
+ * the build-time DESCRIBE statement. Returns `null` when the value isn't valid
+ * for its type, so the caller falls back to the safe type-based placeholder
+ * instead of substituting attacker-controllable text.
+ *
+ * The value comes from a `.sql` file that may be shared via a template or
+ * dependency, so it must not be able to inject SQL into `DESCRIBE QUERY`:
+ * - string-like types are always emitted as one well-formed, fully-escaped
+ *   single-quoted literal (a pre-quoted literal is kept as-is, anything else is
+ *   quoted with `'` doubled), so the value can never break out of the string;
+ * - numeric / boolean / binary values must match a strict literal shape and are
+ *   rejected (`null`) otherwise, rather than being passed through verbatim.
+ */
+function formatSampleValue(
+  sqlType: string | undefined,
+  raw: string,
+): string | null {
   switch (sqlType?.toUpperCase()) {
     case "STRING":
     case "DATE":
     case "TIMESTAMP":
     case "TIMESTAMP_NTZ":
-      return `'${raw.replace(/'/g, "''")}'`;
+      return isWellFormedStringLiteral(raw)
+        ? raw
+        : `'${raw.replace(/'/g, "''")}'`;
+    case "NUMERIC":
+    case "DECIMAL":
+    case "BIGINT":
+    case "TINYINT":
+    case "SMALLINT":
+    case "INT":
+    case "FLOAT":
+    case "DOUBLE":
+      return /^[+-]?\d+(\.\d+)?$/.test(raw) ? raw : null;
+    case "BOOLEAN":
+      return /^(?:true|false)$/i.test(raw) ? raw.toLowerCase() : null;
+    case "BINARY":
+      return /^X'[0-9a-fA-F]*'$/i.test(raw) ? raw : null;
     default:
-      return raw;
+      return null;
   }
 }
 
@@ -434,7 +472,12 @@ export function extractParameterDefaults(sql: string): Record<string, string> {
     /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\s*=\s*(.+?)\s*$/gim;
   for (const match of sql.matchAll(regex)) {
     const [, paramName, paramType, rawValue] = match;
-    defaults[paramName] = formatSampleValue(paramType, rawValue);
+    const formatted = formatSampleValue(paramType, rawValue);
+    // A value that fails type validation is dropped, not substituted: the param
+    // then falls back to the safe type-based placeholder during DESCRIBE.
+    if (formatted !== null) {
+      defaults[paramName] = formatted;
+    }
   }
   return defaults;
 }

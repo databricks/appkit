@@ -81,9 +81,13 @@ FROM IDENTIFIER(:target_catalog || '.sales.nation')
 
 Type generation describes `main.sales.nation` to infer the result columns, while
 the deployed app binds whatever catalog the caller passes. String, `DATE`, and
-`TIMESTAMP` values are quoted automatically (`= main` → `'main'`); numeric and
-boolean values are used verbatim (`= 100`, `= true`). Already-quoted values are
-left as-is.
+`TIMESTAMP` values are quoted automatically (`= main` → `'main'`), and an
+already-quoted literal is kept as-is (`= '2024-01-01'`). Numeric, `BOOLEAN`, and
+`BINARY` values are validated against a strict literal shape (`= 100`, `= true`,
+`= X'00'`); a value that doesn't match — anything that could otherwise inject SQL
+into the describe statement — is ignored and the parameter falls back to its
+type-based placeholder, so a sample value can never break out of the
+`DESCRIBE QUERY`.
 
 ## Server-injected parameters
 
