@@ -283,13 +283,29 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+  let originalNodeEnv: string | undefined;
   const TEST_PORT = 9879;
   const unhandledRejections: unknown[] = [];
+  // Only count rejections raised by this suite's handlers — other suites in
+  // the same worker may legitimately produce unrelated rejections.
+  const suiteErrorMessages = new Set([
+    "boom",
+    "buffered boom",
+    AuthenticationError.missingToken("user token").message,
+  ]);
   const onUnhandledRejection = (reason: unknown) => {
-    unhandledRejections.push(reason);
+    if (reason instanceof Error && suiteErrorMessages.has(reason.message)) {
+      unhandledRejections.push(reason);
+    }
   };
 
   beforeAll(async () => {
+    // The 401 test requires non-development (asUser must throw instead of
+    // falling back) and the "boom" assertion requires non-production (the
+    // message must not be masked) — pin NODE_ENV so both are deterministic.
+    originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+
     setupDatabricksEnv();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
@@ -305,6 +321,14 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
         description: "Test plugin whose handlers reject",
         resources: { required: [], optional: [] },
       } satisfies PluginManifest<"throwing-plugin">;
+
+      async setup() {
+        // Registered through PluginContext's buffering API — exercises the
+        // applyRoute path, which must wrap handlers like Plugin.route() does.
+        this.context?.addRoute("get", "/buffered-error", async () => {
+          throw new Error("buffered boom");
+        });
+      }
 
       injectRoutes(router: IAppRouter) {
         this.route(router, {
@@ -352,6 +376,11 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
   });
 
   afterAll(async () => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
     process.off("unhandledRejection", onUnhandledRejection);
     serviceContextMock?.restore();
     if (server) {
@@ -392,9 +421,24 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
 
     const data = (await response.json()) as { error: string };
-    // NODE_ENV is not "production" under vitest, so the original message
+    // NODE_ENV is pinned to "test" in beforeAll, so the original message
     // is surfaced; in production it would be masked as "Server error".
     expect(data.error).toBe("boom");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(unhandledRejections).toEqual([]);
+  });
+
+  test("buffered route with rejecting async handler returns 500 JSON without unhandled rejection", async () => {
+    // /buffered-error is mounted on the root app via PluginContext.addRoute,
+    // not via Plugin.route() — its handler must be wrapped by applyRoute.
+    const response = await fetch(`${baseUrl}/buffered-error`);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+
+    const data = (await response.json()) as { error: string };
+    expect(data.error).toBe("buffered boom");
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(unhandledRejections).toEqual([]);

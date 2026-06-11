@@ -1,6 +1,24 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AuthenticationError, ValidationError } from "../../../errors";
+import {
+  AuthenticationError,
+  ServerError,
+  ValidationError,
+} from "../../../errors";
 import { errorHandlerMiddleware } from "../index";
+
+const loggerSpies = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  event: vi.fn(),
+}));
+
+vi.mock("../../../logging/logger", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../logging/logger")>();
+  return { ...actual, createLogger: () => loggerSpies };
+});
 
 function makeReq() {
   return { method: "GET", originalUrl: "/api/genie/default/messages" } as any;
@@ -18,7 +36,7 @@ describe("errorHandlerMiddleware", () => {
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   test("maps AppKitError to its statusCode with its message", () => {
@@ -39,7 +57,7 @@ describe("errorHandlerMiddleware", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test("preserves AppKitError messages in production (client-safe by design)", () => {
+  test("preserves 4xx AppKitError messages in production (client-safe by design)", () => {
     process.env.NODE_ENV = "production";
     const res = makeRes();
 
@@ -52,6 +70,38 @@ describe("errorHandlerMiddleware", () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({ error: "content is required" });
+  });
+
+  test("masks 5xx AppKitError messages in production", () => {
+    process.env.NODE_ENV = "production";
+    const res = makeRes();
+
+    errorHandlerMiddleware(
+      new ServerError("internal connection details"),
+      makeReq(),
+      res,
+      vi.fn(),
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: "Server error" });
+  });
+
+  test("preserves 5xx AppKitError messages outside production", () => {
+    process.env.NODE_ENV = "test";
+    const res = makeRes();
+
+    errorHandlerMiddleware(
+      new ServerError("internal connection details"),
+      makeReq(),
+      res,
+      vi.fn(),
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      error: "internal connection details",
+    });
   });
 
   test("maps unknown errors to 500 with the message outside production", () => {
@@ -102,6 +152,51 @@ describe("errorHandlerMiddleware", () => {
 
     expect(res.status).toHaveBeenCalledWith(502);
     expect(res.json).toHaveBeenCalledWith({ error: "Server error" });
+  });
+
+  test("ignores non-integer statusCode values and falls back to 500", () => {
+    const res = makeRes();
+    const err = Object.assign(new Error("weird status"), {
+      statusCode: 404.5,
+    });
+
+    errorHandlerMiddleware(err, makeReq(), res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: "weird status" });
+  });
+
+  test("logs 4xx errors at warn with the message, not the full error", () => {
+    const res = makeRes();
+    const err = AuthenticationError.missingToken("user token");
+
+    errorHandlerMiddleware(err, makeReq(), res, vi.fn());
+
+    expect(loggerSpies.warn).toHaveBeenCalledTimes(1);
+    expect(loggerSpies.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      "GET",
+      "/api/genie/default/messages",
+      401,
+      err.message,
+    );
+    expect(loggerSpies.error).not.toHaveBeenCalled();
+  });
+
+  test("logs 5xx and unknown errors at error with the error object", () => {
+    const res = makeRes();
+    const err = new Error("boom");
+
+    errorHandlerMiddleware(err, makeReq(), res, vi.fn());
+
+    expect(loggerSpies.error).toHaveBeenCalledTimes(1);
+    expect(loggerSpies.error).toHaveBeenCalledWith(
+      expect.any(String),
+      "GET",
+      "/api/genie/default/messages",
+      err,
+    );
+    expect(loggerSpies.warn).not.toHaveBeenCalled();
   });
 
   test("delegates to next(err) when headers are already sent", () => {

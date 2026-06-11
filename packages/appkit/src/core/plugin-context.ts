@@ -2,6 +2,7 @@ import type express from "express";
 import type { BasePlugin, IAppRequest, ToolProvider } from "shared";
 import { createLogger } from "../logging/logger";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
+import { forwardAsyncErrors } from "../utils/safe-handler";
 
 const logger = createLogger("plugin-context");
 
@@ -287,7 +288,9 @@ export class PluginContext {
       if (typeof app[method] === "function") {
         (app[method] as (...a: unknown[]) => void)(
           route.path,
-          ...route.handlers,
+          // Forward sync throws and async rejections to the Express error
+          // middleware — Express 4 does not do this on its own.
+          ...route.handlers.map(forwardAsyncErrors),
         );
       }
     });
@@ -299,7 +302,9 @@ export class PluginContext {
   ): void {
     if (!this.routeTarget) return;
     this.routeTarget.addExtension((app) => {
-      app.use(path, ...handlers);
+      // forwardAsyncErrors leaves 4-arg error middleware untouched, so error
+      // handlers passed through addMiddleware keep their Express semantics.
+      app.use(path, ...handlers.map(forwardAsyncErrors));
     });
   }
 }

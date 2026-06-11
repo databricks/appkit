@@ -25,6 +25,7 @@ import {
   TelemetryManager,
 } from "../telemetry";
 import { deepMerge } from "../utils";
+import { forwardAsyncErrors } from "../utils/safe-handler";
 import { DevFileReader } from "./dev-reader";
 import type { ExecutionResult } from "./execution-result";
 import { CacheInterceptor } from "./interceptors/cache";
@@ -666,20 +667,9 @@ export abstract class Plugin<
   ): void {
     const { name, method, path, handler } = config;
 
-    // Express 4 does not catch rejected promises from async handlers — a
-    // rejection (e.g. asUser() throwing AuthenticationError before any
-    // response is written) escapes as an unhandledRejection, which leaves
-    // the request hanging and crashes Node by default. Catch both sync
-    // throws and async rejections and forward them to the Express error
-    // middleware via next(err).
-    // The promise chain is returned so callers that invoke the handler
-    // directly (e.g. unit tests) can await completion; Express ignores it.
-    const safeHandler: express.RequestHandler = (req, res, next) =>
-      Promise.resolve()
-        .then(() => handler(req, res))
-        .catch(next);
-
-    router[method](path, safeHandler);
+    // Sync throws and async rejections are forwarded to the Express error
+    // middleware via next(err) — Express 4 does not do this on its own.
+    router[method](path, forwardAsyncErrors(handler));
 
     const fullPath = `/api/${this.name}${path}`;
     this.registerEndpoint(name, fullPath);

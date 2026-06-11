@@ -198,6 +198,11 @@ export class ServerPlugin extends Plugin {
    * Call this inside the `onPluginsReady` callback of `createApp` to register
    * custom Express routes or middleware before the server starts listening.
    *
+   * Note: async handlers registered directly on the app must handle their own
+   * rejections — Express 4 does not forward rejected promises to the error
+   * middleware. Errors passed explicitly to `next(err)` are formatted by the
+   * terminal error middleware.
+   *
    * @param fn - A function that receives the express application.
    * @returns The server plugin instance for chaining.
    */
@@ -522,7 +527,10 @@ function hasHttpStatusCode(
   if (!(error instanceof Error) || !("statusCode" in error)) return false;
   const statusCode = (error as Record<string, unknown>).statusCode;
   return (
-    typeof statusCode === "number" && statusCode >= 400 && statusCode <= 599
+    typeof statusCode === "number" &&
+    Number.isInteger(statusCode) &&
+    statusCode >= 400 &&
+    statusCode <= 599
   );
 }
 
@@ -532,10 +540,13 @@ function hasHttpStatusCode(
  * Converts errors forwarded via `next(err)` (including async handler
  * rejections forwarded by `Plugin.route()`) into JSON error responses,
  * following the same status/message conventions as `Plugin.execute()`:
- * - `AppKitError` → its `statusCode` with its message
- * - errors with an HTTP `statusCode` → that status; 5xx messages are
- *   masked in production to avoid leaking internals
+ * - errors carrying an HTTP `statusCode` (including `AppKitError`) → that
+ *   status; 5xx messages are masked in production to avoid leaking internals
  * - anything else → 500 with a generic message in production
+ *
+ * 4xx errors are expected client errors (e.g. missing auth headers) and are
+ * logged at `warn` with just the message; 5xx/unknown errors are logged at
+ * `error` with the full error.
  *
  * @internal Exported for unit tests.
  */
@@ -545,34 +556,43 @@ export function errorHandlerMiddleware(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  logger.error(
-    "Unhandled error for %s %s: %O",
-    req.method,
-    req.originalUrl,
-    err,
-  );
+  const httpError =
+    err instanceof AppKitError || hasHttpStatusCode(err) ? err : null;
+  const statusCode = httpError ? httpError.statusCode : 500;
+  const isClientError = statusCode < 500;
+
+  if (isClientError) {
+    logger.warn(
+      "Request failed for %s %s with status %d: %s",
+      req.method,
+      req.originalUrl,
+      statusCode,
+      err instanceof Error ? err.message : String(err),
+    );
+  } else {
+    logger.error(
+      "Unhandled error for %s %s: %O",
+      req.method,
+      req.originalUrl,
+      err,
+    );
+  }
 
   if (res.headersSent) {
     next(err);
     return;
   }
 
-  if (err instanceof AppKitError) {
-    res.status(err.statusCode).json({ error: err.message });
-    return;
-  }
-
   const isDev = process.env.NODE_ENV !== "production";
 
-  if (hasHttpStatusCode(err)) {
-    const isClientError = err.statusCode < 500;
-    res.status(err.statusCode).json({
-      error: isDev || isClientError ? err.message : "Server error",
+  if (httpError) {
+    res.status(statusCode).json({
+      error: isDev || isClientError ? httpError.message : "Server error",
     });
     return;
   }
 
-  res.status(500).json({
+  res.status(statusCode).json({
     error: isDev && err instanceof Error ? err.message : "Server error",
   });
 }
