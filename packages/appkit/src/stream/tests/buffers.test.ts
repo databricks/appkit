@@ -121,6 +121,22 @@ describe("RingBuffer", () => {
       expect(buffer.getAll().map((item) => item.id)).toEqual(["a", "b", "c"]);
     });
 
+    test("should pin survivor set and order in getAll after multiple wraps", () => {
+      const buffer = createBuffer(4);
+      for (const [i, id] of ["1", "2", "3", "4", "5", "6", "7"].entries()) {
+        buffer.add({ id, value: i });
+      }
+
+      // ids 1-3 were overwritten; the 4 survivors come back in insertion order
+      expect(buffer.getAll().map((item) => item.id)).toEqual([
+        "4",
+        "5",
+        "6",
+        "7",
+      ]);
+      expect(buffer.getSize()).toBe(4);
+    });
+
     test("should update an existing key in place without consuming a slot", () => {
       const buffer = createBuffer(2);
       buffer.add({ id: "a", value: 1 });
@@ -152,6 +168,18 @@ describe("EventRingBuffer", () => {
     // buffer now holds 3, 4, 5 (oldest overwritten)
     const replayed = buffer.getEventsSince("3");
     expect(replayed.map((event) => event.id)).toEqual(["4", "5"]);
+  });
+
+  test("should pin replay order from a mid-buffer id after multiple wraps", () => {
+    const buffer = new EventRingBuffer(4);
+    for (const id of ["1", "2", "3", "4", "5", "6", "7"]) {
+      buffer.add(createEvent(id));
+    }
+
+    expect(buffer.getEventsSince("5").map((event) => event.id)).toEqual([
+      "6",
+      "7",
+    ]);
   });
 
   test("should return no events when the last event id is not in the buffer", () => {
