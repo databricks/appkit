@@ -771,9 +771,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   private mountInvokeRoutes() {
     if (!this.context) return;
-    const handler = (req: express.Request, res: express.Response) => {
+    // Return the promise so the forwardAsyncErrors wrapper applied by
+    // PluginContext.addRoute can forward rejections to the error middleware.
+    const handler = (req: express.Request, res: express.Response) =>
       this._handleInvoke(req, res);
-    };
     this.context.addRoute("post", "/invocations", handler);
     this.context.addRoute("post", "/responses", handler);
   }

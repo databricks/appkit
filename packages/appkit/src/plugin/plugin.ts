@@ -629,16 +629,20 @@ export abstract class Plugin<
     } catch (error) {
       logger.error("Plugin execution failed", { error, plugin: this.name });
 
+      const isDev = process.env.NODE_ENV !== "production";
+
       if (error instanceof AppKitError) {
+        // Same 5xx disclosure policy as the server error middleware: mask
+        // server-side error messages in production to avoid leaking internals.
         return {
           ok: false,
           status: error.statusCode,
-          message: error.message,
+          message:
+            isDev || error.statusCode < 500 ? error.message : "Server error",
         };
       }
 
       if (hasHttpStatusCode(error)) {
-        const isDev = process.env.NODE_ENV !== "production";
         const isClientError = error.statusCode >= 400 && error.statusCode < 500;
         return {
           ok: false,
@@ -647,7 +651,6 @@ export abstract class Plugin<
         };
       }
 
-      const isDev = process.env.NODE_ENV !== "production";
       return {
         ok: false,
         status: 500,

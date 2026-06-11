@@ -12,6 +12,12 @@ import type express from "express";
  * Error-handling middleware (arity 4, `(err, req, res, next)`) is returned
  * unchanged: Express identifies it by function arity, so wrapping it would
  * silently turn it into a regular handler.
+ *
+ * Note: handlers must RETURN their promise (e.g. `(req, res) =>
+ * this._handle(req, res)` or `async (req, res) => { await ... }`) for
+ * rejections to be caught — a fire-and-forget body like
+ * `(req, res) => { this._handle(req, res); }` hides the promise from the
+ * wrapper and rejections escape as unhandledRejection again.
  */
 export function forwardAsyncErrors(
   handler: (

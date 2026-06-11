@@ -28,6 +28,7 @@ import {
   AuthenticationError,
   ConnectionError,
   ExecutionError,
+  ServerError,
   TunnelError,
   ValidationError,
 } from "../../errors";
@@ -528,6 +529,80 @@ describe("Plugin", () => {
           ok: false,
           status: 403,
           message: "Forbidden",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("should redact 5xx AppKitError message in production", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const mockFn = vi
+          .fn()
+          .mockRejectedValue(new ServerError("internal server detail"));
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        // Same disclosure policy as the server error middleware: 5xx
+        // AppKitError messages are masked in production.
+        expect(result).toEqual({
+          ok: false,
+          status: 500,
+          message: "Server error",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("should preserve 5xx AppKitError message in development", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+      try {
+        const plugin = new TestPlugin(config);
+        const mockFn = vi
+          .fn()
+          .mockRejectedValue(new ServerError("internal server detail"));
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        expect(result).toEqual({
+          ok: false,
+          status: 500,
+          message: "internal server detail",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("should preserve 4xx AppKitError message in production", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const mockFn = vi
+          .fn()
+          .mockRejectedValue(new ValidationError("bad input"));
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        expect(result).toEqual({
+          ok: false,
+          status: 400,
+          message: "bad input",
         });
       } finally {
         process.env.NODE_ENV = originalEnv;

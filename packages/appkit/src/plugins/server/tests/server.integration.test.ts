@@ -291,6 +291,7 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
   const suiteErrorMessages = new Set([
     "boom",
     "buffered boom",
+    "returned promise boom",
     AuthenticationError.missingToken("user token").message,
   ]);
   const onUnhandledRejection = (reason: unknown) => {
@@ -328,6 +329,18 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
         this.context?.addRoute("get", "/buffered-error", async () => {
           throw new Error("buffered boom");
         });
+
+        // Mirrors the agents plugin invoke shape: a non-async handler that
+        // calls an async rejecting method and RETURNS its promise. The
+        // forwardAsyncErrors wrapper can only catch the rejection if the
+        // promise is returned.
+        this.context?.addRoute("post", "/buffered-returned-promise", () =>
+          this._rejectingMethod(),
+        );
+      }
+
+      async _rejectingMethod(): Promise<void> {
+        throw new Error("returned promise boom");
       }
 
       injectRoutes(router: IAppRouter) {
@@ -439,6 +452,25 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
 
     const data = (await response.json()) as { error: string };
     expect(data.error).toBe("buffered boom");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(unhandledRejections).toEqual([]);
+  });
+
+  test("buffered handler returning a rejecting method's promise returns 500 JSON without unhandled rejection", async () => {
+    // Locks in the contract relied on by the agents `/invocations` and
+    // `/responses` routes: a handler that returns its promise has rejections
+    // forwarded to the error middleware instead of escaping as
+    // unhandledRejection.
+    const response = await fetch(`${baseUrl}/buffered-returned-promise`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+
+    const data = (await response.json()) as { error: string };
+    expect(data.error).toBe("returned promise boom");
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(unhandledRejections).toEqual([]);
