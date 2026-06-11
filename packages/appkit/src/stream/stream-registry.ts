@@ -15,8 +15,13 @@ export class StreamRegistry {
 
   // add a stream to the registry
   add(entry: StreamEntry): void {
-    // enforce hard cap
-    if (this.streams.size >= this.maxActiveStreams) {
+    // enforce hard cap, but only when inserting a genuinely new key:
+    // re-adding an existing streamId updates in place and doesn't grow the
+    // map, so evicting another stream for it would destroy an innocent one
+    if (
+      !this.streams.has(entry.streamId) &&
+      this.streams.size >= this.maxActiveStreams
+    ) {
       this._evictOldestStream(entry.streamId);
     }
 
@@ -109,7 +114,12 @@ export class StreamRegistry {
         }
       }
       this._clearGraceTimer(oldestStream);
-      oldestStream.abortController.abort("Stream evicted");
+      // abort with a DOMException AbortError so the error categorizer routes
+      // eviction as an abort (matching the manager's terminal paths) rather
+      // than a stream failure
+      oldestStream.abortController.abort(
+        new DOMException("Stream evicted", "AbortError"),
+      );
       // a pending removal timer would otherwise pin the evicted entry
       if (oldestStream.removalTimer) {
         clearTimeout(oldestStream.removalTimer);
