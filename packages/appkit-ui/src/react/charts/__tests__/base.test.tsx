@@ -205,4 +205,31 @@ describe("BaseChart ECharts registration", () => {
     );
     expect(registrationErrors).toEqual([]);
   });
+
+  test("renders custom `options` using a registered component without registration errors", async () => {
+    const { container } = render(
+      <BaseChart
+        data={cartesianData}
+        chartType="line"
+        xKey="month"
+        yKey="revenue"
+        options={{ title: { subtext: "custom" } }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector("canvas")).not.toBeNull(),
+    );
+    expect(registrationErrors).toEqual([]);
+  });
+
+  test("renders the no-data fallback for empty data without mounting ECharts", () => {
+    const { container, getByText } = render(
+      <BaseChart data={[]} chartType="line" />,
+    );
+
+    expect(getByText("No data")).toBeTruthy();
+    expect(container.querySelector("canvas")).toBeNull();
+    expect(registrationErrors).toEqual([]);
+  });
 });

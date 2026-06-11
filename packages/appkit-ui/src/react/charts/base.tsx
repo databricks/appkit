@@ -1,5 +1,5 @@
 // Type-only import: erased at compile time, does not pull the full echarts
-// bundle in. echarts-for-react's API is typed against this `ECharts` class.
+// bundle in. The `ECharts` type is used for the stored ECharts instance ref.
 import type { ECharts } from "echarts";
 import {
   BarChart,
@@ -50,6 +50,14 @@ import type {
 // toolbox, markLine), register it here. Consumers passing custom `options`
 // that need extra features can register them in their own app via
 // `import { use } from "echarts/core"`.
+//
+// Note: tooltip-driven axisPointer is bundled with `TooltipComponent`, so no
+// explicit AxisPointerComponent registration is needed.
+//
+// This `use()` call must stay co-located in the same module as `BaseChart`:
+// `package.json#sideEffects` declares JS modules side-effect free, so moving
+// registration to a separate import-for-side-effect module would let bundlers
+// drop it during tree-shaking.
 echarts.use([
   // Series types used by the option builders
   LineChart, // line + area charts (area = line with areaStyle)
@@ -140,7 +148,17 @@ export interface BaseChartProps {
   min?: number;
   /** Max value for heatmap color scale */
   max?: number;
-  /** Additional ECharts options to merge */
+  /**
+   * Additional ECharts options to merge.
+   *
+   * Only the built-in feature set is registered by this package, so options
+   * referencing extra ECharts features (`dataZoom`, `toolbox`, `markLine`,
+   * `markArea`, `graphic`, `dataset`, top-level `axisPointer`, ...) require
+   * registering them in your app via `import { use } from "echarts/core"`.
+   * This only works when your `echarts` resolves to the same module
+   * instance/version as this package's (the registry is a singleton;
+   * duplicate echarts copies won't share registrations).
+   */
   options?: Record<string, unknown>;
   /** Additional CSS classes */
   className?: string;
