@@ -48,17 +48,3 @@ index a8f5fa929e64750ad03b08b1349516c452090b39..b6344d3d4caca4c7b7914c674721ae45
      const parsed = jsonBigint.parse(text);
      return schema.parse(parsed);
  }
-diff --git a/package.json b/package.json
-index f70216d01c01999efa798362c49034ac89982bb3..675b82ee16b77fe018813c4101394e85682c1e90 100644
---- a/package.json
-+++ b/package.json
-@@ -6,7 +6,8 @@
-   "exports": {
-     "./v1": {
-       "types": "./dist/v1/index.d.ts",
--      "import": "./dist/v1/index.js"
-+      "import": "./dist/v1/index.js",
-+      "default": "./dist/v1/index.js"
-     }
-   },
-   "files": [

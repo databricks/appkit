@@ -9,22 +9,19 @@ overrides:
 
 patchedDependencies:
   '@databricks/sdk-auth':
-    hash: c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0
+    hash: 946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14
     path: patches/@databricks__sdk-auth.patch
   '@databricks/sdk-core':
-    hash: 1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae
+    hash: 6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11
     path: patches/@databricks__sdk-core.patch
   '@databricks/sdk-files':
-    hash: 348909ba86c9b05b6c30a2f3cb3dd24748a1b1f0b273b167934876f9a96e5914
+    hash: 00e011bcf7167e4a9adb2888d74c834f6113edb52ffe8aa701d36a91445ea765
     path: patches/@databricks__sdk-files.patch
-  '@databricks/sdk-options':
-    hash: 32d35413d698738b5566b997576223c084608b02f37c205cf999ee34507da7c8
-    path: patches/@databricks__sdk-options.patch
   '@databricks/sdk-vectorsearch':
-    hash: 31c398075ae5af1af1f66d55917a532cc60234fd3288b510c52a62fcc3857ef9
+    hash: e847369694e25b93b1751a8a7e516a89f1656f1f2f12fd6ecc03c3e7c9a12f06
     path: patches/@databricks__sdk-vectorsearch.patch
   '@databricks/sdk-warehouses':
-    hash: 296b64921d02e923efa7b976beccce5e40930f5daa832e19e7e057bb901a74b6
+    hash: 091fd081cd301b3c6fe0e9d4b5477f317df86b2768eed91976f851c307cf2fd5
     path: patches/@databricks__sdk-warehouses.patch
 
 importers:
@@ -269,23 +266,23 @@ importers:
         specifier: workspace:*
         version: link:../lakebase
       '@databricks/sdk-auth':
-        specifier: 0.1.0-dev.3
-        version: 0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)
-      '@databricks/sdk-core':
         specifier: 0.1.0-dev.4
-        version: 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
+        version: 0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)
+      '@databricks/sdk-core':
+        specifier: 0.1.0-dev.5
+        version: 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
       '@databricks/sdk-files':
-        specifier: 0.1.0-dev.3
-        version: 0.1.0-dev.3(patch_hash=348909ba86c9b05b6c30a2f3cb3dd24748a1b1f0b273b167934876f9a96e5914)
+        specifier: 0.1.0-dev.4
+        version: 0.1.0-dev.4(patch_hash=00e011bcf7167e4a9adb2888d74c834f6113edb52ffe8aa701d36a91445ea765)
       '@databricks/sdk-vectorsearch':
-        specifier: 0.1.0-dev.3
-        version: 0.1.0-dev.3(patch_hash=31c398075ae5af1af1f66d55917a532cc60234fd3288b510c52a62fcc3857ef9)
+        specifier: 0.1.0-dev.4
+        version: 0.1.0-dev.4(patch_hash=e847369694e25b93b1751a8a7e516a89f1656f1f2f12fd6ecc03c3e7c9a12f06)
       '@databricks/sdk-warehouses':
-        specifier: 0.1.0-dev.2
-        version: 0.1.0-dev.2(patch_hash=296b64921d02e923efa7b976beccce5e40930f5daa832e19e7e057bb901a74b6)
+        specifier: 0.1.0-dev.3
+        version: 0.1.0-dev.3(patch_hash=091fd081cd301b3c6fe0e9d4b5477f317df86b2768eed91976f851c307cf2fd5)
       '@opentelemetry/api':
         specifier: 1.9.0
         version: 1.9.0
@@ -1415,6 +1412,10 @@ packages:
     resolution: {integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/runtime@7.29.7':
+    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/template@7.27.2':
     resolution: {integrity: sha512-LPDZ85aEJyYSd18/DkjNh4/y1ntkE5KwUHWTiqgRxruuZL2F1yuHligVHLvcHY2vMHXttKFpJn6LwfI7cw7ODw==}
     engines: {node: '>=6.9.0'}
@@ -1974,32 +1975,32 @@ packages:
     engines: {node: ^20 || ^22 || ^24 || ^25, pnpm: '>=10'}
     hasBin: true
 
-  '@databricks/sdk-auth@0.1.0-dev.3':
-    resolution: {integrity: sha512-ilvxOPduoI+IdEm47x8mZOEO5StXq5T3LNNMjmn7fH9m375LZb+U2Cxfjeg/4uX02sXwFKAQmrtp8FQ8/5ZUew==}
+  '@databricks/sdk-auth@0.1.0-dev.4':
+    resolution: {integrity: sha512-BRSECJU4SSSZhxjZYdU0vQmiWJJ2HB94ZsBHCjjK17U9zYS81jvpxIdvmMU3/EbUA93DYyWtSMAiQeGgdAFsqw==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-core@0.1.0-dev.4':
-    resolution: {integrity: sha512-K/4DAxpXLSdXBNrXd73k6vazVrZ681v2oAdj6Pve9lXsicu/+SHHFM4NBPbj4HBX8XCuTu0LYcUKgjiFDXaxKQ==}
+  '@databricks/sdk-core@0.1.0-dev.5':
+    resolution: {integrity: sha512-bhu7cQPziIs1UnvwAkBha3zNTGhIK5BoB4I0Agm9/ZNTCeCR0mSxQDa6HL8YSZGaNw2qnxQGiUUkKf+VEau3mg==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-experimental@0.17.0':
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
 
-  '@databricks/sdk-files@0.1.0-dev.3':
-    resolution: {integrity: sha512-Dzi8bPPLl3j4EUmb2M+HjXII94RzfQYwlktZKLkr/8BDdna2GRLlbEiKIM048LtBwxwnf+9g2ARRVFjj12S37A==}
+  '@databricks/sdk-files@0.1.0-dev.4':
+    resolution: {integrity: sha512-OZwXtjyYJ71qDzfB/5YiXGHymZb4TRvO+PnzWnHvf5rIiVbBNKdWwVnc56bHoWoxFLIOkzYWswvcVXJezY0CFw==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-options@0.1.0-dev.3':
-    resolution: {integrity: sha512-lOBjmJW4nxA18BROelmFEfYqa0KZRYKZxgbunh4js0Kbt+fp3lMHI7UTM9MEc8jBWeMlvJyWEcPTdgoEUIolgQ==}
+  '@databricks/sdk-options@0.1.0-dev.4':
+    resolution: {integrity: sha512-wIJ/6nYGDlci5nkpfdmeANMlosvD8Rx2glkdgyTaEF0LiHQNNh0ogBk0SwDgoNBchOuy75fzTbfHtyVuPMQzRA==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-vectorsearch@0.1.0-dev.3':
-    resolution: {integrity: sha512-D9F0X23m6UAwZ1RrgSfeinfyQulWN7wXqiHU5nI7LPEShZl8bk08GKk9mbydoa+lgcBVJP5kqa2fUvJJDM565g==}
+  '@databricks/sdk-vectorsearch@0.1.0-dev.4':
+    resolution: {integrity: sha512-WNUVam4eAq21WqLjpj6azmDrYbM2epx4qeuOqQXa445yQ7f52fbDpl9xKj7LUC+B09h0l5c63GJNJ016fpBgJQ==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-warehouses@0.1.0-dev.2':
-    resolution: {integrity: sha512-vM09V7DOvyVo9BZN+ClKyqznuODXMWHAUKy9J1rJ8qL+E7hDdr82vrYux5TFrqBJKUDeGhQHv/mqNeIP7sq5iw==}
+  '@databricks/sdk-warehouses@0.1.0-dev.3':
+    resolution: {integrity: sha512-vRIeJLJJUxAn+W1l66XVl1WIYPstvxUditN4TgsTcTv7TQ/Qyduc+Hl8DPEHPWoiqzfW+o0ldGzzP68LMGnI3g==}
     engines: {node: '>=22.0.0'}
 
   '@date-fns/tz@1.4.1':
@@ -12003,6 +12004,9 @@ packages:
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
   zrender@6.0.0:
     resolution: {integrity: sha512-41dFXEEXuJpNecuUQq6JlbybmnHaqqpGlbH1yxnA5V9MMP4SbohSVZsJIwz+zdjQXSSlR1Vc34EgH1zxyTDvhg==}
 
@@ -12014,33 +12018,33 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@2.0.21(zod@4.3.6)':
+  '@ai-sdk/gateway@2.0.21(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.4.3)
       '@vercel/oidc': 3.0.5
-      zod: 4.3.6
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@3.0.19(zod@4.3.6)':
+  '@ai-sdk/provider-utils@3.0.19(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.0
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.0.6
-      zod: 4.3.6
+      zod: 4.4.3
 
   '@ai-sdk/provider@2.0.0':
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/react@2.0.115(react@19.2.0)(zod@4.3.6)':
+  '@ai-sdk/react@2.0.115(react@19.2.0)(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
-      ai: 5.0.113(zod@4.3.6)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.4.3)
+      ai: 5.0.113(zod@4.4.3)
       react: 19.2.0
       swr: 2.3.8(react@19.2.0)
       throttleit: 2.1.0
     optionalDependencies:
-      zod: 4.3.6
+      zod: 4.4.3
 
   '@algolia/abtesting@1.12.0':
     dependencies:
@@ -13027,6 +13031,8 @@ snapshots:
 
   '@babel/runtime@7.28.6': {}
 
+  '@babel/runtime@7.29.7': {}
+
   '@babel/template@7.27.2':
     dependencies:
       '@babel/code-frame': 7.27.1
@@ -13672,12 +13678,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@databricks/sdk-auth@0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)':
+  '@databricks/sdk-auth@0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)':
     dependencies:
-      '@databricks/sdk-core': 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
+      '@databricks/sdk-core': 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
       zod: 4.3.6
 
-  '@databricks/sdk-core@0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)':
+  '@databricks/sdk-core@0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)':
     dependencies:
       json-bigint: 1.0.0
       zod: 4.3.6
@@ -13691,34 +13697,34 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@databricks/sdk-files@0.1.0-dev.3(patch_hash=348909ba86c9b05b6c30a2f3cb3dd24748a1b1f0b273b167934876f9a96e5914)':
+  '@databricks/sdk-files@0.1.0-dev.4(patch_hash=00e011bcf7167e4a9adb2888d74c834f6113edb52ffe8aa701d36a91445ea765)':
     dependencies:
-      '@databricks/sdk-auth': 0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)
-      '@databricks/sdk-core': 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
-      '@databricks/sdk-options': 0.1.0-dev.3(patch_hash=32d35413d698738b5566b997576223c084608b02f37c205cf999ee34507da7c8)
+      '@databricks/sdk-auth': 0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)
+      '@databricks/sdk-core': 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
+      '@databricks/sdk-options': 0.1.0-dev.4
       '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
 
-  '@databricks/sdk-options@0.1.0-dev.3(patch_hash=32d35413d698738b5566b997576223c084608b02f37c205cf999ee34507da7c8)':
+  '@databricks/sdk-options@0.1.0-dev.4':
     dependencies:
-      '@databricks/sdk-auth': 0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)
-      '@databricks/sdk-core': 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
+      '@databricks/sdk-auth': 0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)
+      '@databricks/sdk-core': 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
 
-  '@databricks/sdk-vectorsearch@0.1.0-dev.3(patch_hash=31c398075ae5af1af1f66d55917a532cc60234fd3288b510c52a62fcc3857ef9)':
+  '@databricks/sdk-vectorsearch@0.1.0-dev.4(patch_hash=e847369694e25b93b1751a8a7e516a89f1656f1f2f12fd6ecc03c3e7c9a12f06)':
     dependencies:
-      '@databricks/sdk-auth': 0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)
-      '@databricks/sdk-core': 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
-      '@databricks/sdk-options': 0.1.0-dev.3(patch_hash=32d35413d698738b5566b997576223c084608b02f37c205cf999ee34507da7c8)
+      '@databricks/sdk-auth': 0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)
+      '@databricks/sdk-core': 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
+      '@databricks/sdk-options': 0.1.0-dev.4
       '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
 
-  '@databricks/sdk-warehouses@0.1.0-dev.2(patch_hash=296b64921d02e923efa7b976beccce5e40930f5daa832e19e7e057bb901a74b6)':
+  '@databricks/sdk-warehouses@0.1.0-dev.3(patch_hash=091fd081cd301b3c6fe0e9d4b5477f317df86b2768eed91976f851c307cf2fd5)':
     dependencies:
-      '@databricks/sdk-auth': 0.1.0-dev.3(patch_hash=c1b5391b4407b43c03b96bb5dee68e3b66beaf04c758100fcfa6846833fa2fa0)
-      '@databricks/sdk-core': 0.1.0-dev.4(patch_hash=1ef32458a1afdfe556aceae7ba92661ee21423ec8120c9c906350f9d8cef65ae)
-      '@databricks/sdk-options': 0.1.0-dev.3(patch_hash=32d35413d698738b5566b997576223c084608b02f37c205cf999ee34507da7c8)
+      '@databricks/sdk-auth': 0.1.0-dev.4(patch_hash=946915ee73dadc82c9df7746cef62a4844c8c211675d7b2c141631d232285e14)
+      '@databricks/sdk-core': 0.1.0-dev.5(patch_hash=6d24c516e967418ff8cb5f5be86694a1bdae7a549452b25c93c5aa6f41aa7e11)
+      '@databricks/sdk-options': 0.1.0-dev.4
       '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
@@ -13737,14 +13743,14 @@ snapshots:
 
   '@docsearch/react@4.3.2(@algolia/client-search@5.46.0)(@types/react@19.2.7)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(search-insights@2.17.3)':
     dependencies:
-      '@ai-sdk/react': 2.0.115(react@19.2.0)(zod@4.3.6)
+      '@ai-sdk/react': 2.0.115(react@19.2.0)(zod@4.4.3)
       '@algolia/autocomplete-core': 1.19.2(@algolia/client-search@5.46.0)(algoliasearch@5.46.0)(search-insights@2.17.3)
       '@docsearch/core': 4.3.1(@types/react@19.2.7)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@docsearch/css': 4.3.2
-      ai: 5.0.113(zod@4.3.6)
+      ai: 5.0.113(zod@4.4.3)
       algoliasearch: 5.46.0
       marked: 16.4.2
-      zod: 4.3.6
+      zod: 4.4.3
     optionalDependencies:
       '@types/react': 19.2.7
       react: 19.2.0
@@ -16918,7 +16924,7 @@ snapshots:
 
   '@slorber/react-helmet-async@1.3.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
     dependencies:
-      '@babel/runtime': 7.28.6
+      '@babel/runtime': 7.29.7
       invariant: 2.2.4
       prop-types: 15.8.1
       react: 19.2.0
@@ -17879,13 +17885,13 @@ snapshots:
       clean-stack: 2.2.0
       indent-string: 4.0.0
 
-  ai@5.0.113(zod@4.3.6):
+  ai@5.0.113(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 2.0.21(zod@4.3.6)
+      '@ai-sdk/gateway': 2.0.21(zod@4.4.3)
       '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.4.3)
       '@opentelemetry/api': 1.9.0
-      zod: 4.3.6
+      zod: 4.4.3
 
   ajv-formats@2.1.1(ajv@8.17.1):
     optionalDependencies:
@@ -25392,6 +25398,8 @@ snapshots:
   zod@4.1.13: {}
 
   zod@4.3.6: {}
+
+  zod@4.4.3: {}
 
   zrender@6.0.0:
     dependencies:

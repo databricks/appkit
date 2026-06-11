@@ -1,5 +1,5 @@
 diff --git a/dist/v1/client.js b/dist/v1/client.js
-index 575fe0bcfca585f7fd2eaef884d4cd58cd309120..f52159807c00d3d503c80f84ba1fe412d69c0780 100644
+index f15783ea1fb4963f8a216e0fb8bf6d12c60f9693..627e70248c977e3cbff290d378c89d5d76714528 100644
 --- a/dist/v1/client.js
 +++ b/dist/v1/client.js
 @@ -2,10 +2,10 @@
@@ -11,8 +11,8 @@ index 575fe0bcfca585f7fd2eaef884d4cd58cd309120..f52159807c00d3d503c80f84ba1fe412
 +import { newHttpClient } from './transport.js';
 +import { buildHttpRequest, executeCall, executeHttpCall, marshalRequest, parseResponse, executeWait, StillRunningError, } from './utils.js';
  import pkgJson from '../../package.json' with { type: 'json' };
--import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseRequest_ResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseRequest_ResponseSchema, unmarshalEditWarehouseRequest_ResponseSchema, unmarshalGetWarehouseRequest_ResponseSchema, unmarshalGetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesRequest_ResponseSchema, unmarshalSetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalStartRequest_ResponseSchema, unmarshalStopRequest_ResponseSchema, } from './model';
-+import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseRequest_ResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseRequest_ResponseSchema, unmarshalEditWarehouseRequest_ResponseSchema, unmarshalGetWarehouseRequest_ResponseSchema, unmarshalGetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesRequest_ResponseSchema, unmarshalSetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalStartRequest_ResponseSchema, unmarshalStopRequest_ResponseSchema, } from './model.js';
+-import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseResponseSchema, unmarshalEditWarehouseResponseSchema, unmarshalGetWarehouseResponseSchema, unmarshalGetWorkspaceWarehouseConfigResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesResponseSchema, unmarshalSetWorkspaceWarehouseConfigResponseSchema, unmarshalStartResponseSchema, unmarshalStopResponseSchema, } from './model';
++import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseResponseSchema, unmarshalEditWarehouseResponseSchema, unmarshalGetWarehouseResponseSchema, unmarshalGetWorkspaceWarehouseConfigResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesResponseSchema, unmarshalSetWorkspaceWarehouseConfigResponseSchema, unmarshalStartResponseSchema, unmarshalStopResponseSchema, } from './model.js';
  // Package identity segment for this client to be used in the User-Agent header.
  const PACKAGE_SEGMENT = {
      key: 'sdk-js-' + pkgJson.name.replace(/^@[^/]+\/sdk-/, ''),
@@ -50,17 +50,3 @@ index a8f5fa929e64750ad03b08b1349516c452090b39..b6344d3d4caca4c7b7914c674721ae45
      const parsed = jsonBigint.parse(text);
      return schema.parse(parsed);
  }
-diff --git a/package.json b/package.json
-index f5255b21d634b1f7eaca1c782802997c18992414..cecddb9573ee9fbf813289891ef186a274d3dc16 100644
---- a/package.json
-+++ b/package.json
-@@ -6,7 +6,8 @@
-   "exports": {
-     "./v1": {
-       "types": "./dist/v1/index.d.ts",
--      "import": "./dist/v1/index.js"
-+      "import": "./dist/v1/index.js",
-+      "default": "./dist/v1/index.js"
-     }
-   },
-   "files": [

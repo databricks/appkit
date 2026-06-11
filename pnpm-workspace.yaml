@@ -7,6 +7,5 @@ patchedDependencies:
   '@databricks/sdk-auth': patches/@databricks__sdk-auth.patch
   '@databricks/sdk-core': patches/@databricks__sdk-core.patch
   '@databricks/sdk-files': patches/@databricks__sdk-files.patch
-  '@databricks/sdk-options': patches/@databricks__sdk-options.patch
   '@databricks/sdk-vectorsearch': patches/@databricks__sdk-vectorsearch.patch
   '@databricks/sdk-warehouses': patches/@databricks__sdk-warehouses.patch

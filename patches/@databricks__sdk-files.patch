@@ -1,5 +1,5 @@
 diff --git a/dist/v2/client.js b/dist/v2/client.js
-index 6176818da2a5d552c97b489a9a911cb306c7cd65..6ef818146b1c77c5049312521c27d4407f9e8597 100644
+index a6819fe2f4950c2bdeff2d1727396c9ebbfb4ed8..e694e5066289dfa63ef26274e95d0a22481588d1 100644
 --- a/dist/v2/client.js
 +++ b/dist/v2/client.js
 @@ -2,10 +2,10 @@
@@ -11,8 +11,8 @@ index 6176818da2a5d552c97b489a9a911cb306c7cd65..6ef818146b1c77c5049312521c27d440
 +import { newHttpClient } from './transport.js';
 +import { buildHttpRequest, encodeMultiSegmentPath, executeCall, executeHttpCall, sendAndCheckError, marshalRequest, parseResponse, } from './utils.js';
  import pkgJson from '../../package.json' with { type: 'json' };
--import { marshalAddBlockRequestSchema, marshalCloseRequestSchema, marshalCreateRequestSchema, marshalDeleteRequestSchema, marshalMkDirsRequestSchema, marshalMoveRequestSchema, marshalPutRequestSchema, unmarshalAddBlockRequest_ResponseSchema, unmarshalCloseRequest_ResponseSchema, unmarshalCreateDirectoryResponseSchema, unmarshalCreateRequest_ResponseSchema, unmarshalDeleteDirectoryResponseSchema, unmarshalDeleteFileResponseSchema, unmarshalDeleteRequest_ResponseSchema, unmarshalGetDirectoryMetadataResponseSchema, unmarshalGetFileMetadataResponseSchema, unmarshalGetStatusRequest_ResponseSchema, unmarshalListDirectoryResponseSchema, unmarshalListStatusRequest_ResponseSchema, unmarshalMkDirsRequest_ResponseSchema, unmarshalMoveRequest_ResponseSchema, unmarshalPutRequest_ResponseSchema, unmarshalReadRequest_ResponseSchema, unmarshalUploadFileResponseSchema, } from './model';
-+import { marshalAddBlockRequestSchema, marshalCloseRequestSchema, marshalCreateRequestSchema, marshalDeleteRequestSchema, marshalMkDirsRequestSchema, marshalMoveRequestSchema, marshalPutRequestSchema, unmarshalAddBlockRequest_ResponseSchema, unmarshalCloseRequest_ResponseSchema, unmarshalCreateDirectoryResponseSchema, unmarshalCreateRequest_ResponseSchema, unmarshalDeleteDirectoryResponseSchema, unmarshalDeleteFileResponseSchema, unmarshalDeleteRequest_ResponseSchema, unmarshalGetDirectoryMetadataResponseSchema, unmarshalGetFileMetadataResponseSchema, unmarshalGetStatusRequest_ResponseSchema, unmarshalListDirectoryResponseSchema, unmarshalListStatusRequest_ResponseSchema, unmarshalMkDirsRequest_ResponseSchema, unmarshalMoveRequest_ResponseSchema, unmarshalPutRequest_ResponseSchema, unmarshalReadRequest_ResponseSchema, unmarshalUploadFileResponseSchema, } from './model.js';
+-import { marshalAddBlockRequestSchema, marshalCloseRequestSchema, marshalCreateRequestSchema, marshalDeleteRequestSchema, marshalMkDirsRequestSchema, marshalMoveRequestSchema, marshalPutRequestSchema, unmarshalAddBlockResponseSchema, unmarshalCloseResponseSchema, unmarshalCreateDirectoryResponseSchema, unmarshalCreateResponseSchema, unmarshalDeleteDirectoryResponseSchema, unmarshalDeleteFileResponseSchema, unmarshalDeleteResponseSchema, unmarshalGetDirectoryMetadataResponseSchema, unmarshalGetFileMetadataResponseSchema, unmarshalGetStatusResponseSchema, unmarshalListDirectoryResponseSchema, unmarshalListStatusResponseSchema, unmarshalMkDirsResponseSchema, unmarshalMoveResponseSchema, unmarshalPutResponseSchema, unmarshalReadResponseSchema, unmarshalUploadFileResponseSchema, } from './model';
++import { marshalAddBlockRequestSchema, marshalCloseRequestSchema, marshalCreateRequestSchema, marshalDeleteRequestSchema, marshalMkDirsRequestSchema, marshalMoveRequestSchema, marshalPutRequestSchema, unmarshalAddBlockResponseSchema, unmarshalCloseResponseSchema, unmarshalCreateDirectoryResponseSchema, unmarshalCreateResponseSchema, unmarshalDeleteDirectoryResponseSchema, unmarshalDeleteFileResponseSchema, unmarshalDeleteResponseSchema, unmarshalGetDirectoryMetadataResponseSchema, unmarshalGetFileMetadataResponseSchema, unmarshalGetStatusResponseSchema, unmarshalListDirectoryResponseSchema, unmarshalListStatusResponseSchema, unmarshalMkDirsResponseSchema, unmarshalMoveResponseSchema, unmarshalPutResponseSchema, unmarshalReadResponseSchema, unmarshalUploadFileResponseSchema, } from './model.js';
  // Package identity segment for this client to be used in the User-Agent header.
  const PACKAGE_SEGMENT = {
      key: 'sdk-js-' + pkgJson.name.replace(/^@[^/]+\/sdk-/, ''),
@@ -25,38 +25,3 @@ index 7e688a7b83670680b50f04cddcd2da860cf8e07d..faa59472c09c75d85a5be6763f01447f
 -export { FilesClient } from './client';
 +export { FilesClient } from './client.js';
  //# sourceMappingURL=index.js.map
-\ No newline at end of file
-diff --git a/dist/v2/utils.js b/dist/v2/utils.js
-index 716a15566bbb9f48eaaeb58b93c17a2b64004825..44fb9923003cebdc1f0d9b7709cca731dbcd8685 100644
---- a/dist/v2/utils.js
-+++ b/dist/v2/utils.js
-@@ -79,6 +79,15 @@ export function buildHttpRequest(method, url, headers, signal, body) {
- }
- export function parseResponse(body, schema) {
-     const text = new TextDecoder().decode(body);
-+    // Upstream bug workaround: `jsonBigint.parse("")` throws a plain
-+    // object (not an Error) which then loses all information through
-+    // sdk-core/ops/executeImpl's toError(). Endpoints that return HTTP
-+    // 204 No Content (e.g. createDirectory) hit this path. Treat empty
-+    // bodies as the schema's empty-object form, which works because
-+    // void-response endpoints have empty-object schemas.
-+    if (text === "") {
-+        return schema.parse({});
-+    }
-     const parsed = jsonBigint.parse(text);
-     return schema.parse(parsed);
- }
-diff --git a/package.json b/package.json
-index 9da1ca7d2aa9fb6d7d87a3c01c88dadf28a8da7f..66d2aa45e1453a28dae9a4b11a727c6c4dc782de 100644
---- a/package.json
-+++ b/package.json
-@@ -6,7 +6,8 @@
-   "exports": {
-     "./v2": {
-       "types": "./dist/v2/index.d.ts",
--      "import": "./dist/v2/index.js"
-+      "import": "./dist/v2/index.js",
-+      "default": "./dist/v2/index.js"
-     }
-   },
-   "files": [
