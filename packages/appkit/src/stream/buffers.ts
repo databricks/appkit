@@ -39,7 +39,23 @@ export class RingBuffer<T> {
       return;
     }
 
-    // evict least recently used item if at capacity
+    // if there is free space but writeIndex points at a live entry
+    // (holes created by remove()), insert into a freed slot instead of
+    // silently overwriting a live, still-indexed entry
+    if (this.size < this.capacity && this.buffer[this.writeIndex] !== null) {
+      for (let i = 1; i < this.capacity; i++) {
+        const candidate = (this.writeIndex + i) % this.capacity;
+        if (this.buffer[candidate] === null) {
+          this.buffer[candidate] = item;
+          this.keyIndex.set(key, candidate);
+          this.size++;
+          return;
+        }
+      }
+    }
+
+    // evict the oldest-inserted item if the buffer is truly full
+    // (add-only ring semantics, e.g. event replay buffers)
     const evicted = this.buffer[this.writeIndex];
     if (evicted !== null) {
       const evictedKey = this.keyExtractor(evicted);
@@ -85,12 +101,12 @@ export class RingBuffer<T> {
   getAll(): T[] {
     const result: T[] = [];
 
-    // iterate over buffer in order of insertion
-    for (let i = 0; i < this.size; i++) {
-      // calculate index of item in buffer
-      const index =
-        (this.writeIndex - this.size + i + this.capacity) % this.capacity;
-      // add item to result if not null
+    // walk every slot starting at writeIndex (the oldest slot when full),
+    // skipping holes left by remove(). For add-only buffers this yields
+    // items in insertion order; for buffers with removals it guarantees
+    // every surviving entry is returned.
+    for (let i = 0; i < this.capacity; i++) {
+      const index = (this.writeIndex + i) % this.capacity;
       const item = this.buffer[index];
       if (item !== null) {
         result.push(item);

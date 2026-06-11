@@ -431,6 +431,151 @@ describe("StreamRegistry", () => {
     });
   });
 
+  describe("eviction when access order diverges from insertion order", () => {
+    test("should evict only the LRU stream and keep all others alive when the oldest-inserted stream was accessed recently", () => {
+      const ac1 = new AbortController();
+      const ac2 = new AbortController();
+      const ac3 = new AbortController();
+      const client1 = createMockClient();
+      const client2 = createMockClient();
+
+      const entry1 = createMockStreamEntry("stream-1", {
+        lastAccess: 100,
+        abortController: ac1,
+        clients: new Set([client1]),
+      });
+      const entry2 = createMockStreamEntry("stream-2", {
+        lastAccess: 200,
+        abortController: ac2,
+        clients: new Set([client2]),
+      });
+      const entry3 = createMockStreamEntry("stream-3", {
+        lastAccess: 300,
+        abortController: ac3,
+      });
+
+      registry.add(entry1);
+      registry.add(entry2);
+      registry.add(entry3);
+
+      // simulate a reconnect bumping the oldest-inserted stream's lastAccess
+      // so access order diverges from insertion order
+      entry1.lastAccess = 400;
+
+      // adding stream-4 at capacity must evict stream-2 (now the true LRU),
+      // not silently destroy stream-1 (the oldest-inserted entry)
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 500 }));
+
+      // stream-2 was evicted cleanly: aborted + clients notified
+      expect(registry.has("stream-2")).toBe(false);
+      expect(ac2.signal.aborted).toBe(true);
+      expect(ac2.signal.reason).toBe("Stream evicted");
+      expect(client2.write).toHaveBeenCalledWith("event: error\n");
+      expect(client2.write).toHaveBeenCalledWith(
+        `data: ${JSON.stringify({ error: "Stream evicted", code: SSEErrorCode.STREAM_EVICTED })}\n\n`,
+      );
+
+      // ALL other streams remain reachable by key and alive
+      expect(registry.get("stream-1")).toBe(entry1);
+      expect(ac1.signal.aborted).toBe(false);
+      expect(client1.write).not.toHaveBeenCalled();
+      expect(registry.get("stream-3")).toBe(entry3);
+      expect(ac3.signal.aborted).toBe(false);
+      expect(registry.has("stream-4")).toBe(true);
+      expect(registry.size()).toBe(3);
+    });
+
+    test("should never leave a stream unreachable or un-aborted across repeated evictions with shuffled access order", () => {
+      const entries = new Map<string, StreamEntry>();
+
+      const addStream = (id: string, lastAccess: number): StreamEntry => {
+        const entry = createMockStreamEntry(id, { lastAccess });
+        entries.set(id, entry);
+        registry.add(entry);
+        return entry;
+      };
+      const isAborted = (id: string) =>
+        entries.get(id)?.abortController.signal.aborted ?? false;
+
+      const entry1 = addStream("stream-1", 100);
+      const entry2 = addStream("stream-2", 200);
+      addStream("stream-3", 300);
+
+      // bump stream-1 and stream-2 (reconnects), making stream-3 the LRU
+      entry1.lastAccess = 400;
+      entry2.lastAccess = 500;
+
+      const entry4 = addStream("stream-4", 600);
+
+      // stream-3 (LRU) evicted; everything else alive and reachable
+      expect(registry.has("stream-3")).toBe(false);
+      expect(isAborted("stream-3")).toBe(true);
+
+      for (const id of ["stream-1", "stream-2", "stream-4"]) {
+        expect(registry.has(id)).toBe(true);
+        expect(isAborted(id)).toBe(false);
+      }
+
+      // bump stream-4, making stream-1 the LRU
+      entry4.lastAccess = 700;
+
+      addStream("stream-5", 800);
+
+      expect(registry.has("stream-1")).toBe(false);
+      expect(isAborted("stream-1")).toBe(true);
+
+      for (const id of ["stream-2", "stream-4", "stream-5"]) {
+        expect(registry.has(id)).toBe(true);
+        expect(isAborted(id)).toBe(false);
+      }
+      expect(registry.size()).toBe(3);
+    });
+
+    test("should evict the LRU stream after remove() created holes in the underlying buffer", () => {
+      const ac2 = new AbortController();
+      const ac3 = new AbortController();
+      const ac4 = new AbortController();
+
+      registry.add(createMockStreamEntry("stream-1", { lastAccess: 100 }));
+      registry.add(
+        createMockStreamEntry("stream-2", {
+          lastAccess: 200,
+          abortController: ac2,
+        }),
+      );
+      registry.add(
+        createMockStreamEntry("stream-3", {
+          lastAccess: 300,
+          abortController: ac3,
+        }),
+      );
+
+      // remove stream-1 (completed), leaving a hole in the buffer
+      registry.remove("stream-1");
+
+      // refill to capacity
+      registry.add(
+        createMockStreamEntry("stream-4", {
+          lastAccess: 400,
+          abortController: ac4,
+        }),
+      );
+      expect(registry.size()).toBe(3);
+
+      // adding stream-5 must evict stream-2 (LRU among survivors)
+      registry.add(createMockStreamEntry("stream-5", { lastAccess: 500 }));
+
+      expect(registry.has("stream-2")).toBe(false);
+      expect(ac2.signal.aborted).toBe(true);
+      expect(registry.has("stream-3")).toBe(true);
+      expect(ac3.signal.aborted).toBe(false);
+      expect(registry.has("stream-4")).toBe(true);
+      expect(ac4.signal.aborted).toBe(false);
+      expect(registry.has("stream-5")).toBe(true);
+      expect(registry.size()).toBe(3);
+    });
+  });
+
   describe("clear", () => {
     test("should abort all streams and clear the registry", () => {
       const ac1 = new AbortController();
@@ -473,6 +618,40 @@ describe("StreamRegistry", () => {
       expect(registry.get("stream-2")).toBeNull();
       expect(registry.has("stream-1")).toBe(false);
       expect(registry.has("stream-2")).toBe(false);
+    });
+
+    test("should abort every stream on clear, including ones outside the size-window after remove()", () => {
+      const ac1 = new AbortController();
+      const ac2 = new AbortController();
+      const ac4 = new AbortController();
+
+      // fill to capacity so the underlying ring wraps (writeIndex back to 0)
+      registry.add(createMockStreamEntry("stream-1", { abortController: ac1 }));
+      registry.add(createMockStreamEntry("stream-2", { abortController: ac2 }));
+      registry.add(createMockStreamEntry("stream-3"));
+
+      // removing the most recently inserted stream shrinks the size-window;
+      // stream-1 (oldest slot) used to fall outside the window walked by
+      // getAll() and was never aborted on clear()
+      registry.remove("stream-3");
+
+      registry.clear();
+
+      expect(ac1.signal.aborted).toBe(true);
+      expect(ac1.signal.reason).toBe("Server shutdown");
+      expect(ac2.signal.aborted).toBe(true);
+      expect(registry.size()).toBe(0);
+
+      // also verify after holes + refill
+      const ac5 = new AbortController();
+      registry.add(createMockStreamEntry("stream-4", { abortController: ac4 }));
+      registry.add(createMockStreamEntry("stream-5", { abortController: ac5 }));
+      registry.remove("stream-5");
+
+      registry.clear();
+
+      expect(ac4.signal.aborted).toBe(true);
+      expect(registry.size()).toBe(0);
     });
 
     test("should allow adding new streams after clear", () => {
