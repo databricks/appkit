@@ -35,6 +35,7 @@ export class TelemetryManager {
 
   private static instance?: TelemetryManager;
   private sdk?: NodeSDK;
+  private shutdownPromise?: Promise<void>;
 
   /**
    * Create a scoped telemetry provider for a specific plugin.
@@ -166,16 +167,28 @@ export class TelemetryManager {
     process.once("SIGINT", shutdownFn);
   }
 
-  private async shutdown(): Promise<void> {
-    if (!this.sdk) {
-      return;
+  /**
+   * Flush and shut down the OpenTelemetry SDK.
+   *
+   * Idempotent: the SDK reference is cleared synchronously and concurrent
+   * or repeated calls await the same in-flight flush. Public so the server
+   * plugin can await the flush inside its orchestrated graceful shutdown
+   * instead of racing the signal handler registered in
+   * {@link registerShutdown} against `process.exit`.
+   */
+  async shutdown(): Promise<void> {
+    if (this.sdk) {
+      const sdk = this.sdk;
+      this.sdk = undefined;
+      this.shutdownPromise = (async () => {
+        try {
+          await sdk.shutdown();
+        } catch (error) {
+          logger.error("Error shutting down: %O", error);
+        }
+      })();
     }
 
-    try {
-      await this.sdk.shutdown();
-      this.sdk = undefined;
-    } catch (error) {
-      logger.error("Error shutting down: %O", error);
-    }
+    return this.shutdownPromise;
   }
 }

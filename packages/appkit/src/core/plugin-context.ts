@@ -237,7 +237,8 @@ export class PluginContext {
    * Errors in individual callbacks are logged but do not prevent
    * other callbacks from running.
    *
-   * @internal Called by AppKit core only.
+   * @internal Called by AppKit core (`setup:complete`) and the server
+   * plugin (`shutdown`, during graceful shutdown).
    */
   async emitLifecycle(event: LifecycleEvent): Promise<void> {
     const hooks = this.lifecycleHooks.get(event);

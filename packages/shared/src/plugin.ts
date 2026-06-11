@@ -18,6 +18,18 @@ export interface BasePlugin {
 
   abortActiveOperations?(): void;
 
+  /**
+   * Optional graceful-shutdown hook.
+   *
+   * Invoked by the server plugin during graceful shutdown (SIGTERM/SIGINT),
+   * after `abortActiveOperations()` has run and the server has stopped
+   * accepting new connections. Use it to drain in-flight work or release
+   * resources. Each plugin's hook is bounded by a per-plugin timeout and
+   * runs concurrently with other plugins' hooks; errors are logged and
+   * never abort the shutdown.
+   */
+  shutdown?(): Promise<void> | void;
+
   setup(): Promise<void>;
 
   injectRoutes(router: express.Router): void;
