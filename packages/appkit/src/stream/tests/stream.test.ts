@@ -730,4 +730,61 @@ describe("StreamManager", () => {
       expect(events2.some((e) => e.includes("should-not-appear"))).toBe(false);
     });
   });
+
+  describe("error categorization", () => {
+    async function captureErrorEvent(
+      manager: StreamManager,
+      thrown: unknown,
+    ): Promise<{ code?: string; error?: string } | undefined> {
+      const { mockRes, events } = createMockResponse();
+      async function* generator() {
+        yield { type: "start" };
+        throw thrown;
+      }
+      await manager.stream(mockRes as any, generator);
+      const dataLine = events
+        .find((e) => e.startsWith("data:") && e.includes('"code"'))
+        ?.replace(/^data: /, "")
+        .replace(/\n\n$/, "");
+      if (!dataLine) return undefined;
+      return JSON.parse(dataLine) as { code?: string; error?: string };
+    }
+
+    test("does not emit an error SSE frame for native AbortError", async () => {
+      const err = new Error("operation aborted");
+      err.name = "AbortError";
+      const payload = await captureErrorEvent(streamManager, err);
+      expect(payload).toBeUndefined();
+    });
+
+    test("does not emit an error SSE frame for wrapped abort messages", async () => {
+      class FakeExecutionError extends Error {
+        statusCode = 500;
+        constructor() {
+          super("Statement failed: The operation was aborted.");
+          this.name = "ExecutionError";
+        }
+      }
+      const payload = await captureErrorEvent(
+        streamManager,
+        new FakeExecutionError(),
+      );
+      expect(payload).toBeUndefined();
+    });
+
+    test("classifies real upstream API errors as UPSTREAM_ERROR", async () => {
+      class FakeApiError extends Error {
+        statusCode = 503;
+        constructor() {
+          super("Statement failed: Internal warehouse error");
+          this.name = "ExecutionError";
+        }
+      }
+      const payload = await captureErrorEvent(
+        streamManager,
+        new FakeApiError(),
+      );
+      expect(payload?.code).toBe("UPSTREAM_ERROR");
+    });
+  });
 });

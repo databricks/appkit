@@ -373,6 +373,156 @@ describe("SQLWarehouseConnector", () => {
       }
     });
 
+    test("deduplicates concurrent cold-start waiters onto one poll loop", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STOPPED" })
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const start = vi.fn().mockResolvedValue(undefined);
+      const wsClient = { warehouses: { get, start } };
+      const allUpdates = [0, 1, 2].map(() => [] as { state: string }[]);
+
+      const waits = allUpdates.map((updates) =>
+        connector.ensureWarehouseRunning(wsClient as any, "wh-herd", {
+          onStatus: (u) => updates.push(u),
+          timeoutMs: 60_000,
+        }),
+      );
+      await vi.runAllTimersAsync();
+      await Promise.all(waits);
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(3);
+      const states = ["STARTING", "RUNNING"];
+      for (const updates of allUpdates) {
+        expect(updates.map((u) => u.state)).toEqual(states);
+      }
+    });
+
+    test("one waiter aborting does not cancel the shared readiness loop", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const controller = new AbortController();
+
+      const aborted = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-partial-abort",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      const survivor = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-partial-abort",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+
+      controller.abort();
+
+      const runPromise = vi.runAllTimersAsync();
+      await expect(aborted).rejects.toThrow(/canceled/i);
+      await runPromise;
+      await expect(survivor).resolves.toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(2);
+    });
+
+    test("synchronous remount rejoins before microtask orphan abort", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const mount1 = new AbortController();
+
+      const first = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-strict",
+        {
+          onStatus: () => {},
+          signal: mount1.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      mount1.abort();
+
+      const remount = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-strict",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+
+      const firstOutcome = expect(first).rejects.toThrow(/canceled/i);
+      await vi.runAllTimersAsync();
+      await firstOutcome;
+      await expect(remount).resolves.toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(2);
+    });
+
+    test("orphan before warehouses.start is aborted on the next microtask", async () => {
+      const get = vi.fn().mockResolvedValue({ state: "STARTING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const controller = new AbortController();
+
+      const only = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan-pre-start",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      controller.abort();
+
+      await expect(only).rejects.toThrow(/canceled/i);
+      await Promise.resolve();
+
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(wsClient.warehouses.start).not.toHaveBeenCalled();
+    });
+
+    test("orphan after warehouses.start runs poll to completion", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STOPPED" })
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const start = vi.fn().mockResolvedValue(undefined);
+      const wsClient = { warehouses: { get, start } };
+      const controller = new AbortController();
+
+      const only = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan-post-start",
+        {
+          onStatus: () => {},
+          signal: controller.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      await Promise.resolve();
+      controller.abort();
+
+      await expect(only).rejects.toThrow(/canceled/i);
+      await vi.runAllTimersAsync();
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(3);
+
+      await connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-orphan-post-start",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+      expect(get).toHaveBeenCalledTimes(3);
+    });
+
     test("continues the readiness loop when onStatus callback throws", async () => {
       // A consumer crash mid-poll must not abort the readiness contract;
       // the emitter swallows the throw onto the OTel span and the loop
