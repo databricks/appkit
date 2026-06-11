@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreExportsUsedInFile": true,
   "ignoreWorkspaces": [
     "packages/shared",
     "packages/lakebase",

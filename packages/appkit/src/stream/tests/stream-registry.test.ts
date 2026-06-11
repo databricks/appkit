@@ -262,6 +262,90 @@ describe("StreamRegistry", () => {
 
       expect(abortController1.signal.reason).toBe("Stream evicted");
     });
+
+    test("should prefer evicting a completed stream over an older live stream", () => {
+      const liveAbortController = new AbortController();
+
+      // the live stream is the LRU candidate, but a completed stream
+      // (waiting out its buffer TTL) exists and must be evicted first
+      registry.add(
+        createMockStreamEntry("live-old", {
+          lastAccess: 100,
+          abortController: liveAbortController,
+        }),
+      );
+      registry.add(
+        createMockStreamEntry("completed-recent", {
+          lastAccess: 300,
+          isCompleted: true,
+        }),
+      );
+      registry.add(createMockStreamEntry("live-recent", { lastAccess: 200 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed-recent")).toBe(false);
+      expect(registry.has("live-old")).toBe(true);
+      expect(registry.has("live-recent")).toBe(true);
+      expect(registry.has("stream-4")).toBe(true);
+      expect(liveAbortController.signal.aborted).toBe(false);
+    });
+
+    test("should evict the oldest completed stream when several are completed", () => {
+      registry.add(
+        createMockStreamEntry("completed-old", {
+          lastAccess: 200,
+          isCompleted: true,
+        }),
+      );
+      registry.add(
+        createMockStreamEntry("completed-recent", {
+          lastAccess: 300,
+          isCompleted: true,
+        }),
+      );
+      registry.add(createMockStreamEntry("live", { lastAccess: 100 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed-old")).toBe(false);
+      expect(registry.has("completed-recent")).toBe(true);
+      expect(registry.has("live")).toBe(true);
+    });
+
+    test("should fall back to LRU eviction when no stream is completed", () => {
+      registry.add(createMockStreamEntry("stream-1", { lastAccess: 300 }));
+      registry.add(createMockStreamEntry("stream-2", { lastAccess: 100 }));
+      registry.add(createMockStreamEntry("stream-3", { lastAccess: 200 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("stream-2")).toBe(false);
+      expect(registry.has("stream-1")).toBe(true);
+      expect(registry.has("stream-3")).toBe(true);
+      expect(registry.has("stream-4")).toBe(true);
+    });
+
+    test("should clear a pending removal timer on the evicted completed stream", () => {
+      vi.useFakeTimers();
+      const removalTimer = setTimeout(() => {}, 60_000);
+
+      registry.add(
+        createMockStreamEntry("completed", {
+          lastAccess: 100,
+          isCompleted: true,
+          removalTimer,
+        }),
+      );
+      registry.add(createMockStreamEntry("stream-2", { lastAccess: 200 }));
+      registry.add(createMockStreamEntry("stream-3", { lastAccess: 300 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed")).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.useRealTimers();
+    });
   });
 
   describe("eviction SSE broadcast", () => {
