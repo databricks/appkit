@@ -640,6 +640,48 @@ describe("DatabricksAdapter", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
+  test("flushes the last buffered text when maxSteps is exhausted mid-tool-calling (#421)", async () => {
+    // Every turn carries a draft answer AND a tool call, so the loop never
+    // reaches a terminal (no-tool) turn — it exits by exhausting maxSteps.
+    // Without the post-loop flush the buffered text would be dropped and the
+    // caller would receive no answer at all.
+    const draft = "Partial answer so far.";
+    globalThis.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        body: createReadableStream([
+          textDelta(draft),
+          toolCallDelta(
+            0,
+            "call_loop",
+            "analytics__query",
+            '{"query":"SELECT 1"}',
+          ),
+          sseChunk("[DONE]"),
+        ]),
+      }),
+    );
+
+    const adapter = createAdapter({ maxSteps: 2 });
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool: vi.fn().mockResolvedValue("ok") },
+    )) {
+      events.push(event);
+    }
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    // The draft is surfaced exactly once (the post-loop flush), not per turn.
+    const messageDeltas = events.filter((e) => e.type === "message_delta");
+    expect(messageDeltas).toEqual([{ type: "message_delta", content: draft }]);
+  });
+
   test("sends correct request to endpoint URL", async () => {
     globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
 

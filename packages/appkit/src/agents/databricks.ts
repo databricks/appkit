@@ -398,6 +398,15 @@ export class DatabricksAdapter implements AgentAdapter {
 
     yield { type: "status", status: "running" };
 
+    // When tools are offered, streamCompletion buffers assistant text instead of
+    // streaming it live (#421), and run() surfaces it only on a terminal turn.
+    // If the loop instead exits by exhausting maxSteps while still tool-calling,
+    // there is no terminal turn — so we'd drop the last turn's text entirely and
+    // the caller would see nothing. Track the last buffered text and whether a
+    // terminal turn surfaced it, then flush it after the loop as a fallback.
+    let lastBufferedText = "";
+    let surfacedFinalText = false;
+
     for (let step = 0; step < this.maxSteps; step++) {
       if (context.signal?.aborted) break;
 
@@ -406,6 +415,7 @@ export class DatabricksAdapter implements AgentAdapter {
         tools,
         context,
       );
+      lastBufferedText = text;
 
       if (toolCalls.length === 0) {
         const parsed = parseTextToolCalls(text);
@@ -422,6 +432,7 @@ export class DatabricksAdapter implements AgentAdapter {
         if (tools.length > 0 && text) {
           yield { type: "message_delta", content: text };
         }
+        surfacedFinalText = true;
         break;
       }
 
@@ -436,6 +447,20 @@ export class DatabricksAdapter implements AgentAdapter {
         const originalName = wireToName.get(wireName) ?? wireName;
         yield* this.executeSingleTool(tc, originalName, messages, context);
       }
+    }
+
+    // maxSteps exhausted mid-tool-calling: no terminal turn ever surfaced the
+    // buffered text. Flush the last turn's text so the caller isn't left with a
+    // silent, answerless run. Skipped when a terminal turn already emitted (or
+    // streamed live with no tools), or when the run was aborted (signal handling
+    // discards in-flight output).
+    if (
+      !surfacedFinalText &&
+      tools.length > 0 &&
+      lastBufferedText &&
+      !context.signal?.aborted
+    ) {
+      yield { type: "message_delta", content: lastBufferedText };
     }
   }
 
