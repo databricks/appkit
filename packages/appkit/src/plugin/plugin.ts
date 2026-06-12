@@ -27,7 +27,7 @@ import {
 import { deepMerge } from "../utils";
 import { forwardAsyncErrors } from "../utils/safe-handler";
 import { DevFileReader } from "./dev-reader";
-import { ABORTED_ERROR_CODE, type ExecutionResult } from "./execution-result";
+import type { ExecutionResult } from "./execution-result";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
 import { TelemetryInterceptor } from "./interceptors/telemetry";
@@ -108,25 +108,6 @@ function hasHttpStatusCode(
     "statusCode" in error &&
     typeof (error as Record<string, unknown>).statusCode === "number"
   );
-}
-
-/**
- * Derive the stable, machine-readable `code` for a failed
- * {@link ExecutionResult}. Unlike the message, the code is never masked in
- * production, so consumers can branch on it to recover error semantics
- * (e.g. distinguishing user cancellation from a statement failure).
- */
-function getExecutionErrorCode(error: unknown): string | undefined {
-  if (error instanceof Error && error.name === "AbortError") {
-    return ABORTED_ERROR_CODE;
-  }
-  if (error instanceof AppKitError) {
-    return error.code;
-  }
-  if (error instanceof Error) {
-    return error.name;
-  }
-  return undefined;
 }
 
 /**
@@ -648,39 +629,30 @@ export abstract class Plugin<
     } catch (error) {
       logger.error("Plugin execution failed", { error, plugin: this.name });
 
-      const isDev = process.env.NODE_ENV !== "production";
-      // Stable discriminator that survives production message masking, so
-      // consumers never have to string-match the (maskable) message.
-      const code = getExecutionErrorCode(error);
-
       if (error instanceof AppKitError) {
-        // Same 5xx disclosure policy as the server error middleware: mask
-        // server-side error messages in production to avoid leaking internals.
         return {
           ok: false,
           status: error.statusCode,
-          message:
-            isDev || error.statusCode < 500 ? error.message : "Server error",
-          code,
+          message: error.message,
         };
       }
 
       if (hasHttpStatusCode(error)) {
+        const isDev = process.env.NODE_ENV !== "production";
         const isClientError = error.statusCode >= 400 && error.statusCode < 500;
         return {
           ok: false,
           status: error.statusCode,
           message: isDev || isClientError ? error.message : "Server error",
-          code,
         };
       }
 
+      const isDev = process.env.NODE_ENV !== "production";
       return {
         ok: false,
         status: 500,
         message:
           isDev && error instanceof Error ? error.message : "Server error",
-        code,
       };
     }
   }

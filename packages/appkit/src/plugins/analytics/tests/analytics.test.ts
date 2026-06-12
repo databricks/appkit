@@ -8,11 +8,7 @@ import {
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
-import {
-  AnalyticsPlugin,
-  analytics,
-  throwFromFailedSqlResult,
-} from "../analytics";
+import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
 // Mock CacheManager singleton with actual caching behavior
@@ -751,60 +747,6 @@ describe("Analytics Plugin", () => {
       const plugin = new AnalyticsPlugin({ name: "analytics" });
       const entries = plugin.toolkit({ prefix: "", only: ["query"] });
       expect(Object.keys(entries)).toEqual(["query"]);
-    });
-  });
-
-  describe("throwFromFailedSqlResult", () => {
-    test("produces AbortError from production-masked result carrying ABORTED code", () => {
-      // In production the 5xx message is masked as "Server error"; only the
-      // machine-readable code identifies the abort.
-      expect(() =>
-        throwFromFailedSqlResult({ message: "Server error", code: "ABORTED" }),
-      ).toThrowError(
-        expect.objectContaining({
-          name: "AbortError",
-          message: "The operation was aborted.",
-        }),
-      );
-    });
-
-    test("produces AbortError from production-masked result carrying EXECUTION_CANCELED code", () => {
-      expect(() =>
-        throwFromFailedSqlResult({
-          message: "Server error",
-          code: "EXECUTION_CANCELED",
-        }),
-      ).toThrowError(expect.objectContaining({ name: "AbortError" }));
-    });
-
-    test("falls back to message sniffing when no code is present", () => {
-      expect(() =>
-        throwFromFailedSqlResult({ message: "Statement was canceled" }),
-      ).toThrowError(
-        expect.objectContaining({
-          name: "AbortError",
-          message: "Statement was canceled",
-        }),
-      );
-      expect(() =>
-        throwFromFailedSqlResult({ message: "The operation was aborted." }),
-      ).toThrowError(expect.objectContaining({ name: "AbortError" }));
-    });
-
-    test("throws statement failure for non-abort errors", () => {
-      expect(() =>
-        throwFromFailedSqlResult({
-          message: "Statement failed: syntax error",
-          code: "EXECUTION_ERROR",
-        }),
-      ).toThrowError("Statement failed: syntax error");
-      // Masked production failure without abort semantics stays a failure.
-      expect(() =>
-        throwFromFailedSqlResult({
-          message: "Server error",
-          code: "EXECUTION_ERROR",
-        }),
-      ).toThrowError("Statement failed: Server error");
     });
   });
 });
