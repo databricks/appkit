@@ -41,19 +41,24 @@ export class StreamRegistry {
     return this.streams.getSize();
   }
 
-  // get all streams currently in the registry
-  values(): StreamEntry[] {
-    return this.streams.getAll();
-  }
-
   clear(): void {
     const allStreams = this.streams.getAll();
 
     for (const stream of allStreams) {
+      this._clearGraceTimer(stream);
       stream.abortController.abort("Server shutdown");
     }
 
     this.streams.clear();
+  }
+
+  // clear a pending disconnect-grace timer so a removed stream can't keep its
+  // entry (and event buffer) alive until the timer fires
+  private _clearGraceTimer(stream: StreamEntry): void {
+    if (stream.disconnectGraceTimer) {
+      clearTimeout(stream.disconnectGraceTimer);
+      stream.disconnectGraceTimer = undefined;
+    }
   }
 
   // evict the oldest stream from the registry
@@ -88,6 +93,7 @@ export class StreamRegistry {
           }
         }
       }
+      this._clearGraceTimer(oldestStream);
       oldestStream.abortController.abort("Stream evicted");
       this.streams.remove(oldestStream.streamId);
     }

@@ -77,13 +77,7 @@ export class StreamManager {
 
   // abort all active operations
   abortAll(): void {
-    // clear any pending disconnect-grace timers so they can't fire late
-    for (const entry of this.streamRegistry.values()) {
-      if (entry.disconnectGraceTimer) {
-        clearTimeout(entry.disconnectGraceTimer);
-        entry.disconnectGraceTimer = undefined;
-      }
-    }
+    // pending disconnect-grace timers are cleared by streamRegistry.clear() below
     this.activeOperations.forEach((operation) => {
       if (operation.heartbeat) clearInterval(operation.heartbeat);
       operation.controller.abort(
@@ -428,9 +422,7 @@ export class StreamManager {
   // stopping background polling loops for genuinely abandoned streams.
   private _scheduleGraceAbort(streamEntry: StreamEntry): void {
     // clear any existing grace timer to avoid stacking
-    if (streamEntry.disconnectGraceTimer) {
-      clearTimeout(streamEntry.disconnectGraceTimer);
-    }
+    this._clearGraceTimer(streamEntry);
 
     const timer = setTimeout(() => {
       streamEntry.disconnectGraceTimer = undefined;
