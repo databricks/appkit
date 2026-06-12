@@ -2,7 +2,8 @@
 # Uses .gitignore glob syntax. Only files that match AND are gitignored are
 # copied, so tracked templates like .env.dist / .env.tmpl are left untouched.
 #
-# A bare pattern with no slash matches at any depth, so `.env` picks up
-# apps/dev-playground/.env, apps/clean-app/.env, etc.
-.env
-.env.local
+# Listed as explicit, anchored paths (mirroring .cursor/worktrees.json) rather
+# than a bare `.env` glob, so exactly the dev env files are copied and nothing
+# else is picked up at unexpected depths.
+apps/dev-playground/.env
+apps/clean-app/.env
