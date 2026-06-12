@@ -21,24 +21,26 @@ throw new ExecutionError("Statement was canceled");
 ```ts
 new ExecutionError(message: string, options?: {
   cause?: Error;
+  code?: string;
   context?: Record<string, unknown>;
 }): ExecutionError;
 ```
 
 #### Parameters
 
-| Parameter | Type |
-| ------ | ------ |
-| `message` | `string` |
-| `options?` | \{ `cause?`: `Error`; `context?`: `Record`\<`string`, `unknown`\>; \} |
-| `options.cause?` | `Error` |
-| `options.context?` | `Record`\<`string`, `unknown`\> |
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `message` | `string` | - |
+| `options?` | \{ `cause?`: `Error`; `code?`: `string`; `context?`: `Record`\<`string`, `unknown`\>; \} | - |
+| `options.cause?` | `Error` | - |
+| `options.code?` | `string` | Stable machine-readable code (defaults to `"EXECUTION_ERROR"`). |
+| `options.context?` | `Record`\<`string`, `unknown`\> | - |
 
 #### Returns
 
 `ExecutionError`
 
-#### Inherited from
+#### Overrides
 
 [`AppKitError`](Class.AppKitError.md).[`constructor`](Class.AppKitError.md#constructor)
 
@@ -61,7 +63,7 @@ Optional cause of the error
 ### code
 
 ```ts
-readonly code: "EXECUTION_ERROR" = "EXECUTION_ERROR";
+readonly code: string;
 ```
 
 Error code for programmatic error handling
@@ -112,6 +114,18 @@ HTTP status code suggestion (can be overridden)
 
 [`AppKitError`](Class.AppKitError.md).[`statusCode`](Class.AppKitError.md#statuscode)
 
+***
+
+### CANCELED\_CODE
+
+```ts
+readonly static CANCELED_CODE: "EXECUTION_CANCELED" = "EXECUTION_CANCELED";
+```
+
+Stable code carried by errors created via [ExecutionError.canceled](#canceled).
+Lets consumers detect cancellation programmatically without inspecting
+the message (which may be masked in production).
+
 ## Methods
 
 ### toJSON()
@@ -157,7 +171,9 @@ Create a human-readable string representation
 static canceled(): ExecutionError;
 ```
 
-Create an execution error for canceled operation
+Create an execution error for canceled operation.
+Carries the [ExecutionError.CANCELED\_CODE](#canceled_code) code so cancellation
+stays distinguishable even when the message is masked in production.
 
 #### Returns
 
