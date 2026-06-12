@@ -11,6 +11,13 @@ export interface StreamConfig {
   maxPersistentBuffers?: number;
   heartbeatInterval?: number;
   maxActiveStreams?: number;
+  /**
+   * How long (ms) an idle stream's generator is kept alive after the last
+   * client disconnects, so a reconnecting client can resume. If no client
+   * reconnects within this window, the abandoned stream's generator is
+   * aborted (e.g. to stop background polling loops like jobs runAndWait).
+   */
+  disconnectGraceMs?: number;
 }
 
 /** Retry configuration for the RetryInterceptor. Uses exponential backoff with full jitter between attempts. */
