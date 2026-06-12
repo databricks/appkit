@@ -2,6 +2,45 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSSE } from "@/js";
 
 /**
+ * Parse a wire string as JSON, returning the raw value (or `undefined`) when
+ * it isn't valid JSON. Tool `arguments`/`output` arrive as serialized strings
+ * on the Responses API; we surface the parsed value when possible so item
+ * consumers don't each re-parse.
+ */
+function parseMaybeJson(value: string | undefined): unknown {
+  if (value === undefined || value === "") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/** Find the last element matching `pred` (no `Array.prototype.findLast` dep). */
+function findLast<T, S extends T>(
+  arr: T[],
+  pred: (value: T) => value is S,
+): S | undefined {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (pred(arr[i])) return arr[i] as S;
+  }
+  return undefined;
+}
+
+/**
+ * Text of the last `message` item — the terminal answer of the turn. Streams
+ * live as that message's deltas arrive; earlier (superseded draft) messages
+ * are ignored.
+ */
+function lastMessageText(list: AgentTurnItem[]): string {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const it = list[i];
+    if (it.kind === "message") return it.text;
+  }
+  return "";
+}
+
+/**
  * One Responses-API-shaped event yielded by the agents plugin SSE stream.
  *
  * The hook handles the two paths every chat UI needs — accumulating
@@ -39,6 +78,41 @@ export interface AgentChatEvent {
   annotations?: Record<string, unknown>;
 }
 
+/**
+ * One ordered item in an agent turn, derived from the Responses-API output
+ * items the agents plugin streams. Each ReAct round's assistant text is a
+ * distinct `message` item; tool calls and their results sit between rounds.
+ *
+ * The list is ordered by the wire `output_index`, so the LAST `message` item
+ * is the terminal answer and everything before it is intermediate "thinking"
+ * (draft messages the model emitted alongside its tool calls, plus the tool
+ * calls/results themselves).
+ *
+ * @see {@link UseAgentChatResult.items}
+ */
+export type AgentTurnItem =
+  | {
+      kind: "message";
+      id: string;
+      text: string;
+      status: "in_progress" | "completed";
+    }
+  | {
+      kind: "tool_call";
+      id: string;
+      callId: string;
+      name: string;
+      args: unknown;
+      status: "in_progress" | "completed";
+    }
+  | {
+      kind: "tool_result";
+      id: string;
+      callId: string;
+      output: unknown;
+      error?: string;
+    };
+
 export interface UseAgentChatOptions {
   /**
    * Agent name registered with the `agents()` plugin (e.g. `"assistant"`,
@@ -62,8 +136,24 @@ export interface UseAgentChatOptions {
 }
 
 export interface UseAgentChatResult {
-  /** Accumulated assistant text from `response.output_text.delta` events. */
+  /**
+   * Text of the FINAL assistant message item — the terminal answer of the
+   * turn, updated live as its deltas stream in. With OpenAI-compatible Claude
+   * the model emits a full draft answer alongside its tool calls on every
+   * ReAct round; `content` surfaces only the last round's message, so it never
+   * shows those duplicated drafts. For the full per-round structure (drafts,
+   * tool calls, tool results) read {@link items} instead.
+   */
   content: string;
+  /**
+   * Ordered list of turn items derived from the Responses-API output items,
+   * keyed by wire `output_index`. Render everything before the last `message`
+   * item as collapsible intermediate steps ("thinking" + tool calls/results)
+   * and the last `message` item as the prominent answer. Messages stream in
+   * live; tool calls flip to `completed` on their `done` event. Reset at the
+   * start of each {@link send} and by {@link reset}.
+   */
+  items: AgentTurnItem[];
   /**
    * Every parsed event, in order. Provided for components that need to
    * render historical tool calls or replay state after a remount —
@@ -104,25 +194,35 @@ export interface UseAgentChatResult {
  * The hook is intentionally lower-level than a full chat component —
  * it owns one stream at a time, not a multi-turn message history. The
  * caller composes its own messages array (typically a `useState`) and
- * appends to it via the `onEvent` callback for tool calls and via the
- * `content` field for assistant text.
+ * appends to it from the structured {@link UseAgentChatResult.items} list
+ * (drafts, tool calls, tool results, and the terminal answer) or, for the
+ * common case, just reads {@link UseAgentChatResult.content} (the final
+ * answer text, streamed live and de-duplicated across ReAct rounds).
  *
  * @example
  * ```tsx
  * function Chat({ agent }: { agent: string }) {
- *   const [messages, setMessages] = useState<Message[]>([]);
- *   const { content, threadId, isStreaming, send, reset } = useAgentChat({
- *     agent,
- *     onEvent(ev) {
- *       if (ev.type === "response.output_item.added" && ev.item?.type === "function_call") {
- *         setMessages((m) => [...m, { role: "tool", name: ev.item?.name, args: ev.item?.arguments }]);
- *       }
- *     },
- *   });
- *   // `content` reflects the latest assistant turn; reset() between conversations.
- *   // ...
+ *   const { content, items, threadId, isStreaming, send, reset } = useAgentChat({ agent });
+ *   const steps = items.slice(0, -1); // everything before the terminal answer
+ *   return (
+ *     <>
+ *       {steps.length > 0 && (
+ *         <details>
+ *           <summary>Steps</summary>
+ *           {steps.map((it) =>
+ *             it.kind === "message" ? <p key={it.id}>{it.text}</p> :
+ *             it.kind === "tool_call" ? <code key={it.id}>{it.name}</code> :
+ *             <code key={it.id}>{String(it.output)}</code>,
+ *           )}
+ *         </details>
+ *       )}
+ *       <div>{content}</div>
+ *     </>
+ *   );
  * }
  * ```
+ *
+ * `content` is the terminal answer (streams live, de-duplicated across rounds).
  */
 export function useAgentChat({
   agent,
@@ -130,6 +230,7 @@ export function useAgentChat({
   onEvent,
 }: UseAgentChatOptions): UseAgentChatResult {
   const [content, setContent] = useState("");
+  const [items, setItems] = useState<AgentTurnItem[]>([]);
   const [events, setEvents] = useState<AgentChatEvent[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -139,7 +240,9 @@ export function useAgentChat({
   // `onEvent`: `send` is a stable callback that reads the latest
   // threadId/onEvent without re-mounting connectSSE on every render.
   const threadIdRef = useRef<string | null>(null);
-  const contentRef = useRef("");
+  // Working copy of the ordered turn items, keyed by wire `item_id`. Mutated
+  // as events arrive, then mirrored into `items`/`content` state.
+  const itemsRef = useRef<AgentTurnItem[]>([]);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -148,8 +251,9 @@ export function useAgentChat({
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     threadIdRef.current = null;
-    contentRef.current = "";
+    itemsRef.current = [];
     setContent("");
+    setItems([]);
     setEvents([]);
     setThreadId(null);
     setIsStreaming(false);
@@ -163,8 +267,9 @@ export function useAgentChat({
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      contentRef.current = "";
+      itemsRef.current = [];
       setContent("");
+      setItems([]);
       setEvents([]);
       setError(null);
       setIsStreaming(true);
@@ -217,12 +322,94 @@ export function useAgentChat({
                 threadIdRef.current = tid;
                 setThreadId(tid);
               }
+              return;
+            }
+
+            // Reduce the Responses-API wire events into the ordered item list.
+            // The translator emits items in `output_index` order, so simply
+            // appending on `added` keeps the list ordered.
+            const list = itemsRef.current;
+            let changed = false;
+
+            if (event.type === "response.output_item.added") {
+              const it = event.item;
+              if (it?.type === "message" && it.id) {
+                list.push({
+                  kind: "message",
+                  id: it.id,
+                  text: "",
+                  status: "in_progress",
+                });
+                changed = true;
+              } else if (it?.type === "function_call") {
+                list.push({
+                  kind: "tool_call",
+                  id: it.id ?? it.call_id ?? `fc_${list.length}`,
+                  callId: it.call_id ?? "",
+                  name: it.name ?? "",
+                  args: parseMaybeJson(it.arguments),
+                  status: "in_progress",
+                });
+                changed = true;
+              } else if (it?.type === "function_call_output") {
+                list.push({
+                  kind: "tool_result",
+                  id: it.id ?? `fc_output_${list.length}`,
+                  callId: it.call_id ?? "",
+                  output: parseMaybeJson(it.output),
+                });
+                changed = true;
+              }
+            } else if (event.type === "response.output_item.done") {
+              const it = event.item;
+              if (it?.type === "function_call") {
+                const callId = it.call_id ?? "";
+                const target = findLast(
+                  list,
+                  (x): x is Extract<AgentTurnItem, { kind: "tool_call" }> =>
+                    x.kind === "tool_call" &&
+                    (x.callId === callId || x.id === it.id),
+                );
+                if (target) {
+                  target.status = "completed";
+                  if (it.arguments !== undefined) {
+                    target.args = parseMaybeJson(it.arguments);
+                  }
+                  if (it.name) target.name = it.name;
+                  changed = true;
+                }
+              } else if (it?.type === "message" && it.id) {
+                const target = findLast(
+                  list,
+                  (x): x is Extract<AgentTurnItem, { kind: "message" }> =>
+                    x.kind === "message" && x.id === it.id,
+                );
+                if (target) {
+                  target.status = "completed";
+                  changed = true;
+                }
+              }
             } else if (
               event.type === "response.output_text.delta" &&
               typeof event.delta === "string"
             ) {
-              contentRef.current += event.delta;
-              setContent(contentRef.current);
+              const target = findLast(
+                list,
+                (x): x is Extract<AgentTurnItem, { kind: "message" }> =>
+                  x.kind === "message" && x.id === event.item_id,
+              );
+              if (target) {
+                target.text += event.delta;
+                changed = true;
+              }
+            }
+
+            if (changed) {
+              // Clone so React sees a new reference; item objects are mutated
+              // in place in the ref, so shallow-copy them too.
+              const snapshot = list.map((x) => ({ ...x }));
+              setItems(snapshot);
+              setContent(lastMessageText(snapshot));
             }
           },
           onError: (err) => {
@@ -253,6 +440,7 @@ export function useAgentChat({
 
   return {
     content,
+    items,
     events,
     threadId,
     isStreaming,

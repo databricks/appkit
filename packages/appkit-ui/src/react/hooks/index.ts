@@ -24,6 +24,7 @@ export type {
 } from "./types";
 export {
   type AgentChatEvent,
+  type AgentTurnItem,
   type UseAgentChatOptions,
   type UseAgentChatResult,
   useAgentChat,

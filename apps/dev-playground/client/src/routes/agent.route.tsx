@@ -1,5 +1,11 @@
 import { getPluginClientConfig } from "@databricks/appkit-ui/js";
-import { Button } from "@databricks/appkit-ui/react";
+import type { AgentTurnItem } from "@databricks/appkit-ui/react";
+import {
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -39,7 +45,113 @@ interface SSEEvent {
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
+  /** User text, or — for assistant turns — the terminal answer text. */
   content: string;
+  /**
+   * For assistant turns: the ordered per-round trace (intermediate draft
+   * messages, tool calls, tool results, and the final answer). Rendered as a
+   * collapsible "Steps" section above the answer. Undefined for user turns.
+   */
+  items?: AgentTurnItem[];
+}
+
+/** Parse a wire JSON string, falling back to the raw value. */
+function parseMaybeJson(value: string | undefined): unknown {
+  if (value === undefined || value === "") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/** Text of the last `message` item — the terminal answer. */
+function lastMessageText(items: AgentTurnItem[]): string {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "message") return it.text;
+  }
+  return "";
+}
+
+function summarizeArgs(args: unknown): string {
+  if (args === undefined || args === "") return "";
+  const s = typeof args === "string" ? args : JSON.stringify(args);
+  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+}
+
+function summarizeOutput(output: unknown): string {
+  const s = typeof output === "string" ? output : JSON.stringify(output);
+  return s.length > 200 ? `${s.slice(0, 200)}…` : s;
+}
+
+/**
+ * Renders an assistant turn: collapsible intermediate steps (every item before
+ * the last `message`) plus the terminal answer streamed live below.
+ */
+function AssistantTurn({ items }: { items: AgentTurnItem[] }) {
+  const lastMessageIdx = (() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].kind === "message") return i;
+    }
+    return -1;
+  })();
+  const steps = lastMessageIdx >= 0 ? items.slice(0, lastMessageIdx) : items;
+  const answer = lastMessageIdx >= 0 ? lastMessageText(items) : "";
+
+  return (
+    <div className="max-w-[85%] space-y-2">
+      {steps.length > 0 && (
+        <Collapsible>
+          <CollapsibleTrigger className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+            Steps ({steps.length})
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-1 space-y-1 border-l-2 border-muted pl-3">
+            {steps.map((it) => {
+              if (it.kind === "message") {
+                return (
+                  <p
+                    key={it.id}
+                    className="whitespace-pre-wrap text-xs text-muted-foreground/80"
+                  >
+                    {it.text}
+                  </p>
+                );
+              }
+              if (it.kind === "tool_call") {
+                return (
+                  <div
+                    key={it.id}
+                    className="inline-flex max-w-full items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs font-mono"
+                  >
+                    <span className="font-semibold">{it.name}</span>
+                    <span className="opacity-60 truncate">
+                      ({summarizeArgs(it.args)})
+                    </span>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={it.id}
+                  className={`rounded px-2 py-0.5 text-xs font-mono ${
+                    it.error
+                      ? "bg-red-500/10 text-red-600"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {it.error ? `error: ${it.error}` : summarizeOutput(it.output)}
+                </div>
+              );
+            })}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+      <div className="rounded-lg bg-muted px-4 py-2">
+        <p className="whitespace-pre-wrap text-sm">{answer}</p>
+      </div>
+    </div>
+  );
 }
 
 interface PendingApproval {
@@ -138,7 +250,7 @@ function useAutocomplete(enabled: boolean) {
 
 function AgentRoute() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [events, setEvents] = useState<SSEEvent[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -232,8 +344,30 @@ function AgentRoute() {
       if (!reader) return;
 
       const decoder = new TextDecoder();
-      let assistantContent = "";
+      // Per-round trace items for this assistant turn, keyed by wire item id.
+      const turnItems: AgentTurnItem[] = [];
+      const assistantId = ++msgIdCounter.current;
       let buffer = "";
+
+      const flushAssistant = () => {
+        const snapshot = turnItems.map((x) => ({ ...x }));
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          const next: ChatMessage = {
+            id: assistantId,
+            role: "assistant",
+            content: lastMessageText(snapshot),
+            items: snapshot,
+          };
+          if (last?.role === "assistant" && last.id === assistantId) {
+            updated[updated.length - 1] = next;
+          } else {
+            updated.push(next);
+          }
+          return updated;
+        });
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -273,26 +407,81 @@ function AgentRoute() {
               setThreadId(event.data.threadId as string);
             }
 
-            if (event.type === "response.output_text.delta" && event.delta) {
-              assistantContent += event.delta;
-              setMessages((prev) => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last?.role === "assistant") {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: assistantContent,
-                  };
-                } else {
-                  updated.push({
-                    id: ++msgIdCounter.current,
-                    role: "assistant",
-                    content: assistantContent,
-                  });
+            // Build the ordered per-round item list. The translator emits
+            // items in output_index order, so appending on `added` keeps it
+            // ordered. Each ReAct round's draft is its own message item, so the
+            // duplicated drafts surface as collapsible steps, not the answer.
+            let changed = false;
+            const it = event.item;
+            if (event.type === "response.output_item.added") {
+              if (it?.type === "message" && it.id) {
+                turnItems.push({
+                  kind: "message",
+                  id: it.id,
+                  text: "",
+                  status: "in_progress",
+                });
+                changed = true;
+              } else if (it?.type === "function_call") {
+                turnItems.push({
+                  kind: "tool_call",
+                  id: it.id ?? it.call_id ?? `fc_${turnItems.length}`,
+                  callId: it.call_id ?? "",
+                  name: it.name ?? "",
+                  args: parseMaybeJson(it.arguments),
+                  status: "in_progress",
+                });
+                changed = true;
+              } else if (it?.type === "function_call_output") {
+                turnItems.push({
+                  kind: "tool_result",
+                  id: it.id ?? `fc_output_${turnItems.length}`,
+                  callId: it.call_id ?? "",
+                  output: parseMaybeJson(it.output),
+                });
+                changed = true;
+              }
+            } else if (event.type === "response.output_item.done") {
+              if (it?.type === "function_call") {
+                for (let i = turnItems.length - 1; i >= 0; i--) {
+                  const t = turnItems[i];
+                  if (
+                    t.kind === "tool_call" &&
+                    (t.callId === it.call_id || t.id === it.id)
+                  ) {
+                    t.status = "completed";
+                    if (it.arguments !== undefined) {
+                      t.args = parseMaybeJson(it.arguments);
+                    }
+                    changed = true;
+                    break;
+                  }
                 }
-                return updated;
-              });
+              } else if (it?.type === "message" && it.id) {
+                for (let i = turnItems.length - 1; i >= 0; i--) {
+                  const t = turnItems[i];
+                  if (t.kind === "message" && t.id === it.id) {
+                    t.status = "completed";
+                    changed = true;
+                    break;
+                  }
+                }
+              }
+            } else if (
+              event.type === "response.output_text.delta" &&
+              event.delta
+            ) {
+              for (let i = turnItems.length - 1; i >= 0; i--) {
+                const t = turnItems[i];
+                if (t.kind === "message" && t.id === event.item_id) {
+                  t.text += event.delta;
+                  changed = true;
+                  break;
+                }
+              }
             }
+
+            if (changed) flushAssistant();
           } catch {
             // skip malformed events
           }
@@ -368,15 +557,21 @@ function AgentRoute() {
                   key={msg.id}
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  <div
-                    className={`max-w-[85%] rounded-lg px-4 py-2 ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
-                  </div>
+                  {msg.role === "assistant" && msg.items ? (
+                    <AssistantTurn items={msg.items} />
+                  ) : (
+                    <div
+                      className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap text-sm">
+                        {msg.content}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
 

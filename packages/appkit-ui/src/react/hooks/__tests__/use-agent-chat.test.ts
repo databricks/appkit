@@ -51,6 +51,7 @@ describe("useAgentChat", () => {
     const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
 
     expect(result.current.content).toBe("");
+    expect(result.current.items).toEqual([]);
     expect(result.current.events).toEqual([]);
     expect(result.current.threadId).toBeNull();
     expect(result.current.isStreaming).toBe(false);
@@ -102,16 +103,151 @@ describe("useAgentChat", () => {
     await act(async () => {
       await emit(
         JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_1" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
           type: "response.output_text.delta",
+          item_id: "msg_1",
           delta: "Hello, ",
         }),
       );
       await emit(
-        JSON.stringify({ type: "response.output_text.delta", delta: "world" }),
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          delta: "world",
+        }),
       );
     });
 
     expect(result.current.content).toBe("Hello, world");
+  });
+
+  test("builds an ordered items list and content = the LAST message", async () => {
+    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+
+    act(() => {
+      void result.current.send("hi");
+    });
+    await waitFor(() => expect(capturedCallbacks.onMessage).toBeDefined());
+
+    await act(async () => {
+      // Round 1: a draft message item (the model's duplicate draft answer).
+      await emit(
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_1" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          delta: "draft answer",
+        }),
+      );
+      // A tool call + result between the two rounds.
+      await emit(
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 1,
+          item: {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "get_weather",
+            arguments: '{"city":"SF"}',
+          },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_item.done",
+          output_index: 1,
+          item: {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "get_weather",
+            arguments: '{"city":"SF"}',
+          },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 2,
+          item: {
+            type: "function_call_output",
+            id: "fco_1",
+            call_id: "call_1",
+            output: '{"temp":72}',
+          },
+        }),
+      );
+      // Terminal round: the real answer, streamed live in two deltas.
+      await emit(
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 3,
+          item: { type: "message", id: "msg_2" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_2",
+          delta: "It's ",
+        }),
+      );
+    });
+
+    // Deltas stream into the right item live, and content tracks the LAST
+    // message — never concatenating the round-1 draft.
+    expect(result.current.content).toBe("It's ");
+    expect(result.current.items.map((it) => it.kind)).toEqual([
+      "message",
+      "tool_call",
+      "tool_result",
+      "message",
+    ]);
+
+    await act(async () => {
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_2",
+          delta: "72 in SF.",
+        }),
+      );
+    });
+
+    expect(result.current.content).toBe("It's 72 in SF.");
+
+    const items = result.current.items;
+    const draft = items[0];
+    const toolCall = items[1];
+    const toolResult = items[2];
+    const answer = items[3];
+    expect(draft).toMatchObject({ kind: "message", text: "draft answer" });
+    expect(toolCall).toMatchObject({
+      kind: "tool_call",
+      name: "get_weather",
+      callId: "call_1",
+      status: "completed",
+      args: { city: "SF" },
+    });
+    expect(toolResult).toMatchObject({
+      kind: "tool_result",
+      callId: "call_1",
+      output: { temp: 72 },
+    });
+    expect(answer).toMatchObject({ kind: "message", text: "It's 72 in SF." });
   });
 
   test("captures threadId from appkit.metadata and reuses it on next send()", async () => {
@@ -207,7 +343,18 @@ describe("useAgentChat", () => {
 
     await act(async () => {
       await emit(
-        JSON.stringify({ type: "response.output_text.delta", delta: "x" }),
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_1" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          delta: "x",
+        }),
       );
     });
 
@@ -231,12 +378,25 @@ describe("useAgentChat", () => {
       await emit("[DONE]");
       await emit("");
       await emit(
-        JSON.stringify({ type: "response.output_text.delta", delta: "ok" }),
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_1" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          delta: "ok",
+        }),
       );
     });
 
     expect(result.current.content).toBe("ok");
-    expect(onEvent).toHaveBeenCalledTimes(1);
+    // Two well-formed events parsed (the message item + its delta); the three
+    // malformed/empty payloads were skipped before reaching onEvent.
+    expect(onEvent).toHaveBeenCalledTimes(2);
   });
 
   test("isStreaming toggles around the connectSSE lifecycle", async () => {
@@ -269,7 +429,18 @@ describe("useAgentChat", () => {
         JSON.stringify({ type: "appkit.metadata", data: { threadId: "t-1" } }),
       );
       await emit(
-        JSON.stringify({ type: "response.output_text.delta", delta: "x" }),
+        JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "message", id: "msg_1" },
+        }),
+      );
+      await emit(
+        JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          delta: "x",
+        }),
       );
     });
 
