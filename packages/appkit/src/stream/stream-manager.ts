@@ -119,8 +119,7 @@ export class StreamManager {
       }
     }
 
-    // A client is (re)attaching: cancel any pending disconnect-grace abort so
-    // a reconnection within the grace window resumes the live generator.
+    // a reconnecting client cancels the pending disconnect-grace abort
     this._clearGraceTimer(streamEntry);
 
     // add client to stream entry
@@ -148,10 +147,7 @@ export class StreamManager {
       streamEntry.clients.delete(res);
       this.activeOperations.delete(streamOperation);
 
-      // When no clients remain, don't abort immediately — start a grace timer
-      // so a reconnecting client can resume the stream. Only truly-abandoned
-      // streams (no reconnect within the window) get their generator aborted,
-      // which stops background polling loops (e.g. jobs runAndWait).
+      // grace-abort instead of aborting now, so a reconnect can resume
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
         this._scheduleGraceAbort(streamEntry);
       }
@@ -237,11 +233,7 @@ export class StreamManager {
       this.activeOperations.delete(streamOperation);
       streamEntry.clients.delete(res);
 
-      // When no clients remain, don't abort the generator immediately — start a
-      // grace timer so a reconnecting client (e.g. SSE resume with
-      // Last-Event-ID) can keep the stream alive. Polling loops (e.g. jobs
-      // runAndWait) of truly-abandoned streams are still stopped, just
-      // `disconnectGraceMs` later instead of instantly.
+      // grace-abort instead of aborting now, so a reconnect can resume
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
         this._scheduleGraceAbort(streamEntry);
       }
@@ -415,13 +407,9 @@ export class StreamManager {
     }
   }
 
-  // Schedule a delayed abort for a stream whose last client just disconnected.
-  // If a client reconnects within the grace window, the timer is cleared in
-  // `_attachToExistingStream` and the generator keeps running so reconnection
-  // can resume. Otherwise the generator is aborted once the window expires,
-  // stopping background polling loops for genuinely abandoned streams.
+  // abort the generator after the grace window unless a client reconnects first
   private _scheduleGraceAbort(streamEntry: StreamEntry): void {
-    // clear any existing grace timer to avoid stacking
+    // clear any existing timer to avoid stacking
     this._clearGraceTimer(streamEntry);
 
     const timer = setTimeout(() => {

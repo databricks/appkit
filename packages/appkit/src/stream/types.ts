@@ -49,11 +49,7 @@ export interface StreamEntry {
   lastAccess: number;
   abortController: AbortController;
   traceContext: Context;
-  /**
-   * Pending timer that aborts the generator once the disconnect grace window
-   * elapses with no clients. Cleared if a client reconnects, or when the
-   * stream completes/errors. Undefined while at least one client is connected.
-   */
+  // pending grace-window abort, set while the last client is disconnected
   disconnectGraceTimer?: NodeJS.Timeout;
 }
 

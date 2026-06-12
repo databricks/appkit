@@ -52,8 +52,7 @@ export class StreamRegistry {
     this.streams.clear();
   }
 
-  // clear a pending disconnect-grace timer so a removed stream can't keep its
-  // entry (and event buffer) alive until the timer fires
+  // clear a pending grace timer so a removed stream isn't pinned until it fires
   private _clearGraceTimer(stream: StreamEntry): void {
     if (stream.disconnectGraceTimer) {
       clearTimeout(stream.disconnectGraceTimer);
