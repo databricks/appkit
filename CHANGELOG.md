@@ -64,6 +64,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.41.4](https://github.com/databricks/appkit/compare/v0.41.3...v0.41.4) (2026-06-12)
+
+### appkit
+
+* **appkit:** keep SSE generator alive for a grace window so reconnection resumes ([#445](https://github.com/databricks/appkit/issues/445)) ([f81fff1](https://github.com/databricks/appkit/commit/f81fff1ceee17234b57f60de5ebd97dd4c008639))
+
+
 ## [0.41.3](https://github.com/databricks/appkit/compare/v0.41.2...v0.41.3) (2026-06-12)
 
 ### appkit-ui
