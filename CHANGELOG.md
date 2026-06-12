@@ -62,6 +62,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.41.3](https://github.com/databricks/appkit/compare/v0.41.2...v0.41.3) (2026-06-12)
+
+### appkit-ui
+
+* **appkit-ui:** escape heatmap tooltip values to prevent XSS ([#437](https://github.com/databricks/appkit/issues/437)) ([d73ff25](https://github.com/databricks/appkit/commit/d73ff25b82b2018f4dc38df335e9fe4fbd484155))
+
+
 ## [0.41.2](https://github.com/databricks/appkit/compare/v0.41.1...v0.41.2) (2026-06-11)
 
 ### connectors
