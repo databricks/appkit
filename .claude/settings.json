@@ -1,4 +1,26 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(pnpm build:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm test)",
+      "Bash(pnpm check)",
+      "Bash(pnpm check:fix)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm format:*)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm -r typecheck)",
+      "Bash(pnpm docs:build)",
+      "Bash(pnpm exec biome:*)",
+      "Bash(pnpm exec tsc:*)",
+      "Bash(npx appkit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +30,18 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/setup-worktree.sh\"",
             "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/biome-format.sh\"",
+            "timeout": 60
           }
         ]
       }
