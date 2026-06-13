@@ -5,6 +5,17 @@ import {
   mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
+import {
+  DateDay,
+  Decimal,
+  makeData,
+  Table,
+  TimestampMicrosecond,
+  tableToIPC,
+  Utf8,
+  Vector,
+  vectorFromArray,
+} from "apache-arrow";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
@@ -621,6 +632,63 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("OBO requests differing only by whitespace in x-forwarded-user share one cache key", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM my_data",
+        isAsUser: true,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ owner: "alice-data" }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      // Same user, but the forwarded header is padded with surrounding
+      // whitespace. The OBO cache key derives from the trimmed user id
+      // (executorKey = resolveUserId(req)), so this must hit the SAME cache
+      // entry as the unpadded request below — no per-whitespace cache fork.
+      const paddedReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "  alice  ",
+        },
+      });
+      const paddedRes = createMockResponse();
+      await handler(paddedReq, paddedRes);
+
+      // Same user, unpadded header — must reuse the cached result.
+      const bareReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice",
+        },
+      });
+      const bareRes = createMockResponse();
+      await handler(bareReq, bareRes);
+
+      // Only one execution: the whitespace variant resolved to the same
+      // per-user cache key as the bare id, so the second request was a hit.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+
+      // Both responses serve the same (cached) data.
+      expect(paddedRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"alice-data"'),
+      );
+      expect(bareRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"alice-data"'),
+      );
+    });
+
     test("should handle AbortSignal cancellation", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
@@ -1010,7 +1078,12 @@ describe("Analytics Plugin", () => {
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
-      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      // Skip the leading warehouse_status event the route always emits;
+      // the terminal result/arrow/error payload is the one under test.
+      const payload = writeCalls.find(
+        (s: string) =>
+          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      );
       expect(payload).toBeDefined();
       expect(payload).toContain('"type":"arrow"');
       expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
@@ -1082,7 +1155,12 @@ describe("Analytics Plugin", () => {
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
-      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      // Skip the leading warehouse_status event the route always emits;
+      // the terminal result/arrow/error payload is the one under test.
+      const payload = writeCalls.find(
+        (s: string) =>
+          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      );
       expect(payload).toBeDefined();
       expect(payload).toContain('"type":"arrow"');
       expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
@@ -1212,7 +1290,12 @@ describe("Analytics Plugin", () => {
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
-      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      // Skip the leading warehouse_status event the route always emits;
+      // the terminal result/arrow/error payload is the one under test.
+      const payload = writeCalls.find(
+        (s: string) =>
+          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      );
       expect(payload).toBeDefined();
       expect(payload).toContain('"type":"result"');
       expect(payload).not.toContain('"type":"arrow"');
@@ -1221,6 +1304,97 @@ describe("Analytics Plugin", () => {
       // have produced for the same warehouse + same INT columns.
       expect(payload).toContain('"test_col":"1"');
       expect(payload).toContain('"test_col2":"2"');
+    });
+
+    test("/query/:query_key JSON_ARRAY fallback formats decimal, timestamp, date, and JSON-string columns to match the native JSON_ARRAY shape", async () => {
+      // The server-side Arrow→rows decoder (needs-arrow fallback) must
+      // render typed Arrow cells the same way the warehouse renders them
+      // under native JSON_ARRAY, or callers can tell which path served the
+      // query. Regression coverage for the four decode bugs:
+      //  - DECIMAL: scale applied ("123.45"), not the raw unscaled mantissa.
+      //  - TIMESTAMP: "yyyy-MM-dd HH:mm:ss[.SSS]", not a raw epoch number.
+      //  - DATE: "yyyy-MM-dd", not a raw epoch number.
+      //  - STRING holding JSON: parsed to an object, matching the JSON path.
+      // Build a one-row Arrow table with each type and IPC-encode it.
+      const decType = new Decimal(2, 10, 128); // scale=2, precision=10
+      // 128-bit little-endian limbs for the signed unscaled value 12345.
+      const decLimbs = new Uint32Array(4);
+      decLimbs[0] = 12345;
+      const decVec = new Vector([
+        makeData({ type: decType, length: 1, data: decLimbs }),
+      ]);
+      const tsVec = vectorFromArray(
+        [new Date(Date.UTC(2024, 5, 13, 1, 2, 3, 500))],
+        new TimestampMicrosecond("UTC"),
+      );
+      // TIMESTAMP_NTZ: no timezone → ISO without the trailing Z.
+      const tsNtzVec = vectorFromArray(
+        [new Date(Date.UTC(2024, 0, 2, 3, 4, 5))],
+        new TimestampMicrosecond(),
+      );
+      const dateVec = vectorFromArray(
+        [new Date(Date.UTC(2024, 5, 13))],
+        new DateDay(),
+      );
+      const jsonVec = vectorFromArray(['{"nested":1}'], new Utf8());
+      const table = new Table({
+        amount: decVec,
+        ts: tsVec,
+        ts_ntz: tsNtzVec,
+        d: dateVec,
+        meta: jsonVec,
+      });
+      const attachment = Buffer.from(tableToIPC(table, "stream")).toString(
+        "base64",
+      );
+
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"Inline disposition only supports ARROW_STREAM format."}',
+          ),
+        )
+        .mockResolvedValueOnce({
+          result: { attachment, status: { state: "SUCCEEDED" } },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON_ARRAY" },
+      });
+      const mockRes = createMockResponse();
+      await handler(mockReq, mockRes);
+
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find(
+        (s: string) =>
+          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      );
+      expect(payload).toBeDefined();
+      expect(payload).toContain('"type":"result"');
+      // DECIMAL: scale applied, not the unscaled "12345".
+      expect(payload).toContain('"amount":"123.45"');
+      // TIMESTAMP: ISO-8601 ms precision with Z (zoned), not an epoch
+      // number. Matches dogfood's native JSON_ARRAY rendering.
+      expect(payload).toContain('"ts":"2024-06-13T01:02:03.500Z"');
+      // TIMESTAMP_NTZ: same ISO form without the trailing Z.
+      expect(payload).toContain('"ts_ntz":"2024-01-02T03:04:05.000"');
+      // DATE: yyyy-MM-dd.
+      expect(payload).toContain('"d":"2024-06-13"');
+      // STRING holding JSON parsed to a nested object.
+      expect(payload).toContain('"meta":{"nested":1}');
     });
 
     test("/query/:query_key surfaces an error when both JSON_ARRAY + INLINE and the ARROW_STREAM retry fail", async () => {
@@ -1288,7 +1462,12 @@ describe("Analytics Plugin", () => {
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
-      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      // Skip the leading warehouse_status event the route always emits;
+      // the terminal result/arrow/error payload is the one under test.
+      const payload = writeCalls.find(
+        (s: string) =>
+          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      );
       if (payload) {
         expect(payload).not.toContain('"type":"result"');
       }
@@ -1399,6 +1578,71 @@ describe("Analytics Plugin", () => {
           format: "JSON_ARRAY",
         });
       }
+    });
+
+    test("emits warehouse_status events before the result for a STARTING warehouse", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1, name: "test" }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+
+      // Override the default RUNNING mock with a STARTING -> RUNNING sequence
+      // so the route streams a warehouse_status event before the result.
+      const warehouseGet = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      mockReq.serviceWorkspaceClient.warehouses.get = warehouseGet;
+      mockReq.userWorkspaceClient.warehouses.get = warehouseGet;
+      const mockRes = createMockResponse();
+
+      // The connector polls every 3s between warehouse state checks; use fake
+      // timers so the test doesn't actually sleep.
+      vi.useFakeTimers();
+      const handlerPromise = handler(mockReq, mockRes);
+      await vi.runAllTimersAsync();
+      await handlerPromise;
+      vi.useRealTimers();
+
+      // Inspect the SSE writes: a `warehouse_status` event must precede the
+      // `result` event.
+      const eventLines = (mockRes.write as any).mock.calls
+        .map((call: any[]) => call[0] as string)
+        .filter((s: string) => s.startsWith("event: "));
+      const warehouseIdx = eventLines.findIndex(
+        (s: string) => s === "event: warehouse_status\n",
+      );
+      const resultIdx = eventLines.findIndex(
+        (s: string) => s === "event: result\n",
+      );
+      expect(warehouseIdx).toBeGreaterThanOrEqual(0);
+      expect(resultIdx).toBeGreaterThanOrEqual(0);
+      expect(warehouseIdx).toBeLessThan(resultIdx);
+
+      // The status payload should include the state field.
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /"type":"warehouse_status".*"state":"(STARTING|RUNNING)"/,
+        ),
+      );
+
+      expect(executeMock).toHaveBeenCalledTimes(1);
     });
 
     test("should return 404 when query file is not found", async () => {

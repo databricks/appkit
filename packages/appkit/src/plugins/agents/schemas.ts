@@ -58,7 +58,6 @@ export const invocationsRequestSchema = z.object({
         `input array exceeds the ${MAX_INVOCATIONS_INPUT_ITEMS}-item limit`,
       ),
   ]),
-  stream: z.boolean().optional().default(true),
   model: z.string().optional(),
 });
 

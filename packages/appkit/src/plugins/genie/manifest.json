@@ -1,4 +1,5 @@
 {
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "genie",
   "displayName": "Genie Plugin",
   "description": "AI/BI Genie space integration for natural language data queries",
@@ -13,7 +14,11 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_GENIE_SPACE_ID",
-            "description": "Default Genie Space ID"
+            "description": "Default Genie Space ID",
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "genie_space"
+            }
           },
           "name": {
             "description": "Genie Space display name"
@@ -22,6 +27,13 @@
       }
     ],
     "optional": []
+  },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "After init, configure the 'spaces' map in plugin config with alias-to-Space-ID mappings"
+      ]
+    }
   },
   "config": {
     "schema": {

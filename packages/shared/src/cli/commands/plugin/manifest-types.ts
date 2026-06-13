@@ -1,28 +1,24 @@
 /**
- * Shared types for plugin manifests used across CLI commands.
- * Base types (ResourceFieldEntry, ResourceRequirement, PluginManifest) are
- * generated from plugin-manifest.schema.json — only CLI-specific extensions
- * (TemplatePlugin, TemplatePluginsManifest) are hand-written here.
+ * Thin re-export shim for plugin manifest types used across CLI commands.
+ *
+ * Source of truth is the Zod schema module (`../../../schemas/manifest`); all
+ * type aliases and the Standard Schema interface re-export from there. This
+ * shim only exists so existing callers (`sync.ts`, `validate.ts`, `create.ts`,
+ * `add-resource.ts`, etc.) continue importing from the same path.
  */
 
+export type { StandardSchemaV1 } from "@standard-schema/spec";
 export type {
+  DiscoveryDescriptor,
+  Origin,
   PluginManifest,
+  PluginScaffoldingRules,
   ResourceFieldEntry,
+  ResourceKind,
   ResourceRequirement,
-} from "../../../schemas/plugin-manifest.generated";
-
-import type { PluginManifest } from "../../../schemas/plugin-manifest.generated";
-
-export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
-  package: string;
-  /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
-  requiredByTemplate?: boolean;
-  /** Plugin stability level. Absent or undefined means "ga" (general availability). */
-  stability?: "beta" | "ga";
-}
-
-export interface TemplatePluginsManifest {
-  $schema: string;
-  version: string;
-  plugins: Record<string, TemplatePlugin>;
-}
+  ScaffoldingDescriptor,
+  ScaffoldingFlag,
+  ScaffoldingRules,
+  TemplatePlugin,
+  TemplatePluginsManifest,
+} from "../../../schemas/manifest";

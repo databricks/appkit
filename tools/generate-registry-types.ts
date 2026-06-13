@@ -1,109 +1,108 @@
 /**
  * Generates registry types (ResourceType enum, permission types, hierarchy) from
- * plugin-manifest.schema.json. Single source of truth for resource types and permissions.
+ * the canonical Zod schemas in `packages/shared/src/schemas/manifest.ts`. Single
+ * source of truth for resource types and permissions.
+ *
+ * The resource-type enum + per-type permission enums are extracted via Zod 4's
+ * native `.options` accessor on enum schemas (no runtime JSON-schema read).
  *
  * Run from repo root: pnpm exec tsx tools/generate-registry-types.ts
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatWithBiome } from "./format-with-biome.ts";
+import {
+  appPermissionSchema,
+  databasePermissionSchema,
+  experimentPermissionSchema,
+  genieSpacePermissionSchema,
+  jobPermissionSchema,
+  postgresPermissionSchema,
+  resourceTypeSchema,
+  secretPermissionSchema,
+  servingEndpointPermissionSchema,
+  sqlWarehousePermissionSchema,
+  ucConnectionPermissionSchema,
+  ucFunctionPermissionSchema,
+  vectorSearchIndexPermissionSchema,
+  volumePermissionSchema,
+} from "../packages/shared/src/schemas/manifest";
+import { formatWithBiome } from "./format-with-biome";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
-const SCHEMA_PATH = path.join(
-  REPO_ROOT,
-  "packages/shared/src/schemas/plugin-manifest.schema.json",
-);
 const OUT_PATH = path.join(
   REPO_ROOT,
   "packages/appkit/src/registry/types.generated.ts",
 );
-
-interface SchemaDefs {
-  resourceType?: { enum?: string[] };
-  resourceRequirement?: {
-    allOf?: Array<{
-      if?: { properties?: { type?: { const?: string } } };
-      then?: { properties?: { permission?: { $ref?: string } } };
-    }>;
-  };
-  [key: string]: unknown;
-}
-
-function loadSchema(): Record<string, unknown> {
-  const raw = fs.readFileSync(SCHEMA_PATH, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
 
 /** value "sql_warehouse" -> "SQL_WAREHOUSE" */
 function toEnumKey(value: string): string {
   return value.toUpperCase().replace(/-/g, "_");
 }
 
-/** def key "secretPermission" -> "SecretPermission" */
-function toPermissionTypeName(defKey: string): string {
-  return defKey.charAt(0).toUpperCase() + defKey.slice(1);
+/** type "sql_warehouse" -> "SqlWarehousePermission" */
+function toPermissionTypeName(type: string): string {
+  return (
+    type
+      .split("_")
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join("") + "Permission"
+  );
 }
 
-function generate(schema: Record<string, unknown>): string {
-  const defs = (schema.$defs ?? {}) as SchemaDefs;
-  const resourceType = defs.resourceType;
-  const resourceReq = defs.resourceRequirement;
-  const allOf = resourceReq?.allOf ?? [];
+/**
+ * Per-type permission enum schemas, keyed by the resource type literal.
+ * Mirrors `schema-resources.ts`'s `PERMISSION_SCHEMAS_BY_TYPE`. Add an entry
+ * when extending `resourceTypeSchema`.
+ */
+const PERMISSION_SCHEMAS_BY_TYPE = {
+  secret: secretPermissionSchema,
+  job: jobPermissionSchema,
+  sql_warehouse: sqlWarehousePermissionSchema,
+  serving_endpoint: servingEndpointPermissionSchema,
+  volume: volumePermissionSchema,
+  vector_search_index: vectorSearchIndexPermissionSchema,
+  uc_function: ucFunctionPermissionSchema,
+  uc_connection: ucConnectionPermissionSchema,
+  database: databasePermissionSchema,
+  postgres: postgresPermissionSchema,
+  genie_space: genieSpacePermissionSchema,
+  experiment: experimentPermissionSchema,
+  app: appPermissionSchema,
+} as const;
 
-  const resourceTypes: string[] = resourceType?.enum ?? [];
-  const typeToPermissionRef: Array<{ type: string; ref: string }> = [];
-
-  for (const branch of allOf) {
-    const typeConst = branch?.if?.properties?.type?.const;
-    const ref = branch?.then?.properties?.permission?.$ref;
-    if (typeof typeConst === "string" && typeof ref === "string") {
-      typeToPermissionRef.push({ type: typeConst, ref });
-    }
-  }
-
-  // Resolve ref to def key: "#/$defs/secretPermission" -> "secretPermission"
-  const refToDefKey = (ref: string): string => {
-    const segments = ref.replace(/^#\//, "").split("/");
-    return segments[segments.length - 1] ?? "";
-  };
-
-  const defKeyToPermissionTypeName: Record<string, string> = {};
-  const typeToPermissions: Record<string, string[]> = {};
-
-  for (const { type, ref } of typeToPermissionRef) {
-    const defKey = refToDefKey(ref);
-    const permDef = defs[defKey] as { enum?: string[] } | undefined;
-    const enumArr = permDef?.enum ?? [];
-    if (enumArr.length > 0) {
-      defKeyToPermissionTypeName[defKey] = toPermissionTypeName(defKey);
-      // Schema enum order is weakest to strongest (see schema descriptions)
-      typeToPermissions[type] = [...enumArr];
-    }
-  }
+function generate(): string {
+  const resourceTypes = [...resourceTypeSchema.options];
 
   const lines: string[] = [
-    "// AUTO-GENERATED from packages/shared/src/schemas/plugin-manifest.schema.json",
+    "// AUTO-GENERATED from packages/shared/src/schemas/manifest.ts (Zod canonical).",
     "// Do not edit. Run: pnpm exec tsx tools/generate-registry-types.ts",
     "",
-    "/** Resource types from schema $defs.resourceType.enum */",
+    "/** Resource types from resourceTypeSchema.options */",
     "export enum ResourceType {",
     ...resourceTypes.map((v) => `  ${toEnumKey(v)} = "${v}",`),
     "}",
     "",
     "// ============================================================================",
-    "// Permissions per resource type (from schema permission $defs)",
+    "// Permissions per resource type (from per-type permission enum schemas)",
     "// ============================================================================",
   ];
 
   const permissionTypeNames: string[] = [];
-  for (const { type, ref } of typeToPermissionRef) {
-    const defKey = refToDefKey(ref);
-    const typeName = defKeyToPermissionTypeName[defKey];
-    if (!typeName) continue;
-    const perms = typeToPermissions[type];
-    if (!perms?.length) continue;
+  const typeToPermissions: Record<string, string[]> = {};
+
+  for (const type of resourceTypes) {
+    const schema = PERMISSION_SCHEMAS_BY_TYPE[type];
+    if (!schema) {
+      throw new Error(
+        `generate-registry-types: missing permission schema for resource type '${type}'. ` +
+          `Add it to PERMISSION_SCHEMAS_BY_TYPE in tools/generate-registry-types.ts.`,
+      );
+    }
+    const perms = [...schema.options];
+    typeToPermissions[type] = perms;
+    const typeName = toPermissionTypeName(type);
     permissionTypeNames.push(typeName);
     const union = perms.map((p) => `"${p}"`).join(" | ");
     lines.push(`/** Permissions for ${toEnumKey(type)} resources */`);
@@ -115,9 +114,7 @@ function generate(schema: Record<string, unknown>): string {
     "/** Union of all possible permission levels across all resource types. */",
   );
   lines.push(
-    "export type ResourcePermission =\n  | " +
-      permissionTypeNames.join("\n  | ") +
-      ";",
+    `export type ResourcePermission =\n  | ${permissionTypeNames.join("\n  | ")};`,
   );
   lines.push("");
   lines.push(
@@ -146,8 +143,7 @@ function generate(schema: Record<string, unknown>): string {
 }
 
 function main(): void {
-  const schema = loadSchema();
-  const out = generate(schema);
+  const out = generate();
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, out, "utf-8");
   formatWithBiome(OUT_PATH);

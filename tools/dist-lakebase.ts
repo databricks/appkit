@@ -1,11 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const { values } = parseArgs({
+  options: {
+    prerelease: { type: "string" },
+  },
+});
+const prerelease = values.prerelease;
 
 fs.mkdirSync("tmp", { recursive: true });
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+if (prerelease) {
+  pkg.version = `${pkg.version}-pr.${prerelease}`;
+}
 
 pkg.exports = pkg.publishConfig.exports;
 delete pkg.publishConfig.exports;

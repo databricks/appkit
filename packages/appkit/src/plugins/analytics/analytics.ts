@@ -1,5 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { tableFromIPC } from "apache-arrow";
+import { type DataType, Type, tableFromIPC } from "apache-arrow";
 import type express from "express";
 import {
   type AgentToolDefinition,
@@ -14,6 +14,10 @@ import {
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
+import {
+  DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+  type WarehouseStatusUpdate,
+} from "../../connectors/sql-warehouse/client";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
@@ -22,7 +26,7 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { ExecutionError } from "../../errors";
+import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -34,12 +38,62 @@ import { QueryProcessor } from "./query";
 import {
   type AnalyticsFormat,
   type AnalyticsQueryResponse,
+  type AnalyticsStreamMessage,
   type IAnalyticsConfig,
   type IAnalyticsQueryRequest,
   normalizeAnalyticsFormat,
+  type WarehouseStatus,
 } from "./types";
 
 const logger = createLogger("analytics");
+
+/**
+ * Bridges a callback-emitting async function into an async iterable.
+ *
+ * `start(emit)` runs concurrently; every value passed to `emit` is yielded
+ * in order. The iterable completes when `start`'s promise resolves and
+ * re-throws (after draining) if it rejects. Lets a callback-based progress
+ * API (e.g. SQL warehouse readiness) be consumed with `for await`.
+ */
+async function* streamCallbacks<T>(
+  start: (emit: (value: T) => void) => Promise<void>,
+): AsyncGenerator<T, void, unknown> {
+  const queue: T[] = [];
+  let wake: (() => void) | null = null;
+  let settled = false;
+  let error: unknown = null;
+
+  const notify = (): void => {
+    wake?.();
+    wake = null;
+  };
+
+  // The .then(_, err => ...) chain converts a rejection into a resolved
+  // promise; the consumer surfaces `error` after draining the queue.
+  void start((value) => {
+    queue.push(value);
+    notify();
+  }).then(
+    () => {
+      settled = true;
+      notify();
+    },
+    (err) => {
+      error = err;
+      settled = true;
+      notify();
+    },
+  );
+
+  while (!settled || queue.length > 0) {
+    while (queue.length > 0) yield queue.shift() as T;
+    if (settled) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+  }
+  if (error) throw error;
+}
 
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
@@ -354,31 +408,122 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       ],
     };
 
-    const defaultConfig: PluginExecuteConfig = {
+    // Cache/retry/timeout are scoped to the SQL execution itself (inner
+    // `execute`) so the warehouse-readiness phase isn't subject to retries
+    // and the generator value never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: cacheConfig,
     };
 
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // user-scoped trace context still apply.
     const streamExecutionSettings: StreamExecutionSettings = {
-      default: defaultConfig,
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
     };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
 
     await executor.executeStream(
       res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
+        );
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            },
+          };
+        }
+
+        // `execute()` reduces a thrown error to `{ status, message }`,
+        // dropping the rich fields (`errorCode`, `clientMessage`) the
+        // fallback's `ExecutionError`s carry. Capture the original here so
+        // we can re-throw it intact — the SSE error path
+        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
+        let originalError: unknown;
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            try {
+              const processedParams =
+                await self.queryProcessor.processQueryParams(query, parameters);
+              // Disposition/format fallback (inline-arrow stash, JSON_ARRAY↔
+              // ARROW_STREAM retries) lives in `_executeWithFormatFallback`,
+              // which returns the SSE message the client should receive.
+              return await self._executeWithFormatFallback(
+                executor,
+                query,
+                processedParams,
+                format,
+                stashUserKey,
+                sig,
+              );
+            } catch (err) {
+              originalError = err;
+              throw err;
+            }
+          },
+          { default: sqlConfig },
+          executorKey,
         );
 
-        return this._executeWithFormatFallback(
-          executor,
-          query,
-          processedParams,
-          format,
-          stashUserKey,
-          signal,
-        );
+        if (!sqlResult.ok) {
+          const msg = sqlResult.message;
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("operation was aborted") ||
+            lower.includes("the request was aborted") ||
+            lower.includes("statement was canceled")
+          ) {
+            const err = new DOMException(
+              lower.includes("canceled") ? msg : "The operation was aborted.",
+              "AbortError",
+            );
+            throw err;
+          }
+          // Re-throw the original error so its structured `errorCode` (e.g.
+          // INLINE_ARROW_STASH_EXHAUSTED) and sanitized `clientMessage`
+          // survive to the SSE error payload. Fall back to a generic
+          // statement failure only if the original wasn't an AppKitError.
+          if (originalError instanceof AppKitError) {
+            throw originalError;
+          }
+          const inner = msg.startsWith("Statement failed: ")
+            ? msg.slice("Statement failed: ".length)
+            : msg;
+          throw ExecutionError.statementFailed(inner);
+        }
+
+        yield sqlResult.data as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,
@@ -526,13 +671,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       if (result?.attachment) {
         return this._stashAndEmitInline(result, stashUserKey, signal);
       }
-      // INLINE succeeded but the warehouse didn't return an Arrow
-      // attachment — degrade to a plain result message with whatever
-      // data the warehouse did return.
-      return makeResultMessage(result?.data, {
-        status: result?.status,
-        statement_id: result?.statement_id,
-      });
+      // INLINE succeeded but the warehouse returned no Arrow attachment
+      // (rare: inline `data_array` under ARROW_STREAM). An ARROW_STREAM
+      // caller's client decodes the `/arrow-result` bytes into a
+      // TypedArrowTable, so emitting a `result` row message here would
+      // break that contract. Fall through to the EXTERNAL_LINKS path
+      // below to obtain a fetchable Arrow statement instead.
+      logger.warn(
+        "ARROW_STREAM INLINE returned no attachment; falling back to EXTERNAL_LINKS",
+      );
     } catch (err: unknown) {
       // If the request was aborted, do not retry — the signal is dead and
       // a second statement would be billed but never read.
@@ -741,6 +888,72 @@ function nestedJsonReplacer(_key: string, value: unknown): unknown {
 }
 
 /**
+ * Render an `apache-arrow` Decimal cell to a fixed-point string. The JS
+ * value is a `DecimalBigNum` whose `toString()` yields the *signed
+ * unscaled* integer (e.g. `12345`, `-6789`); the decimal point is placed
+ * `scale` digits from the right to match the warehouse's native
+ * JSON_ARRAY rendering (`"123.45"`, `"-67.89"`).
+ */
+function formatDecimalCell(
+  value: { toString(): string },
+  scale: number,
+): string {
+  const unscaled = value.toString();
+  if (scale <= 0) return unscaled;
+  const negative = unscaled.startsWith("-");
+  let digits = negative ? unscaled.slice(1) : unscaled;
+  if (digits.length <= scale) digits = digits.padStart(scale + 1, "0");
+  const point = digits.length - scale;
+  const out = `${digits.slice(0, point)}.${digits.slice(point)}`;
+  return negative ? `-${out}` : out;
+}
+
+/**
+ * Render an `apache-arrow` Timestamp cell to the warehouse's native
+ * JSON_ARRAY rendering, which is ISO-8601 with millisecond precision:
+ * `yyyy-MM-ddTHH:mm:ss.SSSZ` for zoned TIMESTAMP / TIMESTAMP_LTZ, and the
+ * same without the trailing `Z` for TIMESTAMP_NTZ. This is exactly
+ * `Date#toISOString()` (drop the `Z` when the column carries no timezone).
+ *
+ * `arrow-js` normalizes every Timestamp unit to epoch **milliseconds** at
+ * `.get()` (a MICROSECOND column returns ms, not micros); the warehouse
+ * also truncates JSON_ARRAY timestamps to ms, so the two agree. Verified
+ * against a dogfood serverless warehouse: `2024-06-13T01:02:03.500Z`,
+ * `2024-06-13T01:02:03.000Z`, and NTZ `2024-01-02T03:04:05.000`.
+ */
+function formatTimestampCell(epochMs: number, hasTimezone: boolean): string {
+  const iso = new Date(epochMs).toISOString();
+  return hasTimezone ? iso : iso.slice(0, -1);
+}
+
+/**
+ * Render an `apache-arrow` Date cell to `yyyy-MM-dd` (UTC) to match the
+ * warehouse's native JSON_ARRAY rendering. `arrow-js` normalizes Date
+ * columns to epoch milliseconds at UTC midnight on `.get()`.
+ */
+function formatDateCell(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Parse a STRING cell that looks like JSON (`{`/`[` prefixed) into an
+ * object/array, mirroring `SQLWarehouseConnector._transformDataArray` so
+ * the JSON_ARRAY fallback produces the same nested shape the native
+ * JSON_ARRAY path does. Non-JSON strings (and parse failures) pass
+ * through unchanged.
+ */
+function maybeParseJsonString(value: string): unknown {
+  if (value && (value[0] === "{" || value[0] === "[")) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+/**
  * Decode a base64 Arrow IPC attachment to plain row objects.
  *
  * Used by the JSON_ARRAY fallback path when a warehouse refuses
@@ -787,23 +1000,49 @@ function decodeArrowAttachmentToRows(
   // O(rows × cols) times. At 100k × 50 columns that's millions of
   // redundant lookups on the event loop.
   const columns = table.schema.fields.map(
-    (f) => [f.name, table.getChild(f.name)] as const,
+    (f) => [f.name, table.getChild(f.name), f.type] as const,
   );
   const rows: Record<string, unknown>[] = [];
   for (let i = 0; i < table.numRows; i++) {
     const row: Record<string, unknown> = {};
-    for (const [name, col] of columns) {
+    for (const [name, col, type] of columns) {
       const v = col?.get(i);
       if (v == null) {
         row[name] = null;
-      } else if (
+        continue;
+      }
+      // Branch on the Arrow field type first: several Databricks types
+      // decode to JS values whose default stringification does NOT match
+      // the warehouse's native JSON_ARRAY rendering. Without these the
+      // fallback silently diverges from the direct JSON_ARRAY path
+      // (decimals lose scale, temporals come back as raw epoch numbers).
+      switch (type.typeId) {
+        case Type.Decimal:
+          row[name] = formatDecimalCell(
+            v as { toString(): string },
+            (type as DataType & { scale: number }).scale,
+          );
+          continue;
+        case Type.Timestamp:
+          row[name] = formatTimestampCell(
+            Number(v),
+            (type as DataType & { timezone?: string | null }).timezone != null,
+          );
+          continue;
+        case Type.Date:
+          row[name] = formatDateCell(Number(v));
+          continue;
+      }
+      if (
         typeof v === "number" ||
         typeof v === "bigint" ||
         typeof v === "boolean"
       ) {
         row[name] = String(v);
       } else if (typeof v === "string") {
-        row[name] = v;
+        // Match `_transformDataArray`: STRING columns holding JSON are
+        // parsed into objects/arrays so both paths yield the same shape.
+        row[name] = maybeParseJsonString(v);
       } else if (v instanceof Date) {
         row[name] = v.toISOString();
       } else if (v instanceof Uint8Array) {

@@ -8,6 +8,7 @@ import { appKitServingTypesPlugin } from "../../type-generator/serving/vite-plug
 import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { mergeConfigDedup } from "../../utils";
 import { BaseServer } from "./base-server";
+import { reactSourceLocPlugin } from "./react-source-loc-vite-plugin";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 const logger = createLogger("server:vite");
@@ -52,6 +53,7 @@ export class ViteDevServer extends BaseServer {
     const react = await import("@vitejs/plugin-react");
 
     const clientRoot = this.findClientRoot();
+    const projectRoot = process.cwd();
 
     const loadedConfig = await loadConfigFromFile(
       {
@@ -81,6 +83,7 @@ export class ViteDevServer extends BaseServer {
       },
       plugins: [
         react.default(),
+        reactSourceLocPlugin({ projectRoot }),
         appKitTypesPlugin(),
         appKitServingTypesPlugin(),
       ],

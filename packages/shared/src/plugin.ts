@@ -1,13 +1,16 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
 import type {
+  DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
-  ResourceRequirement as GeneratedResourceRequirement,
+  PluginScaffoldingRules,
   ResourceFieldEntry,
-} from "./schemas/plugin-manifest.generated";
+} from "./schemas/manifest";
 
-// Re-export generated types as the shared canonical definitions.
-export type { ResourceFieldEntry };
+// Re-export the canonical schema-derived types as the shared definitions.
+// Sourced from `./schemas/manifest` (the Zod canonical) so `DiscoveryDescriptor`
+// stays the discriminated union shape rather than the free-form predecessor.
+export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -92,17 +95,30 @@ export type PluginConstructor<
 
 /**
  * Manifest declaration for plugins.
- * Extends the generated PluginManifest with a generic name parameter
- * and uses JSONSchema7 for config.schema (the generated ConfigSchema
+ * Extends the schema-derived PluginManifest with a generic name parameter
+ * and uses JSONSchema7 for config.schema (the schema-inferred ConfigSchema
  * is too restrictive for plugin consumers).
  *
- * @see {@link GeneratedPluginManifest} — generated base from plugin-manifest.schema.json
+ * @see {@link GeneratedPluginManifest} — Zod-inferred base from `schemas/manifest`
  * @see `packages/appkit/src/registry/types.ts` `PluginManifest` — strict appkit narrowing (enum types)
  */
 export interface PluginManifest<TName extends string = string>
   extends Omit<
     GeneratedPluginManifest,
-    "name" | "config" | "$schema" | "resources"
+    | "name"
+    | "config"
+    | "$schema"
+    | "resources"
+    | "displayName"
+    | "description"
+    | "author"
+    | "version"
+    | "repository"
+    | "keywords"
+    | "license"
+    | "onSetupMessage"
+    | "hidden"
+    | "stability"
   > {
   name: TName;
   resources: {
@@ -112,6 +128,26 @@ export interface PluginManifest<TName extends string = string>
   config?: {
     schema: JSONSchema7;
   };
+  /** Human-readable display name for UI and CLI */
+  displayName: string;
+  /** Brief description of what the plugin does */
+  description: string;
+  /** Author name or organization */
+  author?: string;
+  /** Plugin version (semver format) */
+  version?: string;
+  /** URL to the plugin's source repository */
+  repository?: string;
+  /** Keywords for plugin discovery */
+  keywords?: string[];
+  /** SPDX license identifier */
+  license?: string;
+  /** Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning). */
+  onSetupMessage?: string;
+  /** When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync. */
+  hidden?: boolean;
+  /** Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly. */
+  stability?: "beta" | "ga";
 }
 
 /**
@@ -119,10 +155,21 @@ export interface PluginManifest<TName extends string = string>
  * - `fields` is made required (schema has it optional, but registry always populates it)
  * - `required` boolean tracks whether the resource is mandatory at runtime
  *
- * @see {@link GeneratedResourceRequirement} — generated base from plugin-manifest.schema.json
+ * Defined as a flat structural shape rather than narrowing the schema-derived
+ * discriminated union. Per-type permission tightness is enforced by the
+ * Zod parse at validation time; expressing it in the consumer-facing
+ * `ResourceRequirement` would force every plugin to thread the variant type
+ * through `getResourceRequirements()` for no runtime benefit.
+ *
+ * @see `packages/shared/src/schemas/manifest.ts` `resourceRequirementSchema` — Zod discriminated union
  * @see `packages/appkit/src/registry/types.ts` `ResourceRequirement` — strict appkit narrowing (enum types)
  */
-export interface ResourceRequirement extends GeneratedResourceRequirement {
+export interface ResourceRequirement {
+  type: string;
+  alias: string;
+  resourceKey: string;
+  description: string;
+  permission: string;
   fields: Record<string, ResourceFieldEntry>;
   required: boolean;
 }

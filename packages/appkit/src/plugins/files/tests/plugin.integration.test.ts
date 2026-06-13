@@ -65,11 +65,33 @@ const MOCK_AUTH_HEADERS = {
 /** Volume key used in all integration tests. */
 const VOL = "files";
 
+/**
+ * Wait for the supplied server to finish binding, then return the
+ * OS-assigned port. Required when tests pass `port: 0` to `serverPlugin`
+ * — `appkit.server.start()` returns as soon as `listen()` is invoked but
+ * before the bind completes, so `server.address()` returns `null` until
+ * the `listening` event fires.
+ */
+async function getListeningPort(server: Server): Promise<number> {
+  const addr = server.address();
+  if (addr && typeof addr === "object" && typeof addr.port === "number") {
+    return addr.port;
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", () => resolve());
+    server.once("error", (err) => reject(err));
+  });
+  const ready = server.address();
+  if (!ready || typeof ready !== "object") {
+    throw new Error("Server is listening but address() returned null");
+  }
+  return ready.port;
+}
+
 describe("Files Plugin Integration", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9880;
 
   beforeAll(async () => {
     setupDatabricksEnv({
@@ -84,8 +106,10 @@ describe("Files Plugin Integration", () => {
 
     const appkit = await createApp({
       plugins: [
+        // port: 0 → OS assigns an ephemeral port. Avoids EADDRINUSE
+        // when concurrent CI runs or stale processes hold a fixed port.
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
         files(),
@@ -93,7 +117,8 @@ describe("Files Plugin Integration", () => {
     });
 
     server = appkit.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+    const port = await getListeningPort(server);
+    baseUrl = `http://127.0.0.1:${port}`;
   });
 
   afterAll(async () => {
@@ -437,15 +462,123 @@ describe("Files Plugin Integration", () => {
   });
 
   describe("Service principal execution", () => {
-    test("requests without user token return 401 (policy requires user identity)", async () => {
+    test("header-less request + default publicRead() + list → 200 (policy decides)", async () => {
+      mockFilesApi.listDirectoryContents.mockReturnValue(
+        (async function* () {
+          yield {
+            name: "sp-file.txt",
+            path: "/Volumes/catalog/schema/vol/sp-file.txt",
+            is_directory: false,
+          };
+        })(),
+      );
+
       // Use a unique path to avoid cached results from earlier tests
       const response = await fetch(
         `${baseUrl}/api/files/${VOL}/list?path=sp-only`,
       );
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(200);
+    });
+
+    test("header-less request + default publicRead() + upload → 403", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/files/${VOL}/upload?path=/Volumes/catalog/schema/vol/sp-upload.bin`,
+        {
+          method: "POST",
+          headers: { "content-length": "0" },
+        },
+      );
+
+      expect(response.status).toBe(403);
       const data = (await response.json()) as { error: string };
-      expect(data.error).toMatch(/x-forwarded-user/);
+      expect(data.error).toMatch(/Policy denied/);
+    });
+
+    test("header-less request + denyAll() volume → 403", async () => {
+      const denySpy = vi.fn().mockReturnValue(false);
+      const appkit = await createApp({
+        plugins: [
+          serverPlugin({
+            port: 0,
+            host: "127.0.0.1",
+          }),
+          files({
+            volumes: {
+              files: { policy: denySpy },
+            },
+          }),
+        ],
+      });
+
+      try {
+        const port = await getListeningPort(appkit.server.getServer());
+        const localBase = `http://127.0.0.1:${port}`;
+
+        const response = await fetch(
+          `${localBase}/api/files/${VOL}/list?path=denied`,
+        );
+
+        expect(response.status).toBe(403);
+        expect(denySpy).toHaveBeenCalled();
+        const userArg = denySpy.mock.calls[0][2];
+        expect(userArg.isServicePrincipal).toBe(true);
+      } finally {
+        const srv = appkit.server.getServer();
+        if (srv) {
+          await new Promise<void>((resolve, reject) => {
+            srv.close((err) => (err ? reject(err) : resolve()));
+          });
+        }
+      }
+    });
+
+    test("header-less HTTP request → custom policy observes isServicePrincipal: true", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const appkit = await createApp({
+        plugins: [
+          serverPlugin({
+            port: 0,
+            host: "127.0.0.1",
+          }),
+          files({
+            volumes: {
+              files: { policy: policySpy },
+            },
+          }),
+        ],
+      });
+
+      try {
+        const port = await getListeningPort(appkit.server.getServer());
+        const localBase = `http://127.0.0.1:${port}`;
+
+        mockFilesApi.listDirectoryContents.mockReturnValue(
+          (async function* () {
+            yield {
+              name: "spy-file.txt",
+              path: "/Volumes/catalog/schema/vol/spy-file.txt",
+              is_directory: false,
+            };
+          })(),
+        );
+
+        const response = await fetch(
+          `${localBase}/api/files/${VOL}/list?path=spy`,
+        );
+
+        expect(response.status).toBe(200);
+        expect(policySpy).toHaveBeenCalledTimes(1);
+        const userArg = policySpy.mock.calls[0][2];
+        expect(userArg.isServicePrincipal).toBe(true);
+      } finally {
+        const srv = appkit.server.getServer();
+        if (srv) {
+          await new Promise<void>((resolve, reject) => {
+            srv.close((err) => (err ? reject(err) : resolve()));
+          });
+        }
+      }
     });
 
     test("requests with user headers also succeed", async () => {

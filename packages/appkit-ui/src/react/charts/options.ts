@@ -1,5 +1,10 @@
 import type { ChartType } from "./types";
-import { createTimeSeriesData, formatLabel, truncateLabel } from "./utils";
+import {
+  createTimeSeriesData,
+  escapeHtml,
+  formatLabel,
+  truncateLabel,
+} from "./utils";
 
 // ============================================================================
 // Option Builder Types
@@ -189,9 +194,11 @@ export function buildHeatmapOption(
       trigger: "item",
       formatter: (params: { data: [number, number, number] }) => {
         const [xIdx, yIdx, value] = params.data;
-        const xLabel = ctx.xData[xIdx] ?? xIdx;
-        const yLabel = ctx.yAxisData[yIdx] ?? yIdx;
-        return `${xLabel}, ${yLabel}: ${value}`;
+        // Function formatter output is injected as raw HTML into the
+        // tooltip DOM, so data-derived labels must be escaped.
+        const xLabel = escapeHtml(String(ctx.xData[xIdx] ?? xIdx));
+        const yLabel = escapeHtml(String(ctx.yAxisData[yIdx] ?? yIdx));
+        return `${xLabel}, ${yLabel}: ${escapeHtml(String(value))}`;
       },
     },
     grid: {
@@ -270,6 +277,7 @@ export function buildCartesianOption(
       right: "10%",
       top: ctx.title ? "15%" : "10%",
       bottom: ctx.showLegend && hasMultipleSeries ? "20%" : "15%",
+      containLabel: true,
     },
     xAxis: {
       type: isScatter ? "value" : isTimeSeries ? "time" : "category",

@@ -1,6 +1,6 @@
 # Enumeration: ResourceType
 
-Resource types from schema $defs.resourceType.enum
+Resource types from resourceTypeSchema.options
 
 ## Enumeration Members
 

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
+import { templateFieldEntrySchema } from "../../../../schemas/manifest";
 import {
   isWithinDirectory,
   parseImports,
@@ -180,6 +181,66 @@ describe("plugin sync", () => {
     it("rejects untrusted package scopes by default", () => {
       expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
       expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
+    });
+  });
+
+  describe("templateFieldEntrySchema origin transform", () => {
+    function originOf(
+      field: Parameters<typeof templateFieldEntrySchema.parse>[0],
+    ) {
+      return templateFieldEntrySchema.parse(field).origin;
+    }
+
+    it("emits 'platform' when localOnly is true", () => {
+      expect(originOf({ env: "PGHOST", localOnly: true })).toBe("platform");
+    });
+
+    it("emits 'platform' when localOnly is true even with resolve", () => {
+      expect(
+        originOf({
+          env: "PGHOST",
+          localOnly: true,
+          resolve: "postgres:host",
+        }),
+      ).toBe("platform");
+    });
+
+    it("emits 'static' when value is present", () => {
+      expect(originOf({ env: "PGPORT", value: "5432" })).toBe("static");
+    });
+
+    it("emits 'cli' when resolve is present", () => {
+      expect(
+        originOf({
+          env: "LAKEBASE_ENDPOINT",
+          resolve: "postgres:endpointPath",
+        }),
+      ).toBe("cli");
+    });
+
+    it("emits 'user' for fields with no special properties", () => {
+      expect(
+        originOf({
+          env: "DATABRICKS_WAREHOUSE_ID",
+          description: "Warehouse ID",
+        }),
+      ).toBe("user");
+    });
+
+    it("emits 'user' for a minimal field with only env", () => {
+      expect(originOf({ env: "MY_VAR" })).toBe("user");
+    });
+
+    it("overwrites a stale 'origin' on input — drift-by-construction", () => {
+      // A previously-synced template manifest may carry an origin in its
+      // input; the transform must still emit the canonical computed value.
+      expect(
+        originOf({
+          env: "PGPORT",
+          value: "5432",
+          origin: "user",
+        }),
+      ).toBe("static");
     });
   });
 });

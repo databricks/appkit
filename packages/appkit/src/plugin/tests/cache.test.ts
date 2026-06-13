@@ -20,9 +20,9 @@ class MockCacheManager {
 
   async getOrExecute<T>(
     key: (string | number | object)[],
-    fn: () => Promise<T>,
+    fn: (sharedSignal?: AbortSignal) => Promise<T>,
     userKey: string,
-    options?: { ttl?: number },
+    options?: { ttl?: number; callerSignal?: AbortSignal },
   ): Promise<T> {
     const cacheKey = this.generateKey(key, userKey);
     const cached = await this.get<T>(cacheKey);
@@ -35,7 +35,8 @@ class MockCacheManager {
       return inFlight as Promise<T>;
     }
 
-    const promise = fn()
+    const sharedController = new AbortController();
+    const promise = fn(sharedController.signal)
       .then(async (result) => {
         await this.set(cacheKey, result, options);
         return result;
@@ -262,5 +263,40 @@ describe("CacheInterceptor", () => {
     await interceptor.intercept(fn, context);
 
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should swap context.signal to shared signal during fn() and restore afterward", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["test", "signal-swap"],
+    };
+    const callerSignal = new AbortController().signal;
+    const contextWithSignal: InterceptorContext = {
+      metadata: new Map(),
+      userKey: "service",
+      signal: callerSignal,
+    };
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
+      config,
+    );
+
+    let signalDuringExecution: AbortSignal | undefined;
+    const fn = vi.fn().mockImplementation(async () => {
+      signalDuringExecution = contextWithSignal.signal;
+      return "result";
+    });
+
+    await interceptor.intercept(fn, contextWithSignal);
+
+    // During fn(), context.signal should have been swapped to the shared signal
+    expect(signalDuringExecution).toBeDefined();
+    expect(signalDuringExecution).not.toBe(callerSignal);
+    expect(signalDuringExecution).toBeInstanceOf(AbortSignal);
+
+    // After intercept completes, context.signal should be restored
+    expect(contextWithSignal.signal).toBe(callerSignal);
   });
 });

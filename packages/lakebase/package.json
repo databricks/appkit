@@ -43,6 +43,7 @@
     "clean": "rm -rf dist tmp",
     "dist": "tsx ../../tools/dist-lakebase.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
+    "tarball:prerelease": "rm -rf tmp && SHORTSHA=$(git rev-parse --short HEAD) && pnpm dist --prerelease $SHORTSHA && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit",
     "release:dry": "release-it --dry-run",
     "release:sbom": "pnpm exec cdxgen -t js --no-recurse --required-only -o tmp/sbom.cdx.json ."

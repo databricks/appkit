@@ -7,6 +7,7 @@ import {
   type ResolvedManifest,
   resolveManifestInDir,
 } from "../manifest-resolve";
+import type { ValidateResult } from "./validate-manifest";
 import {
   detectSchemaType,
   formatValidationErrors,
@@ -92,7 +93,12 @@ async function runPluginValidate(
   }
 
   let hasFailure = false;
-  const jsonResults: { path: string; valid: boolean; errors?: string[] }[] = [];
+  const jsonResults: {
+    path: string;
+    valid: boolean;
+    errors?: string[];
+    warnings?: string[];
+  }[] = [];
 
   for (const { path: manifestPath, type } of manifestPaths) {
     const relativePath = path.relative(cwd, manifestPath);
@@ -116,7 +122,7 @@ async function runPluginValidate(
     }
 
     const schemaType = detectSchemaType(obj);
-    const result =
+    const result: ValidateResult =
       schemaType === "template-plugins"
         ? validateTemplateManifest(obj)
         : validateManifest(obj);
@@ -130,9 +136,7 @@ async function runPluginValidate(
     } else {
       if (options.json) {
         const errors = result.errors?.length
-          ? formatValidationErrors(result.errors, obj)
-              .split("\n")
-              .filter(Boolean)
+          ? formatValidationErrors(result.errors).split("\n").filter(Boolean)
           : [];
         jsonResults.push({
           path: relativePath,
@@ -142,7 +146,7 @@ async function runPluginValidate(
       } else {
         console.error(`✗ ${relativePath}`);
         if (result.errors?.length) {
-          console.error(formatValidationErrors(result.errors, obj));
+          console.error(formatValidationErrors(result.errors));
         }
       }
       hasFailure = true;

@@ -52,8 +52,9 @@ beforeEach(() => {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
-    getOrExecute: vi.fn(async (_k: unknown[], fn: () => Promise<unknown>) =>
-      fn(),
+    getOrExecute: vi.fn(
+      async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
+        fn(),
     ),
     generateKey: vi.fn(() => "test-key"),
     // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -258,12 +259,12 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     const { res, setHeader, json } = mockRes();
     await (
       plugin as unknown as {
-        _handleInvocations: (
+        _handleInvoke: (
           r: express.Request,
           w: express.Response,
         ) => Promise<void>;
       }
-    )._handleInvocations(mockReq({ input: "hi" }, "alice"), res);
+    )._handleInvoke(mockReq({ input: "hi" }, "alice"), res);
 
     expect(res.status).toHaveBeenCalledWith(429);
     expect(setHeader).toHaveBeenCalledWith("Retry-After", "5");

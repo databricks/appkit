@@ -5,15 +5,31 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
+import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import {
   type DatabricksStatementExecutionResponse,
+  type QueryFatalError,
+  type QueryGenerationResult,
   type QuerySchema,
+  type QuerySyntaxError,
   sqlTypeToHelper,
   sqlTypeToMarker,
 } from "./types";
+import {
+  getWarehouseState,
+  startWarehouse,
+  waitUntilRunning,
+} from "./warehouse-status";
 
 const logger = createLogger("type-generator:query-registry");
+
+/**
+ * Upper bound on how long a `blocking`-mode preflight will wait for a starting
+ * warehouse to reach RUNNING before giving up (~5 min). Generous enough to ride
+ * out a cold start without hanging an interactive CLI invocation indefinitely.
+ */
+const PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 /**
  * Regex breakdown:
@@ -81,6 +97,129 @@ function parseError(raw: string): { code?: string; message: string } {
     }
   }
   return { message: raw };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (isObject(error) && typeof error.message === "string") {
+    return error.message;
+  }
+  return String(error);
+}
+
+function getErrorDiagnostic(error: unknown): string {
+  const seen = new Set<unknown>();
+  const messages: string[] = [];
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const message = getErrorMessage(current);
+    if (
+      message &&
+      message !== "[object Object]" &&
+      !messages.includes(message)
+    ) {
+      messages.push(message);
+    }
+
+    const code = getErrorCode(current);
+    if (code && !messages.includes(code)) messages.push(code);
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  return messages.length > 0 ? messages.join(": ") : getErrorMessage(error);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!isObject(error)) return undefined;
+  const code = error.code ?? error.errno;
+  return typeof code === "string" ? code : undefined;
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!isObject(error)) return undefined;
+  const direct = error.status ?? error.statusCode;
+  if (typeof direct === "number") return direct;
+  if (isObject(error.response) && typeof error.response.status === "number") {
+    return error.response.status;
+  }
+  return undefined;
+}
+
+function getErrorChildren(error: unknown): unknown[] {
+  if (!isObject(error)) return [];
+  const children: unknown[] = [];
+  if ("cause" in error) children.push(error.cause);
+  if (error instanceof AggregateError) children.push(...error.errors);
+  return children;
+}
+
+const CONNECTIVITY_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "EAI_NODATA",
+  "EAI_NONAME",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+function isConnectivityMessage(message: string): boolean {
+  return (
+    /\bconnection (?:refused|reset|timed out)\b/i.test(message) ||
+    /\bsocket hang up\b/i.test(message) ||
+    /\bnetwork error\b/i.test(message) ||
+    /\bcan'?t connect to\b/i.test(message) ||
+    /\bcertificate has expired\b/i.test(message) ||
+    /\bunable to verify the first certificate\b/i.test(message) ||
+    /\bupstream connect error or disconnect\/reset before headers\b/i.test(
+      message,
+    )
+  );
+}
+
+function isConnectivityError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const code = getErrorCode(current);
+    if (
+      code &&
+      (CONNECTIVITY_ERROR_CODES.has(code) || code.startsWith("UND_ERR_"))
+    ) {
+      return true;
+    }
+
+    const status = getErrorStatus(current);
+    if (status === 502 || status === 503 || status === 504) return true;
+
+    if (isConnectivityMessage(getErrorMessage(current))) return true;
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  return false;
 }
 
 /**
@@ -243,6 +382,25 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
   }`;
 }
 
+/**
+ * Degrade gracefully when DESCRIBE can't produce a fresh schema (transient
+ * connectivity outage, or a warehouse that's reachable but not ready). Reuse
+ * the last-good cached type when the SQL hash is unchanged, otherwise emit
+ * `unknown` from SQL alone. Never persists `result: unknown`.
+ */
+function degradedType(
+  cache: Awaited<ReturnType<typeof loadCache>>,
+  queryName: string,
+  sql: string,
+  sqlHash: string,
+): string {
+  const prior = cache.queries[queryName];
+  const canReusePrior = prior?.hash === sqlHash && !prior.retry;
+  return canReusePrior
+    ? prior.type
+    : generateUnknownResultQuery(sql, queryName);
+}
+
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
   // Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the
@@ -318,14 +476,27 @@ export function inferParameterTypes(
  * @param warehouseId - the warehouse id to use for schema analysis
  * @param options - options for the query generation
  * @param options.noCache - if true, skip the cache and regenerate all types
+ * @param options.mode - preflight policy: "non-blocking" never probes the
+ *   warehouse and never describes (emits cached/`unknown` types and returns
+ *   immediately), "blocking" waits for a starting warehouse and starts (then
+ *   waits for) a stopped one, treating only a deleted/deleting warehouse as
+ *   fatal. Defaults to "non-blocking".
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
   queryFolder: string,
   warehouseId: string,
-  options: { noCache?: boolean; concurrency?: number } = {},
-): Promise<QuerySchema[]> {
-  const { noCache = false, concurrency: rawConcurrency = 10 } = options;
+  options: {
+    noCache?: boolean;
+    concurrency?: number;
+    mode?: PreflightMode;
+  } = {},
+): Promise<QueryGenerationResult> {
+  const {
+    noCache = false,
+    concurrency: rawConcurrency = 10,
+    mode = "non-blocking",
+  } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
       ? Math.max(1, Math.floor(rawConcurrency))
@@ -366,7 +537,10 @@ export async function generateQueriesFromDescribe(
   const logEntries: Array<{
     queryName: string;
     status: "HIT" | "MISS";
-    failed?: boolean;
+    // Absent for clean hits/misses. "syntax" = bad SQL on a reachable warehouse;
+    // "connectivity" = warehouse unreachable; "empty" = described but no columns;
+    // "fatal" = non-SQL setup/request failure surfaced after .d.ts emission.
+    kind?: "syntax" | "connectivity" | "empty" | "fatal";
     error?: { code?: string; message: string };
   }> = [];
 
@@ -421,64 +595,195 @@ export async function generateQueriesFromDescribe(
   // Phase 2: Execute all uncached DESCRIBE calls in parallel
   type DescribeResult =
     | {
+        // Described successfully with a result schema — the only case we cache.
         status: "ok";
         index: number;
         schema: QuerySchema;
         cacheEntry: { hash: string; type: string; retry: boolean };
       }
     | {
-        status: "fail";
+        // Reachable warehouse ran DESCRIBE and rejected the statement — a
+        // genuine SQL error. Eligible to fail the build; never cached.
+        status: "syntax";
         index: number;
         schema: QuerySchema;
-        cacheEntry: { hash: string; type: string; retry: boolean };
         error: { code?: string; message: string };
+      }
+    | {
+        // DESCRIBE succeeded but returned no columns — soft `unknown`. Not a
+        // failure, not cached, retried next run.
+        status: "empty";
+        index: number;
+        schema: QuerySchema;
+      }
+    | {
+        // Warehouse reachable but returned a non-terminal state (PENDING/
+        // RUNNING) with no rows — stopped/cold-starting/busy. Degrade like a
+        // transient outage (reuse cache or `unknown`); not cached, not empty.
+        status: "unavailable";
+        index: number;
+        schema: QuerySchema;
       };
 
   const freshResults: Array<{ index: number; schema: QuerySchema }> = [];
+  // Genuine SQL errors (reachable warehouse). Connectivity failures are NOT
+  // recorded here — they degrade silently so a transient outage isn't fatal.
+  const syntaxErrors: QuerySyntaxError[] = [];
+  const fatalErrors: QueryFatalError[] = [];
 
   if (uncachedQueries.length > 0) {
-    let completed = 0;
-    const total = uncachedQueries.length;
-    spinner.start(
-      `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
-    );
-
-    // Some serverless warehouses reject JSON_ARRAY+INLINE for DESCRIBE — and
-    // they signal the rejection two different ways: either as a thrown error,
-    // or as a `status.state === "FAILED"` response. Both paths funnel through
-    // this matcher so we can retry with ARROW_STREAM+INLINE consistently.
-    const looksLikeFormatRejection = (msg: string): boolean =>
-      msg.includes("JSON_ARRAY") &&
-      (msg.includes("not supported") ||
-        msg.includes("INVALID_PARAMETER_VALUE") ||
-        msg.includes("NOT_IMPLEMENTED"));
-
-    const describeOne = async ({
-      index,
-      queryName,
-      sql,
-      sqlHash,
-      cleanedSql,
-    }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-      // Prefer JSON_ARRAY + INLINE so `data_array` parsing works directly.
-      // Some serverless warehouses reject this combination — fall back to
-      // ARROW_STREAM + INLINE (still inline, just a different format) and
-      // let `convertToQueryType` decode the inline attachment. Forcing
-      // INLINE on the retry avoids EXTERNAL_LINKS, which would silently
-      // produce empty `data_array` and degrade types to `unknown`.
-      let result: DatabricksStatementExecutionResponse;
+    // One-time warehouse preflight (before issuing any DESCRIBE). A single
+    // warehouses.get classifies the warehouse so we can skip the whole describe
+    // batch when it can't serve this run, instead of letting every query fail
+    // (and re-fail next run). Reuses this file's degrade/classify helpers so a
+    // not-ready warehouse degrades exactly like a per-query outage.
+    let decision: ReturnType<typeof decidePreflight> = "proceed";
+    let fatalMessage = "";
+    if (mode === "non-blocking") {
+      // `non-blocking` never describes and must make ZERO warehouse round-trips:
+      // skip the probe entirely (no getWarehouseState) and go straight to
+      // degradeAll. A foreground/one-shot run can't describe in the background,
+      // so it emits best-available types (reused cache or `unknown`) and returns
+      // now.
+      decision = "degradeAll";
+    } else {
       try {
-        result = (await client.statementExecution.executeStatement({
-          statement: `DESCRIBE QUERY ${cleanedSql}`,
-          warehouse_id: warehouseId,
-          format: "JSON_ARRAY",
-          disposition: "INLINE",
-        })) as DatabricksStatementExecutionResponse;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (looksLikeFormatRejection(msg)) {
+        const state = await getWarehouseState(client, warehouseId);
+        decision = decidePreflight(state, mode);
+        if (decision === "fatal") {
+          fatalMessage = `warehouse ${warehouseId} is ${state}`;
+        }
+        if (decision === "startWaitProceed") {
+          // Stopped/stopping warehouse: nudge it out of the stopped state, then
+          // poll to RUNNING. treatStoppedAsTransient rides out the stale
+          // pre-start STOPPED/STOPPING reading the start hasn't propagated past
+          // yet — only DELETED/DELETING (or the deadline) ends the wait early.
+          await startWarehouse(client, warehouseId);
+          const final = await waitUntilRunning(client, warehouseId, {
+            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            treatStoppedAsTransient: true,
+          });
+          if (final === "RUNNING") {
+            decision = "proceed";
+          } else {
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+          }
+        }
+        if (decision === "waitThenProceed") {
+          const final = await waitUntilRunning(client, warehouseId, {
+            maxMs: PREFLIGHT_WAIT_MAX_MS,
+          });
+          if (final === "RUNNING") {
+            decision = "proceed";
+          } else {
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+          }
+        }
+      } catch (err) {
+        if (isConnectivityError(err)) {
+          // Warehouse unreachable (transient outage): degrade silently like a
+          // per-query connectivity failure — never fail a build on a blip.
+          decision = "degradeAll";
+        } else {
+          // Auth, bad warehouse id, malformed config, or a timed-out wait: fatal.
+          decision = "fatal";
+          fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+        }
+      }
+    }
+
+    if (decision !== "proceed") {
+      // degradeAll or fatal: skip DESCRIBE entirely. Every uncached query gets a
+      // degraded schema (reused cache or `unknown`); fatal additionally records
+      // a fatalError per query so the caller fails the build after writing.
+      const kind = decision === "fatal" ? "fatal" : "connectivity";
+      for (const { index, queryName, sql, sqlHash } of uncachedQueries) {
+        freshResults.push({
+          index,
+          schema: {
+            name: queryName,
+            type: degradedType(cache, queryName, sql, sqlHash),
+          },
+        });
+        if (decision === "fatal") {
+          fatalErrors.push({ name: queryName, message: fatalMessage });
+          logEntries.push({
+            queryName,
+            status: "MISS",
+            kind,
+            error: { message: fatalMessage },
+          });
+        } else {
+          logEntries.push({ queryName, status: "MISS", kind });
+        }
+      }
+    } else {
+      let completed = 0;
+      const total = uncachedQueries.length;
+      spinner.start(
+        `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
+      );
+
+      // Some serverless warehouses reject JSON_ARRAY+INLINE for DESCRIBE — and
+      // they signal the rejection two different ways: either as a thrown error,
+      // or as a `status.state === "FAILED"` response. Both paths funnel through
+      // this matcher so we can retry with ARROW_STREAM+INLINE consistently.
+      const looksLikeFormatRejection = (msg: string): boolean =>
+        msg.includes("JSON_ARRAY") &&
+        (msg.includes("not supported") ||
+          msg.includes("INVALID_PARAMETER_VALUE") ||
+          msg.includes("NOT_IMPLEMENTED"));
+
+      const describeOne = async ({
+        index,
+        queryName,
+        sql,
+        sqlHash,
+        cleanedSql,
+      }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
+        // Prefer JSON_ARRAY + INLINE so `data_array` parsing works directly.
+        // Some serverless warehouses reject this combination — fall back to
+        // ARROW_STREAM + INLINE (still inline, just a different format) and
+        // let `convertToQueryType` decode the inline attachment. Forcing
+        // INLINE on the retry avoids EXTERNAL_LINKS, which would silently
+        // produce empty `data_array` and degrade types to `unknown`.
+        let result: DatabricksStatementExecutionResponse;
+        try {
+          result = (await client.statementExecution.executeStatement({
+            statement: `DESCRIBE QUERY ${cleanedSql}`,
+            warehouse_id: warehouseId,
+            format: "JSON_ARRAY",
+            disposition: "INLINE",
+          })) as DatabricksStatementExecutionResponse;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (looksLikeFormatRejection(msg)) {
+            logger.debug(
+              "Warehouse rejected JSON_ARRAY+INLINE for %s (thrown), retrying with ARROW_STREAM+INLINE",
+              queryName,
+            );
+            result = (await client.statementExecution.executeStatement({
+              statement: `DESCRIBE QUERY ${cleanedSql}`,
+              warehouse_id: warehouseId,
+              format: "ARROW_STREAM",
+              disposition: "INLINE",
+            })) as DatabricksStatementExecutionResponse;
+          } else {
+            throw err;
+          }
+        }
+
+        // Some warehouses surface the format rejection as `status.state ===
+        // "FAILED"` instead of throwing. Detect that shape and retry with
+        // ARROW_STREAM before we degrade the type to `unknown`.
+        if (
+          result.status.state === "FAILED" &&
+          looksLikeFormatRejection(result.status.error?.message ?? "")
+        ) {
           logger.debug(
-            "Warehouse rejected JSON_ARRAY+INLINE for %s (thrown), retrying with ARROW_STREAM+INLINE",
+            "Warehouse rejected JSON_ARRAY+INLINE for %s (state=FAILED), retrying with ARROW_STREAM+INLINE",
             queryName,
           );
           result = (await client.statementExecution.executeStatement({
@@ -487,121 +792,177 @@ export async function generateQueriesFromDescribe(
             format: "ARROW_STREAM",
             disposition: "INLINE",
           })) as DatabricksStatementExecutionResponse;
-        } else {
-          throw err;
         }
-      }
 
-      // Some warehouses surface the format rejection as `status.state ===
-      // "FAILED"` instead of throwing. Detect that shape and retry with
-      // ARROW_STREAM before we degrade the type to `unknown`.
-      if (
-        result.status.state === "FAILED" &&
-        looksLikeFormatRejection(result.status.error?.message ?? "")
-      ) {
-        logger.debug(
-          "Warehouse rejected JSON_ARRAY+INLINE for %s (state=FAILED), retrying with ARROW_STREAM+INLINE",
-          queryName,
+        completed++;
+        spinner.update(
+          `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
         );
-        result = (await client.statementExecution.executeStatement({
-          statement: `DESCRIBE QUERY ${cleanedSql}`,
-          warehouse_id: warehouseId,
-          format: "ARROW_STREAM",
-          disposition: "INLINE",
-        })) as DatabricksStatementExecutionResponse;
-      }
 
-      completed++;
-      spinner.update(
-        `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
-      );
+        logger.debug(
+          "DESCRIBE result for %s: state=%s, rows=%d, hasAttachment=%s",
+          queryName,
+          result.status.state,
+          result.result?.data_array?.length ?? 0,
+          !!result.result?.attachment,
+        );
 
-      logger.debug(
-        "DESCRIBE result for %s: state=%s, rows=%d, hasAttachment=%s",
-        queryName,
-        result.status.state,
-        result.result?.data_array?.length ?? 0,
-        !!result.result?.attachment,
-      );
+        if (result.status.state === "FAILED") {
+          // The warehouse was reachable and ran DESCRIBE, but the statement
+          // failed — a genuine SQL error (bad table, syntax, incompatible type).
+          const sqlError =
+            result.status.error?.message || "Query execution failed";
+          // The failure is surfaced once, formatted, by the aggregated
+          // TypegenSyntaxError (and the summary table) — don't also log the raw
+          // message here or every SQL error prints twice in dev.
+          const type = generateUnknownResultQuery(sql, queryName);
+          return {
+            status: "syntax",
+            index,
+            schema: { name: queryName, type },
+            error: parseError(sqlError),
+          };
+        }
 
-      if (result.status.state === "FAILED") {
-        const sqlError =
-          result.status.error?.message || "Query execution failed";
-        logger.warn("DESCRIBE failed for %s: %s", queryName, sqlError);
-        const type = generateUnknownResultQuery(sql, queryName);
+        if (result.status.state !== "SUCCEEDED") {
+          // Non-terminal state (PENDING/RUNNING) with no result rows: the
+          // warehouse is reachable but not ready (stopped, cold-starting, or
+          // busy). Degrade like a transient outage — reuse the last-good cached
+          // type when the SQL is unchanged, else emit `unknown`. Never "empty":
+          // treating this as empty would emit `result: unknown` AND discard the
+          // good cached type, silently throwing away working types.
+          return {
+            status: "unavailable",
+            index,
+            schema: {
+              name: queryName,
+              type: degradedType(cache, queryName, sql, sqlHash),
+            },
+          };
+        }
+
+        const { type, hasResults } = convertToQueryType(result, sql, queryName);
+        if (!hasResults) {
+          // Described, but no result columns. Emit `unknown` and retry next run;
+          // do not cache (we never persist `result: unknown`).
+          return { status: "empty", index, schema: { name: queryName, type } };
+        }
         return {
-          status: "fail",
+          status: "ok",
           index,
           schema: { name: queryName, type },
-          cacheEntry: { hash: sqlHash, type, retry: true },
-          error: parseError(sqlError),
+          cacheEntry: { hash: sqlHash, type, retry: false },
         };
-      }
-
-      const { type, hasResults } = convertToQueryType(result, sql, queryName);
-      return {
-        status: "ok",
-        index,
-        schema: { name: queryName, type },
-        cacheEntry: { hash: sqlHash, type, retry: !hasResults },
       };
-    };
 
-    // Process in chunks, saving cache after each chunk
-    const processBatchResults = (
-      settled: PromiseSettledResult<DescribeResult>[],
-      batchOffset: number,
-    ) => {
-      for (let i = 0; i < settled.length; i++) {
-        const entry = settled[i];
-        const { queryName } = uncachedQueries[batchOffset + i];
+      // Process in chunks, saving cache after each chunk
+      const processBatchResults = (
+        settled: PromiseSettledResult<DescribeResult>[],
+        batchOffset: number,
+      ) => {
+        for (let i = 0; i < settled.length; i++) {
+          const entry = settled[i];
+          const { queryName } = uncachedQueries[batchOffset + i];
 
-        if (entry.status === "fulfilled") {
-          const res = entry.value;
-          freshResults.push({ index: res.index, schema: res.schema });
-          cache.queries[queryName] = res.cacheEntry;
-          logEntries.push({
-            queryName,
-            status: "MISS",
-            failed: res.status === "fail",
-            error: res.status === "fail" ? res.error : undefined,
-          });
-        } else {
-          const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
-          const reason =
-            entry.reason instanceof Error
-              ? entry.reason.message
-              : String(entry.reason);
-          logger.warn("DESCRIBE rejected for %s: %s", queryName, reason);
-          const type = generateUnknownResultQuery(sql, queryName);
-          freshResults.push({ index, schema: { name: queryName, type } });
-          cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-          logEntries.push({
-            queryName,
-            status: "MISS",
-            failed: true,
-            error: parseError(reason),
-          });
+          if (entry.status === "fulfilled") {
+            const res = entry.value;
+            freshResults.push({ index: res.index, schema: res.schema });
+
+            if (res.status === "ok") {
+              // Only a successful describe with a result schema is cached.
+              cache.queries[queryName] = res.cacheEntry;
+              logEntries.push({ queryName, status: "MISS" });
+            } else if (res.status === "syntax") {
+              // Genuine SQL error — record it for the caller's prod/dev gate.
+              // Not cached: re-described next run so a fixed query recovers.
+              syntaxErrors.push({
+                name: queryName,
+                message: res.error.message,
+              });
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "syntax",
+                error: res.error,
+              });
+            } else if (res.status === "empty") {
+              // status === "empty": described, no columns. Soft unknown, not cached.
+              logEntries.push({ queryName, status: "MISS", kind: "empty" });
+            } else {
+              // status === "unavailable": non-terminal DESCRIBE (warehouse
+              // stopped/cold-starting/busy). Degrade like a transient outage:
+              // tag OFFLINE, count as degraded, never cache.
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "connectivity",
+              });
+            }
+          } else {
+            // executeStatement rejected without a normal StatementExecution result.
+            // Only structured transport/connectivity failures are treated as
+            // offline; auth, bad warehouse IDs, malformed requests, and SDK/config
+            // failures stay fatal so users fix the underlying setup issue.
+            completed++;
+            spinner.update(
+              `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
+            );
+
+            const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
+            const reason = getErrorDiagnostic(entry.reason);
+            const error = parseError(reason);
+            const priorEntry = cache.queries[queryName];
+            const canReusePrior =
+              priorEntry?.hash === sqlHash && !priorEntry.retry;
+            const type = degradedType(cache, queryName, sql, sqlHash);
+            freshResults.push({ index, schema: { name: queryName, type } });
+
+            if (!isConnectivityError(entry.reason)) {
+              fatalErrors.push({ name: queryName, message: error.message });
+              logEntries.push({
+                queryName,
+                status: "MISS",
+                kind: "fatal",
+                error,
+              });
+              continue;
+            }
+
+            logger.warn(
+              "DESCRIBE unreachable for %s: %s — %s",
+              queryName,
+              reason,
+              canReusePrior
+                ? "reusing last cached type"
+                : "emitting unknown (no matching cache)",
+            );
+            logEntries.push({
+              queryName,
+              status: "MISS",
+              kind: "connectivity",
+              error,
+            });
+          }
         }
-      }
-    };
+      };
 
-    if (uncachedQueries.length > concurrency) {
-      for (let b = 0; b < uncachedQueries.length; b += concurrency) {
-        const batch = uncachedQueries.slice(b, b + concurrency);
-        const batchResults = await Promise.allSettled(batch.map(describeOne));
-        processBatchResults(batchResults, b);
+      if (uncachedQueries.length > concurrency) {
+        for (let b = 0; b < uncachedQueries.length; b += concurrency) {
+          const batch = uncachedQueries.slice(b, b + concurrency);
+          const batchResults = await Promise.allSettled(batch.map(describeOne));
+          processBatchResults(batchResults, b);
+          await saveCache(cache);
+        }
+      } else {
+        const settled = await Promise.allSettled(
+          uncachedQueries.map(describeOne),
+        );
+        processBatchResults(settled, 0);
         await saveCache(cache);
       }
-    } else {
-      const settled = await Promise.allSettled(
-        uncachedQueries.map(describeOne),
-      );
-      processBatchResults(settled, 0);
-      await saveCache(cache);
-    }
 
-    spinner.stop("");
+      spinner.stop("");
+    }
   }
 
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
@@ -616,36 +977,69 @@ export async function generateQueriesFromDescribe(
     );
     console.log(`  ${separator}`);
     for (const entry of logEntries) {
-      const tag = entry.failed
-        ? pc.bold(pc.red("ERROR"))
-        : entry.status === "HIT"
-          ? `cache ${pc.bold(pc.green("HIT  "))}`
-          : `cache ${pc.bold(pc.yellow("MISS "))}`;
+      let tag: string;
+      switch (entry.kind) {
+        case "syntax":
+          tag = pc.bold(pc.red("SQL ERR"));
+          break;
+        case "connectivity":
+          tag = pc.bold(pc.yellow("OFFLINE"));
+          break;
+        case "empty":
+          tag = pc.dim("EMPTY  ");
+          break;
+        case "fatal":
+          tag = pc.bold(pc.red("FATAL "));
+          break;
+        default:
+          tag =
+            entry.status === "HIT"
+              ? `cache ${pc.bold(pc.green("HIT  "))}`
+              : `cache ${pc.bold(pc.yellow("MISS "))}`;
+      }
       const rawName = entry.queryName.padEnd(maxNameLen);
-      const name = entry.failed ? pc.dim(pc.strikethrough(rawName)) : rawName;
+      // Only genuine SQL errors are struck through. Connectivity/empty kept a
+      // usable type (reused or unknown), so they read as degraded, not broken.
+      const name =
+        entry.kind === "syntax" || entry.kind === "fatal"
+          ? pc.dim(pc.strikethrough(rawName))
+          : rawName;
       const errorCode = entry.error?.message.match(/\[([^\]]+)\]/)?.[1];
       const reason = errorCode ? `  ${pc.dim(errorCode)}` : "";
       console.log(`  ${tag}  ${name}${reason}`);
     }
     const newCount = logEntries.filter(
-      (e) => e.status === "MISS" && !e.failed,
+      (e) => e.status === "MISS" && !e.kind,
     ).length;
-    const cacheCount = logEntries.filter(
-      (e) => e.status === "HIT" && !e.failed,
+    const cacheCount = logEntries.filter((e) => e.status === "HIT").length;
+    const syntaxCount = logEntries.filter((e) => e.kind === "syntax").length;
+    const offlineCount = logEntries.filter(
+      (e) => e.kind === "connectivity",
     ).length;
-    const errorCount = logEntries.filter((e) => e.failed).length;
+    const emptyCount = logEntries.filter((e) => e.kind === "empty").length;
+    const fatalCount = logEntries.filter((e) => e.kind === "fatal").length;
     console.log(`  ${separator}`);
     const parts = [`${newCount} new`, `${cacheCount} from cache`];
-    if (errorCount > 0)
-      parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
+    if (syntaxCount > 0)
+      parts.push(
+        `${syntaxCount} SQL ${syntaxCount === 1 ? "error" : "errors"}`,
+      );
+    if (offlineCount > 0) parts.push(`${offlineCount} degraded`);
+    if (emptyCount > 0) parts.push(`${emptyCount} empty`);
+    if (fatalCount > 0)
+      parts.push(
+        `${fatalCount} fatal ${fatalCount === 1 ? "error" : "errors"}`,
+      );
     console.log(`  ${parts.join(", ")}. ${pc.dim(`${elapsed}s`)}`);
     console.log("");
   }
 
   // Merge and sort by original file index for deterministic output
-  return [...cachedResults, ...freshResults]
+  const schemas = [...cachedResults, ...freshResults]
     .sort((a, b) => a.index - b.index)
     .map((r) => r.schema);
+
+  return { schemas, syntaxErrors, fatalErrors };
 }
 
 /**

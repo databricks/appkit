@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AnalyticsSseMessage } from "shared";
 import { ArrowClient, connectSSE } from "@/js";
 import type {
@@ -8,17 +15,12 @@ import type {
   QueryKey,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
+  WarehouseStatus,
 } from "./types";
+import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
 
-/**
- * Shallow structural equality for analytics query parameter objects.
- *
- * Analytics query parameters are produced by the `sql.*` builders and are
- * always plain objects keyed to primitive values (string | number | boolean
- * | null | undefined), so shallow equality is sufficient and substantially
- * cheaper than a full deep-equal.
- */
+/** Shallow equality for plain-object query parameters (primitive values only). */
 function shallowEqualParams(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (
@@ -46,12 +48,7 @@ function shallowEqualParams(a: unknown, b: unknown): boolean {
   return true;
 }
 
-/**
- * Stabilize a value's identity across renders when it is structurally equal
- * to the previous value. Used to make object-literal parameters safe to pass
- * directly to `useAnalyticsQuery` without forcing every consumer to wrap
- * params in `useMemo`.
- */
+/** Keep structurally-equal params referentially stable across renders. */
 function useStableParams<T>(value: T): T {
   const ref = useRef<T>(value);
   if (!shallowEqualParams(ref.current, value)) {
@@ -60,16 +57,130 @@ function useStableParams<T>(value: T): T {
   return ref.current;
 }
 
-function getDevMode() {
-  const url = new URL(window.location.href);
-  const searchParams = url.searchParams;
-  const dev = searchParams.get("dev");
-
+function getDevMode(): string {
+  const dev = new URL(window.location.href).searchParams.get("dev");
   return dev ? `?dev=${dev}` : "";
 }
 
-function getArrowStreamUrl(id: string) {
+function getArrowStreamUrl(id: string): string {
   return `/api/analytics/arrow-result/${id}`;
+}
+
+const GENERIC_LOAD_ERROR = "Unable to load data, please try again";
+
+interface AnalyticsQuerySseContext<ResultType> {
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setErrorCode: (code: string | null) => void;
+  setData: (data: ResultType | null) => void;
+  setWarehouseStatus: (status: WarehouseStatus | null) => void;
+  publishWarehouseStatus: (status: WarehouseStatus | null) => void;
+  unpublishWarehouseStatus: () => void;
+}
+
+function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as WarehouseStatus).state === "string"
+  );
+}
+
+async function handleAnalyticsSseMessage<ResultType>(
+  parsed: Record<string, unknown>,
+  ctx: AnalyticsQuerySseContext<ResultType>,
+): Promise<void> {
+  if (parsed.type === "warehouse_status") {
+    if (!isWarehouseStatusPayload(parsed.status)) {
+      ctx.setLoading(false);
+      ctx.setError(GENERIC_LOAD_ERROR);
+      ctx.unpublishWarehouseStatus();
+      console.error(
+        "[useAnalyticsQuery] Malformed warehouse_status event",
+        parsed,
+      );
+      return;
+    }
+    ctx.setWarehouseStatus(parsed.status);
+    ctx.publishWarehouseStatus(parsed.status);
+    return;
+  }
+
+  // The error/code branch below predates the SSE wire schema and can fire
+  // for messages that don't match any AnalyticsSseMessage variant (e.g.
+  // server-side error events from executeStream). Validate the known
+  // result/arrow variants first; fall through to error handling otherwise.
+  const validated = AnalyticsSseMessage.safeParse(parsed);
+  const msg = validated.success ? validated.data : null;
+
+  // success - JSON format. The wire schema makes `data` optional (e.g. an
+  // empty result set may omit it), so normalize the missing case to an
+  // explicit empty array rather than letting `undefined` bleed into the
+  // hook's `T | null` state.
+  if (msg?.type === "result") {
+    ctx.setLoading(false);
+    ctx.setData((msg.data ?? []) as ResultType);
+    ctx.unpublishWarehouseStatus();
+    return;
+  }
+
+  // success - Arrow format. Both INLINE (server-stashed, statement_id
+  // prefixed with "inline-") and EXTERNAL_LINKS (warehouse statement_id)
+  // flow through this single branch — the /arrow-result route dispatches
+  // based on the id prefix so the client doesn't need to know which path
+  // the bytes came from.
+  if (msg?.type === "arrow") {
+    try {
+      const arrowData = await ArrowClient.fetchArrow(
+        getArrowStreamUrl(msg.statement_id),
+      );
+      const table = await ArrowClient.processArrowBuffer(arrowData);
+      ctx.setLoading(false);
+      ctx.setData(table as ResultType);
+      ctx.unpublishWarehouseStatus();
+    } catch (error) {
+      console.error("[useAnalyticsQuery] Failed to fetch Arrow data", error);
+      ctx.setLoading(false);
+      ctx.setError(GENERIC_LOAD_ERROR);
+      ctx.unpublishWarehouseStatus();
+    }
+    return;
+  }
+
+  if (parsed.type === "error" || parsed.error || parsed.code) {
+    const errorMsg =
+      (parsed.error as string | undefined) ||
+      (parsed.message as string | undefined) ||
+      "Unable to execute query";
+    ctx.setLoading(false);
+    ctx.setError(errorMsg);
+    ctx.unpublishWarehouseStatus();
+    // Propagate the upstream structured code so UI consumers can branch on
+    // a stable identifier (e.g. retry on INLINE_ARROW_STASH_EXHAUSTED,
+    // format-switch on RESULT_TOO_LARGE_FOR_JSON_FALLBACK) instead of
+    // parsing the human-readable message.
+    if (typeof parsed.errorCode === "string") {
+      ctx.setErrorCode(parsed.errorCode);
+    }
+    if (parsed.code) {
+      console.error(
+        `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
+      );
+    }
+    return;
+  }
+
+  // The payload matched neither AnalyticsSseMessage nor an error event —
+  // surface a generic error rather than silently dropping it.
+  if (!validated.success) {
+    console.error(
+      "[useAnalyticsQuery] Malformed SSE payload",
+      validated.error.flatten(),
+    );
+    ctx.setLoading(false);
+    ctx.setError(GENERIC_LOAD_ERROR);
+    ctx.unpublishWarehouseStatus();
+  }
 }
 
 /**
@@ -122,7 +233,15 @@ export function useAnalyticsQuery<
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [warehouseStatus, setWarehouseStatus] =
+    useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const publisherId = useId();
+  const {
+    publish: publishWarehouseStatus,
+    unpublish: unpublishWarehouseStatus,
+  } = useAnalyticsWarehousePublisher(publisherId, queryKey);
 
   if (!queryKey || queryKey.trim().length === 0) {
     throw new Error(
@@ -130,10 +249,6 @@ export function useAnalyticsQuery<
     );
   }
 
-  // Stabilize the parameters reference across renders. Without this, a fresh
-  // object literal at the call site (e.g. `useAnalyticsQuery("k", { limit: 10 })`)
-  // would change identity every render, invalidating the `payload` memo and
-  // re-running `start` -> infinite refetch loop.
   const stableParameters = useStableParams(parameters);
 
   const payload = useMemo(() => {
@@ -162,111 +277,39 @@ export function useAnalyticsQuery<
       return;
     }
 
-    // Abort previous request if exists
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
 
     setLoading(true);
     setError(null);
     setErrorCode(null);
     setData(null);
+    setWarehouseStatus(null);
+    publishWarehouseStatus(null);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    const sseContext: AnalyticsQuerySseContext<ResultType> = {
+      setLoading,
+      setError,
+      setErrorCode,
+      setData,
+      setWarehouseStatus,
+      publishWarehouseStatus,
+      unpublishWarehouseStatus,
+    };
+
     connectSSE({
       url: urlSuffix,
-      payload: payload,
+      payload,
       signal: abortController.signal,
       onMessage: async (message) => {
+        // Drop late envelopes from a stream whose controller was already
+        // aborted (React StrictMode unmount→remount). Mirrors onError below.
+        if (abortController.signal.aborted) return;
         try {
-          const rawParsed = JSON.parse(message.data);
-
-          // The error/code branch below predates the SSE wire schema and
-          // can fire for messages that don't match any AnalyticsSseMessage
-          // variant (e.g. server-side error events from executeStream).
-          // Try schema validation first; if it fails, fall through to the
-          // generic error/code handling below.
-          const validated = AnalyticsSseMessage.safeParse(rawParsed);
-          const msg = validated.success ? validated.data : null;
-
-          // success - JSON format. The wire schema makes `data` optional
-          // (e.g. an empty result set may omit it), so normalize the
-          // missing case to an explicit empty array rather than letting
-          // `undefined` bleed into the hook's `T | null` state.
-          if (msg?.type === "result") {
-            setLoading(false);
-            setData((msg.data ?? []) as ResultType);
-            return;
-          }
-
-          // success - Arrow format. Both INLINE (server-stashed,
-          // statement_id prefixed with "inline-") and EXTERNAL_LINKS
-          // (warehouse statement_id) flow through this single branch — the
-          // /arrow-result route dispatches based on the id prefix so the
-          // client doesn't need to know which path the bytes came from.
-          if (msg?.type === "arrow") {
-            try {
-              const arrowData = await ArrowClient.fetchArrow(
-                getArrowStreamUrl(msg.statement_id),
-              );
-              const table = await ArrowClient.processArrowBuffer(arrowData);
-              setLoading(false);
-              // Table is cast to TypedArrowTable with row type from QueryRegistry
-              setData(table as ResultType);
-              return;
-            } catch (error) {
-              console.error(
-                "[useAnalyticsQuery] Failed to fetch Arrow data",
-                error,
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
-          }
-
-          // The schema didn't match — fall through to error/code handling
-          // below for legacy error events or surface a malformed-payload
-          // error if no error fields are present.
-          const parsed = rawParsed;
-
-          // error
-          if (parsed.type === "error" || parsed.error || parsed.code) {
-            const errorMsg =
-              parsed.error || parsed.message || "Unable to execute query";
-
-            setLoading(false);
-            setError(errorMsg);
-            // Propagate the upstream structured code so UI consumers
-            // can branch on a stable identifier (e.g. retry on
-            // INLINE_ARROW_STASH_EXHAUSTED, format-switch on
-            // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) instead of parsing
-            // the human-readable message.
-            if (typeof parsed.errorCode === "string") {
-              setErrorCode(parsed.errorCode);
-            }
-
-            if (parsed.code) {
-              console.error(
-                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
-              );
-            }
-            return;
-          }
-
-          // The payload matched neither AnalyticsSseMessage nor an error
-          // event — surface a generic error rather than silently dropping it.
-          if (!validated.success) {
-            console.error(
-              "[useAnalyticsQuery] Malformed SSE payload",
-              validated.error.flatten(),
-            );
-            setLoading(false);
-            setError("Unable to load data, please try again");
-            return;
-          }
+          const parsed = JSON.parse(message.data) as Record<string, unknown>;
+          await handleAnalyticsSseMessage(parsed, sseContext);
         } catch (error) {
           // A `JSON.parse` failure (or any other thrown error inside the
           // SSE message handler) used to leave the hook permanently in
@@ -287,16 +330,15 @@ export function useAnalyticsQuery<
       onError: (error) => {
         if (abortController.signal.aborted) return;
         setLoading(false);
+        unpublishWarehouseStatus();
 
-        let userMessage = "Unable to load data, please try again";
-
+        let userMessage = GENERIC_LOAD_ERROR;
         if (error instanceof Error) {
           if (error.name === "AbortError") {
             userMessage = "Request timed out, please try again";
           } else if (error.message.includes("Failed to fetch")) {
             userMessage = "Network error. Please check your connection.";
           }
-
           console.error("[useAnalyticsQuery] Error", {
             queryKey,
             error: error.message,
@@ -306,7 +348,13 @@ export function useAnalyticsQuery<
         setError(userMessage);
       },
     });
-  }, [queryKey, payload, urlSuffix]);
+  }, [
+    queryKey,
+    payload,
+    urlSuffix,
+    publishWarehouseStatus,
+    unpublishWarehouseStatus,
+  ]);
 
   useEffect(() => {
     if (autoStart) {
@@ -315,11 +363,11 @@ export function useAnalyticsQuery<
 
     return () => {
       abortControllerRef.current?.abort();
+      unpublishWarehouseStatus();
     };
-  }, [start, autoStart]);
+  }, [start, autoStart, unpublishWarehouseStatus]);
 
-  // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);
 
-  return { data, loading, error, errorCode };
+  return { data, loading, error, errorCode, warehouseStatus };
 }

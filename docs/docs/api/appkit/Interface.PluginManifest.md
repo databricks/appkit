@@ -6,7 +6,7 @@ Extends the shared PluginManifest with strict resource types.
 
 ## See
 
- - `packages/shared/src/schemas/plugin-manifest.generated.ts` `PluginManifest` — generated base
+ - `packages/shared/src/schemas/manifest.ts` `pluginManifestSchema` — Zod source of truth
  - SharedPluginManifest — shared re-export with JSONSchema7 config
 
 ## Extends
@@ -210,6 +210,54 @@ required: Omit<ResourceRequirement, "required">[];
 ```
 
 Resources that must be available for the plugin to function
+
+***
+
+### scaffolding?
+
+```ts
+optional scaffolding: {
+  rules?: {
+     must?: string[];
+     never?: string[];
+     should?: string[];
+  };
+};
+```
+
+#### rules?
+
+```ts
+optional rules: {
+  must?: string[];
+  never?: string[];
+  should?: string[];
+};
+```
+
+##### rules.must?
+
+```ts
+optional must: string[];
+```
+
+##### rules.never?
+
+```ts
+optional never: string[];
+```
+
+##### rules.should?
+
+```ts
+optional should: string[];
+```
+
+#### Inherited from
+
+```ts
+Omit.scaffolding
+```
 
 ***
 

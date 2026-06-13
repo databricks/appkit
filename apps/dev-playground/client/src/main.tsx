@@ -1,3 +1,7 @@
+import {
+  ResourceStatusIndicator,
+  ResourceStatusProvider,
+} from "@databricks/appkit-ui/react";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -24,6 +28,9 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <ResourceStatusProvider>
+      <ResourceStatusIndicator />
+      <RouterProvider router={router} />
+    </ResourceStatusProvider>
   </React.StrictMode>,
 );

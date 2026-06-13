@@ -145,8 +145,7 @@ function main(): void {
   fs.writeFileSync(BETA_OUT, renderBarrel(beta), "utf-8");
   // Self-format so a fresh `pnpm build` doesn't leave the generated
   // barrels dirty against biome's canonical formatting (matches the
-  // pattern set by tools/generate-schema-types.ts and
-  // tools/generate-registry-types.ts after PR #324).
+  // pattern set by tools/generate-registry-types.ts after PR #324).
   formatWithBiome(GA_OUT);
   formatWithBiome(BETA_OUT);
 

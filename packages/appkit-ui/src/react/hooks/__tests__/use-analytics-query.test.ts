@@ -1,11 +1,27 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 let lastConnectArgs: any = null;
-const mockProcessArrowBuffer = vi.fn();
+let capturedCallbacks: {
+  onMessage?: (msg: { data: string }) => void;
+  onError?: (err: Error) => void;
+  signal?: AbortSignal;
+} = {};
+
 const mockFetchArrow = vi.fn();
-const mockConnectSSE = vi.fn((args: any) => {
+const mockProcessArrowBuffer = vi.fn();
+
+// Mock connectSSE so the hook does not attempt a real network request.
+// Capture both the full args (used by the arrow/result/error tests) and the
+// individual callbacks/signal (used by the warehouse-status and late-envelope
+// tests). The hook ignores the return value.
+const mockConnectSSE = vi.fn((args: any): unknown => {
   lastConnectArgs = args;
+  capturedCallbacks = {
+    onMessage: args?.onMessage,
+    onError: args?.onError,
+    signal: args?.signal,
+  };
   return () => {};
 });
 
@@ -23,10 +39,17 @@ vi.mock("../use-query-hmr", () => ({
 
 import { useAnalyticsQuery } from "../use-analytics-query";
 
+function markAborted() {
+  const sig = capturedCallbacks.signal;
+  if (!sig) throw new Error("signal not captured yet");
+  Object.defineProperty(sig, "aborted", { value: true, configurable: true });
+}
+
 describe("useAnalyticsQuery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lastConnectArgs = null;
+    capturedCallbacks = {};
   });
 
   test("fetches an arrow message (warehouse statement id) via /arrow-result", async () => {
@@ -272,5 +295,177 @@ describe("useAnalyticsQuery", () => {
     rerender();
 
     expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  describe("warehouse_status", () => {
+    test("surfaces warehouseStatus while waiting and clears loading on result", async () => {
+      let capturedOnMessage:
+        | ((msg: { id: string; data: string }) => void)
+        | null = null;
+      mockConnectSSE.mockImplementationOnce(
+        (opts: { onMessage?: (msg: { id: string; data: string }) => void }) => {
+          capturedOnMessage = opts.onMessage ?? null;
+          return new Promise<void>(() => {});
+        },
+      );
+
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      expect(result.current.loading).toBe(true);
+      expect(result.current.warehouseStatus).toBeNull();
+      expect(result.current.data).toBeNull();
+      expect(capturedOnMessage).toBeTruthy();
+
+      act(() => {
+        capturedOnMessage?.({
+          id: "1",
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "STARTING", elapsedMs: 1200 },
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.warehouseStatus).toEqual({
+          state: "STARTING",
+          elapsedMs: 1200,
+        });
+      });
+      expect(result.current.loading).toBe(true);
+      expect(result.current.data).toBeNull();
+
+      act(() => {
+        capturedOnMessage?.({
+          id: "2",
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "RUNNING", elapsedMs: 4500 },
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.warehouseStatus?.state).toBe("RUNNING");
+      });
+
+      act(() => {
+        capturedOnMessage?.({
+          id: "3",
+          data: JSON.stringify({
+            type: "result",
+            data: [{ id: 1, name: "row1" }],
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(result.current.data).toEqual([{ id: 1, name: "row1" }]);
+      expect(result.current.error).toBeNull();
+      expect(result.current.warehouseStatus?.state).toBe("RUNNING");
+    });
+
+    test("surfaces an error when a warehouse_status event has no status payload", async () => {
+      let capturedOnMessage:
+        | ((msg: { id: string; data: string }) => void)
+        | null = null;
+      mockConnectSSE.mockImplementationOnce(
+        (opts: { onMessage?: (msg: { id: string; data: string }) => void }) => {
+          capturedOnMessage = opts.onMessage ?? null;
+          return new Promise<void>(() => {});
+        },
+      );
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      act(() => {
+        capturedOnMessage?.({
+          id: "1",
+          data: JSON.stringify({ type: "warehouse_status" }),
+        });
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toMatch(/Unable to load data/);
+      expect(result.current.warehouseStatus).toBeNull();
+
+      consoleError.mockRestore();
+    });
+  });
+
+  describe("aborted controller", () => {
+    test("ignores late error envelope after the controller was aborted", async () => {
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      await waitFor(() => expect(capturedCallbacks.signal).toBeDefined());
+
+      markAborted();
+
+      await act(async () => {
+        await capturedCallbacks.onMessage?.({
+          data: JSON.stringify({
+            type: "error",
+            error: "Statement failed: The operation was aborted.",
+            code: "UPSTREAM_ERROR",
+          }),
+        });
+      });
+
+      expect(result.current.error).toBeNull();
+    });
+
+    test("ignores late result envelope after the controller was aborted", async () => {
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      await waitFor(() => expect(capturedCallbacks.signal).toBeDefined());
+
+      markAborted();
+
+      await act(async () => {
+        await capturedCallbacks.onMessage?.({
+          data: JSON.stringify({ type: "result", data: [{ id: 99 }] }),
+        });
+      });
+
+      expect(result.current.data).toBeNull();
+    });
+
+    test("ignores late arrow envelope after the controller was aborted", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("test_query", null, { format: "ARROW_STREAM" }),
+      );
+
+      await waitFor(() => expect(capturedCallbacks.signal).toBeDefined());
+
+      markAborted();
+
+      await act(async () => {
+        await capturedCallbacks.onMessage?.({
+          data: JSON.stringify({ type: "arrow", statement_id: "stmt-123" }),
+        });
+      });
+
+      expect(mockFetchArrow).not.toHaveBeenCalled();
+      expect(result.current.data).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
   });
 });

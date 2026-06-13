@@ -18,11 +18,27 @@ export class CacheInterceptor implements ExecutionInterceptor {
       return fn();
     }
 
+    const callerSignal = context.signal;
+
+    // The cache may dedupe this request onto a shared in-flight execution.
+    // Swap context.signal to the cache-owned shared signal for the duration
+    // of fn() so the inner interceptor chain (timeout/retry/telemetry) and
+    // the underlying I/O observe abort only when *all* callers have left,
+    // not just this one. Without this swap, mount #1's abort under React
+    // StrictMode poisons mount #2's joined inflight result.
     return this.cacheManager.getOrExecute(
       this.config.cacheKey,
-      fn,
+      async (sharedSignal) => {
+        const previousSignal = context.signal;
+        context.signal = sharedSignal;
+        try {
+          return await fn();
+        } finally {
+          context.signal = previousSignal;
+        }
+      },
       context.userKey,
-      { ttl: this.config.ttl },
+      { ttl: this.config.ttl, callerSignal },
     );
   }
 }

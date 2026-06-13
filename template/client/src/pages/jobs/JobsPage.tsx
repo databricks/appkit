@@ -154,7 +154,7 @@ export function JobsPage() {
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label
           htmlFor={inputId}
           className="text-sm font-medium text-foreground"
@@ -166,7 +166,7 @@ export function JobsPage() {
           type="text"
           value={jobKey}
           onChange={(e) => setJobKey(e.target.value)}
-          className="rounded-md border border-input bg-background px-3 py-1.5 text-sm w-48"
+          className="rounded-md border border-input bg-background px-3 py-1.5 text-sm w-full sm:w-48"
         />
         <Button
           onClick={fetchStatus}

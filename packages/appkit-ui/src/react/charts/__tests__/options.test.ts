@@ -12,6 +12,9 @@ import {
 interface EChartsOption {
   title?: { text?: string };
   legend?: unknown;
+  tooltip?: {
+    formatter?: (params: { data: [number, number, number] }) => string;
+  };
   xAxis: { type: string; data?: unknown[] };
   yAxis: { type: string; data?: unknown[] };
   series: Array<{
@@ -645,5 +648,29 @@ describe("buildHeatmapOption", () => {
     const opt = asOption(buildHeatmapOption(ctx));
 
     expect(opt.series[0].data).toEqual(ctx.heatmapData);
+  });
+
+  test("tooltip formatter renders labels and values", () => {
+    const ctx = createHeatmapContext();
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    const output = opt.tooltip?.formatter?.({ data: [1, 2, 25] });
+    expect(output).toBe("10AM, Wed: 25");
+  });
+
+  test("tooltip formatter escapes HTML in category values (XSS)", () => {
+    const ctx = {
+      ...createHeatmapContext(),
+      xData: ["<img src=x onerror=alert(1)>", "10AM"],
+      yAxisData: ["<script>alert(2)</script>", "Tue"],
+    };
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    const output = opt.tooltip?.formatter?.({ data: [0, 0, 10] });
+    expect(output).not.toContain("<");
+    expect(output).not.toContain(">");
+    expect(output).toBe(
+      "&lt;img src=x onerror=alert(1)&gt;, &lt;script&gt;alert(2)&lt;/script&gt;: 10",
+    );
   });
 });
