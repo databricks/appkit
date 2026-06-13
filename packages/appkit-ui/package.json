@@ -39,6 +39,10 @@
       "development": "./src/react/beta.ts",
       "default": "./dist/react/beta.js"
     },
+    "./react/chat": {
+      "development": "./src/react/chat/index.ts",
+      "default": "./dist/react/chat/index.js"
+    },
     "./package.json": "./package.json",
     "./styles.css": {
       "development": "./src/react/styles/globals.css",
@@ -104,13 +108,25 @@
     "vaul": "1.1.2"
   },
   "peerDependencies": {
+    "@ai-sdk/react": "~4.0.0-beta",
+    "ai": "~7.0.0-beta",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0",
     "recharts": "^2.0.0 || ^3.0.0"
   },
+  "peerDependenciesMeta": {
+    "@ai-sdk/react": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@ai-sdk/react": "4.0.0-beta.76",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "ai": "7.0.0-beta.76",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "recharts": "2.15.4",
@@ -123,6 +139,7 @@
       "./js/beta": "./dist/js/beta.js",
       "./react": "./dist/react/index.js",
       "./react/beta": "./dist/react/beta.js",
+      "./react/chat": "./dist/react/chat/index.js",
       "./package.json": "./package.json",
       "./styles.css": "./dist/styles.css"
     }

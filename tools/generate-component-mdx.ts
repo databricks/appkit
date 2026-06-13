@@ -11,6 +11,7 @@ const COMPONENTS_DIR = "packages/appkit-ui/src/react/ui";
 const CHARTS_DIR = "packages/appkit-ui/src/react/charts";
 const TABLE_DIR = "packages/appkit-ui/src/react/table";
 const GENIE_DIR = "packages/appkit-ui/src/react/genie";
+const CHAT_DIR = "packages/appkit-ui/src/react/chat";
 const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui";
 
 const FILE_BROWSER_DIR = "packages/appkit-ui/src/react/file-browser";
@@ -21,6 +22,7 @@ const SOURCE_DIRS = [
   { name: "table", path: TABLE_DIR },
   { name: "genie", path: GENIE_DIR },
   { name: "file-browser", path: FILE_BROWSER_DIR },
+  { name: "chat", path: CHAT_DIR },
 ] as const;
 
 const FILE_EXTENSIONS = {
@@ -43,6 +45,7 @@ const PATH_PATTERNS = {
   TABLE_DIR: "src/react/table/",
   GENIE_DIR: "src/react/genie/",
   FILE_BROWSER_DIR: "src/react/file-browser/",
+  CHAT_DIR: "src/react/chat/",
   DATA_TABLE_FILE: "data-table.tsx",
   REACT_TYPES: "@types/react",
 } as const;
@@ -52,6 +55,7 @@ const OUTPUT_SUBDIRS = {
   UI: "ui",
   GENIE: "genie",
   FILES: "files",
+  CHAT: "chat",
   EXAMPLES: "examples",
 } as const;
 
@@ -100,11 +104,17 @@ function stripDocSuffix(name: string): string {
     : name;
 }
 
-type ComponentCategory = "chart" | "table" | "ui" | "genie" | "file-browser";
+type ComponentCategory =
+  | "chart"
+  | "table"
+  | "ui"
+  | "genie"
+  | "file-browser"
+  | "chat";
 
 interface ComponentInfo {
   category: ComponentCategory;
-  subdir: string; // "data", "ui", or "genie"
+  subdir: string; // "data", "ui", "genie", "files", or "chat"
   chartDir?: string; // Only for charts
 }
 
@@ -131,6 +141,10 @@ function categorizeComponent(component: ComponentDoc): ComponentInfo {
 
   if (relativePath.includes(PATH_PATTERNS.FILE_BROWSER_DIR)) {
     return { category: "file-browser", subdir: OUTPUT_SUBDIRS.FILES };
+  }
+
+  if (relativePath.includes(PATH_PATTERNS.CHAT_DIR)) {
+    return { category: "chat", subdir: OUTPUT_SUBDIRS.CHAT };
   }
 
   return { category: "ui", subdir: OUTPUT_SUBDIRS.UI };
@@ -334,7 +348,7 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
   }
 
   // Genie / Multi-Genie / Chat components — examples next to source files
-  if (info.category === "genie") {
+  if (info.category === "genie" || info.category === "chat") {
     const sourceDir = path.dirname(filePath);
     const examplePath = path.join(
       sourceDir,
@@ -373,7 +387,8 @@ ${buildComponentDetails(component, {
     if (
       subdir === OUTPUT_SUBDIRS.DATA ||
       subdir === OUTPUT_SUBDIRS.GENIE ||
-      subdir === OUTPUT_SUBDIRS.FILES
+      subdir === OUTPUT_SUBDIRS.FILES ||
+      subdir === OUTPUT_SUBDIRS.CHAT
     ) {
       // For data components: show code only (no interactive preview)
       const sourceCode = fs.readFileSync(example.path, MARKDOWN.FILE_ENCODING);
@@ -584,6 +599,40 @@ function main() {
       }
     }
 
+    // Exclude non-component files from chat directory.
+    // Hooks (use-*.ts), the transport class, lib utilities, and barrel
+    // files are documented in the hand-written `chat/index.md` overview.
+    // Within `chat/app/`, only `chat-app.tsx` is publicly exposed; the
+    // sibling sub-components are package-private slot pieces.
+    // The `chat/db-icons/` directory contains internal DuBois icon
+    // components that are not part of the public API surface.
+    if (info.category === "chat") {
+      const basename = path.basename(filePath);
+      if (
+        basename === "index.ts" ||
+        basename === "utils.ts" ||
+        basename.startsWith("use-") ||
+        basename === "responses-api-transport.ts"
+      ) {
+        return false;
+      }
+      if (filePath.includes(`${PATH_PATTERNS.CHAT_DIR}db-icons/`)) {
+        return false;
+      }
+      if (
+        filePath.includes(`${PATH_PATTERNS.CHAT_DIR}app/`) &&
+        basename !== "chat-app.tsx"
+      ) {
+        return false;
+      }
+      // `chat-app.tsx` re-exports type aliases (`ApprovalEntry`,
+      // `ChatComposerProps`, …) that react-docgen-typescript picks up as
+      // pseudo-components. Only the `ChatApp` component itself is public.
+      if (basename === "chat-app.tsx" && displayName !== "ChatApp") {
+        return false;
+      }
+    }
+
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
@@ -649,16 +698,26 @@ function main() {
   // Create output directory if it doesn't exist
   fs.mkdirSync(outputDir, { recursive: true });
 
-  // Delete only subdirectories (preserve root-level files)
-  // This preserves files like _index.md (category link) and styling.md (manual docs)
-  if (fs.existsSync(outputDir)) {
-    const entries = fs.readdirSync(outputDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        fs.rmSync(path.join(outputDir, entry.name), {
-          recursive: true,
-          force: true,
-        });
+  // Subdirectories owned by the generator. Inside each, only auto-generated
+  // artifacts (*.mdx and the auto-written _category_.json) are deleted on
+  // regen — hand-written files like `index.md` are preserved.
+  const generatedSubdirs = [
+    OUTPUT_SUBDIRS.DATA,
+    OUTPUT_SUBDIRS.UI,
+    OUTPUT_SUBDIRS.GENIE,
+    OUTPUT_SUBDIRS.FILES,
+    OUTPUT_SUBDIRS.CHAT,
+  ];
+  for (const sub of generatedSubdirs) {
+    const subPath = path.join(outputDir, sub);
+    if (!fs.existsSync(subPath)) continue;
+    const files = fs.readdirSync(subPath, { withFileTypes: true });
+    for (const f of files) {
+      if (
+        f.isFile() &&
+        (f.name.endsWith(".mdx") || f.name === FILE_EXTENSIONS.CATEGORY_CONFIG)
+      ) {
+        fs.rmSync(path.join(subPath, f.name), { force: true });
       }
     }
   }
@@ -668,10 +727,12 @@ function main() {
   const uiOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.UI);
   const genieOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.GENIE);
   const filesOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.FILES);
+  const chatOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.CHAT);
   fs.mkdirSync(dataOutputDir, { recursive: true });
   fs.mkdirSync(uiOutputDir, { recursive: true });
   fs.mkdirSync(genieOutputDir, { recursive: true });
   fs.mkdirSync(filesOutputDir, { recursive: true });
+  fs.mkdirSync(chatOutputDir, { recursive: true });
 
   // Create _category_.json files for proper sidebar labels
   fs.writeFileSync(
@@ -716,6 +777,18 @@ function main() {
       {
         label: "Files (UC) components",
         position: 6,
+      },
+      null,
+      2,
+    )}\n`,
+    MARKDOWN.FILE_ENCODING,
+  );
+  fs.writeFileSync(
+    path.join(chatOutputDir, FILE_EXTENSIONS.CATEGORY_CONFIG),
+    `${JSON.stringify(
+      {
+        label: "Chat primitives",
+        position: 7,
       },
       null,
       2,

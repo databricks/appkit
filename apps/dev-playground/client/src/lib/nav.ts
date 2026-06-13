@@ -99,6 +99,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: BotIcon,
       },
       {
+        to: "/agent-chat-full",
+        label: "Custom Agent (full no-config chat)",
+        description:
+          "Drop-in <ChatApp /> with zero props — defaults to /api/agents/chat with the full UX.",
+        icon: MessageCircleIcon,
+      },
+      {
         to: "/genie",
         label: "Genie",
         description:
