@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { AgentAdapter } from "shared";
+import type { GenerationParams } from "../../agents/databricks";
 import type {
   AgentDefinition,
   AgentTool,
@@ -75,6 +76,12 @@ interface Frontmatter {
   agents?: string[];
   maxSteps?: number;
   maxTokens?: number;
+  /**
+   * Optional OpenAI-compatible generation params forwarded to the serving
+   * request body (`temperature`, `top_p`, `stop`, `frequency_penalty`,
+   * `presence_penalty`). Parsed defensively in {@link buildDefinition}.
+   */
+  generationParams?: Record<string, unknown>;
   default?: boolean;
   baseSystemPrompt?: false | string;
   ephemeral?: boolean;
@@ -120,6 +127,7 @@ const ALLOWED_KEYS = new Set([
   "agents",
   "maxSteps",
   "maxTokens",
+  "generationParams",
   "default",
   "baseSystemPrompt",
   "ephemeral",
@@ -340,6 +348,32 @@ export function parseFrontmatter(
   return { data: data as Frontmatter, content: match[2].trim() };
 }
 
+/**
+ * Defensively maps a frontmatter `generationParams` map to {@link GenerationParams}.
+ * Picks only known keys with the expected wire types; ignores everything else.
+ * Returns `undefined` when no valid key is present.
+ */
+function parseGenerationParams(value: unknown): GenerationParams | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const out: GenerationParams = {};
+  if (typeof raw.temperature === "number") out.temperature = raw.temperature;
+  if (typeof raw.top_p === "number") out.top_p = raw.top_p;
+  if (typeof raw.frequency_penalty === "number")
+    out.frequency_penalty = raw.frequency_penalty;
+  if (typeof raw.presence_penalty === "number")
+    out.presence_penalty = raw.presence_penalty;
+  if (
+    typeof raw.stop === "string" ||
+    (Array.isArray(raw.stop) && raw.stop.every((s) => typeof s === "string"))
+  ) {
+    out.stop = raw.stop as string | string[];
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function buildDefinition(
   name: string,
   raw: string,
@@ -364,6 +398,7 @@ function buildDefinition(
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     maxSteps: typeof fm.maxSteps === "number" ? fm.maxSteps : undefined,
     maxTokens: typeof fm.maxTokens === "number" ? fm.maxTokens : undefined,
+    generationParams: parseGenerationParams(fm.generationParams),
     baseSystemPrompt,
     ephemeral: typeof fm.ephemeral === "boolean" ? fm.ephemeral : undefined,
   };

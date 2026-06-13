@@ -26,6 +26,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * Optional generation parameters forwarded to the OpenAI-compatible serving
+ * request body. Names match the serving API wire keys. Only keys that are set
+ * are sent — undefined values are omitted so the endpoint applies its own
+ * defaults. Ranges are not validated here; the serving endpoint validates.
+ */
+export interface GenerationParams {
+  /** Sampling temperature. */
+  temperature?: number;
+  /** Nucleus sampling probability mass (`top_p`). */
+  top_p?: number;
+  /** Stop sequence(s) that end generation. */
+  stop?: string | string[];
+  /** Penalize tokens by frequency. */
+  frequency_penalty?: number;
+  /** Penalize tokens by prior presence. */
+  presence_penalty?: number;
+}
+
+const GENERATION_PARAM_KEYS = [
+  "temperature",
+  "top_p",
+  "stop",
+  "frequency_penalty",
+  "presence_penalty",
+] as const satisfies readonly (keyof GenerationParams)[];
+
+/** Copy only the set generation params onto the request body. */
+function applyGenerationParams(
+  body: Record<string, unknown>,
+  params: GenerationParams,
+): void {
+  for (const key of GENERATION_PARAM_KEYS) {
+    const value = params[key];
+    if (value !== undefined) body[key] = value;
+  }
+}
+
 function extractLlamaToolJsonSlice(text: string): string | undefined {
   const start = text.indexOf("[{");
   if (start < 0) return undefined;
@@ -83,6 +121,8 @@ interface RawFetchAdapterOptions {
   authenticate: () => Promise<Record<string, string>>;
   maxSteps?: number;
   maxTokens?: number;
+  /** Optional generation params forwarded to the serving request body. */
+  generationParams?: GenerationParams;
   /** Max length of one SSE line (including an incomplete tail in the buffer). */
   maxSseLineChars?: number;
   /** Max total length of assistant `delta.content` across the stream. */
@@ -101,6 +141,7 @@ interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
   maxSteps?: number;
   maxTokens?: number;
+  generationParams?: GenerationParams;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
   maxToolArgumentsChars?: number;
@@ -134,6 +175,7 @@ interface ServingEndpointOptions {
   endpointName: string;
   maxSteps?: number;
   maxTokens?: number;
+  generationParams?: GenerationParams;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
   maxToolArgumentsChars?: number;
@@ -142,6 +184,7 @@ interface ServingEndpointOptions {
 interface ModelServingOptions {
   maxSteps?: number;
   maxTokens?: number;
+  generationParams?: GenerationParams;
   workspaceClient?: WorkspaceClientLike;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
@@ -237,6 +280,7 @@ export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
   private maxSteps: number;
   private maxTokens: number;
+  private generationParams: GenerationParams;
   private maxSseLineChars: number;
   private maxStreamTextChars: number;
   private maxToolArgumentsChars: number;
@@ -244,6 +288,7 @@ export class DatabricksAdapter implements AgentAdapter {
   constructor(options: DatabricksAdapterOptions) {
     this.maxSteps = options.maxSteps ?? 10;
     this.maxTokens = options.maxTokens ?? 4096;
+    this.generationParams = options.generationParams ?? {};
     this.maxSseLineChars =
       options.maxSseLineChars ?? DEFAULT_MAX_SSE_LINE_CHARS;
     this.maxStreamTextChars =
@@ -296,6 +341,7 @@ export class DatabricksAdapter implements AgentAdapter {
       endpointName,
       maxSteps,
       maxTokens,
+      generationParams,
       maxSseLineChars,
       maxStreamTextChars,
       maxToolArgumentsChars,
@@ -313,6 +359,7 @@ export class DatabricksAdapter implements AgentAdapter {
         ),
       maxSteps,
       maxTokens,
+      generationParams,
       maxSseLineChars,
       maxStreamTextChars,
       maxToolArgumentsChars,
@@ -367,6 +414,7 @@ export class DatabricksAdapter implements AgentAdapter {
       endpointName: resolvedEndpoint,
       maxSteps: options?.maxSteps,
       maxTokens: options?.maxTokens,
+      generationParams: options?.generationParams,
       maxSseLineChars: options?.maxSseLineChars,
       maxStreamTextChars: options?.maxStreamTextChars,
       maxToolArgumentsChars: options?.maxToolArgumentsChars,
@@ -491,6 +539,8 @@ export class DatabricksAdapter implements AgentAdapter {
       stream: true,
       max_tokens: this.maxTokens,
     };
+
+    applyGenerationParams(body, this.generationParams);
 
     if (tools.length > 0) {
       body.tools = tools;

@@ -446,6 +446,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       baseSystemPrompt: def.baseSystemPrompt,
       maxSteps: def.maxSteps,
       maxTokens: def.maxTokens,
+      generationParams: def.generationParams,
       ephemeral: def.ephemeral,
     };
   }
@@ -458,9 +459,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Per-agent adapter knobs from `AgentDefinition` / markdown frontmatter.
     // Only applied when AppKit builds the adapter itself (string or omitted
     // model). Users who pass a pre-built `AgentAdapter` own these settings.
-    const adapterOptions: { maxSteps?: number; maxTokens?: number } = {};
+    const adapterOptions: {
+      maxSteps?: number;
+      maxTokens?: number;
+      generationParams?: AgentDefinition["generationParams"];
+    } = {};
     if (def.maxSteps !== undefined) adapterOptions.maxSteps = def.maxSteps;
     if (def.maxTokens !== undefined) adapterOptions.maxTokens = def.maxTokens;
+    if (def.generationParams !== undefined)
+      adapterOptions.generationParams = def.generationParams;
 
     if (!source) {
       const { DatabricksAdapter } = await import("../../agents/databricks");
