@@ -23,6 +23,10 @@ dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 const logger = createLogger("server");
 
+// Registered once per process; repeated start() calls (e.g. in tests) must not
+// stack handlers on the shared `process`.
+let processHandlersRegistered = false;
+
 /** Dev-only: try `requested` then consecutive ports (see `get-port` `portNumbers`). */
 const devListenPortSpan = 100;
 
@@ -160,12 +164,7 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    // The first server to start installs the shared process-level handlers;
-    // every started server then participates in shutdown.
-    if (ServerPlugin.startedServers.size === 0) {
-      ServerPlugin._installProcessHandlers();
-    }
-    ServerPlugin.startedServers.add(this);
+    this._registerProcessHandlers();
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
@@ -402,44 +401,16 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  /**
-   * Servers that have started and participate in process-level lifecycle.
-   * The set being empty is the "install once" latch: the first `start()`
-   * installs the shared `process` handlers, and registration stays lazy
-   * (importing this module attaches nothing). Avoids a module-level flag.
-   */
-  private static readonly startedServers = new Set<ServerPlugin>();
+  private _registerProcessHandlers() {
+    if (processHandlersRegistered) return;
+    processHandlersRegistered = true;
 
-  /**
-   * Install process-level lifecycle handlers exactly once per process.
-   *
-   * Beyond SIGTERM/SIGINT, this wires up global error handlers so an
-   * unhandled async error no longer crashes the Node process silently in
-   * production:
-   * - `uncaughtException` — the process is in an undefined state, so we log
-   *   the error and run the same graceful shutdown the signal handlers use,
-   *   then exit non-zero (handled inside `_gracefulShutdown`).
-   * - `unhandledRejection` — log at error level for visibility without
-   *   forcing an exit, matching how the codebase isolates non-fatal errors.
-   *
-   * Handlers shut down every started server, not just the first — they live
-   * on the shared `process` object, so the single registration covers all.
-   */
-  private static _installProcessHandlers() {
-    const shutdownAll = (exitCode?: number) => {
-      for (const server of ServerPlugin.startedServers) {
-        void server._gracefulShutdown(exitCode);
-      }
-    };
-
-    process.on("SIGTERM", () => shutdownAll());
-    process.on("SIGINT", () => shutdownAll());
-
+    process.on("SIGTERM", () => this._gracefulShutdown());
+    process.on("SIGINT", () => this._gracefulShutdown());
     process.on("uncaughtException", (error: Error, origin) => {
       logger.error("Uncaught exception (%s), shutting down: %O", origin, error);
-      shutdownAll(1);
+      this._gracefulShutdown(1);
     });
-
     process.on("unhandledRejection", (reason) => {
       logger.error("Unhandled promise rejection: %O", reason);
     });
