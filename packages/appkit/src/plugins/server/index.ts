@@ -23,13 +23,6 @@ dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 const logger = createLogger("server");
 
-/**
- * Guards process-level lifecycle handlers (signals + global error handlers)
- * to a single registration per process, regardless of how many server
- * instances start. Avoids stacking listeners on the shared `process` object.
- */
-let processHandlersRegistered = false;
-
 /** Dev-only: try `requested` then consecutive ports (see `get-port` `portNumbers`). */
 const devListenPortSpan = 100;
 
@@ -167,7 +160,12 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    this._registerProcessHandlers();
+    // The first server to start installs the shared process-level handlers;
+    // every started server then participates in shutdown.
+    if (ServerPlugin.startedServers.size === 0) {
+      ServerPlugin._installProcessHandlers();
+    }
+    ServerPlugin.startedServers.add(this);
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
@@ -405,7 +403,15 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
-   * Register process-level lifecycle handlers exactly once.
+   * Servers that have started and participate in process-level lifecycle.
+   * The set being empty is the "install once" latch: the first `start()`
+   * installs the shared `process` handlers, and registration stays lazy
+   * (importing this module attaches nothing). Avoids a module-level flag.
+   */
+  private static readonly startedServers = new Set<ServerPlugin>();
+
+  /**
+   * Install process-level lifecycle handlers exactly once per process.
    *
    * Beyond SIGTERM/SIGINT, this wires up global error handlers so an
    * unhandled async error no longer crashes the Node process silently in
@@ -416,20 +422,22 @@ export class ServerPlugin extends Plugin {
    * - `unhandledRejection` — log at error level for visibility without
    *   forcing an exit, matching how the codebase isolates non-fatal errors.
    *
-   * Guarded module-wide so repeated `start()` calls (e.g. in tests, or
-   * multiple server instances) don't stack listeners on the shared
-   * `process` object.
+   * Handlers shut down every started server, not just the first — they live
+   * on the shared `process` object, so the single registration covers all.
    */
-  private _registerProcessHandlers() {
-    if (processHandlersRegistered) return;
-    processHandlersRegistered = true;
+  private static _installProcessHandlers() {
+    const shutdownAll = (exitCode?: number) => {
+      for (const server of ServerPlugin.startedServers) {
+        void server._gracefulShutdown(exitCode);
+      }
+    };
 
-    process.on("SIGTERM", () => this._gracefulShutdown());
-    process.on("SIGINT", () => this._gracefulShutdown());
+    process.on("SIGTERM", () => shutdownAll());
+    process.on("SIGINT", () => shutdownAll());
 
     process.on("uncaughtException", (error: Error, origin) => {
       logger.error("Uncaught exception (%s), shutting down: %O", origin, error);
-      this._gracefulShutdown(1);
+      shutdownAll(1);
     });
 
     process.on("unhandledRejection", (reason) => {
