@@ -23,6 +23,13 @@ dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 const logger = createLogger("server");
 
+/**
+ * Guards process-level lifecycle handlers (signals + global error handlers)
+ * to a single registration per process, regardless of how many server
+ * instances start. Avoids stacking listeners on the shared `process` object.
+ */
+let processHandlersRegistered = false;
+
 /** Dev-only: try `requested` then consecutive ports (see `get-port` `portNumbers`). */
 const devListenPortSpan = 100;
 
@@ -160,8 +167,7 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    process.on("SIGTERM", () => this._gracefulShutdown());
-    process.on("SIGINT", () => this._gracefulShutdown());
+    this._registerProcessHandlers();
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
@@ -398,7 +404,40 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private async _gracefulShutdown() {
+  /**
+   * Register process-level lifecycle handlers exactly once.
+   *
+   * Beyond SIGTERM/SIGINT, this wires up global error handlers so an
+   * unhandled async error no longer crashes the Node process silently in
+   * production:
+   * - `uncaughtException` — the process is in an undefined state, so we log
+   *   the error and run the same graceful shutdown the signal handlers use,
+   *   then exit non-zero (handled inside `_gracefulShutdown`).
+   * - `unhandledRejection` — log at error level for visibility without
+   *   forcing an exit, matching how the codebase isolates non-fatal errors.
+   *
+   * Guarded module-wide so repeated `start()` calls (e.g. in tests, or
+   * multiple server instances) don't stack listeners on the shared
+   * `process` object.
+   */
+  private _registerProcessHandlers() {
+    if (processHandlersRegistered) return;
+    processHandlersRegistered = true;
+
+    process.on("SIGTERM", () => this._gracefulShutdown());
+    process.on("SIGINT", () => this._gracefulShutdown());
+
+    process.on("uncaughtException", (error: Error, origin) => {
+      logger.error("Uncaught exception (%s), shutting down: %O", origin, error);
+      this._gracefulShutdown(1);
+    });
+
+    process.on("unhandledRejection", (reason) => {
+      logger.error("Unhandled promise rejection: %O", reason);
+    });
+  }
+
+  private async _gracefulShutdown(exitCode = 0) {
     logger.info("Starting graceful shutdown...");
 
     if (this.viteDevServer) {
@@ -433,7 +472,7 @@ export class ServerPlugin extends Plugin {
     if (this.server) {
       this.server.close(() => {
         logger.debug("Server closed gracefully");
-        process.exit(0);
+        process.exit(exitCode);
       });
 
       // 3. timeout to force shutdown after 15 seconds
@@ -442,7 +481,7 @@ export class ServerPlugin extends Plugin {
         process.exit(1);
       }, 15000);
     } else {
-      process.exit(0);
+      process.exit(exitCode);
     }
   }
 
