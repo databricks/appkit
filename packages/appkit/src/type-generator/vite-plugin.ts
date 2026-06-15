@@ -6,8 +6,6 @@ import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
-  METRIC_METADATA_FILE,
-  METRIC_TYPES_FILE,
   TYPES_DIR,
   TypegenFatalError,
   TypegenSyntaxError,
@@ -35,11 +33,15 @@ const DEV_WAREHOUSE_WATCH_MAX_MS = 60_000;
 interface AppKitTypesPluginOptions {
   /* Path to the output d.ts file (relative to client folder). */
   outFile?: string;
-  /** Path to the metric registry d.ts file (relative to client folder). */
+  /**
+   * Path to the metric registry d.ts file (relative to client folder).
+   * Defaults to a sibling of `outFile`, computed by the generator.
+   */
   metricOutFile?: string;
   /**
    * Path to the metric semantic-metadata JSON file (relative to client folder).
-   * Build-time artifact — sibling of {@link metricOutFile}. Skipped
+   * Build-time artifact — defaults to a sibling of {@link metricOutFile}
+   * (itself a sibling of `outFile`), computed by the generator. Skipped
    * automatically when `metric-views.json` is absent.
    */
   metricMetadataOutFile?: string;
@@ -55,8 +57,8 @@ interface AppKitTypesPluginOptions {
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
-  let metricOutFile: string;
-  let metricMetadataOutFile: string;
+  let metricOutFile: string | undefined;
+  let metricMetadataOutFile: string | undefined;
   let watchFolders: string[];
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
@@ -196,9 +198,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    *
    * Post-probe behaviour by state:
    *  - RUNNING → describe right away (the dev foreground degraded, so a running
-   *    warehouse would otherwise never get real types — this is the case Phase 3
-   *    restores). `waitUntilRunning` returns immediately for an already-running
-   *    warehouse, then the blocking regenerate fires.
+   *    warehouse would otherwise never get real types). `waitUntilRunning`
+   *    returns immediately for an already-running warehouse, then the blocking
+   *    regenerate fires.
    *  - STARTING → it's already coming up; just wait for RUNNING, then describe.
    *  - STOPPED / STOPPING → kick off a start, wait for RUNNING, then describe.
    *  - DELETED / DELETING → return (a deleted warehouse can't be started, and
@@ -310,15 +312,20 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         projectRoot,
         options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
-      metricOutFile = path.resolve(
-        projectRoot,
-        options?.metricOutFile ?? `shared/${TYPES_DIR}/${METRIC_TYPES_FILE}`,
-      );
-      metricMetadataOutFile = path.resolve(
-        projectRoot,
-        options?.metricMetadataOutFile ??
-          `shared/${TYPES_DIR}/${METRIC_METADATA_FILE}`,
-      );
+      // Metric out-paths resolve against projectRoot only when explicitly
+      // provided; unset options pass through as undefined so the generator
+      // computes its sibling-of-outFile defaults. In the all-defaults case
+      // the final paths are identical (the default outFile above lives in
+      // shared/<TYPES_DIR>/), and a customized outFile now keeps its metric
+      // siblings next to it instead of pinning them under shared/.
+      metricOutFile =
+        options?.metricOutFile !== undefined
+          ? path.resolve(projectRoot, options.metricOutFile)
+          : undefined;
+      metricMetadataOutFile =
+        options?.metricMetadataOutFile !== undefined
+          ? path.resolve(projectRoot, options.metricMetadataOutFile)
+          : undefined;
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),
       ];

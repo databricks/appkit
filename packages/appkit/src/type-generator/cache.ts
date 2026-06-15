@@ -10,6 +10,9 @@ const logger = createLogger("type-generator:cache");
  * Cache types
  * @property hash - the hash of the SQL query
  * @property type - the type of the query
+ * @property retry - when true the entry never satisfies a cache hit, so the
+ *   query is re-described on the next pass; fresh successful describes
+ *   persist `retry: false`
  */
 interface CacheEntry {
   hash: string;
@@ -39,6 +42,48 @@ export interface MetricCacheEntry {
   hash: string;
   schema: MetricSchema;
   retry: boolean;
+}
+
+/**
+ * Structural gate for reviving a cached metric entry at partition time.
+ *
+ * The cache file lives in `node_modules/.databricks` and is plain JSON —
+ * hand-edits, truncation, or a stale writer can leave entries whose shape no
+ * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
+ * cache MISS (re-describe) rather than crash the pass or render revived
+ * garbage into the artifacts. Checks exactly what the renderers and the
+ * metadata bundle consume: `hash` string, `retry` boolean, and a schema with
+ * `key`/`source` strings, a valid lane, an optional boolean `degraded`, and
+ * measure/dimension arrays whose elements carry `name`/`type` strings
+ * (other column fields are optional). Deliberately inline — the shared Zod
+ * schemas must not enter the type-generator's runtime path.
+ */
+export function isRevivableMetricCacheEntry(entry: MetricCacheEntry): boolean {
+  if (typeof entry.hash !== "string" || typeof entry.retry !== "boolean") {
+    return false;
+  }
+  const schema = entry.schema as unknown;
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return false;
+  }
+  const s = schema as Record<string, unknown>;
+  const isColumnArray = (value: unknown): boolean =>
+    Array.isArray(value) &&
+    value.every(
+      (col) =>
+        typeof col === "object" &&
+        col !== null &&
+        typeof (col as Record<string, unknown>).name === "string" &&
+        typeof (col as Record<string, unknown>).type === "string",
+    );
+  return (
+    typeof s.key === "string" &&
+    typeof s.source === "string" &&
+    (s.lane === "sp" || s.lane === "obo") &&
+    (s.degraded === undefined || typeof s.degraded === "boolean") &&
+    isColumnArray(s.measures) &&
+    isColumnArray(s.dimensions)
+  );
 }
 
 /**
@@ -75,6 +120,15 @@ const CACHE_DIR = path.join(
  */
 export function hashSQL(sql: string): string {
   return crypto.createHash("md5").update(sql).digest("hex");
+}
+
+/**
+ * Change detector stored on {@link MetricCacheEntry.hash}: md5 over
+ * `"<source>|<lane>"` — the two config inputs that determine a DESCRIBE —
+ * so editing either invalidates the entry.
+ */
+export function metricCacheHash(source: string, lane: string): string {
+  return hashSQL(`${source}|${lane}`);
 }
 
 /**

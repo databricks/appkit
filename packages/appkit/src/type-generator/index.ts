@@ -4,7 +4,13 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import dotenv from "dotenv";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
-import { hashSQL, loadCache, type MetricCacheEntry, saveCache } from "./cache";
+import {
+  isRevivableMetricCacheEntry,
+  loadCache,
+  type MetricCacheEntry,
+  metricCacheHash,
+  saveCache,
+} from "./cache";
 import {
   createWorkspaceDescribeFetcher,
   type DescribeFetcher,
@@ -260,48 +266,6 @@ async function probeWarehouseState(
 }
 
 /**
- * Structural gate for reviving a cached metric entry at partition time.
- *
- * The cache file lives in `node_modules/.databricks` and is plain JSON —
- * hand-edits, truncation, or a stale writer can leave entries whose shape no
- * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
- * cache MISS (re-describe) rather than crash the pass or render revived
- * garbage into the artifacts. Checks exactly what the renderers and the
- * metadata bundle consume: `hash` string, `retry` boolean, and a schema with
- * `key`/`source` strings, a valid lane, an optional boolean `degraded`, and
- * measure/dimension arrays whose elements carry `name`/`type` strings
- * (other column fields are optional). Deliberately inline — the shared Zod
- * schemas must not enter the type-generator's runtime path.
- */
-function isRevivableMetricCacheEntry(entry: MetricCacheEntry): boolean {
-  if (typeof entry.hash !== "string" || typeof entry.retry !== "boolean") {
-    return false;
-  }
-  const schema = entry.schema as unknown;
-  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
-    return false;
-  }
-  const s = schema as Record<string, unknown>;
-  const isColumnArray = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.every(
-      (col) =>
-        typeof col === "object" &&
-        col !== null &&
-        typeof (col as Record<string, unknown>).name === "string" &&
-        typeof (col as Record<string, unknown>).type === "string",
-    );
-  return (
-    typeof s.key === "string" &&
-    typeof s.source === "string" &&
-    (s.lane === "sp" || s.lane === "obo") &&
-    (s.degraded === undefined || typeof s.degraded === "boolean") &&
-    isColumnArray(s.measures) &&
-    isColumnArray(s.dimensions)
-  );
-}
-
-/**
  * Entry point for generating type declarations from all imported files
  * @param options - the options for the generation
  * @param options.entryPoint - the entry point file
@@ -427,8 +391,6 @@ export async function generateFromEntryPoint(options: {
       // describe-needed here.
       const hitSchemas = new Map<string, MetricSchema>();
       const describeNeeded: typeof resolution.entries = [];
-      // Parallel to describeNeeded: the config hash to persist per key.
-      const neededHashes: string[] = [];
       // Hits whose cached schema is degraded are STICKY failures: a previous
       // pass pinned them with `retry: false` because re-describing the
       // unchanged entry can't succeed (deterministic DESCRIBE failure, or a
@@ -437,12 +399,11 @@ export async function generateFromEntryPoint(options: {
       // collect them for the single notice below.
       const stickyDegradedHits: string[] = [];
       for (const entry of resolution.entries) {
-        const hash = hashSQL(`${entry.source}|${entry.lane}`);
         const prior = metricsSection[entry.key];
         if (
           prior !== undefined &&
           isRevivableMetricCacheEntry(prior) &&
-          prior.hash === hash &&
+          prior.hash === metricCacheHash(entry.source, entry.lane) &&
           !prior.retry
         ) {
           hitSchemas.set(entry.key, prior.schema);
@@ -451,7 +412,6 @@ export async function generateFromEntryPoint(options: {
           }
         } else {
           describeNeeded.push(entry);
-          neededHashes.push(hash);
         }
       }
 
@@ -682,10 +642,11 @@ export async function generateFromEntryPoint(options: {
       for (let i = 0; i < describeNeeded.length; i++) {
         // syncMetrics (and both .map(emptyMetricSchema) branches) return
         // one schema per entry in entry order, so described[i] always
-        // belongs to describeNeeded[i] / neededHashes[i].
-        const failure = failureByKey.get(describeNeeded[i].key);
-        metricsSection[describeNeeded[i].key] = {
-          hash: neededHashes[i],
+        // belongs to describeNeeded[i].
+        const entry = describeNeeded[i];
+        const failure = failureByKey.get(entry.key);
+        metricsSection[entry.key] = {
+          hash: metricCacheHash(entry.source, entry.lane),
           schema: described[i],
           retry:
             described[i].degraded === true &&

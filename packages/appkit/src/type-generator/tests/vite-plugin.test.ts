@@ -38,10 +38,8 @@ vi.mock("@databricks/sdk-experimental", () => ({
 
 const { appKitTypesPlugin } = await import("../vite-plugin");
 // Real constant values: the "../index" mock spreads the actual module, so these
-// are the genuine defaults the plugin resolves its metric out-paths from.
-const { METRIC_METADATA_FILE, METRIC_TYPES_FILE, TYPES_DIR } = await import(
-  "../index"
-);
+// are the genuine defaults the plugin resolves outFile from.
+const { ANALYTICS_TYPES_FILE, TYPES_DIR } = await import("../index");
 
 // The plugin hooks are loosely typed on Vite's Plugin; cast to the shapes we
 // actually drive so we can call them directly without a Vite build.
@@ -363,22 +361,23 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
     else process.env.DATABRICKS_WAREHOUSE_ID = savedWarehouseId;
   });
 
-  test("defaults the metric out files to shared/<TYPES_DIR> siblings of outFile", async () => {
+  test("passes unset metric out files through as undefined so the generator defaults them to siblings of outFile", async () => {
     await runPlugin();
     await flush();
 
-    // configResolved resolves both metric paths against projectRoot
-    // (config.root/..) exactly like outFile.
+    // configResolved resolves only outFile (and explicitly-provided metric
+    // paths) against projectRoot (config.root/..). Unset metric options stay
+    // undefined so generateFromEntryPoint computes its sibling-of-outFile
+    // defaults — identical final paths in the all-defaults case, since the
+    // default outFile below lives in shared/<TYPES_DIR>/.
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        metricOutFile: path.resolve(
+        outFile: path.resolve(
           process.cwd(),
-          `shared/${TYPES_DIR}/${METRIC_TYPES_FILE}`,
+          `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
         ),
-        metricMetadataOutFile: path.resolve(
-          process.cwd(),
-          `shared/${TYPES_DIR}/${METRIC_METADATA_FILE}`,
-        ),
+        metricOutFile: undefined,
+        metricMetadataOutFile: undefined,
       }),
     );
   });

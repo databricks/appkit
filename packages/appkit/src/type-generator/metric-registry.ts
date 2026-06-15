@@ -93,12 +93,12 @@ interface ResolvedMetricEntry {
 /**
  * Per-column metadata extracted from DESCRIBE TABLE EXTENDED ... AS JSON.
  *
- * Phase 1 captured measure flags + types. Phase 2 widens to time-typed
- * dimensions: grain qualification is inferred from the column's SQL type
- * (TIMESTAMP* / DATE) — the UC metric-view YAML schema has no per-column
- * `time_grain` attribute, so the type is the only signal available.
+ * Beyond measure flags + types, time-typed dimensions carry grain
+ * qualification inferred from the column's SQL type (TIMESTAMP* / DATE) —
+ * the UC metric-view YAML schema has no per-column `time_grain` attribute,
+ * so the type is the only signal available.
  *
- * Phase 5 captures the YAML 1.1 semantic-metadata fields so the build-time
+ * The YAML 1.1 semantic-metadata fields are captured so the build-time
  * artifact is a complete record of what the metric view declares: display name
  * (used by `formatLabel` to render axis titles / legend entries / tooltips),
  * format spec (printf-like string consumed by `formatValue` and `toD3Format`),
@@ -137,8 +137,8 @@ export interface MetricColumnMetadata {
 /**
  * Per-metric schema captured at type-generation time.
  *
- * The full row type is the union of measure + dimension column types. Phase 1
- * uses only `measures`; Phase 2 widens to `dimensions` and `timeGrains`.
+ * The full row type is the union of measure + dimension column types;
+ * time-typed dimensions additionally carry their inferred `timeGrains`.
  */
 export interface MetricSchema {
   /** Stable metric key (the map key under `metricViews` in metric-views.json). */
@@ -236,6 +236,15 @@ function isValidFqn(fqn: string): boolean {
 }
 
 /**
+ * Field allowlists enforced by {@link resolveMetricConfig}. v1 explicitly
+ * rejects unknown top-level fields (so the legacy sp/obo lane shape — and
+ * future additions — cannot be silently consumed today) and unknown entry
+ * fields (same rationale, per entry).
+ */
+const ALLOWED_TOP_LEVEL_FIELDS = new Set(["$schema", "metricViews"]);
+const ALLOWED_ENTRY_FIELDS = new Set(["source", "executor"]);
+
+/**
  * Resolve the `metricViews` map into a flat list of entries.
  *
  * The internal lane is derived from each entry's `executor` at this parse
@@ -252,11 +261,8 @@ function isValidFqn(fqn: string): boolean {
 export function resolveMetricConfig(
   config: MetricSourceConfig,
 ): MetricConfigResolution {
-  // v1 explicitly rejects unknown top-level fields so the legacy sp/obo lane
-  // shape (and future additions) cannot be silently consumed today.
-  const allowedTopLevel = new Set(["$schema", "metricViews"]);
   for (const field of Object.keys(config)) {
-    if (!allowedTopLevel.has(field)) {
+    if (!ALLOWED_TOP_LEVEL_FIELDS.has(field)) {
       throw new Error(
         `Invalid top-level field "${field}" in metric-views.json: only '$schema' and 'metricViews' are allowed.`,
       );
@@ -299,11 +305,8 @@ export function resolveMetricConfig(
       );
     }
 
-    // v1 explicitly rejects unknown entry fields so future additions cannot
-    // be silently consumed today.
-    const allowed = new Set(["source", "executor"]);
     for (const field of Object.keys(entry)) {
-      if (!allowed.has(field)) {
+      if (!ALLOWED_ENTRY_FIELDS.has(field)) {
         throw new Error(
           `Invalid field "${field}" on metric entry "${key}": only 'source' and 'executor' are allowed at v1.`,
         );
@@ -412,8 +415,8 @@ export function parseDescribeTableExtendedJson(
  *
  * Tolerant of multiple JSON shapes (the field may be `columns` or `schema.fields`,
  * type may be a string or `{ name }` object, the measure marker may be `is_measure`
- * or under `metadata.is_measure`). Phase 1's job is to find names + measure flags;
- * later phases can tighten this if a more authoritative shape stabilizes.
+ * or under `metadata.is_measure`). The job here is to find names + measure
+ * flags; this can be tightened if a more authoritative shape stabilizes.
  */
 export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
   if (!parsed || typeof parsed !== "object") {
@@ -652,24 +655,18 @@ function readDecimalPlaces(obj: Record<string, unknown>): number | undefined {
  * is never lost — `formatValue` and `toD3Format` will still render correctly,
  * just without a single-character glyph.
  */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CNY: "¥",
+  INR: "₹",
+  BRL: "R$",
+};
+
 function currencySymbol(code: string): string {
-  switch (code) {
-    case "USD":
-      return "$";
-    case "EUR":
-      return "€";
-    case "GBP":
-      return "£";
-    case "JPY":
-    case "CNY":
-      return "¥";
-    case "INR":
-      return "₹";
-    case "BRL":
-      return "R$";
-    default:
-      return `${code} `;
-  }
+  return CURRENCY_SYMBOLS[code] ?? `${code} `;
 }
 
 /**
@@ -709,7 +706,7 @@ function inferTimeGrains(type: string): string[] | undefined {
 /**
  * Map a Databricks SQL type to a TypeScript primitive.
  * Centralized here (not imported from query-registry) so this module
- * stays self-contained at Phase 1.
+ * stays self-contained.
  */
 function tsTypeFor(sqlType: string): string {
   const normalized = sqlType
@@ -750,47 +747,36 @@ function renderMetricEntry(schema: MetricSchema): string {
     return renderDegradedMetricEntry(schema);
   }
   const indent = "      ";
-  const measures =
-    schema.measures.length > 0
-      ? schema.measures
-          .map(
-            (m) => `${indent}/** @sqlType ${m.type} */
-${indent}${JSON.stringify(m.name)}: ${tsTypeFor(m.type)}`,
-          )
-          .join(";\n")
-      : "";
-  const dimensions =
-    schema.dimensions.length > 0
-      ? schema.dimensions
-          .map((d) => {
-            const grainComment = d.timeGrains?.length
-              ? ` @timeGrain ${d.timeGrains.join("|")}`
-              : "";
-            return `${indent}/** @sqlType ${d.type}${grainComment} */
-${indent}${JSON.stringify(d.name)}: ${tsTypeFor(d.type)}`;
-          })
-          .join(";\n")
-      : "";
+  // One builder serves measures AND dimensions: the grain-comment leg is a
+  // no-op for measures, which never carry `timeGrains` (extractMetricColumns
+  // skips grain inference for them), so the rendered output is identical to
+  // a measure-specific variant for every reachable input.
+  const colsBlock = (cols: MetricColumnMetadata[]): string => {
+    if (cols.length === 0) return "Record<string, never>";
+    const fields = cols
+      .map((col) => {
+        const grainComment = col.timeGrains?.length
+          ? ` @timeGrain ${col.timeGrains.join("|")}`
+          : "";
+        return `${indent}/** @sqlType ${col.type}${grainComment} */
+${indent}${JSON.stringify(col.name)}: ${tsTypeFor(col.type)}`;
+      })
+      .join(";\n");
+    return `{
+${fields};
+    }`;
+  };
+  const unionOf = (keys: string[]): string =>
+    keys.length > 0 ? keys.join(" | ") : "never";
 
-  const measureKeys = schema.measures.map((m) => JSON.stringify(m.name));
-  const dimensionKeys = schema.dimensions.map((d) => JSON.stringify(d.name));
-
-  const measuresBlock = measures
-    ? `{
-${measures};
-    }`
-    : "Record<string, never>";
-
-  const dimensionsBlock = dimensions
-    ? `{
-${dimensions};
-    }`
-    : "Record<string, never>";
-
-  const measureUnion =
-    measureKeys.length > 0 ? measureKeys.join(" | ") : "never";
-  const dimensionUnion =
-    dimensionKeys.length > 0 ? dimensionKeys.join(" | ") : "never";
+  const measuresBlock = colsBlock(schema.measures);
+  const dimensionsBlock = colsBlock(schema.dimensions);
+  const measureUnion = unionOf(
+    schema.measures.map((m) => JSON.stringify(m.name)),
+  );
+  const dimensionUnion = unionOf(
+    schema.dimensions.map((d) => JSON.stringify(d.name)),
+  );
 
   // Union of allowed time-grains across every time-typed dimension. The PRD
   // documents the v1 contract: a single top-level `timeGrain` applies to all
@@ -1016,7 +1002,7 @@ type MetricsMetadataBundle = Record<string, MetricSemanticMetadataEntry>;
  * Deterministic key order: outer object keys are sorted in locale-independent
  * code-unit order (see {@link compareKeys} — identical to the .d.ts order);
  * measures and dimensions are emitted in the order they appeared in DESCRIBE
- * (Phase 1's preserved-from-YAML order), but each per-column object's fields
+ * (the preserved-from-YAML order), but each per-column object's fields
  * follow a fixed declaration order so snapshot diffs are stable.
  *
  * The output is `JSON.stringify`'d with two-space indentation by the file
@@ -1291,6 +1277,20 @@ export async function syncMetrics(
   const schemas = new Array<MetricSchema>(entries.length);
   const failureSlots = new Array<MetricSyncFailure | undefined>(entries.length);
 
+  // Shared shape for every failed outcome: degraded schema plus one failure
+  // record. Reason wording and transient classification stay at the call
+  // sites — this only removes the structural repetition.
+  const failedOutcome = (
+    index: number,
+    entry: ResolvedMetricEntry,
+    reason: string,
+    transient: boolean,
+  ): MetricDescribeOutcome => ({
+    index,
+    schema: emptyMetricSchema(entry),
+    failure: { key: entry.key, source: entry.source, reason, transient },
+  });
+
   const describeOne = async (
     entry: ResolvedMetricEntry,
     index: number,
@@ -1302,16 +1302,7 @@ export async function syncMetrics(
       // The fetcher itself threw — a transport/auth blip, not a warehouse
       // verdict on the entry. Transient: a later pass may succeed unchanged.
       const reason = `DESCRIBE TABLE EXTENDED failed: ${(err as Error).message}`;
-      return {
-        index,
-        schema: emptyMetricSchema(entry),
-        failure: {
-          key: entry.key,
-          source: entry.source,
-          reason,
-          transient: true,
-        },
-      };
+      return failedOutcome(index, entry, reason, true);
     }
 
     // Non-terminal statement state (PENDING/RUNNING): the warehouse is
@@ -1326,29 +1317,16 @@ export async function syncMetrics(
       return { index, schema: emptyMetricSchema(entry) };
     }
 
-    let columns: MetricColumnMetadata[] = [];
-    let parseError: string | null = null;
+    let columns: MetricColumnMetadata[];
     try {
       const parsed = parseDescribeTableExtendedJson(response);
       columns = extractMetricColumns(parsed);
     } catch (err) {
-      parseError = `Failed to extract columns from DESCRIBE response: ${(err as Error).message}`;
-    }
-
-    if (parseError) {
       // Deterministic warehouse answer (FAILED statement, SUCCEEDED with zero
       // rows, unparseable payload): re-describing the same entry would fail
       // identically, so this failure is non-transient (sticky in the cache).
-      return {
-        index,
-        schema: emptyMetricSchema(entry),
-        failure: {
-          key: entry.key,
-          source: entry.source,
-          reason: parseError,
-          transient: false,
-        },
-      };
+      const reason = `Failed to extract columns from DESCRIBE response: ${(err as Error).message}`;
+      return failedOutcome(index, entry, reason, false);
     }
 
     if (columns.length === 0) {
@@ -1357,21 +1335,11 @@ export async function syncMetrics(
       // recognize. Treat as a failure so CI catches it instead of letting an
       // empty bundle entry ship — the route's fail-closed gate would then
       // 503 every request to this metric in production. The schema is also
-      // degraded: its real columns are unknown.
+      // degraded: its real columns are unknown. Deterministic answer for
+      // this entry — non-transient, like the parse failures above.
       const reason =
         "DESCRIBE response yielded zero columns — check the response shape (top-level `columns` array or `schema.fields`).";
-      return {
-        index,
-        schema: emptyMetricSchema(entry),
-        // Deterministic answer for this entry — non-transient, like the
-        // parse failures above.
-        failure: {
-          key: entry.key,
-          source: entry.source,
-          reason,
-          transient: false,
-        },
-      };
+      return failedOutcome(index, entry, reason, false);
     }
 
     const measures = columns.filter((c) => c.isMeasure);
@@ -1420,15 +1388,16 @@ export async function syncMetrics(
           result.reason instanceof Error
             ? result.reason.message
             : String(result.reason);
-        schemas[index] = emptyMetricSchema(entry);
         // Unknown cause — prefer convergence: mark transient so the next
         // describe-capable pass retries instead of pinning a surprise.
-        failureSlots[index] = {
-          key: entry.key,
-          source: entry.source,
-          reason: `DESCRIBE TABLE EXTENDED failed: ${message}`,
-          transient: true,
-        };
+        const { schema, failure } = failedOutcome(
+          index,
+          entry,
+          `DESCRIBE TABLE EXTENDED failed: ${message}`,
+          true,
+        );
+        schemas[index] = schema;
+        failureSlots[index] = failure;
       }
     }
   }

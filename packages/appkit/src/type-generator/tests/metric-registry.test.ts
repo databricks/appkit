@@ -32,7 +32,7 @@ import type { DatabricksStatementExecutionResponse } from "../types";
  * }
  * ```
  *
- * Phase 1 mocks this. Live integration ships in Phase 7.
+ * Unit tests mock this; live warehouse integration is exercised separately.
  */
 function mockDescribeResponse(
   payload: unknown,
