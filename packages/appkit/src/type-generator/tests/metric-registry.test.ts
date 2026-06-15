@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
 import {
   buildMetricsMetadataBundle,
+  createWorkspaceDescribeFetcher,
   extractMetricColumns,
   generateMetricsMetadataJson,
   generateMetricTypeDeclarations,
@@ -183,6 +184,14 @@ describe("resolveMetricConfig", () => {
     expect(resolveMetricConfig({ metricViews: {} }).entries).toEqual([]);
   });
 
+  test("rejects metricViews: null (only a genuinely-absent field defaults)", () => {
+    // The canonical Zod schema rejects null (`.optional()` admits undefined
+    // only) — the inline validator must not coalesce null into an empty map.
+    expect(() => resolveUnchecked({ metricViews: null })).toThrowError(
+      /expected an object map of metric entries/,
+    );
+  });
+
   test("rejects a non-object entry", () => {
     expect(() =>
       resolveUnchecked({ metricViews: { revenue: "a.b.c" } }),
@@ -202,11 +211,68 @@ describe("resolveMetricConfig", () => {
   });
 });
 
+// ── Input caps (inline-only at v1): the canonical Zod schema has no caps
+// yet — aligning it is a PR4 rider, so these fixtures deliberately do NOT
+// run through metricSourceSchema (they'd pass it) and stay out of the
+// parity suite below.
+describe("resolveMetricConfig — input caps", () => {
+  const manyViews = (count: number) =>
+    Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`m${i}`, { source: "a.b.c" }]),
+    );
+
+  test("accepts exactly 200 metricViews entries", () => {
+    const { entries } = resolveMetricConfig({ metricViews: manyViews(200) });
+    expect(entries).toHaveLength(200);
+  });
+
+  test("rejects 201 metricViews entries, naming the limit and the count", () => {
+    expect(() =>
+      resolveMetricConfig({ metricViews: manyViews(201) }),
+    ).toThrowError(/201 metric views exceed the maximum of 200/);
+  });
+
+  test("accepts FQN segments of exactly 255 characters (full FQN at the 767 cap)", () => {
+    const seg = "a".repeat(255);
+    const fqn = `${seg}.${seg}.${seg}`; // 3 × 255 + 2 = 767 — at the cap.
+    expect(fqn).toHaveLength(767);
+    const { entries } = resolveMetricConfig({
+      metricViews: { revenue: { source: fqn } },
+    });
+    expect(entries[0].source).toBe(fqn);
+  });
+
+  test("rejects a 256-character FQN segment, naming the key, segment, and limit", () => {
+    const fqn = `${"a".repeat(256)}.b.c`;
+    expect(() =>
+      resolveMetricConfig({ metricViews: { revenue: { source: fqn } } }),
+    ).toThrowError(
+      /Invalid metric source for "revenue": the catalog segment is 256 characters, exceeding the maximum of 255/,
+    );
+  });
+
+  test("rejects a full FQN over 767 characters, naming the key and limit", () => {
+    const seg = "a".repeat(300);
+    const fqn = `${seg}.${seg}.${seg}`; // 902 — total cap fires before segment caps.
+    expect(() =>
+      resolveMetricConfig({ metricViews: { revenue: { source: fqn } } }),
+    ).toThrowError(
+      /Invalid metric source for "revenue": FQN is 902 characters, exceeding the maximum of 767/,
+    );
+  });
+});
+
 // ── Parity: the inline config validation must agree with the canonical
 // shared Zod schema (packages/shared/src/schemas/metric-source.ts).
 // The regexes and allowlists are copied, not imported (locked dependency-graph
 // ruling: the type-generator must not pull the shared schema package into the
 // runtime path) — this block is the drift alarm. TEST-ONLY import.
+//
+// Caps divergence: the inline validator enforces v1 input caps (≤200 entries,
+// ≤255 per FQN segment, ≤767 full FQN) that the canonical schema does not
+// carry yet — aligning the Zod schema is a PR4 rider. Cap fixtures therefore
+// live in the dedicated caps suite above and are asserted on the inline side
+// only; do NOT add them here expecting metricSourceSchema to reject them.
 describe("resolveMetricConfig — parity with shared metricSourceSchema", () => {
   const accepts: Array<{ name: string; config: Record<string, unknown> }> = [
     {
@@ -279,6 +345,11 @@ describe("resolveMetricConfig — parity with shared metricSourceSchema", () => 
       name: "non-object entry",
       config: { metricViews: { revenue: "a.b.c" } },
     },
+    {
+      // `.optional()` admits undefined only — null must throw on both sides.
+      name: "metricViews: null",
+      config: { metricViews: null },
+    },
   ];
 
   for (const fixture of accepts) {
@@ -334,6 +405,95 @@ describe("parseDescribeTableExtendedJson", () => {
         result: { data_array: [[null]] },
       }),
     ).toThrowError(/JSON string/);
+  });
+});
+
+// ── DESCRIBE statement construction: every FQN segment is backtick-quoted.
+// The segment charset ([a-zA-Z0-9_][a-zA-Z0-9_-]*) cannot contain backticks,
+// so the quoting cannot be escaped from — and the one SQL metacharacter the
+// charset does allow (`-`, which unquoted can open a `--` line comment) is
+// neutralized inside the quotes.
+describe("createWorkspaceDescribeFetcher", () => {
+  /** Stub WorkspaceClient capturing executeStatement requests. */
+  function stubClient(payload: unknown = { columns: [] }) {
+    const statements: Array<Record<string, unknown>> = [];
+    const client = {
+      statementExecution: {
+        executeStatement: async (req: Record<string, unknown>) => {
+          statements.push(req);
+          return mockDescribeResponse(payload);
+        },
+      },
+    } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
+    return { client, statements };
+  }
+
+  test("emits a backtick-quoted three-part FQN with warehouse id and wait timeout", async () => {
+    const { client, statements } = stubClient();
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    await fetcher("demo.sales.revenue");
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatchObject({
+      statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
+      warehouse_id: "wh-1",
+      wait_timeout: "30s",
+    });
+  });
+
+  test("a hyphenated FQN round-trips: validated by resolveMetricConfig, quoted in the statement, response parsed", async () => {
+    // Hyphenated catalogs are valid per the shared source regex; unquoted
+    // they would be a SQL syntax error against a real warehouse.
+    const { entries } = resolveMetricConfig({
+      metricViews: { revenue: { source: "prod-data.analytics.revenue" } },
+    });
+    expect(entries[0].source).toBe("prod-data.analytics.revenue");
+
+    const { client, statements } = stubClient({
+      columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
+    });
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    const response = await fetcher(entries[0].source);
+
+    expect(statements[0].statement).toBe(
+      "DESCRIBE TABLE EXTENDED `prod-data`.`analytics`.`revenue` AS JSON",
+    );
+    const cols = extractMetricColumns(parseDescribeTableExtendedJson(response));
+    expect(cols).toHaveLength(1);
+    expect(cols[0]).toMatchObject({
+      name: "arr",
+      type: "DECIMAL",
+      isMeasure: true,
+    });
+  });
+
+  test("a segment containing `--` is quoted so the comment introducer is neutralized", async () => {
+    const { client, statements } = stubClient();
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    await fetcher("a.b.c--x");
+
+    // `--` sits inside backticks — an identifier character sequence, not a
+    // line comment that would truncate ` AS JSON` off the statement.
+    expect(statements[0].statement).toBe(
+      "DESCRIBE TABLE EXTENDED `a`.`b`.`c--x` AS JSON",
+    );
+    expect(statements[0].statement).toContain("`c--x`");
+  });
+
+  test("rejects an FQN that fails validation without issuing a statement", async () => {
+    const { client, statements } = stubClient();
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    // Backticks (and anything else outside the segment charset) fail the
+    // defense-in-depth re-validation at the fetcher seam.
+    await expect(fetcher("a.b.`c`")).rejects.toThrowError(/three-part UC FQN/);
+    await expect(fetcher("not.three.part.parts")).rejects.toThrowError(
+      /three-part UC FQN/,
+    );
+    expect(statements).toHaveLength(0);
   });
 });
 
@@ -536,8 +696,81 @@ describe("syncMetrics", () => {
     expect(failures[0]).toMatchObject({
       key: "revenue",
       source: "demo.public.revenue",
+      // A rejected fetch is a transport blip, not a warehouse verdict —
+      // transient, so the caller's cache retries it.
+      transient: true,
     });
     expect(failures[0].reason).toMatch(/warehouse unreachable/);
+  });
+});
+
+// ── D′ transience classification: every failure says whether retrying the
+// unchanged entry can succeed. Rejected fetches (and the defensive
+// settlement-rejection backstop) are transient; deterministic warehouse
+// answers — FAILED, zero rows, unparseable payload, zero columns — are not,
+// and the caller's cache pins them sticky until the config hash changes.
+describe("syncMetrics — failure transience (D′)", () => {
+  const singleEntryResolution = () =>
+    resolveMetricConfig({
+      metricViews: { revenue: { source: "demo.public.revenue" } },
+    });
+
+  test("a rejected fetch is transient", async () => {
+    const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
+      throw new Error("socket hang up");
+    };
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(true);
+  });
+
+  test.each<[string, DatabricksStatementExecutionResponse]>([
+    [
+      "a FAILED statement",
+      {
+        statement_id: "stmt-mock",
+        status: { state: "FAILED", error: { message: "no such table" } },
+      },
+    ],
+    [
+      "a SUCCEEDED statement with zero rows",
+      {
+        statement_id: "stmt-mock",
+        status: { state: "SUCCEEDED" },
+        result: { data_array: [] },
+      },
+    ],
+    [
+      "an unparseable payload",
+      {
+        statement_id: "stmt-mock",
+        status: { state: "SUCCEEDED" },
+        result: { data_array: [["{not json"]] },
+      },
+    ],
+    ["zero extracted columns", mockDescribeResponse({ unrelated: true })],
+  ])("%s is non-transient (deterministic)", async (_label, response) => {
+    const fetcher = async () => response;
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(false);
+  });
+
+  test("a defensive rejected settlement is transient (unknown cause — prefer convergence)", async () => {
+    // Same poisoned-response trick as the scheduling suite: blow up after
+    // the fetch try/catch so the settlement itself rejects.
+    const poisoned = new Proxy({} as DatabricksStatementExecutionResponse, {
+      get(_target, prop) {
+        if (prop === "then") {
+          return undefined; // keep the object await-able
+        }
+        throw new Error("poisoned response object");
+      },
+    });
+    const fetcher = async () => poisoned;
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(true);
   });
 });
 
@@ -1302,6 +1535,44 @@ describe("extractMetricColumns — Phase 5 semantic metadata", () => {
     });
     expect(cols[0].format).toBe("$#,##0.0000");
   });
+
+  test("clamps structured decimal places to 100 (Number#toFixed RangeError bound)", () => {
+    // Format specs are workspace-authored column metadata, not app config —
+    // a wild `places` is clamped (never thrown) so the build still succeeds
+    // and downstream toFixed-style formatters stay inside their 100-digit
+    // RangeError bound.
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "huge",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: { number: { decimal_places: { places: 1000 } } },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe(`#,##0.${"0".repeat(100)}`);
+  });
+
+  test("clamps a bare-number decimal_places to 100 as well", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "huge",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: {
+              currency: { decimal_places: 500, currency_code: "USD" },
+            },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe(`$#,##0.${"0".repeat(100)}`);
+  });
 });
 
 // ── Phase 5: metadata bundle generation ───────────────────────────────────
@@ -1457,6 +1728,62 @@ describe("buildMetricsMetadataBundle", () => {
       "year",
     ]);
   });
+
+  test("a __proto__ metric key and a __proto__ column name are emitted as own enumerable properties (no prototype pollution)", async () => {
+    // "__proto__" passes the metric key regex, so a config can genuinely
+    // declare it — and a workspace column can genuinely be named it. The
+    // bundle (and its per-entry maps) are null-prototype, so the write
+    // stores data instead of hitting the Object.prototype setter (which
+    // would swap the map's prototype and silently drop the key from the
+    // emitted JSON). Object-literal syntax would set the prototype at
+    // construction, so the config arrives via JSON.parse — exactly like the
+    // real metric-views.json read.
+    const config = JSON.parse(
+      '{"metricViews":{"__proto__":{"source":"demo.evil.proto"},"revenue":{"source":"demo.sales.revenue"}}}',
+    );
+    const resolution = resolveMetricConfig(config);
+    expect(resolution.entries.map((e) => e.key)).toEqual([
+      "__proto__",
+      "revenue",
+    ]);
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          { name: "__proto__", type: "DOUBLE", is_measure: true },
+          { name: "region", type: "STRING", is_measure: false },
+        ],
+      });
+
+    const { schemas, failures } = await syncMetrics(resolution, fetcher);
+    expect(failures).toEqual([]);
+
+    // Pre-serialization: own keys on the null-prototype maps.
+    const bundle = buildMetricsMetadataBundle(schemas);
+    expect(Object.hasOwn(bundle, "__proto__")).toBe(true);
+    expect(Object.hasOwn(bundle, "revenue")).toBe(true);
+
+    // The emitted metrics.metadata.json carries both as own enumerable
+    // properties (JSON.parse creates own data properties for __proto__).
+    const parsed = JSON.parse(generateMetricsMetadataJson(schemas));
+    expect(Object.keys(parsed)).toEqual(["__proto__", "revenue"]);
+    expect(Object.hasOwn(parsed, "__proto__")).toBe(true);
+    const protoEntry = Object.getOwnPropertyDescriptor(
+      parsed,
+      "__proto__",
+    )?.value;
+    expect(Object.hasOwn(protoEntry.measures, "__proto__")).toBe(true);
+    expect(Object.hasOwn(parsed.revenue.measures, "__proto__")).toBe(true);
+    expect(
+      Object.getOwnPropertyDescriptor(parsed.revenue.measures, "__proto__")
+        ?.value,
+    ).toEqual({ type: "DOUBLE" });
+
+    // And no global prototype pollution leaked out of the build.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).measures).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty("measures");
+  });
 });
 
 // ── Phase 5: metadata JSON serialization ──────────────────────────────────
@@ -1557,6 +1884,48 @@ describe("generateMetricsMetadataJson — snapshot", () => {
 
   test("emits `{}` when no metrics are registered", () => {
     expect(generateMetricsMetadataJson([])).toBe("{}\n");
+  });
+});
+
+// ── Key-order determinism across artifacts: both emitters sort with ONE
+// shared locale-independent (code-unit) comparator. localeCompare-style
+// collation would interleave mixed-case keys ("ARPU", "churn", "Revenue")
+// and could vary by machine/locale, drifting the .d.ts from the bundle.
+describe("artifact key-order determinism", () => {
+  test("mixed-case keys order identically (code-unit) in metric.d.ts and metrics.metadata.json", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: {
+        Revenue: { source: "a.b.r" },
+        churn: { source: "a.b.c" },
+        ARPU: { source: "a.b.a" },
+      },
+    });
+    // Code-unit order puts uppercase before lowercase — NOT the
+    // case-insensitive interleaving locale collation would produce.
+    expect(resolution.entries.map((e) => e.key)).toEqual([
+      "ARPU",
+      "Revenue",
+      "churn",
+    ]);
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [{ name: "v", type: "DOUBLE", is_measure: true }],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+
+    // Entry keys in the .d.ts appear as `    "<key>": {` lines (4-space
+    // indent — metadata column maps sit deeper and don't match).
+    const declarations = generateMetricTypeDeclarations(schemas);
+    const dtsKeys = [...declarations.matchAll(/^ {4}"([^"]+)": \{$/gm)].map(
+      (m) => m[1],
+    );
+    const bundleKeys = Object.keys(
+      JSON.parse(generateMetricsMetadataJson(schemas)),
+    );
+
+    expect(dtsKeys).toEqual(["ARPU", "Revenue", "churn"]);
+    expect(bundleKeys).toEqual(dtsKeys);
   });
 });
 

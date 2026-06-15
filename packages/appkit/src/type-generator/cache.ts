@@ -24,10 +24,16 @@ interface CacheEntry {
  * determine a DESCRIBE — so editing either invalidates the entry. `schema`
  * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
  * design), letting a warm pass regenerate both metric artifacts without a
- * single warehouse call. `retry: true` marks a degraded outcome (DESCRIBE
- * skipped, unanswered, or failed): the cached schema still renders
- * artifacts, but the next eligible pass re-describes exactly these keys so
- * degraded schemas converge to real ones.
+ * single warehouse call. `retry: true` marks a SELF-CONVERGING degraded
+ * outcome (DESCRIBE skipped behind a not-running warehouse, unanswered, or
+ * transiently failed): the cached schema still renders artifacts, but the
+ * next eligible pass re-describes exactly these keys so degraded schemas
+ * converge to real ones. A degraded schema with `retry: false` is a STICKY
+ * failure — a deterministic DESCRIBE failure (bad FQN, unparseable
+ * response, zero columns) or a deleted warehouse — that re-describing the
+ * unchanged entry cannot fix; it hits like any cached entry until the
+ * config hash changes or the cache is bypassed, and the type generator
+ * warns about it on every pass that serves it.
  */
 export interface MetricCacheEntry {
   hash: string;

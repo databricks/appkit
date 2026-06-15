@@ -306,6 +306,36 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
   });
+
+  test("a legacy-metric-views.json change does NOT regenerate; metric-views.json still does (basename match, not suffix)", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    await buildStart();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // Suffix-matches "metric-views.json" but is a different file — the
+    // basename check must not fire for it.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "legacy-metric-views.json"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // The real config file still triggers.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "metric-views.json"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("appKitTypesPlugin — metric option plumbing", () => {

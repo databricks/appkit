@@ -352,7 +352,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         if (
           isWatchedFile &&
           (changedFile.endsWith(".sql") ||
-            changedFile.endsWith("metric-views.json"))
+            // Basename equality, not endsWith: a sibling like
+            // "legacy-metric-views.json" must not trigger a regenerate —
+            // only the real config file does.
+            path.basename(changedFile) === "metric-views.json")
         ) {
           // Route through the single-flight runner (was fire-and-forget
           // generate(), which could race the initial build / watch). This is a

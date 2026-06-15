@@ -14,6 +14,37 @@ import type { DatabricksStatementExecutionResponse } from "./types";
 const METRIC_CONFIG_FILE = "metric-views.json";
 
 /**
+ * Input caps enforced by {@link resolveMetricConfig}.
+ *
+ * Inline-only at v1: the canonical Zod schema
+ * (`packages/shared/src/schemas/metric-source.ts`) carries no caps yet —
+ * aligning it is a PR4 rider, so the parity suite deliberately excludes cap
+ * fixtures until then.
+ *
+ * - `MAX_METRIC_VIEWS` bounds the `metricViews` map so a pathological config
+ *   cannot fan out thousands of DESCRIBE statements per generation pass.
+ * - `MAX_FQN_SEGMENT_LENGTH` mirrors Unity Catalog's 255-character
+ *   identifier limit per FQN part.
+ * - `MAX_FQN_LENGTH` bounds the full dotted name (3 × 255 + 2 separators).
+ */
+const MAX_METRIC_VIEWS = 200;
+const MAX_FQN_SEGMENT_LENGTH = 255;
+const MAX_FQN_LENGTH = 767;
+
+/**
+ * Locale-independent comparator (UTF-16 code-unit order) shared by BOTH
+ * artifact key orderings: {@link resolveMetricConfig}'s entry sort (which the
+ * `.d.ts` renderer preserves) and {@link buildMetricsMetadataBundle}'s key
+ * sort. `localeCompare` (ICU-backed collation) can order mixed-case keys
+ * differently across machines and locales; code-unit order cannot — so the
+ * emitted `metric.d.ts` and `metrics.metadata.json` key order is always
+ * identical.
+ */
+function compareKeys(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * The lane an entry sits in: `sp` (service principal, shared cache)
  * or `obo` (on-behalf-of, per-user cache).
  *
@@ -212,9 +243,11 @@ function isValidFqn(fqn: string): boolean {
  * Downstream consumers only ever see lanes.
  *
  * Throws on unknown top-level fields, invalid keys, non-object entries,
- * unknown entry fields, invalid FQNs, or invalid executors. A single map
- * makes duplicate metric keys unrepresentable by construction. Stable
- * ordering: alphabetical by key.
+ * unknown entry fields, invalid FQNs, invalid executors, or inputs exceeding
+ * the v1 caps ({@link MAX_METRIC_VIEWS} entries, {@link MAX_FQN_LENGTH} /
+ * {@link MAX_FQN_SEGMENT_LENGTH} FQN bounds). A single map makes duplicate
+ * metric keys unrepresentable by construction. Stable ordering: by key in
+ * locale-independent code-unit order (see {@link compareKeys}).
  */
 export function resolveMetricConfig(
   config: MetricSourceConfig,
@@ -230,7 +263,11 @@ export function resolveMetricConfig(
     }
   }
 
-  const metricViews = config.metricViews ?? {};
+  // Default ONLY a genuinely-absent `metricViews`. `null` must fall through
+  // to the type check below and throw — the canonical Zod schema rejects null
+  // (`.optional()` admits undefined only) and the inline validator agrees.
+  const metricViews =
+    config.metricViews === undefined ? {} : config.metricViews;
   if (
     typeof metricViews !== "object" ||
     metricViews === null ||
@@ -242,7 +279,12 @@ export function resolveMetricConfig(
   }
 
   const entries: ResolvedMetricEntry[] = [];
-  const sortedKeys = Object.keys(metricViews).sort();
+  const sortedKeys = Object.keys(metricViews).sort(compareKeys);
+  if (sortedKeys.length > MAX_METRIC_VIEWS) {
+    throw new Error(
+      `Invalid 'metricViews' in metric-views.json: ${sortedKeys.length} metric views exceed the maximum of ${MAX_METRIC_VIEWS}.`,
+    );
+  }
   for (const key of sortedKeys) {
     if (!isValidMetricKey(key)) {
       throw new Error(
@@ -274,10 +316,31 @@ export function resolveMetricConfig(
       );
     }
 
+    // Total-length cap BEFORE the regex so the pattern only ever runs on
+    // bounded input. The offending FQN is reported by length, not echoed —
+    // it can be arbitrarily long.
+    if (entry.source.length > MAX_FQN_LENGTH) {
+      throw new Error(
+        `Invalid metric source for "${key}": FQN is ${entry.source.length} characters, exceeding the maximum of ${MAX_FQN_LENGTH}.`,
+      );
+    }
+
     if (!isValidFqn(entry.source)) {
       throw new Error(
         `Invalid metric source "${entry.source}" for "${key}": expected a three-part UC FQN <catalog>.<schema>.<metric_view>.`,
       );
+    }
+
+    // The regex guarantees exactly three dot-joined segments; cap each at
+    // UC's identifier limit.
+    const segments = entry.source.split(".");
+    const segmentNames = ["catalog", "schema", "metric_view"];
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i].length > MAX_FQN_SEGMENT_LENGTH) {
+        throw new Error(
+          `Invalid metric source for "${key}": the ${segmentNames[i]} segment is ${segments[i].length} characters, exceeding the maximum of ${MAX_FQN_SEGMENT_LENGTH} per segment.`,
+        );
+      }
     }
 
     const executor = entry.executor;
@@ -559,15 +622,25 @@ function fractionalSuffix(places: number): string {
   return places > 0 ? `.${"0".repeat(places)}` : "";
 }
 
+/**
+ * Maximum decimal places honored from a format spec. `Number#toFixed` (the
+ * digit-count primitive downstream formatters render fractional suffixes
+ * with) throws a RangeError above 100 fraction digits, and the emitted
+ * printf string would carry a pathological zero-run. Clamp, do NOT throw:
+ * format specs are workspace-authored column metadata, not app config — a
+ * wild value must degrade gracefully, never fail the build.
+ */
+const MAX_DECIMAL_PLACES = 100;
+
 function readDecimalPlaces(obj: Record<string, unknown>): number | undefined {
   const dp = obj.decimal_places;
   if (typeof dp === "number" && Number.isFinite(dp) && dp >= 0) {
-    return Math.floor(dp);
+    return Math.min(Math.floor(dp), MAX_DECIMAL_PLACES);
   }
   if (dp && typeof dp === "object" && !Array.isArray(dp)) {
     const places = (dp as Record<string, unknown>).places;
     if (typeof places === "number" && Number.isFinite(places) && places >= 0) {
-      return Math.floor(places);
+      return Math.min(Math.floor(places), MAX_DECIMAL_PLACES);
     }
   }
   return undefined;
@@ -940,7 +1013,8 @@ type MetricsMetadataBundle = Record<string, MetricSemanticMetadataEntry>;
 /**
  * Pure function: turn a list of metric schemas into the JSON metadata bundle.
  *
- * Deterministic key order: outer object keys are sorted alphabetically;
+ * Deterministic key order: outer object keys are sorted in locale-independent
+ * code-unit order (see {@link compareKeys} — identical to the .d.ts order);
  * measures and dimensions are emitted in the order they appeared in DESCRIBE
  * (Phase 1's preserved-from-YAML order), but each per-column object's fields
  * follow a fixed declaration order so snapshot diffs are stable.
@@ -952,16 +1026,28 @@ type MetricsMetadataBundle = Record<string, MetricSemanticMetadataEntry>;
 export function buildMetricsMetadataBundle(
   schemas: MetricSchema[],
 ): MetricsMetadataBundle {
-  const bundle: MetricsMetadataBundle = {};
-  const sortedSchemas = [...schemas].sort((a, b) => a.key.localeCompare(b.key));
+  // Null-prototype maps, same guard as the typegen cache section in
+  // index.ts: metric keys are user-controlled config input and column names
+  // are workspace-controlled DESCRIBE output — "__proto__" passes the metric
+  // key regex and is a legal column name. On a plain object that write would
+  // hit the Object.prototype setter (swapping the object's prototype and
+  // silently dropping the entry from the emitted JSON) instead of storing
+  // data.
+  const bundle: MetricsMetadataBundle = Object.create(null);
+  // compareKeys (code-unit), NOT localeCompare: the bundle's key order must
+  // be byte-identical to the .d.ts entry order (resolveMetricConfig's sort)
+  // on every machine and locale.
+  const sortedSchemas = [...schemas].sort((a, b) => compareKeys(a.key, b.key));
 
   for (const schema of sortedSchemas) {
-    const measures: Record<string, MetricColumnSemanticMetadata> = {};
+    const measures: Record<string, MetricColumnSemanticMetadata> =
+      Object.create(null);
     for (const m of schema.measures) {
       measures[m.name] = buildColumnMetadata(m);
     }
 
-    const dimensions: Record<string, MetricColumnSemanticMetadata> = {};
+    const dimensions: Record<string, MetricColumnSemanticMetadata> =
+      Object.create(null);
     for (const d of schema.dimensions) {
       dimensions[d.name] = buildColumnMetadata(d);
     }
@@ -1042,8 +1128,26 @@ export function createWorkspaceDescribeFetcher(
   warehouseId: string,
 ): DescribeFetcher {
   return async (fqn: string) => {
+    // Defense-in-depth: every caller passes a source that already cleared
+    // resolveMetricConfig, but this fetcher is an exported seam — re-check
+    // before interpolating into SQL.
+    if (!isValidFqn(fqn)) {
+      throw new Error(
+        `Invalid metric source "${fqn}": expected a three-part UC FQN <catalog>.<schema>.<metric_view>.`,
+      );
+    }
+    // Backtick-quote each segment. The segment charset
+    // ([a-zA-Z0-9_][a-zA-Z0-9_-]*, enforced by the regex above) cannot
+    // contain backticks (or dots), so the quoting cannot be escaped from —
+    // while the SQL metacharacter the charset DOES allow is neutralized
+    // inside the quotes (a hyphenated segment like "c--x" would otherwise
+    // open a `--` line comment mid-statement).
+    const quotedFqn = fqn
+      .split(".")
+      .map((segment) => `\`${segment}\``)
+      .join(".");
     const result = (await client.statementExecution.executeStatement({
-      statement: `DESCRIBE TABLE EXTENDED ${fqn} AS JSON`,
+      statement: `DESCRIBE TABLE EXTENDED ${quotedFqn} AS JSON`,
       warehouse_id: warehouseId,
       wait_timeout: "30s",
     })) as DatabricksStatementExecutionResponse;
@@ -1065,6 +1169,19 @@ export interface MetricSyncFailure {
   source: string;
   /** Single human-readable reason (DESCRIBE failed, parse failed, zero columns). */
   reason: string;
+  /**
+   * Whether the failure is expected to self-converge on a later pass without
+   * a config change. `true` for failures whose cause lives outside the
+   * entry's definition — a rejected fetch (transport/auth blip) or an
+   * unexplained settlement rejection — so retrying the same DESCRIBE can
+   * succeed. `false` for deterministic warehouse answers (FAILED statement,
+   * SUCCEEDED with zero rows, unparseable response, zero extracted columns):
+   * re-describing an unchanged entry would fail identically, so the caller's
+   * cache pins these sticky (`retry: false`) until the config (hash) changes
+   * or the cache is bypassed. Additive field — existing fields are consumed
+   * by the CLI via dynamic import and must not change shape.
+   */
+  transient: boolean;
 }
 
 /**
@@ -1144,7 +1261,9 @@ interface MetricDescribeOutcome {
  *
  *  - FAILED statement, rejected fetch, unparseable response, or zero
  *    extracted columns → a genuine failure: recorded in `failures` AND the
- *    schema is `degraded: true` (its columns are unknown).
+ *    schema is `degraded: true` (its columns are unknown). Each failure also
+ *    carries `transient` (see {@link MetricSyncFailure.transient}): rejected
+ *    fetches are transient, deterministic warehouse answers are not.
  *  - Non-terminal statement state (PENDING/RUNNING — warehouse reachable but
  *    not ready) → degraded, never an error: schema is `degraded: true`, NOT
  *    in `failures`. The next run with a ready warehouse lands the real
@@ -1180,11 +1299,18 @@ export async function syncMetrics(
     try {
       response = await fetcher(entry.source);
     } catch (err) {
+      // The fetcher itself threw — a transport/auth blip, not a warehouse
+      // verdict on the entry. Transient: a later pass may succeed unchanged.
       const reason = `DESCRIBE TABLE EXTENDED failed: ${(err as Error).message}`;
       return {
         index,
         schema: emptyMetricSchema(entry),
-        failure: { key: entry.key, source: entry.source, reason },
+        failure: {
+          key: entry.key,
+          source: entry.source,
+          reason,
+          transient: true,
+        },
       };
     }
 
@@ -1210,10 +1336,18 @@ export async function syncMetrics(
     }
 
     if (parseError) {
+      // Deterministic warehouse answer (FAILED statement, SUCCEEDED with zero
+      // rows, unparseable payload): re-describing the same entry would fail
+      // identically, so this failure is non-transient (sticky in the cache).
       return {
         index,
         schema: emptyMetricSchema(entry),
-        failure: { key: entry.key, source: entry.source, reason: parseError },
+        failure: {
+          key: entry.key,
+          source: entry.source,
+          reason: parseError,
+          transient: false,
+        },
       };
     }
 
@@ -1229,7 +1363,14 @@ export async function syncMetrics(
       return {
         index,
         schema: emptyMetricSchema(entry),
-        failure: { key: entry.key, source: entry.source, reason },
+        // Deterministic answer for this entry — non-transient, like the
+        // parse failures above.
+        failure: {
+          key: entry.key,
+          source: entry.source,
+          reason,
+          transient: false,
+        },
       };
     }
 
@@ -1280,10 +1421,13 @@ export async function syncMetrics(
             ? result.reason.message
             : String(result.reason);
         schemas[index] = emptyMetricSchema(entry);
+        // Unknown cause — prefer convergence: mark transient so the next
+        // describe-capable pass retries instead of pinning a surprise.
         failureSlots[index] = {
           key: entry.key,
           source: entry.source,
           reason: `DESCRIBE TABLE EXTENDED failed: ${message}`,
+          transient: true,
         };
       }
     }

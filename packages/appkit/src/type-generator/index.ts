@@ -32,6 +32,7 @@ import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 import {
   getWarehouseState,
   startWarehouse,
+  type WarehouseState,
   waitUntilRunning,
 } from "./warehouse-status";
 
@@ -228,28 +229,76 @@ declare module "@databricks/appkit-ui/react" {
 
 /**
  * Status-only probe for the metric-view gate in {@link generateFromEntryPoint}:
- * is the warehouse RUNNING right now?
+ * what state is the warehouse in right now?
  *
  * Uses {@link getWarehouseState} (`warehouses.get`) — a read-only GET that can
  * never start the warehouse — unlike the metric DESCRIBE statements it guards,
  * whose statement execution auto-starts a stopped warehouse and waits on it.
  *
+ * Returns the observed state so the gate can distinguish a transient
+ * not-running state (STOPPED/STARTING/... → degraded entries that retry) from
+ * a terminal one (DELETED/DELETING → degraded entries pinned sticky: they can
+ * never self-converge).
+ *
  * Takes the metric path's lazy client *getter* (not a constructed client) so
  * the probe's failure semantics cover client construction too: any failure to
- * observe a state — connectivity, auth, bad id, or SDK construction — reads
- * as "not running". In non-blocking mode typegen must never block on, or fail
- * because of, the warehouse, so the caller degrades and a later blocking run
- * (e.g. the Vite plugin's warehouse watch) lands the real schemas.
+ * observe a state — connectivity, auth, bad id, or SDK construction — returns
+ * `undefined`, which the gate reads as a transient not-running state. In
+ * non-blocking mode typegen must never block on, or fail because of, the
+ * warehouse, so the caller degrades and a later blocking run (e.g. the Vite
+ * plugin's warehouse watch) lands the real schemas.
  */
-async function isWarehouseRunning(
+async function probeWarehouseState(
   getClient: () => WorkspaceClient,
   warehouseId: string,
-): Promise<boolean> {
+): Promise<WarehouseState | undefined> {
   try {
-    return (await getWarehouseState(getClient(), warehouseId)) === "RUNNING";
+    return await getWarehouseState(getClient(), warehouseId);
   } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Structural gate for reviving a cached metric entry at partition time.
+ *
+ * The cache file lives in `node_modules/.databricks` and is plain JSON —
+ * hand-edits, truncation, or a stale writer can leave entries whose shape no
+ * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
+ * cache MISS (re-describe) rather than crash the pass or render revived
+ * garbage into the artifacts. Checks exactly what the renderers and the
+ * metadata bundle consume: `hash` string, `retry` boolean, and a schema with
+ * `key`/`source` strings, a valid lane, an optional boolean `degraded`, and
+ * measure/dimension arrays whose elements carry `name`/`type` strings
+ * (other column fields are optional). Deliberately inline — the shared Zod
+ * schemas must not enter the type-generator's runtime path.
+ */
+function isRevivableMetricCacheEntry(entry: MetricCacheEntry): boolean {
+  if (typeof entry.hash !== "string" || typeof entry.retry !== "boolean") {
     return false;
   }
+  const schema = entry.schema as unknown;
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return false;
+  }
+  const s = schema as Record<string, unknown>;
+  const isColumnArray = (value: unknown): boolean =>
+    Array.isArray(value) &&
+    value.every(
+      (col) =>
+        typeof col === "object" &&
+        col !== null &&
+        typeof (col as Record<string, unknown>).name === "string" &&
+        typeof (col as Record<string, unknown>).type === "string",
+    );
+  return (
+    typeof s.key === "string" &&
+    typeof s.source === "string" &&
+    (s.lane === "sp" || s.lane === "obo") &&
+    (s.degraded === undefined || typeof s.degraded === "boolean") &&
+    isColumnArray(s.measures) &&
+    isColumnArray(s.dimensions)
+  );
 }
 
 /**
@@ -269,10 +318,13 @@ async function isWarehouseRunning(
  *   with `retry: true`, converging to real schemas on the next
  *   describe-capable pass — in dev the Vite plugin's warehouse watch triggers
  *   that pass automatically, while one-shot CLI runs (e.g. postinstall) leave
- *   no background waiter and converge on their next run. `"blocking"` first
- *   ensures the warehouse is running — it waits for a starting warehouse and
- *   starts (then waits for) a stopped one, failing the build only for a
- *   deleted/deleting warehouse, exactly like the query path's fatal
+ *   no background waiter and converge on their next run. (A probe that reads
+ *   DELETED/DELETING instead caches the keys sticky — `retry: false` — since
+ *   they can never converge; the sticky-hit notice surfaces them on later
+ *   passes.) `"blocking"` first ensures the warehouse is running — it waits
+ *   for a starting warehouse and starts (then waits for) a stopped one,
+ *   failing the build only for a deleted/deleting warehouse (observed at the
+ *   first check or mid-wait), exactly like the query path's fatal
  *   preflight — and then DESCRIBEs. Defaults to `"non-blocking"`.
  * @param options.metricOutFile - optional output file for the MetricRegistry
  *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
@@ -363,28 +415,51 @@ export async function generateFromEntryPoint(options: {
         }
       }
 
-      // Partition BEFORE any gate/preflight decision: a hit (hash match and
-      // not flagged for retry) is served from cache no matter what the
-      // warehouse is doing — a degraded-mode pass falls back to
-      // last-known-good schemas exactly like queries degrade to cached
-      // types. Only the remainder — new keys, edited entries, and
-      // retry-flagged degraded entries — is eligible for DESCRIBE, so a
-      // fully-warm pass makes zero warehouse calls and constructs zero
-      // clients. `noCache` left the section empty above, which makes every
-      // configured key describe-needed here.
+      // Partition BEFORE any gate/preflight decision: a hit (structurally
+      // valid entry, hash match, and not flagged for retry) is served from
+      // cache no matter what the warehouse is doing — a degraded-mode pass
+      // falls back to last-known-good schemas exactly like queries degrade
+      // to cached types. Only the remainder — new keys, edited entries,
+      // retry-flagged degraded entries, and malformed (unrevivable) entries
+      // — is eligible for DESCRIBE, so a fully-warm pass makes zero
+      // warehouse calls and constructs zero clients. `noCache` left the
+      // section empty above, which makes every configured key
+      // describe-needed here.
       const hitSchemas = new Map<string, MetricSchema>();
       const describeNeeded: typeof resolution.entries = [];
       // Parallel to describeNeeded: the config hash to persist per key.
       const neededHashes: string[] = [];
+      // Hits whose cached schema is degraded are STICKY failures: a previous
+      // pass pinned them with `retry: false` because re-describing the
+      // unchanged entry can't succeed (deterministic DESCRIBE failure, or a
+      // deleted warehouse). They serve their permissive schemas like any hit,
+      // but silently doing so forever would hide the misconfiguration —
+      // collect them for the single notice below.
+      const stickyDegradedHits: string[] = [];
       for (const entry of resolution.entries) {
         const hash = hashSQL(`${entry.source}|${entry.lane}`);
         const prior = metricsSection[entry.key];
-        if (prior && prior.hash === hash && !prior.retry) {
+        if (
+          prior !== undefined &&
+          isRevivableMetricCacheEntry(prior) &&
+          prior.hash === hash &&
+          !prior.retry
+        ) {
           hitSchemas.set(entry.key, prior.schema);
+          if (prior.schema.degraded === true) {
+            stickyDegradedHits.push(entry.key);
+          }
         } else {
           describeNeeded.push(entry);
           neededHashes.push(hash);
         }
+      }
+
+      if (stickyDegradedHits.length > 0) {
+        logger.warn(
+          "cached failure for %s — fix the entry in metric-views.json or run with --no-cache to retry.",
+          stickyDegradedHits.join(", "),
+        );
       }
 
       // At most ONE WorkspaceClient per generation pass for the whole metric
@@ -402,15 +477,15 @@ export async function generateFromEntryPoint(options: {
 
       // Blocking-mode preflight: ensure the warehouse is running before the
       // DESCRIBE batch, mirroring the query path's flow (probe → decide →
-      // wait / start+wait; only DELETED/DELETING is fatal). Deliberately
-      // SPLIT from the query path's preflight rather than shared — queries
-      // and metric views may bind to different warehouses in the future.
-      // Two deliberate softenings versus the query preflight: a failed probe
-      // and a timed-out (or non-RUNNING-ending) wait are NOT fatal here. We
-      // fall through to syncMetrics, whose DESCRIBEs classify a still-not-
-      // ready warehouse as degraded (permissive types, refreshed by a later
-      // run) rather than failing the build. An injected metricFetcher needs
-      // no warehouse, so it skips the preflight entirely.
+      // wait / start+wait; only DELETED/DELETING is fatal — at decision time
+      // OR observed mid-wait). Deliberately SPLIT from the query path's
+      // preflight rather than shared — queries and metric views may bind to
+      // different warehouses in the future. Two deliberate softenings versus
+      // the query preflight: a failed probe and a timed-out wait (thrown)
+      // are NOT fatal here. We fall through to syncMetrics, whose DESCRIBEs
+      // classify a still-not-ready warehouse as degraded (permissive types,
+      // refreshed by a later run) rather than failing the build. An injected
+      // metricFetcher needs no warehouse, so it skips the preflight entirely.
       let preflightFatalMessage: string | undefined;
       if (
         mode === "blocking" &&
@@ -427,17 +502,38 @@ export async function generateFromEntryPoint(options: {
             // treatStoppedAsTransient rides out the stale pre-start
             // STOPPED/STOPPING reading, same as the query preflight.
             await startWarehouse(getMetricClient(), warehouseId);
-            await waitUntilRunning(getMetricClient(), warehouseId, {
-              maxMs: METRIC_PREFLIGHT_WAIT_MAX_MS,
-              treatStoppedAsTransient: true,
-            });
+            const settled = await waitUntilRunning(
+              getMetricClient(),
+              warehouseId,
+              {
+                maxMs: METRIC_PREFLIGHT_WAIT_MAX_MS,
+                treatStoppedAsTransient: true,
+              },
+            );
+            if (settled !== "RUNNING") {
+              // With treatStoppedAsTransient, a non-RUNNING resolve is
+              // exactly DELETED/DELETING — the warehouse was deleted while
+              // we waited. Fatal, same as catching it at decision time.
+              preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
+            }
           } else if (decision === "waitThenProceed") {
-            await waitUntilRunning(getMetricClient(), warehouseId, {
-              maxMs: METRIC_PREFLIGHT_WAIT_MAX_MS,
-            });
+            const settled = await waitUntilRunning(
+              getMetricClient(),
+              warehouseId,
+              {
+                maxMs: METRIC_PREFLIGHT_WAIT_MAX_MS,
+              },
+            );
+            if (settled === "DELETED" || settled === "DELETING") {
+              // Deleted mid-wait: fatal. A STOPPED/STOPPING resolve (this
+              // wait runs without treatStoppedAsTransient) stays a soft
+              // fall-through — a stopped warehouse is startable, so it
+              // degrades and converges rather than failing the build.
+              preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
+            }
           }
-          // "proceed" — and a wait that resolved non-RUNNING — falls through
-          // to syncMetrics below.
+          // "proceed" — and a wait that resolved into a startable state —
+          // falls through to syncMetrics below.
         } catch {
           // Probe/start failure or a wait that timed out: fall through to
           // syncMetrics. DESCRIBEs against a not-ready warehouse come back
@@ -451,30 +547,44 @@ export async function generateFromEntryPoint(options: {
       // key and auto-starts a stopped warehouse — exactly what "non-blocking"
       // promises never to do. One status-only probe (a GET that can never
       // start the warehouse) decides whether to describe now or emit degraded
-      // artifacts that a later blocking run refreshes. An injected
-      // metricFetcher always runs: it doesn't hit a warehouse (tests/CI
-      // inject mocks), so gating it would only skip meaningful work. A pass
-      // with nothing describe-needed — fully-warm cache or an empty
-      // metricViews map — needs no probe either: nothing would be described
-      // in any mode.
-      const describeNow =
+      // artifacts that a later blocking run refreshes. The probe keeps the
+      // observed state (not just a boolean) so the skip below can tell a
+      // transient not-running state from a terminal DELETED/DELETING one. An
+      // injected metricFetcher always runs: it doesn't hit a warehouse
+      // (tests/CI inject mocks), so gating it would only skip meaningful
+      // work. A pass with nothing describe-needed — fully-warm cache or an
+      // empty metricViews map — needs no probe either: nothing would be
+      // described in any mode.
+      let gateState: WarehouseState | undefined;
+      let describeNow =
         metricFetcher !== undefined ||
         mode !== "non-blocking" ||
-        describeNeeded.length === 0 ||
-        (await isWarehouseRunning(getMetricClient, warehouseId));
+        describeNeeded.length === 0;
+      if (!describeNow) {
+        gateState = await probeWarehouseState(getMetricClient, warehouseId);
+        describeNow = gateState === "RUNNING";
+      }
 
       let described: MetricSchema[];
       let failures: MetricSyncFailure[] = [];
+      // True when this pass skipped the DESCRIBE batch for a reason that can
+      // never self-converge — a deleted/deleting warehouse (fatal preflight
+      // or gate skip). The write site pins those degraded outcomes sticky
+      // (`retry: false`) instead of re-describing them forever.
+      let terminalSkip = false;
       if (preflightFatalMessage !== undefined) {
-        // Fatal preflight (deleted/deleting warehouse): fail exactly like the
-        // query path's fatal preflight — skip the DESCRIBE batch, emit
-        // degraded schemas so both artifacts are still written, and record
-        // one fatal error per describe-needed key (cache hits are unaffected:
-        // they serve their cached schemas). The shared end-of-run throw below
-        // (TypegenFatalError, or TypegenSyntaxError's fatalQueries when
-        // syntax errors coexist) surfaces them after the writes, identically
-        // to query fatals.
+        // Fatal preflight (deleted/deleting warehouse — at decision time or
+        // mid-wait): fail exactly like the query path's fatal preflight —
+        // skip the DESCRIBE batch, emit degraded schemas so both artifacts
+        // are still written, and record one fatal error per describe-needed
+        // key (cache hits are unaffected: they serve their cached schemas).
+        // The shared end-of-run throw below (TypegenFatalError, or
+        // TypegenSyntaxError's fatalQueries when syntax errors coexist)
+        // surfaces them after the writes, identically to query fatals. The
+        // skip is terminal — these keys can never converge against a deleted
+        // warehouse — so their cache entries are pinned sticky.
         described = describeNeeded.map(emptyMetricSchema);
+        terminalSkip = true;
         for (const entry of describeNeeded) {
           fatalErrors.push({ name: entry.key, message: preflightFatalMessage });
         }
@@ -532,10 +642,14 @@ export async function generateFromEntryPoint(options: {
         // runtime allowlists) so both artifacts always exist, and say so
         // once — no per-key warnings (nothing failed). Cache hits keep
         // serving their last-known-good schemas — only the remainder
-        // degrades. The dev warehouse watch (or the next blocking run)
-        // re-enters this path with the warehouse RUNNING and lands the real
-        // schemas.
+        // degrades. For a transient state (stopped/starting/probe failure)
+        // the dev warehouse watch (or the next blocking run) re-enters this
+        // path with the warehouse RUNNING and lands the real schemas. A
+        // DELETED/DELETING probe is terminal: those keys are pinned sticky
+        // below (non-blocking never fails the build, so the sticky-hit
+        // notice on later passes is the loud signal).
         described = describeNeeded.map(emptyMetricSchema);
+        terminalSkip = gateState === "DELETED" || gateState === "DELETING";
         logger.info(
           "Warehouse %s is not running — wrote degraded metric types (permissive) for %d metric view(s) (%s); they will refresh once the warehouse is available.",
           warehouseId,
@@ -546,25 +660,55 @@ export async function generateFromEntryPoint(options: {
 
       // Persist this pass's outcomes for exactly the keys it owned (the
       // describe-needed set): a successful DESCRIBE caches `retry: false`;
-      // every degraded outcome — syncMetrics failures and non-terminal
-      // states, the gate-skip path, and the fatal-preflight path (the last
-      // two never entered syncMetrics) — caches its degraded schema with
-      // `retry: true` so the next eligible pass re-describes only these
-      // keys. Hits were partitioned out above and are never rewritten, which
-      // is what lets a warehouse-down pass keep last-known-good entries
-      // intact. One save per pass; with `noCache` the section was started
-      // empty, so saving overwrites it with this pass's results alone.
-      if (describeNeeded.length > 0 || noCache) {
-        for (let i = 0; i < describeNeeded.length; i++) {
-          // syncMetrics (and both .map(emptyMetricSchema) branches) return
-          // one schema per entry in entry order, so described[i] always
-          // belongs to describeNeeded[i] / neededHashes[i].
-          metricsSection[describeNeeded[i].key] = {
-            hash: neededHashes[i],
-            schema: described[i],
-            retry: described[i].degraded === true,
-          };
+      // degraded outcomes split by whether re-describing the unchanged entry
+      // can ever succeed. Self-converging degradation — non-terminal states,
+      // transient fetch failures, and the gate-skip / preflight paths for a
+      // merely not-running warehouse — caches `retry: true` so the next
+      // eligible pass re-describes only these keys. Deterministic failures
+      // (FAILED statement, zero rows, unparseable response, zero columns)
+      // and terminal skips (deleted/deleting warehouse) are pinned STICKY:
+      // `retry: false` with the degraded schema cached, so they hit on later
+      // passes (surfacing through the sticky-hit notice) instead of
+      // re-failing every describe-capable run. Hits were partitioned out
+      // above and are never rewritten, which is what lets a warehouse-down
+      // pass keep last-known-good entries intact. Keys dropped from the
+      // config are pruned so the section tracks metric-views.json exactly.
+      // One save per pass; with `noCache` the section was started empty, so
+      // saving overwrites it with this pass's results alone.
+      const failureByKey = new Map<string, MetricSyncFailure>();
+      for (const failure of failures) {
+        failureByKey.set(failure.key, failure);
+      }
+      for (let i = 0; i < describeNeeded.length; i++) {
+        // syncMetrics (and both .map(emptyMetricSchema) branches) return
+        // one schema per entry in entry order, so described[i] always
+        // belongs to describeNeeded[i] / neededHashes[i].
+        const failure = failureByKey.get(describeNeeded[i].key);
+        metricsSection[describeNeeded[i].key] = {
+          hash: neededHashes[i],
+          schema: described[i],
+          retry:
+            described[i].degraded === true &&
+            !terminalSkip &&
+            (failure === undefined || failure.transient === true),
+        };
+      }
+
+      // Prune entries whose key is no longer configured, so a removed metric
+      // doesn't haunt the cache file forever.
+      const configuredKeys = new Set(resolution.entries.map((e) => e.key));
+      let prunedCount = 0;
+      for (const key of Object.keys(metricsSection)) {
+        if (!configuredKeys.has(key)) {
+          delete metricsSection[key];
+          prunedCount++;
         }
+      }
+
+      // Save when this pass produced outcomes, bypassed the cache, or pruned
+      // — a warm pass over a shrunk config has nothing to describe but must
+      // still shrink the file.
+      if (describeNeeded.length > 0 || noCache || prunedCount > 0) {
         cache.metrics = metricsSection;
         await saveCache(cache);
       }
