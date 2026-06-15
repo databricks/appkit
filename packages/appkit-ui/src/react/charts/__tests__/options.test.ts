@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { FALLBACK_UI_TOKENS } from "../constants";
 import {
   buildCartesianOption,
   buildHeatmapOption,
@@ -787,5 +788,66 @@ describe("axis & chrome theming", () => {
     };
     expect(radar.axisName.color).toBe(TEST_UI.axisTitle);
     expect(radar.splitLine.lineStyle.color).toBe(TEST_UI.grid);
+  });
+
+  test("applies ui tokens to radar legend (multi-series)", () => {
+    const ctx = createBaseContext({
+      yFields: ["a", "b"],
+      yDataMap: { a: [1, 2, 3], b: [4, 5, 6] },
+      showLegend: true,
+    });
+    const opt = buildRadarOption(ctx, true);
+    expect((opt.legend as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("applies axis-label color on scatter x-axis", () => {
+    const ctx = createBaseContext();
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "scatter",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+  });
+
+  test("applies axis-label color on time-series x-axis", () => {
+    const ctx = createBaseContext();
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "line",
+      isTimeSeries: true,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+  });
+
+  test("falls back to default chrome tokens when ui is omitted", () => {
+    const ctx = createBaseContext({ ui: undefined });
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "bar",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(
+      FALLBACK_UI_TOKENS.axisLabel,
+    );
+    expect((opt.yAxis as AxisShape).splitLine.lineStyle.color).toBe(
+      FALLBACK_UI_TOKENS.grid,
+    );
+    expect((opt.title as TextStyled).textStyle.color).toBe(
+      FALLBACK_UI_TOKENS.axisTitle,
+    );
   });
 });

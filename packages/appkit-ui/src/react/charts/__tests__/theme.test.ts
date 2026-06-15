@@ -2,17 +2,18 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   CHART_COLOR_VARS_CATEGORICAL,
-  CHART_COLOR_VARS_CHROME,
   CHART_COLOR_VARS_DIVERGING,
   CHART_COLOR_VARS_SEQUENTIAL,
+  CHART_UI_VARS,
   FALLBACK_COLORS_CATEGORICAL,
-  FALLBACK_COLORS_CHROME,
   FALLBACK_COLORS_DIVERGING,
   FALLBACK_COLORS_SEQUENTIAL,
+  FALLBACK_UI_TOKENS,
 } from "../constants";
 import {
-  resetThemeColorCache,
+  resetThemeCache,
   useAllThemeColors,
+  useChartUITokens,
   useThemeColors,
 } from "../theme";
 import type { ChartColorPalette } from "../types";
@@ -38,7 +39,7 @@ describe("useThemeColors", () => {
 
   beforeEach(() => {
     // Reset the module-level cache before each test
-    resetThemeColorCache();
+    resetThemeCache();
 
     // Mock matchMedia
     window.matchMedia = createMockMatchMedia() as typeof window.matchMedia;
@@ -450,7 +451,7 @@ describe("useThemeColors", () => {
       expect(disconnectSpy).toHaveBeenCalled();
     });
 
-    test("cleans up old listeners when palette changes", () => {
+    test("does not churn listeners when palette changes", () => {
       const removeEventListenerSpy = vi.fn();
       const disconnectSpy = vi.fn();
       const addEventListenerSpy = vi.fn();
@@ -472,24 +473,31 @@ describe("useThemeColors", () => {
         disconnect: disconnectSpy,
       }));
 
-      const { rerender } = renderHook(
+      const { rerender, unmount } = renderHook(
         ({ palette }: { palette: ChartColorPalette }) =>
           useThemeColors(palette),
         { initialProps: { palette: "categorical" as ChartColorPalette } },
       );
 
-      // Initial setup
+      // Initial setup: one shared listener + observer.
       expect(addEventListenerSpy).toHaveBeenCalledTimes(1);
       expect(observeSpy).toHaveBeenCalledTimes(1);
 
-      // Change palette
+      // Changing the palette swaps the hook's callback but must NOT re-install
+      // the shared listeners — this is the per-render subscription churn the
+      // shared subscriber removes.
       rerender({ palette: "sequential" as ChartColorPalette });
 
-      // Old listeners should be cleaned up, new ones set up
+      expect(removeEventListenerSpy).not.toHaveBeenCalled();
+      expect(disconnectSpy).not.toHaveBeenCalled();
+      expect(addEventListenerSpy).toHaveBeenCalledTimes(1);
+      expect(observeSpy).toHaveBeenCalledTimes(1);
+
+      // Listeners are torn down only when the hook unmounts.
+      unmount();
+
       expect(removeEventListenerSpy).toHaveBeenCalledTimes(1);
       expect(disconnectSpy).toHaveBeenCalledTimes(1);
-      expect(addEventListenerSpy).toHaveBeenCalledTimes(2);
-      expect(observeSpy).toHaveBeenCalledTimes(2);
     });
   });
 });
@@ -501,7 +509,7 @@ describe("useAllThemeColors", () => {
 
   beforeEach(() => {
     // Reset the module-level cache before each test
-    resetThemeColorCache();
+    resetThemeCache();
 
     // Mock matchMedia
     window.matchMedia = createMockMatchMedia() as typeof window.matchMedia;
@@ -572,13 +580,18 @@ describe("useAllThemeColors", () => {
   });
 });
 
-describe('useThemeColors("chrome")', () => {
+describe("useChartUITokens", () => {
   const originalGetComputedStyle = window.getComputedStyle;
   const originalMatchMedia = window.matchMedia;
+  const originalMutationObserver = window.MutationObserver;
 
   beforeEach(() => {
-    resetThemeColorCache();
+    resetThemeCache();
     window.matchMedia = createMockMatchMedia() as typeof window.matchMedia;
+    window.MutationObserver = vi.fn().mockImplementation(() => ({
+      observe: vi.fn(),
+      disconnect: vi.fn(),
+    }));
     // Default: empty CSS variables → fallbacks
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -592,19 +605,20 @@ describe('useThemeColors("chrome")', () => {
     vi.restoreAllMocks();
     window.getComputedStyle = originalGetComputedStyle;
     window.matchMedia = originalMatchMedia;
+    window.MutationObserver = originalMutationObserver;
   });
 
-  test("returns chrome fallback colors when CSS vars unavailable", () => {
-    const { result } = renderHook(() => useThemeColors("chrome"));
+  test("returns chrome fallback tokens when CSS vars unavailable", () => {
+    const { result } = renderHook(() => useChartUITokens());
 
-    expect(result.current).toEqual(FALLBACK_COLORS_CHROME);
+    expect(result.current).toEqual(FALLBACK_UI_TOKENS);
   });
 
-  test("reads chrome colors from CSS variables in order", () => {
+  test("reads chrome tokens from CSS variables by name", () => {
     const values: Record<string, string> = {
-      [CHART_COLOR_VARS_CHROME[0]]: "rgb(10, 10, 10)",
-      [CHART_COLOR_VARS_CHROME[1]]: "rgb(20, 20, 20)",
-      [CHART_COLOR_VARS_CHROME[2]]: "rgb(30, 30, 30)",
+      [CHART_UI_VARS.axisLabel]: "rgb(10, 10, 10)",
+      [CHART_UI_VARS.axisTitle]: "rgb(20, 20, 20)",
+      [CHART_UI_VARS.grid]: "rgb(30, 30, 30)",
     };
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -613,16 +627,39 @@ describe('useThemeColors("chrome")', () => {
         }) as unknown as CSSStyleDeclaration,
     );
 
-    const { result } = renderHook(() => useThemeColors("chrome"));
+    const { result } = renderHook(() => useChartUITokens());
 
-    expect(result.current).toEqual([
-      "rgb(10, 10, 10)",
-      "rgb(20, 20, 20)",
-      "rgb(30, 30, 30)",
-    ]);
+    expect(result.current).toEqual({
+      axisLabel: "rgb(10, 10, 10)",
+      axisTitle: "rgb(20, 20, 20)",
+      grid: "rgb(30, 30, 30)",
+    });
   });
 
-  test("reads the chrome CSS variables in order", () => {
+  test("falls back per field when only some chrome vars resolve", () => {
+    // axisTitle intentionally missing — must fall back without shifting the
+    // others (the failure mode of the old positional-array resolution).
+    const values: Record<string, string> = {
+      [CHART_UI_VARS.axisLabel]: "rgb(10, 10, 10)",
+      [CHART_UI_VARS.grid]: "rgb(30, 30, 30)",
+    };
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      () =>
+        ({
+          getPropertyValue: (prop: string) => values[prop] || "",
+        }) as unknown as CSSStyleDeclaration,
+    );
+
+    const { result } = renderHook(() => useChartUITokens());
+
+    expect(result.current).toEqual({
+      axisLabel: "rgb(10, 10, 10)",
+      axisTitle: FALLBACK_UI_TOKENS.axisTitle,
+      grid: "rgb(30, 30, 30)",
+    });
+  });
+
+  test("reads each chrome CSS variable by name", () => {
     const getPropertyValueSpy = vi.fn().mockReturnValue("");
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -631,10 +668,238 @@ describe('useThemeColors("chrome")', () => {
         }) as unknown as CSSStyleDeclaration,
     );
 
-    renderHook(() => useThemeColors("chrome"));
+    renderHook(() => useChartUITokens());
 
-    for (const varName of CHART_COLOR_VARS_CHROME) {
+    for (const varName of Object.values(CHART_UI_VARS)) {
       expect(getPropertyValueSpy).toHaveBeenCalledWith(varName);
     }
+  });
+
+  describe("theme change reactivity", () => {
+    test("subscribes to matchMedia color scheme changes", () => {
+      const addEventListenerSpy = vi.fn();
+      const removeEventListenerSpy = vi.fn();
+
+      window.matchMedia = vi.fn().mockImplementation((query) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: addEventListenerSpy,
+        removeEventListener: removeEventListenerSpy,
+        dispatchEvent: vi.fn(),
+      }));
+
+      const { unmount } = renderHook(() => useChartUITokens());
+
+      expect(window.matchMedia).toHaveBeenCalledWith(
+        "(prefers-color-scheme: dark)",
+      );
+      expect(addEventListenerSpy).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+
+      unmount();
+
+      expect(removeEventListenerSpy).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+    });
+
+    test("subscribes to MutationObserver for theme attribute changes", () => {
+      const observeSpy = vi.fn();
+      const disconnectSpy = vi.fn();
+
+      window.MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: observeSpy,
+        disconnect: disconnectSpy,
+      }));
+
+      const { unmount } = renderHook(() => useChartUITokens());
+
+      expect(observeSpy).toHaveBeenCalledWith(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme", "data-mode"],
+      });
+
+      unmount();
+
+      expect(disconnectSpy).toHaveBeenCalled();
+    });
+
+    test("updates tokens when system color scheme changes", () => {
+      let matchMediaCallback: () => void = () => {};
+
+      window.matchMedia = vi.fn().mockImplementation((query) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: (_event: string, callback: () => void) => {
+          matchMediaCallback = callback;
+        },
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+      window.MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: vi.fn(),
+        disconnect: vi.fn(),
+      }));
+
+      let callCount = 0;
+      vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+        return {
+          getPropertyValue: (prop: string) => {
+            if (prop === CHART_UI_VARS.axisLabel) {
+              return callCount++ === 0 ? "rgb(1, 1, 1)" : "rgb(2, 2, 2)";
+            }
+            return "";
+          },
+        } as unknown as CSSStyleDeclaration;
+      });
+
+      const { result } = renderHook(() => useChartUITokens());
+
+      expect(result.current.axisLabel).toBe("rgb(1, 1, 1)");
+
+      act(() => {
+        matchMediaCallback();
+      });
+
+      expect(result.current.axisLabel).toBe("rgb(2, 2, 2)");
+    });
+
+    test("updates tokens when theme attributes change via MutationObserver", () => {
+      let mutationCallback: () => void = () => {};
+
+      window.MutationObserver = vi.fn().mockImplementation((callback) => {
+        mutationCallback = callback;
+        return {
+          observe: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      });
+
+      let callCount = 0;
+      vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+        return {
+          getPropertyValue: (prop: string) => {
+            if (prop === CHART_UI_VARS.axisLabel) {
+              return callCount++ === 0 ? "rgb(10, 10, 10)" : "rgb(20, 20, 20)";
+            }
+            return "";
+          },
+        } as unknown as CSSStyleDeclaration;
+      });
+
+      const { result } = renderHook(() => useChartUITokens());
+
+      expect(result.current.axisLabel).toBe("rgb(10, 10, 10)");
+
+      act(() => {
+        mutationCallback();
+      });
+
+      expect(result.current.axisLabel).toBe("rgb(20, 20, 20)");
+    });
+  });
+
+  describe("effect cleanup", () => {
+    test("removes all listeners on unmount", () => {
+      const removeEventListenerSpy = vi.fn();
+      const disconnectSpy = vi.fn();
+
+      window.matchMedia = vi.fn().mockImplementation((query) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: removeEventListenerSpy,
+        dispatchEvent: vi.fn(),
+      }));
+      window.MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: vi.fn(),
+        disconnect: disconnectSpy,
+      }));
+
+      const { unmount } = renderHook(() => useChartUITokens());
+
+      unmount();
+
+      expect(removeEventListenerSpy).toHaveBeenCalled();
+      expect(disconnectSpy).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("shared theme-change subscription", () => {
+  const originalGetComputedStyle = window.getComputedStyle;
+  const originalMatchMedia = window.matchMedia;
+  const originalMutationObserver = window.MutationObserver;
+
+  beforeEach(() => {
+    resetThemeCache();
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      () =>
+        ({
+          getPropertyValue: () => "",
+        }) as unknown as CSSStyleDeclaration,
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.getComputedStyle = originalGetComputedStyle;
+    window.matchMedia = originalMatchMedia;
+    window.MutationObserver = originalMutationObserver;
+  });
+
+  test("installs one shared listener for many hooks and releases it only after the last unmounts", () => {
+    const addEventListenerSpy = vi.fn();
+    const removeEventListenerSpy = vi.fn();
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: addEventListenerSpy,
+      removeEventListener: removeEventListenerSpy,
+      dispatchEvent: vi.fn(),
+    }));
+
+    const observeSpy = vi.fn();
+    const disconnectSpy = vi.fn();
+    window.MutationObserver = vi.fn().mockImplementation(() => ({
+      observe: observeSpy,
+      disconnect: disconnectSpy,
+    }));
+
+    // Three independent hook instances — what a dashboard with several charts
+    // looks like. The old per-hook design installed three listeners + observers.
+    const a = renderHook(() => useThemeColors("categorical"));
+    const b = renderHook(() => useChartUITokens());
+    const c = renderHook(() => useThemeColors("sequential"));
+
+    expect(window.matchMedia).toHaveBeenCalledTimes(1);
+    expect(addEventListenerSpy).toHaveBeenCalledTimes(1);
+    expect(observeSpy).toHaveBeenCalledTimes(1);
+
+    // Tearing down all but the last keeps the shared listener alive.
+    a.unmount();
+    b.unmount();
+    expect(removeEventListenerSpy).not.toHaveBeenCalled();
+    expect(disconnectSpy).not.toHaveBeenCalled();
+
+    // The final unmount releases the shared listener exactly once.
+    c.unmount();
+    expect(removeEventListenerSpy).toHaveBeenCalledTimes(1);
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
   });
 });

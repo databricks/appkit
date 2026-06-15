@@ -5441,18 +5441,8 @@
   --chart-div-6: hsla(10, 60%, 65%, 1);
   --chart-div-7: hsla(10, 72%, 50%, 1);
   --chart-div-8: hsla(10, 80%, 40%, 1);
-  --chart-axis-label: hsla(
-    240,
-    4%,
-    46%,
-    1
-  );
-  --chart-axis-title: hsla(
-    240,
-    6%,
-    10%,
-    1
-  );
+  --chart-axis-label: hsla(240, 4%, 46%, 1);
+  --chart-axis-title: hsla(240, 6%, 10%, 1);
   --chart-grid: hsla(240, 5%, 90%, 1);
   --chart-1: var(--chart-cat-1);
   --chart-2: var(--chart-cat-2);

@@ -2,6 +2,8 @@
 // Shared Constants for Chart Components
 // ============================================================================
 
+import type { ChartUITokens } from "./types";
+
 // Re-export field patterns from shared constants
 export {
   DATE_FIELD_PATTERNS,
@@ -105,20 +107,16 @@ export const FALLBACK_COLORS_DIVERGING = [
 // Chart Chrome (axis text, titles, grid lines)
 // ============================================================================
 
-/**
- * CSS variable names for chart "chrome" — read like the palettes via
- * `useThemeColors("chrome")`.
- * Order: [axis tick labels, axis/legend/title text, axis/grid lines].
- */
-export const CHART_COLOR_VARS_CHROME = [
-  "--chart-axis-label",
-  "--chart-axis-title",
-  "--chart-grid",
-] as const;
+/** CSS variable names for chart chrome colors (read at runtime like the palettes) */
+export const CHART_UI_VARS: Record<keyof ChartUITokens, string> = {
+  axisLabel: "--chart-axis-label",
+  axisTitle: "--chart-axis-title",
+  grid: "--chart-grid",
+};
 
-/** Fallback chart chrome colors (light values), same order as CHART_COLOR_VARS_CHROME */
-export const FALLBACK_COLORS_CHROME = [
-  "hsla(240, 4%, 46%, 1)", // axis tick labels ≈ --muted-foreground
-  "hsla(240, 6%, 10%, 1)", // axis/legend/title text ≈ --foreground
-  "hsla(240, 5%, 90%, 1)", // axis/grid lines ≈ --border
-];
+/** Fallback chart chrome colors (light values; used when CSS variables unavailable) */
+export const FALLBACK_UI_TOKENS: ChartUITokens = {
+  axisLabel: "hsla(240, 4%, 46%, 1)", // ≈ --muted-foreground
+  axisTitle: "hsla(240, 6%, 10%, 1)", // ≈ --foreground
+  grid: "hsla(240, 5%, 90%, 1)", // ≈ --border
+};

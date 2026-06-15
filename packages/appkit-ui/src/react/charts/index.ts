@@ -45,14 +45,12 @@ export {
   // Color palette CSS variables
   CHART_COLOR_VARS,
   CHART_COLOR_VARS_CATEGORICAL,
-  CHART_COLOR_VARS_CHROME,
   CHART_COLOR_VARS_DIVERGING,
   CHART_COLOR_VARS_SEQUENTIAL,
   // Field detection patterns
   DATE_FIELD_PATTERNS,
   // Fallback colors
   FALLBACK_COLORS_CATEGORICAL,
-  FALLBACK_COLORS_CHROME,
   FALLBACK_COLORS_DIVERGING,
   FALLBACK_COLORS_SEQUENTIAL,
   METADATA_DATE_PATTERNS,
@@ -65,6 +63,7 @@ export {
 
 export {
   useAllThemeColors,
+  useChartUITokens,
   useThemeColors,
 } from "./theme";
 

@@ -72,19 +72,9 @@
      CHART CHROME - axis labels, titles, grid lines
      ≈ muted-foreground / foreground / border (hsla so ECharts can parse)
      ======================================== */
-  --chart-axis-label: hsla(
-    240,
-    4%,
-    46%,
-    1
-  ); /* tick labels ≈ --muted-foreground */
-  --chart-axis-title: hsla(
-    240,
-    6%,
-    10%,
-    1
-  ); /* names/legend/title ≈ --foreground */
-  --chart-grid: hsla(240, 5%, 90%, 1); /* axis/tick/split lines ≈ --border */
+  --chart-axis-label: hsla(240, 4%, 46%, 1);
+  --chart-axis-title: hsla(240, 6%, 10%, 1);
+  --chart-grid: hsla(240, 5%, 90%, 1);
 
   /* Legacy aliases (for backwards compatibility) */
   --chart-1: var(--chart-cat-1);
