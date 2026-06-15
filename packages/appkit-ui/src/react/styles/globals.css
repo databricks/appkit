@@ -69,12 +69,13 @@
   --chart-div-8: hsla(10, 80%, 40%, 1); /* Strong positive */
 
   /* ========================================
-     CHART CHROME - axis labels, titles, grid lines
-     ≈ muted-foreground / foreground / border (hsla so ECharts can parse)
+     CHART UI TOKENS - axis labels, titles, grid lines, tooltip
+     ≈ muted-foreground / foreground / border / popover (hsla so ECharts can parse)
      ======================================== */
   --chart-axis-label: hsla(240, 4%, 46%, 1);
   --chart-axis-title: hsla(240, 6%, 10%, 1);
   --chart-grid: hsla(240, 5%, 90%, 1);
+  --chart-tooltip-bg: hsla(0, 0%, 100%, 1);
 
   /* Legacy aliases (for backwards compatibility) */
   --chart-1: var(--chart-cat-1);
@@ -157,10 +158,11 @@
   --chart-6: var(--chart-cat-6);
   --chart-7: var(--chart-cat-7);
   --chart-8: var(--chart-cat-8);
-  /* Chart chrome (≈ muted-foreground / foreground / border, hsla for ECharts) */
+  /* Chart UI tokens (≈ muted-foreground / foreground / border / popover, hsla for ECharts) */
   --chart-axis-label: hsla(240, 5%, 65%, 1);
   --chart-axis-title: hsla(0, 0%, 98%, 1);
   --chart-grid: hsla(0, 0%, 100%, 0.1);
+  --chart-tooltip-bg: hsla(240, 6%, 13%, 1);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -239,10 +241,11 @@
     --chart-div-7: hsla(10, 70%, 58%, 1);
     --chart-div-8: hsla(10, 80%, 65%, 1); /* Strong positive (red) */
 
-    /* Chart chrome (≈ muted-foreground / foreground / border, hsla for ECharts) */
+    /* Chart UI tokens (≈ muted-foreground / foreground / border / popover, hsla for ECharts) */
     --chart-axis-label: hsla(240, 5%, 65%, 1);
     --chart-axis-title: hsla(0, 0%, 98%, 1);
     --chart-grid: hsla(0, 0%, 100%, 0.1);
+    --chart-tooltip-bg: hsla(240, 6%, 13%, 1);
 
     /* Legacy aliases */
     --chart-1: var(--chart-cat-1);
@@ -328,10 +331,11 @@
   --color-chart-div-7: var(--chart-div-7);
   --color-chart-div-8: var(--chart-div-8);
 
-  /* Chart chrome */
+  /* Chart UI tokens */
   --color-chart-axis-label: var(--chart-axis-label);
   --color-chart-axis-title: var(--chart-axis-title);
   --color-chart-grid: var(--chart-grid);
+  --color-chart-tooltip-bg: var(--chart-tooltip-bg);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

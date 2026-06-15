@@ -59,8 +59,6 @@ function axisCommon(ui: ChartUITokens) {
   };
 }
 
-// Spread of axisCommon whose axisLabel keeps the themed color even when a chart
-// adds its own axisLabel options (rotate, width, formatter, ...).
 function mergeAxisLabel(
   ui: ChartUITokens,
   axisLabel: Record<string, unknown>,
@@ -73,6 +71,14 @@ function mergeAxisLabel(
 
 function legendTextStyle(ui: ChartUITokens) {
   return { textStyle: { color: ui.axisTitle } };
+}
+
+function tooltipTokens(ui: ChartUITokens) {
+  return {
+    backgroundColor: ui.tooltipBg,
+    borderColor: ui.grid,
+    textStyle: { color: ui.axisTitle },
+  };
 }
 
 // ============================================================================
@@ -90,7 +96,7 @@ export function buildRadarOption(
 
   return {
     ...buildBaseOption(ctx),
-    tooltip: { trigger: "item" },
+    tooltip: { ...tooltipTokens(ui), trigger: "item" },
     legend:
       ctx.showLegend && ctx.yFields.length > 1
         ? { top: "bottom", ...legendTextStyle(ui) }
@@ -140,7 +146,11 @@ export function buildPieOption(
 
   return {
     ...buildBaseOption(ctx),
-    tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+    tooltip: {
+      ...tooltipTokens(ui),
+      trigger: "item",
+      formatter: "{b}: {c} ({d}%)",
+    },
     legend: ctx.showLegend
       ? {
           orient: "vertical",
@@ -187,7 +197,11 @@ export function buildHorizontalBarOption(
 
   return {
     ...buildBaseOption(ctx),
-    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    tooltip: {
+      ...tooltipTokens(ui),
+      trigger: "axis",
+      axisPointer: { type: "shadow" },
+    },
     legend:
       ctx.showLegend && hasMultipleSeries
         ? { top: "bottom", ...legendTextStyle(ui) }
@@ -243,6 +257,7 @@ export function buildHeatmapOption(
   return {
     ...buildBaseOption(ctx),
     tooltip: {
+      ...tooltipTokens(ui),
       trigger: "item",
       formatter: (params: { data: [number, number, number] }) => {
         const [xIdx, yIdx, value] = params.data;
@@ -324,7 +339,7 @@ export function buildCartesianOption(
 
   return {
     ...buildBaseOption(ctx),
-    tooltip: { trigger: isScatter ? "item" : "axis" },
+    tooltip: { ...tooltipTokens(ui), trigger: isScatter ? "item" : "axis" },
     legend:
       ctx.showLegend && hasMultipleSeries
         ? { top: "bottom", ...legendTextStyle(ui) }

@@ -15,6 +15,9 @@ interface EChartsOption {
   legend?: unknown;
   tooltip?: {
     formatter?: (params: { data: [number, number, number] }) => string;
+    backgroundColor?: string;
+    borderColor?: string;
+    textStyle?: { color: string };
   };
   xAxis: { type: string; data?: unknown[] };
   yAxis: { type: string; data?: unknown[] };
@@ -59,11 +62,12 @@ function asRadarOption(result: Record<string, unknown>): RadarOption {
   return result as unknown as RadarOption;
 }
 
-// Distinct chrome tokens so theming assertions are unambiguous
+// Distinct UI tokens so theming assertions are unambiguous
 const TEST_UI = {
   axisLabel: "#a11111",
   axisTitle: "#b22222",
   grid: "#c33333",
+  tooltipBg: "#d44444",
 };
 
 // Base context used across tests
@@ -685,7 +689,7 @@ describe("buildHeatmapOption", () => {
   });
 });
 
-describe("axis & chrome theming", () => {
+describe("axis & UI theming", () => {
   type AxisShape = {
     axisLabel: { color?: string; rotate?: number; width?: number };
     axisLine: { lineStyle: { color: string } };
@@ -778,7 +782,7 @@ describe("axis & chrome theming", () => {
     expect((opt.legend as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
   });
 
-  test("applies ui tokens to radar chrome", () => {
+  test("applies ui tokens to radar", () => {
     const ctx = createBaseContext();
     const opt = buildRadarOption(ctx, true);
     const radar = opt.radar as {
@@ -828,7 +832,7 @@ describe("axis & chrome theming", () => {
     expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
   });
 
-  test("falls back to default chrome tokens when ui is omitted", () => {
+  test("falls back to default UI tokens when ui is omitted", () => {
     const ctx = createBaseContext({ ui: undefined });
     const opt = buildCartesianOption({
       ...ctx,
@@ -849,5 +853,78 @@ describe("axis & chrome theming", () => {
     expect((opt.title as TextStyled).textStyle.color).toBe(
       FALLBACK_UI_TOKENS.axisTitle,
     );
+    expect((opt.tooltip as { backgroundColor: string }).backgroundColor).toBe(
+      FALLBACK_UI_TOKENS.tooltipBg,
+    );
+  });
+});
+
+describe("tooltip theming", () => {
+  test("themes cartesian tooltip (background, border, text)", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(
+      buildCartesianOption({
+        ...ctx,
+        chartType: "bar",
+        isTimeSeries: false,
+        stacked: false,
+        smooth: false,
+        showSymbol: false,
+        symbolSize: 8,
+      }),
+    );
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    expect(opt.tooltip?.textStyle?.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("themes horizontal bar tooltip while keeping axisPointer", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildHorizontalBarOption(ctx, false));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(
+      (opt.tooltip as { axisPointer?: { type: string } }).axisPointer?.type,
+    ).toBe("shadow");
+  });
+
+  test("themes pie tooltip while keeping the formatter", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildPieOption(ctx, "pie", 0, true, "outside"));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    expect((opt.tooltip as { formatter?: string }).formatter).toBe(
+      "{b}: {c} ({d}%)",
+    );
+  });
+
+  test("themes radar tooltip", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildRadarOption(ctx, true));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.textStyle?.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("themes heatmap tooltip while keeping the escaping formatter", () => {
+    const ctx: HeatmapContext = {
+      ...createBaseContext({ showLegend: false }),
+      yAxisData: ["Mon", "Tue"],
+      heatmapData: [
+        [0, 0, 10],
+        [1, 0, 20],
+      ],
+      min: 10,
+      max: 20,
+      showLabels: false,
+    };
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    // Formatter still runs (and still escapes) on top of the themed tooltip.
+    expect(opt.tooltip?.formatter?.({ data: [0, 0, 10] })).toBe("A, Mon: 10");
   });
 });

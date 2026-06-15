@@ -5444,6 +5444,7 @@
   --chart-axis-label: hsla(240, 4%, 46%, 1);
   --chart-axis-title: hsla(240, 6%, 10%, 1);
   --chart-grid: hsla(240, 5%, 90%, 1);
+  --chart-tooltip-bg: hsla(0, 0%, 100%, 1);
   --chart-1: var(--chart-cat-1);
   --chart-2: var(--chart-cat-2);
   --chart-3: var(--chart-cat-3);
@@ -5521,6 +5522,7 @@
   --chart-axis-label: hsla(240, 5%, 65%, 1);
   --chart-axis-title: hsla(0, 0%, 98%, 1);
   --chart-grid: hsla(0, 0%, 100%, 0.1);
+  --chart-tooltip-bg: hsla(240, 6%, 13%, 1);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -5588,6 +5590,7 @@
     --chart-axis-label: hsla(240, 5%, 65%, 1);
     --chart-axis-title: hsla(0, 0%, 98%, 1);
     --chart-grid: hsla(0, 0%, 100%, 0.1);
+    --chart-tooltip-bg: hsla(240, 6%, 13%, 1);
     --chart-1: var(--chart-cat-1);
     --chart-2: var(--chart-cat-2);
     --chart-3: var(--chart-cat-3);

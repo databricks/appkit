@@ -608,17 +608,18 @@ describe("useChartUITokens", () => {
     window.MutationObserver = originalMutationObserver;
   });
 
-  test("returns chrome fallback tokens when CSS vars unavailable", () => {
+  test("returns fallback UI tokens when CSS vars unavailable", () => {
     const { result } = renderHook(() => useChartUITokens());
 
     expect(result.current).toEqual(FALLBACK_UI_TOKENS);
   });
 
-  test("reads chrome tokens from CSS variables by name", () => {
+  test("reads UI tokens from CSS variables by name", () => {
     const values: Record<string, string> = {
       [CHART_UI_VARS.axisLabel]: "rgb(10, 10, 10)",
       [CHART_UI_VARS.axisTitle]: "rgb(20, 20, 20)",
       [CHART_UI_VARS.grid]: "rgb(30, 30, 30)",
+      [CHART_UI_VARS.tooltipBg]: "rgb(40, 40, 40)",
     };
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -633,10 +634,11 @@ describe("useChartUITokens", () => {
       axisLabel: "rgb(10, 10, 10)",
       axisTitle: "rgb(20, 20, 20)",
       grid: "rgb(30, 30, 30)",
+      tooltipBg: "rgb(40, 40, 40)",
     });
   });
 
-  test("falls back per field when only some chrome vars resolve", () => {
+  test("falls back per field when only some UI vars resolve", () => {
     // axisTitle intentionally missing — must fall back without shifting the
     // others (the failure mode of the old positional-array resolution).
     const values: Record<string, string> = {
@@ -656,10 +658,11 @@ describe("useChartUITokens", () => {
       axisLabel: "rgb(10, 10, 10)",
       axisTitle: FALLBACK_UI_TOKENS.axisTitle,
       grid: "rgb(30, 30, 30)",
+      tooltipBg: FALLBACK_UI_TOKENS.tooltipBg,
     });
   });
 
-  test("reads each chrome CSS variable by name", () => {
+  test("reads each UI CSS variable by name", () => {
     const getPropertyValueSpy = vi.fn().mockReturnValue("");
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -675,61 +678,10 @@ describe("useChartUITokens", () => {
     }
   });
 
+  // Listener wiring (subscribe/cleanup/ref-counting) is shared via
+  // useThemeChangeEffect and covered by useThemeColors + the "shared
+  // theme-change subscription" block; here we only assert token values re-resolve.
   describe("theme change reactivity", () => {
-    test("subscribes to matchMedia color scheme changes", () => {
-      const addEventListenerSpy = vi.fn();
-      const removeEventListenerSpy = vi.fn();
-
-      window.matchMedia = vi.fn().mockImplementation((query) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: addEventListenerSpy,
-        removeEventListener: removeEventListenerSpy,
-        dispatchEvent: vi.fn(),
-      }));
-
-      const { unmount } = renderHook(() => useChartUITokens());
-
-      expect(window.matchMedia).toHaveBeenCalledWith(
-        "(prefers-color-scheme: dark)",
-      );
-      expect(addEventListenerSpy).toHaveBeenCalledWith(
-        "change",
-        expect.any(Function),
-      );
-
-      unmount();
-
-      expect(removeEventListenerSpy).toHaveBeenCalledWith(
-        "change",
-        expect.any(Function),
-      );
-    });
-
-    test("subscribes to MutationObserver for theme attribute changes", () => {
-      const observeSpy = vi.fn();
-      const disconnectSpy = vi.fn();
-
-      window.MutationObserver = vi.fn().mockImplementation(() => ({
-        observe: observeSpy,
-        disconnect: disconnectSpy,
-      }));
-
-      const { unmount } = renderHook(() => useChartUITokens());
-
-      expect(observeSpy).toHaveBeenCalledWith(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["class", "data-theme", "data-mode"],
-      });
-
-      unmount();
-
-      expect(disconnectSpy).toHaveBeenCalled();
-    });
-
     test("updates tokens when system color scheme changes", () => {
       let matchMediaCallback: () => void = () => {};
 
@@ -805,35 +757,6 @@ describe("useChartUITokens", () => {
       });
 
       expect(result.current.axisLabel).toBe("rgb(20, 20, 20)");
-    });
-  });
-
-  describe("effect cleanup", () => {
-    test("removes all listeners on unmount", () => {
-      const removeEventListenerSpy = vi.fn();
-      const disconnectSpy = vi.fn();
-
-      window.matchMedia = vi.fn().mockImplementation((query) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: removeEventListenerSpy,
-        dispatchEvent: vi.fn(),
-      }));
-      window.MutationObserver = vi.fn().mockImplementation(() => ({
-        observe: vi.fn(),
-        disconnect: disconnectSpy,
-      }));
-
-      const { unmount } = renderHook(() => useChartUITokens());
-
-      unmount();
-
-      expect(removeEventListenerSpy).toHaveBeenCalled();
-      expect(disconnectSpy).toHaveBeenCalled();
     });
   });
 });

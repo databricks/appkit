@@ -104,19 +104,21 @@ export const FALLBACK_COLORS_DIVERGING = [
 ];
 
 // ============================================================================
-// Chart Chrome (axis text, titles, grid lines)
+// Chart UI tokens (axis text, titles, grid lines)
 // ============================================================================
 
-/** CSS variable names for chart chrome colors (read at runtime like the palettes) */
+/** CSS variable names for the chart UI tokens (read at runtime like the palettes) */
 export const CHART_UI_VARS: Record<keyof ChartUITokens, string> = {
   axisLabel: "--chart-axis-label",
   axisTitle: "--chart-axis-title",
   grid: "--chart-grid",
+  tooltipBg: "--chart-tooltip-bg",
 };
 
-/** Fallback chart chrome colors (light values; used when CSS variables unavailable) */
+/** Fallback chart UI tokens (light values). */
 export const FALLBACK_UI_TOKENS: ChartUITokens = {
   axisLabel: "hsla(240, 4%, 46%, 1)", // ≈ --muted-foreground
   axisTitle: "hsla(240, 6%, 10%, 1)", // ≈ --foreground
   grid: "hsla(240, 5%, 90%, 1)", // ≈ --border
+  tooltipBg: "hsla(0, 0%, 100%, 1)", // ≈ --popover
 };

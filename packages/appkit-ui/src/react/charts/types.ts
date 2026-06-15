@@ -31,7 +31,7 @@ export type ChartData = Table | Record<string, unknown>[];
 /** Color palette types for different visualization needs */
 export type ChartColorPalette = "categorical" | "sequential" | "diverging";
 
-/** Resolved colors for chart "chrome" — axis text, titles, and grid lines. */
+/** Resolved colors for the chart UI — axis text, titles, grid lines, and tooltip. */
 export interface ChartUITokens {
   /** Axis tick labels (≈ `--muted-foreground`) */
   axisLabel: string;
@@ -39,6 +39,8 @@ export interface ChartUITokens {
   axisTitle: string;
   /** Axis, tick, and split (grid) lines (≈ `--border`) */
   grid: string;
+  /** Tooltip popover background (≈ `--popover`) */
+  tooltipBg: string;
 }
 
 /** Common visual and behavior props for all charts */

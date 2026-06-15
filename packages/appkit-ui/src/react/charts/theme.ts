@@ -43,10 +43,10 @@ const PALETTE_CONFIG: Record<
  */
 const colorCache = new Map<string, string[]>();
 
-/** Cache for computed chart-chrome tokens (axis text, grid lines). */
+/** Cache for the computed chart UI tokens (axis text, grid lines). */
 let uiTokenCache: ChartUITokens | null = null;
 
-/** Clears both theme caches (palette colors + chrome tokens). */
+/** Clears both theme caches (palette colors + UI tokens). */
 function clearThemeCaches(): void {
   colorCache.clear();
   uiTokenCache = null;
@@ -85,10 +85,9 @@ function getThemeColors(palette: ChartColorPalette = "categorical"): string[] {
 }
 
 /**
- * Gets chart-chrome tokens (axis text, titles, grid lines) with caching.
- * Each token falls back independently, so a single missing CSS variable never
- * shifts the others. Authored in `hsla` so ECharts/zrender can parse them (the
- * `oklch` semantic tokens cannot be passed to ECharts directly).
+ * Gets the chart UI tokens (axis text, titles, grid lines) with caching.
+ * Authored in `hsla` because ECharts/zrender cannot parse the `oklch` semantic
+ * tokens.
  */
 function getThemeUITokens(): ChartUITokens {
   if (typeof window === "undefined") return FALLBACK_UI_TOKENS;
@@ -105,6 +104,7 @@ function getThemeUITokens(): ChartUITokens {
     axisLabel: read(CHART_UI_VARS.axisLabel, FALLBACK_UI_TOKENS.axisLabel),
     axisTitle: read(CHART_UI_VARS.axisTitle, FALLBACK_UI_TOKENS.axisTitle),
     grid: read(CHART_UI_VARS.grid, FALLBACK_UI_TOKENS.grid),
+    tooltipBg: read(CHART_UI_VARS.tooltipBg, FALLBACK_UI_TOKENS.tooltipBg),
   };
 
   return uiTokenCache;
@@ -114,17 +114,14 @@ function getThemeUITokens(): ChartUITokens {
 // Theme Change Subscription (shared)
 // ============================================================================
 
-// One matchMedia listener + one MutationObserver for the whole module, shared by
-// every chart hook. A theme change resets the caches once, then notifies all
-// subscribers — instead of each hook installing its own listener and racing to
-// clear the caches the others just repopulated.
+// One shared, ref-counted matchMedia + MutationObserver for the whole module: a
+// theme change clears the caches once, then notifies every subscribed hook.
 const subscribers = new Set<() => void>();
 let teardownListeners: (() => void) | null = null;
 
 function handleThemeChange(): void {
   clearThemeCaches();
-  // Snapshot so a subscriber mounting/unmounting during notification cannot
-  // mutate the set mid-iteration.
+  // Snapshot: a subscriber may add/remove itself during iteration.
   for (const notify of [...subscribers]) notify();
 }
 
@@ -149,7 +146,7 @@ function ensureListening(): void {
 /**
  * Resets all module-level theme state: clears both caches and drops the shared
  * subscription (removing the matchMedia/MutationObserver listeners). Used by
- * tests to isolate runs; the runtime only ever clears caches, via the dispatcher.
+ * tests to isolate runs; the runtime only ever clears caches.
  * @internal
  */
 export function resetThemeCache(): void {
@@ -203,7 +200,7 @@ export function useThemeColors(
       : getThemeColors(palette),
   );
 
-  // Re-resolve colors when the theme changes (the cache is reset centrally).
+  // Re-resolve colors when the theme changes.
   const updateColors = useCallback(() => {
     setColors(getThemeColors(palette));
   }, [palette]);
@@ -214,16 +211,16 @@ export function useThemeColors(
 }
 
 /**
- * Hook to get the chart-chrome tokens (axis text, titles, grid lines) with
- * automatic updates on theme change. Pass the result into the ECharts option
- * builders so axis labels, lines, legends, and titles follow the active theme.
+ * Hook to get the chart UI tokens (axis text, titles, grid lines) with automatic
+ * updates on theme change. Pass the result into the ECharts option builders so
+ * axis labels, lines, legends, and titles follow the active theme.
  */
 export function useChartUITokens(): ChartUITokens {
   const [tokens, setTokens] = useState<ChartUITokens>(() =>
     typeof window === "undefined" ? FALLBACK_UI_TOKENS : getThemeUITokens(),
   );
 
-  // Re-resolve tokens when the theme changes (the cache is reset centrally).
+  // Re-resolve tokens when the theme changes.
   const updateTokens = useCallback(() => {
     setTokens(getThemeUITokens());
   }, []);
