@@ -4,6 +4,7 @@
 
 :root {
   --radius: 0.625rem;
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -67,6 +68,25 @@
   --chart-div-7: hsla(10, 72%, 50%, 1);
   --chart-div-8: hsla(10, 80%, 40%, 1); /* Strong positive */
 
+  /* ========================================
+     CHART CHROME - axis labels, titles, grid lines
+     Authored in hsla so ECharts/zrender can parse them
+     (oklch is not parseable). Visually ≈ the semantic tokens.
+     ======================================== */
+  --chart-axis-label: hsla(
+    240,
+    4%,
+    46%,
+    1
+  ); /* tick labels ≈ --muted-foreground */
+  --chart-axis-title: hsla(
+    240,
+    6%,
+    10%,
+    1
+  ); /* names/legend/title ≈ --foreground */
+  --chart-grid: hsla(240, 5%, 90%, 1); /* axis/tick/split lines ≈ --border */
+
   /* Legacy aliases (for backwards compatibility) */
   --chart-1: var(--chart-cat-1);
   --chart-2: var(--chart-cat-2);
@@ -88,6 +108,7 @@
 
 /* Dark theme via class (takes precedence over media query) */
 .dark {
+  color-scheme: dark;
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
@@ -111,11 +132,46 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  /* CATEGORICAL */
+  --chart-cat-1: hsla(217, 91%, 65%, 1); /* Blue */
+  --chart-cat-2: hsla(160, 65%, 55%, 1); /* Teal */
+  --chart-cat-3: hsla(291, 60%, 65%, 1); /* Purple */
+  --chart-cat-4: hsla(38, 95%, 60%, 1); /* Amber */
+  --chart-cat-5: hsla(349, 80%, 62%, 1); /* Rose */
+  --chart-cat-6: hsla(189, 85%, 52%, 1); /* Cyan */
+  --chart-cat-7: hsla(271, 65%, 70%, 1); /* Lavender */
+  --chart-cat-8: hsla(142, 60%, 55%, 1); /* Emerald */
+  /* SEQUENTIAL (inverted for dark mode) */
+  --chart-seq-1: hsla(217, 50%, 25%, 1);
+  --chart-seq-2: hsla(217, 55%, 35%, 1);
+  --chart-seq-3: hsla(217, 60%, 45%, 1);
+  --chart-seq-4: hsla(217, 65%, 55%, 1);
+  --chart-seq-5: hsla(217, 70%, 62%, 1);
+  --chart-seq-6: hsla(217, 75%, 70%, 1);
+  --chart-seq-7: hsla(217, 80%, 78%, 1);
+  --chart-seq-8: hsla(217, 85%, 88%, 1);
+  /* DIVERGING */
+  --chart-div-1: hsla(217, 85%, 70%, 1);
+  --chart-div-2: hsla(217, 70%, 60%, 1);
+  --chart-div-3: hsla(217, 50%, 50%, 1);
+  --chart-div-4: hsla(217, 25%, 40%, 1);
+  --chart-div-5: hsla(10, 25%, 40%, 1);
+  --chart-div-6: hsla(10, 55%, 50%, 1);
+  --chart-div-7: hsla(10, 70%, 58%, 1);
+  --chart-div-8: hsla(10, 80%, 65%, 1);
+  /* Legacy aliases */
+  --chart-1: var(--chart-cat-1);
+  --chart-2: var(--chart-cat-2);
+  --chart-3: var(--chart-cat-3);
+  --chart-4: var(--chart-cat-4);
+  --chart-5: var(--chart-cat-5);
+  --chart-6: var(--chart-cat-6);
+  --chart-7: var(--chart-cat-7);
+  --chart-8: var(--chart-cat-8);
+  /* Chart chrome (≈ muted-foreground / foreground / border, hsla for ECharts) */
+  --chart-axis-label: hsla(240, 5%, 65%, 1);
+  --chart-axis-title: hsla(0, 0%, 98%, 1);
+  --chart-grid: hsla(0, 0%, 100%, 0.1);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -129,6 +185,7 @@
 /* Dark theme via media query (fallback when no class is set) */
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
+    color-scheme: dark;
     --background: oklch(0.141 0.005 285.823);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.21 0.006 285.885);
@@ -192,6 +249,11 @@
     --chart-div-6: hsla(10, 55%, 50%, 1);
     --chart-div-7: hsla(10, 70%, 58%, 1);
     --chart-div-8: hsla(10, 80%, 65%, 1); /* Strong positive (red) */
+
+    /* Chart chrome (≈ muted-foreground / foreground / border, hsla for ECharts) */
+    --chart-axis-label: hsla(240, 5%, 65%, 1);
+    --chart-axis-title: hsla(0, 0%, 98%, 1);
+    --chart-grid: hsla(0, 0%, 100%, 0.1);
 
     /* Legacy aliases */
     --chart-1: var(--chart-cat-1);
@@ -276,6 +338,11 @@
   --color-chart-div-6: var(--chart-div-6);
   --color-chart-div-7: var(--chart-div-7);
   --color-chart-div-8: var(--chart-div-8);
+
+  /* Chart chrome */
+  --color-chart-axis-label: var(--chart-axis-label);
+  --color-chart-axis-title: var(--chart-axis-title);
+  --color-chart-grid: var(--chart-grid);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

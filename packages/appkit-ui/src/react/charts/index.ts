@@ -47,12 +47,15 @@ export {
   CHART_COLOR_VARS_CATEGORICAL,
   CHART_COLOR_VARS_DIVERGING,
   CHART_COLOR_VARS_SEQUENTIAL,
+  // Chart chrome (axis text, titles, grid lines)
+  CHART_UI_VARS,
   // Field detection patterns
   DATE_FIELD_PATTERNS,
   // Fallback colors
   FALLBACK_COLORS_CATEGORICAL,
   FALLBACK_COLORS_DIVERGING,
   FALLBACK_COLORS_SEQUENTIAL,
+  FALLBACK_UI_TOKENS,
   METADATA_DATE_PATTERNS,
   NAME_FIELD_PATTERNS,
 } from "./constants";
@@ -63,6 +66,7 @@ export {
 
 export {
   useAllThemeColors,
+  useChartUITokens,
   useThemeColors,
 } from "./theme";
 
@@ -110,6 +114,7 @@ export type {
   ChartColorPalette,
   ChartData,
   ChartType,
+  ChartUITokens,
   // Data formats
   DataFormat,
   DataProps,

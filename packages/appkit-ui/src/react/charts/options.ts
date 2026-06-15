@@ -1,4 +1,4 @@
-import type { ChartType } from "./types";
+import type { ChartType, ChartUITokens } from "./types";
 import {
   createTimeSeriesData,
   escapeHtml,
@@ -18,6 +18,8 @@ export interface OptionBuilderContext {
   title?: string;
   showLegend: boolean;
   xField?: string;
+  /** Resolved chart-chrome colors (axis text, titles, grid lines). */
+  ui: ChartUITokens;
 }
 
 export interface CartesianContext extends OptionBuilderContext {
@@ -35,9 +37,35 @@ export interface CartesianContext extends OptionBuilderContext {
 
 function buildBaseOption(ctx: OptionBuilderContext): Record<string, unknown> {
   return {
-    title: ctx.title ? { text: ctx.title, left: "center" } : undefined,
+    title: ctx.title
+      ? {
+          text: ctx.title,
+          left: "center",
+          textStyle: { color: ctx.ui.axisTitle },
+        }
+      : undefined,
     color: ctx.colors,
   };
+}
+
+/**
+ * Shared axis chrome (tick labels, axis/tick/split lines, axis name) resolved
+ * from the active theme. Spread into an axis object, then override `axisLabel`
+ * if you need to keep a formatter/rotate (merge the color back in).
+ */
+function axisCommon(ui: ChartUITokens) {
+  return {
+    axisLabel: { color: ui.axisLabel },
+    axisLine: { lineStyle: { color: ui.grid } },
+    axisTick: { lineStyle: { color: ui.grid } },
+    splitLine: { lineStyle: { color: ui.grid } },
+    nameTextStyle: { color: ui.axisTitle },
+  };
+}
+
+/** Shared legend text color resolved from the active theme. */
+function legendTextStyle(ui: ChartUITokens) {
+  return { textStyle: { color: ui.axisTitle } };
 }
 
 // ============================================================================
@@ -56,13 +84,18 @@ export function buildRadarOption(
     ...buildBaseOption(ctx),
     tooltip: { trigger: "item" },
     legend:
-      ctx.showLegend && ctx.yFields.length > 1 ? { top: "bottom" } : undefined,
+      ctx.showLegend && ctx.yFields.length > 1
+        ? { top: "bottom", ...legendTextStyle(ctx.ui) }
+        : undefined,
     radar: {
       indicator: ctx.xData.map((name) => ({
         name: String(name),
         max: maxValue * 1.2,
       })),
       shape: "polygon",
+      axisName: { color: ctx.ui.axisTitle },
+      axisLine: { lineStyle: { color: ctx.ui.grid } },
+      splitLine: { lineStyle: { color: ctx.ui.grid } },
     },
     series: [
       {
@@ -100,7 +133,12 @@ export function buildPieOption(
     ...buildBaseOption(ctx),
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
     legend: ctx.showLegend
-      ? { orient: "vertical", left: "left", top: "middle" }
+      ? {
+          orient: "vertical",
+          left: "left",
+          top: "middle",
+          ...legendTextStyle(ctx.ui),
+        }
       : undefined,
     series: [
       {
@@ -140,18 +178,23 @@ export function buildHorizontalBarOption(
   return {
     ...buildBaseOption(ctx),
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-    legend: ctx.showLegend && hasMultipleSeries ? { top: "bottom" } : undefined,
+    legend:
+      ctx.showLegend && hasMultipleSeries
+        ? { top: "bottom", ...legendTextStyle(ctx.ui) }
+        : undefined,
     grid: {
       left: "20%",
       right: "10%",
       top: ctx.title ? "15%" : "5%",
       bottom: ctx.showLegend && hasMultipleSeries ? "15%" : "5%",
     },
-    xAxis: { type: "value" },
+    xAxis: { type: "value", ...axisCommon(ctx.ui) },
     yAxis: {
       type: "category",
       data: ctx.xData,
+      ...axisCommon(ctx.ui),
       axisLabel: {
+        color: ctx.ui.axisLabel,
         width: 100,
         overflow: "truncate",
         formatter: (value: string) => truncateLabel(String(value)),
@@ -211,7 +254,9 @@ export function buildHeatmapOption(
       type: "category",
       data: ctx.xData,
       splitArea: { show: true },
+      ...axisCommon(ctx.ui),
       axisLabel: {
+        color: ctx.ui.axisLabel,
         rotate: ctx.xData.length > 10 ? 45 : 0,
         formatter: (v: string) => truncateLabel(String(v), 10),
       },
@@ -220,7 +265,9 @@ export function buildHeatmapOption(
       type: "category",
       data: ctx.yAxisData,
       splitArea: { show: true },
+      ...axisCommon(ctx.ui),
       axisLabel: {
+        color: ctx.ui.axisLabel,
         formatter: (v: string) => truncateLabel(String(v), 12),
       },
     },
@@ -231,6 +278,7 @@ export function buildHeatmapOption(
       orient: "vertical",
       right: "2%",
       top: "center",
+      textStyle: { color: ctx.ui.axisTitle },
       inRange: {
         color: ctx.colors.length >= 2 ? ctx.colors : ["#f0f0f0", ctx.colors[0]],
       },
@@ -271,7 +319,10 @@ export function buildCartesianOption(
   return {
     ...buildBaseOption(ctx),
     tooltip: { trigger: isScatter ? "item" : "axis" },
-    legend: ctx.showLegend && hasMultipleSeries ? { top: "bottom" } : undefined,
+    legend:
+      ctx.showLegend && hasMultipleSeries
+        ? { top: "bottom", ...legendTextStyle(ctx.ui) }
+        : undefined,
     grid: {
       left: "10%",
       right: "10%",
@@ -283,10 +334,12 @@ export function buildCartesianOption(
       type: isScatter ? "value" : isTimeSeries ? "time" : "category",
       data: isScatter || isTimeSeries ? undefined : ctx.xData,
       name: ctx.xField ? formatLabel(ctx.xField) : undefined,
+      ...axisCommon(ctx.ui),
       axisLabel:
         isScatter || isTimeSeries
-          ? { show: true }
+          ? { show: true, color: ctx.ui.axisLabel }
           : {
+              color: ctx.ui.axisLabel,
               rotate: ctx.xData.length > 10 ? 45 : 0,
               formatter: (v: string) => truncateLabel(String(v), 10),
             },
@@ -294,6 +347,7 @@ export function buildCartesianOption(
     yAxis: {
       type: "value",
       name: ctx.yFields.length === 1 ? formatLabel(ctx.yFields[0]) : undefined,
+      ...axisCommon(ctx.ui),
     },
     series: ctx.yFields.map((key, idx) => ({
       name: formatLabel(key),

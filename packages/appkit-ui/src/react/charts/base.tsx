@@ -10,7 +10,7 @@ import {
   buildRadarOption,
   type OptionBuilderContext,
 } from "./options";
-import { useThemeColors } from "./theme";
+import { useChartUITokens, useThemeColors } from "./theme";
 import type {
   ChartColorPalette,
   ChartData,
@@ -132,6 +132,9 @@ export function BaseChart({
   const themeColors = useThemeColors(resolvedPalette);
   const colors = customColors ?? themeColors;
 
+  // Chart-chrome colors (axis text, titles, grid lines) for the active theme
+  const ui = useChartUITokens();
+
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
 
@@ -191,6 +194,7 @@ export function BaseChart({
       title,
       showLegend,
       xField,
+      ui,
     };
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";
@@ -255,6 +259,7 @@ export function BaseChart({
   }, [
     normalized,
     colors,
+    ui,
     title,
     showLegend,
     chartType,

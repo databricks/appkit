@@ -2,6 +2,8 @@
 // Shared Constants for Chart Components
 // ============================================================================
 
+import type { ChartUITokens } from "./types";
+
 // Re-export field patterns from shared constants
 export {
   DATE_FIELD_PATTERNS,
@@ -100,3 +102,21 @@ export const FALLBACK_COLORS_DIVERGING = [
   "hsla(10, 72%, 50%, 1)",
   "hsla(10, 80%, 40%, 1)", // Strong positive
 ];
+
+// ============================================================================
+// Chart Chrome (axis text, titles, grid lines)
+// ============================================================================
+
+/** CSS variable names for chart chrome colors (read at runtime like the palettes) */
+export const CHART_UI_VARS: Record<keyof ChartUITokens, string> = {
+  axisLabel: "--chart-axis-label",
+  axisTitle: "--chart-axis-title",
+  grid: "--chart-grid",
+};
+
+/** Fallback chart chrome colors (light values; used when CSS variables unavailable) */
+export const FALLBACK_UI_TOKENS: ChartUITokens = {
+  axisLabel: "hsla(240, 4%, 46%, 1)",
+  axisTitle: "hsla(240, 6%, 10%, 1)",
+  grid: "hsla(240, 5%, 90%, 1)",
+};
