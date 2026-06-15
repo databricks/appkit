@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createLogger } from "../logging/logger";
+import type { MetricSchema } from "./metric-registry";
 
 const logger = createLogger("type-generator:cache");
 
@@ -17,13 +18,38 @@ interface CacheEntry {
 }
 
 /**
+ * One cached metric-view DESCRIBE outcome.
+ *
+ * `hash` is md5 over `"<source>|<lane>"` — the two config inputs that
+ * determine a DESCRIBE — so editing either invalidates the entry. `schema`
+ * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
+ * design), letting a warm pass regenerate both metric artifacts without a
+ * single warehouse call. `retry: true` marks a degraded outcome (DESCRIBE
+ * skipped, unanswered, or failed): the cached schema still renders
+ * artifacts, but the next eligible pass re-describes exactly these keys so
+ * degraded schemas converge to real ones.
+ */
+export interface MetricCacheEntry {
+  hash: string;
+  schema: MetricSchema;
+  retry: boolean;
+}
+
+/**
  * Cache interface
  * @property version - the version of the cache
  * @property queries - the queries in the cache
+ * @property metrics - cached metric-view schemas keyed by metric key.
+ *   OPTIONAL on purpose: version "3" files written before this section
+ *   existed load unchanged (absent ⇒ treated as empty by the metric path),
+ *   and the query path's `noCache` reinit literal stays valid as-is. The
+ *   section rides through the query path's load → mutate → save cycle as a
+ *   plain sibling key, so query-side saves preserve it byte-for-byte.
  */
 interface Cache {
   version: string;
   queries: Record<string, CacheEntry>;
+  metrics?: Record<string, MetricCacheEntry>;
 }
 
 export const CACHE_VERSION = "3";

@@ -6,6 +6,8 @@ import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
+  METRIC_METADATA_FILE,
+  METRIC_TYPES_FILE,
   TYPES_DIR,
   TypegenFatalError,
   TypegenSyntaxError,
@@ -33,6 +35,14 @@ const DEV_WAREHOUSE_WATCH_MAX_MS = 60_000;
 interface AppKitTypesPluginOptions {
   /* Path to the output d.ts file (relative to client folder). */
   outFile?: string;
+  /** Path to the metric registry d.ts file (relative to client folder). */
+  metricOutFile?: string;
+  /**
+   * Path to the metric semantic-metadata JSON file (relative to client folder).
+   * Build-time artifact — sibling of {@link metricOutFile}. Skipped
+   * automatically when `metric-views.json` is absent.
+   */
+  metricMetadataOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -45,6 +55,8 @@ interface AppKitTypesPluginOptions {
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
+  let metricOutFile: string;
+  let metricMetadataOutFile: string;
   let watchFolders: string[];
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
@@ -94,6 +106,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         warehouseId,
         noCache: false,
         mode,
+        metricOutFile,
+        metricMetadataOutFile,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -296,6 +310,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         projectRoot,
         options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
+      metricOutFile = path.resolve(
+        projectRoot,
+        options?.metricOutFile ?? `shared/${TYPES_DIR}/${METRIC_TYPES_FILE}`,
+      );
+      metricMetadataOutFile = path.resolve(
+        projectRoot,
+        options?.metricMetadataOutFile ??
+          `shared/${TYPES_DIR}/${METRIC_METADATA_FILE}`,
+      );
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),
       ];
@@ -326,13 +349,18 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           changedFile.startsWith(folder),
         );
 
-        if (isWatchedFile && changedFile.endsWith(".sql")) {
+        if (
+          isWatchedFile &&
+          (changedFile.endsWith(".sql") ||
+            changedFile.endsWith("metric-views.json"))
+        ) {
           // Route through the single-flight runner (was fire-and-forget
           // generate(), which could race the initial build / watch). This is a
           // dev-only hook, so degrade instantly (non-blocking), then re-arm the
-          // warehouse watch so the edited query is re-described in the background
-          // against the running warehouse (or once a still-starting one warms
-          // up), landing fresh blocking-described types.
+          // warehouse watch so the edited query or metric-view source is
+          // re-described in the background against the running warehouse (or
+          // once a still-starting one warms up), landing fresh
+          // blocking-described types.
           void runGenerate("non-blocking");
           armWarehouseWatch();
         }
