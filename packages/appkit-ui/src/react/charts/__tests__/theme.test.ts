@@ -2,18 +2,17 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   CHART_COLOR_VARS_CATEGORICAL,
+  CHART_COLOR_VARS_CHROME,
   CHART_COLOR_VARS_DIVERGING,
   CHART_COLOR_VARS_SEQUENTIAL,
-  CHART_UI_VARS,
   FALLBACK_COLORS_CATEGORICAL,
+  FALLBACK_COLORS_CHROME,
   FALLBACK_COLORS_DIVERGING,
   FALLBACK_COLORS_SEQUENTIAL,
-  FALLBACK_UI_TOKENS,
 } from "../constants";
 import {
   resetThemeColorCache,
   useAllThemeColors,
-  useChartUITokens,
   useThemeColors,
 } from "../theme";
 import type { ChartColorPalette } from "../types";
@@ -573,18 +572,13 @@ describe("useAllThemeColors", () => {
   });
 });
 
-describe("useChartUITokens", () => {
+describe('useThemeColors("chrome")', () => {
   const originalGetComputedStyle = window.getComputedStyle;
   const originalMatchMedia = window.matchMedia;
-  const originalMutationObserver = window.MutationObserver;
 
   beforeEach(() => {
     resetThemeColorCache();
     window.matchMedia = createMockMatchMedia() as typeof window.matchMedia;
-    window.MutationObserver = vi.fn().mockImplementation(() => ({
-      observe: vi.fn(),
-      disconnect: vi.fn(),
-    }));
     // Default: empty CSS variables → fallbacks
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -598,20 +592,19 @@ describe("useChartUITokens", () => {
     vi.restoreAllMocks();
     window.getComputedStyle = originalGetComputedStyle;
     window.matchMedia = originalMatchMedia;
-    window.MutationObserver = originalMutationObserver;
   });
 
-  test("returns fallback tokens when CSS vars unavailable", () => {
-    const { result } = renderHook(() => useChartUITokens());
+  test("returns chrome fallback colors when CSS vars unavailable", () => {
+    const { result } = renderHook(() => useThemeColors("chrome"));
 
-    expect(result.current).toEqual(FALLBACK_UI_TOKENS);
+    expect(result.current).toEqual(FALLBACK_COLORS_CHROME);
   });
 
-  test("reads chrome colors from CSS variables", () => {
+  test("reads chrome colors from CSS variables in order", () => {
     const values: Record<string, string> = {
-      [CHART_UI_VARS.axisLabel]: "rgb(10, 10, 10)",
-      [CHART_UI_VARS.axisTitle]: "rgb(20, 20, 20)",
-      [CHART_UI_VARS.grid]: "rgb(30, 30, 30)",
+      [CHART_COLOR_VARS_CHROME[0]]: "rgb(10, 10, 10)",
+      [CHART_COLOR_VARS_CHROME[1]]: "rgb(20, 20, 20)",
+      [CHART_COLOR_VARS_CHROME[2]]: "rgb(30, 30, 30)",
     };
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
@@ -620,60 +613,28 @@ describe("useChartUITokens", () => {
         }) as unknown as CSSStyleDeclaration,
     );
 
-    const { result } = renderHook(() => useChartUITokens());
+    const { result } = renderHook(() => useThemeColors("chrome"));
 
-    expect(result.current).toEqual({
-      axisLabel: "rgb(10, 10, 10)",
-      axisTitle: "rgb(20, 20, 20)",
-      grid: "rgb(30, 30, 30)",
-    });
+    expect(result.current).toEqual([
+      "rgb(10, 10, 10)",
+      "rgb(20, 20, 20)",
+      "rgb(30, 30, 30)",
+    ]);
   });
 
-  test("falls back per-token when a single var is missing", () => {
-    const values: Record<string, string> = {
-      [CHART_UI_VARS.axisLabel]: "rgb(10, 10, 10)",
-    };
+  test("reads the chrome CSS variables in order", () => {
+    const getPropertyValueSpy = vi.fn().mockReturnValue("");
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () =>
         ({
-          getPropertyValue: (prop: string) => values[prop] || "",
+          getPropertyValue: getPropertyValueSpy,
         }) as unknown as CSSStyleDeclaration,
     );
 
-    const { result } = renderHook(() => useChartUITokens());
+    renderHook(() => useThemeColors("chrome"));
 
-    expect(result.current.axisLabel).toBe("rgb(10, 10, 10)");
-    expect(result.current.axisTitle).toBe(FALLBACK_UI_TOKENS.axisTitle);
-    expect(result.current.grid).toBe(FALLBACK_UI_TOKENS.grid);
-  });
-
-  test("updates tokens when theme attributes change", () => {
-    let mutationCallback: () => void = () => {};
-    window.MutationObserver = vi.fn().mockImplementation((cb) => {
-      mutationCallback = cb;
-      return { observe: vi.fn(), disconnect: vi.fn() };
-    });
-
-    let call = 0;
-    vi.spyOn(window, "getComputedStyle").mockImplementation(
-      () =>
-        ({
-          getPropertyValue: (prop: string) => {
-            if (prop === CHART_UI_VARS.axisLabel) {
-              return call++ === 0 ? "rgb(1, 1, 1)" : "rgb(9, 9, 9)";
-            }
-            return "";
-          },
-        }) as unknown as CSSStyleDeclaration,
-    );
-
-    const { result } = renderHook(() => useChartUITokens());
-    expect(result.current.axisLabel).toBe("rgb(1, 1, 1)");
-
-    act(() => {
-      mutationCallback();
-    });
-
-    expect(result.current.axisLabel).toBe("rgb(9, 9, 9)");
+    for (const varName of CHART_COLOR_VARS_CHROME) {
+      expect(getPropertyValueSpy).toHaveBeenCalledWith(varName);
+    }
   });
 });

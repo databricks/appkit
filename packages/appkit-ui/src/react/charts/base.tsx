@@ -10,7 +10,7 @@ import {
   buildRadarOption,
   type OptionBuilderContext,
 } from "./options";
-import { useChartUITokens, useThemeColors } from "./theme";
+import { useThemeColors } from "./theme";
 import type {
   ChartColorPalette,
   ChartData,
@@ -132,8 +132,9 @@ export function BaseChart({
   const themeColors = useThemeColors(resolvedPalette);
   const colors = customColors ?? themeColors;
 
-  // Chart-chrome colors (axis text, titles, grid lines) for the active theme
-  const ui = useChartUITokens();
+  // Chart-chrome colors (axis text, titles, grid lines) for the active theme.
+  // Order matches CHART_COLOR_VARS_CHROME: [axisLabel, axisTitle, grid].
+  const chrome = useThemeColors("chrome");
 
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
@@ -186,6 +187,11 @@ export function BaseChart({
     // For other charts, yDataMap is required
     const yDataMap = "yDataMap" in normalized ? normalized.yDataMap : {};
 
+    const ui = {
+      axisLabel: chrome[0],
+      axisTitle: chrome[1],
+      grid: chrome[2],
+    };
     const baseCtx: OptionBuilderContext = {
       xData,
       yDataMap,
@@ -259,7 +265,7 @@ export function BaseChart({
   }, [
     normalized,
     colors,
-    ui,
+    chrome,
     title,
     showLegend,
     chartType,
