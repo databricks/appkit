@@ -70,8 +70,7 @@
 
   /* ========================================
      CHART CHROME - axis labels, titles, grid lines
-     Authored in hsla so ECharts/zrender can parse them
-     (oklch is not parseable). Visually ≈ the semantic tokens.
+     ≈ muted-foreground / foreground / border (hsla so ECharts can parse)
      ======================================== */
   --chart-axis-label: hsla(
     240,

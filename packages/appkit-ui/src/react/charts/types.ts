@@ -31,11 +31,7 @@ export type ChartData = Table | Record<string, unknown>[];
 /** Color palette types for different visualization needs */
 export type ChartColorPalette = "categorical" | "sequential" | "diverging";
 
-/**
- * Resolved colors for chart "chrome" — axis text, titles, and grid lines.
- * These are read from CSS variables and passed into ECharts options (which,
- * unlike the Recharts `ChartContainer`, cannot consume CSS classes directly).
- */
+/** Resolved colors for chart "chrome" — axis text, titles, and grid lines. */
 export interface ChartUITokens {
   /** Axis tick labels (≈ `--muted-foreground`) */
   axisLabel: string;

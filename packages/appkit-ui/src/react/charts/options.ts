@@ -18,7 +18,6 @@ export interface OptionBuilderContext {
   title?: string;
   showLegend: boolean;
   xField?: string;
-  /** Resolved chart-chrome colors (axis text, titles, grid lines). */
   ui: ChartUITokens;
 }
 
@@ -48,11 +47,6 @@ function buildBaseOption(ctx: OptionBuilderContext): Record<string, unknown> {
   };
 }
 
-/**
- * Shared axis chrome (tick labels, axis/tick/split lines, axis name) resolved
- * from the active theme. Spread into an axis object, then override `axisLabel`
- * if you need to keep a formatter/rotate (merge the color back in).
- */
 function axisCommon(ui: ChartUITokens) {
   return {
     axisLabel: { color: ui.axisLabel },
@@ -63,7 +57,6 @@ function axisCommon(ui: ChartUITokens) {
   };
 }
 
-/** Shared legend text color resolved from the active theme. */
 function legendTextStyle(ui: ChartUITokens) {
   return { textStyle: { color: ui.axisTitle } };
 }

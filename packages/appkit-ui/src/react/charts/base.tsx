@@ -132,8 +132,6 @@ export function BaseChart({
   const themeColors = useThemeColors(resolvedPalette);
   const colors = customColors ?? themeColors;
 
-  // Chart-chrome colors (axis text, titles, grid lines) for the active theme.
-  // Order matches CHART_COLOR_VARS_CHROME: [axisLabel, axisTitle, grid].
   const chrome = useThemeColors("chrome");
 
   // Store ECharts instance directly to avoid stale ref issues on unmount
