@@ -83,6 +83,35 @@ function succeededResult(columns: [string, string, string | null][]) {
   };
 }
 
+/**
+ * Build a SUCCEEDED DESCRIBE QUERY response whose rows arrive only as a base64
+ * Arrow IPC `attachment` (no `data_array`) — the ARROW_STREAM/INLINE wire shape
+ * the fetcher now requests. The describeOne path pipes this through
+ * normalizeResultRows, which decodes the attachment so convertToQueryType can
+ * read the columns. Each [name, type, comment] triple becomes one DESCRIBE row.
+ */
+async function succeededArrowAttachmentResult(
+  columns: [string, string, string | null][],
+) {
+  const arrow = await import("apache-arrow");
+  const table = arrow.tableFromArrays({
+    col_name: columns.map((c) => c[0]),
+    data_type: columns.map((c) => c[1]),
+    comment: columns.map((c) => c[2]),
+  });
+  const attachment = Buffer.from(arrow.tableToIPC(table, "stream")).toString(
+    "base64",
+  );
+  return {
+    statement_id: "stmt-arrow",
+    status: { state: "SUCCEEDED" },
+    manifest: { format: "ARROW_STREAM" },
+    // No data_array — rows live in the attachment, like a real INLINE Arrow
+    // response. This is the condition the silent-degrade bug left unread.
+    result: { attachment },
+  };
+}
+
 describe("generateQueriesFromDescribe", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -118,6 +147,60 @@ describe("generateQueriesFromDescribe", () => {
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
     expect(lastSavedQueries()?.users.type).toContain("id: number");
+  });
+
+  test("ARROW attachment path — decodes Arrow rows into a real query schema", async () => {
+    // The warehouse answers ARROW_STREAM/INLINE: columns arrive only as a
+    // base64 Arrow IPC attachment with data_array undefined. describeOne pipes
+    // this through normalizeResultRows before convertToQueryType, so the schema
+    // resolves to real columns instead of the degraded `result: unknown`.
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue(
+      "SELECT id, name FROM users WHERE status = :status",
+    );
+    mocks.executeStatement.mockResolvedValue(
+      await succeededArrowAttachmentResult([
+        ["id", "INT", null],
+        ["name", "STRING", "display name"],
+      ]),
+    );
+
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas).toHaveLength(1);
+    expect(schemas[0].name).toBe("users");
+    // Real columns recovered from the Arrow attachment — not `result: unknown`.
+    expect(schemas[0].type).toContain("id: number");
+    expect(schemas[0].type).toContain("name: string");
+    expect(schemas[0].type).not.toContain("result: unknown");
+    expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
+    // A resolved schema is cached (we only persist non-unknown results).
+    expect(lastSavedQueries()?.users.type).toContain("id: number");
+  });
+
+  test("ARROW attachment request — pins ARROW_STREAM/INLINE and a 30s wait", async () => {
+    // Regression guard for the executeStatement call shape: without the pinned
+    // wait_timeout the call could return PENDING and degrade; without
+    // ARROW_STREAM/INLINE the normalizer would have no attachment to decode.
+    mocks.readdir.mockResolvedValue(["q.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT 1 AS one");
+    mocks.executeStatement.mockResolvedValue(
+      succeededResult([["one", "INT", null]]),
+    );
+
+    await describeQueries("/queries", "wh-123");
+
+    expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+    expect(mocks.executeStatement.mock.calls[0][0]).toMatchObject({
+      warehouse_id: "wh-123",
+      wait_timeout: "30s",
+      format: "ARROW_STREAM",
+      disposition: "INLINE",
+    });
   });
 
   test("FAILED status with error message — reports SQL error and produces unknown result type", async () => {

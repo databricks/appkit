@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { normalizeResultRows } from "./statement-result";
 import type { DatabricksStatementExecutionResponse } from "./types";
 
 /**
@@ -1136,8 +1137,16 @@ export function createWorkspaceDescribeFetcher(
       statement: `DESCRIBE TABLE EXTENDED ${quotedFqn} AS JSON`,
       warehouse_id: warehouseId,
       wait_timeout: "30s",
+      // INLINE + ARROW_STREAM returns the single DESCRIBE row as a base64
+      // Arrow IPC attachment (the SDK's default disposition would also stream
+      // it as an attachment, but pinning these makes the wire shape explicit).
+      // normalizeResultRows decodes that attachment into `result.data_array`
+      // so `parseDescribeTableExtendedJson` can read the JSON-string cell;
+      // it is a no-op passthrough when the warehouse already populated rows.
+      format: "ARROW_STREAM",
+      disposition: "INLINE",
     })) as DatabricksStatementExecutionResponse;
-    return result;
+    return await normalizeResultRows(result);
   };
 }
 

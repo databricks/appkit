@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -45,6 +46,20 @@ function mockDescribeResponse(
     },
   };
 }
+
+/**
+ * Real Arrow IPC attachment captured live from dogfood:
+ *   DESCRIBE TABLE EXTENDED `appkit_demo`.`public`.`revenue_metrics` AS JSON
+ * with `format: "ARROW_STREAM", disposition: "INLINE"`. The single DESCRIBE
+ * row (one JSON-string cell) is base64 Arrow IPC — the wire shape this fetcher
+ * now requests and the normalizer decodes. Used to prove the fetcher →
+ * normalizer → parser chain extracts real columns from an attachment-only
+ * response (the silent-degrade bug left this unread).
+ */
+const ARROW_ATTACHMENT_B64 = readFileSync(
+  path.join(__dirname, "fixtures", "describe-arrow-attachment.b64"),
+  "utf-8",
+);
 
 /**
  * Cast helper for fixtures that intentionally violate the config type
@@ -439,7 +454,46 @@ describe("createWorkspaceDescribeFetcher", () => {
       statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
       warehouse_id: "wh-1",
       wait_timeout: "30s",
+      // Pinned wire format: the warehouse returns the single DESCRIBE row as a
+      // base64 Arrow IPC attachment, which the normalizer decodes into rows.
+      format: "ARROW_STREAM",
+      disposition: "INLINE",
     });
+  });
+
+  test("decodes an Arrow attachment-only response into parseable columns (fetcher → normalizer → parser)", async () => {
+    // The warehouse answers ARROW_STREAM/INLINE: rows arrive as a base64 Arrow
+    // IPC attachment with `data_array` undefined. Before the normalizer was
+    // wired in, parseDescribeTableExtendedJson read this as "no rows" and the
+    // metric shipped degraded. Now the fetcher pipes the response through
+    // normalizeResultRows, so the real describe doc is recovered end-to-end.
+    const statements: Array<Record<string, unknown>> = [];
+    const client = {
+      statementExecution: {
+        executeStatement: async (req: Record<string, unknown>) => {
+          statements.push(req);
+          return {
+            statement_id: "stmt-arrow",
+            status: { state: "SUCCEEDED" },
+            manifest: { format: "ARROW_STREAM" },
+            // Only an attachment — no data_array (the bug's trigger condition).
+            result: { attachment: ARROW_ATTACHMENT_B64 },
+          } as DatabricksStatementExecutionResponse;
+        },
+      },
+    } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
+
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+    const response = await fetcher("appkit_demo.public.revenue_metrics");
+
+    // The fetcher decoded the attachment: rows are now readable.
+    expect(response.result?.data_array).toBeDefined();
+    const parsed = parseDescribeTableExtendedJson(response);
+    const cols = extractMetricColumns(parsed);
+    // The real revenue_metrics describe doc carries measures and dimensions.
+    expect(cols.length).toBeGreaterThan(0);
+    expect(cols.some((c) => c.isMeasure)).toBe(true);
+    expect(cols.some((c) => !c.isMeasure)).toBe(true);
   });
 
   test("a hyphenated FQN round-trips: validated by resolveMetricConfig, quoted in the statement, response parsed", async () => {
@@ -701,6 +755,46 @@ describe("syncMetrics", () => {
       transient: true,
     });
     expect(failures[0].reason).toMatch(/warehouse unreachable/);
+  });
+
+  test("a multi-chunk (truncated) DESCRIBE surfaces as a loud failure, not a crash (fetcher → normalizer → syncMetrics)", async () => {
+    // End-to-end loudness check for the truncation guard. The warehouse paginates
+    // the DESCRIBE result (sets next_chunk_index on the first chunk); the fetcher
+    // pipes the response through normalizeResultRows, which THROWS rather than
+    // emit partial types. That throw must be caught inside describeOne and
+    // recorded as a MetricSyncFailure — never an uncaught crash that aborts the
+    // whole generation pass.
+    const resolution = resolveMetricConfig({
+      metricViews: { revenue: { source: "demo.public.revenue" } },
+    });
+    const client = {
+      statementExecution: {
+        executeStatement: async () =>
+          ({
+            statement_id: "stmt-chunked",
+            status: { state: "SUCCEEDED" },
+            manifest: { format: "ARROW_STREAM" },
+            result: {
+              attachment: ARROW_ATTACHMENT_B64,
+              next_chunk_index: 1,
+            },
+          }) as DatabricksStatementExecutionResponse,
+      },
+    } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    // The pass resolves (no crash) and records the truncation loudly.
+    const { schemas, failures } = await syncMetrics(resolution, fetcher);
+    expect(schemas[0].degraded).toBe(true);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      key: "revenue",
+      source: "demo.public.revenue",
+      // A thrown fetch is treated as a transport blip → transient (the caller's
+      // cache retries). The point of the test is that it is RECORDED, loudly.
+      transient: true,
+    });
+    expect(failures[0].reason).toMatch(/multi-chunk/i);
   });
 });
 
