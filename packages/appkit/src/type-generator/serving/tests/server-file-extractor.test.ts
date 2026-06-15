@@ -1,10 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { tryLoadAstGrep } from "../../../internal/ast-grep";
 import {
   extractServingEndpoints,
   findServerFile,
 } from "../server-file-extractor";
+
+// ast-grep is now loaded lazily (and memoized) the first time it is needed.
+// Warm that cache with the real `fs` up front, because the tests below stub
+// `fs.readFileSync` globally — and Node's underlying `require` reads module
+// files through `fs`, so a stub active at first-load time would break the
+// native-module require and, via memoization, poison every later test.
+beforeAll(() => {
+  tryLoadAstGrep();
+});
 
 describe("findServerFile", () => {
   afterEach(() => {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Lang, parse } from "@ast-grep/napi";
 import { Command } from "commander";
+import { AstGrepUnavailableError, loadAstGrepOrThrow } from "../ast-grep";
 
 interface Rule {
   id: string;
@@ -74,6 +74,7 @@ interface Violation {
 }
 
 function lintFile(filePath: string, rules: Rule[]): Violation[] {
+  const { Lang, parse } = loadAstGrepOrThrow();
   const violations: Violation[] = [];
   const content = fs.readFileSync(filePath, "utf-8");
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
@@ -119,9 +120,17 @@ function runLint() {
 
   const allViolations: Violation[] = [];
 
-  for (const file of files) {
-    const violations = lintFile(file, rules);
-    allViolations.push(...violations);
+  try {
+    for (const file of files) {
+      const violations = lintFile(file, rules);
+      allViolations.push(...violations);
+    }
+  } catch (error) {
+    if (error instanceof AstGrepUnavailableError) {
+      console.error(error.message);
+      process.exit(1);
+    }
+    throw error;
   }
 
   if (allViolations.length === 0) {

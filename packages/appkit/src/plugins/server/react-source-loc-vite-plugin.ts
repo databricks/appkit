@@ -1,7 +1,11 @@
 import path from "node:path";
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import type { SgNode } from "@ast-grep/napi";
 import MagicString from "magic-string";
 import type { Plugin } from "vite";
+import { tryLoadAstGrep } from "../../internal/ast-grep";
+
+/** Warn at most once per process when ast-grep is unavailable (dev-only plugin). */
+let warnedAstGrepUnavailable = false;
 
 const JSX_ELEMENT_MATCHER = {
   rule: {
@@ -67,6 +71,23 @@ export function reactSourceLocPlugin(
 
     transform(code, id) {
       if (!shouldTransform(id)) return;
+
+      // Lazy-load ast-grep. If its native binary is unavailable, degrade: skip
+      // source-location annotation (a dev convenience) instead of crashing the
+      // dev server. Warn once so the cause is visible without spamming the log.
+      const astGrep = tryLoadAstGrep();
+      if (!astGrep) {
+        if (!warnedAstGrepUnavailable) {
+          warnedAstGrepUnavailable = true;
+          console.warn(
+            "[appkit:react-source-loc] @ast-grep/napi's native binary is " +
+              `unavailable (${process.platform}-${process.arch}); skipping ` +
+              "data-source annotation for this dev session.",
+          );
+        }
+        return;
+      }
+      const { Lang, parse } = astGrep;
 
       const cleanId = cleanModuleId(id);
       const root = parse(Lang.Tsx, code).root();

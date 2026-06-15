@@ -1,13 +1,17 @@
 import path from "node:path";
-import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
 import { templateFieldEntrySchema } from "../../../../schemas/manifest";
+import { loadAstGrepOrThrow } from "../../../ast-grep";
 import {
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
   shouldAllowJsManifestForPackage,
 } from "./sync";
+
+// Load ast-grep through the SDK's lazy loader (the binary is present in CI/dev,
+// where these tests run). Mirrors how the command itself obtains it.
+const { Lang, parse } = loadAstGrepOrThrow();
 
 describe("plugin sync", () => {
   describe("isWithinDirectory", () => {

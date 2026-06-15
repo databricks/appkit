@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import type { SgNode } from "@ast-grep/napi";
+import { tryLoadAstGrep } from "../../internal/ast-grep";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
 
@@ -47,6 +48,23 @@ export function extractServingEndpoints(
     logger.debug("Could not read server file: %s", serverFilePath);
     return null;
   }
+
+  // Lazy-load ast-grep. If its native binary is unavailable (e.g. an install
+  // that omitted optional deps), degrade gracefully: callers fall back to the
+  // explicit `endpoints` option or the DATABRICKS_SERVING_ENDPOINT_NAME env var.
+  const astGrep = tryLoadAstGrep();
+  if (!astGrep) {
+    logger.warn(
+      "@ast-grep/napi's native binary is unavailable (%s-%s); skipping " +
+        "serving-endpoint auto-discovery for %s. Pass endpoints explicitly via " +
+        "appKitServingTypesPlugin({ endpoints }) or set DATABRICKS_SERVING_ENDPOINT_NAME.",
+      process.platform,
+      process.arch,
+      serverFilePath,
+    );
+    return null;
+  }
+  const { Lang, parse } = astGrep;
 
   const lang = serverFilePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
   const ast = parse(lang, content);

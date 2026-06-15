@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Lang, parse } from "@ast-grep/napi";
 import { Command } from "commander";
+import { AstGrepUnavailableError, loadAstGrepOrThrow } from "../../ast-grep";
 
 const SEARCH_DIRS = ["server", "src", "."];
 const CANDIDATE_NAMES = ["server.ts", "index.ts"];
@@ -55,6 +55,7 @@ function findTsFiles(dir: string, files: string[] = []): string[] {
 }
 
 function isAlreadyMigrated(content: string): boolean {
+  const { Lang, parse } = loadAstGrepOrThrow();
   const ast = parse(Lang.TypeScript, content);
   const root = ast.root();
   return root.findAll("createApp({ $$$PROPS })").some((match) => {
@@ -435,31 +436,39 @@ function runCodemod(options: { path?: string; write?: boolean }) {
 
   let hasChanges = false;
 
-  for (const file of files) {
-    const relPath = path.relative(rootDir, file);
-    const result = migrateFile(file);
+  try {
+    for (const file of files) {
+      const relPath = path.relative(rootDir, file);
+      const result = migrateFile(file);
 
-    for (const warning of result.warnings) {
-      console.log(`  ${relPath}: ${warning}`);
-    }
-
-    if (!result.migrated) {
-      if (result.warnings.length === 0) {
-        console.log(`  ${relPath}: No migration needed.`);
+      for (const warning of result.warnings) {
+        console.log(`  ${relPath}: ${warning}`);
       }
-      continue;
-    }
 
-    hasChanges = true;
+      if (!result.migrated) {
+        if (result.warnings.length === 0) {
+          console.log(`  ${relPath}: No migration needed.`);
+        }
+        continue;
+      }
 
-    if (write) {
-      fs.writeFileSync(file, result.content, "utf-8");
-      console.log(`  ${relPath}: Migrated successfully.`);
-    } else {
-      console.log(`\n--- ${relPath} (dry run) ---`);
-      console.log(result.content);
-      console.log("---");
+      hasChanges = true;
+
+      if (write) {
+        fs.writeFileSync(file, result.content, "utf-8");
+        console.log(`  ${relPath}: Migrated successfully.`);
+      } else {
+        console.log(`\n--- ${relPath} (dry run) ---`);
+        console.log(result.content);
+        console.log("---");
+      }
     }
+  } catch (error) {
+    if (error instanceof AstGrepUnavailableError) {
+      console.error(error.message);
+      process.exit(1);
+    }
+    throw error;
   }
 
   if (hasChanges && !write) {

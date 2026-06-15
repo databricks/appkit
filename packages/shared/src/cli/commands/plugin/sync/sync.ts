@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import type { SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 import {
   TEMPLATE_SCAFFOLDING,
   templateFieldEntrySchema,
 } from "../../../../schemas/manifest";
+import { AstGrepUnavailableError, loadAstGrepOrThrow } from "../../../ast-grep";
 import {
   loadManifestFromFile,
   type ResolvedManifest,
@@ -646,6 +647,9 @@ async function runPluginsSync(options: {
     }
 
     const content = fs.readFileSync(serverFile, "utf-8");
+    // Parsing the server file requires ast-grep. Load it lazily and surface a
+    // clear, actionable error if its native binary is unavailable.
+    const { Lang, parse } = loadAstGrepOrThrow();
     const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
     const ast = parse(lang, content);
     const root = ast.root();
@@ -914,7 +918,9 @@ Examples:
   )
   .action((opts) =>
     runPluginsSync(opts).catch((err) => {
-      console.error(err);
+      // A missing ast-grep binary already carries an actionable message; print
+      // just that (not a raw stack). Anything else keeps full-error logging.
+      console.error(err instanceof AstGrepUnavailableError ? err.message : err);
       process.exit(1);
     }),
   );

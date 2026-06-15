@@ -93,9 +93,14 @@ async function runGenerateTypes(
     });
     console.log(`Generated serving types: ${servingOutFile}`);
   } catch (error) {
+    // Only treat this as "appkit is not installed" when the module that could
+    // not be found is actually @databricks/appkit (the dynamic import above).
+    // A bare "Cannot find module" check would misreport unrelated failures —
+    // e.g. a missing @ast-grep/napi native binary — as a missing appkit.
     if (
       error instanceof Error &&
-      error.message.includes("Cannot find module")
+      error.message.includes("Cannot find module") &&
+      error.message.includes("@databricks/appkit")
     ) {
       console.error(
         "Error: The 'generate-types' command is only available in @databricks/appkit.",
