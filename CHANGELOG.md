@@ -66,6 +66,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.41.5](https://github.com/databricks/appkit/compare/v0.41.4...v0.41.5) (2026-06-16)
+
+### appkit-ui
+
+* **appkit-ui:** dark mode fixes for charts ([#452](https://github.com/databricks/appkit/issues/452)) ([c0400f7](https://github.com/databricks/appkit/commit/c0400f7cf2a581ba41ef7fdefc69d7966b726c24))
+
+
 ## [0.41.4](https://github.com/databricks/appkit/compare/v0.41.3...v0.41.4) (2026-06-12)
 
 ### appkit
