@@ -1,4 +1,11 @@
 packages:
-  - "packages/*"
-  - "apps/*"
-  - "docs"
+  - packages/*
+  - apps/*
+  - docs
+
+onlyBuiltDependencies:
+  - bufferutil
+  - core-js
+  - core-js-pure
+  - esbuild
+  - protobufjs

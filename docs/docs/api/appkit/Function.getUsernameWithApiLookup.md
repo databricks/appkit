@@ -1,7 +1,7 @@
 # Function: getUsernameWithApiLookup()
 
 ```ts
-function getUsernameWithApiLookup(config?: Partial<LakebasePoolConfig>): Promise<string | undefined>;
+function getUsernameWithApiLookup(config?: Partial<LakebaseAuthConfig>): Promise<string | undefined>;
 ```
 
 Resolves the PostgreSQL username for a Lakebase connection.
@@ -24,7 +24,7 @@ caller can decide whether to proceed or surface an error.
 
 | Parameter | Type |
 | ------ | ------ |
-| `config?` | `Partial`\<[`LakebasePoolConfig`](Interface.LakebasePoolConfig.md)\> |
+| `config?` | `Partial`\<`LakebaseAuthConfig`\> |
 
 ## Returns
 

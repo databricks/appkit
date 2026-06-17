@@ -526,6 +526,9 @@ importers:
 
   packages/lakebase:
     dependencies:
+      '@databricks/lakebase-auth':
+        specifier: workspace:*
+        version: link:../lakebase-auth
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
@@ -539,6 +542,12 @@ importers:
       '@types/pg':
         specifier: 8.16.0
         version: 8.16.0
+
+  packages/lakebase-auth:
+    dependencies:
+      '@databricks/sdk-experimental':
+        specifier: 0.17.0
+        version: 0.17.0
 
   packages/shared:
     dependencies:

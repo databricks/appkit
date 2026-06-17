@@ -53,6 +53,14 @@ export default defineConfig({
       {
         plugins: [tsconfigPaths()],
         test: {
+          name: "lakebase-auth",
+          root: "./packages/lakebase-auth",
+          environment: "node",
+        },
+      },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
           name: "shared",
           root: "./packages/shared",
           environment: "node",

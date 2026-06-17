@@ -1,7 +1,7 @@
 # Function: getWorkspaceClient()
 
 ```ts
-function getWorkspaceClient(config: Partial<LakebasePoolConfig>): WorkspaceClient;
+function getWorkspaceClient(config: Partial<LakebaseAuthConfig>): WorkspaceClient;
 ```
 
 Get workspace client from config or SDK default auth chain
@@ -10,7 +10,7 @@ Get workspace client from config or SDK default auth chain
 
 | Parameter | Type |
 | ------ | ------ |
-| `config` | `Partial`\<[`LakebasePoolConfig`](Interface.LakebasePoolConfig.md)\> |
+| `config` | `Partial`\<`LakebaseAuthConfig`\> |
 
 ## Returns
 

@@ -8,10 +8,13 @@ Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with a
 
 **Key features:**
 - Standard `pg.Pool` compatible with any PostgreSQL library or ORM
-- Automatic OAuth token refresh (1-hour tokens, 2-minute refresh buffer)
+- Automatic OAuth token refresh (1-hour tokens, 2-minute refresh buffer) — eager (background) by default, or lazy (on-demand)
+- Retries transient credential-fetch failures
 - Token caching to minimize API calls
 - Built-in OpenTelemetry instrumentation (query duration, pool connections, token refresh)
 - AppKit logger configured by default for query and connection events
+
+The underlying OAuth credential generation and token-refresh logic lives in the lightweight, driver-agnostic [`@databricks/lakebase-auth`](https://www.npmjs.com/package/@databricks/lakebase-auth) package, which can also be used standalone with `pg`, `postgres.js`, or `Bun.SQL`.
 
 ## Getting started with the Lakebase
 

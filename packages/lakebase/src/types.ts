@@ -1,5 +1,23 @@
+import type {
+  RefreshMode,
+  RequestedClaims,
+  RetryOptions,
+} from "@databricks/lakebase-auth";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { PoolConfig } from "pg";
+
+// Re-export the auth/credential types so existing `@databricks/lakebase`
+// imports keep working after the split into `@databricks/lakebase-auth`.
+export type {
+  Credential,
+  DatabaseCredential,
+  GenerateDatabaseCredentialRequest,
+  RefreshMode,
+  RequestedClaims,
+  RequestedResource,
+  RetryOptions,
+} from "@databricks/lakebase-auth";
+export { RequestedClaimsPermissionSet } from "@databricks/lakebase-auth";
 
 /**
  * Optional logger interface for the Lakebase driver.
@@ -82,6 +100,38 @@ export interface LakebasePoolConfig extends PoolConfig {
   sslMode?: "require" | "disable" | "prefer";
 
   /**
+   * Optional UC claims for fine-grained Unity Catalog table permissions on the
+   * generated Postgres token.
+   */
+  claims?: RequestedClaims[];
+
+  /**
+   * Token refresh strategy.
+   *
+   * - `"eager"` (default): fetch a token immediately and refresh it in the
+   *   background before it expires. Best for time-sensitive, user-facing apps.
+   * - `"lazy"`: fetch a token on first use and refresh it on demand.
+   *
+   * @default "eager"
+   */
+  refresh?: RefreshMode;
+
+  /**
+   * How long before token expiry to refresh, in milliseconds.
+   *
+   * @default 120000 (2 minutes)
+   */
+  earlyRefreshMs?: number;
+
+  /**
+   * Retry options for transient credential-fetch failures (e.g. the OAuth
+   * server being briefly unreachable).
+   *
+   * @default { schedule: [50, 500, 5000] }
+   */
+  retry?: RetryOptions;
+
+  /**
    * Telemetry configuration
    *
    * - `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured
@@ -114,98 +164,4 @@ export interface LakebasePoolConfig extends PoolConfig {
    * ```
    */
   logger?: Logger | LoggerConfig;
-}
-
-// ---------------------------------------------------------------------------
-// Authentication types for Lakebase Postgres OAuth token generation
-// @see https://docs.databricks.com/aws/en/oltp/projects/authentication
-// ---------------------------------------------------------------------------
-
-/**
- * Database credentials with OAuth token for Postgres connection
- */
-export interface DatabaseCredential {
-  /** OAuth token to use as the password when connecting to Postgres */
-  token: string;
-
-  /**
-   * Token expiration time in UTC (ISO 8601 format)
-   * Tokens expire after 1 hour from generation
-   * @example "2026-02-06T17:07:00Z"
-   */
-  expire_time: string;
-}
-
-/**
- * Permission set for Unity Catalog table access
- */
-export enum RequestedClaimsPermissionSet {
-  /**
-   * Read-only access to specified UC tables
-   */
-  READ_ONLY = "READ_ONLY",
-}
-
-/**
- * Resource to request permissions for in Unity Catalog
- */
-export interface RequestedResource {
-  /**
-   * Unity Catalog table name to request access to
-   * @example "catalog.schema.table"
-   */
-  table_name?: string;
-
-  /**
-   * Generic resource name for non-table resources
-   */
-  unspecified_resource_name?: string;
-}
-
-/**
- * Optional claims for fine-grained Unity Catalog table permissions
- * When specified, the returned token will be scoped to only the requested tables
- */
-export interface RequestedClaims {
-  /**
-   * Permission level to request
-   */
-  permission_set?: RequestedClaimsPermissionSet;
-
-  /**
-   * List of UC resources to request access to
-   */
-  resources?: RequestedResource[];
-}
-
-/**
- * Request parameters for generating database OAuth credentials
- */
-export interface GenerateDatabaseCredentialRequest {
-  /**
-   * Endpoint resource path. Retrieve using the Databricks CLI:
-   * ```
-   * databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
-   * ```
-   * Use the `name` field from the output.
-   *
-   * @example "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-identifier}"
-   */
-  endpoint: string;
-
-  /**
-   * Optional claims for fine-grained UC table permissions.
-   * When specified, the token will only grant access to the specified tables.
-   *
-   * @example
-   * ```typescript
-   * {
-   *   claims: [{
-   *     permission_set: RequestedClaimsPermissionSet.READ_ONLY,
-   *     resources: [{ table_name: "catalog.schema.users" }]
-   *   }]
-   * }
-   * ```
-   */
-  claims?: RequestedClaims[];
 }

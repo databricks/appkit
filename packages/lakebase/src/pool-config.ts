@@ -1,27 +1,146 @@
+import {
+  type Credential,
+  type FetchCredential,
+  generateDatabaseCredential,
+  getPgConfig,
+  getWorkspaceClient,
+  type LogFn,
+} from "@databricks/lakebase-auth";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { PoolConfig } from "pg";
-import { getUsernameSync, parsePoolConfig } from "./config";
-import { type DriverTelemetry, initTelemetry } from "./telemetry";
-import { createTokenRefreshCallback } from "./token-refresh";
+import {
+  type DriverTelemetry,
+  initTelemetry,
+  SpanStatusCode,
+} from "./telemetry";
 import type { LakebasePoolConfig, Logger } from "./types";
 
+/** Default pool sizing values for the Lakebase connector */
+const poolDefaults = {
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+};
+
+/** Bridge a {@link Logger} to the auth package's structured `onLog` callback. */
+export function loggerToOnLog(logger?: Logger): LogFn | undefined {
+  if (!logger) return undefined;
+  return (level, message, ...args) => logger[level](message, ...args);
+}
+
 /**
- * Map an SSL mode string to the corresponding `pg` SSL configuration.
- *
- * - `"require"` -- SSL enabled with certificate verification
- * - `"prefer"`  -- SSL enabled without certificate verification (try SSL, accept any cert)
- * - `"disable"` -- SSL disabled
+ * Build a credential fetcher that wraps {@link generateDatabaseCredential} with
+ * OpenTelemetry tracing/metrics and logger integration. Injected into the auth
+ * package's password provider so observability stays in `@databricks/lakebase`.
  */
-function mapSslConfig(
-  sslMode: "require" | "prefer" | "disable",
-): PoolConfig["ssl"] {
-  switch (sslMode) {
-    case "require":
-      return { rejectUnauthorized: true };
-    case "prefer":
-      return { rejectUnauthorized: false };
-    case "disable":
-      return false;
-  }
+export function createTelemetryFetchCredential(deps: {
+  userConfig: Partial<LakebasePoolConfig>;
+  endpoint: string;
+  telemetry: DriverTelemetry;
+  logger?: Logger;
+}): FetchCredential {
+  // Lazily initialize the workspace client on first password fetch.
+  let workspaceClient: WorkspaceClient | null =
+    deps.userConfig.workspaceClient ?? null;
+
+  return async (): Promise<Credential> => {
+    if (!workspaceClient) {
+      try {
+        workspaceClient = getWorkspaceClient(deps.userConfig);
+      } catch (error) {
+        deps.logger?.error("Failed to initialize workspace client: %O", error);
+        throw error;
+      }
+    }
+    const client = workspaceClient;
+
+    const startTime = Date.now();
+    try {
+      return await deps.telemetry.tracer.startActiveSpan(
+        "lakebase.token.refresh",
+        { attributes: { "lakebase.endpoint": deps.endpoint } },
+        async (span) => {
+          const credential = await generateDatabaseCredential(client, {
+            endpoint: deps.endpoint,
+            ...(deps.userConfig.claims
+              ? { claims: deps.userConfig.claims }
+              : {}),
+          });
+          const expiresAt = new Date(credential.expire_time).getTime();
+          span.setAttribute(
+            "lakebase.token.expires_at",
+            new Date(expiresAt).toISOString(),
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+          return { token: credential.token, expiresAt };
+        },
+      );
+    } catch (error) {
+      deps.logger?.error("Failed to fetch OAuth token: %O", {
+        error,
+        message: error instanceof Error ? error.message : String(error),
+        endpoint: deps.endpoint,
+      });
+      throw error;
+    } finally {
+      deps.telemetry.tokenRefreshDuration.record(Date.now() - startTime);
+    }
+  };
+}
+
+/**
+ * Build the Lakebase `pg.PoolConfig` along with a disposer that stops the
+ * background token refresh (used by {@link createLakebasePool} to clean up on
+ * `pool.end()`).
+ */
+export function buildLakebasePgConfig(
+  config?: Partial<LakebasePoolConfig>,
+  telemetry?: DriverTelemetry,
+  logger?: Logger,
+): { poolConfig: PoolConfig; dispose: () => void } {
+  const userConfig = config ?? {};
+  const onLog = loggerToOnLog(logger);
+
+  // Resolve the endpoint (with env fallback) so the telemetry-wrapped fetcher
+  // is used for OAuth auth regardless of whether the endpoint came from config
+  // or LAKEBASE_ENDPOINT. When neither endpoint nor password is set, getPgConfig
+  // below throws the appropriate configuration error.
+  const endpoint = userConfig.endpoint ?? process.env.LAKEBASE_ENDPOINT;
+
+  // Only wrap with telemetry when using OAuth (no native password provided).
+  const fetchCredential =
+    userConfig.password === undefined && endpoint !== undefined
+      ? createTelemetryFetchCredential({
+          userConfig,
+          endpoint,
+          telemetry: telemetry ?? initTelemetry(),
+          logger,
+        })
+      : undefined;
+
+  const { dispose, ...pg } = getPgConfig({
+    ...userConfig,
+    fetchCredential,
+    onLog,
+  });
+
+  const poolConfig: PoolConfig = {
+    host: pg.host,
+    port: pg.port,
+    user: pg.user,
+    database: pg.database,
+    password: pg.password,
+    ssl: pg.ssl,
+    max: userConfig.max ?? poolDefaults.max,
+    idleTimeoutMillis:
+      userConfig.idleTimeoutMillis ?? poolDefaults.idleTimeoutMillis,
+    connectionTimeoutMillis:
+      userConfig.connectionTimeoutMillis ??
+      poolDefaults.connectionTimeoutMillis,
+  };
+
+  return { poolConfig, dispose };
 }
 
 /**
@@ -44,36 +163,7 @@ export function getLakebasePgConfig(
   telemetry?: DriverTelemetry,
   logger?: Logger,
 ): PoolConfig {
-  const userConfig = config ?? {};
-  const poolConfig = parsePoolConfig(userConfig);
-  const username = getUsernameSync(userConfig);
-
-  let passwordConfig: string | (() => string | Promise<string>) | undefined;
-
-  if (userConfig.password !== undefined) {
-    passwordConfig = userConfig.password;
-  } else if (poolConfig.endpoint) {
-    // endpoint is guaranteed here -- parsePoolConfig() throws if
-    // neither endpoint nor password is provided
-    passwordConfig = createTokenRefreshCallback({
-      userConfig,
-      endpoint: poolConfig.endpoint,
-      telemetry: telemetry ?? initTelemetry(),
-      logger,
-    });
-  }
-
-  return {
-    host: poolConfig.host,
-    port: poolConfig.port,
-    user: username,
-    database: poolConfig.database,
-    password: passwordConfig,
-    ssl: poolConfig.ssl ?? mapSslConfig(poolConfig.sslMode),
-    max: poolConfig.max,
-    idleTimeoutMillis: poolConfig.idleTimeoutMillis,
-    connectionTimeoutMillis: poolConfig.connectionTimeoutMillis,
-  };
+  return buildLakebasePgConfig(config, telemetry, logger).poolConfig;
 }
 
 /**

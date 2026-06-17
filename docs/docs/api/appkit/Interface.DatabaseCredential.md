@@ -1,6 +1,6 @@
 # Interface: DatabaseCredential
 
-Database credentials with OAuth token for Postgres connection
+Database credentials with OAuth token for Postgres connection.
 
 ## Properties
 

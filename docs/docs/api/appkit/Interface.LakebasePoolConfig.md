@@ -18,6 +18,33 @@ https://docs.databricks.com/aws/en/oltp/projects/authentication
 
 ## Properties
 
+### claims?
+
+```ts
+optional claims: RequestedClaims[];
+```
+
+Optional UC claims for fine-grained Unity Catalog table permissions on the
+generated Postgres token.
+
+***
+
+### earlyRefreshMs?
+
+```ts
+optional earlyRefreshMs: number;
+```
+
+How long before token expiry to refresh, in milliseconds.
+
+#### Default
+
+```ts
+120000 (2 minutes)
+```
+
+***
+
 ### endpoint?
 
 ```ts
@@ -69,6 +96,43 @@ const pool = createLakebasePool({
 const pool = createLakebasePool({
   logger: { debug: true, info: true, error: true }
 });
+```
+
+***
+
+### refresh?
+
+```ts
+optional refresh: RefreshMode;
+```
+
+Token refresh strategy.
+
+- `"eager"` (default): fetch a token immediately and refresh it in the
+  background before it expires. Best for time-sensitive, user-facing apps.
+- `"lazy"`: fetch a token on first use and refresh it on demand.
+
+#### Default
+
+```ts
+"eager"
+```
+
+***
+
+### retry?
+
+```ts
+optional retry: RetryOptions;
+```
+
+Retry options for transient credential-fetch failures (e.g. the OAuth
+server being briefly unreachable).
+
+#### Default
+
+```ts
+{ schedule: [50, 500, 5000] }
 ```
 
 ***

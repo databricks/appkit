@@ -1,5 +1,8 @@
-export { getUsernameWithApiLookup, getWorkspaceClient } from "./config";
-export { generateDatabaseCredential } from "./credentials";
+export {
+  generateDatabaseCredential,
+  getUsernameWithApiLookup,
+  getWorkspaceClient,
+} from "@databricks/lakebase-auth";
 export { createLakebasePool } from "./pool";
 export {
   getLakebaseOrmConfig,
@@ -14,7 +17,9 @@ export type {
   LakebasePoolConfig,
   Logger,
   LoggerConfig,
+  RefreshMode,
   RequestedClaims,
   RequestedResource,
+  RetryOptions,
 } from "./types";
 export { RequestedClaimsPermissionSet } from "./types";

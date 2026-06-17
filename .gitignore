@@ -13,3 +13,5 @@ coverage
 .databricks
 
 .claude/scheduled_tasks.lock
+
+.cursor/

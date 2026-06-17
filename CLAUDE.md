@@ -28,7 +28,8 @@ Examples:
 /packages/
   /appkit/          - Core SDK with plugin architecture
   /appkit-ui/       - React components and JS utilities
-  /lakebase/        - Standalone Lakebase (PostgreSQL) connector package
+  /lakebase/        - Standalone Lakebase (PostgreSQL) connector package (pg.Pool + OTel)
+  /lakebase-auth/   - Driver-agnostic Lakebase OAuth credential/token-refresh package (SDK-only deps)
   /shared/          - Shared TypeScript types across packages
 
 /apps/
@@ -144,7 +145,7 @@ pnpm clean:full       # Remove build artifacts + node_modules
 
 ### Releasing
 
-This project uses a two-stage release pipeline. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` is released independently.
+This project uses a two-stage release pipeline. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` and `@databricks/lakebase-auth` are each released independently.
 
 #### Stage 1: Prepare (this repo)
 
@@ -154,7 +155,7 @@ The `prepare-release` workflow runs automatically on push to `main`:
 3. Builds, packs, and uploads artifacts (`.tgz`, changelog, SHA256 digests)
 4. **Does NOT** commit, tag, push, or publish — only uploads artifacts
 
-Lakebase has a separate `prepare-release-lakebase` workflow triggered by changes to `packages/lakebase/**`.
+Lakebase has a separate `prepare-release-lakebase` workflow triggered by changes to `packages/lakebase/**`, and `@databricks/lakebase-auth` has a `prepare-release-lakebase-auth` workflow triggered by changes to `packages/lakebase-auth/**`.
 
 #### Stage 2: Publish (secure repo)
 
@@ -248,10 +249,11 @@ The AnalyticsPlugin provides SQL query execution:
 
 ### Lakebase Connector
 
-Lakebase support is split into two layers:
+Lakebase support is split into three layers:
 
-1. **`@databricks/lakebase` package** (`packages/lakebase/`) - Standalone connector with OAuth token refresh, ORM helpers, and full API. See the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
-2. **AppKit integration** (`packages/appkit/src/connectors/lakebase/`) - Thin wrapper that adds AppKit logger integration and re-exports the standalone package.
+1. **`@databricks/lakebase-auth` package** (`packages/lakebase-auth/`) - Driver-agnostic OAuth credential generation and token refresh (eager by default, plus lazy; retries transient failures). Dependency-light (Databricks SDK only, no `pg`/OTel). Exposes `getPgConfig()` and the low-level `createPasswordProvider()` for use with `pg`, `postgres.js`, `Bun.SQL`, etc. See the [`@databricks/lakebase-auth` README](https://github.com/databricks/appkit/blob/main/packages/lakebase-auth/README.md).
+2. **`@databricks/lakebase` package** (`packages/lakebase/`) - Builds on `@databricks/lakebase-auth` to provide a ready-to-use `pg.Pool` (`createLakebasePool`) with OpenTelemetry instrumentation and logger integration, plus ORM helpers. See the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
+3. **AppKit integration** (`packages/appkit/src/connectors/lakebase/`) - Thin wrapper that adds AppKit logger integration and re-exports the standalone package.
 
 **Quick Example:**
 ```typescript

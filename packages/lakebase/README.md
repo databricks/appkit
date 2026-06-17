@@ -8,13 +8,16 @@ PostgreSQL driver for Databricks Lakebase Autoscaling with automatic OAuth token
 
 It:
 
-- Returns a standard `pg.Pool` - works with any PostgreSQL library or ORM
-- Automatically refreshes OAuth tokens (1-hour lifetime, with 2-minute buffer)
+- Returns a standard `pg.Pool` - works with many PostgreSQL libraries and ORMs
+- Automatically refreshes OAuth tokens (1-hour lifetime, with 2-minute buffer) — **eagerly** in the background by default, or **lazily** on demand
+- Retries transient credential-fetch failures (e.g. a briefly unreachable OAuth server)
 - Caches tokens to minimize API calls
 - Zero configuration with environment variables
 - Optional OpenTelemetry instrumentation
 
-**NOTE:** This package is NOT compatible with the Databricks Lakebase Provisioned.
+OAuth credential generation and token-refresh logic lives in the smaller, driver-agnostic [`@databricks/lakebase-auth`](https://www.npmjs.com/package/@databricks/lakebase-auth) package. Use that package directly if you want a Postgres config for `postgres.js`, `Bun.SQL`, or `pg` without the bundled `pg.Pool` and OpenTelemetry instrumentation.
+
+**NOTE:** This package is NOT compatible with Databricks Lakebase Provisioned.
 
 ## Installation
 
@@ -79,6 +82,28 @@ The driver supports Databricks authentication via:
 
 See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/auth/index.html) or [Lakebase Autoscaling authentication docs](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) for more information.
 
+## Token Refresh & Retries
+
+OAuth tokens (1-hour lifetime) are refreshed automatically. Two strategies are available via the `refresh` option:
+
+| Mode                | Behavior                                                                | Best for                                  |
+| ------------------- | ----------------------------------------------------------------------- | ----------------------------------------- |
+| `"eager"` (default) | Fetches a token at pool creation and refreshes in the background before expiry | Time-sensitive, user-facing apps and APIs |
+| `"lazy"`            | Fetches on first connection and refreshes on demand when nearing expiry | Background jobs, infrequent connections   |
+
+```typescript
+const pool = createLakebasePool({ refresh: "lazy" });
+```
+
+The eager refresh uses an `unref`'d timer (never keeps the process alive on its own) and is cancelled automatically when you call `pool.end()`.
+
+Transient credential-fetch failures are retried automatically (default schedule `[50, 500, 5000]` ms). Customize or disable with the `retry` option:
+
+```typescript
+createLakebasePool({ retry: { schedule: [100, 1000] } }); // custom backoff
+createLakebasePool({ retry: { schedule: [] } }); // disable retries
+```
+
 ## PostgreSQL Username Resolution
 
 The driver resolves the PostgreSQL username (`user` configuration option) using the following priority order:
@@ -89,7 +114,7 @@ The driver resolves the PostgreSQL username (`user` configuration option) using 
 
 If none of these are set, the driver throws a `ConfigurationError`.
 
-### Automatic resolution via Workspace API
+### Automatic Resolution via Workspace API
 
 For human users authenticating with a PAT token or browser OAuth via `~/.databrickscfg`, none of the above are typically set. Use `getUsernameWithApiLookup` to automatically fetch the username from the Databricks workspace before creating the pool:
 
@@ -121,6 +146,9 @@ const pool = createLakebasePool({ user });
 | `max`                     | -                                  | Max pool connections                    | `10`                    |
 | `idleTimeoutMillis`       | -                                  | Idle connection timeout                 | `30000`                 |
 | `connectionTimeoutMillis` | -                                  | Connection timeout                      | `10000`                 |
+| `refresh`                 | -                                  | Token refresh strategy (`eager`/`lazy`) | `eager`                 |
+| `earlyRefreshMs`          | -                                  | How long before expiry to refresh       | `120000`                |
+| `retry`                   | -                                  | Retry schedule for credential fetches   | `[50, 500, 5000]`       |
 | `logger`                  | -                                  | Logger instance or config               | `{ error: true }`       |
 
 ## Logging

@@ -1,36 +1,48 @@
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-import type pg from "pg";
 import { ConfigurationError, ValidationError } from "./errors";
-import type { LakebasePoolConfig } from "./types";
+import type { LakebaseAuthConfig, SslConfig } from "./types";
 
-/** Default configuration values for the Lakebase connector */
+/** Default connection values for Lakebase auth */
 const defaults = {
   port: 5432,
   sslMode: "require" as const,
-  max: 10,
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
 };
 
 const VALID_SSL_MODES = ["require", "disable", "prefer"] as const;
 type SslMode = (typeof VALID_SSL_MODES)[number];
 
-export interface ParsedPoolConfig {
+/** Connection essentials parsed from config and environment variables. */
+export interface ParsedAuthConfig {
   endpoint?: string;
   host: string;
   database: string;
   port: number;
   sslMode: SslMode;
-  ssl?: pg.PoolConfig["ssl"];
-  max: number;
-  idleTimeoutMillis: number;
-  connectionTimeoutMillis: number;
+  ssl?: SslConfig;
 }
 
-/** Parse pool configuration from provided config and environment variables */
-export function parsePoolConfig(
-  userConfig?: Partial<LakebasePoolConfig>,
-): ParsedPoolConfig {
+/**
+ * Map an SSL mode string to the corresponding SSL configuration.
+ *
+ * - `"require"` -- SSL enabled with certificate verification
+ * - `"prefer"`  -- SSL enabled without certificate verification (try SSL, accept any cert)
+ * - `"disable"` -- SSL disabled
+ */
+export function mapSslConfig(sslMode: SslMode): SslConfig {
+  switch (sslMode) {
+    case "require":
+      return { rejectUnauthorized: true };
+    case "prefer":
+      return { rejectUnauthorized: false };
+    case "disable":
+      return false;
+  }
+}
+
+/** Parse connection configuration from provided config and environment variables */
+export function parseConfig(
+  userConfig?: Partial<LakebaseAuthConfig>,
+): ParsedAuthConfig {
   // Get endpoint (required only for OAuth auth)
   const endpoint = userConfig?.endpoint ?? process.env.LAKEBASE_ENDPOINT;
 
@@ -65,15 +77,7 @@ export function parsePoolConfig(
 
   // Get SSL mode (optional, default from defaults)
   const rawSslMode = userConfig?.sslMode ?? process.env.PGSSLMODE ?? undefined;
-
   const sslMode = validateSslMode(rawSslMode) ?? defaults.sslMode;
-
-  // Pool options (with defaults)
-  const max = userConfig?.max ?? defaults.max;
-  const idleTimeoutMillis =
-    userConfig?.idleTimeoutMillis ?? defaults.idleTimeoutMillis;
-  const connectionTimeoutMillis =
-    userConfig?.connectionTimeoutMillis ?? defaults.connectionTimeoutMillis;
 
   return {
     endpoint,
@@ -82,9 +86,6 @@ export function parsePoolConfig(
     port,
     sslMode,
     ssl: userConfig?.ssl,
-    max,
-    idleTimeoutMillis,
-    connectionTimeoutMillis,
   };
 }
 
@@ -107,7 +108,7 @@ function validateSslMode(value: string | undefined): SslMode | undefined {
 
 /** Get workspace client from config or SDK default auth chain */
 export function getWorkspaceClient(
-  config: Partial<LakebasePoolConfig>,
+  config: Partial<LakebaseAuthConfig>,
 ): WorkspaceClient {
   // Priority 1: Explicit workspaceClient in config
   if (config.workspaceClient) {
@@ -121,7 +122,7 @@ export function getWorkspaceClient(
 }
 
 /** Get username synchronously from config or environment */
-export function getUsernameSync(config: Partial<LakebasePoolConfig>): string {
+export function getUsernameSync(config: Partial<LakebaseAuthConfig>): string {
   // Priority 1: Explicit user in config
   if (config.user) {
     return config.user;
@@ -162,7 +163,7 @@ export function getUsernameSync(config: Partial<LakebasePoolConfig>): string {
  * caller can decide whether to proceed or surface an error.
  */
 export async function getUsernameWithApiLookup(
-  config?: Partial<LakebasePoolConfig>,
+  config?: Partial<LakebaseAuthConfig>,
 ): Promise<string | undefined> {
   try {
     return getUsernameSync(config ?? {});

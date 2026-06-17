@@ -32,12 +32,15 @@ vi.mock("pg", () => {
   };
 });
 
-// Mock generateDatabaseCredential
-vi.mock("../credentials", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../credentials")>();
+// Mock the auth package: keep the real config/provider/caching logic, but stub
+// out the network-bound credential generation and workspace-client creation.
+vi.mock("@databricks/lakebase-auth", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@databricks/lakebase-auth")>();
   return {
     ...actual,
     generateDatabaseCredential: vi.fn(),
+    getWorkspaceClient: vi.fn(() => ({ config: { host: "test" } })),
   };
 });
 
@@ -117,8 +120,9 @@ describe("createLakebasePool", () => {
     process.env.PGUSER = "test-user@example.com";
 
     // Setup mock for generateDatabaseCredential
-    const utils = await import("../credentials");
-    mockGenerateCredential = utils.generateDatabaseCredential as any;
+    const auth = await import("@databricks/lakebase-auth");
+    mockGenerateCredential =
+      auth.generateDatabaseCredential as unknown as ReturnType<typeof vi.fn>;
     mockGenerateCredential.mockResolvedValue({
       token: "test-oauth-token-12345",
       expire_time: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
@@ -285,7 +289,17 @@ describe("createLakebasePool", () => {
       expect(typeof pool.options.password).toBe("function");
     });
 
-    test("should fetch OAuth token when password callback is invoked", async () => {
+    test("should eagerly fetch a token on pool creation by default", () => {
+      const workspaceClient = { config: { host: "test" } } as any;
+
+      createLakebasePool({ workspaceClient });
+
+      // Eager mode (the default) fetches a token at construction time,
+      // without the password callback being invoked.
+      expect(mockGenerateCredential).toHaveBeenCalledTimes(1);
+    });
+
+    test("should fetch OAuth token when password callback is invoked (lazy)", async () => {
       const workspaceClient = {
         test: "client",
         config: { host: "test" },
@@ -293,9 +307,12 @@ describe("createLakebasePool", () => {
       const pool = createLakebasePool({
         workspaceClient,
         endpoint: "projects/test/branches/main/endpoints/primary",
+        refresh: "lazy",
       });
 
-      // Invoke the password callback
+      // Lazy mode does not fetch until the callback is invoked.
+      expect(mockGenerateCredential).not.toHaveBeenCalled();
+
       const passwordFn = pool.options.password as () => Promise<string>;
       const password = await passwordFn();
 
@@ -309,6 +326,7 @@ describe("createLakebasePool", () => {
       const workspaceClient = { config: { host: "test" } } as any;
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;
@@ -340,6 +358,7 @@ describe("createLakebasePool", () => {
 
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;
@@ -362,6 +381,8 @@ describe("createLakebasePool", () => {
 
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
+        retry: { schedule: [] }, // disable retries for a fast, deterministic failure
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;
@@ -388,6 +409,7 @@ describe("createLakebasePool", () => {
 
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;
@@ -404,6 +426,15 @@ describe("createLakebasePool", () => {
       expect(p1).toBe("deduped-token");
       expect(p2).toBe("deduped-token");
       expect(p3).toBe("deduped-token");
+    });
+
+    test("should clear background refresh when the pool is closed", async () => {
+      const workspaceClient = { config: { host: "test" } } as any;
+      const pool = createLakebasePool({ workspaceClient });
+
+      // pool.end is wrapped to dispose the eager refresh timer.
+      expect(pool.end.name).toBe("endWithDispose");
+      await expect(pool.end()).resolves.toBeUndefined();
     });
   });
 
@@ -578,6 +609,7 @@ describe("createLakebasePool", () => {
       const workspaceClient = { config: { host: "test" } } as any;
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;
@@ -591,6 +623,7 @@ describe("createLakebasePool", () => {
       const workspaceClient = { config: { host: "test" } } as any;
       const pool = createLakebasePool({
         workspaceClient,
+        refresh: "lazy",
       });
 
       const passwordFn = pool.options.password as () => Promise<string>;

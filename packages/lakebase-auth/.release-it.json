@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/release-it@19/schema/release-it.json",
+  "git": {
+    "commit": false,
+    "tag": false,
+    "push": false,
+    "requireBranch": false,
+    "requireCleanWorkingDir": false,
+    "requireCommits": true,
+    "requireCommitsFail": false,
+    "tagMatch": "lakebase-auth-v*",
+    "tagName": "lakebase-auth-v${version}",
+    "getLatestTagFromAllRefs": true,
+    "commitsPath": "."
+  },
+  "github": {
+    "release": false
+  },
+  "npm": false,
+  "hooks": {},
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": {
+        "name": "conventionalcommits",
+        "bumpStrict": true
+      },
+      "infile": "changelog-diff.md",
+      "gitRawCommitsOpts": { "path": "." },
+      "commitsOpts": { "path": "." }
+    }
+  }
+}

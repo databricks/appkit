@@ -1,5 +1,5 @@
 /**
- * Base error class for Lakebase driver errors.
+ * Base error class for Lakebase auth errors.
  */
 export abstract class LakebaseError extends Error {
   abstract readonly code: string;

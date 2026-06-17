@@ -1,6 +1,6 @@
 import pg from "pg";
 import { resolveLogger } from "./logger";
-import { getLakebasePgConfig } from "./pool-config";
+import { buildLakebasePgConfig } from "./pool-config";
 import {
   attachPoolMetrics,
   initTelemetry,
@@ -63,11 +63,26 @@ export function createLakebasePool(
 
   const telemetry = initTelemetry();
 
-  const poolConfig = getLakebasePgConfig(userConfig, telemetry, logger);
+  const { poolConfig, dispose } = buildLakebasePgConfig(
+    userConfig,
+    telemetry,
+    logger,
+  );
 
   const pool = new pg.Pool(poolConfig);
 
   attachPoolMetrics(pool, telemetry, logger);
+
+  // Stop the background token refresh (eager mode) when the pool is closed.
+  const origEnd = pool.end.bind(pool);
+  pool.end = function endWithDispose(
+    ...args: unknown[]
+  ): ReturnType<typeof pool.end> {
+    dispose();
+    return (origEnd as (...a: unknown[]) => unknown)(...args) as ReturnType<
+      typeof pool.end
+    >;
+  } as typeof pool.end;
 
   // Wrap pool.query to track query duration and create trace spans.
   // pg.Pool.query has 15+ overloads that are difficult to type-preserve,
