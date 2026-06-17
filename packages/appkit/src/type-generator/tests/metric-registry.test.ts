@@ -4,17 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
+import { readMetricConfig, resolveMetricConfig } from "../mv-registry/config";
 import {
-  buildMetricsMetadataBundle,
   createWorkspaceDescribeFetcher,
   extractMetricColumns,
-  generateMetricsMetadataJson,
-  generateMetricTypeDeclarations,
   parseDescribeTableExtendedJson,
-  readMetricConfig,
-  resolveMetricConfig,
-  syncMetrics,
-} from "../metric-registry";
+} from "../mv-registry/describe";
+import {
+  buildMetricsMetadataBundle,
+  generateMetricsMetadataJson,
+} from "../mv-registry/metadata";
+import { generateMetricTypeDeclarations } from "../mv-registry/render-types";
+import { syncMetrics } from "../mv-registry/sync";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
 /**

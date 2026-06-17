@@ -12,25 +12,23 @@ import {
   saveCache,
 } from "./cache";
 import {
-  createWorkspaceDescribeFetcher,
-  type DescribeFetcher,
-  emptyMetricSchema,
-  generateMetricsMetadataJson,
-  generateMetricTypeDeclarations,
-  type MetricColumnMetadata,
-  type MetricLane,
-  type MetricSchema,
-  type MetricSyncFailure,
-  type MetricSyncResult,
-  readMetricConfig,
-  resolveMetricConfig,
-  syncMetrics,
-} from "./metric-registry";
-import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
   resolveProjectRoot,
 } from "./migration";
+import { readMetricConfig, resolveMetricConfig } from "./mv-registry/config";
+import { createWorkspaceDescribeFetcher } from "./mv-registry/describe";
+import { generateMetricsMetadataJson } from "./mv-registry/metadata";
+import { generateMetricTypeDeclarations } from "./mv-registry/render-types";
+import { emptyMetricSchema, syncMetrics } from "./mv-registry/sync";
+import type {
+  DescribeFetcher,
+  MetricColumnMetadata,
+  MetricLane,
+  MetricSchema,
+  MetricSyncFailure,
+  MetricSyncResult,
+} from "./mv-registry/types";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
@@ -737,7 +735,7 @@ export async function generateFromEntryPoint(options: {
 // mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
 export const generateServingTypes = generateServingTypesImpl;
 
-// Re-export the metric-registry types so consumers (CLI, the type-generator
+// Re-export the mv-registry types so consumers (CLI, the type-generator
 // .d.ts shim in `packages/shared`) can pick them up from this entry point —
 // the .d.ts shim documents these as part of the package's public surface.
 export type {
@@ -761,7 +759,7 @@ export const METRIC_TYPES_FILE = "metric.d.ts";
  *
  * Sibling of {@link METRIC_TYPES_FILE}. The JSON shape is
  * `Record<metricKey, { measures, dimensions }>` — see `MetricsMetadataBundle`
- * in `metric-registry.ts` (UC FQN and execution lane are server-side concerns
+ * in `mv-registry` (UC FQN and execution lane are server-side concerns
  * and deliberately not part of this client-shipped artifact). The consuming
  * app imports this file at build time (via Vite's JSON loader / Webpack's
  * `import` etc.) and registers it through `@databricks/appkit-ui/format`'s
