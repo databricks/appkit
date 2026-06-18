@@ -37,14 +37,14 @@ interface AppKitTypesPluginOptions {
    * Path to the metric registry d.ts file (relative to client folder).
    * Defaults to a sibling of `outFile`, computed by the generator.
    */
-  metricOutFile?: string;
+  mvOutFile?: string;
   /**
    * Path to the metric semantic-metadata JSON file (relative to client folder).
-   * Build-time artifact — defaults to a sibling of {@link metricOutFile}
+   * Build-time artifact — defaults to a sibling of {@link mvOutFile}
    * (itself a sibling of `outFile`), computed by the generator. Skipped
    * automatically when `metric-views.json` is absent.
    */
-  metricMetadataOutFile?: string;
+  mvMetadataOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -57,8 +57,8 @@ interface AppKitTypesPluginOptions {
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
-  let metricOutFile: string | undefined;
-  let metricMetadataOutFile: string | undefined;
+  let mvOutFile: string | undefined;
+  let mvMetadataOutFile: string | undefined;
   let watchFolders: string[];
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
@@ -108,8 +108,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         warehouseId,
         noCache: false,
         mode,
-        metricOutFile,
-        metricMetadataOutFile,
+        mvOutFile,
+        mvMetadataOutFile,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -318,13 +318,13 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       // the final paths are identical (the default outFile above lives in
       // shared/<TYPES_DIR>/), and a customized outFile now keeps its metric
       // siblings next to it instead of pinning them under shared/.
-      metricOutFile =
-        options?.metricOutFile !== undefined
-          ? path.resolve(projectRoot, options.metricOutFile)
+      mvOutFile =
+        options?.mvOutFile !== undefined
+          ? path.resolve(projectRoot, options.mvOutFile)
           : undefined;
-      metricMetadataOutFile =
-        options?.metricMetadataOutFile !== undefined
-          ? path.resolve(projectRoot, options.metricMetadataOutFile)
+      mvMetadataOutFile =
+        options?.mvMetadataOutFile !== undefined
+          ? path.resolve(projectRoot, options.mvMetadataOutFile)
           : undefined;
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),

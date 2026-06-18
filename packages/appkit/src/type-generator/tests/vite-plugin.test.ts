@@ -376,16 +376,16 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
           process.cwd(),
           `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
         ),
-        metricOutFile: undefined,
-        metricMetadataOutFile: undefined,
+        mvOutFile: undefined,
+        mvMetadataOutFile: undefined,
       }),
     );
   });
 
-  test("custom metricOutFile/metricMetadataOutFile reach generateFromEntryPoint", async () => {
+  test("custom mvOutFile/mvMetadataOutFile reach generateFromEntryPoint", async () => {
     const plugin = appKitTypesPlugin({
-      metricOutFile: "custom/types/metric.d.ts",
-      metricMetadataOutFile: "custom/types/metrics.metadata.json",
+      mvOutFile: "custom/types/metric.d.ts",
+      mvMetadataOutFile: "custom/types/metrics.metadata.json",
     });
     getHook<ConfigResolvedHook>(
       plugin,
@@ -398,8 +398,8 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        metricOutFile: path.resolve(process.cwd(), "custom/types/metric.d.ts"),
-        metricMetadataOutFile: path.resolve(
+        mvOutFile: path.resolve(process.cwd(), "custom/types/metric.d.ts"),
+        mvMetadataOutFile: path.resolve(
           process.cwd(),
           "custom/types/metrics.metadata.json",
         ),

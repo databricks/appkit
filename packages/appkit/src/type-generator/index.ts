@@ -269,12 +269,12 @@ async function probeWarehouseState(
  *   only when the warehouse is already RUNNING, otherwise emits permissive
  *   degraded types immediately. `"blocking"` waits for / starts the warehouse
  *   first, failing the build only for a deleted/deleting one.
- * @param options.metricOutFile - optional output file for the MetricRegistry
+ * @param options.mvOutFile - optional output file for the MetricRegistry
  *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `metric-views.json` is absent.
- * @param options.metricMetadataOutFile - optional output file for the
+ * @param options.mvMetadataOutFile - optional output file for the
  *   build-time semantic metadata JSON bundle (`metrics.metadata.json`).
- *   Defaults to a sibling of `metricOutFile`. Skipped entirely if
+ *   Defaults to a sibling of `mvOutFile`. Skipped entirely if
  *   `metric-views.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics} (tests inject a mock; production lazily builds a
@@ -288,8 +288,8 @@ export async function generateFromEntryPoint(options: {
   warehouseId: string;
   noCache?: boolean;
   mode?: PreflightMode;
-  metricOutFile?: string;
-  metricMetadataOutFile?: string;
+  mvOutFile?: string;
+  mvMetadataOutFile?: string;
   metricFetcher?: DescribeFetcher;
 }) {
   const {
@@ -298,8 +298,8 @@ export async function generateFromEntryPoint(options: {
     warehouseId,
     noCache,
     mode = "non-blocking",
-    metricOutFile,
-    metricMetadataOutFile,
+    mvOutFile,
+    mvMetadataOutFile,
     metricFetcher,
   } = options;
   const projectRoot = resolveProjectRoot(outFile);
@@ -617,7 +617,7 @@ export async function generateFromEntryPoint(options: {
       );
 
       const metricFile =
-        metricOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
+        mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
       const metricDeclarations = generateMetricTypeDeclarations(metricSchemas);
       await fs.mkdir(path.dirname(metricFile), { recursive: true });
       await fs.writeFile(metricFile, metricDeclarations, "utf-8");
@@ -626,7 +626,7 @@ export async function generateFromEntryPoint(options: {
       // imports this artifact (via a registration call from the consuming
       // app) and exposes the per-metric subset on its return value.
       const metadataFile =
-        metricMetadataOutFile ??
+        mvMetadataOutFile ??
         path.join(path.dirname(metricFile), METRIC_METADATA_FILE);
       const metadataJson = generateMetricsMetadataJson(metricSchemas);
       await fs.mkdir(path.dirname(metadataFile), { recursive: true });
