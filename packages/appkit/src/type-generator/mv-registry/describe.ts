@@ -1,5 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { normalizeResultRows } from "../statement-result";
+import { type DescribeFormatMemo, describeAdaptive } from "../statement-result";
 import type { DatabricksStatementExecutionResponse } from "../types";
 import { isValidFqn } from "./config";
 import type { DescribeFetcher, MetricColumnMetadata } from "./types";
@@ -291,6 +291,9 @@ export function createWorkspaceDescribeFetcher(
   client: WorkspaceClient,
   warehouseId: string,
 ): DescribeFetcher {
+  // One format probe per fetcher (= per typegen run): the first DESCRIBE
+  // discovers the warehouse's working format, every later one reuses it.
+  const describeFormat: DescribeFormatMemo = {};
   return async (fqn: string) => {
     /**
      * Defense-in-depth: every caller passes a source that already cleared
@@ -306,13 +309,11 @@ export function createWorkspaceDescribeFetcher(
       .split(".")
       .map((segment) => `\`${segment}\``)
       .join(".");
-    const result = (await client.statementExecution.executeStatement({
-      statement: `DESCRIBE TABLE EXTENDED ${quotedFqn} AS JSON`,
-      warehouse_id: warehouseId,
-      wait_timeout: "30s",
-      format: "ARROW_STREAM",
-      disposition: "INLINE",
-    })) as DatabricksStatementExecutionResponse;
-    return await normalizeResultRows(result);
+    return describeAdaptive(
+      client,
+      `DESCRIBE TABLE EXTENDED ${quotedFqn} AS JSON`,
+      warehouseId,
+      describeFormat,
+    );
   };
 }

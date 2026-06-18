@@ -182,10 +182,11 @@ describe("generateQueriesFromDescribe", () => {
     expect(lastSavedQueries()?.users.type).toContain("id: number");
   });
 
-  test("ARROW attachment request — pins ARROW_STREAM/INLINE and a 30s wait", async () => {
-    // Regression guard for the executeStatement call shape: without the pinned
-    // wait_timeout the call could return PENDING and degrade; without
-    // ARROW_STREAM/INLINE the normalizer would have no attachment to decode.
+  test("DESCRIBE request — tries JSON_ARRAY/INLINE first with a 30s wait", async () => {
+    // Regression guard for the executeStatement call shape: the pinned
+    // wait_timeout stops a PENDING return from degrading, and JSON_ARRAY is the
+    // format standard DBSQL accepts — describeAdaptive only falls back to
+    // ARROW_STREAM if the warehouse rejects JSON_ARRAY.
     mocks.readdir.mockResolvedValue(["q.sql"]);
     mocks.readFile.mockResolvedValue("SELECT 1 AS one");
     mocks.executeStatement.mockResolvedValue(
@@ -198,7 +199,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(mocks.executeStatement.mock.calls[0][0]).toMatchObject({
       warehouse_id: "wh-123",
       wait_timeout: "30s",
-      format: "ARROW_STREAM",
+      format: "JSON_ARRAY",
       disposition: "INLINE",
     });
   });

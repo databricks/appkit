@@ -1,3 +1,4 @@
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { DatabricksStatementExecutionResponse } from "./types";
 
 /**
@@ -81,4 +82,115 @@ export async function normalizeResultRows(
     // Returning it unchanged routes into the deterministic "no rows" degrade.
     return response;
   }
+}
+
+/** Result format the typegen requests for a DESCRIBE. */
+type DescribeFormat = "JSON_ARRAY" | "ARROW_STREAM";
+
+/**
+ * Per-path memo of the result format a warehouse accepts for a DESCRIBE shape.
+ * Create one per describe path (metric / query) and reuse it across that path's
+ * statements: a typegen run targets a single warehouse, so the working format
+ * is discovered once and every later DESCRIBE skips the probe. NOT shared
+ * across paths — `DESCRIBE QUERY` and `DESCRIBE … AS JSON` can differ (Reyden
+ * fails `JSON_ARRAY` only for the single-cell `AS JSON` result).
+ */
+export interface DescribeFormatMemo {
+  format?: "JSON_ARRAY" | "ARROW_STREAM";
+}
+
+function errorMessageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+  return String(error);
+}
+
+/**
+ * True when a failure means the warehouse REJECTED the requested result format
+ * (so another format is worth trying), not that it ran the statement and hit a
+ * real error. There is no structured signal for this, so we match the two known
+ * server signatures: Reyden's `merge_json_arrays` (its `JSON_ARRAY` assembly
+ * fails on a `… AS JSON` single-cell result) and standard DBSQL's rejection of
+ * `ARROW_STREAM` under an `INLINE` disposition. A genuine SQL error,
+ * connectivity failure, or not-ready warehouse does NOT match — those are
+ * returned/propagated for the caller's normal handling, never re-tried.
+ */
+function isFormatRejection(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("merge_json_arrays") ||
+    m.includes("must be json_array") ||
+    (m.includes("disposition") && m.includes("format"))
+  );
+}
+
+/**
+ * Run a DESCRIBE and return a response whose rows are readable via
+ * `result.data_array`, adapting to the warehouse's result-format capability.
+ *
+ * No single format is portable: standard DBSQL (PRO/CLASSIC) serves
+ * `INLINE`+`JSON_ARRAY` and rejects `INLINE`+`ARROW_STREAM`; the Reyden engine
+ * is the inverse — it rejects `JSON_ARRAY` on a `… AS JSON` result
+ * (`merge_json_arrays`) and only returns rows as an `INLINE`+`ARROW_STREAM`
+ * attachment. We try `JSON_ARRAY` first (the documented default) and ONLY when
+ * the warehouse rejects that format ({@link isFormatRejection}) fall back to
+ * `ARROW_STREAM` (decoded by {@link normalizeResultRows}); the accepted format
+ * is memoized so the rest of the run skips the probe. Any other outcome —
+ * success, SQL error, degrade, connectivity failure — is returned or propagated
+ * unchanged, exactly as a single executeStatement would.
+ */
+export async function describeAdaptive(
+  client: WorkspaceClient,
+  statement: string,
+  warehouseId: string,
+  memo: DescribeFormatMemo,
+): Promise<DatabricksStatementExecutionResponse> {
+  const formats: DescribeFormat[] = memo.format
+    ? [memo.format]
+    : ["JSON_ARRAY", "ARROW_STREAM"];
+  let lastResponse: DatabricksStatementExecutionResponse | undefined;
+  let lastError: unknown;
+  for (const format of formats) {
+    try {
+      const response = (await client.statementExecution.executeStatement({
+        statement,
+        warehouse_id: warehouseId,
+        // Synchronous wait: without it the call can return PENDING/RUNNING with
+        // no rows, which downstream misreads as a no-result degrade.
+        wait_timeout: "30s",
+        format,
+        disposition: "INLINE",
+      })) as DatabricksStatementExecutionResponse;
+      const normalized = await normalizeResultRows(response);
+      if (
+        normalized.status?.state === "FAILED" &&
+        isFormatRejection(normalized.status.error?.message)
+      ) {
+        lastResponse = normalized;
+        continue; // warehouse rejected this format — try the next
+      }
+      if (normalized.status?.state === "SUCCEEDED") {
+        memo.format = format;
+      }
+      return normalized;
+    } catch (error) {
+      if (isFormatRejection(errorMessageOf(error))) {
+        lastError = error;
+        continue; // format rejected via a thrown error — try the next
+      }
+      throw error;
+    }
+  }
+  // Every attempted format was rejected. Surface the last outcome so the caller
+  // degrades / reports as usual.
+  if (lastResponse !== undefined) return lastResponse;
+  throw lastError;
 }

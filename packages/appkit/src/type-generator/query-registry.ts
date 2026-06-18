@@ -6,7 +6,7 @@ import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
-import { normalizeResultRows } from "./statement-result";
+import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
 import {
   type DatabricksStatementExecutionResponse,
   type QueryFatalError,
@@ -675,6 +675,10 @@ export async function generateQueriesFromDescribe(
         `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
       );
 
+      // Shared across this run's DESCRIBE QUERY calls: discover the warehouse's
+      // result format once, then reuse it.
+      const describeFormat: DescribeFormatMemo = {};
+
       const describeOne = async ({
         index,
         queryName,
@@ -682,20 +686,16 @@ export async function generateQueriesFromDescribe(
         sqlHash,
         cleanedSql,
       }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-        const result = (await client.statementExecution.executeStatement({
-          statement: `DESCRIBE QUERY ${cleanedSql}`,
-          warehouse_id: warehouseId,
-          // Wait synchronously for completion (matches the metric fetcher):
-          // without it the call can return PENDING/RUNNING with no rows yet,
-          // which classifies as a no-result degrade and ships `unknown`.
-          wait_timeout: "30s",
-          // INLINE + ARROW_STREAM returns the DESCRIBE rows as a base64 Arrow
-          // IPC attachment; normalizeResultRows (below) decodes it into
-          // `result.data_array` so convertToQueryType can read the columns.
-          // No-op passthrough when the warehouse already populated rows.
-          format: "ARROW_STREAM",
-          disposition: "INLINE",
-        })) as DatabricksStatementExecutionResponse;
+        // describeAdaptive negotiates the result format with the warehouse
+        // (JSON_ARRAY for standard DBSQL, ARROW_STREAM for Reyden) and returns
+        // an already-normalized response, so the state classification below
+        // reads it directly.
+        const result = await describeAdaptive(
+          client,
+          `DESCRIBE QUERY ${cleanedSql}`,
+          warehouseId,
+          describeFormat,
+        );
 
         completed++;
         spinner.update(
@@ -743,16 +743,7 @@ export async function generateQueriesFromDescribe(
           };
         }
 
-        // Decode an Arrow IPC attachment into `result.data_array` (no-op when
-        // the warehouse already populated rows) so convertToQueryType can read
-        // the described columns. State classification above intentionally stays
-        // on the raw `result` — the normalizer preserves `status` untouched.
-        const normalized = await normalizeResultRows(result);
-        const { type, hasResults } = convertToQueryType(
-          normalized,
-          sql,
-          queryName,
-        );
+        const { type, hasResults } = convertToQueryType(result, sql, queryName);
         if (!hasResults) {
           // Described, but no result columns. Emit `unknown` and retry next run;
           // do not cache (we never persist `result: unknown`).

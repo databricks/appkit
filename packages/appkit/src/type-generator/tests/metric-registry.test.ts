@@ -455,9 +455,9 @@ describe("createWorkspaceDescribeFetcher", () => {
       statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
       warehouse_id: "wh-1",
       wait_timeout: "30s",
-      // Pinned wire format: the warehouse returns the single DESCRIBE row as a
-      // base64 Arrow IPC attachment, which the normalizer decodes into rows.
-      format: "ARROW_STREAM",
+      // describeAdaptive tries JSON_ARRAY first (standard DBSQL); it falls back
+      // to ARROW_STREAM only if the warehouse rejects that format.
+      format: "JSON_ARRAY",
       disposition: "INLINE",
     });
   });

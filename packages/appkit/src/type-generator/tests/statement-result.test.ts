@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { describe, expect, test } from "vitest";
-import { normalizeResultRows } from "../statement-result";
+import {
+  type DescribeFormatMemo,
+  describeAdaptive,
+  normalizeResultRows,
+} from "../statement-result";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
 /**
@@ -253,5 +258,156 @@ describe("normalizeResultRows", () => {
     expect(normalized.result?.data_array).toEqual([
       ["revenue", "DOUBLE", "total revenue"],
     ]);
+  });
+});
+
+describe("describeAdaptive", () => {
+  type StubBehavior = (
+    format: string,
+  ) =>
+    | DatabricksStatementExecutionResponse
+    | Promise<DatabricksStatementExecutionResponse>;
+
+  // Minimal WorkspaceClient stub: records the formats requested and delegates
+  // each executeStatement to behavior(format), which may resolve or throw.
+  function stubClient(behavior: StubBehavior) {
+    const formats: string[] = [];
+    const client = {
+      statementExecution: {
+        executeStatement: async (req: { format: string }) => {
+          formats.push(req.format);
+          return behavior(req.format);
+        },
+      },
+    } as unknown as WorkspaceClient;
+    return { client, formats };
+  }
+
+  const rows = (
+    data: (string | null)[][],
+  ): DatabricksStatementExecutionResponse => ({
+    statement_id: "stmt",
+    status: { state: "SUCCEEDED" },
+    result: { data_array: data },
+  });
+
+  test("standard DBSQL: JSON_ARRAY succeeds, memoized, no fallback", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") return rows([["schema"]]);
+      throw new Error("ARROW should not be tried");
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE QUERY x",
+      "wh",
+      memo,
+    );
+
+    expect(result.result?.data_array).toEqual([["schema"]]);
+    expect(memo.format).toBe("JSON_ARRAY");
+    expect(formats).toEqual(["JSON_ARRAY"]);
+  });
+
+  test("Reyden (throw on JSON_ARRAY): falls back to ARROW_STREAM + memoizes", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") {
+        throw new Error("merge_json_arrays: malformed JSON batch");
+      }
+      return rows([["arrow-decoded"]]);
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE TABLE x AS JSON",
+      "wh",
+      memo,
+    );
+
+    expect(result.result?.data_array).toEqual([["arrow-decoded"]]);
+    expect(memo.format).toBe("ARROW_STREAM");
+    expect(formats).toEqual(["JSON_ARRAY", "ARROW_STREAM"]);
+  });
+
+  test("Reyden (FAILED state, no throw): also falls back to ARROW_STREAM", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") {
+        return {
+          statement_id: "stmt",
+          status: { state: "FAILED", error: { message: "merge_json_arrays" } },
+          result: {},
+        } as DatabricksStatementExecutionResponse;
+      }
+      return rows([["arrow-decoded"]]);
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE TABLE x AS JSON",
+      "wh",
+      memo,
+    );
+
+    expect(result.result?.data_array).toEqual([["arrow-decoded"]]);
+    expect(memo.format).toBe("ARROW_STREAM");
+    expect(formats).toEqual(["JSON_ARRAY", "ARROW_STREAM"]);
+  });
+
+  test("memoized format is reused without re-probing", async () => {
+    const memo: DescribeFormatMemo = { format: "ARROW_STREAM" };
+    const { client, formats } = stubClient((format) => {
+      if (format === "ARROW_STREAM") return rows([["arrow"]]);
+      throw new Error("JSON_ARRAY should not be tried when memo is set");
+    });
+
+    await describeAdaptive(client, "DESCRIBE TABLE x AS JSON", "wh", memo);
+
+    expect(formats).toEqual(["ARROW_STREAM"]);
+  });
+
+  test("non-format failure (SQL error): returned as-is, no fallback, no memo", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") {
+        return {
+          statement_id: "stmt",
+          status: {
+            state: "FAILED",
+            error: { message: "[TABLE_OR_VIEW_NOT_FOUND]" },
+          },
+          result: {},
+        } as DatabricksStatementExecutionResponse;
+      }
+      throw new Error("ARROW must not be tried for a non-format failure");
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE QUERY x",
+      "wh",
+      memo,
+    );
+
+    expect(result.status.state).toBe("FAILED");
+    expect(result.status.error?.message).toBe("[TABLE_OR_VIEW_NOT_FOUND]");
+    expect(memo.format).toBeUndefined();
+    expect(formats).toEqual(["JSON_ARRAY"]);
+  });
+
+  test("non-format throw (connectivity): rethrown immediately, no fallback", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") throw new Error("connection refused");
+      throw new Error("ARROW must not be tried for a connectivity error");
+    });
+
+    await expect(
+      describeAdaptive(client, "DESCRIBE QUERY x", "wh", memo),
+    ).rejects.toThrow("connection refused");
+    expect(memo.format).toBeUndefined();
+    expect(formats).toEqual(["JSON_ARRAY"]);
   });
 });
