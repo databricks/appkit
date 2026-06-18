@@ -292,9 +292,11 @@ export function createWorkspaceDescribeFetcher(
   warehouseId: string,
 ): DescribeFetcher {
   return async (fqn: string) => {
-    // Defense-in-depth: every caller passes a source that already cleared
-    // resolveMetricConfig, but this fetcher is an exported seam — re-check
-    // before interpolating into SQL.
+    /**
+     * Defense-in-depth: every caller passes a source that already cleared
+     * {@link resolveMetricConfig}, but this fetcher is an exported seam — re-check
+     * before interpolating into SQL.
+     */
     if (!isValidFqn(fqn)) {
       throw new Error(
         `Invalid metric source "${fqn}": expected a three-part UC FQN <catalog>.<schema>.<metric_view>.`,

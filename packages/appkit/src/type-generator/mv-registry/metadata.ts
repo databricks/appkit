@@ -1,9 +1,6 @@
 import { compareKeys } from "./config";
 import type { MetricColumnMetadata, MetricSchema } from "./types";
 
-/**
- * Per-column metadata as emitted into the build-time JSON artifact.
- */
 interface MetricColumnSemanticMetadata {
   type: string;
   display_name?: string;
@@ -13,21 +10,15 @@ interface MetricColumnSemanticMetadata {
   time_grain?: readonly string[];
 }
 
-/**
- * One metric's complete semantic-metadata bundle.
- */
 interface MetricSemanticMetadataEntry {
   measures: Record<string, MetricColumnSemanticMetadata>;
   dimensions: Record<string, MetricColumnSemanticMetadata>;
 }
 
-/**
- * Top-level shape of `metrics.metadata.json` — keyed by metric key.
- */
 type MetricsMetadataBundle = Record<string, MetricSemanticMetadataEntry>;
 
 /**
- * Pure function: turn a list of metric schemas into the JSON metadata bundle.
+ * Converts a list of metric schemas into a JSON metadata bundle.
  */
 export function buildMetricsMetadataBundle(
   schemas: MetricSchema[],
@@ -59,9 +50,6 @@ export function buildMetricsMetadataBundle(
   return bundle;
 }
 
-/**
- * Render one column's emitted semantic-metadata object.
- */
 function buildColumnMetadata(
   col: MetricColumnMetadata,
 ): MetricColumnSemanticMetadata {

@@ -31,14 +31,10 @@ export function emptyMetricSchema(
   };
 }
 
-/**
- * Maximum number of in-flight DESCRIBE statements per syncMetrics pass.
- */
+// Maximum number of in-flight DESCRIBE statements per syncMetrics pass.
 const METRIC_DESCRIBE_CONCURRENCY = 10;
 
-/**
- * Outcome of describing a single metric entry.
- */
+// Outcome of describing a single metric entry.
 interface MetricDescribeOutcome {
   index: number;
   schema: MetricSchema;
@@ -46,7 +42,7 @@ interface MetricDescribeOutcome {
 }
 
 /**
- * Run schema synchronization for every entry in `metric-views.json`.
+ * Run schema synchronization for every entry in {@link import("./config").MV_CONFIG_FILE}.
  */
 export async function syncMetrics(
   resolution: MetricConfigResolution,

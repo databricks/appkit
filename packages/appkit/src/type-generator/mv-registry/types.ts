@@ -101,10 +101,8 @@ export interface MetricSchema {
   degraded?: boolean;
 }
 
-/**
- * Result of reading and resolving metric-views.json — a flat entries list
- * with the lane denormalized for iteration.
- */
+// Result of reading and resolving metric-views.json — a flat entries list
+// with the lane denormalized for iteration.
 export interface MetricConfigResolution {
   entries: ResolvedMetricEntry[];
 }

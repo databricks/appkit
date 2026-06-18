@@ -5,8 +5,6 @@ import type { DatabricksStatementExecutionResponse } from "./types";
  * read rows from `result.data_array`, regardless of the wire format the
  * warehouse chose.
  *
- * ## Why this exists
- *
  * `@databricks/sdk-experimental`'s `executeStatement` defaults to an
  * `ARROW_STREAM` disposition. With an `INLINE` disposition the single
  * DESCRIBE row is returned as a base64-encoded Arrow IPC stream in
@@ -17,59 +15,15 @@ import type { DatabricksStatementExecutionResponse } from "./types";
  * metric/query. (A warehouse configured to return `JSON_ARRAY` populates
  * `data_array` directly and needs no decoding — that path, and every mocked
  * test, flows through here unchanged.)
- *
- * ## Behavior
- *
- * - `data_array` already present → return the response unchanged (passthrough;
- *   keeps JSON_ARRAY warehouses and all `data_array`-based mocked tests working
- *   with zero decode cost).
- * - otherwise `attachment` present → lazily import `apache-arrow`, decode the
- *   IPC stream, and return a response with `result.data_array` populated as
- *   `(string | null)[][]`. All other fields (`status`, `statement_id`,
- *   `manifest`, and any other `result` keys) are preserved.
- * - neither present → return the response unchanged (empty result; the
- *   downstream "returned no rows" path then degrades correctly).
- *
- * ## Failure contract
- *
- * Two distinct paths, by design:
- *
- * - **Truncation throws (loud).** A multi-chunk result (`next_chunk_index`
- *   and/or `next_chunk_internal_link` set) means the warehouse split the rows
- *   across chunks and we only hold the first. Emitting types from a partial
- *   DESCRIBE would silently cache wrong/incomplete types, so this case
- *   **throws** before any passthrough or decode. Both callers run their
- *   describe inside a per-entry try / `Promise.allSettled`, so the throw
- *   surfaces as a loud per-key/per-query failure (a non-transient
- *   `MetricSyncFailure` / a fatal query error), never an uncaught crash.
- * - **Malformed/empty attachment degrades (never throws).** Decode is
- *   best-effort: a corrupt/empty attachment resolves to the original response
- *   (with `data_array` still absent) rather than rejecting. The metric/query
- *   sync paths treat a response without rows as a deterministic "no rows"
- *   degrade (warn-and-continue + sticky cache), so swallowing the decode error
- *   here keeps that contract intact instead of crashing the whole generation
- *   pass on one bad payload.
- *
- * The `apache-arrow` import is lazy (dynamic `import()`) so the dependency only
- * loads when an attachment actually needs decoding — JSON_ARRAY warehouses and
- * unit tests that build `data_array` directly never pull it in.
- *
- * @param response - the raw Statement Execution response
- * @returns a response guaranteed to expose rows via `result.data_array` when
- *   they were decodable, otherwise the response unchanged
  */
 export async function normalizeResultRows(
   response: DatabricksStatementExecutionResponse,
 ): Promise<DatabricksStatementExecutionResponse> {
-  // Truncation guard (ABOVE the passthrough — runs on EITHER transport).
-  // A DESCRIBE result that exceeds INLINE's size limit is paginated: the
-  // warehouse sets `next_chunk_index` and/or `next_chunk_internal_link` and we
-  // only hold the FIRST chunk's rows (whether those rows arrived in
-  // `data_array` or as an Arrow `attachment`). Decoding just the first chunk
-  // would silently cache partial types, so we refuse here. This is a
-  // DELIBERATE throw — distinct from the best-effort decode below, which still
-  // degrades-never-throws on a malformed attachment. Both callers wrap this in
-  // a per-entry catch, so the throw becomes a loud per-key/per-query failure.
+  // Truncation guard, above the passthrough so it runs on either transport. A
+  // result exceeding INLINE's size limit is paginated (`next_chunk_*` set) and
+  // we hold only the first chunk; emitting types from it would cache partial
+  // types. A deliberate throw — unlike the best-effort decode below — that both
+  // callers catch per-entry as a loud per-key/per-query failure.
   if (
     response.result?.next_chunk_index != null ||
     response.result?.next_chunk_internal_link != null
@@ -88,8 +42,7 @@ export async function normalizeResultRows(
 
   const attachment = response.result?.attachment;
   if (attachment === undefined) {
-    // No rows, no attachment: nothing to normalize. Let the downstream
-    // "returned no rows" degrade path fire.
+    // No rows, no attachment: let the downstream "no rows" degrade path fire.
     return response;
   }
 
@@ -124,9 +77,8 @@ export async function normalizeResultRows(
       },
     };
   } catch {
-    // Best-effort: a corrupt/partial Arrow payload must not crash the
-    // generation pass. Returning the response unchanged (data_array still
-    // absent) routes it into the deterministic "no rows" degrade downstream.
+    // Best-effort: a corrupt/partial Arrow payload must not crash the pass.
+    // Returning it unchanged routes into the deterministic "no rows" degrade.
     return response;
   }
 }

@@ -7,40 +7,38 @@ import type {
   ResolvedMetricEntry,
 } from "./types";
 
-/**
- * Default filename for the metric source declarations.
- * Lives at config/queries/metric-views.json by convention.
- */
-const METRIC_CONFIG_FILE = "metric-views.json";
+const MV_CONFIG_FILE = "metric-views.json";
 
 /**
- * Input caps enforced by resolveMetricConfig.
+ * {@link resolveMetricConfig} enforces these caps.
  */
 const MAX_METRIC_VIEWS = 200;
 const MAX_FQN_SEGMENT_LENGTH = 255;
 const MAX_FQN_LENGTH = 767;
 
 /**
- * Locale-independent comparator (UTF-16 code-unit order) shared by BOTH
- * artifact key orderings.
+ * Locale-independent comparator (UTF-16 code-unit order)
+ * shared by BOTH artifact key orderings.
+ *
+ * @note important for caching correctness.
  */
 export function compareKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**
- * Read metric-views.json from a queries folder.
+ * Read {@link MV_CONFIG_FILE} from a queries folder.
  *
  * Returns `null` if the file does not exist (the metric-view path is
  * additive — apps without metric-views.json must not be penalized). There is
- * deliberately no fallback to the legacy `metric.json` filename.
+ * deliberately no fallback to the legacy {@link MV_CONFIG_FILE} filename.
  *
  * Throws on JSON parse errors so misconfiguration surfaces loudly.
  */
 export async function readMetricConfig(
   queryFolder: string,
 ): Promise<MetricSourceConfig | null> {
-  const metricPath = path.join(queryFolder, METRIC_CONFIG_FILE);
+  const metricPath = path.join(queryFolder, MV_CONFIG_FILE);
   let raw: string;
   try {
     raw = await fs.readFile(metricPath, "utf8");
@@ -71,8 +69,9 @@ export async function readMetricConfig(
 
 /**
  * Validate a key against the JSON Schema's metricKey pattern. Kept
- * lightweight — the shared Zod schema (`metricSourceSchema`) is the canonical
- * contract for IDE/CI; this regex is identical to its `metricKeySchema`.
+ * lightweight — the shared Zod schema ({@link metricSourceSchema} in `packages/shared/src/schemas/metric-source.ts`)
+ * is the canonical contract for IDE/CI; this regex is identical to its
+ * {@link metricKeySchema} in `packages/shared/src/schemas/metric-source.ts`.
  */
 function isValidMetricKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
@@ -88,13 +87,13 @@ export function isValidFqn(fqn: string): boolean {
 }
 
 /**
- * Field allowlists enforced by resolveMetricConfig.
+ * Field allowlists enforced by {@link resolveMetricConfig}.
  */
 const ALLOWED_TOP_LEVEL_FIELDS = new Set(["$schema", "metricViews"]);
 const ALLOWED_ENTRY_FIELDS = new Set(["source", "executor"]);
 
 /**
- * Resolve the `metricViews` map into a flat list of entries.
+ * Resolve the {@link MetricSourceConfig.metricViews} map into a flat list of entries.
  */
 export function resolveMetricConfig(
   config: MetricSourceConfig,
@@ -107,8 +106,11 @@ export function resolveMetricConfig(
     }
   }
 
-  // Default ONLY a genuinely-absent `metricViews`. `null` must fall through
-  // to the type check below and throw — the canonical Zod schema rejects null.
+  /**
+   *  Default ONLY a genuinely-absent {@link MetricSourceConfig.metricViews}. `null` must fall through
+   * to the type check below and throw — the canonical Zod schema ({@link metricSourceSchema}) rejects
+   * `null`.
+   */
   const metricViews =
     config.metricViews === undefined ? {} : config.metricViews;
   if (
