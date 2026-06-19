@@ -11,6 +11,7 @@ import {
   metricCacheHash,
   saveCache,
 } from "./cache";
+import { getErrorDiagnostic, isConnectivityError } from "./errors";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
@@ -49,7 +50,7 @@ const logger = createLogger("type-generator");
  * waits for a warehouse to reach RUNNING. Mirrors the query path's (unexported)
  * `PREFLIGHT_WAIT_MAX_MS` in query-registry.ts.
  */
-const MV__PREFLIGHT_WAIT_MAX_MS = 300_000;
+const MV_PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 type TypegenFailure = QuerySyntaxError | QueryFatalError;
 
@@ -240,8 +241,9 @@ declare module "@databricks/appkit-ui/react" {
  * not-running state (STOPPED/STARTING/... → degraded entries that retry) from a
  * terminal one (DELETED/DELETING → degraded entries pinned sticky). Takes the
  * lazy client *getter* (not a client) so the probe also absorbs client
- * construction failure: any failure to observe a state returns `undefined`,
- * which the gate reads as transient not-running.
+ * construction failure. A connectivity blip returns `undefined`, which the gate
+ * reads as transient not-running; a deterministic failure (auth, bad id) is
+ * re-thrown so the gate can classify it fatal rather than silently degrading.
  */
 async function probeWarehouseState(
   getClient: () => WorkspaceClient,
@@ -249,8 +251,13 @@ async function probeWarehouseState(
 ): Promise<WarehouseState | undefined> {
   try {
     return await getWarehouseState(getClient(), warehouseId);
-  } catch {
-    return undefined;
+  } catch (err) {
+    // Connectivity blip → undefined (gate degrades, retries next pass). A
+    // deterministic failure (auth, bad warehouse id, client construction) must
+    // not masquerade as not-running — re-throw so the gate pins it fatal, the
+    // same split the query path's preflight makes.
+    if (isConnectivityError(err)) return undefined;
+    throw err;
   }
 }
 
@@ -427,7 +434,7 @@ export async function generateFromEntryPoint(options: {
               getMetricClient(),
               warehouseId,
               {
-                maxMs: MV__PREFLIGHT_WAIT_MAX_MS,
+                maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
                 treatStoppedAsTransient: true,
               },
             );
@@ -442,7 +449,7 @@ export async function generateFromEntryPoint(options: {
               getMetricClient(),
               warehouseId,
               {
-                maxMs: MV__PREFLIGHT_WAIT_MAX_MS,
+                maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
               },
             );
             if (settled === "DELETED" || settled === "DELETING") {
@@ -453,9 +460,15 @@ export async function generateFromEntryPoint(options: {
               preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
             }
           }
-        } catch {
-          // Probe/start failure or timed-out wait: fall through to syncMetrics,
-          // whose DESCRIBEs classify a not-ready warehouse as degraded, not thrown.
+        } catch (err) {
+          // Connectivity blip: fall through to syncMetrics, whose DESCRIBEs
+          // degrade a not-ready / unreachable warehouse rather than throwing. A
+          // deterministic failure (auth, bad warehouse id, a timed-out start)
+          // is fatal — surface it instead of stalling ~5 min against a
+          // not-ready warehouse, mirroring the query path's preflight catch.
+          if (!isConnectivityError(err)) {
+            preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          }
         }
       }
 
@@ -472,7 +485,14 @@ export async function generateFromEntryPoint(options: {
         mode !== "non-blocking" ||
         describeNeeded.length === 0;
       if (!describeNow) {
-        gateState = await probeWarehouseState(getMetricClient, warehouseId);
+        try {
+          gateState = await probeWarehouseState(getMetricClient, warehouseId);
+        } catch (err) {
+          // probeWarehouseState only throws on a deterministic failure (auth,
+          // bad warehouse id) — a connectivity blip already returned undefined.
+          // Pin it fatal through the same path as a fatal blocking preflight.
+          preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+        }
         describeNow = gateState === "RUNNING";
       }
 
@@ -607,14 +627,21 @@ export async function generateFromEntryPoint(options: {
       for (const schema of described) {
         describedByKey.set(schema.key, schema);
       }
-      const metricSchemas = resolution.entries.map(
-        (entry) =>
-          hitSchemas.get(entry.key) ??
-          describedByKey.get(entry.key) ??
-          // Unreachable: every entry is either a hit or describe-needed, and
-          // every describe-needed entry yields exactly one schema above.
-          emptyMetricSchema(entry),
-      );
+      const metricSchemas = resolution.entries.map((entry) => {
+        const schema =
+          hitSchemas.get(entry.key) ?? describedByKey.get(entry.key);
+        if (schema !== undefined) return schema;
+        // Defensive: every entry is either a cache hit or describe-needed (and
+        // every describe-needed entry yields exactly one schema above), so this
+        // should be unreachable. If the invariant ever breaks, warn loudly but
+        // still emit a permissive degraded schema — the metric path never
+        // crashes a build over a single entry.
+        logger.warn(
+          "no schema resolved for metric key %s — emitting degraded types (should not happen)",
+          entry.key,
+        );
+        return emptyMetricSchema(entry);
+      });
 
       const metricFile =
         mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);

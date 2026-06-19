@@ -992,9 +992,10 @@ describe("syncMetrics", () => {
     expect(failures[0]).toMatchObject({
       key: "revenue",
       source: "demo.public.revenue",
-      // A rejected fetch is a transport blip, not a warehouse verdict —
-      // transient, so the caller's cache retries it.
-      transient: true,
+      // A throw with no recognizable connectivity signal is treated as
+      // deterministic (transient: false) — surfaced, not silently retried. The
+      // point of this test is that it is RECORDED, never an uncaught crash.
+      transient: false,
     });
     expect(failures[0].reason).toMatch(/warehouse unreachable/);
   });
@@ -1032,32 +1033,65 @@ describe("syncMetrics", () => {
     expect(failures[0]).toMatchObject({
       key: "revenue",
       source: "demo.public.revenue",
-      // A thrown fetch is treated as a transport blip → transient (the caller's
-      // cache retries). The point of the test is that it is RECORDED, loudly.
-      transient: true,
+      // Truncation is deterministic — re-describing the unchanged entry yields
+      // the same multi-chunk result — so it is non-transient (sticky/fatal),
+      // never a retryable blip. The point of the test: RECORDED, not a crash.
+      transient: false,
     });
     expect(failures[0].reason).toMatch(/multi-chunk/i);
   });
 });
 
 // ── D′ transience classification: every failure says whether retrying the
-// unchanged entry can succeed. Rejected fetches (and the defensive
-// settlement-rejection backstop) are transient; deterministic warehouse
-// answers — FAILED, zero rows, unparseable payload, zero columns — are not,
-// and the caller's cache pins them sticky until the config hash changes.
+// unchanged entry can succeed. ONLY recognized connectivity errors are
+// transient (self-converge, retry next pass); everything else — deterministic
+// warehouse answers (FAILED, zero rows, unparseable payload, zero columns), the
+// truncation guard, AND unrecognized throws — is non-transient and surfaces as
+// a build failure, matching the query path's pessimistic default.
 describe("syncMetrics — failure transience (D′)", () => {
   const singleEntryResolution = () =>
     resolveMetricConfig({
       metricViews: { revenue: { source: "demo.public.revenue" } },
     });
 
-  test("a rejected fetch is transient", async () => {
+  test("a connectivity-flavored rejected fetch is transient", async () => {
+    // "socket hang up" matches isConnectivityError — a genuine transport blip,
+    // so it stays transient (retry next pass). A throw WITHOUT a connectivity
+    // signal is deterministic; see the non-transient cases below.
     const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
       throw new Error("socket hang up");
     };
     const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
     expect(failures).toHaveLength(1);
     expect(failures[0].transient).toBe(true);
+  });
+
+  test("a connectivity error surfaced by code is transient", async () => {
+    const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
+      const err = new Error("connect ECONNREFUSED 10.0.0.1:443") as Error & {
+        code?: string;
+      };
+      err.code = "ECONNREFUSED";
+      throw err;
+    };
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(true);
+  });
+
+  test("an auth failure is non-transient (deterministic — must surface)", async () => {
+    // A 403 / permission error is a real misconfiguration, not a blip: it must
+    // surface (and fail the build via the caller), never retry forever.
+    const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
+      const err = new Error(
+        "PERMISSION_DENIED: cannot access metric view",
+      ) as Error & { status?: number };
+      err.status = 403;
+      throw err;
+    };
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(false);
   });
 
   test.each<[string, DatabricksStatementExecutionResponse]>([
@@ -1092,9 +1126,11 @@ describe("syncMetrics — failure transience (D′)", () => {
     expect(failures[0].transient).toBe(false);
   });
 
-  test("a defensive rejected settlement is transient (unknown cause — prefer convergence)", async () => {
+  test("a defensive rejected settlement is non-transient (unknown cause — surface, don't loop)", async () => {
     // Same poisoned-response trick as the scheduling suite: blow up after
-    // the fetch try/catch so the settlement itself rejects.
+    // the fetch try/catch so the settlement itself rejects. An unknown internal
+    // failure carries no connectivity signal, so it is surfaced (deterministic)
+    // rather than retried forever — the pessimistic default matching the query path.
     const poisoned = new Proxy({} as DatabricksStatementExecutionResponse, {
       get(_target, prop) {
         if (prop === "then") {
@@ -1106,7 +1142,7 @@ describe("syncMetrics — failure transience (D′)", () => {
     const fetcher = async () => poisoned;
     const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
     expect(failures).toHaveLength(1);
-    expect(failures[0].transient).toBe(true);
+    expect(failures[0].transient).toBe(false);
   });
 });
 

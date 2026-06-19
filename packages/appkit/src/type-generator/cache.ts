@@ -58,11 +58,13 @@ export interface MetricCacheEntry {
  * (other column fields are optional). Deliberately inline — the shared Zod
  * schemas must not enter the type-generator's runtime path.
  */
-export function isRevivableMetricCacheEntry(entry: MetricCacheEntry): boolean {
-  if (typeof entry.hash !== "string" || typeof entry.retry !== "boolean") {
+export function isRevivableMetricCacheEntry(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null) return false;
+  const e = entry as Record<string, unknown>;
+  if (typeof e.hash !== "string" || typeof e.retry !== "boolean") {
     return false;
   }
-  const schema = entry.schema as unknown;
+  const schema = e.schema;
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     return false;
   }

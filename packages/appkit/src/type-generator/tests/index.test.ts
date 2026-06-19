@@ -663,83 +663,121 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(metrics.revenue.schema.degraded).toBe(true);
   });
 
-  test.each([
-    [
-      "rejects with a timeout",
-      () =>
-        mocks.waitUntilRunning.mockRejectedValue(
-          new Error(
-            "Warehouse wh-1 did not reach RUNNING within 300000ms (last state: STARTING)",
-          ),
-        ),
-    ],
-    [
-      "resolves non-RUNNING",
-      () => mocks.waitUntilRunning.mockResolvedValue("STOPPED"),
-    ],
-  ])(
-    "blocking + preflight wait %s: generation does not throw, keys degrade",
-    async (_label, armWait) => {
-      writeMetricConfig();
-      mocks.getWarehouseState.mockResolvedValue("STARTING");
-      armWait();
-      // The fall-through DESCRIBE hits a still-cold warehouse: non-terminal
-      // response, which classifies as degraded (never an error).
-      mocks.executeStatement.mockResolvedValue({
-        statement_id: "stmt-mock",
-        status: { state: "PENDING" },
-      });
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  test("blocking + preflight wait rejects with a timeout: fatal after artifacts (no silent stall)", async () => {
+    // A timed-out wait is deterministic, not a connectivity blip: surface it as
+    // fatal rather than falling through to DESCRIBE a not-ready warehouse — the
+    // ~5-min stall that still "succeeds". (Hybrid: warehouse-level → fatal.)
+    writeMetricConfig();
+    mocks.getWarehouseState.mockResolvedValue("STARTING");
+    mocks.waitUntilRunning.mockRejectedValue(
+      new Error(
+        "Warehouse wh-1 did not reach RUNNING within 300000ms (last state: STARTING)",
+      ),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-      try {
-        await expect(
-          generateFromEntryPoint({
-            outFile,
-            queryFolder,
-            warehouseId: "wh-1",
-            mode: "blocking",
-          }),
-        ).resolves.toBeUndefined();
-
-        // Degraded, not failed: no per-key warns, one info summary line.
-        const warned = warnSpy.mock.calls.flat().map(String).join("\n");
-        expect(warned).not.toContain("metric sync failed");
-        const degradedLines = logSpy.mock.calls
-          .map((call) => call.map(String).join(" "))
-          .filter((line) => line.includes("degraded metric types"));
-        expect(degradedLines).toHaveLength(1);
-      } finally {
-        warnSpy.mockRestore();
-        logSpy.mockRestore();
-      }
-
-      // STARTING → wait-only (no start), without treatStoppedAsTransient.
-      expect(mocks.startWarehouse).not.toHaveBeenCalled();
-      expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
-        expect.anything(),
-        "wh-1",
-        expect.objectContaining({ maxMs: 300_000 }),
+    try {
+      const error = await generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+      }).then(
+        () => {
+          throw new Error("expected generateFromEntryPoint to reject");
+        },
+        (err: unknown) => err,
       );
-      expect(
-        mocks.waitUntilRunning.mock.calls[0][2].treatStoppedAsTransient,
-      ).toBeUndefined();
-      // The DESCRIBE batch still ran (fall-through), and its non-terminal
-      // answer degraded the key per Phase 1 semantics.
-      expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-      const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-      expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
-      expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-        "measureKeys: string",
+      expect(error).toBeInstanceOf(TypegenFatalError);
+      expect((error as InstanceType<typeof TypegenFatalError>).queries).toEqual(
+        [expect.objectContaining({ name: "revenue" })],
       );
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
 
-      // D′: a still-startable warehouse is transient degradation — cached
-      // with retry: true so the next describe-capable pass converges it.
-      const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
-      expect(metrics.revenue.retry).toBe(true);
-      expect(metrics.revenue.schema.degraded).toBe(true);
-    },
-  );
+    // STARTING → wait-only (no start). We bailed at preflight, so the DESCRIBE
+    // batch never ran ...
+    expect(mocks.startWarehouse).not.toHaveBeenCalled();
+    expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
+      expect.anything(),
+      "wh-1",
+      expect.objectContaining({ maxMs: 300_000 }),
+    );
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
+    // ... but degraded artifacts are still written before the throw.
+    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
+    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      "measureKeys: string",
+    );
+
+    // Terminal skip → sticky, like the decision-time fatal.
+    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
+    expect(metrics.revenue.retry).toBe(false);
+    expect(metrics.revenue.schema.degraded).toBe(true);
+  });
+
+  test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw", async () => {
+    // A non-RUNNING *resolve* (not a throw) for a startable state is soft: fall
+    // through to DESCRIBE, which degrades on the still-cold warehouse. Only a
+    // DELETED/DELETING resolve (or a thrown deterministic error) is fatal.
+    writeMetricConfig();
+    mocks.getWarehouseState.mockResolvedValue("STARTING");
+    mocks.waitUntilRunning.mockResolvedValue("STOPPED");
+    // The fall-through DESCRIBE hits a still-cold warehouse: non-terminal
+    // response, which classifies as degraded (never an error).
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-mock",
+      status: { state: "PENDING" },
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await expect(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-1",
+          mode: "blocking",
+        }),
+      ).resolves.toBeUndefined();
+
+      // Degraded, not failed: no per-key warns, one info summary line.
+      const warned = warnSpy.mock.calls.flat().map(String).join("\n");
+      expect(warned).not.toContain("metric sync failed");
+      const degradedLines = logSpy.mock.calls
+        .map((call) => call.map(String).join(" "))
+        .filter((line) => line.includes("degraded metric types"));
+      expect(degradedLines).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+
+    // STARTING → wait-only (no start), without treatStoppedAsTransient.
+    expect(mocks.startWarehouse).not.toHaveBeenCalled();
+    expect(
+      mocks.waitUntilRunning.mock.calls[0][2].treatStoppedAsTransient,
+    ).toBeUndefined();
+    // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
+    // degraded the key per Phase 1 semantics.
+    expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
+    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      "measureKeys: string",
+    );
+
+    // D′: a still-startable warehouse is transient degradation — cached with
+    // retry: true so the next describe-capable pass converges it.
+    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
+    expect(metrics.revenue.retry).toBe(true);
+    expect(metrics.revenue.schema.degraded).toBe(true);
+  });
 
   test.each<[string, boolean]>([
     // STOPPED probe → start + wait (treatStoppedAsTransient: a non-RUNNING
@@ -892,10 +930,14 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   });
 
-  test("non-blocking: a failed status probe degrades instead of throwing", async () => {
+  test("non-blocking: a connectivity status-probe failure degrades instead of throwing", async () => {
     writeMetricConfig();
+    // A genuine connectivity error (ECONNREFUSED code) reads as transient
+    // not-running: the gate degrades and retries next pass, never throwing.
     mocks.getWarehouseState.mockRejectedValue(
-      new Error("connect ECONNREFUSED"),
+      Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:443"), {
+        code: "ECONNREFUSED",
+      }),
     );
 
     await expect(
@@ -910,6 +952,45 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
     expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
+  });
+
+  test("non-blocking: a deterministic status-probe failure (auth) is fatal after artifacts", async () => {
+    writeMetricConfig();
+    // A 403 carries no connectivity signal: the probe re-throws, the gate pins
+    // it fatal (Hybrid: warehouse-level → fatal), and the build fails after the
+    // degraded artifacts are written — never silently degrading a misconfig.
+    mocks.getWarehouseState.mockRejectedValue(
+      Object.assign(
+        new Error("PERMISSION_DENIED: cannot read warehouse wh-1"),
+        {
+          status: 403,
+        },
+      ),
+    );
+
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+      mode: "non-blocking",
+    }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
+    );
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as InstanceType<typeof TypegenFatalError>).queries).toEqual([
+      expect.objectContaining({ name: "revenue" }),
+    ]);
+
+    // No DESCRIBE ran; degraded artifacts still written before the throw.
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
+    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
+    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      "measureKeys: string",
+    );
   });
 });
 

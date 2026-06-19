@@ -1,3 +1,4 @@
+import { getErrorDiagnostic, isConnectivityError } from "../errors";
 import type { DatabricksStatementExecutionResponse } from "../types";
 import {
   extractMetricColumns,
@@ -71,8 +72,11 @@ export async function syncMetrics(
     try {
       response = await fetcher(entry.source);
     } catch (err) {
-      const reason = `DESCRIBE TABLE EXTENDED failed: ${(err as Error).message}`;
-      return failedOutcome(index, entry, reason, true);
+      const reason = `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(err)}`;
+      // Connectivity blips self-converge (retry next pass); auth, a bad
+      // warehouse id, a truncated / multi-chunk result, or a malformed request
+      // are deterministic and must surface — the same split the query path makes.
+      return failedOutcome(index, entry, reason, isConnectivityError(err));
     }
 
     const state = response.status?.state;
@@ -131,15 +135,11 @@ export async function syncMetrics(
       } else {
         const index = offset + i;
         const entry = entries[index];
-        const message =
-          result.reason instanceof Error
-            ? result.reason.message
-            : String(result.reason);
         const { schema, failure } = failedOutcome(
           index,
           entry,
-          `DESCRIBE TABLE EXTENDED failed: ${message}`,
-          true,
+          `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(result.reason)}`,
+          isConnectivityError(result.reason),
         );
         schemas[index] = schema;
         failureSlots[index] = failure;
