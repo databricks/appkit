@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { getErrorMessage } from "./errors";
 import type { DatabricksStatementExecutionResponse } from "./types";
 
 /**
@@ -99,19 +100,6 @@ export interface DescribeFormatMemo {
   format?: "JSON_ARRAY" | "ARROW_STREAM";
 }
 
-function errorMessageOf(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof (error as { message: unknown }).message === "string"
-  ) {
-    return (error as { message: string }).message;
-  }
-  return String(error);
-}
-
 /**
  * True when a failure means the warehouse REJECTED the requested result format
  * (so another format is worth trying), not that it ran the statement and hit a
@@ -182,7 +170,7 @@ export async function describeAdaptive(
       }
       return normalized;
     } catch (error) {
-      if (isFormatRejection(errorMessageOf(error))) {
+      if (isFormatRejection(getErrorMessage(error))) {
         lastError = error;
         continue; // format rejected via a thrown error — try the next
       }

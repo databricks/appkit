@@ -4,6 +4,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
+import { getErrorDiagnostic, isConnectivityError } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
@@ -97,129 +98,6 @@ function parseError(raw: string): { code?: string; message: string } {
     }
   }
   return { message: raw };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (isObject(error) && typeof error.message === "string") {
-    return error.message;
-  }
-  return String(error);
-}
-
-function getErrorDiagnostic(error: unknown): string {
-  const seen = new Set<unknown>();
-  const messages: string[] = [];
-  const stack = [error];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined || seen.has(current)) continue;
-    seen.add(current);
-
-    const message = getErrorMessage(current);
-    if (
-      message &&
-      message !== "[object Object]" &&
-      !messages.includes(message)
-    ) {
-      messages.push(message);
-    }
-
-    const code = getErrorCode(current);
-    if (code && !messages.includes(code)) messages.push(code);
-
-    stack.push(...getErrorChildren(current));
-  }
-
-  return messages.length > 0 ? messages.join(": ") : getErrorMessage(error);
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!isObject(error)) return undefined;
-  const code = error.code ?? error.errno;
-  return typeof code === "string" ? code : undefined;
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (!isObject(error)) return undefined;
-  const direct = error.status ?? error.statusCode;
-  if (typeof direct === "number") return direct;
-  if (isObject(error.response) && typeof error.response.status === "number") {
-    return error.response.status;
-  }
-  return undefined;
-}
-
-function getErrorChildren(error: unknown): unknown[] {
-  if (!isObject(error)) return [];
-  const children: unknown[] = [];
-  if ("cause" in error) children.push(error.cause);
-  if (error instanceof AggregateError) children.push(...error.errors);
-  return children;
-}
-
-const CONNECTIVITY_ERROR_CODES = new Set([
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "ENOTFOUND",
-  "ETIMEDOUT",
-  "EAI_AGAIN",
-  "EAI_NODATA",
-  "EAI_NONAME",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-  "CERT_HAS_EXPIRED",
-  "DEPTH_ZERO_SELF_SIGNED_CERT",
-  "ERR_TLS_CERT_ALTNAME_INVALID",
-  "SELF_SIGNED_CERT_IN_CHAIN",
-  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
-]);
-
-function isConnectivityMessage(message: string): boolean {
-  return (
-    /\bconnection (?:refused|reset|timed out)\b/i.test(message) ||
-    /\bsocket hang up\b/i.test(message) ||
-    /\bnetwork error\b/i.test(message) ||
-    /\bcan'?t connect to\b/i.test(message) ||
-    /\bcertificate has expired\b/i.test(message) ||
-    /\bunable to verify the first certificate\b/i.test(message) ||
-    /\bupstream connect error or disconnect\/reset before headers\b/i.test(
-      message,
-    )
-  );
-}
-
-function isConnectivityError(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  const stack = [error];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined || seen.has(current)) continue;
-    seen.add(current);
-
-    const code = getErrorCode(current);
-    if (
-      code &&
-      (CONNECTIVITY_ERROR_CODES.has(code) || code.startsWith("UND_ERR_"))
-    ) {
-      return true;
-    }
-
-    const status = getErrorStatus(current);
-    if (status === 502 || status === 503 || status === 504) return true;
-
-    if (isConnectivityMessage(getErrorMessage(current))) return true;
-
-    stack.push(...getErrorChildren(current));
-  }
-
-  return false;
 }
 
 /**
