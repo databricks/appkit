@@ -285,6 +285,49 @@ function inferTimeGrains(type: string): string[] | undefined {
 }
 
 /**
+ * Quote a dot-separated FQN for safe interpolation into a Spark/Databricks SQL
+ * statement.
+ *
+ * Each dot-split segment is wrapped in backtick-quoted-identifier syntax. The
+ * one character that can break out of a backtick-quoted identifier is the
+ * backtick itself, escaped by doubling (`` ` `` → `` `` ``) — so every backtick
+ * inside a segment is doubled before the segment is wrapped. Control characters
+ * and newlines have no valid escape inside a quoted identifier, so a segment
+ * containing one is rejected outright.
+ *
+ * This is a pure, standalone escaper: it is intentionally independent of FQN
+ * naming validation ({@link isValidFqn}). Naming validation decides whether an
+ * FQN is an acceptable metric source; this function only guarantees that
+ * whatever it is handed cannot break out of the quoted identifier it produces.
+ *
+ * An ordinary identifier is unchanged apart from the wrapping backticks:
+ * `catalog.schema.view` → `` `catalog`.`schema`.`view` ``.
+ *
+ * @param fqn - Dot-separated identifier (e.g. `catalog.schema.view`).
+ * @returns The backtick-quoted, escaped identifier ready for interpolation.
+ * @throws If any segment contains a control character or newline.
+ */
+export function quoteFqnForSql(fqn: string): string {
+  // Reject anything that cannot be represented inside a backtick-quoted
+  // identifier. \p{Cc} is the Unicode "control" category, which covers C0
+  // (incl. \n, \r, \t), DEL, and C1 — i.e. every control character/newline.
+  const CONTROL_OR_NEWLINE = /\p{Cc}/u;
+  return fqn
+    .split(".")
+    .map((segment) => {
+      if (CONTROL_OR_NEWLINE.test(segment)) {
+        throw new Error(
+          `Cannot quote FQN segment "${segment}" for SQL: it contains a control character or newline, which has no valid escape inside a backtick-quoted identifier.`,
+        );
+      }
+      // Double every backtick — the only break-out from a backtick-quoted
+      // identifier — then wrap the whole segment in backticks.
+      return `\`${segment.replace(/`/g, "``")}\``;
+    })
+    .join(".");
+}
+
+/**
  * Build a DescribeFetcher from a real WorkspaceClient + warehouseId.
  */
 export function createWorkspaceDescribeFetcher(
@@ -305,10 +348,11 @@ export function createWorkspaceDescribeFetcher(
         `Invalid metric source "${fqn}": expected a three-part UC FQN <catalog>.<schema>.<metric_view>.`,
       );
     }
-    const quotedFqn = fqn
-      .split(".")
-      .map((segment) => `\`${segment}\``)
-      .join(".");
+    // Escape + quote every segment before interpolation. isValidFqn already
+    // rejects backticks/control chars for metric sources, so this is
+    // belt-and-suspenders for the SQL-injection seam — and keeps the quoting
+    // independent of the naming rule.
+    const quotedFqn = quoteFqnForSql(fqn);
     return describeAdaptive(
       client,
       `DESCRIBE TABLE EXTENDED ${quotedFqn} AS JSON`,

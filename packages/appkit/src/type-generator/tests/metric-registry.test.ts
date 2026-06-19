@@ -9,6 +9,7 @@ import {
   createWorkspaceDescribeFetcher,
   extractMetricColumns,
   parseDescribeTableExtendedJson,
+  quoteFqnForSql,
 } from "../mv-registry/describe";
 import {
   buildMetricsMetadataBundle,
@@ -421,6 +422,74 @@ describe("parseDescribeTableExtendedJson", () => {
         result: { data_array: [[null]] },
       }),
     ).toThrowError(/JSON string/);
+  });
+});
+
+// ── Standalone SQL identifier escaper: the injection-safety primitive that
+// createWorkspaceDescribeFetcher composes with. Tested directly here,
+// independent of FQN naming validation — it must make ANY input it accepts a
+// single well-formed backtick-quoted identifier, doubling embedded backticks
+// (the only break-out) and refusing control characters/newlines outright.
+describe("quoteFqnForSql", () => {
+  test("quotes an ordinary three-part identifier unchanged (just wrapped)", () => {
+    expect(quoteFqnForSql("catalog.schema.view")).toBe(
+      "`catalog`.`schema`.`view`",
+    );
+  });
+
+  test("preserves the segment charset, incl. underscores and hyphens", () => {
+    expect(quoteFqnForSql("prod-data.public_1.revenue_metrics")).toBe(
+      "`prod-data`.`public_1`.`revenue_metrics`",
+    );
+  });
+
+  test("joins an arbitrary number of segments on '.' (1 and 4 parts)", () => {
+    expect(quoteFqnForSql("solo")).toBe("`solo`");
+    expect(quoteFqnForSql("a.b.c.d")).toBe("`a`.`b`.`c`.`d`");
+  });
+
+  test("doubles a backtick inside a segment so it cannot break out", () => {
+    // The injection-style payload `a\`b`: a naive `\`${segment}\`` wrap would
+    // emit `a`b` — three backticks, closing the identifier early and leaving a
+    // bare `b` token. Doubling makes it the single identifier `a``b`.
+    expect(quoteFqnForSql("a.b.a`b")).toBe("`a`.`b`.`a``b`");
+  });
+
+  test("neutralizes a backtick-led `;DROP` break-out attempt into one identifier", () => {
+    // `x\`;DROP TABLE t;--` would, unescaped, close the identifier at the first
+    // backtick and append `;DROP TABLE t;--` as live SQL. Doubling the backtick
+    // keeps the entire payload trapped inside a single quoted identifier.
+    const out = quoteFqnForSql("cat.sch.x`;DROP TABLE t;--");
+    expect(out).toBe("`cat`.`sch`.`x``;DROP TABLE t;--`");
+    // The dangerous lone backtick is gone: every backtick is now part of a
+    // balanced pair, so the identifier is well-formed and self-contained.
+    expect(out.split("`").length - 1).toBe(8); // 2 wraps × 3 segs + 1 doubled
+    expect(out.endsWith("`")).toBe(true);
+  });
+
+  test("doubles every backtick when a segment contains several", () => {
+    expect(quoteFqnForSql("a.b.`c`d`")).toBe("`a`.`b`.```c``d```");
+  });
+
+  test("rejects a segment containing a newline, naming the problem", () => {
+    expect(() => quoteFqnForSql("a.b.c\nDROP")).toThrowError(
+      /control character or newline/,
+    );
+  });
+
+  test("rejects a carriage return and a tab too", () => {
+    expect(() => quoteFqnForSql("a.b.c\rd")).toThrowError(
+      /control character or newline/,
+    );
+    expect(() => quoteFqnForSql("a.b.c\td")).toThrowError(
+      /control character or newline/,
+    );
+  });
+
+  test("rejects a NUL byte (C0 control)", () => {
+    expect(() => quoteFqnForSql("a.b.c\x00d")).toThrowError(
+      /control character or newline/,
+    );
   });
 });
 
