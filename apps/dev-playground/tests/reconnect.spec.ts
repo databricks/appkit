@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { setupMockAPI } from "./utils/test-utils";
 
 test.describe("Reconnect Route Tests", () => {
@@ -24,10 +24,7 @@ test.describe("Reconnect Route Tests", () => {
       page.locator('[data-slot="badge"]').filter({ hasText: "Reconnected" }),
     ).toBeVisible({ timeout: 5000 });
 
-    const messageCountContainer = page.locator("div").filter({
-      has: page.getByText("/ 5 messages received"),
-    });
-    await expect(messageCountContainer.locator("h2")).toHaveText("5", {
+    await expect(page.getByTestId("message-count")).toHaveText("5", {
       timeout: 5000,
     });
   });
@@ -62,11 +59,8 @@ test.describe("Reconnect Route Tests", () => {
  */
 test.describe("Reconnect Route Tests - Last-Event-ID replay (recovery)", () => {
   // Reads the message-count headline ("N / 5 messages received").
-  const readMessageCount = async (page: import("@playwright/test").Page) => {
-    const container = page.locator("div").filter({
-      has: page.getByText("/ 5 messages received"),
-    });
-    const text = await container.locator("h2").first().textContent();
+  const readMessageCount = async (page: Page) => {
+    const text = await page.getByTestId("message-count").textContent();
     return Number.parseInt(text ?? "0", 10);
   };
 
@@ -84,21 +78,25 @@ test.describe("Reconnect Route Tests - Last-Event-ID replay (recovery)", () => {
     // server SSE stream + StreamManager ring buffer.
     await page.goto("/reconnect", { waitUntil: "domcontentloaded" });
 
-    const messageCount = page.locator("div").filter({
-      has: page.getByText("/ 5 messages received"),
-    });
+    const messageCount = page.getByTestId("message-count");
 
     // Wait until SOME (not all) messages have arrived, then drop the network
-    // mid-stream. The server yields 1 message every ~3s, so >=1 and <5 leaves
-    // room to interrupt before completion.
+    // mid-stream. The server yields 1 message every ~3s, so the [1, 5) window
+    // leaves room to interrupt before completion. Polling the range as a single
+    // predicate keeps the read atomic — there's no gap between checking the
+    // lower and upper bound where the count could slip to 5.
     await expect
-      .poll(() => readMessageCount(page), {
-        timeout: 20000,
-        message: "expected at least one message before forcing disconnect",
-      })
-      .toBeGreaterThanOrEqual(1);
-
-    expect(await readMessageCount(page)).toBeLessThan(5);
+      .poll(
+        async () => {
+          const count = await readMessageCount(page);
+          return count >= 1 && count < 5;
+        },
+        {
+          timeout: 20000,
+          message: "expected to catch the stream mid-flight (1 <= count < 5)",
+        },
+      )
+      .toBe(true);
 
     // Force a client-side disconnect mid-stream: this aborts the in-flight
     // fetch with a network error, triggering the hook's reconnect path which
@@ -109,7 +107,7 @@ test.describe("Reconnect Route Tests - Last-Event-ID replay (recovery)", () => {
 
     // After reconnection + replay, the stream must complete with all 5
     // messages. Web-first assertion polls until the headline reads "5".
-    await expect(messageCount.locator("h2")).toHaveText("5", {
+    await expect(messageCount).toHaveText("5", {
       timeout: 40000,
     });
 
