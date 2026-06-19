@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { APPKIT_USER_AGENT } from "../../../context/client-options";
 import { AppKitMcpClient } from "../client";
 import type { DnsLookup, McpHostPolicy } from "../host-policy";
 
@@ -143,7 +144,10 @@ describe("AppKitMcpClient — host allowlist", () => {
     for (const call of calls) {
       const headers = call.init.headers as Record<string, string>;
       expect(headers.Authorization).toBe("Bearer SP-TOKEN");
+      // Every MCP request is attributed to AppKit via User-Agent.
+      expect(headers["User-Agent"]).toBe(APPKIT_USER_AGENT);
     }
+    expect(APPKIT_USER_AGENT).toMatch(/^@databricks\/appkit\//);
     expect(client.canForwardWorkspaceAuth("genie-1")).toBe(true);
   });
 

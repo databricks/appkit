@@ -311,6 +311,9 @@ export class FilesConnector {
 
       const headers = new Headers({
         "Content-Type": "application/octet-stream",
+        // This raw fetch bypasses apiClient, which would otherwise stamp the
+        // User-Agent; set it explicitly so the upload is attributed to AppKit.
+        "User-Agent": client.apiClient.userAgent(),
       });
       const fetchOptions: RequestInit = { method: "PUT", headers, body };
 
