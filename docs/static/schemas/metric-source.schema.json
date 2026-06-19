@@ -21,7 +21,7 @@
         "properties": {
           "source": {
             "type": "string",
-            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$",
+            "pattern": "^[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+$",
             "description": "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
             "examples": [
               "appkit_demo.public.revenue_metrics",

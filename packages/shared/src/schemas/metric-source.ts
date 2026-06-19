@@ -18,6 +18,26 @@
  */
 
 import { z } from "zod";
+import { UC_FQN_PATTERN } from "./metric-fqn";
+
+/**
+ * Three-part Unity Catalog FQN matcher, composed from the single-segment
+ * {@link UC_FQN_PATTERN} so the per-segment grammar has exactly one source of
+ * truth (shared by the type-generator runtime, which imports the zod-free
+ * {@link UC_FQN_PATTERN} directly — see `./metric-fqn.ts`).
+ *
+ * `UC_FQN_PATTERN` is `^<segment>+$`; stripping its `^`/`$` anchors yields the
+ * per-segment sub-pattern, which is joined with literal dots into
+ * `^<segment>\.<segment>\.<segment>$`. Exactly three dot-separated segments,
+ * each a valid UC object name. Arity (and the per-segment length cap) is also
+ * enforced structurally by the type-generator's `resolveMetricConfig`.
+ */
+const UC_FQN_SEGMENT_SOURCE = UC_FQN_PATTERN.source
+  .replace(/^\^/, "")
+  .replace(/\$$/, "");
+const UC_THREE_PART_FQN_PATTERN = new RegExp(
+  `^${UC_FQN_SEGMENT_SOURCE}\\.${UC_FQN_SEGMENT_SOURCE}\\.${UC_FQN_SEGMENT_SOURCE}$`,
+);
 
 export const metricKeySchema = z
   .string()
@@ -41,9 +61,7 @@ export const metricEntrySchema = z
   .object({
     source: z
       .string()
-      .regex(
-        /^[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$/,
-      )
+      .regex(UC_THREE_PART_FQN_PATTERN)
       .describe(
         "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
       )

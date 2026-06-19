@@ -228,6 +228,143 @@ describe("resolveMetricConfig", () => {
   });
 });
 
+// ── Phase 2: UC-accurate FQN naming validation. The source FQN is validated
+// against UC_FQN_PATTERN (single-sourced from the zod-free
+// packages/shared/src/schemas/metric-fqn.ts, shared with the canonical Zod
+// schema). The old hand-rolled segment charset [a-zA-Z0-9_-] was flagged in
+// PR #433 review (pkosiec) as "more restrictive than UC"; these tests pin the
+// arity/dot/charset rules and the now-accepted UC-legal characters.
+describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
+  const sourceOf = (source: string) => ({
+    metricViews: { revenue: { source } },
+  });
+
+  // ── Arity: exactly three dot-separated parts ───────────────────────────
+  test("rejects too few parts, naming the count and the no-dot-in-name rule", () => {
+    expect(() => resolveMetricConfig(sourceOf("revenue"))).toThrowError(
+      /three-part UC FQN .*\(got 1 dot-separated part\)\. A catalog, schema, or metric view name cannot itself contain a dot\./,
+    );
+    expect(() => resolveMetricConfig(sourceOf("demo.revenue"))).toThrowError(
+      /\(got 2 dot-separated parts\)/,
+    );
+  });
+
+  test("rejects too many parts — the way a dot inside a name manifests", () => {
+    // The dotted source cannot express a dot inside a name: a fourth dot just
+    // reads as a fourth segment. The message explains exactly that.
+    expect(() =>
+      resolveMetricConfig(sourceOf("cat.schema.my.view")),
+    ).toThrowError(
+      /three-part UC FQN .*\(got 4 dot-separated parts\)\. A catalog, schema, or metric view name cannot itself contain a dot\./,
+    );
+  });
+
+  // ── Empty parts: leading / trailing / doubled dots ─────────────────────
+  test("rejects an empty part with a position-specific message", () => {
+    expect(() => resolveMetricConfig(sourceOf(".schema.view"))).toThrowError(
+      /the catalog part is empty/,
+    );
+    expect(() => resolveMetricConfig(sourceOf("cat..view"))).toThrowError(
+      /the schema part is empty/,
+    );
+    expect(() => resolveMetricConfig(sourceOf("cat.schema."))).toThrowError(
+      /the metric_view part is empty/,
+    );
+  });
+
+  // ── Character set: UC-illegal characters, named by segment ─────────────
+  test("rejects a space in a part, naming the part and the UC rule", () => {
+    expect(() =>
+      resolveMetricConfig(sourceOf("cat.schema.my view")),
+    ).toThrowError(
+      /the metric_view part "my view" contains a character Unity Catalog does not allow in an object name \(no spaces, '\/', or control characters\)\./,
+    );
+  });
+
+  test("rejects a forward slash and a control character in a part", () => {
+    expect(() =>
+      resolveMetricConfig(sourceOf("ca/t.schema.view")),
+    ).toThrowError(/the catalog part "ca\/t" contains a character/);
+    expect(() =>
+      resolveMetricConfig(sourceOf("cat.sch\tema.view")),
+    ).toThrowError(/the schema part .* contains a character/);
+  });
+
+  // ── Regression: UC-legal characters the OLD [a-zA-Z0-9_-] regex rejected
+  // now PASS. PR #433 review (pkosiec): "more restrictive than UC". ───────
+  test("accepts hyphens, mixed case, and non-ASCII names UC permits", () => {
+    for (const source of [
+      "prod-data.analytics.revenue",
+      "Catalog.Schema.RevenueMetrics",
+      "café.public.revenue", // accented latin — old regex rejected this
+      "main.public.指标", // CJK — old regex rejected this
+      "main.public.metrics(v2)", // parentheses — old regex rejected this
+    ]) {
+      const { entries } = resolveMetricConfig({
+        metricViews: { m: { source } },
+      });
+      expect(entries[0].source).toBe(source);
+    }
+  });
+
+  test("accepts a previously-rejected character end-to-end (resolve → describe statement quoted)", async () => {
+    // Single, focused regression: an accented catalog name is UC-legal in a
+    // quoted identifier but the old segment charset [a-zA-Z0-9_-] rejected it.
+    // It must now resolve AND quote cleanly in the DESCRIBE statement.
+    const source = "café.public.revenue";
+    const { entries } = resolveMetricConfig({
+      metricViews: { revenue: { source } },
+    });
+    expect(entries[0].source).toBe(source);
+
+    const statements: Array<Record<string, unknown>> = [];
+    const client = {
+      statementExecution: {
+        executeStatement: async (req: Record<string, unknown>) => {
+          statements.push(req);
+          return mockDescribeResponse({
+            columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
+          });
+        },
+      },
+    } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
+
+    await createWorkspaceDescribeFetcher(client, "wh-1")(entries[0].source);
+    expect(statements[0].statement).toBe(
+      "DESCRIBE TABLE EXTENDED `café`.`public`.`revenue` AS JSON",
+    );
+  });
+
+  // ── Malformed → throw at parse time; well-formed-but-nonexistent → degrade
+  // (the degrade path is unchanged — a syntactically valid FQN that the
+  // warehouse cannot resolve still flows to DESCRIBE and degrades). ───────
+  test("a malformed FQN throws at resolve time (never reaches the warehouse)", () => {
+    expect(() =>
+      resolveMetricConfig(sourceOf("not.three.part.parts")),
+    ).toThrowError(/three-part UC FQN/);
+  });
+
+  test("a well-formed-but-nonexistent FQN resolves, then degrades at the warehouse (unchanged)", async () => {
+    // Shape-valid, so resolution accepts it...
+    const resolution = resolveMetricConfig(
+      sourceOf("does_not_exist.nope.ghost"),
+    );
+    expect(resolution.entries[0].source).toBe("does_not_exist.nope.ghost");
+
+    // ...and the warehouse verdict (FAILED: no such table) degrades it without
+    // crashing the pass — exactly the pre-existing degrade behavior.
+    const fetcher =
+      async (): Promise<DatabricksStatementExecutionResponse> => ({
+        statement_id: "stmt-mock",
+        status: { state: "FAILED", error: { message: "no such table" } },
+      });
+    const { schemas, failures } = await syncMetrics(resolution, fetcher);
+    expect(schemas[0].degraded).toBe(true);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].reason).toMatch(/no such table/);
+  });
+});
+
 // ── Input caps (inline-only at v1): the canonical Zod schema has no caps
 // yet — aligning it is a PR4 rider, so these fixtures deliberately do NOT
 // run through metricSourceSchema (they'd pass it) and stay out of the
@@ -281,9 +418,13 @@ describe("resolveMetricConfig — input caps", () => {
 
 // ── Parity: the inline config validation must agree with the canonical
 // shared Zod schema (packages/shared/src/schemas/metric-source.ts).
-// The regexes and allowlists are copied, not imported (locked dependency-graph
-// ruling: the type-generator must not pull the shared schema package into the
-// runtime path) — this block is the drift alarm. TEST-ONLY import.
+// The FQN naming grammar is now SINGLE-SOURCED: both sides validate against
+// UC_FQN_PATTERN from the zod-free packages/shared/src/schemas/metric-fqn.ts
+// (the runtime imports the plain value; the Zod schema composes its three-part
+// .regex(...) from it). The type-generator still must not pull the shared *Zod*
+// schema package into its runtime path (locked dependency-graph ruling), which
+// the zod-free module preserves. Entry/top-level allowlists remain hand-mirrored
+// inline; this block is the drift alarm for them. TEST-ONLY import of the Zod schema.
 //
 // Caps divergence: the inline validator enforces v1 input caps (≤200 entries,
 // ≤255 per FQN segment, ≤767 full FQN) that the canonical schema does not
@@ -331,6 +472,16 @@ describe("resolveMetricConfig — parity with shared metricSourceSchema", () => 
     },
     { name: "empty config (no metricViews)", config: {} },
     { name: "empty metricViews map", config: { metricViews: {} } },
+    // UC-legal characters the OLD [a-zA-Z0-9_-] regex rejected — both the
+    // inline validator and the Zod schema must now accept them in lockstep.
+    {
+      name: "hyphenated catalog (UC-legal)",
+      config: { metricViews: { revenue: { source: "prod-data.public.rev" } } },
+    },
+    {
+      name: "non-ASCII metric view name (UC-legal)",
+      config: { metricViews: { revenue: { source: "main.public.指标" } } },
+    },
   ];
 
   const rejects: Array<{ name: string; config: Record<string, unknown> }> = [
@@ -341,6 +492,10 @@ describe("resolveMetricConfig — parity with shared metricSourceSchema", () => 
     {
       name: "non-three-part FQN",
       config: { metricViews: { revenue: { source: "not.three.part.parts" } } },
+    },
+    {
+      name: "UC-illegal character in a part (space)",
+      config: { metricViews: { revenue: { source: "a.b.c d" } } },
     },
     {
       name: "invalid executor value",
@@ -611,13 +766,30 @@ describe("createWorkspaceDescribeFetcher", () => {
     const { client, statements } = stubClient();
     const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
 
-    // Backticks (and anything else outside the segment charset) fail the
-    // defense-in-depth re-validation at the fetcher seam.
-    await expect(fetcher("a.b.`c`")).rejects.toThrowError(/three-part UC FQN/);
+    // Wrong arity and UC-illegal characters (a space here) both fail the
+    // defense-in-depth re-validation at the fetcher seam — no statement issued.
     await expect(fetcher("not.three.part.parts")).rejects.toThrowError(
       /three-part UC FQN/,
     );
+    await expect(fetcher("a.b.c d")).rejects.toThrowError(/three-part UC FQN/);
     expect(statements).toHaveLength(0);
+  });
+
+  test("a backtick-bearing FQN is now accepted and safely quoted (UC permits it, quoting doubles it)", async () => {
+    // Under the old hand-rolled segment charset ([a-zA-Z0-9_-]) a backtick was
+    // rejected outright. UC actually permits a backtick inside a quoted name,
+    // and quoteFqnForSql (Phase 1) makes it injection-safe by doubling it. So
+    // naming validation now accepts it and the statement quotes it as a single
+    // identifier rather than refusing the FQN.
+    const { client, statements } = stubClient();
+    const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
+
+    await fetcher("a.b.a`c");
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0].statement).toBe(
+      "DESCRIBE TABLE EXTENDED `a`.`b`.`a``c` AS JSON",
+    );
   });
 });
 
