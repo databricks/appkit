@@ -204,7 +204,10 @@ jobs:
           ls -la ~/.cache/ms-playwright 2>/dev/null || echo "(no ms-playwright cache dir)"
       - name: Diag - disk space
         continue-on-error: true
-        run: { df -h; echo "--- ~/.cache ---"; df -h ~/.cache 2>/dev/null || true; }
+        run: |
+          df -h
+          echo "--- ~/.cache ---"
+          df -h ~/.cache 2>/dev/null || true
 
   pr-template-artifact:
     name: PR Template Artifact
