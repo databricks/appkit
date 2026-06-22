@@ -4,7 +4,14 @@ export default defineConfig([
   {
     publint: true,
     name: "@databricks/appkit",
-    entry: ["src/index.ts", "src/beta.ts"],
+    // `./type-generator` is a public subpath export consumed cross-package by the
+    // `appkit` CLI (`appkit mv sync` / `generate-types`) via a dynamic import
+    // Rolldown can't see. It must be its own entry so its declared public API
+    // (syncMetricViewsTypes + METRIC_TYPES_FILE / METRIC_METADATA_FILE, alongside
+    // generateFromEntryPoint / generateServingTypes) is preserved under unbundle
+    // tree-shaking. Without it, the subpath's runtime exports collapse to only the
+    // names appkit's own Vite plugins import — silently dropping the CLI's.
+    entry: ["src/index.ts", "src/beta.ts", "src/type-generator/index.ts"],
     outDir: "dist",
     hash: false,
     format: "esm",
