@@ -172,8 +172,8 @@ export function convertToQueryType(
 
     // generate comment for column
     const comment = column.comment
-      ? `/** ${column.comment} */\n      `
-      : `/** @sqlType ${column.type_name} */\n      `;
+      ? `/** ${column.comment.replace(/\*\//g, "* /")} */\n      `
+      : `/** @sqlType ${column.type_name.replace(/\*\//g, "* /")} */\n      `;
 
     return `${comment}${name}: ${mappedType}`;
   });

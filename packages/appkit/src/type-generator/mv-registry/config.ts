@@ -21,7 +21,8 @@ import type {
 const MV_CONFIG_FILE = "metric-views.json";
 
 /**
- * {@link resolveMetricConfig} enforces these caps.
+ * Safety cap on declared metric views — a typo / DoS guard, NOT a Unity Catalog
+ * limit. Enforced by {@link resolveMetricConfig}.
  */
 const MAX_METRIC_VIEWS = 200;
 /** Per-segment cap = UC's object-name length limit (255). */
@@ -33,10 +34,10 @@ const FQN_SEGMENT_NAMES = ["catalog", "schema", "metric_view"] as const;
 const FQN_SEGMENT_COUNT = FQN_SEGMENT_NAMES.length;
 
 /**
- * Locale-independent comparator (UTF-16 code-unit order)
- * shared by BOTH artifact key orderings.
- *
- * @note important for caching correctness.
+ * Locale-independent comparator (UTF-16 code-unit order) shared by BOTH artifact
+ * key orderings. Plain `sort()` is locale-sensitive, so keys could order
+ * differently across environments and invalidate the cache hash — this keeps the
+ * ordering stable everywhere.
  */
 export function compareKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -47,7 +48,7 @@ export function compareKeys(a: string, b: string): number {
  *
  * Returns `null` if the file does not exist (the metric-view path is
  * additive — apps without metric-views.json must not be penalized). There is
- * deliberately no fallback to the legacy {@link MV_CONFIG_FILE} filename.
+ * deliberately no fallback to the legacy `metric.json` filename.
  *
  * Throws on JSON parse errors so misconfiguration surfaces loudly.
  */
@@ -85,9 +86,9 @@ export async function readMetricConfig(
 
 /**
  * Validate a key against the JSON Schema's metricKey pattern. Kept
- * lightweight — the shared Zod schema ({@link metricSourceSchema} in `packages/shared/src/schemas/metric-source.ts`)
- * is the canonical contract for IDE/CI; this regex is identical to its
- * {@link metricKeySchema} in `packages/shared/src/schemas/metric-source.ts`.
+ * lightweight — the shared Zod schema ({@link metricSourceSchema}) is the
+ * canonical contract for IDE/CI; this regex is identical to its
+ * {@link metricKeySchema}.
  */
 function isValidMetricKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
@@ -134,11 +135,9 @@ export function resolveMetricConfig(
     }
   }
 
-  /**
-   *  Default ONLY a genuinely-absent {@link MetricSourceConfig.metricViews}. `null` must fall through
-   * to the type check below and throw — the canonical Zod schema ({@link metricSourceSchema}) rejects
-   * `null`.
-   */
+  // Default to {} only when metricViews is genuinely absent. A `null` must fall
+  // through to the type check below and throw — the canonical Zod schema rejects
+  // null.
   const metricViews =
     config.metricViews === undefined ? {} : config.metricViews;
   if (

@@ -44,7 +44,7 @@ function renderMetricEntry(schema: MetricSchema): string {
         const grainComment = col.timeGrains?.length
           ? ` @timeGrain ${col.timeGrains.join("|")}`
           : "";
-        return `${indent}/** @sqlType ${col.type}${grainComment} */
+        return `${indent}/** @sqlType ${col.type.replace(/\*\//g, "* /")}${grainComment} */
 ${indent}${JSON.stringify(col.name)}: ${tsTypeFor(col.type)}`;
       })
       .join(";\n");

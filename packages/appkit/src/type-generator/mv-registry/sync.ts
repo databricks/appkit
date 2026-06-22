@@ -43,7 +43,7 @@ interface MetricDescribeOutcome {
 }
 
 /**
- * Run schema synchronization for every entry in {@link import("./config").MV_CONFIG_FILE}.
+ * Run schema synchronization for every entry in `metric-views.json`.
  */
 export async function syncMetrics(
   resolution: MetricConfigResolution,

@@ -1,6 +1,9 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { createLogger } from "../logging/logger";
 import { getErrorMessage } from "./errors";
 import type { DatabricksStatementExecutionResponse } from "./types";
+
+const logger = createLogger("type-generator:statement-result");
 
 /**
  * Normalize a Statement Execution response so downstream parsers can always
@@ -78,9 +81,15 @@ export async function normalizeResultRows(
         data_array: dataArray,
       },
     };
-  } catch {
-    // Best-effort: a corrupt/partial Arrow payload must not crash the pass.
-    // Returning it unchanged routes into the deterministic "no rows" degrade.
+  } catch (err) {
+    // Best-effort: a corrupt/partial Arrow payload — or a missing apache-arrow
+    // module — must not crash the pass. Warn so a Reyden user whose decode failed
+    // gets a breadcrumb instead of mysteriously-empty types, then return the
+    // response unchanged: it routes into the deterministic "no rows" degrade.
+    logger.warn(
+      "failed to decode ARROW_STREAM DESCRIBE attachment (%s); emitting no rows — metric/query types may degrade",
+      getErrorMessage(err),
+    );
     return response;
   }
 }
