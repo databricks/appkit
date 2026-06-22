@@ -335,9 +335,9 @@ export async function generateFromEntryPoint(options: {
   // purely additive — apps that never adopt metric views must not produce
   // empty noise.
   if (queryFolder) {
-    const metricConfig = await readMetricConfig(queryFolder);
-    if (metricConfig) {
-      const resolution = resolveMetricConfig(metricConfig);
+    const mvConfig = await readMetricConfig(queryFolder);
+    if (mvConfig) {
+      const resolution = resolveMetricConfig(mvConfig);
 
       // Metric schemas persist in the shared typegen cache as a `metrics`
       // section (sibling of `queries`, same file/version), keyed by metric key
@@ -353,11 +353,11 @@ export async function generateFromEntryPoint(options: {
       // dropping the entry) instead of storing data. A null prototype also
       // keeps partition reads from resolving inherited names ("constructor",
       // "toString", ...) as phantom entries.
-      const metricsSection: Record<string, MetricCacheEntry> =
+      const mvCacheSection: Record<string, MetricCacheEntry> =
         Object.create(null);
       if (!noCache && cache.metrics) {
         for (const key of Object.keys(cache.metrics)) {
-          metricsSection[key] = cache.metrics[key];
+          mvCacheSection[key] = cache.metrics[key];
         }
       }
 
@@ -375,7 +375,7 @@ export async function generateFromEntryPoint(options: {
       // the single notice below so the misconfiguration isn't silently hidden.
       const stickyDegradedHits: string[] = [];
       for (const entry of resolution.entries) {
-        const prior = metricsSection[entry.key];
+        const prior = mvCacheSection[entry.key];
         if (
           prior !== undefined &&
           isRevivableMetricCacheEntry(prior) &&
@@ -402,10 +402,10 @@ export async function generateFromEntryPoint(options: {
       // status probe, the blocking preflight, and the default DESCRIBE fetcher
       // share this lazily-created instance, so a pass that never contacts the
       // warehouse constructs zero clients.
-      let metricClient: WorkspaceClient | undefined;
-      const getMetricClient = (): WorkspaceClient => {
-        metricClient ??= new WorkspaceClient({});
-        return metricClient;
+      let mvClient: WorkspaceClient | undefined;
+      const getMvClient = (): WorkspaceClient => {
+        mvClient ??= new WorkspaceClient({});
+        return mvClient;
       };
 
       // Blocking-mode preflight: ensure the warehouse is running before the
@@ -422,22 +422,18 @@ export async function generateFromEntryPoint(options: {
         describeNeeded.length > 0
       ) {
         try {
-          const state = await getWarehouseState(getMetricClient(), warehouseId);
+          const state = await getWarehouseState(getMvClient(), warehouseId);
           const decision = decidePreflight(state, mode);
           if (decision === "fatal") {
             preflightFatalMessage = `warehouse ${warehouseId} is ${state}`;
           } else if (decision === "startWaitProceed") {
             // treatStoppedAsTransient rides out the stale pre-start
             // STOPPED/STOPPING reading, same as the query preflight.
-            await startWarehouse(getMetricClient(), warehouseId);
-            const settled = await waitUntilRunning(
-              getMetricClient(),
-              warehouseId,
-              {
-                maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
-                treatStoppedAsTransient: true,
-              },
-            );
+            await startWarehouse(getMvClient(), warehouseId);
+            const settled = await waitUntilRunning(getMvClient(), warehouseId, {
+              maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
+              treatStoppedAsTransient: true,
+            });
             if (settled !== "RUNNING") {
               // With treatStoppedAsTransient, a non-RUNNING resolve is
               // exactly DELETED/DELETING — the warehouse was deleted while
@@ -445,13 +441,9 @@ export async function generateFromEntryPoint(options: {
               preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
             }
           } else if (decision === "waitThenProceed") {
-            const settled = await waitUntilRunning(
-              getMetricClient(),
-              warehouseId,
-              {
-                maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
-              },
-            );
+            const settled = await waitUntilRunning(getMvClient(), warehouseId, {
+              maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
+            });
             if (settled === "DELETED" || settled === "DELETING") {
               // Deleted mid-wait: fatal. A STOPPED/STOPPING resolve (this
               // wait runs without treatStoppedAsTransient) stays a soft
@@ -486,7 +478,7 @@ export async function generateFromEntryPoint(options: {
         describeNeeded.length === 0;
       if (!describeNow) {
         try {
-          gateState = await probeWarehouseState(getMetricClient, warehouseId);
+          gateState = await probeWarehouseState(getMvClient, warehouseId);
         } catch (err) {
           // probeWarehouseState only throws on a deterministic failure (auth,
           // bad warehouse id) — a connectivity blip already returned undefined.
@@ -521,7 +513,7 @@ export async function generateFromEntryPoint(options: {
       } else if (describeNow) {
         const fetcher =
           metricFetcher ??
-          createWorkspaceDescribeFetcher(getMetricClient(), warehouseId);
+          createWorkspaceDescribeFetcher(getMvClient(), warehouseId);
         ({ schemas: described, failures } = await syncMetrics(
           { entries: describeNeeded },
           fetcher,
@@ -591,7 +583,7 @@ export async function generateFromEntryPoint(options: {
         // belongs to describeNeeded[i].
         const entry = describeNeeded[i];
         const failure = failureByKey.get(entry.key);
-        metricsSection[entry.key] = {
+        mvCacheSection[entry.key] = {
           hash: metricCacheHash(entry.source, entry.lane),
           schema: described[i],
           retry:
@@ -605,9 +597,9 @@ export async function generateFromEntryPoint(options: {
       // doesn't haunt the cache file forever.
       const configuredKeys = new Set(resolution.entries.map((e) => e.key));
       let prunedCount = 0;
-      for (const key of Object.keys(metricsSection)) {
+      for (const key of Object.keys(mvCacheSection)) {
         if (!configuredKeys.has(key)) {
-          delete metricsSection[key];
+          delete mvCacheSection[key];
           prunedCount++;
         }
       }
@@ -616,7 +608,7 @@ export async function generateFromEntryPoint(options: {
       // — a warm pass over a shrunk config has nothing to describe but must
       // still shrink the file.
       if (describeNeeded.length > 0 || noCache || prunedCount > 0) {
-        cache.metrics = metricsSection;
+        cache.metrics = mvCacheSection;
         await saveCache(cache);
       }
 
@@ -627,7 +619,7 @@ export async function generateFromEntryPoint(options: {
       for (const schema of described) {
         describedByKey.set(schema.key, schema);
       }
-      const metricSchemas = resolution.entries.map((entry) => {
+      const mvSchemas = resolution.entries.map((entry) => {
         const schema =
           hitSchemas.get(entry.key) ?? describedByKey.get(entry.key);
         if (schema !== undefined) return schema;
@@ -643,25 +635,25 @@ export async function generateFromEntryPoint(options: {
         return emptyMetricSchema(entry);
       });
 
-      const metricFile =
+      const mvFile =
         mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
-      const metricDeclarations = generateMetricTypeDeclarations(metricSchemas);
-      await fs.mkdir(path.dirname(metricFile), { recursive: true });
-      await fs.writeFile(metricFile, metricDeclarations, "utf-8");
+      const mvDeclarations = generateMetricTypeDeclarations(mvSchemas);
+      await fs.mkdir(path.dirname(mvFile), { recursive: true });
+      await fs.writeFile(mvFile, mvDeclarations, "utf-8");
 
       // Emit the semantic-metadata JSON bundle alongside the .d.ts. The hook
       // imports this artifact (via a registration call from the consuming
       // app) and exposes the per-metric subset on its return value.
-      const metadataFile =
+      const mvMetadataFile =
         mvMetadataOutFile ??
-        path.join(path.dirname(metricFile), METRIC_METADATA_FILE);
-      const metadataJson = generateMetricsMetadataJson(metricSchemas);
-      await fs.mkdir(path.dirname(metadataFile), { recursive: true });
-      await fs.writeFile(metadataFile, metadataJson, "utf-8");
+        path.join(path.dirname(mvFile), METRIC_METADATA_FILE);
+      const metadataJson = generateMetricsMetadataJson(mvSchemas);
+      await fs.mkdir(path.dirname(mvMetadataFile), { recursive: true });
+      await fs.writeFile(mvMetadataFile, metadataJson, "utf-8");
 
       logger.debug(
         "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)%s",
-        metricSchemas.length,
+        mvSchemas.length,
         failures.length > 0 ? ` (${failures.length} failure(s))` : "",
       );
     }

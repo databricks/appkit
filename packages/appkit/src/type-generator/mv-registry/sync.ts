@@ -33,7 +33,7 @@ export function emptyMetricSchema(
 }
 
 // Maximum number of in-flight DESCRIBE statements per syncMetrics pass.
-const METRIC_DESCRIBE_CONCURRENCY = 10;
+const MV_DESCRIBE_CONCURRENCY = 10;
 
 // Outcome of describing a single metric entry.
 interface MetricDescribeOutcome {
@@ -117,9 +117,9 @@ export async function syncMetrics(
   for (
     let offset = 0;
     offset < entries.length;
-    offset += METRIC_DESCRIBE_CONCURRENCY
+    offset += MV_DESCRIBE_CONCURRENCY
   ) {
-    const slice = entries.slice(offset, offset + METRIC_DESCRIBE_CONCURRENCY);
+    const slice = entries.slice(offset, offset + MV_DESCRIBE_CONCURRENCY);
     const settled = await Promise.allSettled(
       slice.map((entry, i) => describeOne(entry, offset + i)),
     );
