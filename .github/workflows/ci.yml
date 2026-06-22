@@ -137,7 +137,6 @@ jobs:
     name: Playground Integration Tests
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
-    timeout-minutes: 25
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -153,18 +152,17 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # ── TEMPORARY: does a newer Playwright fix the install hang? ──────────
-      # Playwright 1.58.1's installer hangs at 100% on this runner (curl pulls
-      # the same zip in ~1s). Testing 1.61.0, bounded so it can't hang the job.
-      - name: Diag - playwright install (1.61.0), bounded
-        continue-on-error: true
-        run: |
-          rm -rf ~/.cache/ms-playwright
-          echo "playwright version: $(pnpm --filter=dev-playground exec playwright --version)"
-          echo "::group::playwright install chromium (timeout 180)"
-          timeout 180 pnpm --filter=dev-playground exec playwright install chromium
-          echo "playwright_exit=$?"
-          echo "::endgroup::"
+      - name: Install Playwright Browsers
+        run: pnpm --filter=dev-playground exec playwright install --with-deps chromium
+      - name: Build packages
+        run: pnpm build
+      - name: Run Integration Tests
+        run: pnpm --filter=dev-playground test:integration
+        env:
+          APPKIT_E2E_TEST: 'true'
+          DATABRICKS_WAREHOUSE_ID: e2e-mock
+          DATABRICKS_WORKSPACE_ID: e2e-mock
+          DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
 
   pr-template-artifact:
     name: PR Template Artifact
