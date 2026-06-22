@@ -40,6 +40,7 @@
     "@standard-schema/spec": "1.1.0",
     "@clack/prompts": "1.0.1",
     "commander": "12.1.0",
+    "napi-postinstall": "0.3.4",
     "zod": "4.3.6"
   }
 }

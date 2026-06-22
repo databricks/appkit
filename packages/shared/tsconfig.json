@@ -7,6 +7,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "scripts/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "src/**/fixtures"]
 }
