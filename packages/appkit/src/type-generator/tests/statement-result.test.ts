@@ -397,6 +397,80 @@ describe("describeAdaptive", () => {
     expect(formats).toEqual(["JSON_ARRAY"]);
   });
 
+  test("genuine SQL error whose message mentions disposition+format: not a format rejection", async () => {
+    // The dangerous case the message-only match missed: DESCRIBE runs over
+    // user-supplied SQL, so a source referencing columns named
+    // `disposition`/`format` produces a real SQL error whose echoed-back text
+    // trips the `disposition && format` clause. The `error_code` gate
+    // (TABLE_OR_VIEW_NOT_FOUND ≠ INVALID_PARAMETER_VALUE) keeps it from being
+    // retried under ARROW and masking the real diagnostic.
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") {
+        return {
+          statement_id: "stmt",
+          status: {
+            state: "FAILED",
+            error: {
+              error_code: "TABLE_OR_VIEW_NOT_FOUND",
+              message: "table x has no disposition column; format unknown",
+            },
+          },
+          result: {},
+        } as DatabricksStatementExecutionResponse;
+      }
+      throw new Error("ARROW must not be tried for a genuine SQL error");
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE QUERY x",
+      "wh",
+      memo,
+    );
+
+    // The real diagnostic survives unmasked, and no second format was probed.
+    expect(result.status.state).toBe("FAILED");
+    expect(result.status.error?.error_code).toBe("TABLE_OR_VIEW_NOT_FOUND");
+    expect(memo.format).toBeUndefined();
+    expect(formats).toEqual(["JSON_ARRAY"]);
+  });
+
+  test("standard DBSQL format rejection (INVALID_PARAMETER_VALUE): still falls back", async () => {
+    // The gate must not regress the real rejection path: a request-shape
+    // rejection carries error_code INVALID_PARAMETER_VALUE, so the message match
+    // still applies and the fallback to ARROW_STREAM fires.
+    const memo: DescribeFormatMemo = {};
+    const { client, formats } = stubClient((format) => {
+      if (format === "JSON_ARRAY") {
+        return {
+          statement_id: "stmt",
+          status: {
+            state: "FAILED",
+            error: {
+              error_code: "INVALID_PARAMETER_VALUE",
+              message:
+                "disposition must be one of INLINE, EXTERNAL_LINKS; format must be JSON_ARRAY, ARROW_STREAM",
+            },
+          },
+          result: {},
+        } as DatabricksStatementExecutionResponse;
+      }
+      return rows([["arrow-decoded"]]);
+    });
+
+    const result = await describeAdaptive(
+      client,
+      "DESCRIBE QUERY x",
+      "wh",
+      memo,
+    );
+
+    expect(result.result?.data_array).toEqual([["arrow-decoded"]]);
+    expect(memo.format).toBe("ARROW_STREAM");
+    expect(formats).toEqual(["JSON_ARRAY", "ARROW_STREAM"]);
+  });
+
   test("non-format throw (connectivity): rethrown immediately, no fallback", async () => {
     const memo: DescribeFormatMemo = {};
     const { client, formats } = stubClient((format) => {

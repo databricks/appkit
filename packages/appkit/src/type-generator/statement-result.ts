@@ -112,15 +112,33 @@ export interface DescribeFormatMemo {
 /**
  * True when a failure means the warehouse REJECTED the requested result format
  * (so another format is worth trying), not that it ran the statement and hit a
- * real error. There is no structured signal for this, so we match the two known
- * server signatures: Reyden's `merge_json_arrays` (its `JSON_ARRAY` assembly
- * fails on a `… AS JSON` single-cell result) and standard DBSQL's rejection of
- * `ARROW_STREAM` under an `INLINE` disposition. A genuine SQL error,
- * connectivity failure, or not-ready warehouse does NOT match — those are
- * returned/propagated for the caller's normal handling, never re-tried.
+ * real error. There is no single structured signal for this, so we combine two:
+ *
+ *  - `errorCode` — a statement that actually RAN and failed carries a SQL error
+ *    code (`TABLE_OR_VIEW_NOT_FOUND`, `PARSE_SYNTAX_ERROR`, …); a request-shape
+ *    rejection comes back as `INVALID_PARAMETER_VALUE`. Any other code means the
+ *    statement ran, so it is never a format rejection — whatever its message
+ *    text happens to contain. This gate matters because DESCRIBE runs over
+ *    user-supplied SQL and analysis errors echo the offending SQL back: a source
+ *    with columns named `disposition`/`format` would otherwise trip the message
+ *    match below and get its real diagnostic masked by a pointless retry.
+ *  - the message signatures — Reyden's `merge_json_arrays` (its `JSON_ARRAY`
+ *    assembly fails on a `… AS JSON` single-cell result) and standard DBSQL's
+ *    rejection of `ARROW_STREAM` under an `INLINE` disposition.
+ *
+ * A genuine SQL error, connectivity failure, or not-ready warehouse does NOT
+ * match — those are returned/propagated for the caller's normal handling, never
+ * re-tried. `errorCode` is optional: a thrown SDK error carries no reliable
+ * structured code, so the catch-path caller passes message only.
  */
-function isFormatRejection(message: string | undefined): boolean {
+function isFormatRejection(
+  message: string | undefined,
+  errorCode?: string,
+): boolean {
   if (!message) return false;
+  // It ran and produced a SQL error — never a format rejection, whatever the
+  // message text happens to contain.
+  if (errorCode && errorCode !== "INVALID_PARAMETER_VALUE") return false;
   const m = message.toLowerCase();
   return (
     m.includes("merge_json_arrays") ||
@@ -169,7 +187,10 @@ export async function describeAdaptive(
       const normalized = await normalizeResultRows(response);
       if (
         normalized.status?.state === "FAILED" &&
-        isFormatRejection(normalized.status.error?.message)
+        isFormatRejection(
+          normalized.status.error?.message,
+          normalized.status.error?.error_code,
+        )
       ) {
         lastResponse = normalized;
         continue; // warehouse rejected this format — try the next
