@@ -13,9 +13,21 @@ permissions:
   contents: read
   pull-requests: write
 
+# Serialize per-PR so a rapid open+reopen can't race the marker check and
+# double-post. cancel-in-progress: false — the queued run still executes and
+# deterministically sees the prior run's comment (then skips); there's no
+# "latest commit wins" semantics here, the posted link is identical either way.
+concurrency:
+  group: eval-pr-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   post-eval-link:
     name: Post eval link comment
+    # Skip fork PRs: their GITHUB_TOKEN is read-only (createComment would 403),
+    # and the evals-monitor app is internal — the link is useless to external
+    # contributors anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
