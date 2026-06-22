@@ -153,60 +153,58 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # Cache the downloaded browser binaries so most runs don't depend on the
-      # Playwright CDN, whose downloads have intermittently hung on the runners.
-      - name: Resolve Playwright version
-        id: playwright-version
+      # ── TEMPORARY EGRESS DIAGNOSTICS (do not merge) ──────────────────────
+      # Goal: find out *why* the Playwright Chrome download stalls at 100% on
+      # this runner group. The chrome-linux64.zip URL 307-redirects from
+      # cdn.playwright.dev to storage.googleapis.com (GCS); we probe that path
+      # directly with curl to isolate network/egress vs Playwright behavior.
+      - name: Diag - environment & proxy
+        continue-on-error: true
         run: |
-          version=$(node -p "require('./apps/dev-playground/package.json').devDependencies['@playwright/test']")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Restore Playwright browser cache
-        id: playwright-cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
-      # System libraries needed to *run* Chromium are not in the cached path and
-      # are reinstalled each run; this is the apt step that has always succeeded.
-      - name: Install Playwright system dependencies
-        run: pnpm --filter=dev-playground exec playwright install-deps chromium
-      # Download the browser binaries with a per-attempt timeout + retry so a
-      # stalled CDN download is killed and retried instead of hanging the job.
-      # On a cache hit this is a near-instant no-op (Playwright detects the
-      # already-installed browsers).
-      - name: Install Playwright browsers
-        id: install-browsers
+          echo "::group::proxy env"; env | grep -iE 'proxy' || echo "(no proxy env vars)"; echo "::endgroup::"
+          echo "::group::versions"; curl --version; node --version; echo "::endgroup::"
+      - name: Diag - DNS resolution
+        continue-on-error: true
         run: |
-          for attempt in 1 2 3; do
-            echo "::group::playwright install (attempt $attempt)"
-            if timeout 240 pnpm --filter=dev-playground exec playwright install chromium; then
-              echo "::endgroup::"
-              echo "Playwright browsers ready (attempt $attempt)"
-              exit 0
-            fi
-            echo "::endgroup::"
-            echo "::warning::playwright install attempt $attempt timed out or failed; retrying in 10s"
-            sleep 10
+          for h in cdn.playwright.dev storage.googleapis.com; do
+            echo "== $h =="; getent hosts "$h" || echo "(no resolution)"
           done
-          echo "::error::playwright browser install failed after 3 attempts"
-          exit 1
-      # Only persist the cache after a successful download and only on a miss,
-      # to avoid storing a partially downloaded browser set.
-      - name: Save Playwright browser cache
-        if: steps.install-browsers.outcome == 'success' && steps.playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
-      - name: Build packages
-        run: pnpm build
-      - name: Run Integration Tests
-        run: pnpm --filter=dev-playground test:integration
-        env:
-          APPKIT_E2E_TEST: 'true'
-          DATABRICKS_WAREHOUSE_ID: e2e-mock
-          DATABRICKS_WORKSPACE_ID: e2e-mock
-          DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
+      - name: Diag - redirect chain (no follow)
+        continue-on-error: true
+        run: |
+          curl -sS -o /dev/null -D - --max-time 30 --max-redirs 0 -r 0-0 \
+            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "curl_exit=$?"
+      - name: Diag - full download via CDN redirect (HTTP/2 default)
+        continue-on-error: true
+        run: |
+          curl -sS -L -o /tmp/chrome-cdn.zip --max-time 180 \
+            -w 'http=%{http_code} ip=%{remote_ip} httpv=%{http_version} size=%{size_download} speed=%{speed_download} ttfb=%{time_starttransfer} total=%{time_total}\n' \
+            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip'
+          echo "curl_exit=$?"; ls -l /tmp/chrome-cdn.zip 2>/dev/null || echo "(no file)"
+      - name: Diag - full download forcing HTTP/1.1
+        continue-on-error: true
+        run: |
+          curl -sS -L --http1.1 -o /tmp/chrome-h11.zip --max-time 180 \
+            -w 'http=%{http_code} ip=%{remote_ip} size=%{size_download} total=%{time_total}\n' \
+            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip'
+          echo "curl_exit=$?"; ls -l /tmp/chrome-h11.zip 2>/dev/null || echo "(no file)"
+      - name: Diag - direct download from GCS
+        continue-on-error: true
+        run: |
+          curl -sS -L -o /tmp/chrome-gcs.zip --max-time 180 \
+            -w 'http=%{http_code} ip=%{remote_ip} size=%{size_download} total=%{time_total}\n' \
+            'https://storage.googleapis.com/chrome-for-testing-public/145.0.7632.6/linux64/chrome-linux64.zip'
+          echo "curl_exit=$?"; ls -l /tmp/chrome-gcs.zip 2>/dev/null || echo "(no file)"
+      - name: Diag - playwright install (bounded), to compare against curl
+        continue-on-error: true
+        run: |
+          echo "::group::playwright install chromium (timeout 180)"
+          timeout 180 pnpm --filter=dev-playground exec playwright install chromium
+          echo "playwright_exit=$?"; echo "::endgroup::"
+          ls -la ~/.cache/ms-playwright 2>/dev/null || echo "(no ms-playwright cache dir)"
+      - name: Diag - disk space
+        continue-on-error: true
+        run: { df -h; echo "--- ~/.cache ---"; df -h ~/.cache 2>/dev/null || true; }
 
   pr-template-artifact:
     name: PR Template Artifact
