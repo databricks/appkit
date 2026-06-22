@@ -108,6 +108,8 @@ jobs:
         run: pnpm run check:licenses
       - name: Check template deps are pinned
         run: pnpm exec tsx tools/check-template-deps.ts
+      - name: Check template lockfile uses only public npm registry
+        run: pnpm exec tsx tools/check-template-lock-registry.ts
 
   test:
     name: Unit Tests

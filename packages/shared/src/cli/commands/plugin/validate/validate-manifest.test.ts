@@ -967,6 +967,7 @@ describe("validate-manifest", () => {
       // Pins the canonical content of TEMPLATE_SCAFFOLDING.rules so changes
       // to the must/should/never strings are explicit and reviewed.
       expect(TEMPLATE_SCAFFOLDING.rules.must).toEqual([
+        "Treat `databricks apps init` output as starter code, not requirements; adapt or replace it to match the requested app",
         "Keep all secrets and credentials only in app.yaml, databricks.yml, and/or .env",
       ]);
       expect(TEMPLATE_SCAFFOLDING.rules.should).toEqual([

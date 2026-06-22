@@ -14,6 +14,7 @@ import {
   pluginManifestSchema,
   templatePluginsManifestSchema,
 } from "../packages/shared/src/schemas/manifest";
+import { metricSourceSchema } from "../packages/shared/src/schemas/metric-source";
 import { formatWithBiome } from "./format-with-biome";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,11 +29,17 @@ const TEMPLATE_OUT_PATH = path.join(
   DOCS_SCHEMAS_DIR,
   "template-plugins.schema.json",
 );
+const METRIC_SOURCE_OUT_PATH = path.join(
+  DOCS_SCHEMAS_DIR,
+  "metric-source.schema.json",
+);
 
 const PLUGIN_SCHEMA_ID =
   "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json";
 const TEMPLATE_SCHEMA_ID =
   "https://databricks.github.io/appkit/schemas/template-plugins.schema.json";
+const METRIC_SOURCE_SCHEMA_ID =
+  "https://databricks.github.io/appkit/schemas/metric-source.schema.json";
 
 function emit(
   schema: z.ZodType,
@@ -91,9 +98,15 @@ async function main(): Promise<void> {
     TEMPLATE_SCHEMA_ID,
     "AppKit Template Plugins Manifest",
   );
+  const metricSourceJson = emit(
+    metricSourceSchema,
+    METRIC_SOURCE_SCHEMA_ID,
+    "AppKit Metric Source Configuration",
+  );
 
   writeJson(PLUGIN_OUT_PATH, pluginJson);
   writeJson(TEMPLATE_OUT_PATH, templateJson);
+  writeJson(METRIC_SOURCE_OUT_PATH, metricSourceJson);
 }
 
 main().catch((err) => {
