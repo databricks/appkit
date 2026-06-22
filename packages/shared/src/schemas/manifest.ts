@@ -1099,6 +1099,7 @@ export const TEMPLATE_SCAFFOLDING = {
   },
   rules: {
     must: [
+      "Treat `databricks apps init` output as starter code, not requirements; adapt or replace it to match the requested app",
       "Keep all secrets and credentials only in app.yaml, databricks.yml, and/or .env",
     ],
     should: ["ask user when in doubt of resource to use for plugin"],

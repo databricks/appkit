@@ -543,6 +543,63 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("OBO requests differing only by whitespace in x-forwarded-user share one cache key", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM my_data",
+        isAsUser: true,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ owner: "alice-data" }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      // Same user, but the forwarded header is padded with surrounding
+      // whitespace. The OBO cache key derives from the trimmed user id
+      // (executorKey = resolveUserId(req)), so this must hit the SAME cache
+      // entry as the unpadded request below — no per-whitespace cache fork.
+      const paddedReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "  alice  ",
+        },
+      });
+      const paddedRes = createMockResponse();
+      await handler(paddedReq, paddedRes);
+
+      // Same user, unpadded header — must reuse the cached result.
+      const bareReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice",
+        },
+      });
+      const bareRes = createMockResponse();
+      await handler(bareReq, bareRes);
+
+      // Only one execution: the whitespace variant resolved to the same
+      // per-user cache key as the bare id, so the second request was a hit.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+
+      // Both responses serve the same (cached) data.
+      expect(paddedRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"alice-data"'),
+      );
+      expect(bareRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"alice-data"'),
+      );
+    });
+
     test("should handle AbortSignal cancellation", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

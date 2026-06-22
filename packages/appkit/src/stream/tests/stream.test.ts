@@ -194,7 +194,8 @@ describe("StreamManager", () => {
       expect(streamManager.getActiveCount()).toBe(0);
     });
 
-    test("should abort generator when last client disconnects", async () => {
+    test("should abort generator after grace window when last client disconnects", async () => {
+      vi.useFakeTimers();
       const { mockRes } = createMockResponse();
       let closeHandler: (() => void) | undefined;
 
@@ -220,15 +221,191 @@ describe("StreamManager", () => {
       const streamPromise = streamManager.stream(mockRes as any, generator);
 
       // Let the generator yield "start" and enter the signal wait
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await vi.advanceTimersByTimeAsync(10);
 
-      // Simulate client disconnect
+      // Simulate client disconnect — abort should NOT fire immediately
       if (closeHandler) closeHandler();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(signalAborted).toBe(false);
 
+      // After the grace window elapses with no reconnect, the generator aborts
+      await vi.advanceTimersByTimeAsync(15_000);
       await streamPromise;
 
       expect(signalAborted).toBe(true);
       expect(streamManager.getActiveCount()).toBe(0);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("disconnect grace window", () => {
+    test("does NOT abort the generator if a client reconnects within the grace window", async () => {
+      vi.useFakeTimers();
+      const streamId = "grace-reconnect-123";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+      let closeHandler1: (() => void) | undefined;
+      mockRes1.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler1 = handler;
+      });
+
+      // Finite generator that emits one event, then waits on a manual gate
+      // before emitting the rest — mirrors the reconnect demo's pacing.
+      let releaseRest: (() => void) | undefined;
+      const restGate = new Promise<void>((resolve) => {
+        releaseRest = resolve;
+      });
+
+      async function* generator(signal: AbortSignal) {
+        yield { type: "tick", count: 1 };
+        await restGate;
+        if (signal.aborted) return;
+        yield { type: "tick", count: 2 };
+        yield { type: "tick", count: 3 };
+      }
+
+      const streamPromise = streamManager.stream(mockRes1 as any, generator, {
+        streamId,
+      });
+
+      // first event emitted
+      await vi.advanceTimersByTimeAsync(0);
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+      expect(eventIds.length).toBe(1);
+
+      // client disconnects (clients -> 0) while the generator is still active
+      if (closeHandler1) closeHandler1();
+
+      // reconnect well within the 15s grace window
+      await vi.advanceTimersByTimeAsync(3_000);
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": eventIds[0],
+      });
+      mockRes2.on.mockImplementation(() => {});
+
+      const reconnectPromise = streamManager.stream(
+        mockRes2 as any,
+        async function* () {
+          yield { type: "should-not-run" };
+        },
+        { streamId },
+      );
+
+      // release the rest of the original generator now that we've reconnected
+      releaseRest?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.all([streamPromise, reconnectPromise]);
+
+      // The reconnecting client must receive the subsequent events — proving
+      // the generator was NOT aborted during the disconnect.
+      const reconnectData = events2
+        .filter((e) => e.startsWith("data: "))
+        .map((e) => e.replace("data: ", "").replace("\n\n", ""));
+      expect(reconnectData.some((d) => d.includes('"count":2'))).toBe(true);
+      expect(reconnectData.some((d) => d.includes('"count":3'))).toBe(true);
+      // the placeholder generator passed on reconnect must never run
+      expect(events2.some((e) => e.includes("should-not-run"))).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("aborts the generator when no client reconnects within the grace window", async () => {
+      vi.useFakeTimers();
+      const { mockRes } = createMockResponse();
+      let closeHandler: (() => void) | undefined;
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler = handler;
+      });
+
+      let signalAborted = false;
+      async function* generator(signal: AbortSignal) {
+        yield { type: "start" };
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve();
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        signalAborted = signal.aborted;
+      }
+
+      const streamPromise = streamManager.stream(mockRes as any, generator);
+      await vi.advanceTimersByTimeAsync(0);
+
+      if (closeHandler) closeHandler();
+
+      // Just before the window expires, the generator is still alive.
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(signalAborted).toBe(false);
+
+      // Crossing the window aborts the abandoned generator (jobs cleanup).
+      await vi.advanceTimersByTimeAsync(1);
+      await streamPromise;
+      expect(signalAborted).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    test("respects a custom disconnectGraceMs", async () => {
+      vi.useFakeTimers();
+      const customManager = new StreamManager({ disconnectGraceMs: 1_000 });
+      const { mockRes } = createMockResponse();
+      let closeHandler: (() => void) | undefined;
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler = handler;
+      });
+
+      let signalAborted = false;
+      async function* generator(signal: AbortSignal) {
+        yield { type: "start" };
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve();
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        signalAborted = signal.aborted;
+      }
+
+      const streamPromise = customManager.stream(mockRes as any, generator);
+      await vi.advanceTimersByTimeAsync(0);
+      if (closeHandler) closeHandler();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(signalAborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await streamPromise;
+      expect(signalAborted).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    test("stream completion clears the pending grace timer (no late abort)", async () => {
+      vi.useFakeTimers();
+      const { mockRes } = createMockResponse();
+      let closeHandler: (() => void) | undefined;
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler = handler;
+      });
+
+      const abortSpy = vi.fn();
+
+      async function* generator(signal: AbortSignal) {
+        signal.addEventListener("abort", abortSpy, { once: true });
+        yield { type: "only" };
+        // generator finishes here -> stream becomes completed
+      }
+
+      const streamPromise = streamManager.stream(mockRes as any, generator);
+      await streamPromise;
+
+      // Stream has completed. A late close handler must not schedule an abort,
+      // and any timer that might have been pending must not fire.
+      if (closeHandler) closeHandler();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(abortSpy).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
     });
   });
 
@@ -728,6 +905,63 @@ describe("StreamManager", () => {
         events2.filter((e) => e.startsWith("data: ")).length,
       ).toBeGreaterThan(0);
       expect(events2.some((e) => e.includes("should-not-appear"))).toBe(false);
+    });
+  });
+
+  describe("error categorization", () => {
+    async function captureErrorEvent(
+      manager: StreamManager,
+      thrown: unknown,
+    ): Promise<{ code?: string; error?: string } | undefined> {
+      const { mockRes, events } = createMockResponse();
+      async function* generator() {
+        yield { type: "start" };
+        throw thrown;
+      }
+      await manager.stream(mockRes as any, generator);
+      const dataLine = events
+        .find((e) => e.startsWith("data:") && e.includes('"code"'))
+        ?.replace(/^data: /, "")
+        .replace(/\n\n$/, "");
+      if (!dataLine) return undefined;
+      return JSON.parse(dataLine) as { code?: string; error?: string };
+    }
+
+    test("does not emit an error SSE frame for native AbortError", async () => {
+      const err = new Error("operation aborted");
+      err.name = "AbortError";
+      const payload = await captureErrorEvent(streamManager, err);
+      expect(payload).toBeUndefined();
+    });
+
+    test("does not emit an error SSE frame for wrapped abort messages", async () => {
+      class FakeExecutionError extends Error {
+        statusCode = 500;
+        constructor() {
+          super("Statement failed: The operation was aborted.");
+          this.name = "ExecutionError";
+        }
+      }
+      const payload = await captureErrorEvent(
+        streamManager,
+        new FakeExecutionError(),
+      );
+      expect(payload).toBeUndefined();
+    });
+
+    test("classifies real upstream API errors as UPSTREAM_ERROR", async () => {
+      class FakeApiError extends Error {
+        statusCode = 503;
+        constructor() {
+          super("Statement failed: Internal warehouse error");
+          this.name = "ExecutionError";
+        }
+      }
+      const payload = await captureErrorEvent(
+        streamManager,
+        new FakeApiError(),
+      );
+      expect(payload?.code).toBe("UPSTREAM_ERROR");
     });
   });
 });

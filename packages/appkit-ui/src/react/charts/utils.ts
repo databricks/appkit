@@ -56,6 +56,25 @@ export function formatLabel(field: string): string {
 }
 
 /**
+ * Escapes HTML special characters to prevent XSS.
+ * Required for ECharts function formatters: unlike string-template
+ * formatters, their return values are injected as raw HTML into the
+ * tooltip DOM.
+ *
+ * Only for HTML tooltip contexts; do NOT use on canvas-rendered
+ * axis/series label formatters — canvas text is not HTML and would
+ * display literal entities (e.g. "&amp;").
+ */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Truncates a label to a maximum length with ellipsis.
  */
 export function truncateLabel(value: string, maxLength = 15): string {

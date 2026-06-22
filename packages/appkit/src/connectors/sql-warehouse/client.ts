@@ -86,6 +86,20 @@ interface EnsureWarehouseRunningOptions {
    * trigger billable warehouse starts.
    */
   autoStart?: boolean;
+  /** @internal Fired once when `warehouses.start` is issued for this poll. */
+  onWarehouseStartIssued?: () => void;
+}
+
+/** In-flight warehouse readiness work shared across concurrent callers. */
+interface WarehouseReadinessInFlight {
+  promise: Promise<void>;
+  refCount: number;
+  sharedController: AbortController;
+  subscribers: Set<(update: WarehouseStatusUpdate) => void>;
+  /** Last emitted update; replayed to late joiners. */
+  lastUpdate: WarehouseStatusUpdate | null;
+  /** `true` once this poll has called `warehouses.start`. */
+  warehouseStartIssued: boolean;
 }
 
 export class SQLWarehouseConnector {
@@ -102,6 +116,8 @@ export class SQLWarehouseConnector {
    * {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}.
    */
   private _recentlyRunning = new Map<string, number>();
+  /** Per-warehouse readiness singleflight — one poll loop per cold start. */
+  private _readinessInFlight = new Map<string, WarehouseReadinessInFlight>();
   // telemetry
   private readonly telemetry: TelemetryProvider;
   private readonly telemetryMetrics: {
@@ -308,6 +324,9 @@ export class SQLWarehouseConnector {
             );
           }
 
+          if (error instanceof Error && error.name === "AbortError") {
+            throw error;
+          }
           if (error instanceof AppKitError) {
             throw error;
           }
@@ -355,6 +374,14 @@ export class SQLWarehouseConnector {
    * immediately without any SDK round-trip or status emission. This keeps
    * cache-hit analytics requests off the Databricks control plane.
    *
+   * Concurrent callers for the same `warehouseId` share a single in-flight
+   * poll loop (singleflight): only the owner issues `get`/`start`; joiners
+   * receive broadcast `onStatus` updates and share the result promise.
+   * When every waiter disconnects before `warehouses.start`, the shared poll
+   * is aborted on the next microtask if still unclaimed (kills true orphans
+   * without a fixed grace window). After `start` is issued, the poll runs to
+   * completion even with no waiters.
+   *
    * Behaviour by initial state:
    * - `RUNNING`: emits one update, caches the observation, returns.
    * - `STOPPED`: emits a synthetic `STARTING` update, calls
@@ -383,102 +410,233 @@ export class SQLWarehouseConnector {
     if (!warehouseId) throw ValidationError.missingField("warehouse_id");
     if (this._isRecentlyRunning(warehouseId)) return;
 
-    return this.telemetry.startActiveSpan(
-      "sql.warehouseReady",
-      {
-        kind: SpanKind.CLIENT,
-        attributes: {
-          "db.system": "databricks",
-          "db.warehouse_id": warehouseId,
-          "db.warehouse.startup_timeout_ms": timeoutMs,
+    const existing = this._readinessInFlight.get(warehouseId);
+    if (existing && !existing.sharedController.signal.aborted) {
+      return this._waitOnReadiness(existing, onStatus, signal, true);
+    }
+
+    const entry = this._spawnReadinessInFlight(workspaceClient, warehouseId, {
+      timeoutMs,
+      autoStart,
+    });
+    this._readinessInFlight.set(warehouseId, entry);
+    return this._waitOnReadiness(entry, onStatus, signal, false);
+  }
+
+  private _waitOnReadiness(
+    entry: WarehouseReadinessInFlight,
+    onStatus: (update: WarehouseStatusUpdate) => void,
+    signal: AbortSignal | undefined,
+    join: boolean,
+  ): Promise<void> {
+    if (signal?.aborted) throw ExecutionError.canceled();
+    if (join) entry.refCount++;
+    entry.subscribers.add(onStatus);
+    if (entry.lastUpdate) onStatus(entry.lastUpdate);
+    return this._joinWarehouseReadiness(entry, signal);
+  }
+
+  private _spawnReadinessInFlight(
+    workspaceClient: WorkspaceClient,
+    warehouseId: string,
+    opts: { timeoutMs: number; autoStart: boolean },
+  ): WarehouseReadinessInFlight {
+    const sharedController = new AbortController();
+    const entry: WarehouseReadinessInFlight = {
+      refCount: 1,
+      sharedController,
+      subscribers: new Set(),
+      lastUpdate: null,
+      warehouseStartIssued: false,
+      promise: Promise.resolve(),
+    };
+
+    entry.promise = this.telemetry
+      .startActiveSpan(
+        "sql.warehouseReady",
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            "db.system": "databricks",
+            "db.warehouse_id": warehouseId,
+            "db.warehouse.startup_timeout_ms": opts.timeoutMs,
+          },
         },
-      },
-      async (span: Span) => {
-        const startTime = Date.now();
-        const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
-        let didStart = false;
-        const backoff = new WarehousePollBackoff();
+        async (span: Span) => {
+          try {
+            await this._pollUntilWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                onStatus: (update) => this._broadcastReadiness(entry, update),
+                signal: sharedController.signal,
+                timeoutMs: opts.timeoutMs,
+                autoStart: opts.autoStart,
+                onWarehouseStartIssued: () => {
+                  entry.warehouseStartIssued = true;
+                },
+              },
+              span,
+            );
+            span.setStatus({ code: SpanStatusCode.OK });
+          } catch (error) {
+            this._throwSanitizedReadinessError(error, warehouseId, span);
+          } finally {
+            span.end();
+          }
+        },
+        { name: this.name, includePrefix: true },
+      )
+      .finally(() => {
+        if (this._readinessInFlight.get(warehouseId) === entry) {
+          this._readinessInFlight.delete(warehouseId);
+        }
+      });
 
-        try {
-          while (true) {
-            if (signal?.aborted) throw ExecutionError.canceled();
-            if (Date.now() - startTime > timeoutMs) {
-              throw ExecutionError.statementFailed(
-                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
-              );
-            }
+    entry.promise.catch(() => {});
+    return entry;
+  }
 
-            const info = await workspaceClient.warehouses.get(
+  private _broadcastReadiness(
+    entry: WarehouseReadinessInFlight,
+    update: WarehouseStatusUpdate,
+  ): void {
+    entry.lastUpdate = update;
+    for (const subscriber of entry.subscribers) {
+      try {
+        subscriber(update);
+      } catch {
+        // One consumer must not block updates to the rest.
+      }
+    }
+  }
+
+  /** Ref-counted await; caller abort rejects locally. */
+  private _joinWarehouseReadiness(
+    entry: WarehouseReadinessInFlight,
+    callerSignal?: AbortSignal,
+  ): Promise<void> {
+    if (!callerSignal) return entry.promise;
+
+    return new Promise<void>((resolve, reject) => {
+      let done = false;
+      const finish = (outcome: "ok" | "abort" | "err", error?: unknown) => {
+        if (done) return;
+        done = true;
+        callerSignal.removeEventListener("abort", onAbort);
+        if (outcome === "ok") resolve();
+        else if (outcome === "abort") reject(ExecutionError.canceled());
+        else reject(error);
+      };
+      const onAbort = () => {
+        this._releaseReadinessWaiter(entry);
+        finish("abort");
+      };
+      callerSignal.addEventListener("abort", onAbort, { once: true });
+      entry.promise.then(
+        () => finish("ok"),
+        (error) => finish("err", error),
+      );
+    });
+  }
+
+  private _releaseReadinessWaiter(entry: WarehouseReadinessInFlight): void {
+    if (entry.refCount > 0) entry.refCount--;
+    if (entry.refCount > 0 || entry.sharedController.signal.aborted) return;
+
+    if (entry.warehouseStartIssued) {
+      // Start already issued — finish warming for the process.
+      return;
+    }
+
+    // Defer abort to the next microtask so a synchronous StrictMode
+    // remount can rejoin before the shared poll is cancelled.
+    queueMicrotask(() => {
+      if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+        entry.sharedController.abort("all warehouse readiness waiters aborted");
+      }
+    });
+  }
+
+  private async _pollUntilWarehouseRunning(
+    workspaceClient: WorkspaceClient,
+    warehouseId: string,
+    opts: EnsureWarehouseRunningOptions,
+    span: Span,
+  ): Promise<void> {
+    const {
+      onStatus,
+      signal,
+      timeoutMs = DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+      autoStart = true,
+      onWarehouseStartIssued,
+    } = opts;
+    const startTime = Date.now();
+    const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
+    let didStart = false;
+    const backoff = new WarehousePollBackoff();
+
+    while (true) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      if (Date.now() - startTime > timeoutMs) {
+        throw ExecutionError.statementFailed(
+          `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+        );
+      }
+
+      const info = await workspaceClient.warehouses.get(
+        { id: warehouseId },
+        this._createContext(signal),
+      );
+      const state = info?.state;
+      const summary = info?.health?.summary;
+
+      switch (state) {
+        case "RUNNING":
+          emitter.emit(state, summary);
+          this._recentlyRunning.set(warehouseId, Date.now());
+          span.setAttribute("db.warehouse.attempts", emitter.attempt);
+          return;
+        case "DELETED":
+        case "DELETING":
+          throw ConfigurationError.resourceNotFound(
+            "Warehouse ID",
+            `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
+          );
+        case "STOPPED":
+          if (!autoStart) {
+            throw new ConfigurationError(
+              "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
+            );
+          }
+          if (!didStart) {
+            emitter.emit("STARTING", summary);
+            onWarehouseStartIssued?.();
+            await workspaceClient.warehouses.start(
               { id: warehouseId },
               this._createContext(signal),
             );
-            const state = info?.state;
-            const summary = info?.health?.summary;
-
-            switch (state) {
-              case "RUNNING":
-                emitter.emit(state, summary);
-                this._recentlyRunning.set(warehouseId, Date.now());
-                span.setAttribute("db.warehouse.attempts", emitter.attempt);
-                span.setStatus({ code: SpanStatusCode.OK });
-                return;
-              case "DELETED":
-              case "DELETING":
-                throw ConfigurationError.resourceNotFound(
-                  "Warehouse ID",
-                  `The configured SQL warehouse is ${state}. Update DATABRICKS_WAREHOUSE_ID to point at an active warehouse.`,
-                );
-              case "STOPPED":
-                if (!autoStart) {
-                  // The warehouse exists, it's just in the wrong state and
-                  // policy forbids auto-starting it — use the base
-                  // ConfigurationError directly so the message isn't
-                  // prefixed with "not found".
-                  throw new ConfigurationError(
-                    "The configured SQL warehouse is STOPPED and analytics auto-start is disabled. Start the warehouse manually or set analytics.autoStartWarehouse=true.",
-                  );
-                }
-                if (!didStart) {
-                  emitter.emit("STARTING", summary);
-                  await workspaceClient.warehouses.start(
-                    { id: warehouseId },
-                    this._createContext(signal),
-                  );
-                  didStart = true;
-                } else {
-                  // Warehouse fell back to STOPPED after our start attempt —
-                  // surface the state and keep polling.
-                  emitter.emit(state, summary);
-                }
-                break;
-              case "STARTING":
-              case "STOPPING":
-                emitter.emit(state, summary);
-                break;
-              default:
-                throw ExecutionError.unknownState(String(state ?? "unknown"));
-            }
-
-            // Preempt the next timeout check: if sleeping the full backoff
-            // would push us past `timeoutMs`, throw now rather than waste
-            // up to ~30s sleeping past the deadline (`backoff.next()` caps
-            // at WAREHOUSE_POLL_MAX_MS).
-            const sleepMs = backoff.next();
-            if (Date.now() + sleepMs - startTime >= timeoutMs) {
-              throw ExecutionError.statementFailed(
-                `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
-              );
-            }
-            await this._sleepRespectingAbort(sleepMs, signal);
+            didStart = true;
+          } else {
+            emitter.emit(state, summary);
           }
-        } catch (error) {
-          this._throwSanitizedReadinessError(error, warehouseId, span);
-        } finally {
-          span.end();
-        }
-      },
-      { name: this.name, includePrefix: true },
-    );
+          break;
+        case "STARTING":
+        case "STOPPING":
+          emitter.emit(state, summary);
+          break;
+        default:
+          throw ExecutionError.unknownState(String(state ?? "unknown"));
+      }
+
+      const sleepMs = backoff.next();
+      if (Date.now() + sleepMs - startTime >= timeoutMs) {
+        throw ExecutionError.statementFailed(
+          `SQL warehouse did not reach RUNNING within ${timeoutMs}ms`,
+        );
+      }
+      await this._sleepRespectingAbort(sleepMs, signal);
+    }
   }
 
   /**
@@ -658,6 +816,9 @@ export class SQLWarehouseConnector {
           });
 
           // error logging is handled by executeStatement's catch block (gated on isAborted)
+          if (error instanceof Error && error.name === "AbortError") {
+            throw error;
+          }
           if (error instanceof AppKitError) {
             throw error;
           }

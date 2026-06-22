@@ -56,6 +56,60 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.41.5](https://github.com/databricks/appkit/compare/v0.41.4...v0.41.5) (2026-06-16)
+
+### appkit-ui
+
+* **appkit-ui:** dark mode fixes for charts ([#452](https://github.com/databricks/appkit/issues/452)) ([c0400f7](https://github.com/databricks/appkit/commit/c0400f7cf2a581ba41ef7fdefc69d7966b726c24))
+
+
+## [0.41.4](https://github.com/databricks/appkit/compare/v0.41.3...v0.41.4) (2026-06-12)
+
+### appkit
+
+* **appkit:** keep SSE generator alive for a grace window so reconnection resumes ([#445](https://github.com/databricks/appkit/issues/445)) ([f81fff1](https://github.com/databricks/appkit/commit/f81fff1ceee17234b57f60de5ebd97dd4c008639))
+
+
+## [0.41.3](https://github.com/databricks/appkit/compare/v0.41.2...v0.41.3) (2026-06-12)
+
+### appkit-ui
+
+* **appkit-ui:** escape heatmap tooltip values to prevent XSS ([#437](https://github.com/databricks/appkit/issues/437)) ([d73ff25](https://github.com/databricks/appkit/commit/d73ff25b82b2018f4dc38df335e9fe4fbd484155))
+
+
+## [0.41.2](https://github.com/databricks/appkit/compare/v0.41.1...v0.41.2) (2026-06-11)
+
+### connectors
+
+* **connectors:** singleflight ensureWarehouseRunning per warehouse ([#420](https://github.com/databricks/appkit/issues/420)) ([494edcc](https://github.com/databricks/appkit/commit/494edcc0aa825857b327c89abb12545a98e83410)), closes [#419](https://github.com/databricks/appkit/issues/419)
+
+
+## [0.41.1](https://github.com/databricks/appkit/compare/v0.41.0...v0.41.1) (2026-06-09)
+
+### appkit
+
+* **appkit:** trim x-forwarded-user in core OBO path ([#427](https://github.com/databricks/appkit/issues/427)) ([9d94cab](https://github.com/databricks/appkit/commit/9d94cab656111aeec82ff32d08b4dc2b7150cccf))
+
+
+## [0.41.0](https://github.com/databricks/appkit/compare/v0.40.0...v0.41.0) (2026-06-09)
+
+### shared
+
+* **shared:** add scaffolding rule to treat init output as starter code ([#423](https://github.com/databricks/appkit/issues/423)) ([ab6f4e2](https://github.com/databricks/appkit/commit/ab6f4e284a677f37d40a4033a1cb750560aa57e6))
+
+
 ## [0.40.0](https://github.com/databricks/appkit/compare/v0.39.0...v0.40.0) (2026-06-05)
 
 ### appkit

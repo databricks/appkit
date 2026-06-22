@@ -263,6 +263,9 @@ export function useAnalyticsQuery<
       payload,
       signal: abortController.signal,
       onMessage: async (message) => {
+        // Drop late envelopes from a stream whose controller was already
+        // aborted (React StrictMode unmount→remount). Mirrors onError below.
+        if (abortController.signal.aborted) return;
         try {
           const parsed = JSON.parse(message.data) as Record<string, unknown>;
           await handleAnalyticsSseMessage(parsed, sseContext);
