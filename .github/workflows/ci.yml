@@ -153,61 +153,36 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # ── TEMPORARY EGRESS DIAGNOSTICS (do not merge) ──────────────────────
-      # Goal: find out *why* the Playwright Chrome download stalls at 100% on
-      # this runner group. The chrome-linux64.zip URL 307-redirects from
-      # cdn.playwright.dev to storage.googleapis.com (GCS); we probe that path
-      # directly with curl to isolate network/egress vs Playwright behavior.
-      - name: Diag - environment & proxy
+      # ── TEMPORARY IPv4/IPv6 EXPERIMENT (do not merge) ────────────────────
+      # curl (IPv4, happy-eyeballs) downloads the browser zip in ~1s on this
+      # runner, but `playwright install` (Node 24, verbatim DNS = IPv6-first)
+      # hangs at 100%. Hypothesis: IPv6 egress is broken; forcing IPv4 fixes it.
+      - name: Diag - curl over IPv6 (expected to hang/fail if v6 egress broken)
         continue-on-error: true
         run: |
-          echo "::group::proxy env"; env | grep -iE 'proxy' || echo "(no proxy env vars)"; echo "::endgroup::"
-          echo "::group::versions"; curl --version; node --version; echo "::endgroup::"
-      - name: Diag - DNS resolution
+          curl -sS -4 -L -o /dev/null --max-time 45 \
+            -w 'ipv4: http=%{http_code} ip=%{remote_ip} total=%{time_total}\n' \
+            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "ipv4 curl_exit=$?"
+          curl -sS -6 -L -o /dev/null --max-time 45 \
+            -w 'ipv6: http=%{http_code} ip=%{remote_ip} total=%{time_total}\n' \
+            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "ipv6 curl_exit=$?"
+      - name: Diag - playwright install with IPv4-first (timeout 120)
+        continue-on-error: true
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first
+        run: |
+          echo "::group::playwright install chromium, ipv4first (timeout 120)"
+          timeout 120 pnpm --filter=dev-playground exec playwright install chromium
+          echo "playwright_exit_ipv4first=$?"
+          echo "::endgroup::"
+      - name: Diag - playwright install default DNS order (control, timeout 120)
         continue-on-error: true
         run: |
-          for h in cdn.playwright.dev storage.googleapis.com; do
-            echo "== $h =="; getent hosts "$h" || echo "(no resolution)"
-          done
-      - name: Diag - redirect chain (no follow)
-        continue-on-error: true
-        run: |
-          curl -sS -o /dev/null -D - --max-time 30 --max-redirs 0 -r 0-0 \
-            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "curl_exit=$?"
-      - name: Diag - full download via CDN redirect (HTTP/2 default)
-        continue-on-error: true
-        run: |
-          curl -sS -L -o /tmp/chrome-cdn.zip --max-time 180 \
-            -w 'http=%{http_code} ip=%{remote_ip} httpv=%{http_version} size=%{size_download} speed=%{speed_download} ttfb=%{time_starttransfer} total=%{time_total}\n' \
-            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip'
-          echo "curl_exit=$?"; ls -l /tmp/chrome-cdn.zip 2>/dev/null || echo "(no file)"
-      - name: Diag - full download forcing HTTP/1.1
-        continue-on-error: true
-        run: |
-          curl -sS -L --http1.1 -o /tmp/chrome-h11.zip --max-time 180 \
-            -w 'http=%{http_code} ip=%{remote_ip} size=%{size_download} total=%{time_total}\n' \
-            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip'
-          echo "curl_exit=$?"; ls -l /tmp/chrome-h11.zip 2>/dev/null || echo "(no file)"
-      - name: Diag - direct download from GCS
-        continue-on-error: true
-        run: |
-          curl -sS -L -o /tmp/chrome-gcs.zip --max-time 180 \
-            -w 'http=%{http_code} ip=%{remote_ip} size=%{size_download} total=%{time_total}\n' \
-            'https://storage.googleapis.com/chrome-for-testing-public/145.0.7632.6/linux64/chrome-linux64.zip'
-          echo "curl_exit=$?"; ls -l /tmp/chrome-gcs.zip 2>/dev/null || echo "(no file)"
-      - name: Diag - playwright install (bounded), to compare against curl
-        continue-on-error: true
-        run: |
-          echo "::group::playwright install chromium (timeout 180)"
-          timeout 180 pnpm --filter=dev-playground exec playwright install chromium
-          echo "playwright_exit=$?"; echo "::endgroup::"
-          ls -la ~/.cache/ms-playwright 2>/dev/null || echo "(no ms-playwright cache dir)"
-      - name: Diag - disk space
-        continue-on-error: true
-        run: |
-          df -h
-          echo "--- ~/.cache ---"
-          df -h ~/.cache 2>/dev/null || true
+          rm -rf ~/.cache/ms-playwright
+          echo "::group::playwright install chromium, default DNS (timeout 120)"
+          timeout 120 pnpm --filter=dev-playground exec playwright install chromium
+          echo "playwright_exit_default=$?"
+          echo "::endgroup::"
 
   pr-template-artifact:
     name: PR Template Artifact
