@@ -137,6 +137,7 @@ jobs:
     name: Playground Integration Tests
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
+    timeout-minutes: 25
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -152,8 +153,51 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Playwright Browsers
-        run: pnpm --filter=dev-playground exec playwright install --with-deps chromium
+      # Cache the downloaded browser binaries so most runs don't depend on the
+      # Playwright CDN, whose downloads have intermittently hung on the runners.
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          version=$(node -p "require('./apps/dev-playground/package.json').devDependencies['@playwright/test']")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+      # System libraries needed to *run* Chromium are not in the cached path and
+      # are reinstalled each run; this is the apt step that has always succeeded.
+      - name: Install Playwright system dependencies
+        run: pnpm --filter=dev-playground exec playwright install-deps chromium
+      # Download the browser binaries with a per-attempt timeout + retry so a
+      # stalled CDN download is killed and retried instead of hanging the job.
+      # On a cache hit this is a near-instant no-op (Playwright detects the
+      # already-installed browsers).
+      - name: Install Playwright browsers
+        id: install-browsers
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::playwright install (attempt $attempt)"
+            if timeout 240 pnpm --filter=dev-playground exec playwright install chromium; then
+              echo "::endgroup::"
+              echo "Playwright browsers ready (attempt $attempt)"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::playwright install attempt $attempt timed out or failed; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::playwright browser install failed after 3 attempts"
+          exit 1
+      # Only persist the cache after a successful download and only on a miss,
+      # to avoid storing a partially downloaded browser set.
+      - name: Save Playwright browser cache
+        if: steps.install-browsers.outcome == 'success' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
       - name: Build packages
         run: pnpm build
       - name: Run Integration Tests
