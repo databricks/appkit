@@ -153,35 +153,17 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # ── TEMPORARY IPv4/IPv6 EXPERIMENT (do not merge) ────────────────────
-      # curl (IPv4, happy-eyeballs) downloads the browser zip in ~1s on this
-      # runner, but `playwright install` (Node 24, verbatim DNS = IPv6-first)
-      # hangs at 100%. Hypothesis: IPv6 egress is broken; forcing IPv4 fixes it.
-      - name: Diag - curl over IPv6 (expected to hang/fail if v6 egress broken)
-        continue-on-error: true
-        run: |
-          curl -sS -4 -L -o /dev/null --max-time 45 \
-            -w 'ipv4: http=%{http_code} ip=%{remote_ip} total=%{time_total}\n' \
-            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "ipv4 curl_exit=$?"
-          curl -sS -6 -L -o /dev/null --max-time 45 \
-            -w 'ipv6: http=%{http_code} ip=%{remote_ip} total=%{time_total}\n' \
-            'https://cdn.playwright.dev/builds/cft/145.0.7632.6/linux64/chrome-linux64.zip' || echo "ipv6 curl_exit=$?"
-      - name: Diag - playwright install with IPv4-first (timeout 120)
-        continue-on-error: true
-        env:
-          NODE_OPTIONS: --dns-result-order=ipv4first
-        run: |
-          echo "::group::playwright install chromium, ipv4first (timeout 120)"
-          timeout 120 pnpm --filter=dev-playground exec playwright install chromium
-          echo "playwright_exit_ipv4first=$?"
-          echo "::endgroup::"
-      - name: Diag - playwright install default DNS order (control, timeout 120)
+      # ── TEMPORARY: does a newer Playwright fix the install hang? ──────────
+      # Playwright 1.58.1's installer hangs at 100% on this runner (curl pulls
+      # the same zip in ~1s). Testing 1.61.0, bounded so it can't hang the job.
+      - name: Diag - playwright install (1.61.0), bounded
         continue-on-error: true
         run: |
           rm -rf ~/.cache/ms-playwright
-          echo "::group::playwright install chromium, default DNS (timeout 120)"
-          timeout 120 pnpm --filter=dev-playground exec playwright install chromium
-          echo "playwright_exit_default=$?"
+          echo "playwright version: $(pnpm --filter=dev-playground exec playwright --version)"
+          echo "::group::playwright install chromium (timeout 180)"
+          timeout 180 pnpm --filter=dev-playground exec playwright install chromium
+          echo "playwright_exit=$?"
           echo "::endgroup::"
 
   pr-template-artifact:
