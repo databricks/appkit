@@ -5,10 +5,10 @@
 
 /**
  * Pre-fetch the @ast-grep/napi native host binding at install time. No-op unless
- * running under npm. Best-effort and NON-FATAL: any failure logs a single warning
- * and resolves normally.
+ * running under npm. Best-effort and NON-FATAL: runs in a child process bounded by
+ * a hard timeout, and any failure or timeout logs a single warning and returns.
  */
-export function ensureAstGrepBinding(): Promise<void>;
+export function ensureAstGrepBinding(): void;
 
 /** Print the hint telling users how to set up AI assistant instructions. */
 export function printSetupHint(): void;
