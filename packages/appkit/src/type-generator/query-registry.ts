@@ -349,12 +349,19 @@ function degradedType(
     : generateUnknownResultQuery(sql, queryName);
 }
 
+// Single source of truth for the `@param` type alternation, shared by
+// extractParameterTypes and extractParameterDefaults so the two can't drift.
+// Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the regex
+// engine doesn't greedy-match TIMESTAMP and leave `_NTZ` unconsumed.
+const PARAM_TYPE_ALTERNATION =
+  "STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY";
+
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
-  // Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the
-  // regex engine doesn't greedy-match TIMESTAMP and leave `_NTZ` unconsumed.
-  const regex =
-    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\b/gi;
+  const regex = new RegExp(
+    `--\\s*@param\\s+(\\w+)\\s+(${PARAM_TYPE_ALTERNATION})\\b`,
+    "gi",
+  );
   const matches = sql.matchAll(regex);
   for (const match of matches) {
     const [, paramName, paramType] = match;
@@ -470,14 +477,16 @@ function formatSampleValue(
  */
 export function extractParameterDefaults(sql: string): Record<string, string> {
   const defaults: Record<string, string> = {};
-  // Mirrors extractParameterTypes' type alternation, then requires `= <value>`
-  // on the same line. All inter-token whitespace is horizontal-only
-  // (`[^\S\r\n]`, not `\s`): `\s` matches newlines, so a value-less line like
-  // `-- @param x STRING =` would let `\s*=\s*(.+?)` swallow the *next* line as
-  // the sample value. Restricting to same-line whitespace makes such a line
-  // simply not match, so it correctly falls back to the type placeholder.
-  const regex =
-    /--[^\S\r\n]*@param[^\S\r\n]+(\w+)[^\S\r\n]+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)[^\S\r\n]*=[^\S\r\n]*(.+?)[^\S\r\n]*$/gim;
+  // Reuses PARAM_TYPE_ALTERNATION, then requires `= <value>` on the same line.
+  // All inter-token whitespace is horizontal-only (`[^\S\r\n]`, not `\s`): `\s`
+  // matches newlines, so a value-less line like `-- @param x STRING =` would let
+  // `\s*=\s*(.+?)` swallow the *next* line as the sample value. Restricting to
+  // same-line whitespace makes such a line simply not match, so it correctly
+  // falls back to the type placeholder.
+  const regex = new RegExp(
+    `--[^\\S\\r\\n]*@param[^\\S\\r\\n]+(\\w+)[^\\S\\r\\n]+(${PARAM_TYPE_ALTERNATION})[^\\S\\r\\n]*=[^\\S\\r\\n]*(.+?)[^\\S\\r\\n]*$`,
+    "gim",
+  );
   for (const match of sql.matchAll(regex)) {
     const [, paramName, paramType, rawValue] = match;
     const formatted = formatSampleValue(paramType, rawValue);
