@@ -31,6 +31,18 @@ export type ChartData = Table | Record<string, unknown>[];
 /** Color palette types for different visualization needs */
 export type ChartColorPalette = "categorical" | "sequential" | "diverging";
 
+/** Resolved colors for the chart UI — axis text, titles, grid lines, and tooltip. */
+export interface ChartUITokens {
+  /** Axis tick labels (≈ `--muted-foreground`) */
+  axisLabel: string;
+  /** Axis names, legend, title, and visualMap text (≈ `--foreground`) */
+  axisTitle: string;
+  /** Axis, tick, and split (grid) lines (≈ `--border`) */
+  grid: string;
+  /** Tooltip popover background (≈ `--popover`) */
+  tooltipBg: string;
+}
+
 /** Common visual and behavior props for all charts */
 export interface ChartBaseProps {
   /** Chart title */

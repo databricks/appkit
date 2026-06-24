@@ -18,6 +18,7 @@ export class StreamManager {
   private sseWriter: SSEWriter;
   private maxEventSize: number;
   private bufferTTL: number;
+  private disconnectGraceMs: number;
 
   constructor(options?: StreamConfig) {
     this.streamRegistry = new StreamRegistry(
@@ -26,6 +27,8 @@ export class StreamManager {
     this.sseWriter = new SSEWriter();
     this.maxEventSize = options?.maxEventSize ?? streamDefaults.maxEventSize;
     this.bufferTTL = options?.bufferTTL ?? streamDefaults.bufferTTL;
+    this.disconnectGraceMs =
+      options?.disconnectGraceMs ?? streamDefaults.disconnectGraceMs;
     this.activeOperations = new Set();
   }
 
@@ -74,6 +77,7 @@ export class StreamManager {
 
   // abort all active operations
   abortAll(): void {
+    // pending disconnect-grace timers are cleared by streamRegistry.clear() below
     this.activeOperations.forEach((operation) => {
       if (operation.heartbeat) clearInterval(operation.heartbeat);
       operation.controller.abort(
@@ -115,6 +119,9 @@ export class StreamManager {
       }
     }
 
+    // a reconnecting client cancels the pending disconnect-grace abort
+    this._clearGraceTimer(streamEntry);
+
     // add client to stream entry
     streamEntry.clients.add(res);
     streamEntry.lastAccess = Date.now();
@@ -140,11 +147,9 @@ export class StreamManager {
       streamEntry.clients.delete(res);
       this.activeOperations.delete(streamOperation);
 
-      // Stop the generator when no clients remain
+      // grace-abort instead of aborting now, so a reconnect can resume
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        streamEntry.abortController.abort(
-          new DOMException("All clients disconnected", "AbortError"),
-        );
+        this._scheduleGraceAbort(streamEntry);
       }
 
       // cleanup if stream is completed and no clients are connected
@@ -228,12 +233,9 @@ export class StreamManager {
       this.activeOperations.delete(streamOperation);
       streamEntry.clients.delete(res);
 
-      // Stop the generator when no clients remain so polling loops
-      // (e.g. jobs runAndWait) don't keep running in the background.
+      // grace-abort instead of aborting now, so a reconnect can resume
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        abortController.abort(
-          new DOMException("Client disconnected", "AbortError"),
-        );
+        this._scheduleGraceAbort(streamEntry);
       }
     });
 
@@ -285,6 +287,9 @@ export class StreamManager {
 
         streamEntry.isCompleted = true;
 
+        // no late grace abort should fire on a completed stream
+        this._clearGraceTimer(streamEntry);
+
         // close all clients
         this._closeAllClients(streamEntry);
 
@@ -299,13 +304,18 @@ export class StreamManager {
         // client cancellation is a normal control-flow signal, not a failure
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
-        } else {
-          logger.error(
-            "Stream execution failed: %s (code=%s)",
-            errorMsg,
-            errorCode,
-          );
+          streamEntry.isCompleted = true;
+          this._clearGraceTimer(streamEntry);
+          this._closeAllClients(streamEntry);
+          this._cleanupStream(streamEntry);
+          return;
         }
+
+        logger.error(
+          "Stream execution failed: %s (code=%s)",
+          errorMsg,
+          errorCode,
+        );
 
         // buffer error event
         streamEntry.eventBuffer.add({
@@ -324,6 +334,7 @@ export class StreamManager {
           true,
         );
         streamEntry.isCompleted = true;
+        this._clearGraceTimer(streamEntry);
       }
     });
   }
@@ -396,6 +407,33 @@ export class StreamManager {
     }
   }
 
+  // abort the generator after the grace window unless a client reconnects first
+  private _scheduleGraceAbort(streamEntry: StreamEntry): void {
+    // clear any existing timer to avoid stacking
+    this._clearGraceTimer(streamEntry);
+
+    const timer = setTimeout(() => {
+      streamEntry.disconnectGraceTimer = undefined;
+      if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
+        streamEntry.abortController.abort(
+          new DOMException("Client disconnected (grace expired)", "AbortError"),
+        );
+      }
+    }, this.disconnectGraceMs);
+
+    // never keep the process alive solely for a grace timer
+    timer.unref?.();
+    streamEntry.disconnectGraceTimer = timer;
+  }
+
+  // clear a pending disconnect-grace timer, if any
+  private _clearGraceTimer(streamEntry: StreamEntry): void {
+    if (streamEntry.disconnectGraceTimer) {
+      clearTimeout(streamEntry.disconnectGraceTimer);
+      streamEntry.disconnectGraceTimer = undefined;
+    }
+  }
+
   // cleanup stream if no clients are connected
   private _cleanupStream(streamEntry: StreamEntry): void {
     if (streamEntry.clients.size === 0) {
@@ -419,6 +457,16 @@ export class StreamManager {
       }
 
       if (error.name === "AbortError") {
+        return SSEErrorCode.STREAM_ABORTED;
+      }
+
+      // Defense-in-depth: upstream layers (SQL client, cache) may wrap an
+      // AbortError into ExecutionError, losing `name` but keeping the message.
+      if (
+        message.includes("operation was aborted") ||
+        message.includes("the request was aborted") ||
+        message.includes("statement was canceled")
+      ) {
         return SSEErrorCode.STREAM_ABORTED;
       }
 

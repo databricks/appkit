@@ -49,6 +49,8 @@ export interface StreamEntry {
   lastAccess: number;
   abortController: AbortController;
   traceContext: Context;
+  // pending grace-window abort, set while the last client is disconnected
+  disconnectGraceTimer?: NodeJS.Timeout;
 }
 
 export interface StreamOperation {

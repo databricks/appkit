@@ -320,10 +320,23 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         );
 
         if (!sqlResult.ok) {
-          // Surface a typed AppKitError so StreamManager can categorize via
-          // the structured `code`. The HTTP status code from `execute()`
-          // doesn't apply to SSE error frames.
-          throw ExecutionError.statementFailed(sqlResult.message);
+          const msg = sqlResult.message;
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("operation was aborted") ||
+            lower.includes("the request was aborted") ||
+            lower.includes("statement was canceled")
+          ) {
+            const err = new DOMException(
+              lower.includes("canceled") ? msg : "The operation was aborted.",
+              "AbortError",
+            );
+            throw err;
+          }
+          const inner = msg.startsWith("Statement failed: ")
+            ? msg.slice("Statement failed: ".length)
+            : msg;
+          throw ExecutionError.statementFailed(inner);
         }
 
         yield sqlResult.data as AnalyticsStreamMessage;
