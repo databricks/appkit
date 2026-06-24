@@ -4,11 +4,10 @@ import {
 } from "../../../schemas/metric-source";
 
 /**
- * A single metric-source validation issue. `path` is a humanized property path
- * (e.g. `metricViews.revenue.source`) suitable for direct CLI output, and
- * `message` is the schema's own diagnostic. Mirrors the `SemanticIssue` shape
- * used by the plugin-manifest validator so CLI output stays uniform across
- * commands.
+ * A single metric-source validation issue. `path` is formatted for direct CLI
+ * output (e.g. `metricViews.revenue.source`), and `message` is the schema's own
+ * diagnostic. Mirrors the `SemanticIssue` shape used by the plugin-manifest
+ * validator so CLI output stays uniform across commands.
  */
 export interface MetricViewsSourceIssue {
   path: string;
@@ -21,12 +20,11 @@ export type ValidateMetricViewsSourceResult =
   | { valid: false; errors: MetricViewsSourceIssue[] };
 
 /**
- * Humanize a Zod issue path (array of object keys / array indices) into a
- * single string like `metricViews.revenue.source`. Numeric segments render as
- * `[n]`; an empty path (a root-level issue, e.g. an unrecognized top-level key)
- * renders as `(root)`. Mirrors `humanizePath` in the plugin-manifest validator.
+ * Format a Zod issue path (array of object keys / array indices) as a CLI path
+ * like `metricViews.revenue.source`. Numeric segments render as `[n]`; an empty
+ * path (a root-level issue, e.g. an unrecognized top-level key) renders as `(root)`.
  */
-export function humanizeMetricViewsPath(
+export function formatMetricViewsPath(
   path: ReadonlyArray<PropertyKey> | undefined,
 ): string {
   if (!path || path.length === 0) return "(root)";
@@ -60,7 +58,7 @@ export function validateMetricViewsSource(
     return { valid: true, source: result.data };
   }
   const errors = result.error.issues.map((issue) => ({
-    path: humanizeMetricViewsPath(issue.path as ReadonlyArray<PropertyKey>),
+    path: formatMetricViewsPath(issue.path as ReadonlyArray<PropertyKey>),
     message: issue.message,
   }));
   return { valid: false, errors };

@@ -429,7 +429,7 @@ describe("appkit mv sync", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     const errored = erroredText();
     expect(errored).toContain("invalid");
-    // Humanized path of the failing field.
+    // CLI path of the failing field.
     expect(errored).toContain("metricViews.revenue.source");
   });
 

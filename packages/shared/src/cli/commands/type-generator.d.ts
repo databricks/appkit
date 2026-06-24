@@ -1,4 +1,3 @@
-// Type declarations for optional @databricks/appkit/type-generator module
 declare module "@databricks/appkit/type-generator" {
   export function generateFromEntryPoint(options: {
     queryFolder?: string;
@@ -26,7 +25,6 @@ declare module "@databricks/appkit/type-generator" {
     noCache?: boolean;
   }): Promise<void>;
 
-  /** Execution lane: `sp` (service principal) or `obo` (on-behalf-of). */
   type MetricLane = "sp" | "obo";
 
   /** Per-metric schema captured by {@link syncMetricViewsTypes}. */
@@ -53,16 +51,20 @@ declare module "@databricks/appkit/type-generator" {
     metricMetadataOutFile?: string;
     schemas: MetricSchema[];
     failures: MetricSyncFailure[];
-    /** `true` when no metric-views.json was found — nothing was synced. */
+    // `true` when no metric-views.json was found — nothing was synced.
     noConfig: boolean;
   }
 
   /**
-   * Metric-only sync entry: read metric-views.json from `queryFolder`, DESCRIBE
-   * every entry (minus clean cache hits), and write `metric.d.ts` +
-   * `metrics.metadata.json`. Does NOT generate analytics query types. Backs
-   * `appkit mv sync`. `cache` defaults to ON; only `cache === false` (the
-   * CLI's `--no-cache`) disables the shared metric type-generation cache.
+   * Generate the metric-view type artifacts used by `appkit mv sync`.
+   *
+   * Reads `metric-views.json` from `queryFolder`, DESCRIBEs any metric views
+   * that are missing from the cache, then writes `metric.d.ts` and
+   * `metrics.metadata.json`. This only syncs metric-view types; analytics query
+   * types are generated separately.
+   *
+   * The cache is enabled by default. Pass `cache: false` to force fresh
+   * DESCRIBE results, matching the CLI's `--no-cache` flag.
    */
   export function syncMetricViewsTypes(options: {
     queryFolder: string;
@@ -72,8 +74,6 @@ declare module "@databricks/appkit/type-generator" {
     cache?: boolean;
   }): Promise<SyncMetricViewsTypesResult>;
 
-  /** Default filename for the generated MetricRegistry declarations. */
   export const METRIC_TYPES_FILE: string;
-  /** Default filename for the build-time semantic-metadata JSON bundle. */
   export const METRIC_METADATA_FILE: string;
 }

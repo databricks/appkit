@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  formatMetricViewsPath,
   formatMetricViewsSourceErrors,
-  humanizeMetricViewsPath,
   validateMetricViewsSource,
 } from "./validate-metric-views-source";
 
@@ -145,26 +145,26 @@ describe("validateMetricViewsSource", () => {
       });
       expect(result.valid).toBe(false);
       if (result.valid) throw new Error("expected invalid");
-      // Root-level issue → humanized as "(root)".
+      // Root-level issues render as "(root)".
       expect(result.errors[0].path).toBe("(root)");
     });
   });
 });
 
-describe("humanizeMetricViewsPath", () => {
+describe("formatMetricViewsPath", () => {
   test("empty path renders as (root)", () => {
-    expect(humanizeMetricViewsPath([])).toBe("(root)");
-    expect(humanizeMetricViewsPath(undefined)).toBe("(root)");
+    expect(formatMetricViewsPath([])).toBe("(root)");
+    expect(formatMetricViewsPath(undefined)).toBe("(root)");
   });
 
   test("nested object keys join with dots", () => {
-    expect(humanizeMetricViewsPath(["metricViews", "revenue", "source"])).toBe(
+    expect(formatMetricViewsPath(["metricViews", "revenue", "source"])).toBe(
       "metricViews.revenue.source",
     );
   });
 
   test("numeric segments render as bracket indices", () => {
-    expect(humanizeMetricViewsPath(["a", 0, "b"])).toBe("a[0].b");
+    expect(formatMetricViewsPath(["a", 0, "b"])).toBe("a[0].b");
   });
 });
 
