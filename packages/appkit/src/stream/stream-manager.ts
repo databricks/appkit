@@ -8,7 +8,13 @@ import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
-import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
+import {
+  clearGraceTimer,
+  clearRemovalTimer,
+  SSEErrorCode,
+  type StreamEntry,
+  type StreamOperation,
+} from "./types";
 import { StreamValidator } from "./validator";
 
 const logger = createLogger("stream");
@@ -122,14 +128,11 @@ export class StreamManager {
     }
 
     // a reconnecting client cancels the pending disconnect-grace abort
-    this._clearGraceTimer(streamEntry);
+    clearGraceTimer(streamEntry);
 
     // a reconnect cancels any pending registry removal so the entry isn't
     // pulled out from under the newly attached client
-    if (streamEntry.removalTimer) {
-      clearTimeout(streamEntry.removalTimer);
-      streamEntry.removalTimer = undefined;
-    }
+    clearRemovalTimer(streamEntry);
 
     // add client to stream entry
     streamEntry.clients.add(res);
@@ -301,7 +304,7 @@ export class StreamManager {
         streamEntry.isCompleted = true;
 
         // no late grace abort should fire on a completed stream
-        this._clearGraceTimer(streamEntry);
+        clearGraceTimer(streamEntry);
 
         // close all clients (this also drops them from the entry, so the
         // removal below is scheduled regardless of whether the transport
@@ -331,7 +334,7 @@ export class StreamManager {
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
           streamEntry.isCompleted = true;
-          this._clearGraceTimer(streamEntry);
+          clearGraceTimer(streamEntry);
           this._closeAllClients(streamEntry);
           this._scheduleRemovalAfterTTL(streamEntry);
           return;
@@ -368,7 +371,7 @@ export class StreamManager {
           upstreamCode,
         );
         streamEntry.isCompleted = true;
-        this._clearGraceTimer(streamEntry);
+        clearGraceTimer(streamEntry);
 
         // the broadcast above already ended the connected clients; drop them
         // from the entry so removal is scheduled regardless of whether the
@@ -462,7 +465,7 @@ export class StreamManager {
   // abort the generator after the grace window unless a client reconnects first
   private _scheduleGraceAbort(streamEntry: StreamEntry): void {
     // clear any existing timer to avoid stacking
-    this._clearGraceTimer(streamEntry);
+    clearGraceTimer(streamEntry);
 
     const timer = setTimeout(() => {
       streamEntry.disconnectGraceTimer = undefined;
@@ -476,14 +479,6 @@ export class StreamManager {
     // never keep the process alive solely for a grace timer
     timer.unref?.();
     streamEntry.disconnectGraceTimer = timer;
-  }
-
-  // clear a pending disconnect-grace timer, if any
-  private _clearGraceTimer(streamEntry: StreamEntry): void {
-    if (streamEntry.disconnectGraceTimer) {
-      clearTimeout(streamEntry.disconnectGraceTimer);
-      streamEntry.disconnectGraceTimer = undefined;
-    }
   }
 
   // schedule registry removal once a finished (completed or errored) stream

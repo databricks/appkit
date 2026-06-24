@@ -1,4 +1,9 @@
-import { SSEErrorCode, type StreamEntry } from "./types";
+import {
+  clearGraceTimer,
+  clearRemovalTimer,
+  SSEErrorCode,
+  type StreamEntry,
+} from "./types";
 
 export class StreamRegistry {
   // keyed storage with explicit, policy-driven eviction. A ring buffer is
@@ -51,22 +56,11 @@ export class StreamRegistry {
   clear(): void {
     for (const stream of this.streams.values()) {
       stream.abortController.abort("Server shutdown");
-      this._clearGraceTimer(stream);
-      if (stream.removalTimer) {
-        clearTimeout(stream.removalTimer);
-        stream.removalTimer = undefined;
-      }
+      clearGraceTimer(stream);
+      clearRemovalTimer(stream);
     }
 
     this.streams.clear();
-  }
-
-  // clear a pending grace timer so a removed stream isn't pinned until it fires
-  private _clearGraceTimer(stream: StreamEntry): void {
-    if (stream.disconnectGraceTimer) {
-      clearTimeout(stream.disconnectGraceTimer);
-      stream.disconnectGraceTimer = undefined;
-    }
   }
 
   // evict the oldest stream from the registry, preferring completed streams.
@@ -113,7 +107,7 @@ export class StreamRegistry {
           }
         }
       }
-      this._clearGraceTimer(oldestStream);
+      clearGraceTimer(oldestStream);
       // abort with a DOMException AbortError so the error categorizer routes
       // eviction as an abort (matching the manager's terminal paths) rather
       // than a stream failure
@@ -121,10 +115,7 @@ export class StreamRegistry {
         new DOMException("Stream evicted", "AbortError"),
       );
       // a pending removal timer would otherwise pin the evicted entry
-      if (oldestStream.removalTimer) {
-        clearTimeout(oldestStream.removalTimer);
-        oldestStream.removalTimer = undefined;
-      }
+      clearRemovalTimer(oldestStream);
       this.streams.delete(oldestStream.streamId);
     }
   }
