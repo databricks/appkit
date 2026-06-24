@@ -679,6 +679,44 @@ describe("extractParameterDefaults", () => {
       x: "'''a'' OR 1=1 OR ''b'''",
     });
   });
+
+  test("escapes backslashes so a string value can't break out via \\'", () => {
+    // Databricks/Spark treats `\` as an escape inside string literals, so
+    // doubling only `'` is not enough: `x\' UNION ...` quoted as `'x\'' ...'`
+    // would let `\'` escape the first quote and the next `'` close the literal,
+    // turning the rest into executable SQL. Escaping `\` -> `\\` first keeps the
+    // value as one inert literal.
+    const sql = [
+      "-- @param x STRING = x\\' UNION SELECT secret FROM creds --",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      x: "'x\\\\'' UNION SELECT secret FROM creds --'",
+    });
+    // A backslash-bearing "looks pre-quoted" value is not trusted either: it is
+    // re-escaped rather than passed through (an unterminated `'a\'`).
+    expect(
+      extractParameterDefaults("-- @param y STRING = 'a\\'\nSELECT 1"),
+    ).toEqual({ y: "'''a\\\\'''" });
+  });
+
+  test("a value-less `=` line does not swallow the following line", () => {
+    // `\s` would match the newline and capture the next line as the value; the
+    // horizontal-only whitespace class makes this line simply not match, so the
+    // param falls back to its type placeholder during DESCRIBE.
+    const blankValue = ["-- @param target_catalog STRING =", "SELECT 1"].join(
+      "\n",
+    );
+    expect(extractParameterDefaults(blankValue)).toEqual({});
+
+    // ...and it must not consume the *next* @param annotation either.
+    const blankThenNext = [
+      "-- @param a STRING =",
+      "-- @param b INT = 5",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(blankThenNext)).toEqual({ b: "5" });
+  });
 });
 
 describe("substituteParametersForDescribe (IDENTIFIER support, #383)", () => {

@@ -398,13 +398,16 @@ export function defaultForType(sqlType: string | undefined): string {
  * literal — i.e. it opens and closes with `'` and every interior quote is part
  * of an escaped `''` pair. `'2024-01-01'` and `'O''Brien'` qualify;
  * `'a' OR 1=1 OR 'b'` does not (it has lone interior quotes), so it is treated
- * as raw content and re-escaped rather than trusted.
+ * as raw content and re-escaped rather than trusted. A backslash also
+ * disqualifies it: Databricks/Spark treats `\` as an escape inside literals (so
+ * `'a\'` is unterminated), and we never trust such input — it is re-escaped.
  */
 function isWellFormedStringLiteral(raw: string): boolean {
   if (raw.length < 2 || !raw.startsWith("'") || !raw.endsWith("'")) {
     return false;
   }
   const inner = raw.slice(1, -1);
+  if (inner.includes("\\")) return false;
   return !inner.replace(/''/g, "").includes("'");
 }
 
@@ -418,7 +421,8 @@ function isWellFormedStringLiteral(raw: string): boolean {
  * dependency, so it must not be able to inject SQL into `DESCRIBE QUERY`:
  * - string-like types are always emitted as one well-formed, fully-escaped
  *   single-quoted literal (a pre-quoted literal is kept as-is, anything else is
- *   quoted with `'` doubled), so the value can never break out of the string;
+ *   quoted with both `\` and `'` doubled so neither can terminate the literal),
+ *   so the value can never break out of the string;
  * - numeric / boolean / binary values must match a strict literal shape and are
  *   rejected (`null`) otherwise, rather than being passed through verbatim.
  */
@@ -433,7 +437,7 @@ function formatSampleValue(
     case "TIMESTAMP_NTZ":
       return isWellFormedStringLiteral(raw)
         ? raw
-        : `'${raw.replace(/'/g, "''")}'`;
+        : `'${raw.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
     case "NUMERIC":
     case "DECIMAL":
     case "BIGINT":
@@ -467,9 +471,13 @@ function formatSampleValue(
 export function extractParameterDefaults(sql: string): Record<string, string> {
   const defaults: Record<string, string> = {};
   // Mirrors extractParameterTypes' type alternation, then requires `= <value>`
-  // through end-of-line. Lines without a value are left to extractParameterTypes.
+  // on the same line. All inter-token whitespace is horizontal-only
+  // (`[^\S\r\n]`, not `\s`): `\s` matches newlines, so a value-less line like
+  // `-- @param x STRING =` would let `\s*=\s*(.+?)` swallow the *next* line as
+  // the sample value. Restricting to same-line whitespace makes such a line
+  // simply not match, so it correctly falls back to the type placeholder.
   const regex =
-    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\s*=\s*(.+?)\s*$/gim;
+    /--[^\S\r\n]*@param[^\S\r\n]+(\w+)[^\S\r\n]+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)[^\S\r\n]*=[^\S\r\n]*(.+?)[^\S\r\n]*$/gim;
   for (const match of sql.matchAll(regex)) {
     const [, paramName, paramType, rawValue] = match;
     const formatted = formatSampleValue(paramType, rawValue);
@@ -665,9 +673,9 @@ export async function generateQueriesFromDescribe(
       const annotatedTypes = extractParameterTypes(sql);
       const inferredTypes = inferParameterTypes(sql, protectedRanges);
       const parameterTypes = { ...inferredTypes, ...annotatedTypes };
-      // Explicit describe-time sample values (`-- @param name TYPE = value`)
-      // take precedence over the type-based default so queries with dynamic
-      // table names (IDENTIFIER) can resolve a real table during DESCRIBE.
+      // substituteParametersForDescribe applies `-- @param name TYPE = value`
+      // sample values (e.g. for IDENTIFIER table names) ahead of type defaults;
+      // parameterDefaults is recomputed here only to skip them in the warn loop.
       const parameterDefaults = extractParameterDefaults(sql);
       const sqlWithDefaults = substituteParametersForDescribe(sql);
 
