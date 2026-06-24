@@ -236,7 +236,11 @@ export class ServiceContext {
       return process.env.DATABRICKS_WAREHOUSE_ID;
     }
 
-    if (process.env.NODE_ENV === "development") {
+    const autoResolve =
+      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE === "true" ||
+      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE === "1";
+
+    if (process.env.NODE_ENV === "development" && autoResolve) {
       const response = (await client.apiClient.request({
         path: "/api/2.0/sql/warehouses",
         method: "GET",
