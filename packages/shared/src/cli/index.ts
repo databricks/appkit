@@ -10,6 +10,8 @@ import { doctorCommand } from "./commands/doctor/index.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
 import { pluginCommand } from "./commands/plugin/index.js";
+import { addCommand } from "./commands/registry/add.js";
+import { registryCommand } from "./commands/registry/index.js";
 import { setupCommand } from "./commands/setup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,5 +32,7 @@ cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
 cmd.addCommand(codemodCommand);
 cmd.addCommand(doctorCommand);
+cmd.addCommand(registryCommand);
+cmd.addCommand(addCommand);
 
 await cmd.parseAsync();
