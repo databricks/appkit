@@ -145,6 +145,34 @@ describe("Lakebase Authentication", () => {
       ).rejects.toThrow("API request failed");
     });
 
+    it.each([
+      ["null", null],
+      ["a non-object", "not-an-object"],
+      ["an object missing token", { expire_time: "2026-02-06T18:00:00Z" }],
+      ["an object missing expire_time", { token: "abc" }],
+    ])("should reject when the response is %s", async (_label, response) => {
+      vi.mocked(mockApiClient.request).mockResolvedValue(response);
+
+      await expect(
+        generateDatabaseCredential(mockWorkspaceClient, {
+          endpoint: "projects/test/branches/main/endpoints/primary",
+        }),
+      ).rejects.toThrow("Invalid value for credential response");
+    });
+
+    it("should reject when token or expire_time are not strings", async () => {
+      vi.mocked(mockApiClient.request).mockResolvedValue({
+        token: 123,
+        expire_time: 456,
+      });
+
+      await expect(
+        generateDatabaseCredential(mockWorkspaceClient, {
+          endpoint: "projects/test/branches/main/endpoints/primary",
+        }),
+      ).rejects.toThrow("Invalid value for credential response fields");
+    });
+
     it("should use correct workspace host for API calls", async () => {
       const customHost = "https://custom-workspace.databricks.com";
 
