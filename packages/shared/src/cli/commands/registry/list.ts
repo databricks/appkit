@@ -13,12 +13,36 @@ interface RegistryIndexItem {
   type?: string;
   title?: string;
   description?: string;
+  categories?: string[];
   meta?: { verified?: boolean };
   files?: Array<{ path?: string; target?: string }>;
 }
 
 function isVerified(item: RegistryIndexItem): boolean {
   return item.meta?.verified === true;
+}
+
+/** Free-text haystack for search matching. */
+function searchHaystack(item: RegistryIndexItem): string {
+  return [
+    item.name,
+    item.title ?? "",
+    item.description ?? "",
+    itemKind(item),
+    ...(item.categories ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+/** True if every whitespace-separated term in `query` appears in the item. */
+function matchesQuery(item: RegistryIndexItem, query: string): boolean {
+  const haystack = searchHaystack(item);
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => haystack.includes(term));
 }
 
 /** A friendly kind for the TYPE column: plugin, component, hook, theme, … */
@@ -84,10 +108,8 @@ function printTable(items: RegistryIndexItem[]): void {
   }
 }
 
-async function runList(opts: {
-  json?: boolean;
-  verified?: boolean;
-}): Promise<void> {
+/** Fetches the registry index (token-aware), or exits with a helpful message. */
+async function fetchIndex(): Promise<RegistryIndexItem[]> {
   const token = resolveToken();
   const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
   const headers: Record<string, string> = {};
@@ -100,7 +122,7 @@ async function runList(opts: {
   try {
     res = await fetch(url, { headers });
   } catch (err) {
-    console.error(`Failed to reach the registry at ${url}`);
+    console.error(pc.red(`Failed to reach the registry at ${url}`));
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
@@ -118,16 +140,15 @@ async function runList(opts: {
     process.exit(1);
   }
   if (!res.ok) {
-    console.error(`Registry returned HTTP ${res.status} for ${url}`);
+    console.error(pc.red(`Registry returned HTTP ${res.status} for ${url}`));
     process.exit(1);
   }
 
   const data = (await res.json()) as { items?: RegistryIndexItem[] };
-  let items = data.items ?? [];
-  if (opts.verified) {
-    items = items.filter(isVerified);
-  }
+  return data.items ?? [];
+}
 
+function output(items: RegistryIndexItem[], opts: { json?: boolean }): void {
   if (opts.json) {
     // Surface `kind` + `verified` as top-level fields for easy scripting.
     console.log(
@@ -146,12 +167,55 @@ async function runList(opts: {
   }
 }
 
+async function runList(opts: {
+  json?: boolean;
+  verified?: boolean;
+}): Promise<void> {
+  let items = await fetchIndex();
+  if (opts.verified) items = items.filter(isVerified);
+  output(items, opts);
+}
+
+async function runSearch(
+  query: string,
+  opts: { json?: boolean; verified?: boolean },
+): Promise<void> {
+  let items = await fetchIndex();
+  items = items.filter((i) => matchesQuery(i, query));
+  if (opts.verified) items = items.filter(isVerified);
+  if (items.length === 0 && !opts.json) {
+    console.log(pc.dim(`No items match "${query}".`));
+    return;
+  }
+  output(items, opts);
+}
+
 export const registryListCommand = new Command("list")
   .description("List items available in the AppKit registry")
   .option("--json", "Output as JSON")
   .option("--verified", "Show only verified items")
   .action((opts: { json?: boolean; verified?: boolean }) =>
     runList(opts).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );
+
+export const registrySearchCommand = new Command("search")
+  .description("Search registry items by name, description, type, or keyword")
+  .argument("<query...>", "Search terms (all must match)")
+  .option("--json", "Output as JSON")
+  .option("--verified", "Show only verified items")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit registry search chart
+  $ appkit registry search kpi dashboard
+  $ appkit registry search plugin --json`,
+  )
+  .action((query: string[], opts: { json?: boolean; verified?: boolean }) =>
+    runSearch(query.join(" "), opts).catch((err) => {
       console.error(err);
       process.exit(1);
     }),
