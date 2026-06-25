@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
+import pc from "picocolors";
 import {
   fetchRegistryItem,
   type RegistryItem,
@@ -118,7 +119,9 @@ function installDependencies(deps: string[], cwd: string): void {
   if (deps.length === 0) return;
   if (!fs.existsSync(path.join(cwd, "package.json"))) {
     console.warn(
-      `No package.json found — install these manually: ${deps.join(" ")}`,
+      pc.yellow(
+        `No package.json found — install these manually: ${deps.join(" ")}`,
+      ),
     );
     return;
   }
@@ -131,7 +134,9 @@ function installDependencies(deps: string[], cwd: string): void {
   });
   if (result.status !== 0) {
     console.warn(
-      `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${deps.join(" ")}`,
+      pc.yellow(
+        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${deps.join(" ")}`,
+      ),
     );
   }
 }
@@ -145,7 +150,9 @@ function runPluginSync(cwd: string): void {
   );
   if (result.status !== 0) {
     console.warn(
-      "  Plugin sync did not complete cleanly — run `appkit plugin sync --write` manually.",
+      pc.yellow(
+        "  Plugin sync did not complete cleanly — run `appkit plugin sync --write` manually.",
+      ),
     );
   }
 }
@@ -159,13 +166,16 @@ function writeItemFile(
   const existed = fs.existsSync(dest);
   if (existed && !force) {
     console.error(
-      `Refusing to overwrite ${path.relative(cwd, dest)} — pass --force to replace it.`,
+      pc.red(
+        `Refusing to overwrite ${path.relative(cwd, dest)} — pass --force to replace it.`,
+      ),
     );
     process.exit(1);
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, content);
-  console.log(`${existed ? "Updated" : "Created"} ${path.relative(cwd, dest)}`);
+  const label = existed ? pc.yellow("Updated") : pc.green("Created");
+  console.log(`${label} ${path.relative(cwd, dest)}`);
 }
 
 interface PluginSummary {
@@ -197,10 +207,10 @@ async function runAdd(
   const frontendRoot = hasUi ? findFrontendRoot(cwd) : cwd;
   const serverRoot = hasPlugin ? findServerRoot(cwd) : cwd;
   if (hasUi && frontendRoot !== cwd) {
-    console.log(`UI components → ${path.relative(cwd, frontendRoot)}/`);
+    console.log(pc.dim(`UI components → ${path.relative(cwd, frontendRoot)}/`));
   }
   if (hasPlugin && serverRoot !== cwd) {
-    console.log(`Plugins → ${path.relative(cwd, serverRoot)}/`);
+    console.log(pc.dim(`Plugins → ${path.relative(cwd, serverRoot)}/`));
   }
 
   const deps = new Set<string>();
@@ -255,13 +265,15 @@ async function runAdd(
   installDependencies([...deps], findNearestPackageJson(cwd));
 
   if (hasPlugin) {
-    console.log("\nRegistering plugins (appkit plugin sync)...");
+    console.log(pc.dim("\nRegistering plugins (appkit plugin sync)..."));
     runPluginSync(cwd);
   }
 
   if (wroteUi) {
     console.log(
-      '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so components are themed.',
+      pc.dim(
+        '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so components are themed.',
+      ),
     );
   }
   for (const s of pluginSummaries) {
@@ -271,11 +283,13 @@ async function runAdd(
     if (opts.register !== false && s.exportName) {
       const result = registerPluginInServer(cwd, s.importPath, s.exportName);
       if (result.status === "wired") {
-        console.log(`\nRegistered ${s.exportName} in ${result.file}`);
+        console.log(
+          `\n${pc.green("Registered")} ${s.exportName} in ${result.file}`,
+        );
         wired = true;
       } else if (result.status === "already") {
         console.log(
-          `\n${s.exportName} is already registered in ${result.file}`,
+          pc.dim(`\n${s.exportName} is already registered in ${result.file}`),
         );
         wired = true;
       }
@@ -283,13 +297,17 @@ async function runAdd(
     if (!wired) {
       const imp = s.exportName ?? "<plugin>";
       console.log(
-        "\nAdd this to your server's createApp call:\n" +
-          `  import { ${imp} } from "${s.importPath}";\n` +
-          `  const app = await createApp({ plugins: [${imp}(), /* ... */] });`,
+        `\n${pc.bold("Add this to your server's createApp call:")}\n` +
+          pc.dim(
+            `  import { ${imp} } from "${s.importPath}";\n` +
+              `  const app = await createApp({ plugins: [${imp}(), /* ... */] });`,
+          ),
       );
     }
     if (s.envs.length > 0) {
-      console.log(`  Required env var(s): ${s.envs.join(", ")}`);
+      console.log(
+        `  ${pc.yellow("Required env var(s):")} ${s.envs.join(", ")}`,
+      );
     }
   }
 }
