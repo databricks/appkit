@@ -36,9 +36,12 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
         // Annotate the array element types so the inferred return type is wide
         // enough for `mockResolvedValueOnce` overrides that populate `failures`
         // (an empty literal would otherwise infer `never[]`).
-        const schemas: Array<{ key: string; source: string; lane: string }> = [
-          { key: "revenue", source: "demo.sales.revenue", lane: "sp" },
-        ];
+        const schemas: Array<{
+          key: string;
+          source: string;
+          lane: string;
+          degraded?: boolean;
+        }> = [{ key: "revenue", source: "demo.sales.revenue", lane: "sp" }];
         const failures: Array<{
           key: string;
           source: string;
@@ -133,6 +136,7 @@ describe("appkit mv sync", () => {
   let queryFolder: string;
   let consoleLog: Mock;
   let consoleError: Mock;
+  let consoleWarn: Mock;
   let originalCwd: string;
   const prevWarehouse = process.env.DATABRICKS_WAREHOUSE_ID;
 
@@ -154,6 +158,9 @@ describe("appkit mv sync", () => {
     consoleLog = vi.spyOn(console, "log").mockImplementation(() => {}) as Mock;
     consoleError = vi
       .spyOn(console, "error")
+      .mockImplementation(() => {}) as Mock;
+    consoleWarn = vi
+      .spyOn(console, "warn")
       .mockImplementation(() => {}) as Mock;
   });
 
@@ -361,6 +368,8 @@ describe("appkit mv sync", () => {
   const erroredText = () =>
     consoleError.mock.calls.flat().map(String).join("\n");
 
+  const warnedText = () => consoleWarn.mock.calls.flat().map(String).join("\n");
+
   test("explicit --metric-views-json-path to a missing file: non-zero + recognizable message", async () => {
     const missing = path.join(tmpRoot, "nowhere", "metric-views.json");
 
@@ -532,6 +541,50 @@ describe("appkit mv sync", () => {
     expect(errored).toContain("could not be described");
     expect(errored).toContain("revenue");
     expect(errored).toContain("TABLE_OR_VIEW_NOT_FOUND");
+  });
+
+  test("degraded-but-not-failed (warehouse not ready): warns and exits 0 with permissive types", async () => {
+    writeConfig();
+    // A not-ready warehouse returns no schema for a key WITHOUT a hard failure:
+    // `syncMetricViewsTypes` writes permissive (degraded) types and reports them
+    // via `schemas[].degraded` with an empty `failures` list. Unlike a per-entry
+    // DESCRIBE failure, the CLI must treat this as a WARNING (exit 0), not a hard
+    // failure — the entries refresh on a rerun once the warehouse is available.
+    syncMetricViewsTypes.mockResolvedValueOnce({
+      metricOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metric.d.ts",
+      ),
+      metricMetadataOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metrics.metadata.json",
+      ),
+      schemas: [
+        {
+          key: "revenue",
+          source: "demo.sales.revenue",
+          lane: "sp",
+          degraded: true,
+        },
+      ],
+      failures: [],
+      noConfig: false,
+    });
+
+    const exitSpy = await runCliCapturingExit(["--warehouse-id", "wh-123"]);
+
+    expect(syncMetricViewsTypes).toHaveBeenCalledTimes(1);
+    // Degraded is a warning, NOT a hard failure — the command exits 0.
+    expect(exitSpy).not.toHaveBeenCalled();
+    const warned = warnedText();
+    expect(warned).toContain("could not be described");
+    expect(warned).toContain("revenue");
+    expect(warned).toContain("permissive");
+    expect(warned).toContain("Rerun");
   });
 
   // --- Phase 3: interactive flow ----------------------------------------------

@@ -53,6 +53,10 @@ declare module "@databricks/appkit/type-generator" {
     failures: MetricSyncFailure[];
     // `true` when no metric-views.json was found — nothing was synced.
     noConfig: boolean;
+    // Per-key fatal preflight errors. Always empty for `mv sync` (the CLI uses
+    // the default `describe-now` mode); populated only by the dev/Vite blocking
+    // path. Declared to match the real export's result contract.
+    fatalErrors: Array<{ name: string; message: string }>;
   }
 
   /**

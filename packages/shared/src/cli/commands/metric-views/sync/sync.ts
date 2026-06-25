@@ -251,6 +251,24 @@ async function runMetricViewsSync(
       return;
     }
 
+    // Degraded-but-not-failed (e.g. a not-ready warehouse returned no schema for
+    // some keys): the permissive types ARE written, so unlike `result.failures`
+    // above this is a warning — not a hard failure — and the command still exits
+    // 0. The degraded entries refresh on a rerun once the warehouse is available.
+    const degradedKeys = result.schemas
+      .filter((schema) => schema.degraded)
+      .map((schema) => schema.key);
+    if (degradedKeys.length > 0) {
+      onProgress?.succeed(
+        `Generated permissive metric types: ${metricOutFile}`,
+      );
+      console.warn(
+        `Warning: ${degradedKeys.length} metric view(s) (${degradedKeys.join(", ")}) could not be described — the warehouse wasn't ready, so permissive types were written. Rerun \`appkit mv sync\` once the warehouse is available.`,
+      );
+      console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
+      return;
+    }
+
     onProgress?.succeed(`Generated metric types: ${metricOutFile}`);
     console.log(`Generated metric types: ${metricOutFile}`);
     console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
