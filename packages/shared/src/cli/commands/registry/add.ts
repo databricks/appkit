@@ -285,7 +285,7 @@ async function runAdd(
       console.log(
         "\nAdd this to your server's createApp call:\n" +
           `  import { ${imp} } from "${s.importPath}";\n` +
-          `  const app = await createApp({ plugins: [${imp}, /* ... */] });`,
+          `  const app = await createApp({ plugins: [${imp}(), /* ... */] });`,
       );
     }
     if (s.envs.length > 0) {
