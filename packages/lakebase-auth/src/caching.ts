@@ -4,7 +4,7 @@ import type { FetchCredential, LogFn } from "./types";
  * Delay before retrying a background (eager) refresh that failed even after
  * the inner {@link withRetries} schedule was exhausted.
  */
-const BACKGROUND_RETRY_MS = 5000;
+const BACKGROUND_RETRY_MS = 30000;
 
 /** A cached token source with a disposer to release any background timers. */
 export interface CachedTokenProvider {

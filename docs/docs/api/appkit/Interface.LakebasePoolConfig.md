@@ -140,16 +140,18 @@ server being briefly unreachable).
 ### sslMode?
 
 ```ts
-optional sslMode: "require" | "disable" | "prefer";
+optional sslMode: "verify-full" | "verify-ca" | "require" | "prefer" | "disable";
 ```
 
-SSL mode for the connection (convenience helper)
-Can also be set via PGSSLMODE environment variable
+SSL mode for the connection (convenience helper).
+Can also be set via PGSSLMODE environment variable.
+All values other than "disable" are treated as "verify-full" against system
+root certs.
 
 #### Default
 
 ```ts
-"require"
+"verify-full"
 ```
 
 ***

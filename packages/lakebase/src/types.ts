@@ -92,12 +92,13 @@ export interface LakebasePoolConfig extends PoolConfig {
   endpoint?: string;
 
   /**
-   * SSL mode for the connection (convenience helper)
-   * Can also be set via PGSSLMODE environment variable
+   * SSL mode for the connection (convenience helper). Can also be set via
+   * PGSSLMODE. All values other than "disable" are treated as "verify-full"
+   * with system root certs.
    *
-   * @default "require"
+   * @default "verify-full"
    */
-  sslMode?: "require" | "disable" | "prefer";
+  sslMode?: "verify-full" | "verify-ca" | "require" | "prefer" | "disable";
 
   /**
    * Optional UC claims for fine-grained Unity Catalog table permissions on the

@@ -9,7 +9,7 @@ PostgreSQL driver for Databricks Lakebase Autoscaling with automatic OAuth token
 It:
 
 - Returns a standard `pg.Pool` - works with many PostgreSQL libraries and ORMs
-- Automatically refreshes OAuth tokens (1-hour lifetime, with 2-minute buffer) — **eagerly** in the background by default, or **lazily** on demand
+- Automatically refreshes OAuth tokens (1-hour lifetime, with 2-minute buffer) — **eagerly**, in the background (by default), or **lazily**, on demand
 - Retries transient credential-fetch failures (e.g. a briefly unreachable OAuth server)
 - Caches tokens to minimize API calls
 - Zero configuration with environment variables
@@ -29,23 +29,24 @@ npm install @databricks/lakebase
 
 ### Using Environment Variables
 
+Ensure Databricks credentials are available, for example in `.databrickscfg` or by setting `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and `DATABRICKS_CLIENT_SECRET`.
+
 Set the following environment variables:
 
 ```bash
 export PGHOST=your-lakebase-host.databricks.com
 export PGDATABASE=your_database_name
 export LAKEBASE_ENDPOINT=projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-broad-pine-y12n6gnv/endpoints/ep-summer-frost-y131l3vx
-export PGUSER=your_user # optionally, defaults to DATABRICKS_CLIENT_ID
-export PGSSLMODE=require
+export PGUSER=your_user # optional: defaults to DATABRICKS_CLIENT_ID
 ```
 
-To find your `LAKEBASE_ENDPOINT`, run the Databricks CLI and use the `name` field from the output:
+Your `LAKEBASE_ENDPOINT` has the structure `projects/${project}/branches/${branch}/endpoints/${endpoint}`. To find it, run the Databricks CLI and use the `name` field:
 
 ```bash
 databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
 ```
 
-You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page. (Project list -> Project dashboard -> Branch overview). 
+You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page (Project list -> Project dashboard -> Branch overview). 
 
 Then use the driver:
 

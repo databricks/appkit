@@ -256,7 +256,7 @@
                 "env": "PGSSLMODE",
                 "description": "Postgres SSL mode. Auto-injected by the platform at deploy time.",
                 "localOnly": true,
-                "value": "require",
+                "value": "verify-full",
                 "origin": "platform"
               }
             }

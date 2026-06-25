@@ -5,10 +5,16 @@ import type { LakebaseAuthConfig, SslConfig } from "./types";
 /** Default connection values for Lakebase auth */
 const defaults = {
   port: 5432,
-  sslMode: "require" as const,
+  sslMode: "verify-full" as const,
 };
 
-const VALID_SSL_MODES = ["require", "disable", "prefer"] as const;
+const VALID_SSL_MODES = [
+  "verify-full",
+  "verify-ca",
+  "require",
+  "prefer",
+  "disable",
+] as const;
 type SslMode = (typeof VALID_SSL_MODES)[number];
 
 /** Connection essentials parsed from config and environment variables. */
@@ -22,18 +28,20 @@ export interface ParsedAuthConfig {
 }
 
 /**
- * Map an SSL mode string to the corresponding SSL configuration.
- *
- * - `"require"` -- SSL enabled with certificate verification
- * - `"prefer"`  -- SSL enabled without certificate verification (try SSL, accept any cert)
- * - `"disable"` -- SSL disabled
+ * Map an SSL mode string to the corresponding SSL/TLS configuration.
+ * - `"verify-full"` -- SSL enabled with certificate verification against system certs
+ * - `"verify-ca"`   -- ditto (upgraded)
+ * - `"require"`     -- ditto (upgraded)
+ * - `"prefer"`      -- ditto (upgraded)
+ * - `"disable"`     -- SSL disabled (not compatible with Lakebase)
  */
 export function mapSslConfig(sslMode: SslMode): SslConfig {
   switch (sslMode) {
-    case "require":
+    case "verify-full": // since JS drivers check root certs, there's an implied sslrootcert=system
+    case "verify-ca": // upgraded to equivalent of verify-full, sslrootcert=system
+    case "require": // upgraded to equivalent of verify-full, sslrootcert=system
+    case "prefer": // upgraded to equivalent of verify-full, sslrootcert=system
       return { rejectUnauthorized: true };
-    case "prefer":
-      return { rejectUnauthorized: false };
     case "disable":
       return false;
   }
@@ -99,7 +107,7 @@ function validateSslMode(value: string | undefined): SslMode | undefined {
     throw ValidationError.invalidValue(
       "sslMode (PGSSLMODE)",
       value,
-      `one of: ${VALID_SSL_MODES.join(", ")}`,
+      `one of: ${VALID_SSL_MODES.join(", ")} (all except "disable" are treated as "verify-full")`,
     );
   }
 

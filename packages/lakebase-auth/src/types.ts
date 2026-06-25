@@ -204,10 +204,11 @@ export interface LakebaseAuthConfig {
   port?: number;
 
   /**
-   * SSL mode (convenience helper). Can also be set via PGSSLMODE.
-   * @default "require"
+   * SSL mode (convenience helper). Can also be set via PGSSLMODE. All values
+   * other than "disable" are treated as "verify-full" with system root certs.
+   * @default "verify-full"
    */
-  sslMode?: "require" | "disable" | "prefer";
+  sslMode?: "verify-full" | "verify-ca" | "require" | "prefer" | "disable";
 
   /** Explicit SSL configuration; overrides {@link sslMode} when provided. */
   ssl?: SslConfig;

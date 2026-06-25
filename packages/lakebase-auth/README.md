@@ -25,7 +25,26 @@ npm install @databricks/lakebase-auth
 
 ## Quick Start
 
-Set `PGHOST`, `PGDATABASE`, `LAKEBASE_ENDPOINT`, and (optionally) `PGUSER`, then:
+Ensure Databricks credentials are available, for example in `.databrickscfg` or by setting `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and `DATABRICKS_CLIENT_SECRET`.
+
+Set the following environment variables:
+
+```bash
+export PGHOST=your-lakebase-host.databricks.com
+export PGDATABASE=your_database_name
+export LAKEBASE_ENDPOINT=projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-broad-pine-y12n6gnv/endpoints/ep-summer-frost-y131l3vx
+export PGUSER=your_user # optional: defaults to DATABRICKS_CLIENT_ID
+```
+
+Your `LAKEBASE_ENDPOINT` has the structure `projects/${project}/branches/${branch}/endpoints/${endpoint}`. To find it, run the Databricks CLI and use the `name` field:
+
+```bash
+databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
+```
+
+You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page (Project list -> Project dashboard -> Branch overview). 
+
+Then use with node-postgres:
 
 ```typescript
 import pg from "pg";
@@ -36,28 +55,22 @@ const pool = new pg.Pool(config);
 
 const result = await pool.query("SELECT * FROM users");
 
-// On shutdown, stop the background token refresh:
+// on shutdown, stop the background token refresh:
 await pool.end();
 dispose();
 ```
 
-To find your `LAKEBASE_ENDPOINT`, run the Databricks CLI and use the `name` field:
-
-```bash
-databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
-```
-
 ## Usage with other drivers
 
-`getPgConfig()` returns `host`, `port`, `user`, `database`, `password`, `ssl`, and `dispose`. Map the field names to your driver of choice:
+`getPgConfig()` returns `host`, `port`, `user`, `database`, `password` (a function returning a current OAuth token), `ssl`, and `dispose`. Map the field names to your driver of choice:
 
 ```typescript
-// postgres.js (uses `username`)
+// postgres.js: uses `username`
 import postgres from "postgres";
 const { host, port, user, database, password, ssl } = getPgConfig();
 const sql = postgres({ host, port, username: user, database, password, ssl });
 
-// Bun.SQL (uses `hostname`, `username`, `tls`)
+// Bun.SQL: uses `hostname`, `username`, `tls`
 const cfg = getPgConfig();
 const sql = new Bun.SQL({
   hostname: cfg.host,
@@ -65,7 +78,7 @@ const sql = new Bun.SQL({
   username: cfg.user,
   database: cfg.database,
   password: cfg.password,
-  tls: true,
+  tls: ssl,
 });
 ```
 
@@ -99,7 +112,7 @@ Eager refresh uses an `unref`'d timer, so it never keeps the process alive on it
 
 ## Retries
 
-Transient credential-fetch failures (e.g. the OAuth server being briefly unreachable) are retried automatically. The default schedule is `[50, 500, 5000]` ms (three retries, then a final attempt). Customize or disable it:
+Transient credential-fetch failures (e.g. the OAuth server being briefly unreachable) are retried automatically. The default schedule is `[50, 500, 5000]` ms (i.e. an initial attempt plus three retries with backoff). Customize or disable it:
 
 ```typescript
 // custom backoff
@@ -125,7 +138,7 @@ getPgConfig({
 | ---------------- | ---------------------------------- | ------------------------------------ | ------------------ |
 | `host`           | `PGHOST`                           | Lakebase host                        | _Required_         |
 | `database`       | `PGDATABASE`                       | Database name                        | _Required_         |
-| `endpoint`       | `LAKEBASE_ENDPOINT`                | Endpoint resource path               | _Required_ (OAuth) |
+| `endpoint`       | `LAKEBASE_ENDPOINT`                | Endpoint resource path               | _Required_         |
 | `user`           | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID     | _Required_         |
 | `port`           | `PGPORT`                           | Port number                          | `5432`             |
 | `sslMode`        | `PGSSLMODE`                        | SSL mode                             | `require`          |

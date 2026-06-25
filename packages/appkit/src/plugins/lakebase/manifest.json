@@ -74,7 +74,7 @@
           "sslmode": {
             "env": "PGSSLMODE",
             "localOnly": true,
-            "value": "require",
+            "value": "verify-full",
             "description": "Postgres SSL mode. Auto-injected by the platform at deploy time."
           }
         }

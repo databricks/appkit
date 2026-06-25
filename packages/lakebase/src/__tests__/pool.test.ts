@@ -241,7 +241,7 @@ describe("createLakebasePool", () => {
     test("should configure SSL based on sslMode", () => {
       const pool = createLakebasePool({
         workspaceClient: {} as any,
-        sslMode: "require",
+        sslMode: "verify-full",
       });
 
       expect(pool.options.ssl).toEqual({ rejectUnauthorized: true });
@@ -258,17 +258,23 @@ describe("createLakebasePool", () => {
     });
 
     test("should throw on invalid PGSSLMODE", () => {
-      process.env.PGSSLMODE = "verify-full";
+      process.env.PGSSLMODE = "wide-open";
 
       expect(() =>
         createLakebasePool({
           workspaceClient: {} as any,
         }),
-      ).toThrow("one of: require, disable, prefer");
+      ).toThrow("one of: verify-full, verify-ca, require, prefer, disable");
     });
 
     test("should accept valid PGSSLMODE values", () => {
-      for (const mode of ["require", "disable", "prefer"]) {
+      for (const mode of [
+        "verify-full",
+        "verify-ca",
+        "require",
+        "prefer",
+        "disable",
+      ]) {
         process.env.PGSSLMODE = mode;
 
         expect(() =>

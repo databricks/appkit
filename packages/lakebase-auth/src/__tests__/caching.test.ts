@@ -63,8 +63,8 @@ describe("cachedWithTimedRefresh (eager)", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(onLog).toHaveBeenCalled();
 
-    // BACKGROUND_RETRY_MS is 5000ms.
-    await vi.advanceTimersByTimeAsync(5000);
+    // BACKGROUND_RETRY_MS is 30000ms.
+    await vi.advanceTimersByTimeAsync(30000);
     expect(fetch).toHaveBeenCalledTimes(2);
     await expect(provider.getToken()).resolves.toBe("t-ok");
 
