@@ -1,46 +1,71 @@
-import type { ECharts } from "echarts";
-import ReactECharts from "echarts-for-react";
-import { useCallback, useMemo, useRef } from "react";
-import { normalizeChartData, normalizeHeatmapData } from "./normalize";
-import {
-  buildCartesianOption,
-  buildHeatmapOption,
-  buildHorizontalBarOption,
-  buildPieOption,
-  buildRadarOption,
-  type OptionBuilderContext,
-} from "./options";
-import { useChartUITokens, useThemeColors } from "./theme";
+import type { Config, Layout } from "plotly.js";
+import { useMemo } from "react";
+import { normalizeChartData, normalizeHeatmapData } from "../normalize";
+import { useChartUITokens, useThemeColors } from "../theme";
 import type {
   ChartColorPalette,
   ChartData,
   ChartType,
   Orientation,
-} from "./types";
+} from "../types";
+import {
+  buildPlotlyCartesian,
+  buildPlotlyHeatmap,
+  buildPlotlyPie,
+  buildPlotlyRadar,
+  type PlotlyFigure,
+} from "./options";
+import { Plot } from "./plot";
+
+const DEFAULT_CONFIG: Partial<Config> = {
+  responsive: true,
+  displaylogo: false,
+  displayModeBar: "hover",
+};
 
 // ============================================================================
-// Palette Selection
+// Palette Selection (mirrors the ECharts BaseChart)
 // ============================================================================
 
-/**
- * Determines the appropriate color palette for a chart type.
- * - Heatmaps use sequential (low → high intensity)
- * - All other charts use categorical (distinct categories)
- */
 function getDefaultPalette(chartType: ChartType): ChartColorPalette {
-  switch (chartType) {
-    case "heatmap":
-      return "sequential";
-    default:
-      return "categorical";
+  return chartType === "heatmap" ? "sequential" : "categorical";
+}
+
+// ============================================================================
+// Layout Merge
+// ============================================================================
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  );
+}
+
+/** Deep-merges the user-provided `options` (layout overrides) into the layout. */
+function mergeLayout(
+  base: Partial<Layout>,
+  override?: Record<string, unknown>,
+): Partial<Layout> {
+  if (!override) return base;
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const existing = out[key];
+    out[key] =
+      isPlainObject(existing) && isPlainObject(value)
+        ? mergeLayout(existing as Partial<Layout>, value)
+        : value;
   }
+  return out as Partial<Layout>;
 }
 
 // ============================================================================
 // Component Props
 // ============================================================================
 
-export interface BaseChartProps {
+export interface PlotlyBaseChartProps {
   /** Chart data (Arrow Table or JSON array) - format is auto-detected */
   data: ChartData;
   /** Chart type */
@@ -57,12 +82,7 @@ export interface BaseChartProps {
   title?: string;
   /** Show legend @default true */
   showLegend?: boolean;
-  /**
-   * Color palette to use. Auto-selected based on chart type if not specified.
-   * - "categorical": Distinct colors for different categories (bar, pie, line)
-   * - "sequential": Gradient for magnitude (heatmap)
-   * - "diverging": Two-tone for positive/negative (correlation)
-   */
+  /** Color palette to use. Auto-selected based on chart type if not specified. */
   colorPalette?: ChartColorPalette;
   /** Custom colors (overrides colorPalette) */
   colors?: string[];
@@ -88,21 +108,23 @@ export interface BaseChartProps {
   min?: number;
   /** Max value for heatmap color scale */
   max?: number;
-  /** Additional ECharts options to merge */
+  /** Additional Plotly layout options to deep-merge */
   options?: Record<string, unknown>;
   /** Additional CSS classes */
   className?: string;
 }
 
 // ============================================================================
-// Base Chart Component
+// Plotly Base Chart Component
 // ============================================================================
 
 /**
- * Base chart component that handles both Arrow and JSON data.
- * Renders using ECharts for consistent output across both formats.
+ * Base chart component that renders normalized data with Plotly. This is the
+ * Plotly counterpart of the ECharts `BaseChart`: it reuses the same data
+ * normalization and theme tokens, so a Plotly chart is a visual drop-in for its
+ * ECharts twin while gaining Plotly's richer interactivity.
  */
-export function BaseChart({
+export function PlotlyBaseChart({
   data,
   chartType,
   xKey,
@@ -126,44 +148,12 @@ export function BaseChart({
   max,
   options: customOptions,
   className,
-}: BaseChartProps) {
-  // Determine the appropriate color palette based on chart type
+}: PlotlyBaseChartProps) {
   const resolvedPalette = colorPalette ?? getDefaultPalette(chartType);
   const themeColors = useThemeColors(resolvedPalette);
   const colors = customColors ?? themeColors;
-
   const ui = useChartUITokens();
 
-  // Store ECharts instance directly to avoid stale ref issues on unmount
-  const echartsInstanceRef = useRef<ECharts | null>(null);
-
-  // Callback ref pattern: captures the ECharts instance when ReactECharts mounts
-  // This ensures we always have a stable reference to the actual instance
-  const chartRefCallback = useCallback((node: ReactECharts | null) => {
-    // Dispose previous instance if component is being replaced
-    if (
-      echartsInstanceRef.current &&
-      !echartsInstanceRef.current.isDisposed()
-    ) {
-      echartsInstanceRef.current.dispose();
-    }
-
-    // Store the new instance
-    if (node) {
-      echartsInstanceRef.current = node.getEchartsInstance();
-    } else {
-      // Component unmounting - dispose the stored instance
-      if (
-        echartsInstanceRef.current &&
-        !echartsInstanceRef.current.isDisposed()
-      ) {
-        echartsInstanceRef.current.dispose();
-      }
-      echartsInstanceRef.current = null;
-    }
-  }, []);
-
-  // Memoize data normalization
   const normalized = useMemo(
     () =>
       chartType === "heatmap"
@@ -172,22 +162,13 @@ export function BaseChart({
     [data, xKey, yKey, yAxisKey, orientation, chartType],
   );
 
-  // Memoize option building
-  const option = useMemo(() => {
-    const { xData, yFields, xField, chartType: detectedChartType } = normalized;
-
+  const figure = useMemo<PlotlyFigure | null>(() => {
+    const { xData, yFields, xField } = normalized;
     if (xData.length === 0) return null;
 
-    // Determine chart mode first (needed to handle yDataMap)
-    const isHeatmap = chartType === "heatmap";
-
-    // Heatmaps use heatmapData instead of yDataMap
-    // For other charts, yDataMap is required
-    const yDataMap = "yDataMap" in normalized ? normalized.yDataMap : {};
-
-    const baseCtx: OptionBuilderContext = {
+    const baseCtx = {
       xData,
-      yDataMap,
+      yDataMap: "yDataMap" in normalized ? normalized.yDataMap : {},
       yFields,
       colors,
       title,
@@ -195,24 +176,10 @@ export function BaseChart({
       xField,
       ui,
     };
+
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";
-    const isHorizontal =
-      !isPie &&
-      !isRadar &&
-      !isHeatmap &&
-      (orientation === "horizontal" ||
-        (detectedChartType === "categorical" &&
-          !orientation &&
-          chartType === "bar"));
-    const isTimeSeries =
-      detectedChartType === "timeseries" &&
-      !isHorizontal &&
-      !isRadar &&
-      !isHeatmap;
-
-    // Build option based on chart type
-    let opt: Record<string, unknown>;
+    const isHeatmap = chartType === "heatmap";
 
     if (isHeatmap && "yAxisData" in normalized && "heatmapData" in normalized) {
       const heatmapNorm = normalized as {
@@ -221,7 +188,7 @@ export function BaseChart({
         min: number;
         max: number;
       } & typeof normalized;
-      opt = buildHeatmapOption({
+      return buildPlotlyHeatmap({
         ...baseCtx,
         yAxisData: heatmapNorm.yAxisData,
         heatmapData: heatmapNorm.heatmapData,
@@ -229,32 +196,29 @@ export function BaseChart({
         max: max ?? heatmapNorm.max,
         showLabels,
       });
-    } else if (isRadar) {
-      opt = buildRadarOption(baseCtx, showArea);
-    } else if (isPie) {
-      opt = buildPieOption(
+    }
+
+    if (isRadar) return buildPlotlyRadar(baseCtx, showArea);
+
+    if (isPie) {
+      return buildPlotlyPie(
         baseCtx,
-        chartType as "pie" | "donut",
+        chartType === "donut" || innerRadius > 0,
         innerRadius,
         showLabels,
         labelPosition,
       );
-    } else if (isHorizontal) {
-      opt = buildHorizontalBarOption(baseCtx, stacked);
-    } else {
-      opt = buildCartesianOption({
-        ...baseCtx,
-        chartType,
-        isTimeSeries,
-        stacked,
-        smooth,
-        showSymbol,
-        symbolSize,
-      });
     }
 
-    // Merge custom options
-    return customOptions ? { ...opt, ...customOptions } : opt;
+    return buildPlotlyCartesian({
+      ...baseCtx,
+      chartType,
+      orientation: orientation ?? "vertical",
+      stacked,
+      smooth,
+      showSymbol,
+      symbolSize,
+    });
   }, [
     normalized,
     colors,
@@ -273,10 +237,9 @@ export function BaseChart({
     showArea,
     min,
     max,
-    customOptions,
   ]);
 
-  if (!option) {
+  if (!figure) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
         No data
@@ -284,15 +247,16 @@ export function BaseChart({
     );
   }
 
+  const layout = mergeLayout(figure.layout, customOptions);
+
   return (
-    <ReactECharts
-      ref={chartRefCallback}
-      option={option}
-      style={{ height }}
+    <Plot
+      data={figure.traces}
+      layout={layout}
+      config={DEFAULT_CONFIG}
       className={className}
-      opts={{ renderer: "canvas" }}
-      notMerge={false}
-      lazyUpdate={true}
+      style={{ width: "100%", height }}
+      useResizeHandler
     />
   );
 }

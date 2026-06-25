@@ -10,6 +10,15 @@ export type DataFormat = "json" | "arrow" | "auto";
 /** Chart orientation */
 export type Orientation = "vertical" | "horizontal";
 
+/**
+ * Rendering engine for a chart.
+ * - "echarts": Apache ECharts (default, bundled with the SDK)
+ * - "plotly": Plotly — requires the `react-plotly.js` + `plotly.js-dist-min`
+ *   peer dependencies. Set per-chart via the `engine` prop, or app-wide via
+ *   `<ChartEngineProvider engine="plotly">`.
+ */
+export type ChartEngine = "echarts" | "plotly";
+
 /** Supported chart types */
 export type ChartType =
   | "bar"
@@ -73,7 +82,13 @@ export interface ChartBaseProps {
   /** Test ID for automated testing */
   testId?: string;
 
-  /** Additional ECharts options to merge */
+  /**
+   * Rendering engine. Defaults to the engine from `<ChartEngineProvider>` (or
+   * "echarts" if none). Set to "plotly" to render this chart with Plotly.
+   */
+  engine?: ChartEngine;
+
+  /** Additional engine-specific options to merge (ECharts option / Plotly layout) */
   options?: Record<string, unknown>;
 }
 

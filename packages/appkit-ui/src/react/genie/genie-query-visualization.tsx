@@ -1,8 +1,8 @@
 import { BarChart3Icon, ChevronDownIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { GenieStatementResponse } from "shared";
-import { BaseChart } from "../charts/base";
 import { ChartErrorBoundary } from "../charts/chart-error-boundary";
+import { BaseChart } from "../charts/echarts/base";
 import type { ChartType } from "../charts/types";
 import { cn } from "../lib/utils";
 import { Button } from "../ui/button";

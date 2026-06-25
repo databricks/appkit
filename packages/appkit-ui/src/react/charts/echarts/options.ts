@@ -1,11 +1,11 @@
-import { FALLBACK_UI_TOKENS } from "./constants";
-import type { ChartType, ChartUITokens } from "./types";
+import { FALLBACK_UI_TOKENS } from "../constants";
+import type { ChartType, ChartUITokens } from "../types";
 import {
   createTimeSeriesData,
   escapeHtml,
   formatLabel,
   truncateLabel,
-} from "./utils";
+} from "../utils";
 
 // ============================================================================
 // Option Builder Types
@@ -381,10 +381,22 @@ export function buildCartesianOption(
       smooth: chartType === "line" || chartType === "area" ? smooth : undefined,
       showSymbol:
         chartType === "line" || chartType === "area" ? showSymbol : undefined,
-      symbol: isScatter ? "circle" : undefined,
-      symbolSize: isScatter ? symbolSize : undefined,
+      // Line/area markers default to tiny size-4 hollow circles, which makes an
+      // enabled `showSymbol` barely visible. Use a filled circle at the shared
+      // symbol size so opted-in markers actually read.
+      symbol:
+        isScatter || chartType === "line" || chartType === "area"
+          ? "circle"
+          : undefined,
+      symbolSize:
+        isScatter || chartType === "line" || chartType === "area"
+          ? symbolSize
+          : undefined,
       areaStyle: chartType === "area" ? { opacity: 0.3 } : undefined,
-      stack: stacked && chartType === "area" ? "total" : undefined,
+      stack:
+        stacked && (chartType === "area" || chartType === "bar")
+          ? "total"
+          : undefined,
       itemStyle:
         chartType === "bar" ? { borderRadius: [4, 4, 0, 0] } : undefined,
       color: ctx.colors[idx % ctx.colors.length],

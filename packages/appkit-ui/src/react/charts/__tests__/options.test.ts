@@ -8,7 +8,7 @@ import {
   buildRadarOption,
   type HeatmapContext,
   type OptionBuilderContext,
-} from "../options";
+} from "../echarts/options";
 
 interface EChartsOption {
   title?: { text?: string };
@@ -140,8 +140,7 @@ describe("buildCartesianOption", () => {
       expect(opt.title?.text).toBe("My Chart");
     });
 
-    test("does not apply stacking to bar charts", () => {
-      // Stacking only works for area charts, not bar charts
+    test("stacks bar charts when stacked=true", () => {
       const ctx = createBaseContext({
         yFields: ["a", "b"],
         yDataMap: { a: [1, 2], b: [3, 4] },
@@ -152,6 +151,27 @@ describe("buildCartesianOption", () => {
           chartType: "bar",
           isTimeSeries: false,
           stacked: true,
+          smooth: false,
+          showSymbol: false,
+          symbolSize: 8,
+        }),
+      );
+
+      expect(opt.series[0].stack).toBe("total");
+      expect(opt.series[1].stack).toBe("total");
+    });
+
+    test("does not stack bar charts when stacked=false", () => {
+      const ctx = createBaseContext({
+        yFields: ["a", "b"],
+        yDataMap: { a: [1, 2], b: [3, 4] },
+      });
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "bar",
+          isTimeSeries: false,
+          stacked: false,
           smooth: false,
           showSymbol: false,
           symbolSize: 8,

@@ -17,6 +17,7 @@ import { Route as SmartDashboardRouteRouteImport } from './routes/smart-dashboar
 import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
+import { Route as PlotlyRouteRouteImport } from './routes/plotly.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
@@ -66,6 +67,11 @@ const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
 const PolicyMatrixRouteRoute = PolicyMatrixRouteRouteImport.update({
   id: '/policy-matrix',
   path: '/policy-matrix',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlotlyRouteRoute = PlotlyRouteRouteImport.update({
+  id: '/plotly',
+  path: '/plotly',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/plotly': typeof PlotlyRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/plotly': typeof PlotlyRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -171,6 +179,7 @@ export interface FileRoutesById {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/plotly': typeof PlotlyRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -193,6 +202,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/plotly'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/plotly'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/plotly'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -254,6 +266,7 @@ export interface RootRouteChildren {
   GenieRouteRoute: typeof GenieRouteRoute
   JobsRouteRoute: typeof JobsRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
+  PlotlyRouteRoute: typeof PlotlyRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   ServingRouteRoute: typeof ServingRouteRoute
@@ -320,6 +333,13 @@ declare module '@tanstack/react-router' {
       path: '/policy-matrix'
       fullPath: '/policy-matrix'
       preLoaderRoute: typeof PolicyMatrixRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plotly': {
+      id: '/plotly'
+      path: '/plotly'
+      fullPath: '/plotly'
+      preLoaderRoute: typeof PlotlyRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/lakebase': {
@@ -406,6 +426,7 @@ const rootRouteChildren: RootRouteChildren = {
   GenieRouteRoute: GenieRouteRoute,
   JobsRouteRoute: JobsRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
+  PlotlyRouteRoute: PlotlyRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   ServingRouteRoute: ServingRouteRoute,

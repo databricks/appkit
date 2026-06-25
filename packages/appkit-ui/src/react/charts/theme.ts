@@ -200,6 +200,16 @@ export function useThemeColors(
       : getThemeColors(palette),
   );
 
+  // Re-resolve synchronously when the `palette` argument changes (not just on
+  // theme changes). Without this, switching palette at runtime would keep
+  // returning the palette captured on first render. Guarded by a ref so it runs
+  // only on actual change — the canonical "adjust state on prop change" pattern.
+  const paletteRef = useRef(palette);
+  if (paletteRef.current !== palette) {
+    paletteRef.current = palette;
+    setColors(getThemeColors(palette));
+  }
+
   // Re-resolve colors when the theme changes.
   const updateColors = useCallback(() => {
     setColors(getThemeColors(palette));

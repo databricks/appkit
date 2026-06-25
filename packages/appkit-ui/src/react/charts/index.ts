@@ -14,6 +14,39 @@ export { RadarChart } from "./radar";
 export { ScatterChart } from "./scatter";
 
 // ============================================================================
+// Chart Engine (ECharts ⇄ Plotly)
+// ============================================================================
+// Every chart above renders with Apache ECharts by default. Opt into Plotly
+// per-chart with `engine="plotly"`, or app-wide with `<ChartEngineProvider>`.
+// Plotly requires the `react-plotly.js` + `plotly.js-dist-min` peer deps.
+
+export { ChartEngineProvider, useChartEngine } from "./engine";
+
+// ============================================================================
+// Plotly (experimental)
+// ============================================================================
+// `PlotlyChart` is a generic escape hatch exposing Plotly's full trace API for
+// chart types the unified charts don't model (3D, sankey, sunburst, …).
+// `PlotlyBaseChart` is the engine renderer and `buildPlotly*` its builders.
+
+export {
+  buildPlotlyCartesian,
+  buildPlotlyHeatmap,
+  buildPlotlyPie,
+  buildPlotlyRadar,
+  PlotlyBaseChart,
+  type PlotlyBaseChartProps,
+  type PlotlyCartesianContext,
+  PlotlyChart,
+  type PlotlyChartProps,
+  type PlotlyContext,
+  type PlotlyFigure,
+  type PlotlyHeatmapContext,
+  type PlotlyRow,
+  toRowObjects,
+} from "./plotly";
+
+// ============================================================================
 // Base Components & Utilities
 // ============================================================================
 
@@ -22,8 +55,8 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "../hooks/use-chart-data";
-export { BaseChart, type BaseChartProps } from "./base";
 export { createChart } from "./create-chart";
+export { BaseChart, type BaseChartProps } from "./echarts/base";
 export { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 export { ChartWrapper, type ChartWrapperProps } from "./wrapper";
 
@@ -93,7 +126,7 @@ export {
   type CartesianContext,
   type HeatmapContext,
   type OptionBuilderContext,
-} from "./options";
+} from "./echarts/options";
 
 // ============================================================================
 // Types
@@ -110,6 +143,7 @@ export type {
   ChartBaseProps,
   ChartColorPalette,
   ChartData,
+  ChartEngine,
   ChartType,
   ChartUITokens,
   // Data formats

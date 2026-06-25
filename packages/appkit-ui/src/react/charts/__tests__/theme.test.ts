@@ -187,8 +187,8 @@ describe("useThemeColors", () => {
     });
 
     test("updates colors when palette prop changes", () => {
-      // The hook re-reads CSS variables and updates state when palette changes
-      // Since useState initializer runs on first render only, the effect handles updates
+      // Switching the palette argument at runtime must re-resolve immediately,
+      // without waiting for a theme-change event.
 
       vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
         return {
@@ -210,16 +210,10 @@ describe("useThemeColors", () => {
 
       expect(result.current).toEqual(["#cat1", "#cat2"]);
 
-      // Note: The current implementation only updates colors via effect listeners,
-      // not directly on palette change. The initial state is set from getThemeColors
-      // but subsequent palette changes just re-subscribe to listeners.
-      // This test documents that palette changes require a theme event to trigger update.
       rerender({ palette: "sequential" as ChartColorPalette });
 
-      // The colors won't change immediately since no theme event was fired.
-      // The hook re-subscribes listeners but doesn't immediately fetch new colors.
-      // This is a potential improvement area in the implementation.
-      expect(result.current).toEqual(["#cat1", "#cat2"]);
+      // Colors reflect the new palette right away.
+      expect(result.current).toEqual(["#seq1", "#seq2"]);
     });
   });
 

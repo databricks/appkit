@@ -77,6 +77,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
           "Type-safe parameter builders and query generators for Databricks SQL.",
         icon: FileCode2Icon,
       },
+      {
+        to: "/plotly",
+        label: "Plotly Charts",
+        description:
+          "Plotly-backed charts: drop-in parity with the ECharts charts plus 3D and Sankey.",
+        icon: LineChartIcon,
+      },
     ],
   },
   {
