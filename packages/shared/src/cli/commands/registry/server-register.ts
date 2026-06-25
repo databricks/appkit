@@ -86,14 +86,25 @@ export function registerPluginInServer(
 
   const edits = [];
 
-  // Insert the plugin right after the array's opening bracket.
-  const arrText = arr.text();
-  const inner = arrText.slice(1, -1).trim();
-  const newArr =
-    inner.length === 0
-      ? `[${exportName}]`
-      : `[${exportName}, ${arrText.slice(1)}`;
-  edits.push(arr.replace(newArr));
+  // toPlugin exports are factories, registered as a call: `hello()`.
+  const newElem = `${exportName}()`;
+
+  // Insert before the first element, matching its indentation so the array
+  // formatting is preserved (or inline for a single-line array).
+  const elementKinds = ["identifier", "call_expression", "spread_element"];
+  const firstEl = arr
+    .children()
+    .find((c) => elementKinds.includes(c.kind() as string));
+  if (!firstEl) {
+    edits.push(arr.replace(`[${newElem}]`));
+  } else {
+    const startIdx = firstEl.range().start.index;
+    const lineStart = content.lastIndexOf("\n", startIdx - 1);
+    const indent = content.slice(lineStart + 1, startIdx);
+    const multiline = lineStart !== -1 && /^[ \t]*$/.test(indent);
+    const sep = multiline ? `,\n${indent}` : ", ";
+    edits.push(firstEl.replace(`${newElem}${sep}${firstEl.text()}`));
+  }
 
   // Add the import unless one from the same path already exists.
   const importStmts = root.findAll({ rule: { kind: "import_statement" } });
