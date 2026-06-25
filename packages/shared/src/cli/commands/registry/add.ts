@@ -10,6 +10,7 @@ import {
   stripNamespace,
 } from "./client";
 import { REGISTRY_REPO, resolveToken } from "./constants";
+import { registerPluginInServer } from "./server-register";
 
 /** Subdirectories that commonly hold the frontend / server in an AppKit app. */
 const FRONTEND_SUBDIRS = ["client", "frontend", "web", "app"];
@@ -175,7 +176,7 @@ interface PluginSummary {
 
 async function runAdd(
   refs: string[],
-  opts: { force?: boolean; cwd?: string },
+  opts: { force?: boolean; cwd?: string; register?: boolean },
 ): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   const token = resolveToken();
@@ -263,17 +264,32 @@ async function runAdd(
       '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so components are themed.',
     );
   }
-  if (pluginSummaries.length > 0) {
-    console.log("\nNext steps — register in your server's createApp call:");
-    for (const s of pluginSummaries) {
+  for (const s of pluginSummaries) {
+    // Try to wire the plugin into the server's createApp call automatically;
+    // fall back to printing the snippet when the shape isn't the standard one.
+    let wired = false;
+    if (opts.register !== false && s.exportName) {
+      const result = registerPluginInServer(cwd, s.importPath, s.exportName);
+      if (result.status === "wired") {
+        console.log(`\nRegistered ${s.exportName} in ${result.file}`);
+        wired = true;
+      } else if (result.status === "already") {
+        console.log(
+          `\n${s.exportName} is already registered in ${result.file}`,
+        );
+        wired = true;
+      }
+    }
+    if (!wired) {
       const imp = s.exportName ?? "<plugin>";
       console.log(
-        `\n  import { ${imp} } from "${s.importPath}";\n` +
+        "\nAdd this to your server's createApp call:\n" +
+          `  import { ${imp} } from "${s.importPath}";\n` +
           `  const app = await createApp({ plugins: [${imp}, /* ... */] });`,
       );
-      if (s.envs.length > 0) {
-        console.log(`  Required env var(s): ${s.envs.join(", ")}`);
-      }
+    }
+    if (s.envs.length > 0) {
+      console.log(`  Required env var(s): ${s.envs.join(", ")}`);
     }
   }
 }
@@ -283,12 +299,14 @@ export const addCommand = new Command("add")
   .argument("<item...>", "Registry item name(s), e.g. metric-card or hello")
   .option("-f, --force", "Overwrite existing files")
   .option("-C, --cwd <dir>", "Run as if started in <dir>")
+  .option("--no-register", "Don't edit the server entry to register plugins")
   .addHelpText(
     "after",
     `
 No components.json is required. Item type is detected automatically:
   • UI components → <frontend>/src/components/appkit/  (client/ detected)
-  • Server plugins → <server>/plugins/<name>/ + plugin sync + register snippet
+  • Server plugins → <server>/plugins/<name>/, runs plugin sync, and registers
+    them in your createApp call (use --no-register to skip the server edit)
 
 The frontend/server roots are detected from common layouts, so you can run
 this from the repo root. While the registry repo is private, a read token is
@@ -299,9 +317,13 @@ Examples:
   $ appkit add hello                 # server plugin
   $ appkit add metric-card hello     # mix in one call`,
   )
-  .action((items: string[], opts: { force?: boolean; cwd?: string }) =>
-    runAdd(items, opts).catch((err) => {
-      console.error(err);
-      process.exit(1);
-    }),
+  .action(
+    (
+      items: string[],
+      opts: { force?: boolean; cwd?: string; register?: boolean },
+    ) =>
+      runAdd(items, opts).catch((err) => {
+        console.error(err);
+        process.exit(1);
+      }),
   );

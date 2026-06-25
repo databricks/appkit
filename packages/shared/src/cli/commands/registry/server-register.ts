@@ -1,0 +1,117 @@
+import fs from "node:fs";
+import path from "node:path";
+import { Lang, parse, type SgNode } from "@ast-grep/napi";
+
+/** Server entry candidates, relative to the repo/server root, in priority order. */
+const SERVER_FILE_CANDIDATES = [
+  "server/server.ts",
+  "server/index.ts",
+  "server.ts",
+  "index.ts",
+  "src/server.ts",
+  "src/index.ts",
+];
+
+export interface RegisterResult {
+  /** wired = edited; already = plugin was present; skipped = couldn't safely edit. */
+  status: "wired" | "already" | "skipped";
+  file?: string;
+  reason?: string;
+}
+
+function findServerFile(repoRoot: string): string | null {
+  for (const candidate of SERVER_FILE_CANDIDATES) {
+    const p = path.join(repoRoot, candidate);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** The `plugins: [...]` array node inside a createApp call, if present. */
+function findPluginsArray(root: SgNode): SgNode | null {
+  for (const pair of root.findAll({ rule: { kind: "pair" } })) {
+    const key = pair.find({ rule: { kind: "property_identifier" } });
+    if (key?.text() !== "plugins") continue;
+    const arr = pair.find({ rule: { kind: "array" } });
+    if (arr) return arr;
+  }
+  return null;
+}
+
+function arrayElementNames(arr: SgNode): Set<string> {
+  const names = new Set<string>();
+  for (const child of arr.children()) {
+    if (child.kind() === "identifier") {
+      names.add(child.text());
+    } else if (child.kind() === "call_expression") {
+      const callee = child.children()[0];
+      if (callee?.kind() === "identifier") names.add(callee.text());
+    }
+  }
+  return names;
+}
+
+/**
+ * Best-effort: register a plugin in the server entry's `createApp({ plugins })`
+ * call by inserting the import and adding it to the array. Only edits the
+ * standard shape (a `plugins: [...]` array literal); returns `skipped` otherwise
+ * so the caller can fall back to printing manual instructions. Idempotent.
+ */
+export function registerPluginInServer(
+  repoRoot: string,
+  importPath: string,
+  exportName: string,
+): RegisterResult {
+  const serverFile = findServerFile(repoRoot);
+  if (!serverFile) {
+    return { status: "skipped", reason: "no server entry file found" };
+  }
+
+  const content = fs.readFileSync(serverFile, "utf-8");
+  const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
+  const root = parse(lang, content).root();
+
+  const arr = findPluginsArray(root);
+  if (!arr) {
+    return {
+      status: "skipped",
+      reason: "no createApp({ plugins: [...] }) array found",
+    };
+  }
+
+  const file = path.relative(repoRoot, serverFile);
+  if (arrayElementNames(arr).has(exportName)) {
+    return { status: "already", file };
+  }
+
+  const edits = [];
+
+  // Insert the plugin right after the array's opening bracket.
+  const arrText = arr.text();
+  const inner = arrText.slice(1, -1).trim();
+  const newArr =
+    inner.length === 0
+      ? `[${exportName}]`
+      : `[${exportName}, ${arrText.slice(1)}`;
+  edits.push(arr.replace(newArr));
+
+  // Add the import unless one from the same path already exists.
+  const importStmts = root.findAll({ rule: { kind: "import_statement" } });
+  const hasImport = importStmts.some((s) => {
+    const src = s.find({ rule: { kind: "string" } });
+    return src?.text().replace(/^['"]|['"]$/g, "") === importPath;
+  });
+  const importLine = `import { ${exportName} } from "${importPath}";`;
+  if (!hasImport && importStmts.length > 0) {
+    const last = importStmts[importStmts.length - 1];
+    edits.push(last.replace(`${last.text()}\n${importLine}`));
+  }
+
+  let output = root.commitEdits(edits);
+  if (!hasImport && importStmts.length === 0) {
+    output = `${importLine}\n${output}`;
+  }
+  fs.writeFileSync(serverFile, output);
+
+  return { status: "wired", file };
+}
