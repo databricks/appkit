@@ -11,47 +11,21 @@ import {
 /**
  * Options parsed by commander for `appkit mv sync`.
  *
- * Phase 3 locks the flag surface to exactly four options and adds the
  * interactive clack flow:
  *   - `--warehouse-id` (+ `DATABRICKS_WAREHOUSE_ID` fallback)
  *   - `--metric-views-json-path` (canonical config path)
  *   - `--output-dir` (artifact output directory; replaces Phase 1's `--out-dir`)
- *   - `--no-cache` (commander negation → `cache === false` disables the
- *     metric type-generation cache)
- *
- * Phase 1's interim `--root-dir` is dropped: relative `--metric-views-json-path`
- * / `--output-dir` resolve against `process.cwd()`, mirroring how
- * `generate-types` anchors its defaults at the current directory.
+ *   - `--no-cache` (commander negation → `cache === false` disables the metric type-generation cache)
  */
 export interface MetricViewsSyncOptions {
   warehouseId?: string;
-  /**
-   * Path to metric-views.json. Default:
-   * `<cwd>/config/queries/metric-views.json`. Canonical flag name in the
-   * locked spec.
-   */
   metricViewsJsonPath?: string;
-  /** Output directory for metric-views.d.ts + metric-views.metadata.json (default: <cwd>/shared/appkit-types). */
   outputDir?: string;
-  /**
-   * Caching toggle. Commander's `--no-cache` sets this to `false` (and leaves it
-   * `true`/absent otherwise); `cache === false` is the single signal that
-   * disables the metric type-generation cache when forwarded to
-   * `syncMetricViewsTypes`.
-   */
   cache?: boolean;
 }
 
-/** Default filename for the metric source config (post-#433 name). */
 const METRIC_VIEWS_CONFIG_FILE = "metric-views.json";
 
-/**
- * Non-zero exit code for `appkit mv sync` failure modes. Every error mode
- * exits with this same code and a distinct, recognizable message (the failure
- * mode is identified by that message, not by a bespoke per-mode code — keeping
- * the single Phase-1 exit mechanism). The dormant (no-config) and success cases
- * take an early `return`, exiting 0 naturally.
- */
 const EXIT_FAILURE = 1;
 
 /** Resolved, absolute paths the sync run operates on. */
@@ -77,7 +51,6 @@ function resolvePaths(options: {
 }): ResolvedPaths {
   const cwd = process.cwd();
 
-  // metric-views.json: --metric-views-json-path > <cwd>/config/queries/metric-views.json.
   const explicitConfigPath = options.metricViewsJsonPath !== undefined;
   const configPath = options.metricViewsJsonPath
     ? path.isAbsolute(options.metricViewsJsonPath)
@@ -85,8 +58,6 @@ function resolvePaths(options: {
       : path.resolve(cwd, options.metricViewsJsonPath)
     : path.join(cwd, "config", "queries", METRIC_VIEWS_CONFIG_FILE);
 
-  // Output paths under shared/appkit-types — matches how generate-types
-  // resolves its output directory.
   const outDir = options.outputDir
     ? path.isAbsolute(options.outputDir)
       ? options.outputDir
@@ -105,7 +76,8 @@ function resolvePaths(options: {
  * The shared sync core for BOTH the interactive and non-interactive paths:
  * resolve paths → existence check (dormancy vs missing) → read + `JSON.parse`
  * → schema-validate → require warehouse → ONLY THEN dynamic-import appkit +
- * `syncMetricViewsTypes`. Reaches the appkit metric-sync core through a dynamic
+ * `syncMetricViewsTypes`.
+ *  Reaches the appkit metric-sync core through a dynamic
  * `import("@databricks/appkit/type-generator")` — the exact pattern
  * `generate-types.ts` uses — so the `shared` CLI package carries NO static
  * dependency on `@databricks/appkit` and compiles without it.
@@ -141,13 +113,8 @@ async function runMetricViewsSync(
       return;
     }
 
-    // Existence is checked before anything else (including the warehouse-id
-    // requirement) so the dormancy invariant holds unconditionally:
-    //  - DEFAULT path absent → additive path is dormant, exit 0. An opt-in
-    //    project that never adopted metric views must NOT error, even without a
-    //    warehouse configured.
-    //  - EXPLICIT --metric-views-json-path absent → the user named a file that
-    //    isn't there; that's a real error, exit non-zero.
+    // Check existence before requiring a warehouse. Missing default config means
+    // metric views are unused; a missing explicit path is an error.
     if (!fs.existsSync(configPath)) {
       if (explicitConfigPath) {
         console.error(`Error: metric-views.json not found at ${configPath}.`);
@@ -160,8 +127,6 @@ async function runMetricViewsSync(
       return;
     }
 
-    // Read + parse the config before touching appkit. A malformed file is a
-    // user error with a precise location, not an appkit/warehouse failure.
     const rawConfig = fs.readFileSync(configPath, "utf-8");
     let parsedConfig: unknown;
     try {
@@ -173,10 +138,7 @@ async function runMetricViewsSync(
       return;
     }
 
-    // Schema-validate against the canonical metricSourceSchema (single source
-    // of truth) BEFORE the dynamic import. Bad FQN grammar, an unknown
-    // executor, an unrecognized key, or a bad metric key fail here with the
-    // `path: message` list — never as an opaque downstream error.
+    // Schema-validate against the canonical metricSourceSchema BEFORE the dynamic import.
     const validation = validateMetricViewsSource(parsedConfig);
     if (!validation.valid) {
       console.error(`Error: invalid ${configPath}:`);
@@ -185,9 +147,7 @@ async function runMetricViewsSync(
       return;
     }
 
-    // The warehouse is only needed once we have a valid config to sync; require
-    // it here (after dormancy + validation) so a dormant/invalid project never
-    // trips on a missing warehouse.
+    // The warehouse is only needed once we have a valid config to sync; require it here (after dormancy + validation) so a dormant/invalid project never trips on a missing warehouse.
     const warehouseId =
       options.warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
     if (!warehouseId) {
@@ -214,8 +174,6 @@ async function runMetricViewsSync(
         metricOutFile,
         metricMetadataOutFile,
         warehouseId,
-        // `--no-cache` → cache === false disables the metric typegen cache;
-        // absent/true keeps the default (cache on). Forwarded verbatim.
         cache: options.cache,
       });
     } catch (err) {
@@ -319,23 +277,19 @@ async function runInteractive(): Promise<void> {
     message: "SQL Warehouse ID",
     placeholder: process.env.DATABRICKS_WAREHOUSE_ID
       ? `${process.env.DATABRICKS_WAREHOUSE_ID} (from DATABRICKS_WAREHOUSE_ID)`
-      : "1234abcd5678efgh",
-    // Optional: a blank value defers to DATABRICKS_WAREHOUSE_ID (validated
-    // downstream by runMetricViewsSync, which errors if neither is set).
+      : "your-warehouse-id",
   });
   if (isCancel(warehouseId)) return cancelled();
 
   const metricViewsJsonPath = await text({
     message: "Path to metric-views.json",
     placeholder: "config/queries/metric-views.json",
-    // Optional: blank uses the canonical default path.
   });
   if (isCancel(metricViewsJsonPath)) return cancelled();
 
   const outputDir = await text({
     message: "Output directory for generated types",
     placeholder: "shared/appkit-types",
-    // Optional: blank uses the canonical default output dir.
   });
   if (isCancel(outputDir)) return cancelled();
 
@@ -349,8 +303,6 @@ async function runInteractive(): Promise<void> {
     warehouseId: trimmed(warehouseId),
     metricViewsJsonPath: trimmed(metricViewsJsonPath),
     outputDir: trimmed(outputDir),
-    // Interactive runs use the default cache behavior (cache on); --no-cache is
-    // a non-interactive flag.
     cache: true,
   };
 
