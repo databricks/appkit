@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { pluginAddCommand } from "./add/add";
 import { pluginAddResourceCommand } from "./add-resource/add-resource";
 import { pluginCreateCommand } from "./create/create";
 import { pluginListCommand } from "./list/list";
@@ -20,6 +21,7 @@ export const pluginCommand = new Command("plugin")
   .description("Plugin management commands")
   .addCommand(pluginsSyncCommand)
   .addCommand(pluginCreateCommand)
+  .addCommand(pluginAddCommand)
   .addCommand(pluginValidateCommand)
   .addCommand(pluginListCommand)
   .addCommand(pluginAddResourceCommand)
@@ -30,6 +32,7 @@ export const pluginCommand = new Command("plugin")
 Examples:
   $ appkit plugin sync --write
   $ appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"
+  $ appkit plugin add hello
   $ appkit plugin validate .
   $ appkit plugin list --json
   $ appkit plugin add-resource --path plugins/my-plugin --type sql_warehouse
