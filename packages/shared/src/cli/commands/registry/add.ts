@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
@@ -13,6 +12,21 @@ import {
   resolveToken,
 } from "./constants";
 
+interface RegistryItemFile {
+  path: string;
+  content: string;
+  type: string;
+  /** Destination path relative to the project root. */
+  target?: string;
+}
+
+interface RegistryItem {
+  name: string;
+  dependencies?: string[];
+  registryDependencies?: string[];
+  files?: RegistryItemFile[];
+}
+
 function stripNamespace(component: string): string {
   const prefix = `${REGISTRY_NAMESPACE}/`;
   return component.startsWith(prefix)
@@ -21,16 +35,14 @@ function stripNamespace(component: string): string {
 }
 
 /**
- * Fetches a single registry item and writes it to a temp file, returning the
- * path. When a token is present the GitHub Contents API is used (works for the
- * private/internal repo); otherwise the public raw URL is used. We fetch it
- * ourselves — rather than relying on a shadcn registry namespace — so we fully
- * control the auth headers, then hand the local file to `shadcn add`.
+ * Fetches and parses a single registry item. When a token is present the GitHub
+ * Contents API is used (works for the private/internal repo); otherwise the
+ * public raw URL is used.
  */
 async function fetchItem(
   name: string,
   token: RegistryToken | null,
-): Promise<string> {
+): Promise<RegistryItem> {
   const template = token
     ? REGISTRY_ITEM_API_TEMPLATE
     : REGISTRY_ITEM_URL_TEMPLATE;
@@ -71,26 +83,59 @@ async function fetchItem(
     process.exit(1);
   }
 
-  const body = await res.text();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-registry-"));
-  const file = path.join(dir, `${name}.json`);
-  fs.writeFileSync(file, body);
-  return file;
+  return (await res.json()) as RegistryItem;
+}
+
+/**
+ * Resolves where a registry file should be written. Uses the item's `target`,
+ * placing it under `src/` when the project has one (matching common app
+ * layouts). AppKit registry components import primitives from
+ * `@databricks/appkit-ui` rather than shadcn `@/` aliases, so no components.json
+ * or alias resolution is needed.
+ */
+function resolveTarget(cwd: string, file: RegistryItemFile): string {
+  let target =
+    file.target ?? path.join("components/appkit", path.basename(file.path));
+  if (!target.startsWith("src/") && fs.existsSync(path.join(cwd, "src"))) {
+    target = path.join("src", target);
+  }
+  return path.join(cwd, target);
+}
+
+function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
+  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
+  if (fs.existsSync(path.join(cwd, "bun.lockb"))) return "bun";
+  return "npm";
+}
+
+function installDependencies(deps: string[], cwd: string): void {
+  if (deps.length === 0) return;
+  if (!fs.existsSync(path.join(cwd, "package.json"))) {
+    console.warn(
+      `No package.json found — install these manually: ${deps.join(" ")}`,
+    );
+    return;
+  }
+  const pm = detectPackageManager(cwd);
+  const subcommand = pm === "npm" ? "install" : "add";
+  console.log(`\nInstalling dependencies with ${pm}: ${deps.join(" ")}`);
+  const result = spawnSync(pm, [subcommand, ...deps], {
+    stdio: "inherit",
+    cwd,
+  });
+  if (result.status !== 0) {
+    console.warn(
+      `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${deps.join(" ")}`,
+    );
+  }
 }
 
 async function runAdd(
   components: string[],
-  opts: { yes?: boolean },
+  opts: { force?: boolean },
 ): Promise<void> {
   const cwd = process.cwd();
-  if (!fs.existsSync(path.join(cwd, "components.json"))) {
-    console.error(`No components.json found in ${cwd}.`);
-    console.error(
-      "  Run `npx shadcn@latest init` first, or run this from your app root.",
-    );
-    process.exit(1);
-  }
-
   const token = resolveToken();
   if (token) {
     console.log(
@@ -99,35 +144,63 @@ async function runAdd(
   }
 
   const names = components.map(stripNamespace);
-  const tmpFiles: string[] = [];
+  const items: RegistryItem[] = [];
   for (const name of names) {
-    tmpFiles.push(await fetchItem(name, token));
+    items.push(await fetchItem(name, token));
   }
 
-  const args = ["shadcn@latest", "add", ...tmpFiles];
-  if (opts.yes) args.push("--yes");
-  const result = spawnSync("npx", args, { stdio: "inherit", cwd });
+  const deps = new Set<string>();
+  const written: string[] = [];
 
-  for (const file of tmpFiles) {
-    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  for (const item of items) {
+    for (const dep of item.dependencies ?? []) deps.add(dep);
+
+    // AppKit (Option A) items have no registry dependencies; warn rather than
+    // silently dropping any a future item might declare.
+    for (const rd of item.registryDependencies ?? []) {
+      console.warn(
+        `  Note: "${item.name}" declares registryDependency "${rd}" — add it separately if it isn't already present.`,
+      );
+    }
+
+    for (const file of item.files ?? []) {
+      const dest = resolveTarget(cwd, file);
+      const existed = fs.existsSync(dest);
+      if (existed && !opts.force) {
+        console.error(
+          `Refusing to overwrite ${path.relative(cwd, dest)} — pass --force to replace it.`,
+        );
+        process.exit(1);
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, file.content);
+      written.push(path.relative(cwd, dest));
+      console.log(
+        `${existed ? "Updated" : "Created"} ${path.relative(cwd, dest)}`,
+      );
+    }
   }
 
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
-  }
+  installDependencies([...deps], cwd);
 
-  console.log(
-    '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so the component is themed.',
-  );
+  if (written.length > 0) {
+    console.log(
+      '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so the component is themed.',
+    );
+  }
 }
 
 export const addCommand = new Command("add")
   .description("Add an AppKit registry component to your project")
   .argument("<component...>", "Component name(s), e.g. metric-card")
-  .option("-y, --yes", "Skip confirmation prompts")
+  .option("-f, --force", "Overwrite existing files")
   .addHelpText(
     "after",
     `
+No components.json is required. Files are written to each item's target path
+(under src/ when present) and npm dependencies are installed with your project's
+package manager.
+
 While the registry repo is private, a token with read access is used. It is
 resolved automatically from \`gh auth token\` (if you're logged in with the
 GitHub CLI), or from APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOKEN.
@@ -137,7 +210,7 @@ Examples:
   $ appkit add metric-card data-table
   $ appkit add @appkit/metric-card`,
   )
-  .action((components: string[], opts: { yes?: boolean }) =>
+  .action((components: string[], opts: { force?: boolean }) =>
     runAdd(components, opts).catch((err) => {
       console.error(err);
       process.exit(1);
