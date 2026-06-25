@@ -11,15 +11,36 @@ import {
 } from "./client";
 import { REGISTRY_REPO, resolveToken } from "./constants";
 
-/** Subdirectories that commonly hold the frontend in an AppKit app layout. */
+/** Subdirectories that commonly hold the frontend / server in an AppKit app. */
 const FRONTEND_SUBDIRS = ["client", "frontend", "web", "app"];
+const SERVER_SUBDIRS = ["server", "api", "backend"];
+
+interface ManifestField {
+  env?: string;
+}
+interface ManifestResource {
+  fields?: Record<string, ManifestField>;
+}
+interface PluginManifestShape {
+  name?: string;
+  resources?: { required?: ManifestResource[] };
+}
+
+function isDir(p: string): boolean {
+  return fs.existsSync(p) && fs.statSync(p).isDirectory();
+}
+
+/** A registry item is a server plugin if it ships a manifest.json. */
+function isPluginItem(item: RegistryItem): boolean {
+  return (item.files ?? []).some(
+    (f) => path.basename(f.target ?? f.path) === "manifest.json",
+  );
+}
 
 /**
- * Locates the frontend root to write components into. AppKit apps put the
- * client in a `client/` subdir (with its own components.json + src/), and the
- * CLI is typically run from the repo root. We prefer the dir containing
- * components.json, then a dir with a src/, checking the cwd and common
- * subdirs before falling back to cwd.
+ * Locates the frontend root for UI components. AppKit apps put the client in a
+ * client/ subdir (with its own components.json + src/); the CLI is typically
+ * run from the repo root. Prefer the dir with components.json, then a src/.
  */
 function findFrontendRoot(cwd: string): string {
   if (fs.existsSync(path.join(cwd, "components.json"))) return cwd;
@@ -28,42 +49,61 @@ function findFrontendRoot(cwd: string): string {
       return path.join(cwd, sub);
     }
   }
-  if (fs.existsSync(path.join(cwd, "src"))) return cwd;
+  if (isDir(path.join(cwd, "src"))) return cwd;
   for (const sub of FRONTEND_SUBDIRS) {
-    if (fs.existsSync(path.join(cwd, sub, "src"))) {
-      return path.join(cwd, sub);
-    }
+    if (isDir(path.join(cwd, sub, "src"))) return path.join(cwd, sub);
   }
   return cwd;
 }
 
-/**
- * Finds the dir to install npm deps into: the nearest package.json walking up
- * from the frontend root to the cwd (a monorepo-style app has a single root
- * package.json while the client lives in client/).
- */
-function findInstallDir(base: string, cwd: string): string {
-  let dir = base;
+/** Locates the server root for plugins (the server/ subdir, else cwd). */
+function findServerRoot(cwd: string): string {
+  for (const sub of SERVER_SUBDIRS) {
+    if (isDir(path.join(cwd, sub))) return path.join(cwd, sub);
+  }
+  return cwd;
+}
+
+/** Nearest dir with a package.json, walking up from start (for dep install). */
+function findNearestPackageJson(start: string): string {
+  let dir = start;
   for (;;) {
     if (fs.existsSync(path.join(dir, "package.json"))) return dir;
-    if (dir === cwd) break;
     const parent = path.dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir) return start;
     dir = parent;
   }
-  return cwd;
 }
 
-/**
- * Resolves where a registry file is written, relative to the frontend root.
- * Uses the item's `target`, placing it under `src/` when that root has one.
- */
-function resolveTarget(base: string, file: RegistryItemFile): string {
+/** UI file destination: target under the frontend root, placed in src/ if present. */
+function resolveUiTarget(base: string, file: RegistryItemFile): string {
   let target = file.target ?? path.join("components", path.basename(file.path));
-  if (!target.startsWith("src/") && fs.existsSync(path.join(base, "src"))) {
+  if (!target.startsWith("src/") && isDir(path.join(base, "src"))) {
     target = path.join("src", target);
   }
   return path.join(base, target);
+}
+
+function requiredEnvVars(manifest: PluginManifestShape): string[] {
+  const envs: string[] = [];
+  for (const res of manifest.resources?.required ?? []) {
+    for (const field of Object.values(res.fields ?? {})) {
+      if (field.env) envs.push(field.env);
+    }
+  }
+  return envs;
+}
+
+/** Best-effort: the `toPlugin` export name from the item's index.ts. */
+function pluginExportName(item: RegistryItem): string | null {
+  const index = (item.files ?? []).find(
+    (f) => path.basename(f.target ?? f.path) === "index.ts",
+  );
+  const match = index?.content.match(/export\s*\{([^}]*)\}/);
+  if (!match) return null;
+  const names = match[1].split(",").map((s) => s.trim());
+  // Prefer the camelCase toPlugin instance over the PascalCase class.
+  return names.find((n) => /^[a-z]/.test(n)) ?? names[0] ?? null;
 }
 
 function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
@@ -95,16 +135,49 @@ function installDependencies(deps: string[], cwd: string): void {
   }
 }
 
+/** Runs `appkit plugin sync --write` via this same CLI binary. */
+function runPluginSync(cwd: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [process.argv[1], "plugin", "sync", "--write"],
+    { stdio: "inherit", cwd },
+  );
+  if (result.status !== 0) {
+    console.warn(
+      "  Plugin sync did not complete cleanly — run `appkit plugin sync --write` manually.",
+    );
+  }
+}
+
+function writeItemFile(
+  dest: string,
+  content: string,
+  force: boolean,
+  cwd: string,
+): void {
+  const existed = fs.existsSync(dest);
+  if (existed && !force) {
+    console.error(
+      `Refusing to overwrite ${path.relative(cwd, dest)} — pass --force to replace it.`,
+    );
+    process.exit(1);
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, content);
+  console.log(`${existed ? "Updated" : "Created"} ${path.relative(cwd, dest)}`);
+}
+
+interface PluginSummary {
+  importPath: string;
+  exportName: string | null;
+  envs: string[];
+}
+
 async function runAdd(
-  components: string[],
+  refs: string[],
   opts: { force?: boolean; cwd?: string },
 ): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
-  const base = findFrontendRoot(cwd);
-  if (base !== cwd) {
-    console.log(`Detected frontend root: ${path.relative(cwd, base)}/`);
-  }
-
   const token = resolveToken();
   if (token) {
     console.log(
@@ -112,77 +185,122 @@ async function runAdd(
     );
   }
 
-  const names = components.map(stripNamespace);
+  const names = refs.map(stripNamespace);
   const items: RegistryItem[] = [];
   for (const name of names) {
     items.push(await fetchRegistryItem(name, token));
   }
 
+  const hasUi = items.some((i) => !isPluginItem(i));
+  const hasPlugin = items.some(isPluginItem);
+  const frontendRoot = hasUi ? findFrontendRoot(cwd) : cwd;
+  const serverRoot = hasPlugin ? findServerRoot(cwd) : cwd;
+  if (hasUi && frontendRoot !== cwd) {
+    console.log(`UI components → ${path.relative(cwd, frontendRoot)}/`);
+  }
+  if (hasPlugin && serverRoot !== cwd) {
+    console.log(`Plugins → ${path.relative(cwd, serverRoot)}/`);
+  }
+
   const deps = new Set<string>();
-  const written: string[] = [];
+  let wroteUi = false;
+  const pluginSummaries: PluginSummary[] = [];
 
   for (const item of items) {
     for (const dep of item.dependencies ?? []) deps.add(dep);
 
-    // AppKit (Option A) items have no registry dependencies; warn rather than
-    // silently dropping any a future item might declare.
-    for (const rd of item.registryDependencies ?? []) {
-      console.warn(
-        `  Note: "${item.name}" declares registryDependency "${rd}" — add it separately if it isn't already present.`,
-      );
-    }
-
-    for (const file of item.files ?? []) {
-      const dest = resolveTarget(base, file);
-      const existed = fs.existsSync(dest);
-      if (existed && !opts.force) {
-        console.error(
-          `Refusing to overwrite ${path.relative(cwd, dest)} — pass --force to replace it.`,
+    if (isPluginItem(item)) {
+      let manifest: PluginManifestShape = {};
+      let pluginRel = path.join("plugins", item.name);
+      for (const file of item.files ?? []) {
+        const target =
+          file.target ??
+          path.join("plugins", item.name, path.basename(file.path));
+        writeItemFile(
+          path.join(serverRoot, target),
+          file.content,
+          Boolean(opts.force),
+          cwd,
         );
-        process.exit(1);
+        if (path.basename(target) === "manifest.json") {
+          manifest = JSON.parse(file.content) as PluginManifestShape;
+          pluginRel = path.dirname(target);
+        }
       }
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, file.content);
-      written.push(path.relative(cwd, dest));
-      console.log(
-        `${existed ? "Updated" : "Created"} ${path.relative(cwd, dest)}`,
-      );
+      pluginSummaries.push({
+        importPath: `./${pluginRel}`,
+        exportName: pluginExportName(item),
+        envs: requiredEnvVars(manifest),
+      });
+    } else {
+      for (const file of item.files ?? []) {
+        // UI (Option A) items have no registry deps; warn on any a future item adds.
+        for (const rd of item.registryDependencies ?? []) {
+          console.warn(
+            `  Note: "${item.name}" declares registryDependency "${rd}" — add it separately if needed.`,
+          );
+        }
+        writeItemFile(
+          resolveUiTarget(frontendRoot, file),
+          file.content,
+          Boolean(opts.force),
+          cwd,
+        );
+        wroteUi = true;
+      }
     }
   }
 
-  installDependencies([...deps], findInstallDir(base, cwd));
+  installDependencies([...deps], findNearestPackageJson(cwd));
 
-  if (written.length > 0) {
+  if (hasPlugin) {
+    console.log("\nRegistering plugins (appkit plugin sync)...");
+    runPluginSync(cwd);
+  }
+
+  if (wroteUi) {
     console.log(
-      '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so the component is themed.',
+      '\nReminder: import "@databricks/appkit-ui/styles.css" once at your app root so components are themed.',
     );
+  }
+  if (pluginSummaries.length > 0) {
+    console.log("\nNext steps — register in your server's createApp call:");
+    for (const s of pluginSummaries) {
+      const imp = s.exportName ?? "<plugin>";
+      console.log(
+        `\n  import { ${imp} } from "${s.importPath}";\n` +
+          `  const app = await createApp({ plugins: [${imp}, /* ... */] });`,
+      );
+      if (s.envs.length > 0) {
+        console.log(`  Required env var(s): ${s.envs.join(", ")}`);
+      }
+    }
   }
 }
 
 export const addCommand = new Command("add")
-  .description("Add an AppKit registry component to your project")
-  .argument("<component...>", "Component name(s), e.g. metric-card")
+  .description("Add a UI component or server plugin from the AppKit registry")
+  .argument("<item...>", "Registry item name(s), e.g. metric-card or hello")
   .option("-f, --force", "Overwrite existing files")
   .option("-C, --cwd <dir>", "Run as if started in <dir>")
   .addHelpText(
     "after",
     `
-No components.json is required. The frontend root is detected automatically
-(a client/ subdir or a dir with components.json / src/), so you can run this
-from the repo root. Files land under <frontend>/src/<target>; npm dependencies
-install into the nearest package.json.
+No components.json is required. Item type is detected automatically:
+  • UI components → <frontend>/src/components/appkit/  (client/ detected)
+  • Server plugins → <server>/plugins/<name>/ + plugin sync + register snippet
 
-While the registry repo is private, a token with read access is used. It is
-resolved automatically from \`gh auth token\` (if you're logged in with the
-GitHub CLI), or from APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOKEN.
+The frontend/server roots are detected from common layouts, so you can run
+this from the repo root. While the registry repo is private, a read token is
+resolved from \`gh auth token\` or APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOKEN.
 
 Examples:
-  $ appkit add metric-card
-  $ appkit add metric-card data-table
-  $ appkit add @appkit/metric-card`,
+  $ appkit add metric-card           # UI component
+  $ appkit add hello                 # server plugin
+  $ appkit add metric-card hello     # mix in one call`,
   )
-  .action((components: string[], opts: { force?: boolean; cwd?: string }) =>
-    runAdd(components, opts).catch((err) => {
+  .action((items: string[], opts: { force?: boolean; cwd?: string }) =>
+    runAdd(items, opts).catch((err) => {
       console.error(err);
       process.exit(1);
     }),
