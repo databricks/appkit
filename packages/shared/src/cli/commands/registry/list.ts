@@ -1,6 +1,11 @@
 import process from "node:process";
 import { Command } from "commander";
-import { REGISTRY_INDEX_URL } from "./constants";
+import {
+  REGISTRY_INDEX_API_URL,
+  REGISTRY_INDEX_URL,
+  REGISTRY_REPO,
+  resolveToken,
+} from "./constants";
 
 interface RegistryIndexItem {
   name: string;
@@ -25,18 +30,35 @@ function printTable(items: RegistryIndexItem[]): void {
 }
 
 async function runList(opts: { json?: boolean }): Promise<void> {
+  const token = resolveToken();
+  const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token.value}`;
+    headers.Accept = "application/vnd.github.raw";
+  }
+
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
-    res = await fetch(REGISTRY_INDEX_URL);
+    res = await fetch(url, { headers });
   } catch (err) {
-    console.error(`Failed to reach the registry at ${REGISTRY_INDEX_URL}`);
+    console.error(`Failed to reach the registry at ${url}`);
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  if (!res.ok) {
+  if (res.status === 404 || res.status === 401 || res.status === 403) {
     console.error(
-      `Registry returned HTTP ${res.status} for ${REGISTRY_INDEX_URL}`,
+      `Could not read the registry index from ${REGISTRY_REPO} (HTTP ${res.status}).`,
     );
+    if (!token) {
+      console.error(
+        "  If the repo is private, set APPKIT_REGISTRY_TOKEN (or GITHUB_TOKEN) to a token with read access.",
+      );
+    }
+    process.exit(1);
+  }
+  if (!res.ok) {
+    console.error(`Registry returned HTTP ${res.status} for ${url}`);
     process.exit(1);
   }
 
