@@ -86,20 +86,59 @@ async function fetchItem(
   return (await res.json()) as RegistryItem;
 }
 
+/** Subdirectories that commonly hold the frontend in an AppKit app layout. */
+const FRONTEND_SUBDIRS = ["client", "frontend", "web", "app"];
+
 /**
- * Resolves where a registry file should be written. Uses the item's `target`,
- * placing it under `src/` when the project has one (matching common app
- * layouts). AppKit registry components import primitives from
- * `@databricks/appkit-ui` rather than shadcn `@/` aliases, so no components.json
- * or alias resolution is needed.
+ * Locates the frontend root to write components into. AppKit apps put the
+ * client in a `client/` subdir (with its own components.json + src/), and the
+ * CLI is typically run from the repo root. We prefer the dir containing
+ * components.json, then a dir with a src/, checking the cwd and common
+ * subdirs before falling back to cwd.
  */
-function resolveTarget(cwd: string, file: RegistryItemFile): string {
-  let target =
-    file.target ?? path.join("components/appkit", path.basename(file.path));
-  if (!target.startsWith("src/") && fs.existsSync(path.join(cwd, "src"))) {
+function findFrontendRoot(cwd: string): string {
+  if (fs.existsSync(path.join(cwd, "components.json"))) return cwd;
+  for (const sub of FRONTEND_SUBDIRS) {
+    if (fs.existsSync(path.join(cwd, sub, "components.json"))) {
+      return path.join(cwd, sub);
+    }
+  }
+  if (fs.existsSync(path.join(cwd, "src"))) return cwd;
+  for (const sub of FRONTEND_SUBDIRS) {
+    if (fs.existsSync(path.join(cwd, sub, "src"))) {
+      return path.join(cwd, sub);
+    }
+  }
+  return cwd;
+}
+
+/**
+ * Finds the dir to install npm deps into: the nearest package.json walking up
+ * from the frontend root to the cwd (a monorepo-style app has a single root
+ * package.json while the client lives in client/).
+ */
+function findInstallDir(base: string, cwd: string): string {
+  let dir = base;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+    if (dir === cwd) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return cwd;
+}
+
+/**
+ * Resolves where a registry file is written, relative to the frontend root.
+ * Uses the item's `target`, placing it under `src/` when that root has one.
+ */
+function resolveTarget(base: string, file: RegistryItemFile): string {
+  let target = file.target ?? path.join("components", path.basename(file.path));
+  if (!target.startsWith("src/") && fs.existsSync(path.join(base, "src"))) {
     target = path.join("src", target);
   }
-  return path.join(cwd, target);
+  return path.join(base, target);
 }
 
 function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
@@ -133,9 +172,14 @@ function installDependencies(deps: string[], cwd: string): void {
 
 async function runAdd(
   components: string[],
-  opts: { force?: boolean },
+  opts: { force?: boolean; cwd?: string },
 ): Promise<void> {
-  const cwd = process.cwd();
+  const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+  const base = findFrontendRoot(cwd);
+  if (base !== cwd) {
+    console.log(`Detected frontend root: ${path.relative(cwd, base)}/`);
+  }
+
   const token = resolveToken();
   if (token) {
     console.log(
@@ -164,7 +208,7 @@ async function runAdd(
     }
 
     for (const file of item.files ?? []) {
-      const dest = resolveTarget(cwd, file);
+      const dest = resolveTarget(base, file);
       const existed = fs.existsSync(dest);
       if (existed && !opts.force) {
         console.error(
@@ -181,7 +225,7 @@ async function runAdd(
     }
   }
 
-  installDependencies([...deps], cwd);
+  installDependencies([...deps], findInstallDir(base, cwd));
 
   if (written.length > 0) {
     console.log(
@@ -194,12 +238,14 @@ export const addCommand = new Command("add")
   .description("Add an AppKit registry component to your project")
   .argument("<component...>", "Component name(s), e.g. metric-card")
   .option("-f, --force", "Overwrite existing files")
+  .option("-C, --cwd <dir>", "Run as if started in <dir>")
   .addHelpText(
     "after",
     `
-No components.json is required. Files are written to each item's target path
-(under src/ when present) and npm dependencies are installed with your project's
-package manager.
+No components.json is required. The frontend root is detected automatically
+(a client/ subdir or a dir with components.json / src/), so you can run this
+from the repo root. Files land under <frontend>/src/<target>; npm dependencies
+install into the nearest package.json.
 
 While the registry repo is private, a token with read access is used. It is
 resolved automatically from \`gh auth token\` (if you're logged in with the
@@ -210,7 +256,7 @@ Examples:
   $ appkit add metric-card data-table
   $ appkit add @appkit/metric-card`,
   )
-  .action((components: string[], opts: { force?: boolean }) =>
+  .action((components: string[], opts: { force?: boolean; cwd?: string }) =>
     runAdd(components, opts).catch((err) => {
       console.error(err);
       process.exit(1);
