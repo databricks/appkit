@@ -1,6 +1,10 @@
 import { getUsernameSync, mapSslConfig, parseConfig } from "./config";
 import { createPasswordProvider } from "./password-provider";
-import type { FetchCredential, LakebaseAuthConfig, SslConfig } from "./types";
+import type {
+  DriverSslConfig,
+  FetchCredential,
+  LakebaseAuthConfig,
+} from "./types";
 
 /**
  * A driver-agnostic Postgres connection config with an OAuth password callback.
@@ -17,7 +21,13 @@ export interface PgConfig {
   user: string;
   database: string;
   password: string | (() => string | Promise<string>);
-  ssl: SslConfig;
+  /**
+   * SSL config, typed narrowly ({@link DriverSslConfig}) so it can be passed
+   * directly to `pg`, `postgres.js`, and `Bun.SQL` without a cast. A wider
+   * `tls.ConnectionOptions` supplied via `config.ssl` is still emitted at
+   * runtime — only the static type is narrowed.
+   */
+  ssl: DriverSslConfig;
   /** Stop background token refresh (idempotent). Call on shutdown. */
   dispose: () => void;
 }
@@ -61,15 +71,15 @@ export interface GetPgConfigOptions extends Partial<LakebaseAuthConfig> {
  * ```typescript
  * import { getPgConfig } from "@databricks/lakebase-auth";
  *
- * const { host, port, user, database, password } = getPgConfig();
- * const sql = new Bun.SQL({ hostname: host, port, username: user, database, password, tls: true });
+ * const { host, port, user, database, password, ssl } = getPgConfig();
+ * const sql = new Bun.SQL({ hostname: host, port, username: user, database, password, tls: ssl });
  * ```
  */
 export function getPgConfig(config?: GetPgConfigOptions): PgConfig {
   const userConfig = config ?? {};
   const parsed = parseConfig(userConfig);
   const user = getUsernameSync(userConfig);
-  const ssl = parsed.ssl ?? mapSslConfig(parsed.sslMode);
+  const ssl = parsed.ssl ?? mapSslConfig(parsed.sslMode, parsed.host);
 
   // Native password authentication: no OAuth provider needed.
   if (userConfig.password !== undefined) {

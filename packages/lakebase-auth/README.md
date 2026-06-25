@@ -62,25 +62,32 @@ dispose();
 
 ## Usage with other drivers
 
-`getPgConfig()` returns `host`, `port`, `user`, `database`, `password` (a function returning a current OAuth token), `ssl`, and `dispose`. Map the field names to your driver of choice:
+`getPgConfig()` returns `host`, `port`, `user`, `database`, `password` (a function returning a current OAuth token), `ssl`, and `dispose`. These are accepted by postgres.js and Bun.sql as well as pg:
 
 ```typescript
-// postgres.js: uses `username`
+// postgres.js
 import postgres from "postgres";
-const { host, port, user, database, password, ssl } = getPgConfig();
-const sql = postgres({ host, port, username: user, database, password, ssl });
-
-// Bun.SQL: uses `hostname`, `username`, `tls`
-const cfg = getPgConfig();
-const sql = new Bun.SQL({
-  hostname: cfg.host,
-  port: cfg.port,
-  username: cfg.user,
-  database: cfg.database,
-  password: cfg.password,
-  tls: ssl,
+const { dispose, ...config } = getPgConfig();
+const sql = postgres({
+  ...config,
+  // any custom options or overrides here
 });
+const result = await sql`SELECT now()`
+await sql.end();
+dispose(); // stop background token refresh
+
+// Bun.SQL
+const { dispose, ...config } = getPgConfig();
+const sql = new Bun.SQL({
+  ...config,
+  // any custom options or overrides here
+});
+const result = await sql`SELECT now()`;
+await sql.end();
+dispose(); // stop background token refresh
 ```
+
+The emitted `ssl` object carries a `serverName` for `Bun.SQL`, which [fails to derive SNI from the host](https://github.com/oven-sh/bun/issues/26369) when TLS is passed as an object. Lakebase requires SNI, so this makes Bun connections work; `pg` and `postgres.js` set SNI themselves and ignore the key.
 
 ### Low-level password provider
 

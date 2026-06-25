@@ -42,7 +42,10 @@ describe("getPgConfig", () => {
     expect(cfg.database).toBe("databricks_postgres");
     expect(cfg.user).toBe("user@example.com");
     expect(cfg.port).toBe(5432);
-    expect(cfg.ssl).toEqual({ rejectUnauthorized: true });
+    expect(cfg.ssl).toEqual({
+      rejectUnauthorized: true,
+      serverName: "ep-test.databricks.com",
+    });
     expect(typeof cfg.password).toBe("function");
 
     cfg.dispose();

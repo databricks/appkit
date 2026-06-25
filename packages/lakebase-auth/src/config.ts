@@ -1,6 +1,6 @@
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { ConfigurationError, ValidationError } from "./errors";
-import type { LakebaseAuthConfig, SslConfig } from "./types";
+import type { DriverSslConfig, LakebaseAuthConfig, SslConfig } from "./types";
 
 /** Default connection values for Lakebase auth */
 const defaults = {
@@ -34,17 +34,33 @@ export interface ParsedAuthConfig {
  * - `"require"`     -- ditto (upgraded)
  * - `"prefer"`      -- ditto (upgraded)
  * - `"disable"`     -- SSL disabled (not compatible with Lakebase)
+ *
+ * When `host` is a DNS name (not an IP literal), the `Bun.SQL` SNI server name
+ * is set on the returned object — see {@link DriverSslConfig.serverName}.
  */
-export function mapSslConfig(sslMode: SslMode): SslConfig {
+export function mapSslConfig(sslMode: SslMode, host?: string): DriverSslConfig {
   switch (sslMode) {
     case "verify-full": // since JS drivers check root certs, there's an implied sslrootcert=system
     case "verify-ca": // upgraded to equivalent of verify-full, sslrootcert=system
     case "require": // upgraded to equivalent of verify-full, sslrootcert=system
-    case "prefer": // upgraded to equivalent of verify-full, sslrootcert=system
-      return { rejectUnauthorized: true };
+    case "prefer": {
+      // upgraded to equivalent of verify-full, sslrootcert=system
+      const ssl: DriverSslConfig = { rejectUnauthorized: true };
+      // `Bun.SQL` won't derive the SNI server name from the host when TLS is an
+      // object (https://github.com/oven-sh/bun/issues/26369), so set it. `pg`
+      // and `postgres.js` already do this themselves. SNI must not be an IP.
+      if (host && !isIpAddress(host)) ssl.serverName = host;
+      return ssl;
+    }
     case "disable":
       return false;
   }
+}
+
+/** Whether a host is an IP literal, which must not be sent as a TLS SNI name. */
+function isIpAddress(host: string): boolean {
+  // IPv4 dotted-quad, or anything containing a colon (IPv6).
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":");
 }
 
 /** Parse connection configuration from provided config and environment variables */

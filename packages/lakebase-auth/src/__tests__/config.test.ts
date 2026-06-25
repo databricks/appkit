@@ -58,6 +58,26 @@ describe("mapSslConfig", () => {
   test("maps disable to false", () => {
     expect(mapSslConfig("disable")).toBe(false);
   });
+
+  test("populates the Bun SNI server name from a DNS host", () => {
+    expect(mapSslConfig("verify-full", "ep-test.databricks.com")).toEqual({
+      rejectUnauthorized: true,
+      serverName: "ep-test.databricks.com",
+    });
+  });
+
+  test("omits SNI server name for IP-literal hosts", () => {
+    expect(mapSslConfig("require", "10.0.0.5")).toEqual({
+      rejectUnauthorized: true,
+    });
+    expect(mapSslConfig("require", "::1")).toEqual({
+      rejectUnauthorized: true,
+    });
+  });
+
+  test("never sets SNI when SSL is disabled", () => {
+    expect(mapSslConfig("disable", "ep-test.databricks.com")).toBe(false);
+  });
 });
 
 describe("parseConfig", () => {

@@ -143,10 +143,9 @@ server being briefly unreachable).
 optional sslMode: "verify-full" | "verify-ca" | "require" | "prefer" | "disable";
 ```
 
-SSL mode for the connection (convenience helper).
-Can also be set via PGSSLMODE environment variable.
-All values other than "disable" are treated as "verify-full" against system
-root certs.
+SSL mode for the connection (convenience helper). Can also be set via
+PGSSLMODE. All values other than "disable" are treated as "verify-full"
+with system root certs.
 
 #### Default
 

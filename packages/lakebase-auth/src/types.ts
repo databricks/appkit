@@ -2,13 +2,47 @@ import type { ConnectionOptions } from "node:tls";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 
 /**
- * SSL configuration for a PostgreSQL connection.
+ * SSL configuration *accepted* as input (e.g. `config.ssl`).
  *
- * Structurally identical to `pg`'s `ssl` option (`boolean | tls.ConnectionOptions`),
- * so the result of {@link getPgConfig} can be passed directly to `pg`, `postgres.js`,
- * `Bun.SQL`, and other drivers without depending on `pg` here.
+ * Intentionally wide — structurally identical to `pg`'s `ssl` option
+ * (`boolean | tls.ConnectionOptions`) — so callers can supply a full TLS
+ * config (custom CA, client certs, etc.) without depending on `pg` here.
+ *
+ * Note: what {@link getPgConfig} *emits* is typed as the narrower
+ * {@link DriverSslConfig} (see below) so the result is assignable to every
+ * driver. Any wider value you pass in is still emitted unchanged at runtime;
+ * only the static type is narrowed.
  */
 export type SslConfig = boolean | ConnectionOptions;
+
+/**
+ * SSL configuration *emitted* by {@link getPgConfig} (the `ssl` field).
+ *
+ * Deliberately narrower than {@link SslConfig}: this structural type is
+ * assignable to the `ssl`/`tls` option of `pg`, `postgres.js`, and `Bun.SQL`
+ * alike (Bun's `TLSOptions` rejects `node:tls.ConnectionOptions`'s `key`/`cert`
+ * shapes, so the wide type can't be used directly). The default `sslMode`
+ * mapping only ever produces `false` or `{ rejectUnauthorized: true }`.
+ *
+ * This is a type-level narrowing only: if you pass a wider
+ * `tls.ConnectionOptions` via `config.ssl`, that exact object is still emitted
+ * at runtime.
+ */
+export type DriverSslConfig =
+  | boolean
+  | {
+      rejectUnauthorized?: boolean;
+      /**
+       * SNI server name, in the `Bun.SQL` spelling. Only emitted for `Bun.SQL`'s
+       * benefit: it works around
+       * {@link https://github.com/oven-sh/bun/issues/26369}, where `Bun.SQL`
+       * fails to derive SNI from the host when TLS is given as an object.
+       *
+       * `pg` and `postgres.js` set `servername` from the host themselves (and
+       * harmlessly ignore this camelCase key), so it isn't emitted for them.
+       */
+      serverName?: string;
+    };
 
 /** Log severity levels emitted by the auth package. */
 export type LogLevel = "debug" | "info" | "warn" | "error";

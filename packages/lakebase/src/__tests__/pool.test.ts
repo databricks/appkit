@@ -244,7 +244,10 @@ describe("createLakebasePool", () => {
         sslMode: "verify-full",
       });
 
-      expect(pool.options.ssl).toEqual({ rejectUnauthorized: true });
+      expect(pool.options.ssl).toEqual({
+        rejectUnauthorized: true,
+        serverName: "ep-test.database.us-east-1.databricks.com",
+      });
     });
 
     test("should allow custom SSL configuration", () => {

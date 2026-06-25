@@ -27,6 +27,7 @@ export { DEFAULT_RETRY_SCHEDULE, withRetries } from "./retry";
 export type {
   Credential,
   DatabaseCredential,
+  DriverSslConfig,
   FetchCredential,
   GenerateDatabaseCredentialRequest,
   LakebaseAuthConfig,
