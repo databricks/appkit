@@ -2135,7 +2135,7 @@ describe("buildMetricsMetadataBundle", () => {
     expect(Object.hasOwn(bundle, "__proto__")).toBe(true);
     expect(Object.hasOwn(bundle, "revenue")).toBe(true);
 
-    // The emitted metrics.metadata.json carries both as own enumerable
+    // The emitted metric-views.metadata.json carries both as own enumerable
     // properties (JSON.parse creates own data properties for __proto__).
     const parsed = JSON.parse(generateMetricsMetadataJson(schemas));
     expect(Object.keys(parsed)).toEqual(["__proto__", "revenue"]);
@@ -2264,7 +2264,7 @@ describe("generateMetricsMetadataJson — snapshot", () => {
 // collation would interleave mixed-case keys ("ARPU", "churn", "Revenue")
 // and could vary by machine/locale, drifting the .d.ts from the bundle.
 describe("artifact key-order determinism", () => {
-  test("mixed-case keys order identically (code-unit) in metric.d.ts and metrics.metadata.json", async () => {
+  test("mixed-case keys order identically (code-unit) in metric-views.d.ts and metric-views.metadata.json", async () => {
     const resolution = resolveMetricConfig({
       metricViews: {
         Revenue: { source: "a.b.r" },

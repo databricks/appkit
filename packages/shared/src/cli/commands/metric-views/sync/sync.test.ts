@@ -31,7 +31,7 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
         nodeFs.mkdirSync(nodePath.dirname(opts.metricOutFile), {
           recursive: true,
         });
-        nodeFs.writeFileSync(opts.metricOutFile, "// metric.d.ts\n");
+        nodeFs.writeFileSync(opts.metricOutFile, "// metric-views.d.ts\n");
         nodeFs.writeFileSync(opts.metricMetadataOutFile, "{}\n");
         // Annotate the array element types so the inferred return type is wide
         // enough for `mockResolvedValueOnce` overrides that populate `failures`
@@ -57,8 +57,8 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
         };
       },
     ),
-    METRIC_TYPES_FILE: "metric.d.ts",
-    METRIC_METADATA_FILE: "metrics.metadata.json",
+    METRIC_TYPES_FILE: "metric-views.d.ts",
+    METRIC_METADATA_FILE: "metric-views.metadata.json",
   }));
 
 // The library type-generator is an optional/ambient module; mock it so the
@@ -195,13 +195,13 @@ describe("appkit mv sync", () => {
       tmpRoot,
       "shared",
       "appkit-types",
-      "metric.d.ts",
+      "metric-views.d.ts",
     );
     const expectedMetadataOut = path.join(
       tmpRoot,
       "shared",
       "appkit-types",
-      "metrics.metadata.json",
+      "metric-views.metadata.json",
     );
 
     // The appkit entry was called once with the resolved options. Cache is the
@@ -254,12 +254,12 @@ describe("appkit mv sync", () => {
     expect(syncMetricViewsTypes).toHaveBeenCalledWith({
       queryFolder: customConfigDir,
       warehouseId: "wh-123",
-      metricOutFile: path.join(tmpRoot, "build", "types", "metric.d.ts"),
+      metricOutFile: path.join(tmpRoot, "build", "types", "metric-views.d.ts"),
       metricMetadataOutFile: path.join(
         tmpRoot,
         "build",
         "types",
-        "metrics.metadata.json",
+        "metric-views.metadata.json",
       ),
       cache: undefined,
     });
@@ -287,8 +287,8 @@ describe("appkit mv sync", () => {
     expect(syncMetricViewsTypes).toHaveBeenCalledWith(
       expect.objectContaining({
         queryFolder: path.dirname(absConfig),
-        metricOutFile: path.join(absOut, "metric.d.ts"),
-        metricMetadataOutFile: path.join(absOut, "metrics.metadata.json"),
+        metricOutFile: path.join(absOut, "metric-views.d.ts"),
+        metricMetadataOutFile: path.join(absOut, "metric-views.metadata.json"),
       }),
     );
   });
@@ -513,13 +513,13 @@ describe("appkit mv sync", () => {
         tmpRoot,
         "shared",
         "appkit-types",
-        "metric.d.ts",
+        "metric-views.d.ts",
       ),
       metricMetadataOutFile: path.join(
         tmpRoot,
         "shared",
         "appkit-types",
-        "metrics.metadata.json",
+        "metric-views.metadata.json",
       ),
       schemas: [],
       failures: [
@@ -555,13 +555,13 @@ describe("appkit mv sync", () => {
         tmpRoot,
         "shared",
         "appkit-types",
-        "metric.d.ts",
+        "metric-views.d.ts",
       ),
       metricMetadataOutFile: path.join(
         tmpRoot,
         "shared",
         "appkit-types",
-        "metrics.metadata.json",
+        "metric-views.metadata.json",
       ),
       schemas: [
         {
@@ -614,13 +614,13 @@ describe("appkit mv sync", () => {
         tmpRoot,
         "shared",
         "appkit-types",
-        "metric.d.ts",
+        "metric-views.d.ts",
       ),
       metricMetadataOutFile: path.join(
         tmpRoot,
         "shared",
         "appkit-types",
-        "metrics.metadata.json",
+        "metric-views.metadata.json",
       ),
       cache: true,
     });
@@ -645,7 +645,7 @@ describe("appkit mv sync", () => {
       expect.objectContaining({
         queryFolder: customConfigDir,
         warehouseId: "wh-interactive",
-        metricOutFile: path.join(tmpRoot, "alt", "out", "metric.d.ts"),
+        metricOutFile: path.join(tmpRoot, "alt", "out", "metric-views.d.ts"),
       }),
     );
   });

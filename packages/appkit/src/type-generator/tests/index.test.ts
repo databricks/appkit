@@ -277,11 +277,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   const queryFolder = path.join(metricsDir, "queries");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
   // Defaults: metric artifacts are siblings of `outFile`.
-  const metricFile = path.join(metricsDir, "generated", "metric.d.ts");
+  const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
   const metadataFile = path.join(
     metricsDir,
     "generated",
-    "metrics.metadata.json",
+    "metric-views.metadata.json",
   );
 
   const describeResponse: DatabricksStatementExecutionResponse = {
@@ -330,7 +330,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric.d.ts and metrics.metadata.json when metric-views.json exists", async () => {
+  test("writes metric-views.d.ts and metric-views.metadata.json when metric-views.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -998,11 +998,11 @@ describe("generateFromEntryPoint — metric cache section", () => {
   const cacheTestDir = path.join(__dirname, "__output_metric_cache__");
   const queryFolder = path.join(cacheTestDir, "queries");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(cacheTestDir, "generated", "metric.d.ts");
+  const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
   const metadataFile = path.join(
     cacheTestDir,
     "generated",
-    "metrics.metadata.json",
+    "metric-views.metadata.json",
   );
 
   const describeResponseFor = (

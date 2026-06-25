@@ -31,7 +31,7 @@ export interface MetricViewsSyncOptions {
    * locked spec.
    */
   metricViewsJsonPath?: string;
-  /** Output directory for metric.d.ts + metrics.metadata.json (default: <cwd>/shared/appkit-types). */
+  /** Output directory for metric-views.d.ts + metric-views.metadata.json (default: <cwd>/shared/appkit-types). */
   outputDir?: string;
   /**
    * Caching toggle. Commander's `--no-cache` sets this to `false` (and leaves it
@@ -401,7 +401,7 @@ async function runMetricViewsSyncAction(
 
 export const metricViewsSyncCommand = new Command("sync")
   .description(
-    "Sync UC Metric View schemas: DESCRIBE every entry in metric-views.json, then emit metric.d.ts + metrics.metadata.json.",
+    "Sync UC Metric View schemas: DESCRIBE every entry in metric-views.json, then emit metric-views.d.ts + metric-views.metadata.json.",
   )
   .option(
     "--warehouse-id <id>",
@@ -413,7 +413,7 @@ export const metricViewsSyncCommand = new Command("sync")
   )
   .option(
     "--output-dir <dir>",
-    "Output directory for metric.d.ts and metrics.metadata.json (default: shared/appkit-types)",
+    "Output directory for metric-views.d.ts and metric-views.metadata.json (default: shared/appkit-types)",
   )
   .option("--no-cache", "Disable the metric type-generation cache")
   .addHelpText(

@@ -172,7 +172,7 @@ ${entries};
 `;
 }
 
-// Build the full metric.d.ts file from a list of metric schemas.
+// Build the full metric-views.d.ts file from a list of metric schemas.
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
 ): string {

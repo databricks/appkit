@@ -277,10 +277,10 @@ async function probeWarehouseState(
  *   degraded types immediately. `"blocking"` waits for / starts the warehouse
  *   first, failing the build only for a deleted/deleting one.
  * @param options.mvOutFile - optional output file for the MetricRegistry
- *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
+ *   augmentation. Defaults to a sibling `metric-views.d.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `metric-views.json` is absent.
  * @param options.mvMetadataOutFile - optional output file for the
- *   build-time semantic metadata JSON bundle (`metrics.metadata.json`).
+ *   build-time semantic metadata JSON bundle (`metric-views.metadata.json`).
  *   Defaults to a sibling of `mvOutFile`. Skipped entirely if
  *   `metric-views.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
@@ -421,8 +421,8 @@ export interface SyncMetricViewsTypesResult {
  *   → partition cache hits vs describe-needed → optional warehouse preflight /
  *   #406 status gate → describe ({@link syncMetrics} over
  *   {@link createWorkspaceDescribeFetcher}) → persist + prune the `metrics`
- *   cache section → merge → write `metric.d.ts`
- *   ({@link generateMetricTypeDeclarations}) and `metrics.metadata.json`
+ *   cache section → merge → write `metric-views.d.ts`
+ *   ({@link generateMetricTypeDeclarations}) and `metric-views.metadata.json`
  *   ({@link generateMetricsMetadataJson}).
  *
  * The shared typegen cache (the `metrics` section of `.appkit-types-cache.json`,
@@ -860,7 +860,7 @@ export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 /** Default filename for serving endpoint type declarations. */
 export const SERVING_TYPES_FILE = "serving.d.ts";
 /** Default filename for metric-view registry type declarations. */
-export const METRIC_TYPES_FILE = "metric.d.ts";
+export const METRIC_TYPES_FILE = "metric-views.d.ts";
 /**
  * Default filename for the build-time semantic-metadata JSON bundle, sibling of
  * {@link METRIC_TYPES_FILE}. Shape is `Record<metricKey, { measures,
@@ -870,4 +870,4 @@ export const METRIC_TYPES_FILE = "metric.d.ts";
  * `registerMetricsMetadata()`, so the React hook returns per-metric `metadata`
  * without a second network round-trip.
  */
-export const METRIC_METADATA_FILE = "metrics.metadata.json";
+export const METRIC_METADATA_FILE = "metric-views.metadata.json";

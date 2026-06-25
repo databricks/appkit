@@ -123,12 +123,17 @@ describe("syncMetricViewsTypes", () => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sync-metric-types-"));
     queryFolder = path.join(tmpRoot, "config", "queries");
     fs.mkdirSync(queryFolder, { recursive: true });
-    metricOutFile = path.join(tmpRoot, "shared", "appkit-types", "metric.d.ts");
+    metricOutFile = path.join(
+      tmpRoot,
+      "shared",
+      "appkit-types",
+      "metric-views.d.ts",
+    );
     metricMetadataOutFile = path.join(
       tmpRoot,
       "shared",
       "appkit-types",
-      "metrics.metadata.json",
+      "metric-views.metadata.json",
     );
   });
 
@@ -161,7 +166,7 @@ describe("syncMetricViewsTypes", () => {
     expect(result.metricOutFile).toBe(metricOutFile);
     expect(result.metricMetadataOutFile).toBe(metricMetadataOutFile);
 
-    // --- metric.d.ts: MetricRegistry augmentation for both metrics ---
+    // --- metric-views.d.ts: MetricRegistry augmentation for both metrics ---
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
@@ -176,7 +181,7 @@ describe("syncMetricViewsTypes", () => {
     // The TIMESTAMP dimension carries inferred time grains in its @timeGrain tag.
     expect(declarations).toContain("@timeGrain");
 
-    // --- metrics.metadata.json: per-metric semantic bundle ---
+    // --- metric-views.metadata.json: per-metric semantic bundle ---
     const bundle = JSON.parse(fs.readFileSync(metricMetadataOutFile, "utf-8"));
     // SP metric: currency format spec is preserved on the measure.
     expect(bundle.revenue.measures.total_revenue.type).toBe("DECIMAL(38,2)");

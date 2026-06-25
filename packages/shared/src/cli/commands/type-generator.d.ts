@@ -63,8 +63,8 @@ declare module "@databricks/appkit/type-generator" {
    * Generate the metric-view type artifacts used by `appkit mv sync`.
    *
    * Reads `metric-views.json` from `queryFolder`, DESCRIBEs any metric views
-   * that are missing from the cache, then writes `metric.d.ts` and
-   * `metrics.metadata.json`. This only syncs metric-view types; analytics query
+   * that are missing from the cache, then writes `metric-views.d.ts` and
+   * `metric-views.metadata.json`. This only syncs metric-view types; analytics query
    * types are generated separately.
    *
    * The cache is enabled by default. Pass `cache: false` to force fresh
