@@ -45,6 +45,12 @@ export interface ChartUITokens {
 
 /** Common visual and behavior props for all charts */
 export interface ChartBaseProps {
+  /**
+   * Stable id the agent uses to target this chart via the `read_chart` and
+   * `highlight_series` tools. Omit to auto-derive one from the title. Only
+   * effective inside an `<AgentToolsProvider>`.
+   */
+  agentId?: string;
   /** Chart title */
   title?: string;
   /** Show legend */

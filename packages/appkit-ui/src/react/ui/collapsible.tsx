@@ -1,4 +1,10 @@
+"use client";
+
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
+import type * as React from "react";
+
+import { useAgentElement } from "../agent-tools";
+import { mergeRefs } from "../lib/utils";
 
 /** Interactive component that expands and collapses content */
 function Collapsible({
@@ -9,11 +15,21 @@ function Collapsible({
 
 /** Button that toggles the collapsible content visibility */
 function CollapsibleTrigger({
+  agentId,
+  ref,
   ...props
-}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleTrigger>) {
+}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleTrigger> & {
+  /** Stable id the agent uses to open/close via `open`/`close`/`toggle`. */
+  agentId?: string;
+}) {
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "disclosure",
+    agentId,
+  });
   return (
     <CollapsiblePrimitive.CollapsibleTrigger
       data-slot="collapsible-trigger"
+      ref={mergeRefs(ref, agentRef)}
       {...props}
     />
   );

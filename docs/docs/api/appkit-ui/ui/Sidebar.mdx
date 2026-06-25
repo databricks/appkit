@@ -212,7 +212,9 @@ Input field styled for use within the sidebar
 
 ### Props
 
-This component extends standard HTML element attributes.
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `agentId` | `string` |  | - | Stable id the agent uses to target this input via the `set_value` tool. Omit to auto-derive one from the placeholder/name. Only effective inside an `&lt;AgentToolsProvider&gt;`. |
 
 
 
@@ -558,6 +560,7 @@ Button that toggles the sidebar open and closed
 | `variant` | `"link" \| "default" \| "destructive" \| "secondary" \| "outline" \| "ghost" \| null` |  | - | - |
 | `size` | `"default" \| "sm" \| "lg" \| "icon" \| "icon-sm" \| "icon-lg" \| null` |  | - | - |
 | `asChild` | `boolean` |  | - | - |
+| `agentId` | `string` |  | - | Stable id the agent uses to target this button via the `click` tool. Omit to auto-derive one from the button's text. Only effective inside an `&lt;AgentToolsProvider&gt;`. |
 
 
 

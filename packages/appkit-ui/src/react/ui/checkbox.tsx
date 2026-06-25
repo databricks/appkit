@@ -4,16 +4,31 @@ import type * as React from "react";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import { CheckIcon } from "lucide-react";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 
 /** Checkbox input for selecting multiple options */
 function Checkbox({
   className,
+  agentId,
+  ref,
   ...props
-}: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
+}: React.ComponentProps<typeof CheckboxPrimitive.Root> & {
+  /**
+   * Stable id the agent uses to target this checkbox via the `toggle` tool.
+   * Omit to auto-derive one from the accessible label. Only effective inside
+   * an `<AgentToolsProvider>`.
+   */
+  agentId?: string;
+}) {
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "checkbox",
+    agentId,
+  });
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
+      ref={mergeRefs(ref, agentRef)}
       className={cn(
         // Fixed size and square shape - IMPORTANT: overrides global CSS
         "h-4 w-4 p-0 shrink-0 flex-shrink-0",

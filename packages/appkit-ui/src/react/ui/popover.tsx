@@ -3,7 +3,8 @@
 import type * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
 /** Floating content panel anchored to a trigger element */
@@ -14,9 +15,24 @@ function Popover({
 }
 
 function PopoverTrigger({
+  agentId,
+  ref,
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
+}: React.ComponentProps<typeof PopoverPrimitive.Trigger> & {
+  /** Stable id the agent uses to open/close the popover via `open`/`close`. */
+  agentId?: string;
+}) {
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "overlay",
+    agentId,
+  });
+  return (
+    <PopoverPrimitive.Trigger
+      data-slot="popover-trigger"
+      ref={mergeRefs(ref, agentRef)}
+      {...props}
+    />
+  );
 }
 
 function PopoverContent({

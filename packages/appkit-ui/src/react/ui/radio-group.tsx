@@ -4,7 +4,8 @@ import type * as React from "react";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { CircleIcon } from "lucide-react";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 
 /** Group of radio buttons for selecting a single option */
 function RadioGroup({
@@ -22,11 +23,25 @@ function RadioGroup({
 
 function RadioGroupItem({
   className,
+  agentId,
+  value,
+  ref,
   ...props
-}: React.ComponentProps<typeof RadioGroupPrimitive.Item>) {
+}: React.ComponentProps<typeof RadioGroupPrimitive.Item> & {
+  /** Stable id the agent uses to pick this option via the `select` tool. Defaults to `value`. */
+  agentId?: string;
+}) {
+  // Radio items have no inner text, so seed the agent id/label from `value`.
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "radio",
+    agentId: agentId ?? (value != null ? String(value) : undefined),
+    label: value != null ? String(value) : undefined,
+  });
   return (
     <RadioGroupPrimitive.Item
       data-slot="radio-group-item"
+      value={value}
+      ref={mergeRefs(ref, agentRef)}
       className={cn(
         "border-input text-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
         className,

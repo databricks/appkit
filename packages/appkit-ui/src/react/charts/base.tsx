@@ -1,6 +1,7 @@
 import type { ECharts } from "echarts";
 import ReactECharts from "echarts-for-react";
 import { useCallback, useMemo, useRef } from "react";
+import { useAgentChart } from "../agent-tools";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
   buildCartesianOption,
@@ -92,6 +93,12 @@ export interface BaseChartProps {
   options?: Record<string, unknown>;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Stable id the agent uses to target this chart via the `read_chart` and
+   * `highlight_series` tools. Omit to auto-derive one from the title. Only
+   * effective inside an `<AgentToolsProvider>`.
+   */
+  agentId?: string;
 }
 
 // ============================================================================
@@ -126,6 +133,7 @@ export function BaseChart({
   max,
   options: customOptions,
   className,
+  agentId,
 }: BaseChartProps) {
   // Determine the appropriate color palette based on chart type
   const resolvedPalette = colorPalette ?? getDefaultPalette(chartType);
@@ -275,6 +283,36 @@ export function BaseChart({
     max,
     customOptions,
   ]);
+
+  // Register the chart with the agent-tools layer (no-op without a provider).
+  // `read_chart` exposes the normalized series; `highlight_series` drives the
+  // live ECharts instance. Read lazily so the agent always sees current data.
+  useAgentChart({
+    agentId,
+    label: title,
+    getConfig: () => ({
+      title,
+      chartType,
+      xKey,
+      yKey,
+      orientation,
+      stacked,
+      showLegend,
+      colorPalette: resolvedPalette,
+    }),
+    getData: () => {
+      const yDataMap = "yDataMap" in normalized ? normalized.yDataMap : {};
+      return {
+        xField: normalized.xField,
+        xData: normalized.xData,
+        series: normalized.yFields.map((name) => ({
+          name,
+          values: yDataMap[name] ?? [],
+        })),
+      };
+    },
+    getInstance: () => echartsInstanceRef.current,
+  });
 
   if (!option) {
     return (

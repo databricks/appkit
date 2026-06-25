@@ -1,8 +1,11 @@
+"use client";
+
 import type * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
 /** Modal dialog that overlays the page content */
@@ -14,9 +17,24 @@ function Dialog({
 
 /** Button that opens the dialog */
 function DialogTrigger({
+  agentId,
+  ref,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+}: React.ComponentProps<typeof DialogPrimitive.Trigger> & {
+  /** Stable id the agent uses to open/close the dialog via `open`/`close`. */
+  agentId?: string;
+}) {
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "overlay",
+    agentId,
+  });
+  return (
+    <DialogPrimitive.Trigger
+      data-slot="dialog-trigger"
+      ref={mergeRefs(ref, agentRef)}
+      {...props}
+    />
+  );
 }
 
 /** Portal container for dialog content */

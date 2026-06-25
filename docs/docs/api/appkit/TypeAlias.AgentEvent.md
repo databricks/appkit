@@ -42,6 +42,14 @@ type AgentEvent =
   streamId: string;
   toolName: string;
   type: "approval_pending";
+}
+  | {
+  annotations?: ToolAnnotations;
+  args: unknown;
+  callId: string;
+  streamId: string;
+  toolName: string;
+  type: "client_tool_call";
 };
 ```
 
@@ -268,3 +276,60 @@ is awaiting human approval — fires for tools annotated with
 legacy `destructive: true` boolean. Clients should render an approval
 prompt and POST to `/chat/approve` with the matching `approvalId` and
 a `decision` of `approve` or `deny`.
+
+```ts
+{
+  annotations?: ToolAnnotations;
+  args: unknown;
+  callId: string;
+  streamId: string;
+  toolName: string;
+  type: "client_tool_call";
+}
+```
+
+### annotations?
+
+```ts
+optional annotations: ToolAnnotations;
+```
+
+### args
+
+```ts
+args: unknown;
+```
+
+### callId
+
+```ts
+callId: string;
+```
+
+### streamId
+
+```ts
+streamId: string;
+```
+
+### toolName
+
+```ts
+toolName: string;
+```
+
+### type
+
+```ts
+type: "client_tool_call";
+```
+
+Emitted by the agents plugin (not adapters) when the agent invokes a
+client-registered UI tool. The browser is expected to dispatch the
+call against its in-memory tool registry and POST the outcome to
+`/chat/client-tool-result` with `{ streamId, callId, result | error }`.
+The agent loop pauses on a deferred-promise gate until the result
+arrives or the configured timeout elapses (auto-error).
+
+Carries the same `streamId`/`callId` keying as the approval flow, so
+cross-user / cross-stream submissions are rejected by the gate.

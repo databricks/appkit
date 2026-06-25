@@ -1315,6 +1315,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
+      // The non-streaming invoke surface has no SSE channel and so no client
+      // (UI) tools — `_handleInvoke` doesn't accept a `uiTools` catalog. An
+      // empty map keeps the shared RunState shape (and the `source: "client"`
+      // dispatch branch) well-typed without enabling the round-trip here.
+      clientTools: new Map(),
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>

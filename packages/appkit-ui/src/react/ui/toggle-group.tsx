@@ -1,8 +1,11 @@
+"use client";
+
 import * as React from "react";
 import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
 import type { VariantProps } from "class-variance-authority";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 import { toggleVariants } from "./toggle";
 
 const ToggleGroupContext = React.createContext<
@@ -52,14 +55,26 @@ function ToggleGroupItem({
   children,
   variant,
   size,
+  agentId,
+  value,
+  ref,
   ...props
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Item> &
-  VariantProps<typeof toggleVariants>) {
+  VariantProps<typeof toggleVariants> & {
+    /** Stable id the agent uses to pick this option via the `select` tool. Defaults to `value`. */
+    agentId?: string;
+  }) {
   const context = React.useContext(ToggleGroupContext);
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "option",
+    agentId: agentId ?? (value != null ? String(value) : undefined),
+  });
 
   return (
     <ToggleGroupPrimitive.Item
       data-slot="toggle-group-item"
+      value={value}
+      ref={mergeRefs(ref, agentRef)}
       data-variant={context.variant || variant}
       data-size={context.size || size}
       data-spacing={context.spacing}

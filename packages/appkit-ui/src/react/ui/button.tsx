@@ -1,8 +1,11 @@
+"use client";
+
 import type * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:cursor-pointer",
@@ -42,16 +45,29 @@ function Button({
   variant,
   size,
   asChild = false,
+  agentId,
+  ref,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
+    /**
+     * Stable id the agent uses to target this button via the `click` tool.
+     * Omit to auto-derive one from the button's text. Only effective inside
+     * an `<AgentToolsProvider>`.
+     */
+    agentId?: string;
   }) {
   const Comp = asChild ? Slot : "button";
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "button",
+    agentId,
+  });
 
   return (
     <Comp
       data-slot="button"
+      ref={mergeRefs(ref, agentRef)}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

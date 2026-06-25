@@ -106,6 +106,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: BotIcon,
       },
       {
+        to: "/agent-native-ui",
+        label: "Native UI as Tools",
+        description:
+          "Core appkit-ui components are agent-addressable out of the box — the agent fills a form with zero hand-wired tools.",
+        icon: BotIcon,
+      },
+      {
         to: "/genie",
         label: "Genie",
         description:

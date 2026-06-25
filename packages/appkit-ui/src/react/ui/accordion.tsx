@@ -1,8 +1,11 @@
+"use client";
+
 import type * as React from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { ChevronDownIcon } from "lucide-react";
 
-import { cn } from "../lib/utils";
+import { useAgentElement } from "../agent-tools";
+import { cn, mergeRefs } from "../lib/utils";
 
 /** Collapsible content sections organized in a vertical stack */
 function Accordion({
@@ -29,12 +32,22 @@ function AccordionItem({
 function AccordionTrigger({
   className,
   children,
+  agentId,
+  ref,
   ...props
-}: React.ComponentProps<typeof AccordionPrimitive.Trigger>) {
+}: React.ComponentProps<typeof AccordionPrimitive.Trigger> & {
+  /** Stable id the agent uses to open/close this section via `open`/`close`/`toggle`. */
+  agentId?: string;
+}) {
+  const agentRef = useAgentElement<HTMLButtonElement>({
+    role: "disclosure",
+    agentId,
+  });
   return (
     <AccordionPrimitive.Header className="flex">
       <AccordionPrimitive.Trigger
         data-slot="accordion-trigger"
+        ref={mergeRefs(ref, agentRef)}
         className={cn(
           "focus-visible:border-ring focus-visible:ring-ring/50 flex flex-1 items-start justify-between gap-4 rounded-md py-4 text-left text-sm font-medium transition-all outline-none hover:underline focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&[data-state=open]>svg]:rotate-180",
           className,

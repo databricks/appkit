@@ -7,68 +7,73 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { AgentToolDefinition } from "shared";
+import { AgentElementRegistry } from "./element-registry";
 import { ClientToolRegistry } from "./registry";
+import { synthesizeUiCatalog } from "./synthesize";
 import type { ClientToolDispatchOutcome } from "./types";
+import { isUiToolName, SNAPSHOT_TOOL, VERB_DEFS } from "./verbs";
 
 /**
- * Context exposed to descendants of an `<AgentToolsProvider>`. The
- * `registry` is held by reference so `useAgentTool` can register/unregister
- * synchronously without going through React state. The catalog is read
- * via `useAgentToolCatalog` which subscribes to registry changes through
- * `useSyncExternalStore`, keeping consumers in sync without re-rendering
- * the entire provider on every registration.
+ * Context exposed to descendants of an `<AgentToolsProvider>`. Holds two
+ * registries by reference:
+ *
+ * - `tools` — raw tools added via `useAgentTool` (custom components).
+ * - `elements` — interactive elements registered by core appkit-ui
+ *   components via `useAgentElement`, from which the flattened verb tools
+ *   (`click`, `set_value`, …) + `ui_snapshot` are synthesized.
+ *
+ * Both are refs (not state) so registration doesn't re-render the whole
+ * provider; consumers read the merged catalog via `useAgentToolCatalog`,
+ * which subscribes to both through `useSyncExternalStore`.
  */
 interface AgentToolsContextValue {
-  registry: ClientToolRegistry;
+  tools: ClientToolRegistry;
+  elements: AgentElementRegistry;
 }
 
 const AgentToolsContext = createContext<AgentToolsContextValue | null>(null);
 
 export interface AgentToolsProviderProps {
   children: ReactNode;
-  /**
-   * Optional pre-built registry. Useful for tests that want to inject a
-   * fresh registry per render, or for advanced cases that need to share a
-   * single registry across multiple providers. When omitted, the provider
-   * creates and owns its own registry for the lifetime of the component.
-   */
+  /** Optional pre-built tool registry (tests, advanced sharing). */
   registry?: ClientToolRegistry;
+  /** Optional pre-built element registry (tests, advanced sharing). */
+  elementRegistry?: AgentElementRegistry;
 }
 
 /**
- * Wrap the React subtree that should expose UI tools to the agent. Every
- * `useAgentTool(...)` call inside the subtree adds to this provider's
- * registry; the chat-hook (`useAgentToolCatalog` + `useDispatchClientTool`)
- * reads from it to build the per-request `uiTools` payload.
- *
- * Usage:
- *
- *   <AgentToolsProvider>
- *     <App />
- *   </AgentToolsProvider>
+ * Wrap the React subtree that should expose tools to the agent. Core
+ * appkit-ui components inside it become agent-addressable automatically;
+ * `useAgentTool(...)` adds bespoke tools. The chat hook
+ * (`useAgentToolCatalog` + `useDispatchClientTool`) reads from this provider
+ * to build the per-request `uiTools` payload and to dispatch
+ * `appkit.client_tool_call` events.
  *
  * Multiple providers are supported (nesting, side-by-side panes); each
- * subtree sees only the tools registered within it. Unmounting the
- * provider drops the registry — there is no global singleton state.
+ * subtree sees only its own tools and elements. Unmounting the provider drops
+ * both registries — there is no global singleton state.
  */
 export function AgentToolsProvider({
   children,
   registry,
+  elementRegistry,
 }: AgentToolsProviderProps): ReactNode {
-  // The registry must outlive renders, so it lives in a ref. We deliberately
-  // do not put it in state: registering a tool would otherwise trigger a
-  // re-render of every consumer, which is wasteful — `useSyncExternalStore`
-  // gives us targeted re-renders only for components that read the catalog.
-  const ownedRegistry = useRef<ClientToolRegistry | null>(null);
-  if (!ownedRegistry.current) {
-    ownedRegistry.current = registry ?? new ClientToolRegistry();
+  const ownedTools = useRef<ClientToolRegistry | null>(null);
+  if (!ownedTools.current) {
+    ownedTools.current = registry ?? new ClientToolRegistry();
+  }
+  const ownedElements = useRef<AgentElementRegistry | null>(null);
+  if (!ownedElements.current) {
+    ownedElements.current = elementRegistry ?? new AgentElementRegistry();
   }
 
   const value = useMemo<AgentToolsContextValue>(
     () => ({
-      registry: registry ?? (ownedRegistry.current as ClientToolRegistry),
+      tools: registry ?? (ownedTools.current as ClientToolRegistry),
+      elements:
+        elementRegistry ?? (ownedElements.current as AgentElementRegistry),
     }),
-    [registry],
+    [registry, elementRegistry],
   );
 
   return (
@@ -78,11 +83,6 @@ export function AgentToolsProvider({
   );
 }
 
-/**
- * Internal: throw a clear error when a hook is called outside the
- * provider. Without this you'd see `Cannot read properties of null` from
- * deep inside `useAgentTool` and have to trace it back yourself.
- */
 function useAgentToolsContext(hookName: string): AgentToolsContextValue {
   const ctx = useContext(AgentToolsContext);
   if (!ctx) {
@@ -95,50 +95,70 @@ function useAgentToolsContext(hookName: string): AgentToolsContextValue {
 }
 
 /**
- * Returns the current registry instance. Most callers want
- * {@link useAgentToolCatalog} or {@link useDispatchClientTool} instead;
- * this is the escape hatch for tests and bespoke chat hooks.
+ * Returns the raw-tool registry. Most callers want
+ * {@link useAgentToolCatalog} or {@link useDispatchClientTool}; this backs
+ * {@link useAgentTool} and is the escape hatch for tests and bespoke hooks.
  */
 export function useClientToolRegistry(): ClientToolRegistry {
-  return useAgentToolsContext("useClientToolRegistry").registry;
+  return useAgentToolsContext("useClientToolRegistry").tools;
 }
 
 /**
- * Snapshot of the live tool catalog, suitable for inclusion in the
- * `uiTools` field of the next chat request. Re-renders on registry changes
- * via `useSyncExternalStore` — only components that actually read the
- * catalog re-render.
- *
- * The returned array is referentially stable across renders that don't
- * change the catalog, so passing it directly into `useEffect` deps or
- * memoised callbacks is safe.
+ * Returns the element registry, or `null` when called outside an
+ * `<AgentToolsProvider>`. Backs {@link useAgentElement}, which is baked into
+ * core components and therefore must not throw when an app doesn't use the
+ * agent-tools layer at all.
+ */
+export function useOptionalAgentElementRegistry(): AgentElementRegistry | null {
+  return useContext(AgentToolsContext)?.elements ?? null;
+}
+
+/**
+ * Snapshot of the live tool catalog for the next chat request's `uiTools`
+ * field: the synthesized element verbs (`click`, `set_value`, …) +
+ * `ui_snapshot`, merged with raw `useAgentTool` tools. Re-renders only when
+ * the catalog's shape changes (element mount/unmount/id change, raw-tool
+ * add/remove) — not when live element state (input values, checked) changes,
+ * since that lives in the snapshot result rather than the catalog.
  */
 export function useAgentToolCatalog(): AgentToolDefinition[] {
-  const { registry } = useAgentToolsContext("useAgentToolCatalog");
-  // Cache the last-emitted snapshot so React's bail-out logic in
-  // `useSyncExternalStore` works (`Object.is` comparison on the array
-  // reference). Without this, every subscribe() invocation would build a
-  // fresh array and force re-renders even when the catalog is unchanged.
-  const cached = useRef<AgentToolDefinition[]>([]);
+  const { tools, elements } = useAgentToolsContext("useAgentToolCatalog");
+  const cached = useRef<{ key: string; value: AgentToolDefinition[] }>({
+    key: "",
+    value: [],
+  });
   return useSyncExternalStore(
-    (listener) => registry.subscribe(listener),
-    () => {
-      const next = registry.catalog();
-      const prev = cached.current;
-      if (catalogEqual(prev, next)) return prev;
-      cached.current = next;
-      return next;
+    (listener) => {
+      const a = tools.subscribe(listener);
+      const b = elements.subscribe(listener);
+      return () => {
+        a();
+        b();
+      };
     },
-    () => cached.current,
+    () => {
+      const raw = tools.catalog();
+      const key = `${elements.registrationKey()}##${raw.map((t) => t.name).join(",")}`;
+      if (key === cached.current.key) return cached.current.value;
+      const value = synthesizeUiCatalog(elements, raw);
+      cached.current = { key, value };
+      return value;
+    },
+    () => cached.current.value,
   );
 }
 
 /**
- * Returns a stable callback that dispatches a client tool by name. Use
- * this from a chat hook to handle `appkit.client_tool_call` SSE events:
+ * Returns a stable callback that dispatches a tool by name and returns its
+ * outcome. Routing:
+ *
+ * - `ui_snapshot` → the live element inventory.
+ * - a verb (`click`, `set_value`, …) → the targeted element's handler.
+ * - anything else → a raw `useAgentTool` tool.
+ *
+ * Use it from a chat hook to handle `appkit.client_tool_call` SSE events:
  *
  *   const dispatch = useDispatchClientTool();
- *   ...
  *   const outcome = await dispatch(toolName, args);
  *   await fetch('/api/agents/client-tool-result', {
  *     method: 'POST',
@@ -149,28 +169,24 @@ export function useDispatchClientTool(): (
   name: string,
   args: Record<string, unknown>,
 ) => Promise<ClientToolDispatchOutcome> {
-  const { registry } = useAgentToolsContext("useDispatchClientTool");
-  // Bound method captured once. `registry` is referentially stable for
-  // the provider's lifetime, so this callback is too.
-  return useMemo(() => registry.dispatch.bind(registry), [registry]);
+  const { tools, elements } = useAgentToolsContext("useDispatchClientTool");
+  return useMemo(
+    () =>
+      async (
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<ClientToolDispatchOutcome> => {
+        if (name === SNAPSHOT_TOOL) {
+          return { kind: "ok", result: { elements: elements.snapshot() } };
+        }
+        if (name in VERB_DEFS) {
+          return elements.dispatch(name, args);
+        }
+        return tools.dispatch(name, args);
+      },
+    [tools, elements],
+  );
 }
 
-/**
- * Cheap shallow compare on `AgentToolDefinition[]` keyed by `name`. Two
- * catalogs with the same set of names in the same order are treated as
- * equal — registration order is deterministic enough that this is safe,
- * and tools whose `description` / `parameters` have changed will get new
- * names anyway in practice. Avoids the cost of deep equality on every
- * subscribe call from `useSyncExternalStore`.
- */
-function catalogEqual(
-  a: AgentToolDefinition[],
-  b: AgentToolDefinition[],
-): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i]!.name !== b[i]!.name) return false;
-  }
-  return true;
-}
+/** Re-exported for consumers that need to detect synthesized tool names. */
+export { isUiToolName };
