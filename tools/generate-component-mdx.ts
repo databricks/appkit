@@ -40,6 +40,7 @@ const COMPONENT_PATTERNS = {
 
 const PATH_PATTERNS = {
   CHARTS_DIR: "src/react/charts/",
+  CHART_COMPONENTS_DIR: "src/react/charts/components/",
   TABLE_DIR: "src/react/table/",
   GENIE_DIR: "src/react/genie/",
   FILE_BROWSER_DIR: "src/react/file-browser/",
@@ -112,7 +113,7 @@ function categorizeComponent(component: ComponentDoc): ComponentInfo {
   const filePath = component.filePath || "";
   const relativePath = path.relative(repoRoot, filePath);
 
-  const chartsMatch = relativePath.match(/charts\/([^/]+)\/index\.tsx$/);
+  const chartsMatch = relativePath.match(/charts\/components\/([^/]+)\.tsx$/);
   if (chartsMatch) {
     return {
       category: "chart",
@@ -283,20 +284,22 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       : undefined;
   }
 
-  // Chart components
-  if (info.category === "chart" && info.chartDir) {
+  // Chart components — examples live in a single charts/examples/ dir, named
+  // after the chart (BarChartDoc → bar.example.tsx).
+  if (info.category === "chart") {
     const chartExamplesDir = path.join(
       repoRoot,
       CHARTS_DIR,
-      info.chartDir,
       OUTPUT_SUBDIRS.EXAMPLES,
     );
     const exampleName = stripDocSuffix(component.displayName || "")
       .replace(new RegExp(`${COMPONENT_PATTERNS.CHART_SUFFIX}$`), "")
       .toLowerCase();
 
-    // Try component-specific first, then directory-based
-    for (const name of [exampleName, info.chartDir]) {
+    // Try component-specific name first, then the chart-dir fallback.
+    for (const name of [exampleName, info.chartDir].filter((n): n is string =>
+      Boolean(n),
+    )) {
       const examplePath = path.join(
         chartExamplesDir,
         `${name}${FILE_EXTENSIONS.EXAMPLE}`,
@@ -546,11 +549,11 @@ function main() {
     const filePath = component.filePath || "";
     const info = categorizeComponent(component);
 
-    // Exclude internal utility files from charts/table directories
-    // Only include chart components from index.tsx files
+    // Exclude internal chart files (renderers, factory, wrapper, examples …).
+    // Only the chart component definitions under charts/components/ are docs.
     if (
       filePath.includes(PATH_PATTERNS.CHARTS_DIR) &&
-      !filePath.endsWith(FILE_EXTENSIONS.INDEX)
+      !filePath.includes(PATH_PATTERNS.CHART_COMPONENTS_DIR)
     ) {
       return false;
     }

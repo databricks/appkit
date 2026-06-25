@@ -5,13 +5,13 @@
 // They automatically select the best format based on data size, or you can
 // explicitly specify `format="json"` or `format="arrow"`.
 
-export { AreaChart } from "./area";
-export { BarChart } from "./bar";
-export { HeatmapChart } from "./heatmap";
-export { LineChart } from "./line";
-export { DonutChart, PieChart } from "./pie";
-export { RadarChart } from "./radar";
-export { ScatterChart } from "./scatter";
+export { AreaChart } from "./components/area";
+export { BarChart } from "./components/bar";
+export { HeatmapChart } from "./components/heatmap";
+export { LineChart } from "./components/line";
+export { DonutChart, PieChart } from "./components/pie";
+export { RadarChart } from "./components/radar";
+export { ScatterChart } from "./components/scatter";
 
 // ============================================================================
 // Chart Engine (ECharts ⇄ Plotly)
