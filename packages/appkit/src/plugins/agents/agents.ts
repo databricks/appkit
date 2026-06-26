@@ -79,15 +79,18 @@ import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
+import { McpBridge } from "./mcp-bridge";
 import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
   clientToolResultSchema,
   invocationsRequestSchema,
+  registerToolsSchema,
 } from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
+import { ToolSessionRegistry } from "./tool-session-registry";
 
 const logger = createLogger("agents");
 
@@ -156,13 +159,17 @@ interface RunState {
   /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
   toolCallsUsed: { count: number };
   /**
-   * Per-request client-tool catalog. Empty `Map` when the chat request did
-   * not include `uiTools`. Lookup is by tool name (matches the LLM-visible
-   * name carried in the tool definition). Sub-agents inherit this catalog
-   * via the same `runState` so a UI tool spread to a sub-agent dispatcher
-   * still round-trips to the same browser tab.
+   * Browser tool-session this run is bound to. Client (UI) tool calls are
+   * delivered over that session's persistent channel. Undefined when the chat
+   * request carried no `sessionId` (no UI tools in play).
    */
-  clientTools: Map<string, AgentToolDefinition>;
+  sessionId?: string;
+  /**
+   * Call ids for client-tool round trips spawned by this run, so the run's
+   * teardown can cancel any still in flight (they're keyed by session, not by
+   * run, on the shared gate).
+   */
+  clientCallIds: Set<string>;
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
@@ -188,6 +195,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   private threadStore;
   private approvalGate = new ToolApprovalGate();
   private clientToolGate = new ClientToolGate();
+  private toolSessions = new ToolSessionRegistry();
+  private mcpBridge: McpBridge | null = null;
 
   constructor(config: AgentsPluginConfig) {
     super(config);
@@ -841,6 +850,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       handler: async (req, res) => this._handleClientToolResult(req, res),
     });
     this.route(router, {
+      name: "toolChannel",
+      method: "get",
+      path: "/tool-channel",
+      handler: async (req, res) => {
+        this._handleToolChannel(req, res);
+      },
+    });
+    this.route(router, {
+      name: "registerTools",
+      method: "post",
+      path: "/register-tools",
+      handler: async (req, res) => this._handleRegisterTools(req, res),
+    });
+    this.mountMcpBridge(router);
+    this.route(router, {
       name: "threads",
       method: "get",
       path: "/threads",
@@ -878,6 +902,57 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     };
   }
 
+  /**
+   * Mount the MCP bridge (`/mcp`) when enabled, exposing the connected tab's UI
+   * tools to external MCP clients. Defaults on in development only — it is
+   * unauthenticated, so production stays opt-in. All three methods route to the
+   * same stateless Streamable HTTP handler.
+   */
+  private mountMcpBridge(router: IAppRouter): void {
+    const enabled =
+      this.config.mcpBridge ?? process.env.NODE_ENV === "development";
+    if (!enabled) return;
+
+    this.mcpBridge = new McpBridge({
+      serverName: "appkit-ui-tools",
+      serverVersion: (AgentsPlugin.manifest.version as string) ?? "0.0.0",
+      resolveSession: () => {
+        const s = this.toolSessions.latest();
+        return s
+          ? { sessionId: s.sessionId, userId: s.userId, tools: s.tools }
+          : null;
+      },
+      callTool: ({ sessionId, userId, name, args }) =>
+        this.deliverClientTool({
+          sessionId,
+          userId,
+          toolName: name,
+          toolArgs: args,
+          annotations: undefined,
+          timeoutMs: this.resolvedLimits.toolCallTimeoutMs,
+        }),
+    });
+
+    const handler = (req: express.Request, res: express.Response) => {
+      this.mcpBridge?.handle(req, res).catch((err) => {
+        logger.error("MCP bridge error: %O", err);
+        if (!res.headersSent) res.status(500).json({ error: "MCP error" });
+      });
+    };
+    for (const method of ["post", "get", "delete"] as const) {
+      this.route(router, {
+        name: `mcp-${method}`,
+        method,
+        path: "/mcp",
+        handler: async (req, res) => handler(req, res),
+      });
+    }
+    logger.warn(
+      "MCP bridge enabled at /api/%s/mcp — UNAUTHENTICATED. Anyone who can reach this endpoint can drive a connected browser tab. Keep it dev/localhost-only.",
+      this.name,
+    );
+  }
+
   private async _handleChat(req: express.Request, res: express.Response) {
     const parsed = chatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -887,12 +962,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const {
-      message,
-      threadId,
-      agent: agentName,
-      uiTools: rawUiTools,
-    } = parsed.data;
+    const { message, threadId, agent: agentName, sessionId } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -904,11 +974,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
+    // The browser's UI tools live in its persistent tool session (registered
+    // over the tool channel), not in the chat body. Pull the live catalog for
+    // this session so the same registration is shared with the MCP bridge.
+    const uiToolEntries = sessionId
+      ? (this.toolSessions.get(sessionId)?.tools ?? [])
+      : [];
+
     // Validate the client tool catalog before allocating a thread or stream.
-    // Catalog issues (collisions with the agent's static tools, duplicates
-    // within the catalog itself) must surface as a synchronous 400 instead
-    // of a half-streamed SSE error — clients have no good UI for the latter.
-    const uiToolEntries = (rawUiTools ?? []) as AgentToolDefinition[];
+    // Collisions with the agent's static tools (or duplicates) must surface as
+    // a synchronous 400 instead of a half-streamed SSE error.
     const catalogError = validateClientToolCatalog(
       uiToolEntries,
       registered.toolIndex,
@@ -967,6 +1042,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       thread,
       userId,
       uiToolEntries,
+      sessionId,
     );
   }
 
@@ -1095,6 +1171,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     thread: Thread,
     userId: string,
     uiTools: AgentToolDefinition[] = [],
+    sessionId?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1102,16 +1179,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.trackStream(requestId, userId, abortController);
 
     // Per-request tool index: clones the registered agent's static index and
-    // augments it with the browser-supplied UI tools. Mutating
+    // augments it with the session's registered UI tools. Mutating
     // `registered.toolIndex` directly would leak request-scoped tools into
     // every subsequent run of the same agent (it's shared across users).
     const requestToolIndex = new Map<string, ResolvedToolEntry>(
       registered.toolIndex,
     );
-    const clientTools = new Map<string, AgentToolDefinition>();
     for (const def of uiTools) {
       requestToolIndex.set(def.name, { source: "client", def });
-      clientTools.set(def.name, def);
     }
 
     const tools = Array.from(requestToolIndex.values()).map((e) => e.def);
@@ -1135,7 +1210,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
-      clientTools,
+      sessionId,
+      clientCallIds: new Set<string>(),
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1221,10 +1297,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         return;
       } finally {
         // Any pending approval gates for this stream are auto-denied so the
-        // adapter can unwind if it was still waiting. Same applies to any
-        // client-tool gates the browser hadn't yet responded to.
+        // adapter can unwind if it was still waiting. Client-tool calls are
+        // keyed by session (not by this run), so cancel the specific call ids
+        // this run spawned rather than aborting by stream id.
         this.approvalGate.abortStream(requestId);
-        this.clientToolGate.abortStream(requestId);
+        for (const callId of runState.clientCallIds) {
+          this.clientToolGate.cancel(callId);
+        }
         this.untrackStream(requestId);
         // Stateless agents (e.g. autocomplete) don't persist history; drop
         // the thread so `InMemoryThreadStore` doesn't accumulate one record
@@ -1315,11 +1394,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
-      // The non-streaming invoke surface has no SSE channel and so no client
-      // (UI) tools — `_handleInvoke` doesn't accept a `uiTools` catalog. An
-      // empty map keeps the shared RunState shape (and the `source: "client"`
-      // dispatch branch) well-typed without enabling the round-trip here.
-      clientTools: new Map(),
+      // The non-streaming invoke surface has no browser session — no UI tools
+      // are reachable here. `sessionId` stays undefined; the `source: "client"`
+      // dispatch branch would report "not connected" if one were ever hit.
+      clientCallIds: new Set<string>(),
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1523,34 +1601,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         throw new Error(`Sub-agent not found: ${entry.agentName}`);
       result = await this.runSubAgent(runState, childAgent, args, depth + 1);
     } else if (entry.source === "client") {
-      // Round-trip to the browser: emit `client_tool_call`, await the
-      // ClientToolGate, and unwrap the structured outcome back into the
-      // adapter's tool-result channel. Errors (timeout, abort, browser-
-      // reported failure) become string returns to the LLM rather than
-      // thrown exceptions, matching how `executeTool`'s contract documents
-      // failure (sanitised text → `tool_result.error`).
-      const callId = randomUUID();
-      for (const ev of runState.translator.translate({
-        type: "client_tool_call",
-        callId,
-        streamId: runState.requestId,
-        toolName: name,
-        args,
-        annotations: entry.def.annotations,
-      })) {
-        runState.outboundEvents.push(ev);
-      }
-      const outcome = await this.clientToolGate.wait({
-        callId,
-        streamId: runState.requestId,
+      // Round-trip to the browser over its persistent tool channel (shared
+      // with the MCP bridge), not the chat SSE stream. `deliverClientTool`
+      // already normalizes the result and turns timeouts/aborts/browser
+      // failures into a sanitised string for the LLM, so return directly.
+      return this.deliverClientTool({
+        sessionId: runState.sessionId,
         userId: runState.userId,
         toolName: name,
+        toolArgs: args,
+        annotations: entry.def.annotations,
         timeoutMs: runState.limits.toolCallTimeoutMs,
+        signal: runState.signal,
+        callIds: runState.clientCallIds,
       });
-      if (outcome.kind === "error") {
-        return `Client tool '${name}' failed: ${outcome.error}`;
-      }
-      result = outcome.result;
     }
 
     return normalizeToolResult(result);
@@ -1739,23 +1803,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { streamId, callId, result, error } = parsed.data;
+    const { callId, result, error } = parsed.data;
 
-    const streamEntry = this.activeStreams.get(streamId);
-    if (!streamEntry) {
-      // Same shape as the approval handler: the stream is gone (cancelled,
-      // timed out, completed). The waiter, if any, has already been
-      // aborted, so the result is irrelevant.
-      res.status(404).json({ error: "Stream not found or already completed" });
-      return;
-    }
-
+    // Unified settlement: calls are keyed by callId on the gate, regardless of
+    // whether they were initiated by the in-app chat agent or the MCP bridge,
+    // so there is no chat-stream lookup here. The gate verifies the userId
+    // matches the one captured when the call was issued.
     const userId = this.resolveUserId(req);
-    if (streamEntry.userId !== userId) {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
-
     const outcome =
       typeof error === "string"
         ? ({ kind: "error", error } as const)
@@ -1774,6 +1828,129 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     res.json({ ok: true });
+  }
+
+  /**
+   * Persistent SSE channel a browser tab holds open for the lifetime of the
+   * page. The server pushes `client_tool_call` events down it (from the in-app
+   * agent or the MCP bridge); the tab POSTs outcomes to `/client-tool-result`.
+   * Raw SSE (not `executeStream`) because this is an unbounded channel that the
+   * stream interceptors' timeout would otherwise tear down.
+   */
+  private _handleToolChannel(req: express.Request, res: express.Response) {
+    const sessionId =
+      typeof req.query.sessionId === "string" ? req.query.sessionId : null;
+    if (!sessionId) {
+      res.status(400).json({ error: "sessionId query param is required" });
+      return;
+    }
+    const userId = this.resolveUserId(req);
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write(": connected\n\n");
+    res.flushHeaders?.();
+
+    const push = (event: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+    this.toolSessions.openChannel(sessionId, userId, push);
+
+    const heartbeat = setInterval(() => {
+      res.write(": heartbeat\n\n");
+    }, 15_000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      this.toolSessions.closeChannel(sessionId);
+      // Cancel any UI tool calls still waiting on this tab.
+      this.clientToolGate.abortStream(sessionId);
+    });
+  }
+
+  /**
+   * Browser pushes its live UI-tool catalog for a session. Replaces the
+   * per-request `uiTools` body; the catalog persists until re-registered or the
+   * tab disconnects, and is shared by the chat agent and the MCP bridge.
+   */
+  private async _handleRegisterTools(
+    req: express.Request,
+    res: express.Response,
+  ) {
+    const parsed = registerToolsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    const { sessionId, tools } = parsed.data;
+    const userId = this.resolveUserId(req);
+    this.toolSessions.setTools(
+      sessionId,
+      userId,
+      tools as AgentToolDefinition[],
+    );
+    res.json({ ok: true, count: tools.length });
+  }
+
+  /**
+   * Round-trip a single UI-tool call to a browser tab over its session
+   * channel and await the outcome on the shared gate. Used by both the in-app
+   * agent's dispatch and (Phase 2) the MCP bridge. Never throws — timeouts,
+   * aborts, and missing channels surface as a structured error string.
+   */
+  private async deliverClientTool(args: {
+    sessionId: string | undefined;
+    userId: string;
+    toolName: string;
+    toolArgs: unknown;
+    annotations: ToolAnnotations | undefined;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    callIds?: Set<string>;
+  }): Promise<unknown> {
+    const { sessionId, userId, toolName, toolArgs, annotations, timeoutMs } =
+      args;
+    const session = sessionId ? this.toolSessions.get(sessionId) : undefined;
+    if (!session?.push) {
+      return `Client tool '${toolName}' could not be delivered: the browser tab is not connected.`;
+    }
+
+    const callId = randomUUID();
+    args.callIds?.add(callId);
+    session.push({
+      type: "appkit.client_tool_call",
+      call_id: callId,
+      stream_id: sessionId,
+      tool_name: toolName,
+      args: toolArgs,
+      annotations,
+    });
+
+    const onAbort = () => this.clientToolGate.cancel(callId);
+    args.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      const outcome = await this.clientToolGate.wait({
+        callId,
+        streamId: sessionId as string,
+        userId,
+        toolName,
+        timeoutMs,
+      });
+      if (outcome.kind === "error") {
+        return `Client tool '${toolName}' failed: ${outcome.error}`;
+      }
+      return normalizeToolResult(outcome.result);
+    } finally {
+      args.signal?.removeEventListener("abort", onAbort);
+      args.callIds?.delete(callId);
+    }
   }
 
   private async _handleListThreads(

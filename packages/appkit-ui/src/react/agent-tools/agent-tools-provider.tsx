@@ -9,9 +9,20 @@ import {
 import type { AgentToolDefinition } from "shared";
 import { AgentElementRegistry } from "./element-registry";
 import { ClientToolRegistry } from "./registry";
-import { synthesizeUiCatalog } from "./synthesize";
+import { dispatchUiCall, synthesizeUiCatalog } from "./synthesize";
 import type { ClientToolDispatchOutcome } from "./types";
-import { isUiToolName, SNAPSHOT_TOOL, VERB_DEFS } from "./verbs";
+import { useAgentToolChannel } from "./use-agent-tool-channel";
+import { isUiToolName } from "./verbs";
+
+/** Default mount point for the agents plugin's HTTP routes. */
+const DEFAULT_API_BASE = "/api/agents";
+
+function newSessionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `s-${Math.random().toString(36).slice(2)}`;
+}
 
 /**
  * Context exposed to descendants of an `<AgentToolsProvider>`. Holds two
@@ -29,6 +40,8 @@ import { isUiToolName, SNAPSHOT_TOOL, VERB_DEFS } from "./verbs";
 interface AgentToolsContextValue {
   tools: ClientToolRegistry;
   elements: AgentElementRegistry;
+  /** Per-tab session id; sent on chat requests and used by the tool channel. */
+  sessionId: string;
 }
 
 const AgentToolsContext = createContext<AgentToolsContextValue | null>(null);
@@ -39,6 +52,14 @@ export interface AgentToolsProviderProps {
   registry?: ClientToolRegistry;
   /** Optional pre-built element registry (tests, advanced sharing). */
   elementRegistry?: AgentElementRegistry;
+  /** Base path for the agents plugin routes. @default "/api/agents" */
+  apiBase?: string;
+  /**
+   * Open the persistent tool channel that registers this tab's catalog and
+   * receives agent/MCP tool calls. Disable for tests or chat-only setups.
+   * @default true
+   */
+  channel?: boolean;
 }
 
 /**
@@ -57,6 +78,8 @@ export function AgentToolsProvider({
   children,
   registry,
   elementRegistry,
+  apiBase = DEFAULT_API_BASE,
+  channel = true,
 }: AgentToolsProviderProps): ReactNode {
   const ownedTools = useRef<ClientToolRegistry | null>(null);
   if (!ownedTools.current) {
@@ -66,14 +89,27 @@ export function AgentToolsProvider({
   if (!ownedElements.current) {
     ownedElements.current = elementRegistry ?? new AgentElementRegistry();
   }
+  const sessionRef = useRef<string>("");
+  if (!sessionRef.current) sessionRef.current = newSessionId();
+
+  const tools = registry ?? (ownedTools.current as ClientToolRegistry);
+  const elements =
+    elementRegistry ?? (ownedElements.current as AgentElementRegistry);
+  const sessionId = sessionRef.current;
+
+  // Hold the persistent channel open: register this tab's catalog and execute
+  // agent/MCP-initiated tool calls. Shared substrate for in-app chat and MCP.
+  useAgentToolChannel({
+    tools,
+    elements,
+    apiBase,
+    sessionId,
+    enabled: channel,
+  });
 
   const value = useMemo<AgentToolsContextValue>(
-    () => ({
-      tools: registry ?? (ownedTools.current as ClientToolRegistry),
-      elements:
-        elementRegistry ?? (ownedElements.current as AgentElementRegistry),
-    }),
-    [registry, elementRegistry],
+    () => ({ tools, elements, sessionId }),
+    [tools, elements, sessionId],
   );
 
   return (
@@ -171,21 +207,19 @@ export function useDispatchClientTool(): (
 ) => Promise<ClientToolDispatchOutcome> {
   const { tools, elements } = useAgentToolsContext("useDispatchClientTool");
   return useMemo(
-    () =>
-      async (
-        name: string,
-        args: Record<string, unknown>,
-      ): Promise<ClientToolDispatchOutcome> => {
-        if (name === SNAPSHOT_TOOL) {
-          return { kind: "ok", result: { elements: elements.snapshot() } };
-        }
-        if (name in VERB_DEFS) {
-          return elements.dispatch(name, args);
-        }
-        return tools.dispatch(name, args);
-      },
+    () => (name: string, args: Record<string, unknown>) =>
+      dispatchUiCall(name, args, tools, elements),
     [tools, elements],
   );
+}
+
+/**
+ * The current tab's tool-session id. Send it on chat requests (`sessionId`)
+ * so the agent uses this tab's registered catalog and delivers tool calls over
+ * its channel.
+ */
+export function useAgentSessionId(): string {
+  return useAgentToolsContext("useAgentSessionId").sessionId;
 }
 
 /** Re-exported for consumers that need to detect synthesized tool names. */

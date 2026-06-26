@@ -290,6 +290,23 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Wait for React to commit and Radix to update the DOM after a programmatic
+ * click. Reading `aria-checked` / `data-state` synchronously after `.click()`
+ * returns the *pre-update* value for controlled components, which makes the
+ * agent think the action failed and retry (toggling twice). Two animation
+ * frames is enough for React to flush the re-render.
+ */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    } else {
+      setTimeout(resolve, 32);
+    }
+  });
+}
+
+/**
  * Currently-rendered options for an open Radix Select. Options are portaled to
  * the document (not nested under the trigger), and `aria-controls` on the
  * trigger points at the listbox, so prefer that and fall back to a
@@ -391,9 +408,13 @@ export function buildRoleCapabilities(
     case "switch":
       return {
         toggle: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             node.click();
+            // Read state only after React commits — a controlled component
+            // hasn't updated `aria-checked` synchronously, and returning the
+            // stale value makes the agent toggle again.
+            await nextFrame();
             return { checked: isChecked(node) };
           },
         },
@@ -401,9 +422,10 @@ export function buildRoleCapabilities(
     case "toggle":
       return {
         toggle: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             node.click();
+            await nextFrame();
             return { pressed: isPressed(node) };
           },
         },
@@ -412,14 +434,19 @@ export function buildRoleCapabilities(
     case "radio":
     case "tab":
     case "menuitem":
-      // Selecting = clicking the item. Each item is its own registered
+      // Selecting = activating the item. Each item is its own registered
       // element, so the agent targets it directly by id instead of the
       // synthesizer guessing DOM structure inside a parent group.
+      //
+      // `focus()` before `click()` matters for Radix Tabs, which use
+      // automatic activation (activate on focus, not on a bare `.click()`).
       return {
         select: {
-          execute: () => {
+          execute: async () => {
             const node = need();
+            node.focus();
             node.click();
+            await nextFrame();
             return { selected: isSelected(node) };
           },
         },
@@ -429,23 +456,26 @@ export function buildRoleCapabilities(
       // click only when the desired direction differs from the current state.
       return {
         open: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             if (!isExpanded(node)) node.click();
+            await nextFrame();
             return { open: isExpanded(node) };
           },
         },
         close: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             if (isExpanded(node)) node.click();
+            await nextFrame();
             return { open: isExpanded(node) };
           },
         },
         toggle: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             node.click();
+            await nextFrame();
             return { open: isExpanded(node) };
           },
         },
@@ -455,17 +485,19 @@ export function buildRoleCapabilities(
       // (clicking it again re-opens). Escape is Radix's universal close.
       return {
         open: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             if (!isExpanded(node)) node.click();
+            await nextFrame();
             return { open: isExpanded(node) };
           },
         },
         close: {
-          execute: () => {
+          execute: async () => {
             const node = need();
             if (isExpanded(node)) dispatchEscape(node);
-            return { open: false };
+            await nextFrame();
+            return { open: isExpanded(node) };
           },
         },
       };

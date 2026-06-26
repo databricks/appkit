@@ -1,6 +1,30 @@
 import type { AgentToolDefinition } from "shared";
 import type { AgentElementRegistry } from "./element-registry";
+import type { ClientToolRegistry } from "./registry";
+import type { ClientToolDispatchOutcome } from "./types";
 import { SNAPSHOT_TOOL, VERB_DEFS } from "./verbs";
+
+/**
+ * Route a tool call to the right executor: `ui_snapshot` → the live element
+ * inventory, a verb (`click`, `set_value`, …) → the targeted element, anything
+ * else → a raw `useAgentTool` tool. Shared by `useDispatchClientTool` (in-app
+ * chat) and `useAgentToolChannel` (persistent channel / MCP), so both
+ * initiators execute calls identically.
+ */
+export async function dispatchUiCall(
+  name: string,
+  args: Record<string, unknown>,
+  tools: ClientToolRegistry,
+  elements: AgentElementRegistry,
+): Promise<ClientToolDispatchOutcome> {
+  if (name === SNAPSHOT_TOOL) {
+    return { kind: "ok", result: { elements: elements.snapshot() } };
+  }
+  if (name in VERB_DEFS) {
+    return elements.dispatch(name, args);
+  }
+  return tools.dispatch(name, args);
+}
 
 /**
  * Build the per-request `uiTools` catalog from the live element registry plus

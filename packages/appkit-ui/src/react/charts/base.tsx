@@ -1,6 +1,6 @@
 import type { ECharts } from "echarts";
 import ReactECharts from "echarts-for-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useAgentChart } from "../agent-tools";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
@@ -18,6 +18,7 @@ import type {
   ChartType,
   Orientation,
 } from "./types";
+import { formatLabel } from "./utils";
 
 // ============================================================================
 // Palette Selection
@@ -105,6 +106,43 @@ export interface BaseChartProps {
 // Base Chart Component
 // ============================================================================
 
+/** Names of the series in a built ECharts option. */
+function optionSeriesNames(option: Record<string, unknown> | null): string[] {
+  const series = option?.series;
+  if (!Array.isArray(series)) return [];
+  return series
+    .map((s) => (s as { name?: unknown }).name)
+    .filter((n): n is string => typeof n === "string");
+}
+
+/**
+ * Return a copy of `option` with every series except `highlighted` dimmed via
+ * opacity. Driving the agent `highlight_series` tool through the React-rendered
+ * option (rather than imperative `dispatchAction`) avoids the echarts-for-react
+ * instance-timing traps and is a guaranteed, persistent visual.
+ */
+function applyHighlight(
+  option: Record<string, unknown>,
+  highlighted: string | null,
+): Record<string, unknown> {
+  if (!highlighted || !Array.isArray(option.series)) return option;
+  return {
+    ...option,
+    series: option.series.map((s) => {
+      const series = s as { name?: string; [k: string]: unknown };
+      const opacity = series.name === highlighted ? 1 : 0.18;
+      return {
+        ...series,
+        itemStyle: { ...(series.itemStyle as object), opacity },
+        lineStyle: { ...(series.lineStyle as object), opacity },
+        ...(series.areaStyle
+          ? { areaStyle: { ...(series.areaStyle as object), opacity } }
+          : {}),
+      };
+    }),
+  };
+}
+
 /**
  * Base chart component that handles both Arrow and JSON data.
  * Renders using ECharts for consistent output across both formats.
@@ -141,6 +179,10 @@ export function BaseChart({
   const colors = customColors ?? themeColors;
 
   const ui = useChartUITokens();
+
+  // Agent-driven highlight: which series to emphasize (others dimmed). Set by
+  // the `highlight_series` tool and folded into the option below.
+  const [highlighted, setHighlighted] = useState<string | null>(null);
 
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
@@ -261,8 +303,9 @@ export function BaseChart({
       });
     }
 
-    // Merge custom options
-    return customOptions ? { ...opt, ...customOptions } : opt;
+    // Merge custom options, then apply any agent-driven series highlight.
+    const merged = customOptions ? { ...opt, ...customOptions } : opt;
+    return applyHighlight(merged, highlighted);
   }, [
     normalized,
     colors,
@@ -282,11 +325,13 @@ export function BaseChart({
     min,
     max,
     customOptions,
+    highlighted,
   ]);
 
   // Register the chart with the agent-tools layer (no-op without a provider).
-  // `read_chart` exposes the normalized series; `highlight_series` drives the
-  // live ECharts instance. Read lazily so the agent always sees current data.
+  // `read_chart` exposes the normalized series; `highlight_series` resolves a
+  // series name against `getSeriesNames` and flips `setHighlight`, which dims
+  // the rest through the React-rendered option above.
   useAgentChart({
     agentId,
     label: title,
@@ -305,13 +350,16 @@ export function BaseChart({
       return {
         xField: normalized.xField,
         xData: normalized.xData,
-        series: normalized.yFields.map((name) => ({
-          name,
-          values: yDataMap[name] ?? [],
+        // Report the formatted (rendered) series name so `read_chart` and
+        // `highlight_series` agree on names; pair with the raw values.
+        series: normalized.yFields.map((key) => ({
+          name: formatLabel(key),
+          values: yDataMap[key] ?? [],
         })),
       };
     },
-    getInstance: () => echartsInstanceRef.current,
+    getSeriesNames: () => optionSeriesNames(option),
+    setHighlight: setHighlighted,
   });
 
   if (!option) {

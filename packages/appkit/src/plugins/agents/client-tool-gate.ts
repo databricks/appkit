@@ -107,6 +107,24 @@ export class ClientToolGate {
   }
 
   /**
+   * Cancel a single pending gate by call id (e.g. the enclosing chat run was
+   * aborted while the call was in flight). No-op if already settled. Used by
+   * the unified channel: calls are keyed by session, not by chat run, so a
+   * chat abort must cancel its own in-flight calls individually rather than
+   * by stream id.
+   */
+  cancel(callId: string): void {
+    const p = this.pending.get(callId);
+    if (!p) return;
+    clearTimeout(p.timeout);
+    this.pending.delete(callId);
+    p.resolve({
+      kind: "error",
+      error: `Client tool '${p.toolName}' aborted before the browser responded`,
+    });
+  }
+
+  /**
    * Cancel all pending gates for a specific stream (e.g., when the user
    * cancels the stream or the request unwinds). Each gate resolves with a
    * structured error so the adapter unwinds cleanly.

@@ -1,22 +1,22 @@
 import { Button } from "@databricks/appkit-ui/react";
 import {
+  useAgentSessionId,
   useAgentToolCatalog,
-  useDispatchClientTool,
 } from "@databricks/appkit-ui/react/beta";
 import { useCallback, useRef, useState } from "react";
 
 /**
- * Reusable agent chat panel for the "UI as a tool" demos. Snapshots the live
- * tool catalog from the surrounding `<AgentToolsProvider>` (synthesized verb
- * tools + `ui_snapshot`, plus any `useAgentTool` tools), sends it as `uiTools`
- * on each `POST /chat`, and round-trips every `appkit.client_tool_call` event
- * through `useDispatchClientTool`.
+ * Reusable agent chat panel for the "UI as a tool" demos. The tab's tool
+ * catalog is registered with the server over the persistent channel managed by
+ * `<AgentToolsProvider>` (the unified path shared with the MCP bridge), so the
+ * chat request only sends the `sessionId`; tool calls round-trip over that
+ * channel, not this chat stream.
  *
  * Must be rendered inside an `<AgentToolsProvider>`.
  */
 export function AgentChat({ placeholder }: { placeholder?: string }) {
   const catalog = useAgentToolCatalog();
-  const dispatchClientTool = useDispatchClientTool();
+  const sessionId = useAgentSessionId();
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -52,7 +52,7 @@ export function AgentChat({ placeholder }: { placeholder?: string }) {
         body: JSON.stringify({
           message: trimmed,
           ...(threadId && { threadId }),
-          uiTools: catalog,
+          sessionId,
         }),
       });
 
@@ -70,7 +70,6 @@ export function AgentChat({ placeholder }: { placeholder?: string }) {
       }
 
       await consumeStream(res, {
-        dispatchClientTool,
         appendEvent,
         setMessages,
         setThreadId,
@@ -88,15 +87,7 @@ export function AgentChat({ placeholder }: { placeholder?: string }) {
     } finally {
       setIsLoading(false);
     }
-  }, [
-    input,
-    isLoading,
-    threadId,
-    catalog,
-    dispatchClientTool,
-    appendEvent,
-    nextId,
-  ]);
+  }, [input, isLoading, threadId, sessionId, appendEvent, nextId]);
 
   return (
     <div className="flex-1 flex gap-4 h-[600px] min-w-0">
@@ -196,16 +187,7 @@ interface EventLine {
   detail: string;
 }
 
-interface ClientToolCallEvent {
-  type: "appkit.client_tool_call";
-  call_id: string;
-  stream_id: string;
-  tool_name: string;
-  args: unknown;
-}
-
 interface ConsumeStreamArgs {
-  dispatchClientTool: ReturnType<typeof useDispatchClientTool>;
   appendEvent: (label: string, detail: string) => void;
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setThreadId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -213,17 +195,16 @@ interface ConsumeStreamArgs {
 }
 
 /**
- * Consume the SSE chat stream, accumulate assistant text, and round-trip any
- * `appkit.client_tool_call` events through the registry. The `streamId` POSTed
- * to `/client-tool-result` comes from the event itself; the server keys
- * pending gates by stream and rejects mismatches.
+ * Consume the SSE chat stream and accumulate assistant text. Tool calls are no
+ * longer carried here — they round-trip over the persistent tool channel
+ * (managed by `<AgentToolsProvider>`), so this only handles text, metadata,
+ * the agent's tool-call markers (for the event log), and errors.
  */
 async function consumeStream(
   response: Response,
   args: ConsumeStreamArgs,
 ): Promise<void> {
-  const { dispatchClientTool, appendEvent, setMessages, setThreadId, nextId } =
-    args;
+  const { appendEvent, setMessages, setThreadId, nextId } = args;
 
   const reader = response.body?.getReader();
   if (!reader) return;
@@ -283,49 +264,6 @@ async function consumeStream(
         const item = (evt as { item?: { type?: string; name?: string } }).item;
         if (item?.type === "function_call") {
           appendEvent("tool_call", item.name ?? "<unnamed>");
-        }
-        continue;
-      }
-
-      if (evt.type === "appkit.client_tool_call") {
-        const call = evt as unknown as ClientToolCallEvent;
-        appendEvent(
-          "client_tool_call",
-          `${call.tool_name}(${JSON.stringify(call.args ?? {})})`,
-        );
-        const outcome = await dispatchClientTool(
-          call.tool_name,
-          (call.args ?? {}) as Record<string, unknown>,
-        );
-        appendEvent(
-          outcome.kind === "ok" ? "tool_result" : "tool_error",
-          outcome.kind === "ok"
-            ? JSON.stringify(outcome.result)
-            : outcome.error,
-        );
-        const body =
-          outcome.kind === "ok"
-            ? {
-                streamId: call.stream_id,
-                callId: call.call_id,
-                result: outcome.result,
-              }
-            : {
-                streamId: call.stream_id,
-                callId: call.call_id,
-                error: outcome.error,
-              };
-        try {
-          await fetch("/api/agents/client-tool-result", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-        } catch (err) {
-          appendEvent(
-            "post_failed",
-            err instanceof Error ? err.message : "Unknown error",
-          );
         }
         continue;
       }

@@ -77,21 +77,32 @@ export const chatRequestSchema = z.object({
   threadId: z.string().optional(),
   agent: z.string().optional(),
   /**
-   * UI tools registered by the calling browser for the lifetime of this
-   * single chat request. Names must be unique within the catalog and are
-   * additionally checked against the agent's static tool index server-side
-   * (collisions are rejected to prevent a UI tool from shadowing a plugin
-   * tool the LLM thought it was calling).
+   * Id of the browser's tool session (from the persistent tool channel). When
+   * present, the session's registered UI tools become available to the agent
+   * for this chat — replacing the per-request `uiTools` catalog so registration
+   * is shared with the MCP bridge.
    */
-  uiTools: z
+  sessionId: z.string().optional(),
+});
+
+/**
+ * Body for `POST /register-tools`: the browser pushes its live UI-tool catalog
+ * for a session. Names must be unique within the catalog; collisions with the
+ * agent's static tools are checked at chat time.
+ */
+export const registerToolsSchema = z.object({
+  sessionId: z.string().min(1, "sessionId is required"),
+  tools: z
     .array(uiToolDefinitionSchema)
-    .max(MAX_UI_TOOLS, `uiTools exceeds the ${MAX_UI_TOOLS}-entry limit`)
-    .optional(),
+    .max(MAX_UI_TOOLS, `tools exceeds the ${MAX_UI_TOOLS}-entry limit`)
+    .default([]),
 });
 
 export const clientToolResultSchema = z
   .object({
-    streamId: z.string().min(1, "streamId is required"),
+    // streamId is informational now — calls are settled by callId alone so
+    // the same route serves chat-, channel-, and MCP-initiated calls.
+    streamId: z.string().optional(),
     callId: z.string().min(1, "callId is required"),
     result: z.unknown().optional(),
     error: z.string().max(8_000).optional(),

@@ -2,6 +2,7 @@ export {
   AgentToolsProvider,
   type AgentToolsProviderProps,
   isUiToolName,
+  useAgentSessionId,
   useAgentToolCatalog,
   useClientToolRegistry,
   useDispatchClientTool,
@@ -21,7 +22,6 @@ export type {
   UseAgentToolConfig,
 } from "./types";
 export {
-  type AgentChartInstance,
   type UseAgentChartOptions,
   useAgentChart,
 } from "./use-agent-chart";

@@ -208,6 +208,23 @@ to non-workspace hosts.
 
 ***
 
+### mcpBridge?
+
+```ts
+optional mcpBridge: boolean;
+```
+
+Expose the connected browser tab's UI tools to external MCP clients
+(Claude Code, Cursor, scripts) at `GET/POST /api/agents/mcp`. `tools/list`
+returns the tab's registered catalog; `tools/call` round-trips through the
+same channel the in-app agent uses, so external agents drive the live UI.
+
+Defaults to enabled in development only. UNAUTHENTICATED — anyone who can
+reach the endpoint can drive the browser, so keep it dev/localhost-only
+until an auth story exists.
+
+***
+
 ### name?
 
 ```ts
