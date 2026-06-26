@@ -47,7 +47,8 @@ export {
   tool,
   toolsFromRegistry,
 } from "./core/agent/tools";
-
+// Agent evaluation (eve-style authoring, reports to MLflow)
+export * from "./evals";
 // Agent types
 export type {
   AgentDefinition,
