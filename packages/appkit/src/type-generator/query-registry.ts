@@ -487,12 +487,22 @@ export async function generateQueriesFromDescribe(
     noCache?: boolean;
     concurrency?: number;
     mode?: PreflightMode;
+    /**
+     * Session catalog/schema for the DESCRIBE statements. Lets schema-relative
+     * SQL (unqualified table names) resolve at typegen time the same way it
+     * does at runtime. Optional — when omitted, queries must be fully
+     * qualified to describe successfully.
+     */
+    catalog?: string;
+    schema?: string;
   } = {},
 ): Promise<QueryGenerationResult> {
   const {
     noCache = false,
     concurrency: rawConcurrency = 10,
     mode = "non-blocking",
+    catalog,
+    schema,
   } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
@@ -740,6 +750,7 @@ export async function generateQueriesFromDescribe(
           `DESCRIBE QUERY ${cleanedSql}`,
           warehouseId,
           describeFormat,
+          { catalog, schema },
         );
 
         completed++;

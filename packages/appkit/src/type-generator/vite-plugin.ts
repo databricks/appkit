@@ -102,6 +102,12 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         return;
       }
 
+      // Optional session context so schema-relative queries (unqualified table
+      // names) resolve during DESCRIBE. Read from env alongside the warehouse
+      // id; unset → DESCRIBE runs without a default catalog/schema as before.
+      const catalog = process.env.DATABRICKS_CATALOG || undefined;
+      const schema = process.env.DATABRICKS_SCHEMA || undefined;
+
       await generateFromEntryPoint({
         outFile,
         queryFolder: watchFolders[0],
@@ -110,6 +116,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         mode,
         mvOutFile,
         mvMetadataOutFile,
+        catalog,
+        schema,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable

@@ -167,6 +167,7 @@ export async function describeAdaptive(
   statement: string,
   warehouseId: string,
   memo: DescribeFormatMemo,
+  context?: { catalog?: string; schema?: string },
 ): Promise<DatabricksStatementExecutionResponse> {
   const formats: DescribeFormat[] = memo.format
     ? [memo.format]
@@ -178,6 +179,13 @@ export async function describeAdaptive(
       const response = (await client.statementExecution.executeStatement({
         statement,
         warehouse_id: warehouseId,
+        // Session context for the statement. The Statement Execution API honors
+        // top-level catalog/schema as the equivalent of USE CATALOG / USE SCHEMA
+        // for that one statement — so schema-relative SQL (e.g. `FROM orders`,
+        // no catalog.schema qualifier) resolves during DESCRIBE. Omitted keys
+        // are simply absent, so callers that pass no context are unaffected.
+        ...(context?.catalog ? { catalog: context.catalog } : {}),
+        ...(context?.schema ? { schema: context.schema } : {}),
         // Synchronous wait: without it the call can return PENDING/RUNNING with
         // no rows, which downstream misreads as a no-result degrade.
         wait_timeout: "30s",

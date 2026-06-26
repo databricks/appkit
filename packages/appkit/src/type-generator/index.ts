@@ -298,6 +298,9 @@ export async function generateFromEntryPoint(options: {
   mvOutFile?: string;
   mvMetadataOutFile?: string;
   metricFetcher?: DescribeFetcher;
+  /** Session catalog/schema for DESCRIBE — see generateQueriesFromDescribe. */
+  catalog?: string;
+  schema?: string;
 }) {
   const {
     outFile,
@@ -308,6 +311,8 @@ export async function generateFromEntryPoint(options: {
     mvOutFile,
     mvMetadataOutFile,
     metricFetcher,
+    catalog,
+    schema,
   } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
@@ -320,6 +325,8 @@ export async function generateFromEntryPoint(options: {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
       mode,
+      catalog,
+      schema,
     });
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];

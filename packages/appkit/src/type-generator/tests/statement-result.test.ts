@@ -272,15 +272,17 @@ describe("describeAdaptive", () => {
   // each executeStatement to behavior(format), which may resolve or throw.
   function stubClient(behavior: StubBehavior) {
     const formats: string[] = [];
+    const requests: Record<string, unknown>[] = [];
     const client = {
       statementExecution: {
         executeStatement: async (req: { format: string }) => {
           formats.push(req.format);
+          requests.push(req);
           return behavior(req.format);
         },
       },
     } as unknown as WorkspaceClient;
-    return { client, formats };
+    return { client, formats, requests };
   }
 
   const rows = (
@@ -483,5 +485,40 @@ describe("describeAdaptive", () => {
     ).rejects.toThrow("connection refused");
     expect(memo.format).toBeUndefined();
     expect(formats).toEqual(["JSON_ARRAY"]);
+  });
+
+  test("session context: forwards catalog/schema to executeStatement", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, requests } = stubClient((format) => {
+      if (format === "JSON_ARRAY") return rows([["schema"]]);
+      throw new Error("ARROW should not be tried");
+    });
+
+    await describeAdaptive(client, "DESCRIBE QUERY x", "wh", memo, {
+      catalog: "my_catalog",
+      schema: "my_schema",
+    });
+
+    // The catalog/schema reach executeStatement as top-level session context,
+    // so schema-relative SQL (unqualified table names) resolves at DESCRIBE.
+    expect(requests[0]).toMatchObject({
+      catalog: "my_catalog",
+      schema: "my_schema",
+    });
+  });
+
+  test("session context: omitted keys are absent (back-compat)", async () => {
+    const memo: DescribeFormatMemo = {};
+    const { client, requests } = stubClient((format) => {
+      if (format === "JSON_ARRAY") return rows([["schema"]]);
+      throw new Error("ARROW should not be tried");
+    });
+
+    // No context arg at all → the request carries no catalog/schema, exactly
+    // as before this parameter existed.
+    await describeAdaptive(client, "DESCRIBE QUERY x", "wh", memo);
+
+    expect(requests[0]).not.toHaveProperty("catalog");
+    expect(requests[0]).not.toHaveProperty("schema");
   });
 });
