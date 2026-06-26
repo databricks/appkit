@@ -13,8 +13,24 @@ const prerelease = values.prerelease;
 fs.mkdirSync("tmp", { recursive: true });
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+
+// Packages that are workspace-local but published separately — replace workspace:* with real version.
+const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase-auth"];
+
 if (prerelease) {
   pkg.version = `${pkg.version}-pr.${prerelease}`;
+}
+
+for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
+  if (pkg.dependencies?.[depName] === "workspace:*") {
+    const pkgDirName = depName.split("/").pop() ?? depName;
+    const depPkgPath = path.join(
+      __dirname,
+      `../packages/${pkgDirName}/package.json`,
+    );
+    const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
+    pkg.dependencies[depName] = `${depPkg.version}`;
+  }
 }
 
 pkg.exports = pkg.publishConfig.exports;

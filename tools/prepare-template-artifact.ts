@@ -92,10 +92,18 @@ const appkitUiDir = tarballDir
 const lakebaseDir = tarballDir
   ? join(ROOT, tarballDir)
   : join(ROOT, "packages/lakebase/tmp");
+const lakebaseAuthDir = tarballDir
+  ? join(ROOT, tarballDir)
+  : join(ROOT, "packages/lakebase-auth/tmp");
 
 const APPKIT_TARBALL = getTarballName(appkitDir, "appkit");
 const APPKIT_UI_TARBALL = getTarballName(appkitUiDir, "appkit-ui");
 const LAKEBASE_TARBALL = getTarballName(lakebaseDir, "lakebase", false);
+const LAKEBASE_AUTH_TARBALL = getTarballName(
+  lakebaseAuthDir,
+  "lakebase-auth",
+  false,
+);
 
 const appkitSrc = join(appkitDir, APPKIT_TARBALL);
 const appkitUiSrc = join(appkitUiDir, APPKIT_UI_TARBALL);
@@ -110,6 +118,14 @@ if (LAKEBASE_TARBALL && lakebaseSrc && existsSync(lakebaseSrc)) {
   console.log(`✓ Copied ${LAKEBASE_TARBALL}`);
 }
 
+const lakebaseAuthSrc = LAKEBASE_AUTH_TARBALL
+  ? join(lakebaseAuthDir, LAKEBASE_AUTH_TARBALL)
+  : "";
+if (LAKEBASE_AUTH_TARBALL && lakebaseAuthSrc && existsSync(lakebaseAuthSrc)) {
+  copyFileSync(lakebaseAuthSrc, join(STAGING_DIR, LAKEBASE_AUTH_TARBALL));
+  console.log(`✓ Copied ${LAKEBASE_AUTH_TARBALL}`);
+}
+
 // 3. Rewrite package.json dependencies to point at the local tarballs
 const pkgPath = join(STAGING_DIR, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
@@ -119,9 +135,14 @@ if (lakebaseSrc && existsSync(lakebaseSrc) && LAKEBASE_TARBALL) {
   pkg.overrides = pkg.overrides ?? {};
   pkg.overrides["@databricks/lakebase"] = `file:./${LAKEBASE_TARBALL}`;
 }
+if (lakebaseAuthSrc && existsSync(lakebaseAuthSrc) && LAKEBASE_AUTH_TARBALL) {
+  pkg.overrides = pkg.overrides ?? {};
+  pkg.overrides["@databricks/lakebase-auth"] =
+    `file:./${LAKEBASE_AUTH_TARBALL}`;
+}
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log(
   lakebaseSrc && existsSync(lakebaseSrc)
-    ? "✓ Rewrote package.json (appkit/appkit-ui file: deps; @databricks/lakebase override)"
+    ? "✓ Rewrote package.json (appkit/appkit-ui file: deps; @databricks/lakebase + @databricks/lakebase-auth overrides)"
     : "✓ Rewrote package.json dependencies to file: references (no local lakebase pack)",
 );
