@@ -2,6 +2,7 @@
 
 OAuth credential generation and token refresh for Databricks Lakebase Autoscaling, usable with any PostgreSQL driver.
 
+
 ## Overview
 
 `@databricks/lakebase-auth` produces a Postgres connection config (including an auto-refreshing OAuth password callback) for Databricks Lakebase Autoscaling (OLTP) databases. It is dependency-light (only the Databricks SDK) and driver-agnostic, so it works with [`pg`](https://node-postgres.com/), [`postgres.js`](https://github.com/porsager/postgres), [`Bun.SQL`](https://bun.sh/docs/api/sql), and any ORM built on top of them.
@@ -22,6 +23,7 @@ For a batteries-included `pg.Pool` with OpenTelemetry instrumentation and AppKit
 ```bash
 npm install @databricks/lakebase-auth
 ```
+
 
 ## Quick Start
 
@@ -44,7 +46,9 @@ databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
 
 You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page (Project list -> Project dashboard -> Branch overview). 
 
-Then use with node-postgres:
+Then use `getPgConfig()` with any the Postgres driver or ORM of your choice. The `password` value returned by `getPgConfig()` is a function: all the main drivers will call this to obtain a current token.
+
+### node-postgres (pg)
 
 ```typescript
 import pg from "pg";
@@ -60,49 +64,57 @@ await pool.end();
 dispose();
 ```
 
-## Usage with other drivers
-
-`getPgConfig()` returns `host`, `port`, `user`, `database`, `password` (a function returning a current OAuth token), `ssl`, and `dispose`. These are accepted by postgres.js and Bun.sql as well as pg:
+### postgres.js
 
 ```typescript
-// postgres.js
 import postgres from "postgres";
+import { getPgConfig } from "@databricks/lakebase-auth";
+
 const { dispose, ...config } = getPgConfig();
 const sql = postgres({
   ...config,
   // any custom options or overrides here
 });
+
 const result = await sql`SELECT now()`
+
 await sql.end();
 dispose(); // stop background token refresh
+```
 
-// Bun.SQL
+### Bun.SQL
+
+```typescript
+import { getPgConfig } from "@databricks/lakebase-auth";
+
 const { dispose, ...config } = getPgConfig();
 const sql = new Bun.SQL({
   ...config,
   // any custom options or overrides here
 });
+
 const result = await sql`SELECT now()`;
+
 await sql.end();
 dispose(); // stop background token refresh
 ```
 
-The emitted `ssl` object carries a `serverName` for `Bun.SQL`, which [fails to derive SNI from the host](https://github.com/oven-sh/bun/issues/26369) when TLS is passed as an object. Lakebase requires SNI, so this makes Bun connections work; `pg` and `postgres.js` set SNI themselves and ignore the key.
+The emitted `ssl` object includes `serverName`, since `Bun.SQL` [fails to derive SNI from the host](https://github.com/oven-sh/bun/issues/26369) when SSL/TLS settings are passed as an object. Lakebase requires SNI, so this ensures Bun connections work. `pg` and `postgres.js` set SNI themselves and ignore the key.
 
-### Low-level password provider
 
-If you only need the password callback (and manage the rest of the connection yourself), use `createPasswordProvider`:
+## Low-level password provider
+
+If you only need the password callback (and manage the rest of the connection parameters yourself), use `createPasswordProvider`:
 
 ```typescript
 import { createPasswordProvider } from "@databricks/lakebase-auth";
 
-const { password, dispose } = createPasswordProvider({
-  endpoint: process.env.LAKEBASE_ENDPOINT,
-});
-
+const endpoint = process.env.LAKEBASE_ENDPOINT;
+const { password, dispose } = createPasswordProvider({ endpoint });
 const pool = new pg.Pool({ host, user, database, password });
 // on shutdown: await pool.end(); dispose();
 ```
+
 
 ## Token refresh strategies
 
@@ -117,6 +129,7 @@ const config = getPgConfig({ refresh: "lazy" });
 
 Eager refresh uses an `unref`'d timer, so it never keeps the process alive on its own. Call `dispose()` to cancel it during graceful shutdown.
 
+
 ## Retries
 
 Transient credential-fetch failures (e.g. the OAuth server being briefly unreachable) are retried automatically. The default schedule is `[50, 500, 5000]` ms (i.e. an initial attempt plus three retries with backoff). Customize or disable it:
@@ -129,6 +142,7 @@ getPgConfig({ retry: { schedule: [100, 1000] } });
 getPgConfig({ retry: { schedule: [] } });
 ```
 
+
 ## Logging
 
 The package emits log events through an optional `onLog` callback (no logging dependency):
@@ -138,6 +152,7 @@ getPgConfig({
   onLog: (level, message, ...args) => console[level](message, ...args),
 });
 ```
+
 
 ## Configuration
 
@@ -153,6 +168,7 @@ getPgConfig({
 | `earlyRefreshMs` | -                                  | How long before expiry to refresh    | `120000`           |
 | `retry`          | -                                  | Retry schedule for credential fetch  | `[50, 500, 5000]`  |
 
+
 ## Learn more
 
-For Lakebase Autoscaling documentation, see [docs.databricks.com/aws/en/oltp/projects](https://docs.databricks.com/aws/en/oltp/projects/).
+For Lakebase Autoscaling documentation, see https://docs.databricks.com/aws/en/oltp/projects/.
