@@ -18,6 +18,23 @@ function textDelta(content: string): string {
   );
 }
 
+function usageChunk(
+  prompt: number,
+  completion: number,
+  total: number = prompt + completion,
+): string {
+  return sseChunk(
+    JSON.stringify({
+      choices: [],
+      usage: {
+        prompt_tokens: prompt,
+        completion_tokens: completion,
+        total_tokens: total,
+      },
+    }),
+  );
+}
+
 function toolCallDelta(
   index: number,
   id: string | undefined,
@@ -563,6 +580,113 @@ describe("DatabricksAdapter", () => {
     expect(body.messages[0]).toEqual({
       role: "user",
       content: "Hello",
+    });
+  });
+
+  describe("token usage", () => {
+    test("requests usage via stream_options.include_usage", async () => {
+      globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+      const adapter = createAdapter();
+
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+
+      const [, init] = (globalThis.fetch as any).mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body.stream_options).toEqual({ include_usage: true });
+    });
+
+    test("emits a metadata event with token usage from the final chunk", async () => {
+      globalThis.fetch = mockFetch([
+        textDelta("Hello"),
+        usageChunk(12, 8, 20),
+        sseChunk("[DONE]"),
+      ]);
+      const adapter = createAdapter();
+      const events: AgentEvent[] = [];
+
+      for await (const event of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(event);
+      }
+
+      const metadata = events.filter((e) => e.type === "metadata");
+      expect(metadata).toHaveLength(1);
+      expect(metadata[0]).toEqual({
+        type: "metadata",
+        data: {
+          usage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 },
+        },
+      });
+    });
+
+    test("aggregates usage across model steps in a single turn", async () => {
+      const executeTool = vi.fn().mockResolvedValue({ ok: true });
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            body: createReadableStream([
+              toolCallDelta(0, "call_1", "analytics__query", '{"query":"x"}'),
+              usageChunk(10, 5, 15),
+              sseChunk("[DONE]"),
+            ]),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([
+            textDelta("done"),
+            usageChunk(20, 7, 27),
+            sseChunk("[DONE]"),
+          ]),
+        });
+      });
+
+      const adapter = createAdapter();
+      const events: AgentEvent[] = [];
+      for await (const event of adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: createTestTools(),
+          threadId: "t1",
+        },
+        { executeTool },
+      )) {
+        events.push(event);
+      }
+
+      const metadata = events.filter((e) => e.type === "metadata");
+      expect(metadata).toHaveLength(1);
+      expect(metadata[0]).toEqual({
+        type: "metadata",
+        data: {
+          usage: { promptTokens: 30, completionTokens: 12, totalTokens: 42 },
+        },
+      });
+    });
+
+    test("emits no usage metadata when the endpoint reports none", async () => {
+      globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+      const adapter = createAdapter();
+      const events: AgentEvent[] = [];
+
+      for await (const event of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(event);
+      }
+
+      expect(events.some((e) => e.type === "metadata")).toBe(false);
     });
   });
 

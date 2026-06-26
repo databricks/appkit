@@ -4,6 +4,7 @@ import type {
   AgentInput,
   AgentRunContext,
   AgentToolDefinition,
+  TokenUsage,
 } from "shared";
 import { stream as servingStream } from "../connectors/serving/client";
 
@@ -47,6 +48,47 @@ function openAiChoicesDelta(parsed: unknown): unknown {
 function isStreamingDeltaToolCall(value: unknown): value is DeltaToolCall {
   if (!isRecord(value)) return false;
   return typeof value.index === "number";
+}
+
+/**
+ * Extract OpenAI-compatible `usage` from a parsed SSE chunk. The usage chunk
+ * arrives last (after `[DONE]`-adjacent deltas) with an empty `choices` array,
+ * so it must be read before the empty-delta short-circuit. Returns `undefined`
+ * when the chunk carries no usage (the common case for every non-final chunk,
+ * or for endpoints that ignore `stream_options.include_usage`).
+ */
+function parseUsage(parsed: unknown): TokenUsage | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const usage = parsed.usage;
+  if (!isRecord(usage)) return undefined;
+  const prompt = usage.prompt_tokens;
+  const completion = usage.completion_tokens;
+  const total = usage.total_tokens;
+  if (
+    typeof prompt !== "number" &&
+    typeof completion !== "number" &&
+    typeof total !== "number"
+  ) {
+    return undefined;
+  }
+  const promptTokens = typeof prompt === "number" ? prompt : 0;
+  const completionTokens = typeof completion === "number" ? completion : 0;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens:
+      typeof total === "number" ? total : promptTokens + completionTokens,
+  };
+}
+
+/** Sum per-step usage into a per-turn running total. */
+function addUsage(acc: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+  if (!acc) return next;
+  return {
+    promptTokens: acc.promptTokens + next.promptTokens,
+    completionTokens: acc.completionTokens + next.completionTokens,
+    totalTokens: acc.totalTokens + next.totalTokens,
+  };
 }
 
 function throwIfExceedsStreamLimit(
@@ -398,14 +440,17 @@ export class DatabricksAdapter implements AgentAdapter {
 
     yield { type: "status", status: "running" };
 
+    let turnUsage: TokenUsage | undefined;
+
     for (let step = 0; step < this.maxSteps; step++) {
       if (context.signal?.aborted) break;
 
-      const { text, toolCalls } = yield* this.streamCompletion(
+      const { text, toolCalls, usage } = yield* this.streamCompletion(
         messages,
         tools,
         context,
       );
+      if (usage) turnUsage = addUsage(turnUsage, usage);
 
       if (toolCalls.length === 0) {
         const parsed = parseTextToolCalls(text);
@@ -427,6 +472,10 @@ export class DatabricksAdapter implements AgentAdapter {
         const originalName = wireToName.get(wireName) ?? wireName;
         yield* this.executeSingleTool(tc, originalName, messages, context);
       }
+    }
+
+    if (turnUsage) {
+      yield { type: "metadata", data: { usage: turnUsage } };
     }
   }
 
@@ -483,12 +532,15 @@ export class DatabricksAdapter implements AgentAdapter {
     context: AgentRunContext,
   ): AsyncGenerator<
     AgentEvent,
-    { text: string; toolCalls: OpenAIToolCall[] },
+    { text: string; toolCalls: OpenAIToolCall[]; usage?: TokenUsage },
     unknown
   > {
     const body: Record<string, unknown> = {
       messages,
       stream: true,
+      // Ask the endpoint to append a final chunk carrying token counts.
+      // Endpoints that don't support it ignore the field; usage stays absent.
+      stream_options: { include_usage: true },
       max_tokens: this.maxTokens,
     };
 
@@ -510,6 +562,7 @@ export class DatabricksAdapter implements AgentAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
     let fullText = "";
+    let usage: TokenUsage | undefined;
     const toolCallAccumulator = new Map<
       number,
       {
@@ -560,6 +613,11 @@ export class DatabricksAdapter implements AgentAdapter {
             );
             continue;
           }
+
+          // Read usage before the empty-delta short-circuit: the final usage
+          // chunk carries `usage` with an empty `choices` array.
+          const chunkUsage = parseUsage(parsed);
+          if (chunkUsage) usage = chunkUsage;
 
           const deltaUnknown = openAiChoicesDelta(parsed);
           if (!isRecord(deltaUnknown)) continue;
@@ -641,7 +699,7 @@ export class DatabricksAdapter implements AgentAdapter {
       ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
     }));
 
-    return { text: fullText, toolCalls };
+    return { text: fullText, toolCalls, usage };
   }
 
   private async *executeToolCalls(

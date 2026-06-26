@@ -49,6 +49,12 @@ interface PendingApproval {
   args: unknown;
 }
 
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 function useAutocomplete(enabled: boolean) {
   const [suggestion, setSuggestion] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -142,6 +148,11 @@ function AgentRoute() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  // Live estimate of output tokens, ticked up from streamed text deltas
+  // (the endpoint only reports exact usage at the end of the turn). Reconciled
+  // to the exact count when the usage metadata event arrives.
+  const [streamingOut, setStreamingOut] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
   );
@@ -173,6 +184,8 @@ function AgentRoute() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const msgIdCounter = useRef(0);
+  // Accumulated streamed assistant chars, used for the ~chars/4 token estimate.
+  const streamCharsRef = useRef(0);
 
   const agentConfig = getPluginClientConfig<{
     agents?: string[];
@@ -203,6 +216,9 @@ function AgentRoute() {
       { id: ++msgIdCounter.current, role: "user", content: userMessage },
     ]);
     setEvents([]);
+    setUsage(null);
+    setStreamingOut(0);
+    streamCharsRef.current = 0;
     setIsLoading(true);
 
     try {
@@ -269,12 +285,19 @@ function AgentRoute() {
                 },
               ]);
             }
-            if (event.type === "appkit.metadata" && event.data?.threadId) {
-              setThreadId(event.data.threadId as string);
+            if (event.type === "appkit.metadata") {
+              if (event.data?.threadId) {
+                setThreadId(event.data.threadId as string);
+              }
+              if (event.data?.usage) {
+                setUsage(event.data.usage as TokenUsage);
+              }
             }
 
             if (event.type === "response.output_text.delta" && event.delta) {
               assistantContent += event.delta;
+              streamCharsRef.current += event.delta.length;
+              setStreamingOut(Math.ceil(streamCharsRef.current / 4));
               setMessages((prev) => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
@@ -339,6 +362,17 @@ function AgentRoute() {
                 </span>
               )}
             </p>
+            {usage ? (
+              <p className="mt-1 text-xs font-mono opacity-70">
+                tokens: {usage.promptTokens} in · {usage.completionTokens} out ·{" "}
+                {usage.totalTokens} total
+              </p>
+            ) : streamingOut > 0 ? (
+              <p className="mt-1 text-xs font-mono opacity-50">
+                ~{streamingOut} tokens
+                <span className="animate-pulse"> ▍</span>
+              </p>
+            ) : null}
           </div>
           {hasAutocomplete && (
             <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
