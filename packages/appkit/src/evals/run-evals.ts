@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { discoverEvalFiles } from "./discover";
 import { createHttpDriver } from "./http-driver";
+import { configureJudge } from "./judge";
 import { type ReportOutcome, reportToMlflow } from "./mlflow-report";
 import { createEvalRun, type FinishOutcome, finishEvalRun } from "./mlflow-run";
 import { runEval } from "./run-eval";
@@ -23,6 +24,11 @@ export interface RunEvalsOptions {
    * are logged. Requires Databricks creds + the target experiment.
    */
   mlflow?: { host: string; token: string; experimentId: string };
+  /**
+   * When set, enable `t.judge.*` LLM-as-judge scoring via autoevals against a
+   * Databricks serving endpoint (`model`).
+   */
+  judge?: { host: string; token: string; model: string };
   /** Wall-clock timestamp (ms) for run create/finish — pass `Date.now()`. */
   now?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
@@ -109,6 +115,10 @@ export async function runEvalsInDir(
   const emit = options.onEvent ?? (() => {});
   const total = discovered.length;
   emit({ type: "discovered", total });
+
+  if (options.judge) {
+    await configureJudge(options.judge);
+  }
 
   // Create the MLflow evaluation run up front so each eval's trace can be
   // linked to it as it runs.

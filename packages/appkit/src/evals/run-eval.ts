@@ -1,3 +1,4 @@
+import { judgeClosedQA, judgeCustom, judgeFactuality } from "./judge";
 import type {
   AssertionHandle,
   AssertionResult,
@@ -7,6 +8,9 @@ import type {
   Matcher,
   TestContext,
 } from "./types";
+
+/** Default pass threshold for an LLM-judge score (0..1) before `.atLeast()`. */
+const DEFAULT_JUDGE_THRESHOLD = 0.5;
 
 /** Thrown by `t.skip()` to unwind the test and mark the eval skipped. */
 class SkipSignal extends Error {
@@ -36,6 +40,7 @@ export async function runEval(
 ): Promise<EvalResult> {
   const assertions: AssertionResult[] = [];
   let reply = "";
+  let lastInput = "";
   let toolCalls: string[] = [];
   let sessionId: string | undefined;
   let lastTraceId: string | undefined;
@@ -73,8 +78,18 @@ export async function runEval(
     return handle;
   };
 
+  // LLM-judge assertions are scored and soft by default; the caller chains
+  // `.atLeast(n)` to set the pass threshold or `.gate()` to promote.
+  const recordJudge = (
+    label: string,
+    score: number,
+    rationale?: string,
+  ): AssertionHandle =>
+    record(label, score >= DEFAULT_JUDGE_THRESHOLD, score, rationale).soft();
+
   const t: TestContext = {
     async send(message) {
+      lastInput = message;
       const r = await options.driver.send(message);
       reply = r.reply;
       toolCalls = r.toolCalls;
@@ -112,6 +127,31 @@ export async function runEval(
     check(value: string, matcher: Matcher) {
       const m = matcher(value);
       return record("check", m.pass, m.score, m.detail);
+    },
+    judge: {
+      async factuality(expected) {
+        const { score, rationale } = await judgeFactuality({
+          input: lastInput,
+          output: reply,
+          expected,
+        });
+        return recordJudge("judge.factuality", score, rationale);
+      },
+      async closedQA(criteria) {
+        const { score, rationale } = await judgeClosedQA({
+          input: lastInput,
+          output: reply,
+          criteria,
+        });
+        return recordJudge("judge.closedQA", score, rationale);
+      },
+      async custom(spec) {
+        const { score, rationale } = await judgeCustom(spec, {
+          input: lastInput,
+          output: reply,
+        });
+        return recordJudge(`judge.${spec.name}`, score, rationale);
+      },
     },
     skip(reason) {
       throw new SkipSignal(reason);

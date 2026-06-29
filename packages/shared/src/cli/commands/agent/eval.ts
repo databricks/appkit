@@ -28,6 +28,7 @@ interface EvalRunner {
     strict?: boolean;
     headers?: Record<string, string>;
     mlflow?: { host: string; token: string; experimentId: string };
+    judge?: { host: string; token: string; model: string };
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   evalGlyph(result: unknown): string;
@@ -72,6 +73,7 @@ interface EvalOptions {
   databricksHost?: string;
   databricksToken?: string;
   experiment?: string;
+  judgeModel?: string;
 }
 
 async function runAgentEval(
@@ -88,6 +90,13 @@ async function runAgentEval(
   const experimentId = opts.experiment ?? process.env.MLFLOW_EXPERIMENT_ID;
   const mlflow =
     host && token && experimentId ? { host, token, experimentId } : undefined;
+
+  // LLM-as-judge: reuse the Databricks creds + a judge serving endpoint.
+  const judgeModel = opts.judgeModel ?? process.env.APPKIT_JUDGE_MODEL;
+  const judge =
+    judgeModel && host && token
+      ? { host, token, model: judgeModel }
+      : undefined;
 
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
@@ -122,6 +131,7 @@ async function runAgentEval(
     strict: opts.strict,
     headers: opts.header ? parseHeaders(opts.header) : undefined,
     mlflow,
+    judge,
     onEvent,
   });
   console.log(`\n${runner.formatSummaryLine(summary.results)}`);
@@ -187,5 +197,9 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--experiment <id>",
     "MLflow experiment id for the evaluation run (default: MLFLOW_EXPERIMENT_ID)",
+  )
+  .option(
+    "--judge-model <endpoint>",
+    "Databricks serving endpoint to use as the LLM judge for t.judge.* (default: APPKIT_JUDGE_MODEL)",
   )
   .action(runAgentEval);

@@ -1,10 +1,16 @@
 export { defineEval, defineEvalConfig } from "./define-eval";
 export { type DiscoveredEval, discoverEvalFiles } from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";
+export {
+  configureJudge,
+  isJudgeConfigured,
+  type JudgeConfig,
+  type JudgeScore,
+} from "./judge";
 export { equals, includes, matches } from "./matchers";
 export {
   type Assessment,
-  buildAssessment,
+  buildAssessments,
   type MlflowReportOptions,
   type ReportOutcome,
   reportToMlflow,
@@ -28,6 +34,7 @@ export {
 export type {
   AssertionHandle,
   AssertionResult,
+  CustomJudgeSpec,
   DriveResult,
   EvalConfig,
   EvalDefinition,

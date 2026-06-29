@@ -115,6 +115,33 @@ export function linkTraceToRun(runId: string): void {
   }
 }
 
+/**
+ * Populate the trace-level Request/Response columns and the trace name shown in
+ * the MLflow traces table (span-level inputs/outputs don't fill these, and the
+ * Trace-name column reads the `mlflow.traceName` tag, not the root span name).
+ * The Source column is run-derived (via `mlflow.sourceRun`), so a live chat
+ * turn with no run leaves it empty — it's only set for eval runs, where the run
+ * itself carries the source tags. No-op when tracing is off.
+ */
+export function updateTracePreview(opts: {
+  request?: string;
+  response?: string;
+  name?: string;
+}): void {
+  if (!enabled || !mlflow) return;
+  try {
+    mlflow.updateCurrentTrace({
+      ...(opts.request !== undefined ? { requestPreview: opts.request } : {}),
+      ...(opts.response !== undefined
+        ? { responsePreview: opts.response }
+        : {}),
+      ...(opts.name ? { tags: { "mlflow.traceName": opts.name } } : {}),
+    });
+  } catch (err) {
+    logger.warn("Failed to update trace preview: %O", err);
+  }
+}
+
 /** Flush buffered traces (e.g. on shutdown). No-op when tracing is disabled. */
 export async function flushAgentTraces(): Promise<void> {
   if (!enabled || !mlflow) return;

@@ -25,32 +25,58 @@ export interface ReportOutcome {
 }
 
 /**
- * Build the single pass/fail Feedback assessment for an eval result. Returns
- * undefined when there's no trace to attach to or the eval was skipped.
+ * MLflow assessment names reject `.` (and we avoid spaces/parens too), so map
+ * anything outside `[A-Za-z0-9_-]` to `_`. The judge check on the raw label
+ * (`judge.`-prefixed) is unaffected — it runs before sanitization.
  */
-export function buildAssessment(result: EvalResult): Assessment | undefined {
-  if (!result.traceId || result.skipped) return undefined;
+function sanitizeName(label: string): string {
+  return label.replace(/[^A-Za-z0-9_-]/g, "_");
+}
 
-  const failed = result.assertions.filter((a) => !a.pass);
-  const rationale = result.error
-    ? `error: ${result.error}`
-    : failed.length
-      ? failed
-          .map(
-            (a) =>
-              `${a.severity}:${a.label}${a.detail ? ` (${a.detail})` : ""}`,
-          )
-          .join("; ")
-      : "all assertions passed";
+/**
+ * Build the Feedback assessments for an eval result: one per assertion (judge
+ * assertions tagged `LLM_JUDGE` with their numeric score + rationale, so they
+ * render as judge feedback in MLflow) plus an overall `appkit_eval` pass/fail.
+ * Returns [] when there's no trace to attach to or the eval was skipped.
+ */
+export function buildAssessments(result: EvalResult): Assessment[] {
+  if (!result.traceId || result.skipped) return [];
+  const traceId = result.traceId;
+  const out: Assessment[] = [];
+  const used = new Map<string, number>();
 
-  return {
-    trace_id: result.traceId,
+  for (const a of result.assertions) {
+    const isJudge = a.label.startsWith("judge.");
+    const base = sanitizeName(a.label);
+    const seen = used.get(base) ?? 0;
+    used.set(base, seen + 1);
+    out.push({
+      trace_id: traceId,
+      assessment_name: seen === 0 ? base : `${base}_${seen + 1}`,
+      source: isJudge
+        ? { source_type: "LLM_JUDGE", source_id: "appkit-judge" }
+        : { source_type: "CODE", source_id: "appkit-eval" },
+      // Judges report a numeric score; deterministic assertions a boolean.
+      feedback: { value: a.score ?? a.pass },
+      rationale: a.detail,
+      metadata: { eval_id: result.id, severity: a.severity },
+    });
+  }
+
+  out.push({
+    trace_id: traceId,
     assessment_name: "appkit_eval",
     source: { source_type: "CODE", source_id: "appkit-eval" },
     feedback: { value: result.passed },
-    rationale,
+    rationale: result.error
+      ? `error: ${result.error}`
+      : result.passed
+        ? "all gates passed"
+        : "one or more gates failed",
     metadata: { eval_id: result.id },
-  };
+  });
+
+  return out;
 }
 
 async function postAssessment(
@@ -93,20 +119,22 @@ export async function reportToMlflow(
 ): Promise<ReportOutcome> {
   const outcome: ReportOutcome = { written: 0, skipped: 0, failures: [] };
   for (const result of results) {
-    const assessment = buildAssessment(result);
-    if (!assessment) {
+    const assessments = buildAssessments(result);
+    if (assessments.length === 0) {
       outcome.skipped++;
       continue;
     }
-    const res = await postAssessment(options.host, options.token, assessment);
-    if (res.ok) {
-      outcome.written++;
-    } else {
-      outcome.failures.push({
-        traceId: assessment.trace_id,
-        status: res.status,
-        error: res.error,
-      });
+    for (const assessment of assessments) {
+      const res = await postAssessment(options.host, options.token, assessment);
+      if (res.ok) {
+        outcome.written++;
+      } else {
+        outcome.failures.push({
+          traceId: assessment.trace_id,
+          status: res.status,
+          error: res.error,
+        });
+      }
     }
   }
   return outcome;

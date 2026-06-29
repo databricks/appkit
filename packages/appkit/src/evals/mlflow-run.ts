@@ -4,6 +4,13 @@ import type { EvalResult } from "./types";
 /** Run tag value that makes a run appear under the experiment's "Evaluation runs". */
 const GENAI_EVALUATE_RUN_TYPE = "genai_evaluate";
 
+/**
+ * Source tags on the eval run. Traces linked via `mlflow.sourceRun` surface the
+ * run's source in the traces-table "Source" column (mirrors how Python's
+ * `evaluate()` shows the script name), so tagging the run is what populates it.
+ */
+const EVAL_SOURCE_NAME = "appkit agent eval";
+
 interface CreateRunResponse {
   run: { info: { run_id?: string; run_uuid?: string } };
 }
@@ -34,17 +41,17 @@ export async function createEvalRun(
       experiment_id: options.experimentId,
       start_time: options.startTime,
       ...(options.runName ? { run_name: options.runName } : {}),
+      tags: [
+        { key: "mlflow.runType", value: GENAI_EVALUATE_RUN_TYPE },
+        { key: "mlflow.source.name", value: EVAL_SOURCE_NAME },
+        { key: "mlflow.source.type", value: "LOCAL" },
+      ],
     },
   );
   const runId = created.run?.info?.run_id ?? created.run?.info?.run_uuid;
   if (!runId) {
     throw new Error("runs/create returned no run id");
   }
-  await mlflowPost(options, "/api/2.0/mlflow/runs/set-tag", {
-    run_id: runId,
-    key: "mlflow.runType",
-    value: GENAI_EVALUATE_RUN_TYPE,
-  });
   return runId;
 }
 

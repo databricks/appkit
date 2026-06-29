@@ -129,6 +129,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.AssertionHandle",
+          label: "AssertionHandle"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AssertionResult",
+          label: "AssertionResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.Assessment",
+          label: "Assessment"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.AutoInheritToolsConfig",
           label: "AutoInheritToolsConfig"
         },
@@ -149,8 +164,48 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DiscoveredEval",
+          label: "DiscoveredEval"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DriveResult",
+          label: "DriveResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalConfig",
+          label: "EvalConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalDefinition",
+          label: "EvalDefinition"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalDriver",
+          label: "EvalDriver"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalResult",
+          label: "EvalResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalRunSummary",
+          label: "EvalRunSummary"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EvalSummary",
+          label: "EvalSummary"
         },
         {
           type: "doc",
@@ -171,6 +226,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.HttpDriverOptions",
+          label: "HttpDriverOptions"
         },
         {
           type: "doc",
@@ -214,6 +274,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.MatchResult",
+          label: "MatchResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.McpConnectAllResult",
           label: "McpConnectAllResult"
         },
@@ -221,6 +286,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.Message",
           label: "Message"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.MlflowReportOptions",
+          label: "MlflowReportOptions"
         },
         {
           type: "doc",
@@ -241,6 +311,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RegisteredAgent",
           label: "RegisteredAgent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ReportOutcome",
+          label: "ReportOutcome"
         },
         {
           type: "doc",
@@ -274,6 +349,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RunEvalOptions",
+          label: "RunEvalOptions"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RunEvalsOptions",
+          label: "RunEvalsOptions"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ServingEndpointEntry",
           label: "ServingEndpointEntry"
         },
@@ -291,6 +376,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.TelemetryConfig",
           label: "TelemetryConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.TestContext",
+          label: "TestContext"
         },
         {
           type: "doc",
@@ -375,6 +465,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.EvalProgress",
+          label: "EvalProgress"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ExecutionResult",
           label: "ExecutionResult"
         },
@@ -410,6 +505,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.Matcher",
+          label: "Matcher"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.PluginData",
           label: "PluginData"
         },
@@ -437,6 +537,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ServingFactory",
           label: "ServingFactory"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.Severity",
+          label: "Severity"
         },
         {
           type: "doc",
@@ -497,6 +602,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.buildAssessment",
+          label: "buildAssessment"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.createAgent",
           label: "createAgent"
         },
@@ -504,6 +614,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createApp",
           label: "createApp"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createHttpDriver",
+          label: "createHttpDriver"
         },
         {
           type: "doc",
@@ -517,8 +632,33 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.defineEval",
+          label: "defineEval"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineEvalConfig",
+          label: "defineEvalConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.defineTool",
           label: "defineTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.discoverEvalFiles",
+          label: "discoverEvalFiles"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.equals",
+          label: "equals"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.evalGlyph",
+          label: "evalGlyph"
         },
         {
           type: "doc",
@@ -534,6 +674,26 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.findServerFile",
           label: "findServerFile"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatEvalDetail",
+          label: "formatEvalDetail"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatEvalHeadline",
+          label: "formatEvalHeadline"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatEvalResults",
+          label: "formatEvalResults"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatSummaryLine",
+          label: "formatSummaryLine"
         },
         {
           type: "doc",
@@ -582,6 +742,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.includes",
+          label: "includes"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isFunctionTool",
           label: "isFunctionTool"
         },
@@ -612,6 +777,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.matches",
+          label: "matches"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.mcpServer",
           label: "mcpServer"
         },
@@ -622,6 +792,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.reportToMlflow",
+          label: "reportToMlflow"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.resolveHostedTools",
           label: "resolveHostedTools"
         },
@@ -629,6 +804,21 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.runAgent",
           label: "runAgent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runEval",
+          label: "runEval"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runEvalsInDir",
+          label: "runEvalsInDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.summarize",
+          label: "summarize"
         },
         {
           type: "doc",

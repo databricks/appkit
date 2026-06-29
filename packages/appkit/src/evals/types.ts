@@ -84,8 +84,29 @@ export interface TestContext {
   calledTool(name: string): AssertionHandle;
   /** Assert a value against a matcher, e.g. `t.check(t.reply, includes("Sunny"))`. */
   check(value: string, matcher: Matcher): AssertionHandle;
+  /**
+   * LLM-as-judge scoring of the last reply (via autoevals → a Databricks judge
+   * model). Each returns a scored, soft-by-default assertion; chain `.atLeast(n)`
+   * to set the pass threshold or `.gate()` to make it a hard gate. Requires the
+   * judge to be configured (`--judge-model`).
+   */
+  judge: {
+    /** Score factuality of the reply against an expected reference. */
+    factuality(expected: string): Promise<AssertionHandle>;
+    /** Score whether the reply answers the question, per optional `criteria`. */
+    closedQA(criteria: string): Promise<AssertionHandle>;
+    /** A custom prompt-template judge (the TS analog of MLflow's `@scorer`). */
+    custom(spec: CustomJudgeSpec): Promise<AssertionHandle>;
+  };
   /** Skip this eval with an optional reason. */
   skip(reason?: string): never;
+}
+
+/** A custom LLM-judge definition: a prompt template and choice→score mapping. */
+export interface CustomJudgeSpec {
+  name: string;
+  promptTemplate: string;
+  choiceScores: Record<string, number>;
 }
 
 /** A single eval, default-exported from a `*.eval.ts` file. */

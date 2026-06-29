@@ -56,6 +56,7 @@ import {
   currentTraceId,
   initAgentTracing,
   linkTraceToRun,
+  updateTracePreview,
   withAgentSpan,
 } from "./mlflow";
 import {
@@ -1086,7 +1087,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // No-op passthrough unless an MLflow experiment is bound.
         await withAgentSpan(
           {
-            name: registered.name ?? "agent",
+            name: registered.name || "agent",
             type: "AGENT",
             inputs: {
               messages: thread.messages.map((m) => ({
@@ -1158,6 +1159,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 createdAt: new Date(),
               });
             }
+
+            // Populate the trace-level Request/Response columns and the trace
+            // name in the MLflow traces table (span inputs/outputs and the span
+            // name don't fill these).
+            const lastUserMessage = [...thread.messages]
+              .reverse()
+              .find((m) => m.role === "user")?.content;
+            updateTracePreview({
+              request: lastUserMessage,
+              response: fullContent || undefined,
+              name: registered.name || "agent",
+            });
 
             // Surface the MLflow trace id so eval runs can attach assessments
             // to this turn's trace. No-op when tracing is disabled.
