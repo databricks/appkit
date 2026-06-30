@@ -9,24 +9,35 @@ import {
 } from "../validate-metric-views-source";
 
 /**
- * Options parsed by commander for `appkit mv sync`.
+ * Options parsed by commander for `appkit metric-views sync` (alias `mv`).
  *
- * interactive clack flow:
+ * Flags:
  *   - `--warehouse-id` (+ `DATABRICKS_WAREHOUSE_ID` fallback)
  *   - `--metric-views-json-path` (canonical config path)
  *   - `--output-dir` (artifact output directory; replaces Phase 1's `--out-dir`)
+ *   - `--wait` (wait for the warehouse instead of emitting permissive types on a
+ *     cold warehouse; exit non-zero if any view still can't be described)
  *   - `--no-cache` (commander negation → `cache === false` disables the metric type-generation cache)
  */
 export interface MetricViewsSyncOptions {
   warehouseId?: string;
   metricViewsJsonPath?: string;
   outputDir?: string;
+  wait?: boolean;
   cache?: boolean;
 }
 
 const METRIC_VIEWS_CONFIG_FILE = "metric-views.json";
 
 const EXIT_FAILURE = 1;
+
+/**
+ * What a sync run actually did, returned so the interactive caller can print an
+ * outro that matches the outcome (a dormant run must not claim "synced").
+ * `undefined` means a hard-failure branch already called `process.exit` — it
+ * only "returns" under the test no-op exit spy.
+ */
+type SyncOutcome = "synced" | "degraded" | "noop";
 
 /** Resolved, absolute paths the sync run operates on. */
 interface ResolvedPaths {
@@ -92,7 +103,7 @@ function resolvePaths(options: {
 async function runMetricViewsSync(
   options: MetricViewsSyncOptions,
   onProgress?: { start(): void; succeed(msg: string): void; fail(): void },
-): Promise<void> {
+): Promise<SyncOutcome | undefined> {
   try {
     const { queryFolder, configPath, explicitConfigPath, outDir } =
       resolvePaths(options);
@@ -124,7 +135,7 @@ async function runMetricViewsSync(
       console.log(
         `No ${METRIC_VIEWS_CONFIG_FILE} found at ${configPath}. Nothing to sync.`,
       );
-      return;
+      return "noop";
     }
 
     const rawConfig = fs.readFileSync(configPath, "utf-8");
@@ -175,6 +186,10 @@ async function runMetricViewsSync(
         metricMetadataOutFile,
         warehouseId,
         cache: options.cache,
+        // `--wait` → blocking preflight (wait for / start the warehouse). The
+        // default omits `mode` so appkit uses "describe-now" (DESCRIBE now,
+        // degrade on a cold warehouse) — and the default call shape is unchanged.
+        ...(options.wait ? { mode: "blocking" as const } : {}),
       });
     } catch (err) {
       onProgress?.fail();
@@ -188,6 +203,21 @@ async function runMetricViewsSync(
       console.log(
         `No ${METRIC_VIEWS_CONFIG_FILE} found at ${configPath}. Nothing to sync.`,
       );
+      return "noop";
+    }
+
+    // Fatal preflight errors only arise under `--wait` (blocking mode) — e.g.
+    // the warehouse is deleted/deleting. The artifacts are still written, but
+    // the run did not converge, so exit non-zero with the underlying reason.
+    if (result.fatalErrors.length > 0) {
+      onProgress?.fail();
+      console.error(
+        "Error: could not sync metric views (warehouse preflight failed):",
+      );
+      for (const fe of result.fatalErrors) {
+        console.error(`  ${fe.name}: ${fe.message}`);
+      }
+      process.exit(EXIT_FAILURE);
       return;
     }
 
@@ -217,26 +247,56 @@ async function runMetricViewsSync(
       .filter((schema) => schema.degraded)
       .map((schema) => schema.key);
     if (degradedKeys.length > 0) {
+      // `--wait` promised to wait for the warehouse and emit correct types, so a
+      // still-degraded result is a hard failure — never silently ship permissive
+      // types in CI. Without `--wait` (describe-now) the same state is a warning.
+      if (options.wait) {
+        onProgress?.fail();
+        console.error(
+          `Error: ${degradedKeys.length} metric view(s) (${degradedKeys.join(", ")}) could not be described even after waiting for the warehouse. Check the warehouse state and the metric view definitions, then rerun.`,
+        );
+        process.exit(EXIT_FAILURE);
+        return;
+      }
       onProgress?.succeed(
         `Generated permissive metric types: ${metricOutFile}`,
       );
       console.warn(
-        `Warning: ${degradedKeys.length} metric view(s) (${degradedKeys.join(", ")}) could not be described — the warehouse wasn't ready, so permissive types were written. Rerun \`appkit mv sync\` once the warehouse is available.`,
+        `Warning: ${degradedKeys.length} metric view(s) (${degradedKeys.join(", ")}) could not be described — the warehouse wasn't ready, so permissive types were written. Rerun \`appkit metric-views sync\` once the warehouse is available.`,
       );
-      console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
-      return;
+      // In interactive mode the spinner's success line is the user-facing
+      // output; emit the plain metadata path only on the flag-driven path.
+      if (!onProgress) {
+        console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
+      }
+      return "degraded";
     }
 
     onProgress?.succeed(`Generated metric types: ${metricOutFile}`);
-    console.log(`Generated metric types: ${metricOutFile}`);
-    console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
+    // Avoid a double print in interactive mode: `onProgress.succeed` already
+    // stopped the spinner with the "Generated metric types" line. The plain logs
+    // are the flag-driven path's only output, so gate them on its absence.
+    if (!onProgress) {
+      console.log(`Generated metric types: ${metricOutFile}`);
+      console.log(`Generated metric metadata: ${metricMetadataOutFile}`);
+    }
+    return "synced";
   } catch (error) {
+    // Only a genuinely missing/unresolvable @databricks/appkit maps to the
+    // "not installed" guidance. The dynamic import throws a structured
+    // ERR_MODULE_NOT_FOUND naming the package when appkit is absent; match THAT
+    // rather than any message containing "Cannot find module". Otherwise a real
+    // failure from syncMetricViewsTypes — an unreachable warehouse, an auth
+    // error, a bad FQN — whose message happens to mention a module would be
+    // misreported here, sending the user to reinstall a package that is present.
+    const err = error as { code?: unknown; message?: unknown };
     if (
-      error instanceof Error &&
-      error.message.includes("Cannot find module")
+      err?.code === "ERR_MODULE_NOT_FOUND" &&
+      typeof err.message === "string" &&
+      err.message.includes("@databricks/appkit")
     ) {
       console.error(
-        "Error: appkit mv sync is only available with @databricks/appkit installed.",
+        "Error: appkit metric-views sync is only available with @databricks/appkit installed.",
       );
       console.error("Please install @databricks/appkit to use this command.");
       process.exit(EXIT_FAILURE);
@@ -264,13 +324,15 @@ async function runMetricViewsSync(
 async function runInteractive(): Promise<void> {
   intro("Sync UC Metric View types");
 
-  // A cancelled prompt (Ctrl-C) is a graceful, non-zero exit. The explicit
-  // `return` after `process.exit` keeps control flow correct under a no-op exit
-  // (tests) — without it, a cancelled flow would fall through to the next
-  // prompt and eventually run the sync.
+  // A cancelled prompt (Ctrl-C) is a graceful exit (code 0) — matching
+  // `plugin create` / `add-resource` and clack's own convention, so a wrapper
+  // script that treats non-zero as failure doesn't misread a deliberate cancel.
+  // The explicit `return` after `process.exit` keeps control flow correct under
+  // a no-op exit (tests) — without it, a cancelled flow would fall through to
+  // the next prompt and eventually run the sync.
   const cancelled = (): never => {
     cancel("Cancelled.");
-    process.exit(1);
+    process.exit(0);
   };
 
   const warehouseId = await text({
@@ -307,13 +369,22 @@ async function runInteractive(): Promise<void> {
   };
 
   const s = spinner();
-  await runMetricViewsSync(options, {
+  const outcome = await runMetricViewsSync(options, {
     start: () => s.start("Describing metric views…"),
     succeed: (msg) => s.stop(msg),
     fail: () => s.stop("Failed."),
   });
 
-  outro("Metric types synced.");
+  // Close with an outro that matches what actually happened — a dormant run
+  // logged "Nothing to sync", so a blanket "Metric types synced." would
+  // contradict it. `undefined` means a hard-failure branch already exited.
+  if (outcome === "noop") {
+    outro("Nothing to sync.");
+  } else if (outcome === "degraded") {
+    outro("Metric types synced with warnings.");
+  } else if (outcome === "synced") {
+    outro("Metric types synced.");
+  }
 }
 
 /**
@@ -338,6 +409,7 @@ async function runMetricViewsSyncAction(
     "warehouseId",
     "metricViewsJsonPath",
     "outputDir",
+    "wait",
     "cache",
   ] as const;
   const hasUserFlag = FLAG_OPTION_NAMES.some(
@@ -367,18 +439,25 @@ export const metricViewsSyncCommand = new Command("sync")
     "--output-dir <dir>",
     "Output directory for metric-views.d.ts and metric-views.metadata.json (default: shared/appkit-types)",
   )
+  .option(
+    "--wait",
+    "Wait for the SQL warehouse to start instead of emitting permissive types on a cold warehouse; exit non-zero if any metric view still can't be described",
+  )
   .option("--no-cache", "Disable the metric type-generation cache")
   .addHelpText(
     "after",
     `
 Run with no flags for an interactive prompt; pass any flag for non-interactive mode.
+'mv' is a shorthand alias, so 'appkit mv sync' is equivalent to 'appkit metric-views sync'.
 
 Examples:
-  $ appkit mv sync
-  $ appkit mv sync --warehouse-id 1234abcd5678efgh
-  $ appkit mv sync --warehouse-id 1234abcd5678efgh --metric-views-json-path config/queries/metric-views.json
-  $ appkit mv sync --warehouse-id 1234abcd5678efgh --output-dir shared/appkit-types
-  $ appkit mv sync --warehouse-id 1234abcd5678efgh --no-cache
+  $ appkit metric-views sync
+  $ appkit metric-views sync --warehouse-id 1234abcd5678efgh
+  $ appkit metric-views sync --warehouse-id 1234abcd5678efgh --metric-views-json-path config/queries/metric-views.json
+  $ appkit metric-views sync --warehouse-id 1234abcd5678efgh --output-dir shared/appkit-types
+  $ appkit metric-views sync --warehouse-id 1234abcd5678efgh --wait
+  $ appkit metric-views sync --warehouse-id 1234abcd5678efgh --no-cache
+  $ appkit mv sync --warehouse-id 1234abcd5678efgh   # 'mv' alias
 
 Environment variables:
   DATABRICKS_WAREHOUSE_ID    SQL warehouse ID (used when --warehouse-id is omitted)

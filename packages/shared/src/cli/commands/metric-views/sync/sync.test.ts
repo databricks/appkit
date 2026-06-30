@@ -25,6 +25,7 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
         metricOutFile: string;
         metricMetadataOutFile: string;
         cache?: boolean;
+        mode?: "describe-now" | "non-blocking" | "blocking";
       }) => {
         const nodeFs = require("node:fs") as typeof import("node:fs");
         const nodePath = require("node:path") as typeof import("node:path");
@@ -35,7 +36,7 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
         nodeFs.writeFileSync(opts.metricMetadataOutFile, "{}\n");
         // Annotate the array element types so the inferred return type is wide
         // enough for `mockResolvedValueOnce` overrides that populate `failures`
-        // (an empty literal would otherwise infer `never[]`).
+        // or `fatalErrors` (an empty literal would otherwise infer `never[]`).
         const schemas: Array<{
           key: string;
           source: string;
@@ -48,11 +49,13 @@ const { syncMetricViewsTypes, METRIC_TYPES_FILE, METRIC_METADATA_FILE } =
           reason: string;
           transient: boolean;
         }> = [];
+        const fatalErrors: Array<{ name: string; message: string }> = [];
         return {
           metricOutFile: opts.metricOutFile,
           metricMetadataOutFile: opts.metricMetadataOutFile,
           schemas,
           failures,
+          fatalErrors,
           noConfig: false,
         };
       },
@@ -303,11 +306,17 @@ describe("appkit mv sync", () => {
 
   test("appkit absent: recognizable error message + non-zero exit", async () => {
     writeConfig();
-    // Model the dynamic import failing as it does when @databricks/appkit
-    // isn't installed.
-    syncMetricViewsTypes.mockRejectedValueOnce(
-      new Error("Cannot find module '@databricks/appkit/type-generator'"),
+    // Model a module-resolution failure reaching the catch, as the dynamic
+    // `import("@databricks/appkit/type-generator")` throws when @databricks/appkit
+    // isn't installed: a structured ERR_MODULE_NOT_FOUND naming the package. Only
+    // THIS shape maps to the "not installed" guidance (see the next test).
+    const moduleNotFound = Object.assign(
+      new Error(
+        "Cannot find package '@databricks/appkit' imported from /app/cli.js",
+      ),
+      { code: "ERR_MODULE_NOT_FOUND" },
     );
+    syncMetricViewsTypes.mockRejectedValueOnce(moduleNotFound);
 
     const exitSpy = vi
       .spyOn(process, "exit")
@@ -317,7 +326,33 @@ describe("appkit mv sync", () => {
 
     const errored = consoleError.mock.calls.flat().map(String).join("\n");
     expect(errored).toContain(
-      "appkit mv sync is only available with @databricks/appkit installed",
+      "appkit metric-views sync is only available with @databricks/appkit installed",
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+  });
+
+  test("a non-module sync error propagates verbatim (not misreported as missing appkit)", async () => {
+    writeConfig();
+    // A real failure from syncMetricViewsTypes — e.g. an unreachable warehouse —
+    // carries its own message and no module-resolution code. It must surface
+    // verbatim with a non-zero exit, NOT be rewritten as "install appkit" just
+    // because some unrelated message might mention a module.
+    syncMetricViewsTypes.mockRejectedValueOnce(
+      new Error("Warehouse wh-123 is unreachable (timed out after 30s)"),
+    );
+
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+
+    await runCli(["--warehouse-id", "wh-123"]);
+
+    const errored = consoleError.mock.calls.flat().map(String).join("\n");
+    expect(errored).toContain("Warehouse wh-123 is unreachable");
+    expect(errored).not.toContain(
+      "only available with @databricks/appkit installed",
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -530,6 +565,7 @@ describe("appkit mv sync", () => {
           transient: false,
         },
       ],
+      fatalErrors: [],
       noConfig: false,
     });
 
@@ -572,6 +608,7 @@ describe("appkit mv sync", () => {
         },
       ],
       failures: [],
+      fatalErrors: [],
       noConfig: false,
     });
 
@@ -585,6 +622,105 @@ describe("appkit mv sync", () => {
     expect(warned).toContain("revenue");
     expect(warned).toContain("permissive");
     expect(warned).toContain("Rerun");
+  });
+
+  // --- --wait (blocking preflight): CI opt-in to fail instead of degrade ------
+
+  test("--wait forwards mode: 'blocking' to syncMetricViewsTypes", async () => {
+    writeConfig();
+
+    await runCli(["--warehouse-id", "wh-123", "--wait"]);
+
+    expect(syncMetricViewsTypes).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "blocking" }),
+    );
+  });
+
+  test("without --wait, mode stays describe-now (never blocking)", async () => {
+    writeConfig();
+
+    await runCli(["--warehouse-id", "wh-123"]);
+
+    const call = syncMetricViewsTypes.mock.calls[0][0] as { mode?: string };
+    // describe-now is appkit's default; the CLI omits the key entirely.
+    expect(call.mode).not.toBe("blocking");
+  });
+
+  test("--wait + still-degraded result: hard failure (exit 1), not a warning", async () => {
+    writeConfig();
+    // Even after waiting, a key came back degraded (e.g. a served degraded cache
+    // hit). Under --wait the CLI must fail rather than ship permissive types.
+    syncMetricViewsTypes.mockResolvedValueOnce({
+      metricOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metric-views.d.ts",
+      ),
+      metricMetadataOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metric-views.metadata.json",
+      ),
+      schemas: [
+        {
+          key: "revenue",
+          source: "demo.sales.revenue",
+          lane: "sp",
+          degraded: true,
+        },
+      ],
+      failures: [],
+      fatalErrors: [],
+      noConfig: false,
+    });
+
+    const exitSpy = await runCliCapturingExit([
+      "--warehouse-id",
+      "wh-123",
+      "--wait",
+    ]);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errored = erroredText();
+    expect(errored).toContain("could not be described even after waiting");
+    expect(errored).toContain("revenue");
+  });
+
+  test("--wait + fatal preflight (e.g. deleted warehouse): exit 1 with the reason", async () => {
+    writeConfig();
+    // blocking mode reports a deleted/deleting warehouse via fatalErrors (the
+    // artifacts are still written); the CLI surfaces it and exits non-zero.
+    syncMetricViewsTypes.mockResolvedValueOnce({
+      metricOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metric-views.d.ts",
+      ),
+      metricMetadataOutFile: path.join(
+        tmpRoot,
+        "shared",
+        "appkit-types",
+        "metric-views.metadata.json",
+      ),
+      schemas: [],
+      failures: [],
+      fatalErrors: [{ name: "wh-123", message: "Warehouse is DELETED" }],
+      noConfig: false,
+    });
+
+    const exitSpy = await runCliCapturingExit([
+      "--warehouse-id",
+      "wh-123",
+      "--wait",
+    ]);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errored = erroredText();
+    expect(errored).toContain("warehouse preflight failed");
+    expect(errored).toContain("Warehouse is DELETED");
   });
 
   // --- Phase 3: interactive flow ----------------------------------------------
@@ -624,6 +760,14 @@ describe("appkit mv sync", () => {
       ),
       cache: true,
     });
+
+    // #1: in interactive mode the spinner carries the success line; the plain
+    // "Generated metric types" console.log must NOT also fire (no double print).
+    expect(clackMocks.spinnerStop).toHaveBeenCalledWith(
+      expect.stringContaining("Generated metric types"),
+    );
+    const logged = consoleLog.mock.calls.flat().map(String).join("\n");
+    expect(logged).not.toContain("Generated metric types");
   });
 
   test("interactive: a non-blank config path / output dir answer is honored", async () => {
@@ -665,7 +809,22 @@ describe("appkit mv sync", () => {
     );
   });
 
-  test("interactive cancel (first prompt): graceful cancel + non-zero exit, no appkit call", async () => {
+  test("interactive + no metric-views.json: outro matches the no-op (not a false 'synced')", async () => {
+    // No writeConfig() → the default config path is absent (dormant).
+    clackMocks.textAnswers = ["wh-interactive", "", ""];
+
+    await runCli([]);
+
+    expect(syncMetricViewsTypes).not.toHaveBeenCalled();
+    // A dormant run must not claim success — the outro reflects the no-op.
+    expect(clackMocks.outro).toHaveBeenCalledTimes(1);
+    expect(clackMocks.outro).toHaveBeenCalledWith("Nothing to sync.");
+    expect(clackMocks.outro).not.toHaveBeenCalledWith("Metric types synced.");
+    const logged = consoleLog.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("Nothing to sync");
+  });
+
+  test("interactive cancel (first prompt): graceful cancel + exit 0, no appkit call", async () => {
     writeConfig();
     // First prompt returns the cancel symbol.
     clackMocks.textAnswers = [clackMocks.CANCEL];
@@ -677,11 +836,12 @@ describe("appkit mv sync", () => {
     await runCli([]);
 
     expect(clackMocks.cancel).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    // Cancel is graceful: exit 0, like every other interactive command.
+    expect(exitSpy).toHaveBeenCalledWith(0);
     expect(syncMetricViewsTypes).not.toHaveBeenCalled();
   });
 
-  test("interactive cancel (later prompt): graceful cancel + non-zero exit", async () => {
+  test("interactive cancel (later prompt): graceful cancel + exit 0", async () => {
     writeConfig();
     // First answer ok, second prompt cancels.
     clackMocks.textAnswers = ["wh-1", clackMocks.CANCEL];
@@ -693,7 +853,8 @@ describe("appkit mv sync", () => {
     await runCli([]);
 
     expect(clackMocks.cancel).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    // Cancel is graceful: exit 0, like every other interactive command.
+    expect(exitSpy).toHaveBeenCalledWith(0);
     expect(syncMetricViewsTypes).not.toHaveBeenCalled();
   });
 });

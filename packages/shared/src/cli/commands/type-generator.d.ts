@@ -1,3 +1,20 @@
+/**
+ * Ambient, intentionally NARROWED mirror of `@databricks/appkit/type-generator`.
+ *
+ * `shared` must not statically depend on `appkit` (it is a leaf package), so the
+ * CLI reaches appkit's type-generator through a dynamic
+ * `import("@databricks/appkit/type-generator")`; this declaration types that
+ * import without a build-time dependency on appkit.
+ *
+ * The mirror is deliberately narrower than the real export: array element types
+ * are widened to `unknown[]`, options the CLI never passes (e.g. `metricFetcher`)
+ * are omitted, and only the surface the CLI actually uses is declared.
+ *
+ * DRIFT WARNING: there is NO compile-time link to appkit's real types — if the
+ * real `generateFromEntryPoint` / `syncMetricViewsTypes` (or their result
+ * shapes) change, this declaration will NOT fail to compile and must be
+ * re-synced by hand against `packages/appkit/src/type-generator/index.ts`.
+ */
 declare module "@databricks/appkit/type-generator" {
   export function generateFromEntryPoint(options: {
     queryFolder?: string;
@@ -76,6 +93,11 @@ declare module "@databricks/appkit/type-generator" {
     metricOutFile: string;
     metricMetadataOutFile: string;
     cache?: boolean;
+    // Preflight policy (mirrors the real export). The CLI omits it for the
+    // default `"describe-now"` (DESCRIBE now, degrade on a cold warehouse) and
+    // passes `"blocking"` under `--wait` (wait for / start the warehouse; only a
+    // deleted one is fatal). `"non-blocking"` is the dev/Vite path.
+    mode?: "describe-now" | "non-blocking" | "blocking";
   }): Promise<SyncMetricViewsTypesResult>;
 
   export const METRIC_TYPES_FILE: string;
