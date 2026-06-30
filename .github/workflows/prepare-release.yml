@@ -157,6 +157,16 @@ jobs:
         working-directory: template-artifact
         run: npm install
 
+      # npm install above runs under the JFrog .npmrc (setup-jfrog-npm), which
+      # bakes internal registry URLs into the regenerated lock. Rewrite them back
+      # to public npm and fail-closed if any non-public registry remains, so the
+      # shipped scaffold installs from npmjs.org. --allow-file permits the bundled
+      # appkit/appkit-ui tarballs that prepare-template-artifact.ts pins.
+      - name: Rewrite and validate template lockfile registry
+        run: >
+          pnpm exec tsx tools/check-template-lock-registry.ts
+          template-artifact/package-lock.json --rewrite --allow-file
+
       - name: Create zip artifact
         working-directory: template-artifact
         run: zip -r ../template.zip . -x 'node_modules/*'
