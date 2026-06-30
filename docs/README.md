@@ -30,10 +30,10 @@ This command generates static content into the `build` directory and can be serv
 
 ## Deployment
 
-Documentation is published on [DevHub](https://www.databricks.com/devhub/docs/appkit/v0/). GitHub Pages (`databricks.github.io/appkit/`) automatically redirects all existing URLs to DevHub via `.github/workflows/docs-deploy.yml`.
+Documentation is published on [developers.databricks.com](https://developers.databricks.com/docs/appkit/v0/). GitHub Pages (`databricks.github.io/appkit/`) automatically redirects all existing URLs to developers.databricks.com via `.github/workflows/docs-deploy.yml`.
 
 The `pnpm build` command:
 1. Runs `docusaurus build` — generates HTML, `llms.txt`, and `.md` files
-2. Runs `apply-redirects` — replaces HTML pages with redirect pages pointing to DevHub
+2. Runs `apply-redirects` — replaces HTML pages with redirect pages pointing to developers.databricks.com
 
 Static files remain served from GitHub Pages: JSON schemas (`/schemas/`), `llms.txt`, and `.md` files (used by `npx @databricks/appkit docs` for npm-bundled documentation).
