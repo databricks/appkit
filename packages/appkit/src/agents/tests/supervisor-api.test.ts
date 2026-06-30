@@ -770,6 +770,114 @@ describe("SupervisorApiAdapter", () => {
     });
     expect(events).toContainEqual({ type: "status", status: "complete" });
   });
+
+  test("yields a sanitised transport error when readSseEvents throws mid-stream", async () => {
+    // `readSseEvents` enforces a DoS cap (maxLineChars) and throws when an
+    // SSE block exceeds it. Without a try/catch around the consuming loop
+    // that rejection would propagate out of run() and tear down the request.
+    // The adapter must catch it and surface a terminal `transport` error.
+    const oversizedBlock = `data: ${"x".repeat(1024 * 1024 + 100)}\n\n`;
+    const { streamBody } = makeStreamBody([oversizedBlock]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      {
+        type: "status",
+        status: "error",
+        error: "Supervisor API error (transport)",
+      },
+    ]);
+    // The raw error text (which echoes the cap detail) never reaches the client.
+    for (const e of events) {
+      if (e.type === "status" && "error" in e) {
+        expect(e.error).not.toContain("maxLineChars");
+      }
+    }
+  });
+
+  test("emits a terminal transport error when the stream closes without any events", async () => {
+    // A stream that closes with zero SSE events would otherwise leave the
+    // consumer stuck in `running`. The adapter must end the turn with a
+    // terminal `transport` error.
+    const { streamBody } = makeStreamBody([]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      {
+        type: "status",
+        status: "error",
+        error: "Supervisor API error (transport)",
+      },
+    ]);
+  });
+
+  test("treats incomplete_details alone as benign truncation: recovers text and completes", async () => {
+    // A `max_output_tokens` truncation populates `incomplete_details` while
+    // still producing usable partial output. The adapter must NOT treat this
+    // as a failure — it recovers the partial text and yields `complete`.
+    const { streamBody } = makeStreamBody([
+      sseEvent("response.completed", {
+        response: {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          output: [
+            {
+              type: "message",
+              id: "msg-trunc",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Partial answer" }],
+            },
+          ],
+        },
+      }),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      { type: "message_delta", content: "Partial answer" },
+      { type: "status", status: "complete" },
+    ]);
+  });
+
+  test("coerces a non-string output_text delta to an empty string", async () => {
+    // Hardening for the previous `(data.delta as string) ?? ""` cast: a
+    // non-string `delta` (or `item_id`) must not leak through as a non-string
+    // or `"undefined"` — it is coerced to "".
+    const { streamBody } = makeStreamBody([
+      sseEvent("response.output_text.delta", { item_id: 42, delta: 123 }),
+      sseEvent("response.completed", {}),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      { type: "message_delta", content: "" },
+      { type: "status", status: "complete" },
+    ]);
+  });
 });
 
 describe("fromSupervisorApi", () => {

@@ -30,7 +30,15 @@ type SupervisorErrorCode =
  * never sees raw upstream text.
  */
 function emitError(code: SupervisorErrorCode, detail: unknown): AgentEvent {
-  logger.warn("supervisor-api error code=%s detail=%O", code, detail);
+  // Summarise at `warn` (CWE-532: never dump the full upstream payload to
+  // the default log level); the verbose object is only available via
+  // `DEBUG=appkit:agents:supervisor-api`.
+  logger.warn(
+    "supervisor-api error code=%s detail=%s",
+    code,
+    summariseErrorPayload(detail),
+  );
+  logger.debug("supervisor-api error code=%s detail=%O", code, detail);
   return {
     type: "status",
     status: "error",
@@ -353,51 +361,64 @@ export class SupervisorApiAdapter implements AgentAdapter {
         }
       | undefined;
 
-    for await (const { event, data } of readSseEvents(stream, signal)) {
-      if (data === "[DONE]") continue;
+    // `readSseEvents` throws on transport errors and on the DoS caps
+    // (maxLineChars / maxBufferChars). Without this guard the rejection
+    // propagates out of `run()` and tears down the request. Treat a
+    // consumer-initiated abort as a clean stop; everything else becomes a
+    // sanitised terminal `transport` error.
+    try {
+      for await (const { event, data } of readSseEvents(stream, signal)) {
+        if (data === "[DONE]") continue;
 
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(data);
-      } catch (err) {
-        logger.debug(
-          "Failed to parse SSE data line: %s (%O)",
-          data.slice(0, 200),
-          err,
-        );
-        continue;
-      }
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(data);
+        } catch (err) {
+          logger.debug(
+            "Failed to parse SSE data line: %s (%O)",
+            data.slice(0, 200),
+            err,
+          );
+          continue;
+        }
 
-      const eventType = event || (parsed.type as string) || "";
-      eventCounts.set(eventType, (eventCounts.get(eventType) ?? 0) + 1);
+        const eventType =
+          event || (typeof parsed.type === "string" ? parsed.type : "");
+        eventCounts.set(eventType, (eventCounts.get(eventType) ?? 0) + 1);
 
-      // `response.completed` is held back until after the loop so we can
-      // synthesise a `message_delta` from `response.output[]` when the
-      // stream produced no incremental deltas (intermittent SA behaviour).
-      // Emitting `complete` first would let UIs finalise the turn before the
-      // recovered text arrives.
-      if (eventType === "response.completed") {
-        lastCompleted = parsed.response as typeof lastCompleted;
-        continue;
-      }
+        // `response.completed` is held back until after the loop so we can
+        // synthesise a `message_delta` from `response.output[]` when the
+        // stream produced no incremental deltas (intermittent SA behaviour).
+        // Emitting `complete` first would let UIs finalise the turn before the
+        // recovered text arrives.
+        if (eventType === "response.completed") {
+          lastCompleted = parsed.response as typeof lastCompleted;
+          continue;
+        }
 
-      const out = mapEvent(eventType, parsed, streamedItemIds);
-      if (out) {
-        if (out.type === "message_delta") receivedAnyDelta = true;
-        yield out;
-        if (out.type === "status" && out.status === "error") {
-          terminated = true;
-          break;
+        const out = mapEvent(eventType, parsed, streamedItemIds);
+        if (out) {
+          if (out.type === "message_delta") receivedAnyDelta = true;
+          yield out;
+          if (out.type === "status" && out.status === "error") {
+            terminated = true;
+            break;
+          }
         }
       }
+    } catch (err) {
+      if (signal?.aborted) return;
+      yield emitError("transport", err);
+      return;
     }
 
     if (signal?.aborted) return;
 
     if (eventCounts.size === 0) {
-      logger.warn(
-        "Supervisor API stream closed without emitting any SSE events.",
-      );
+      // A stream that closes without a single event leaves the consumer
+      // stuck in `running`. Surface a terminal `transport` error so the
+      // turn ends.
+      yield emitError("transport", "stream closed without events");
       return;
     }
 
@@ -419,14 +440,15 @@ export class SupervisorApiAdapter implements AgentAdapter {
 
     if (eventCounts.has("response.completed")) {
       // SA sometimes signals a failed turn via `response.completed` with a
-      // nested `status: "failed"` (or a populated `error`/`incomplete_details`)
-      // rather than emitting `response.failed`. Without this gate the
-      // adapter would silently yield `complete` on a server-side failure.
-      if (
-        lastCompleted?.status === "failed" ||
-        lastCompleted?.error != null ||
-        lastCompleted?.incomplete_details != null
-      ) {
+      // nested `status: "failed"` (or a populated `error`) rather than
+      // emitting `response.failed`. Without this gate the adapter would
+      // silently yield `complete` on a server-side failure.
+      //
+      // `incomplete_details` on its own is NOT fatal: a benign
+      // `max_output_tokens` truncation populates it while still producing
+      // usable partial output. In that case we fall through to `complete`
+      // and let the recovered text above stand as the turn result.
+      if (lastCompleted?.status === "failed" || lastCompleted?.error != null) {
         yield emitError("upstream_failed", {
           status: lastCompleted?.status,
           error: lastCompleted?.error,
@@ -539,9 +561,13 @@ function mapEvent(
   // than we care to map.
   switch (eventType as ResponseStreamEvent["type"]) {
     case "response.output_text.delta": {
-      const itemId = data.item_id as string | undefined;
+      const itemId =
+        typeof data.item_id === "string" ? data.item_id : undefined;
       if (itemId) streamedItemIds.add(itemId);
-      return { type: "message_delta", content: (data.delta as string) ?? "" };
+      return {
+        type: "message_delta",
+        content: typeof data.delta === "string" ? data.delta : "",
+      };
     }
 
     // `response.completed` is intentionally absent: `streamResponse` holds
