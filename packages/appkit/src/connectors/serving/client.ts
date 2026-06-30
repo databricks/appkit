@@ -56,6 +56,18 @@ export interface ApiClientLike {
 }
 
 /**
+ * Transport shim shared by the agent adapters: given a request body, returns
+ * the raw SSE byte stream from a serving / AI-gateway endpoint. Injected at
+ * adapter construction time so callers can swap in the workspace SDK (the
+ * factory paths via {@link streamPath}), a bare `fetch` (a reverse proxy /
+ * mock), or a test fake.
+ */
+export type StreamBody = (
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<ReadableStream<Uint8Array>>;
+
+/**
  * Invokes a serving endpoint using the SDK's high-level query API.
  * Returns a typed QueryEndpointResponse.
  */

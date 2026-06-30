@@ -156,14 +156,16 @@ serving surface — no bespoke `fetch()` + `authenticate()` plumbing.
 ### fromSupervisorApi()
 
 ```ts
-static fromSupervisorApi(options: SupervisorApiAdapterOptions): Promise<SupervisorApiAdapter>;
+static fromSupervisorApi(options: SupervisorApiAdapterOptions): Promise<AgentAdapter>;
 ```
 
-Discoverability shim for the Supervisor API adapter. Returns a
-import("./supervisor-api").SupervisorApiAdapter, NOT a
+Discoverability shim for the Supervisor API adapter. Returns an
+[AgentAdapter](Interface.AgentAdapter.md) (a `SupervisorApiAdapter` at runtime), NOT a
 DatabricksAdapter — the two are separate classes (different
-wire formats, different lifecycle). Surfaced here so application
-developers see a single `DatabricksAdapter.from*` autocomplete root.
+wire formats, different lifecycle). The return type is the
+[AgentAdapter](Interface.AgentAdapter.md) interface so callers aren't bound to the concrete
+class. Surfaced here so application developers see a single
+`DatabricksAdapter.from*` autocomplete root.
 
 Dynamic-imports `./supervisor-api` to avoid forming a load-time cycle:
 both files share `connectors/serving/client.ts`.
@@ -176,7 +178,7 @@ both files share `connectors/serving/client.ts`.
 
 #### Returns
 
-`Promise`\<[`SupervisorApiAdapter`](Class.SupervisorApiAdapter.md)\>
+`Promise`\<[`AgentAdapter`](Interface.AgentAdapter.md)\>
 
 #### Example
 

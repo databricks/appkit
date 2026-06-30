@@ -25,10 +25,10 @@ export {
 } from "./agents/databricks";
 export type {
   HostedSupervisorTool,
-  SupervisorApiAdapterCtorOptions,
   SupervisorApiAdapterOptions,
   SupervisorExtension,
   SupervisorTool,
+  WorkspaceClientLike,
 } from "./agents/supervisor-api";
 export {
   fromSupervisorApi,

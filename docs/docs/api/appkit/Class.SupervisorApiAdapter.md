@@ -9,7 +9,7 @@ server-side, so the adapter ignores the agents-plugin tool index.
 
 Authentication is handled via the Databricks SDK credential chain — the
 same mechanism used by `DatabricksAdapter.fromModelServing`. The transport
-is injected via [SupervisorApiAdapterCtorOptions.streamBody](Interface.SupervisorApiAdapterCtorOptions.md#streambody); the
+is injected via SupervisorApiAdapterCtorOptions.streamBody; the
 [fromSupervisorApi](Function.fromSupervisorApi.md) factory wires it through the SDK's
 `apiClient.request({ raw: true })`.
 
@@ -76,7 +76,7 @@ new SupervisorApiAdapter(options: SupervisorApiAdapterCtorOptions): SupervisorAp
 
 | Parameter | Type |
 | ------ | ------ |
-| `options` | [`SupervisorApiAdapterCtorOptions`](Interface.SupervisorApiAdapterCtorOptions.md) |
+| `options` | `SupervisorApiAdapterCtorOptions` |
 
 #### Returns
 

@@ -1,7 +1,7 @@
 # Function: fromSupervisorApi()
 
 ```ts
-function fromSupervisorApi(options: SupervisorApiAdapterOptions): Promise<SupervisorApiAdapter>;
+function fromSupervisorApi(options: SupervisorApiAdapterOptions): Promise<AgentAdapter>;
 ```
 
 Creates an [AgentAdapter](Interface.AgentAdapter.md) backed by the Databricks AI Gateway
@@ -26,7 +26,7 @@ it directly without pulling in [DatabricksAdapter](Class.DatabricksAdapter.md).
 
 ## Returns
 
-`Promise`\<[`SupervisorApiAdapter`](Class.SupervisorApiAdapter.md)\>
+`Promise`\<[`AgentAdapter`](Interface.AgentAdapter.md)\>
 
 ## Example
 

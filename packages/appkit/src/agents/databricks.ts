@@ -5,7 +5,10 @@ import type {
   AgentRunContext,
   AgentToolDefinition,
 } from "shared";
-import { stream as servingStream } from "../connectors/serving/client";
+import {
+  type StreamBody,
+  stream as servingStream,
+} from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
@@ -100,17 +103,6 @@ function throwIfExceedsStreamLimit(
     );
   }
 }
-
-/**
- * Transport shim: given an OpenAI-compatible request body, returns the raw
- * SSE byte stream from the serving endpoint. Injected at construction time so
- * callers can swap in the workspace SDK (factory paths), a bare `fetch`
- * (the raw constructor), or a test fake.
- */
-type StreamBody = (
-  body: Record<string, unknown>,
-  signal?: AbortSignal,
-) => Promise<ReadableStream<Uint8Array>>;
 
 /**
  * Escape-hatch options: provide an `endpointUrl` + `authenticate()` and the
@@ -398,7 +390,7 @@ export class DatabricksAdapter implements AgentAdapter {
     if (!resolvedEndpoint) {
       throw new Error(
         "No endpoint name provided and DATABRICKS_SERVING_ENDPOINT_NAME env var is not set. " +
-          "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
+        "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
       );
     }
 
@@ -425,11 +417,13 @@ export class DatabricksAdapter implements AgentAdapter {
   }
 
   /**
-   * Discoverability shim for the Supervisor API adapter. Returns a
-   * {@link import("./supervisor-api").SupervisorApiAdapter}, NOT a
+   * Discoverability shim for the Supervisor API adapter. Returns an
+   * {@link AgentAdapter} (a `SupervisorApiAdapter` at runtime), NOT a
    * {@link DatabricksAdapter} — the two are separate classes (different
-   * wire formats, different lifecycle). Surfaced here so application
-   * developers see a single `DatabricksAdapter.from*` autocomplete root.
+   * wire formats, different lifecycle). The return type is the
+   * {@link AgentAdapter} interface so callers aren't bound to the concrete
+   * class. Surfaced here so application developers see a single
+   * `DatabricksAdapter.from*` autocomplete root.
    *
    * Dynamic-imports `./supervisor-api` to avoid forming a load-time cycle:
    * both files share `connectors/serving/client.ts`.
@@ -445,7 +439,7 @@ export class DatabricksAdapter implements AgentAdapter {
    */
   static async fromSupervisorApi(
     options: import("./supervisor-api").SupervisorApiAdapterOptions,
-  ): Promise<import("./supervisor-api").SupervisorApiAdapter> {
+  ): Promise<AgentAdapter> {
     const { fromSupervisorApi } = await import("./supervisor-api");
     return fromSupervisorApi(options);
   }

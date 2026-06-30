@@ -13,6 +13,22 @@ Model identifier to pass in the request body
 
 ***
 
+### timeoutMs?
+
+```ts
+optional timeoutMs: number;
+```
+
+Total wall-clock budget (ms) for a single `run()`. When the SSE stream
+runs longer than this — e.g. an upstream that stalls without closing —
+the adapter aborts it and emits a terminal `transport` error rather than
+hanging the request indefinitely.
+
+This is a total-duration cap, not an idle cap. Defaults to 5 minutes,
+generous enough for multi-tool server-side orchestration.
+
+***
+
 ### workspaceClient?
 
 ```ts

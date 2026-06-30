@@ -6,11 +6,24 @@ import type {
   Message,
   ResponseStreamEvent,
 } from "shared";
-import { type ApiClientLike, streamPath } from "../connectors/serving/client";
+import {
+  type ApiClientLike,
+  type StreamBody,
+  streamPath,
+} from "../connectors/serving/client";
 import { createLogger } from "../logging/logger";
 import { readSseEvents } from "../stream";
 
 const logger = createLogger("agents:supervisor-api");
+
+/**
+ * Total wall-clock budget for a single `run()` before the adapter aborts the
+ * SSE stream and surfaces a terminal `transport` error. Guards against an
+ * upstream that stalls indefinitely (the agent run path does not otherwise
+ * wrap `adapter.run()` in a timeout). Override via
+ * {@link SupervisorApiAdapterOptions.timeoutMs}.
+ */
+const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
 
 /**
  * Stable client-facing error codes. We never surface raw upstream error
@@ -74,23 +87,15 @@ function summariseErrorPayload(payload: unknown): string {
 }
 
 /**
- * Transport shim: given a request body, returns the raw SSE byte stream from
- * the Supervisor API endpoint. Injected at construction time so callers can
- * swap in the workspace SDK (the {@link fromSupervisorApi} factory), a bare
- * `fetch` (a reverse proxy / mock), or a test fake. Mirrors `StreamBody` in
- * `agents/databricks.ts` so both adapters share one transport surface.
- */
-type StreamBody = (
-  body: Record<string, unknown>,
-  signal?: AbortSignal,
-) => Promise<ReadableStream<Uint8Array>>;
-
-/**
  * Structural shape of a Databricks SDK client used by {@link fromSupervisorApi}.
  * Only what we need: `apiClient.request` for streaming and
  * `config.ensureResolved` to materialise the host/credentials.
+ *
+ * Exported because {@link SupervisorApiAdapterOptions.workspaceClient} (a
+ * public type) references it — callers passing their own client can name
+ * the shape they need to satisfy.
  */
-interface WorkspaceClientLike extends ApiClientLike {
+export interface WorkspaceClientLike extends ApiClientLike {
   config: { ensureResolved(): Promise<void> };
 }
 
@@ -310,11 +315,22 @@ export interface SupervisorApiAdapterOptions {
    * chain or pass a service-principal client. (CWE-664)
    */
   workspaceClient?: WorkspaceClientLike;
+  /**
+   * Total wall-clock budget (ms) for a single `run()`. When the SSE stream
+   * runs longer than this — e.g. an upstream that stalls without closing —
+   * the adapter aborts it and emits a terminal `transport` error rather than
+   * hanging the request indefinitely.
+   *
+   * This is a total-duration cap, not an idle cap. Defaults to 5 minutes,
+   * generous enough for multi-tool server-side orchestration.
+   */
+  timeoutMs?: number;
 }
 
-export interface SupervisorApiAdapterCtorOptions {
+interface SupervisorApiAdapterCtorOptions {
   streamBody: StreamBody;
   model: string;
+  timeoutMs?: number;
 }
 
 /**
@@ -380,6 +396,7 @@ export interface SupervisorApiAdapterCtorOptions {
 export class SupervisorApiAdapter implements AgentAdapter {
   private streamBody: StreamBody;
   private model: string;
+  private timeoutMs: number;
 
   /**
    * Capability negotiation: the adapter reads its hosted-tool payload
@@ -401,6 +418,7 @@ export class SupervisorApiAdapter implements AgentAdapter {
   constructor(options: SupervisorApiAdapterCtorOptions) {
     this.streamBody = options.streamBody;
     this.model = options.model;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS;
   }
 
   async *run(
@@ -451,13 +469,25 @@ export class SupervisorApiAdapter implements AgentAdapter {
       hostedTools.length,
     );
 
+    // Compose a total-duration timeout with the consumer's abort signal. The
+    // agent run path drives `run()` directly without a TimeoutInterceptor, so
+    // without this the adapter would hang forever on a stalled upstream. We
+    // hand the combined signal to the transport + reader, but keep checking
+    // the consumer's `signal` separately: a consumer-initiated abort is a
+    // clean stop, whereas a timeout is a failure that must surface an error.
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
+
     let stream: ReadableStream<Uint8Array>;
     try {
-      stream = await this.streamBody(body, signal);
+      stream = await this.streamBody(body, combinedSignal);
     } catch (err) {
       // Aborts surface as exceptions thrown by `fetch`/SDK transports when
       // the consumer cancels mid-request. Treat as a clean stop so consumers
-      // don't see a contradictory terminal `error` after their own abort.
+      // don't see a contradictory terminal `error` after their own abort. A
+      // timeout (consumer signal not aborted) falls through to `emitError`.
       if (signal?.aborted) return;
       yield emitError("transport", err);
       return;
@@ -500,7 +530,10 @@ export class SupervisorApiAdapter implements AgentAdapter {
     // consumer-initiated abort as a clean stop; everything else becomes a
     // sanitised terminal `transport` error.
     try {
-      for await (const { event, data } of readSseEvents(stream, signal)) {
+      for await (const { event, data } of readSseEvents(
+        stream,
+        combinedSignal,
+      )) {
         if (data === "[DONE]") continue;
 
         let parsed: Record<string, unknown>;
@@ -545,7 +578,18 @@ export class SupervisorApiAdapter implements AgentAdapter {
       return;
     }
 
+    // Consumer-initiated abort: clean stop, no terminal error.
     if (signal?.aborted) return;
+
+    // Timeout fired while reading (the reader may break cleanly rather than
+    // throw, depending on where the abort lands), so check it explicitly.
+    if (timeoutSignal.aborted) {
+      yield emitError(
+        "transport",
+        `stream timed out after ${this.timeoutMs}ms`,
+      );
+      return;
+    }
 
     if (eventCounts.size === 0) {
       // A stream that closes without a single event leaves the consumer
@@ -830,10 +874,16 @@ function mapEvent(
  */
 export async function fromSupervisorApi(
   options: SupervisorApiAdapterOptions,
-): Promise<SupervisorApiAdapter> {
+): Promise<AgentAdapter> {
   let client = options.workspaceClient;
   if (!client) {
     const sdk = await import("@databricks/sdk-experimental");
+    // The SDK's concrete `WorkspaceClient` provides everything
+    // `WorkspaceClientLike` needs (`apiClient.request` + `config.ensureResolved`)
+    // but its `apiClient.request` signature is narrower than our structural
+    // `Record<string, unknown>` shape, so a direct assignment doesn't type.
+    // The cast bridges the structural gap — same pattern the serving
+    // connector uses for `ApiClientLike`.
     client = new sdk.WorkspaceClient({}) as unknown as WorkspaceClientLike;
   }
 
@@ -846,5 +896,6 @@ export async function fromSupervisorApi(
     streamBody: (body, signal) =>
       streamPath(resolved, "/ai-gateway/mlflow/v1/responses", body, signal),
     model: options.model,
+    timeoutMs: options.timeoutMs,
   });
 }

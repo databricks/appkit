@@ -976,6 +976,36 @@ describe("SupervisorApiAdapter", () => {
     ]);
   });
 
+  test("emits a terminal transport error when the stream stalls past timeoutMs", async () => {
+    // The agent run path drives `run()` without a TimeoutInterceptor, so the
+    // adapter caps total stream duration itself. A stream that never produces
+    // an event nor closes must surface a terminal `transport` error (not hang)
+    // once the timeout elapses.
+    const stalled = new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => {
+          /* never resolves — simulates a stalled upstream */
+        });
+      },
+    });
+    const adapter = new SupervisorApiAdapter({
+      streamBody: async () => stalled,
+      model: "databricks-claude-sonnet-4",
+      timeoutMs: 30,
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      {
+        type: "status",
+        status: "error",
+        error: "Supervisor API error (transport)",
+      },
+    ]);
+  });
+
   test("treats incomplete_details alone as benign truncation: recovers text and completes", async () => {
     // A `max_output_tokens` truncation populates `incomplete_details` while
     // still producing usable partial output. The adapter must NOT treat this

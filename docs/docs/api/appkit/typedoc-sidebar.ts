@@ -304,11 +304,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.SupervisorApiAdapterCtorOptions",
-          label: "SupervisorApiAdapterCtorOptions"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.SupervisorApiAdapterOptions",
           label: "SupervisorApiAdapterOptions"
         },
@@ -366,6 +361,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClientLike",
+          label: "WorkspaceClientLike"
         }
       ]
     },
