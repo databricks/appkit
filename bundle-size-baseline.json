@@ -3,12 +3,34 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 678473,
+        "packed": 678467,
         "unpacked": 2398820
       },
       "dist": {
-        "raw": 2394404,
-        "gzip": 802685,
+        "total": {
+          "raw": 2394404,
+          "gzip": 802675
+        },
+        "js": {
+          "raw": 705697,
+          "gzip": 246586
+        },
+        "types": {
+          "raw": 274553,
+          "gzip": 93028
+        },
+        "maps": {
+          "raw": 1403359,
+          "gzip": 459243
+        },
+        "css": {
+          "raw": 0,
+          "gzip": 0
+        },
+        "other": {
+          "raw": 10795,
+          "gzip": 3818
+        },
         "fileCount": 522
       },
       "entries": [
@@ -84,18 +106,59 @@
               }
             ]
           }
+        },
+        {
+          "id": "./type-generator",
+          "minified": 55019,
+          "gzip": 19056,
+          "composition": {
+            "initialGzip": 19056,
+            "lazyGzip": 0,
+            "totalGzip": 19056,
+            "own": 54837,
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 19056,
+                "kind": "initial"
+              }
+            ]
+          }
         }
       ]
     },
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 303759,
+        "packed": 303755,
         "unpacked": 1288650
       },
       "dist": {
-        "raw": 1284681,
-        "gzip": 424471,
+        "total": {
+          "raw": 1284681,
+          "gzip": 424469
+        },
+        "js": {
+          "raw": 371553,
+          "gzip": 122929
+        },
+        "types": {
+          "raw": 208062,
+          "gzip": 74449
+        },
+        "maps": {
+          "raw": 688206,
+          "gzip": 223745
+        },
+        "css": {
+          "raw": 16860,
+          "gzip": 3346
+        },
+        "other": {
+          "raw": 0,
+          "gzip": 0
+        },
         "fileCount": 475
       },
       "entries": [

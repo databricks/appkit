@@ -4,10 +4,13 @@
  * Measures and tracks the bundle size of the published packages (`appkit`,
  * `appkit-ui`). Three metrics per package:
  *
- *   1. Tarball packed / unpacked size — what `npm publish` ships, via
- *      `npm pack --dry-run --json`. Dependencies stay external (matches how
- *      the packages build), so this is the size of our own shipped files.
- *   2. `dist/` raw + gzip total — every built file summed.
+ *   1. npm tarball (packed) — the gzipped download, via `npm pack --dry-run
+ *      --json` on the package dir (dist + bin). Excludes release-only files
+ *      (docs/NOTICE/llms/shared CLI) that dist-appkit.ts assembles at publish
+ *      time, so it slightly under-reports the true published tarball.
+ *   2. `dist/` size split by file type — JS (runtime), type declarations,
+ *      source maps, CSS — each raw + gzip. Only `js` is runtime code; maps and
+ *      declarations often dominate the raw total.
  *   3. Per-entry import cost — each entry point (`.`, `./react`, ...) bundled
  *      with esbuild, minified and gzipped, with dependencies kept external
  *      (`packages: "external"`). Reflects the reachable own-code cost per
@@ -74,6 +77,7 @@ const PACKAGES: PackageConfig[] = [
     entries: [
       { id: ".", file: "dist/index.js" },
       { id: "./beta", file: "dist/beta.js" },
+      { id: "./type-generator", file: "dist/type-generator/index.js" },
     ],
   },
   {
@@ -118,10 +122,27 @@ interface EntryMeasurement {
   composition?: Composition;
 }
 
+interface SizePair {
+  raw: number;
+  gzip: number;
+}
+
+// dist/ split by file type so sourcemaps and type declarations don't hide
+// inside the headline number — only `js` is runtime code.
+interface DistBreakdown {
+  total: SizePair;
+  js: SizePair;
+  types: SizePair; // .d.ts / .d.mts / .d.cts
+  maps: SizePair; // .js.map, .d.ts.map, ...
+  css: SizePair;
+  other: SizePair;
+  fileCount: number;
+}
+
 interface PackageMeasurement {
   name: string;
   tarball: { packed: number; unpacked: number } | null;
-  dist: { raw: number; gzip: number; fileCount: number };
+  dist: DistBreakdown;
   entries: EntryMeasurement[];
 }
 
@@ -136,17 +157,39 @@ function walkFiles(dir: string): string[] {
   return out;
 }
 
-function measureDist(dir: string): PackageMeasurement["dist"] {
-  let raw = 0;
-  let gzip = 0;
-  let fileCount = 0;
+function measureDist(dir: string): DistBreakdown {
+  const zero = (): SizePair => ({ raw: 0, gzip: 0 });
+  const d: DistBreakdown = {
+    total: zero(),
+    js: zero(),
+    types: zero(),
+    maps: zero(),
+    css: zero(),
+    other: zero(),
+    fileCount: 0,
+  };
+  const add = (b: SizePair, raw: number, gzip: number) => {
+    b.raw += raw;
+    b.gzip += gzip;
+  };
   for (const file of walkFiles(dir)) {
     const contents = fs.readFileSync(file);
-    raw += contents.byteLength;
-    gzip += gzipSync(contents).byteLength;
-    fileCount += 1;
+    const raw = contents.byteLength;
+    const gzip = gzipSync(contents).byteLength;
+    add(d.total, raw, gzip);
+    d.fileCount += 1;
+    const bucket = file.endsWith(".map")
+      ? d.maps
+      : /\.d\.[cm]?ts$/.test(file)
+        ? d.types
+        : file.endsWith(".css")
+          ? d.css
+          : /\.[cm]?js$/.test(file)
+            ? d.js
+            : d.other;
+    add(bucket, raw, gzip);
   }
-  return { raw, gzip, fileCount };
+  return d;
 }
 
 function measureTarball(dir: string): PackageMeasurement["tarball"] {
@@ -419,13 +462,10 @@ function printTable(
         pkg.tarball?.packed ?? null,
         base?.tarball?.packed ?? null,
       ],
-      [
-        "tarball unpacked",
-        pkg.tarball?.unpacked ?? null,
-        base?.tarball?.unpacked ?? null,
-      ],
-      ["dist raw", pkg.dist.raw, base?.dist.raw ?? null],
-      ["dist gzip", pkg.dist.gzip, base?.dist.gzip ?? null],
+      ["dist total", pkg.dist.total.raw, base?.dist.total.raw ?? null],
+      ["  js", pkg.dist.js.raw, base?.dist.js.raw ?? null],
+      ["  type defs", pkg.dist.types.raw, base?.dist.types.raw ?? null],
+      ["  sourcemaps", pkg.dist.maps.raw, base?.dist.maps.raw ?? null],
     ];
     for (const [label, cur, prev] of rows) {
       const delta = baseline ? `  ${formatDelta(cur, prev)}` : "";
@@ -485,28 +525,31 @@ function renderMarkdown(
     exceeded = exceeded || pkgExceeded;
 
     lines.push(`### \`${pkg.name}\`${pkgExceeded ? " ⚠️ over budget" : ""}`, "");
-    lines.push("| Metric | main | this PR | Δ |", "| --- | --- | --- | --- |");
-    const rows: [string, number | null, number | null][] = [
-      [
-        "Tarball (packed)",
-        pkg.tarball?.packed ?? null,
-        base?.tarball?.packed ?? null,
-      ],
-      [
-        "Tarball (unpacked)",
-        pkg.tarball?.unpacked ?? null,
-        base?.tarball?.unpacked ?? null,
-      ],
-      ["dist (raw)", pkg.dist.raw, base?.dist.raw ?? null],
-      ["dist (gzip)", pkg.dist.gzip, base?.dist.gzip ?? null],
+    const hasBaseline = Boolean(baseline);
+    lines.push(
+      `**npm tarball (packed): ${cell(pkg.tarball?.packed ?? null, base?.tarball?.packed ?? null, hasBaseline)}** — gzipped download (dist + bin; excludes release-only docs/NOTICE).`,
+      "",
+      "| dist | raw | gzip |",
+      "| --- | --- | --- |",
+    );
+    const bd = base?.dist ?? null;
+    const distRows: [string, SizePair, SizePair | null][] = [
+      ["JS (runtime)", pkg.dist.js, bd?.js ?? null],
+      ["Type declarations", pkg.dist.types, bd?.types ?? null],
+      ["Source maps", pkg.dist.maps, bd?.maps ?? null],
+      ["CSS", pkg.dist.css, bd?.css ?? null],
+      ["Other", pkg.dist.other, bd?.other ?? null],
     ];
-    for (const [label, cur, prev] of rows) {
+    for (const [label, cur, prev] of distRows) {
+      if (cur.raw === 0 && (prev?.raw ?? 0) === 0) continue; // skip empty buckets
       lines.push(
-        `| ${label} | ${formatBytes(prev)} | ${formatBytes(cur)} | ${baseline ? formatDelta(cur, prev) : "—"} |`,
+        `| ${label} | ${cell(cur.raw, prev?.raw ?? null, hasBaseline)} | ${cell(cur.gzip, prev?.gzip ?? null, hasBaseline)} |`,
       );
     }
-    lines.push("");
-    const hasBaseline = Boolean(baseline);
+    lines.push(
+      `| **Total** | ${cell(pkg.dist.total.raw, bd?.total.raw ?? null, hasBaseline)} | ${cell(pkg.dist.total.gzip, bd?.total.gzip ?? null, hasBaseline)} |`,
+      "",
+    );
     const bundleDeps = PACKAGES.find((p) => p.name === pkg.name)?.bundleDeps;
     const scope = bundleDeps
       ? "consumer bundle — deps bundled, peerDeps external"
