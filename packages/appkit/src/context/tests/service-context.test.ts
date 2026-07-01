@@ -338,24 +338,23 @@ describe("ServiceContext", () => {
       expect(await state.warehouseId).toBe("env-wh-abc");
     });
 
-    test("should throw in dev mode when auto-resolve is not opted in", async () => {
+    test("should skip auto-resolve in dev mode when agentic mode is enabled", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
-      delete process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE;
       process.env.NODE_ENV = "development";
+      process.env.DATABRICKS_APPS_AGENTIC_MODE = "true";
 
       await expect(
         ServiceContext.initialize({ warehouseId: true }),
       ).rejects.toThrow(ConfigurationError);
-      // Must not attempt to list warehouses without explicit opt-in.
+      // Must not attempt to list warehouses in agentic mode.
       expect(mockApiRequest).not.toHaveBeenCalledWith(
         expect.objectContaining({ path: "/api/2.0/sql/warehouses" }),
       );
     });
 
-    test("should auto-discover warehouse in dev mode when opted in", async () => {
+    test("should auto-discover warehouse in development mode", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";
-      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE = "1";
 
       mockApiRequest.mockImplementation(({ path }: { path: string }) => {
         if (path === "/api/2.0/sql/warehouses") {
@@ -380,7 +379,6 @@ describe("ServiceContext", () => {
     test("should sort warehouses by state priority in dev mode", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";
-      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE = "1";
 
       mockApiRequest.mockImplementation(({ path }: { path: string }) => {
         if (path === "/api/2.0/sql/warehouses") {
@@ -404,7 +402,6 @@ describe("ServiceContext", () => {
     test("should throw in dev mode when no warehouses are available", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";
-      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE = "1";
 
       mockApiRequest.mockImplementation(({ path }: { path: string }) => {
         if (path === "/api/2.0/sql/warehouses") {
@@ -421,7 +418,6 @@ describe("ServiceContext", () => {
     test("should throw in dev mode when all warehouses are deleted", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";
-      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE = "1";
 
       mockApiRequest.mockImplementation(({ path }: { path: string }) => {
         if (path === "/api/2.0/sql/warehouses") {
@@ -443,7 +439,6 @@ describe("ServiceContext", () => {
     test("should throw in dev mode when best warehouse has no id", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";
-      process.env.APPKIT_AUTO_RESOLVE_WAREHOUSE = "1";
 
       mockApiRequest.mockImplementation(({ path }: { path: string }) => {
         if (path === "/api/2.0/sql/warehouses") {
