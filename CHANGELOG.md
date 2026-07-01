@@ -74,6 +74,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.43.0](https://github.com/databricks/appkit/compare/v0.42.0...v0.43.0) (2026-07-01)
+
+* attribute outbound Databricks requests to AppKit consistently ([#453](https://github.com/databricks/appkit/issues/453)) ([d37f5f1](https://github.com/databricks/appkit/commit/d37f5f1aca462d62dc773f6bc24e5886499f21fd))
+
+
 ## [0.42.0](https://github.com/databricks/appkit/compare/v0.41.7...v0.42.0) (2026-07-01)
 
 * skip dev warehouse auto-resolution in agentic mode ([#460](https://github.com/databricks/appkit/issues/460)) ([29b33da](https://github.com/databricks/appkit/commit/29b33da982a5fcd5e76b15ffd41a65e2233b4151))
