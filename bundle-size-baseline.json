@@ -17,18 +17,28 @@
           "minified": 250758,
           "gzip": 78284,
           "composition": {
+            "initialGzip": 75710,
+            "lazyGzip": 2574,
+            "totalGzip": 78284,
             "own": 249483,
-            "initialGzip": 74186,
-            "lazyGzip": 4098,
-            "lazyChunks": 1,
-            "lazyChunkList": [
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 71612,
+                "kind": "initial"
+              },
               {
                 "label": "utils.js",
-                "gzip": 4098
+                "gzip": 4098,
+                "kind": "initial"
+              },
+              {
+                "label": "remote-tunnel-manager.js",
+                "gzip": 2574,
+                "kind": "lazy"
               }
-            ],
-            "nodeModules": null,
-            "bundledGzip": null
+            ]
           }
         },
         {
@@ -36,26 +46,43 @@
           "minified": 120500,
           "gzip": 39881,
           "composition": {
+            "initialGzip": 39650,
+            "lazyGzip": 231,
+            "totalGzip": 39881,
             "own": 119365,
-            "initialGzip": 30732,
-            "lazyGzip": 9149,
-            "lazyChunks": 3,
-            "lazyChunkList": [
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 30501,
+                "kind": "initial"
+              },
               {
                 "label": "databricks.js",
-                "gzip": 5807
+                "gzip": 5807,
+                "kind": "initial"
               },
               {
                 "label": "service-context.js",
-                "gzip": 3123
+                "gzip": 3123,
+                "kind": "initial"
               },
               {
                 "label": "client-options.js",
-                "gzip": 219
+                "gzip": 219,
+                "kind": "initial"
+              },
+              {
+                "label": "databricks.js",
+                "gzip": 128,
+                "kind": "lazy"
+              },
+              {
+                "label": "index.js",
+                "gzip": 103,
+                "kind": "lazy"
               }
-            ],
-            "nodeModules": null,
-            "bundledGzip": null
+            ]
           }
         }
       ]
@@ -77,18 +104,28 @@
           "minified": 11848,
           "gzip": 4155,
           "composition": {
-            "own": 11574,
-            "initialGzip": 4155,
-            "lazyGzip": 120,
-            "lazyChunks": 1,
-            "lazyChunkList": [
+            "initialGzip": 4309,
+            "lazyGzip": 50587,
+            "totalGzip": 54896,
+            "own": 11585,
+            "nodeModules": 213288,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 4189,
+                "kind": "initial"
+              },
               {
                 "label": "chunk",
-                "gzip": 120
+                "gzip": 120,
+                "kind": "initial"
+              },
+              {
+                "label": "apache-arrow",
+                "gzip": 50587,
+                "kind": "lazy"
               }
-            ],
-            "nodeModules": 213288,
-            "bundledGzip": 54896
+            ]
           }
         },
         {
@@ -96,13 +133,18 @@
           "minified": 0,
           "gzip": 20,
           "composition": {
-            "own": 0,
             "initialGzip": 20,
             "lazyGzip": 0,
-            "lazyChunks": 0,
-            "lazyChunkList": [],
+            "totalGzip": 20,
+            "own": 0,
             "nodeModules": 0,
-            "bundledGzip": 20
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 20,
+                "kind": "initial"
+              }
+            ]
           }
         },
         {
@@ -110,18 +152,28 @@
           "minified": 182805,
           "gzip": 47055,
           "composition": {
-            "own": 175304,
-            "initialGzip": 47055,
-            "lazyGzip": 2150,
-            "lazyChunks": 1,
-            "lazyChunkList": [
+            "initialGzip": 605334,
+            "lazyGzip": 49772,
+            "totalGzip": 655106,
+            "own": 170537,
+            "nodeModules": 1909652,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 603184,
+                "kind": "initial"
+              },
               {
                 "label": "tslib",
-                "gzip": 2150
+                "gzip": 2150,
+                "kind": "initial"
+              },
+              {
+                "label": "apache-arrow",
+                "gzip": 49772,
+                "kind": "lazy"
               }
-            ],
-            "nodeModules": 1909652,
-            "bundledGzip": 655106
+            ]
           }
         },
         {
@@ -129,13 +181,18 @@
           "minified": 0,
           "gzip": 20,
           "composition": {
-            "own": 0,
             "initialGzip": 20,
             "lazyGzip": 0,
-            "lazyChunks": 0,
-            "lazyChunkList": [],
+            "totalGzip": 20,
+            "own": 0,
             "nodeModules": 0,
-            "bundledGzip": 20
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 20,
+                "kind": "initial"
+              }
+            ]
           }
         }
       ]

@@ -13,12 +13,13 @@
  *      (`packages: "external"`). Reflects the reachable own-code cost per
  *      entry, consistent with deps being external/peer at publish time.
  *   4. Per-entry composition (deep modes only, collapsed in the PR comment) —
- *      from esbuild's metafile with code-splitting on: own-code size, initial
- *      vs lazy-loaded chunks, and — for browser packages whose deps can be
- *      bundled — the node_modules weight a consumer would pay (peerDeps stay
- *      external). Node packages keep deps external (native addons can't bundle
- *      and a server SDK never ships deps to a browser), so their node_modules
- *      column reads "external".
+ *      from esbuild's metafile with code-splitting on: initial (statically
+ *      reachable) vs lazy (dynamic-import-only, e.g. apache-arrow) payload,
+ *      node_modules weight, own-code size, and a table of every emitted chunk.
+ *      Browser packages bundle deps (peerDeps external) so this is the real
+ *      consumer bundle; node packages keep deps external (native addons can't
+ *      bundle, and a server SDK never ships deps to a browser), so their
+ *      node_modules column reads "external".
  *
  * Modes:
  *   (default)              Measure both packages and print a console table.
@@ -94,20 +95,20 @@ const PACKAGES: PackageConfig[] = [
 const BUDGET = { maxIncreasePct: 5, minIncreaseBytes: 10 * 1024 };
 
 interface ChunkInfo {
-  label: string; // derived from the chunk's largest input (module or dep name)
+  label: string; // the chunk's own entry module, or its largest input
   gzip: number;
+  kind: "initial" | "lazy"; // initial = statically reachable from the entry
 }
 
 interface Composition {
-  own: number; // own-code minified bytes (source-attributed, deps excluded)
-  initialGzip: number; // entry chunk gzip
-  lazyGzip: number; // sum of dynamically-imported (lazy) chunk gzip
-  lazyChunks: number; // number of lazy chunks
-  lazyChunkList: ChunkInfo[]; // each lazy chunk, largest first
-  // Deps-bundled view: what a consumer pays with node_modules bundled in
-  // (peerDeps still external). Null when deps stay external (node packages).
-  nodeModules: number | null; // node_modules minified bytes
-  bundledGzip: number | null; // total gzip with deps bundled
+  // For browser packages this is the consumer bundle (deps bundled, peerDeps
+  // external); for node packages it is own code with deps external (as shipped).
+  initialGzip: number; // initial (static-import) payload gzip
+  lazyGzip: number; // lazy (dynamic-import) payload gzip
+  totalGzip: number; // initial + lazy
+  own: number; // own-code minified bytes (deps excluded)
+  nodeModules: number | null; // deps minified; null when deps external (node pkgs)
+  chunks: ChunkInfo[]; // every emitted chunk, initial first then largest-first
 }
 
 interface EntryMeasurement {
@@ -167,30 +168,31 @@ interface Analysis {
   totalGzip: number;
   own: number; // minified bytes attributed to non-node_modules inputs
   nodeModules: number; // minified bytes attributed to node_modules inputs
-  initialGzip: number; // entry chunk gzip
-  lazyGzip: number; // sum of non-entry (lazy) chunk gzip
-  lazyChunks: number;
-  lazyChunkList: ChunkInfo[];
+  initialGzip: number; // initial (static-import closure) chunk gzip
+  lazyGzip: number; // lazy (dynamic-import-only) chunk gzip
+  chunks: ChunkInfo[];
 }
 
-/** Name a chunk after its largest input module (or dependency package). */
-function chunkLabel(inputs: Record<string, { bytesInOutput: number }>): string {
-  let best = "";
-  let max = -1;
-  for (const [input, info] of Object.entries(inputs)) {
-    if (info.bytesInOutput > max) {
-      max = info.bytesInOutput;
-      best = input;
-    }
-  }
-  if (!best) return "chunk";
+type MetaOutput = {
+  entryPoint?: string;
+  inputs: Record<string, { bytesInOutput: number }>;
+};
+
+/** Name a chunk after its own entry module, else its largest input. */
+function chunkLabel(out: MetaOutput): string {
+  const source =
+    out.entryPoint ??
+    Object.entries(out.inputs).sort(
+      (a, b) => b[1].bytesInOutput - a[1].bytesInOutput,
+    )[0]?.[0];
+  if (!source) return "chunk";
   const marker = "node_modules/";
-  const nm = best.lastIndexOf(marker);
+  const nm = source.lastIndexOf(marker);
   if (nm !== -1) {
-    const parts = best.slice(nm + marker.length).split("/");
+    const parts = source.slice(nm + marker.length).split("/");
     return parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
   }
-  return path.basename(best);
+  return path.basename(source);
 }
 
 /**
@@ -219,7 +221,29 @@ async function buildAndAnalyze(
     loader: { ".css": "empty" },
     ...(external ? { external } : { packages: "external" }),
   });
-  const meta = result.metafile;
+  const outputs = result.metafile.outputs;
+  const jsChunks = Object.keys(outputs).filter((p) => p.endsWith(".js"));
+
+  // Initial payload = the entry chunk plus its static-import closure. esbuild
+  // sets `entryPoint` on code-split (dynamic-import) chunks too, so we can't use
+  // that flag — walk the static-import graph instead. Anything reachable only
+  // via a dynamic import (e.g. apache-arrow) is lazy.
+  const entryChunk = jsChunks.find(
+    (p) => outputs[p].entryPoint && absFile.endsWith(outputs[p].entryPoint),
+  );
+  const initial = new Set<string>();
+  const stack = entryChunk ? [entryChunk] : [];
+  while (stack.length) {
+    const p = stack.pop() as string;
+    if (initial.has(p)) continue;
+    initial.add(p);
+    for (const imp of outputs[p].imports) {
+      if (imp.kind === "import-statement" && outputs[imp.path]) {
+        stack.push(imp.path);
+      }
+    }
+  }
+
   const a: Analysis = {
     totalMinified: 0,
     totalGzip: 0,
@@ -227,28 +251,29 @@ async function buildAndAnalyze(
     nodeModules: 0,
     initialGzip: 0,
     lazyGzip: 0,
-    lazyChunks: 0,
-    lazyChunkList: [],
+    chunks: [],
   };
-  for (const [outPath, out] of Object.entries(meta.outputs)) {
-    if (!outPath.endsWith(".js")) continue;
+  for (const p of jsChunks) {
+    const out = outputs[p];
     a.totalMinified += out.bytes;
     for (const [input, info] of Object.entries(out.inputs)) {
       if (input.includes("node_modules")) a.nodeModules += info.bytesInOutput;
       else a.own += info.bytesInOutput;
     }
-    const file = result.outputFiles.find((f) => f.path.endsWith(outPath));
+    const file = result.outputFiles.find((f) => f.path.endsWith(p));
     const gzip = file ? gzipSync(file.contents).byteLength : 0;
     a.totalGzip += gzip;
-    if (out.entryPoint) a.initialGzip += gzip;
-    else {
-      a.lazyGzip += gzip;
-      a.lazyChunks += 1;
-      a.lazyChunkList.push({ label: chunkLabel(out.inputs), gzip });
-    }
+    const kind = initial.has(p) ? "initial" : "lazy";
+    if (kind === "initial") a.initialGzip += gzip;
+    else a.lazyGzip += gzip;
+    a.chunks.push({ label: chunkLabel(out), gzip, kind });
   }
-  a.lazyChunkList.sort(
-    (x, y) => y.gzip - x.gzip || x.label.localeCompare(y.label),
+  // Initial chunks first, then lazy; largest first within each group.
+  a.chunks.sort(
+    (x, y) =>
+      (x.kind === y.kind ? 0 : x.kind === "initial" ? -1 : 1) ||
+      y.gzip - x.gzip ||
+      x.label.localeCompare(y.label),
   );
   return a;
 }
@@ -261,38 +286,32 @@ async function measureEntry(
 ): Promise<Omit<EntryMeasurement, "id">> {
   if (!fs.existsSync(absFile)) return { minified: null, gzip: null };
   try {
-    // Own-code cost (deps external) — the headline, stable import cost.
+    // Headline import cost = own code with deps external (what our code weighs,
+    // independent of dependency churn). Stable and attributable to our changes.
     const own = await buildAndAnalyze(absFile, platform);
-    const composition: Composition = {
-      own: own.own,
-      initialGzip: own.initialGzip,
-      lazyGzip: own.lazyGzip,
-      lazyChunks: own.lazyChunks,
-      lazyChunkList: own.lazyChunkList,
-      nodeModules: null,
-      bundledGzip: null,
-    };
-    // Deps-bundled view (browser packages, deep modes only). Best-effort: if a
-    // dep can't be bundled, leave the node_modules columns empty. Browser
-    // packages lazy-load dependencies (e.g. apache-arrow), not their own
-    // modules, so the meaningful lazy chunks only appear once deps are bundled —
-    // take the lazy split and chunk list from this build too.
+
+    // Composition view. Browser packages bundle deps (peerDeps external) so it
+    // reflects the real consumer bundle — lazy-loaded deps like apache-arrow
+    // land in lazy chunks. Node packages keep deps external (as shipped).
+    let view = own;
+    let nodeModules: number | null = null;
     if (deep && bundleExternal) {
       try {
-        const bundled = await buildAndAnalyze(
-          absFile,
-          platform,
-          bundleExternal,
-        );
-        composition.nodeModules = bundled.nodeModules;
-        composition.bundledGzip = bundled.totalGzip;
-        composition.lazyGzip = bundled.lazyGzip;
-        composition.lazyChunks = bundled.lazyChunks;
-        composition.lazyChunkList = bundled.lazyChunkList;
+        view = await buildAndAnalyze(absFile, platform, bundleExternal);
+        nodeModules = view.nodeModules;
       } catch {
-        // leave deps-bundled fields at their own-code defaults
+        view = own; // a dep couldn't be bundled — fall back to the own-code view
       }
     }
+
+    const composition: Composition = {
+      initialGzip: view.initialGzip,
+      lazyGzip: view.lazyGzip,
+      totalGzip: view.totalGzip,
+      own: view.own,
+      nodeModules,
+      chunks: view.chunks,
+    };
     return { minified: own.totalMinified, gzip: own.totalGzip, composition };
   } catch {
     return { minified: null, gzip: null };
@@ -487,50 +506,45 @@ function renderMarkdown(
       );
     }
     lines.push("");
+    const hasBaseline = Boolean(baseline);
     const bundleDeps = PACKAGES.find((p) => p.name === pkg.name)?.bundleDeps;
+    const scope = bundleDeps
+      ? "consumer bundle — deps bundled, peerDeps external"
+      : "own code — deps external (as shipped)";
     lines.push(
-      "<details><summary>Per-entry composition — own code (deps external) + lazy chunks; node_modules = weight if bundled</summary>",
+      `<details><summary>Per-entry composition (${scope})</summary>`,
       "",
-      "| Entry | Import cost (gz) | Own code (min) | Lazy (gz) | node_modules (min) | + deps total (gz) |",
+      "| Entry | Initial (gz) | Lazy (gz) | Total (gz) | node_modules (min) | Own code (min) |",
       "| --- | --- | --- | --- | --- | --- |",
     );
     for (const entry of pkg.entries) {
-      const prev = base?.entries.find((e) => e.id === entry.id) ?? null;
       const c = entry.composition;
-      const pc = prev?.composition ?? null;
-      const lazy =
-        c && c.lazyChunks > 0
-          ? `${formatBytes(c.lazyGzip)} · ${c.lazyChunks} chunk${c.lazyChunks > 1 ? "s" : ""}`
-          : "none";
+      const pc =
+        base?.entries.find((e) => e.id === entry.id)?.composition ?? null;
       const nodeModules =
         c?.nodeModules != null
-          ? cell(c.nodeModules, pc?.nodeModules ?? null, Boolean(baseline))
-          : bundleDeps
-            ? "n/a"
-            : "external";
-      const bundled =
-        c?.bundledGzip != null
-          ? formatBytes(c.bundledGzip)
-          : bundleDeps
-            ? "n/a"
-            : "—";
+          ? cell(c.nodeModules, pc?.nodeModules ?? null, hasBaseline)
+          : "external";
       lines.push(
-        `| \`${entry.id}\` | ${cell(entry.gzip, prev?.gzip ?? null, Boolean(baseline))} | ${cell(c?.own ?? null, pc?.own ?? null, Boolean(baseline))} | ${lazy} | ${nodeModules} | ${bundled} |`,
+        `| \`${entry.id}\` | ${cell(c?.initialGzip ?? null, pc?.initialGzip ?? null, hasBaseline)} | ${cell(c?.lazyGzip ?? null, pc?.lazyGzip ?? null, hasBaseline)} | ${cell(c?.totalGzip ?? null, pc?.totalGzip ?? null, hasBaseline)} | ${nodeModules} | ${cell(c?.own ?? null, pc?.own ?? null, hasBaseline)} |`,
       );
     }
-    // List the individual lazy chunks (gzip) under the table.
-    const withChunks = pkg.entries.filter(
-      (e) => (e.composition?.lazyChunkList?.length ?? 0) > 0,
+    // Every emitted chunk, per entry.
+    const chunkRows = pkg.entries.flatMap((entry) =>
+      (entry.composition?.chunks ?? []).map(
+        (chunk) =>
+          `| \`${entry.id}\` | \`${chunk.label}\` | ${chunk.kind} | ${formatBytes(chunk.gzip)} |`,
+      ),
     );
-    if (withChunks.length > 0) {
-      lines.push("", "**Lazy chunks (gzip):**");
-      for (const entry of withChunks) {
-        for (const chunk of entry.composition?.lazyChunkList ?? []) {
-          lines.push(
-            `- \`${entry.id}\` → \`${chunk.label}\` ${formatBytes(chunk.gzip)}`,
-          );
-        }
-      }
+    if (chunkRows.length > 0) {
+      lines.push(
+        "",
+        "**Chunks:**",
+        "",
+        "| Entry | Chunk | Load | Size (gz) |",
+        "| --- | --- | --- | --- |",
+        ...chunkRows,
+      );
     }
     lines.push("", "</details>", "");
   }
