@@ -3,13 +3,13 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 761292,
-        "unpacked": 2795741
+        "packed": 678473,
+        "unpacked": 2398820
       },
       "dist": {
-        "raw": 2791325,
-        "gzip": 953653,
-        "fileCount": 667
+        "raw": 2394404,
+        "gzip": 802685,
+        "fileCount": 522
       },
       "entries": [
         {
@@ -27,13 +27,13 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 304085,
-        "unpacked": 1288694
+        "packed": 303755,
+        "unpacked": 1288650
       },
       "dist": {
-        "raw": 1284725,
-        "gzip": 424673,
-        "fileCount": 483
+        "raw": 1284681,
+        "gzip": 424469,
+        "fileCount": 475
       },
       "entries": [
         {
