@@ -70,6 +70,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.41.7](https://github.com/databricks/appkit/compare/v0.41.6...v0.41.7) (2026-07-01)
+
+### deps
+
+* **deps:** bump vulnerable transitive deps to patched versions ([#405](https://github.com/databricks/appkit/issues/405)) ([#434](https://github.com/databricks/appkit/issues/434)) ([36a3ce1](https://github.com/databricks/appkit/commit/36a3ce1ed45c23acb9f7c385d92f31c2fa369929))
+
+
 ## [0.41.6](https://github.com/databricks/appkit/compare/v0.41.5...v0.41.6) (2026-06-24)
 
 ### type-generator
