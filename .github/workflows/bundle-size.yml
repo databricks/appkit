@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      id-token: write # setup-jfrog-npm exchanges an OIDC token for registry auth
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -80,6 +81,7 @@ jobs:
     if: github.event_name == 'push'
     permissions:
       contents: write
+      id-token: write # setup-jfrog-npm exchanges an OIDC token for registry auth
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
