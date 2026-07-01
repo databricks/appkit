@@ -72,6 +72,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.42.0](https://github.com/databricks/appkit/compare/v0.41.7...v0.42.0) (2026-07-01)
+
+* skip dev warehouse auto-resolution in agentic mode ([#460](https://github.com/databricks/appkit/issues/460)) ([29b33da](https://github.com/databricks/appkit/commit/29b33da982a5fcd5e76b15ffd41a65e2233b4151))
+
+
 ## [0.41.7](https://github.com/databricks/appkit/compare/v0.41.6...v0.41.7) (2026-07-01)
 
 ### deps
