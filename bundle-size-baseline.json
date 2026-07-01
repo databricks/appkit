@@ -21,6 +21,12 @@
             "initialGzip": 74186,
             "lazyGzip": 4098,
             "lazyChunks": 1,
+            "lazyChunkList": [
+              {
+                "label": "utils.js",
+                "gzip": 4098
+              }
+            ],
             "nodeModules": null,
             "bundledGzip": null
           }
@@ -34,6 +40,20 @@
             "initialGzip": 30732,
             "lazyGzip": 9149,
             "lazyChunks": 3,
+            "lazyChunkList": [
+              {
+                "label": "databricks.js",
+                "gzip": 5807
+              },
+              {
+                "label": "service-context.js",
+                "gzip": 3123
+              },
+              {
+                "label": "client-options.js",
+                "gzip": 219
+              }
+            ],
             "nodeModules": null,
             "bundledGzip": null
           }
@@ -43,12 +63,12 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 303755,
+        "packed": 303759,
         "unpacked": 1288650
       },
       "dist": {
         "raw": 1284681,
-        "gzip": 424469,
+        "gzip": 424471,
         "fileCount": 475
       },
       "entries": [
@@ -59,8 +79,14 @@
           "composition": {
             "own": 11574,
             "initialGzip": 4155,
-            "lazyGzip": 0,
-            "lazyChunks": 0,
+            "lazyGzip": 120,
+            "lazyChunks": 1,
+            "lazyChunkList": [
+              {
+                "label": "chunk",
+                "gzip": 120
+              }
+            ],
             "nodeModules": 213288,
             "bundledGzip": 54896
           }
@@ -74,6 +100,7 @@
             "initialGzip": 20,
             "lazyGzip": 0,
             "lazyChunks": 0,
+            "lazyChunkList": [],
             "nodeModules": 0,
             "bundledGzip": 20
           }
@@ -85,8 +112,14 @@
           "composition": {
             "own": 175304,
             "initialGzip": 47055,
-            "lazyGzip": 0,
-            "lazyChunks": 0,
+            "lazyGzip": 2150,
+            "lazyChunks": 1,
+            "lazyChunkList": [
+              {
+                "label": "tslib",
+                "gzip": 2150
+              }
+            ],
             "nodeModules": 1909652,
             "bundledGzip": 655106
           }
@@ -100,6 +133,7 @@
             "initialGzip": 20,
             "lazyGzip": 0,
             "lazyChunks": 0,
+            "lazyChunkList": [],
             "nodeModules": 0,
             "bundledGzip": 20
           }

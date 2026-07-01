@@ -93,11 +93,17 @@ const PACKAGES: PackageConfig[] = [
 // so rounding noise never blocks a merge.
 const BUDGET = { maxIncreasePct: 5, minIncreaseBytes: 10 * 1024 };
 
+interface ChunkInfo {
+  label: string; // derived from the chunk's largest input (module or dep name)
+  gzip: number;
+}
+
 interface Composition {
   own: number; // own-code minified bytes (source-attributed, deps excluded)
   initialGzip: number; // entry chunk gzip
   lazyGzip: number; // sum of dynamically-imported (lazy) chunk gzip
   lazyChunks: number; // number of lazy chunks
+  lazyChunkList: ChunkInfo[]; // each lazy chunk, largest first
   // Deps-bundled view: what a consumer pays with node_modules bundled in
   // (peerDeps still external). Null when deps stay external (node packages).
   nodeModules: number | null; // node_modules minified bytes
@@ -164,6 +170,27 @@ interface Analysis {
   initialGzip: number; // entry chunk gzip
   lazyGzip: number; // sum of non-entry (lazy) chunk gzip
   lazyChunks: number;
+  lazyChunkList: ChunkInfo[];
+}
+
+/** Name a chunk after its largest input module (or dependency package). */
+function chunkLabel(inputs: Record<string, { bytesInOutput: number }>): string {
+  let best = "";
+  let max = -1;
+  for (const [input, info] of Object.entries(inputs)) {
+    if (info.bytesInOutput > max) {
+      max = info.bytesInOutput;
+      best = input;
+    }
+  }
+  if (!best) return "chunk";
+  const marker = "node_modules/";
+  const nm = best.lastIndexOf(marker);
+  if (nm !== -1) {
+    const parts = best.slice(nm + marker.length).split("/");
+    return parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+  }
+  return path.basename(best);
 }
 
 /**
@@ -201,6 +228,7 @@ async function buildAndAnalyze(
     initialGzip: 0,
     lazyGzip: 0,
     lazyChunks: 0,
+    lazyChunkList: [],
   };
   for (const [outPath, out] of Object.entries(meta.outputs)) {
     if (!outPath.endsWith(".js")) continue;
@@ -216,8 +244,12 @@ async function buildAndAnalyze(
     else {
       a.lazyGzip += gzip;
       a.lazyChunks += 1;
+      a.lazyChunkList.push({ label: chunkLabel(out.inputs), gzip });
     }
   }
+  a.lazyChunkList.sort(
+    (x, y) => y.gzip - x.gzip || x.label.localeCompare(y.label),
+  );
   return a;
 }
 
@@ -236,11 +268,15 @@ async function measureEntry(
       initialGzip: own.initialGzip,
       lazyGzip: own.lazyGzip,
       lazyChunks: own.lazyChunks,
+      lazyChunkList: own.lazyChunkList,
       nodeModules: null,
       bundledGzip: null,
     };
     // Deps-bundled view (browser packages, deep modes only). Best-effort: if a
-    // dep can't be bundled, leave the node_modules columns empty.
+    // dep can't be bundled, leave the node_modules columns empty. Browser
+    // packages lazy-load dependencies (e.g. apache-arrow), not their own
+    // modules, so the meaningful lazy chunks only appear once deps are bundled —
+    // take the lazy split and chunk list from this build too.
     if (deep && bundleExternal) {
       try {
         const bundled = await buildAndAnalyze(
@@ -250,8 +286,11 @@ async function measureEntry(
         );
         composition.nodeModules = bundled.nodeModules;
         composition.bundledGzip = bundled.totalGzip;
+        composition.lazyGzip = bundled.lazyGzip;
+        composition.lazyChunks = bundled.lazyChunks;
+        composition.lazyChunkList = bundled.lazyChunkList;
       } catch {
-        // leave nodeModules/bundledGzip null
+        // leave deps-bundled fields at their own-code defaults
       }
     }
     return { minified: own.totalMinified, gzip: own.totalGzip, composition };
@@ -478,6 +517,20 @@ function renderMarkdown(
       lines.push(
         `| \`${entry.id}\` | ${cell(entry.gzip, prev?.gzip ?? null, Boolean(baseline))} | ${cell(c?.own ?? null, pc?.own ?? null, Boolean(baseline))} | ${lazy} | ${nodeModules} | ${bundled} |`,
       );
+    }
+    // List the individual lazy chunks (gzip) under the table.
+    const withChunks = pkg.entries.filter(
+      (e) => (e.composition?.lazyChunkList?.length ?? 0) > 0,
+    );
+    if (withChunks.length > 0) {
+      lines.push("", "**Lazy chunks (gzip):**");
+      for (const entry of withChunks) {
+        for (const chunk of entry.composition?.lazyChunkList ?? []) {
+          lines.push(
+            `- \`${entry.id}\` → \`${chunk.label}\` ${formatBytes(chunk.gzip)}`,
+          );
+        }
+      }
     }
     lines.push("", "</details>", "");
   }
