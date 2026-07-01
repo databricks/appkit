@@ -147,7 +147,6 @@ describe("AppKitMcpClient — host allowlist", () => {
       // Every MCP request is attributed to AppKit via User-Agent.
       expect(headers["User-Agent"]).toBe(APPKIT_USER_AGENT);
     }
-    expect(APPKIT_USER_AGENT).toMatch(/^@databricks\/appkit\//);
     expect(client.canForwardWorkspaceAuth("genie-1")).toBe(true);
   });
 

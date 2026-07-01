@@ -5,6 +5,9 @@ import {
   version as productVersion,
 } from "../../package.json";
 
+const normalizedVersion = (coerce(productVersion)?.version ??
+  productVersion) as ClientOptions["productVersion"];
+
 /**
  * SDK client options that stamp every `apiClient.request()` with an AppKit
  * User-Agent (`@databricks/appkit/<version>`), so outbound Databricks traffic
@@ -13,9 +16,6 @@ import {
  */
 export function getClientOptions(): ClientOptions {
   const isDev = process.env.NODE_ENV === "development";
-  const semver = coerce(productVersion);
-  const normalizedVersion = (semver?.version ??
-    productVersion) as ClientOptions["productVersion"];
 
   return {
     product: productName,
@@ -29,6 +29,4 @@ export function getClientOptions(): ClientOptions {
  * call sites that bypass the SDK's `apiClient` and have no client to derive it
  * from (e.g. the MCP connector).
  */
-export const APPKIT_USER_AGENT = `${productName}/${
-  coerce(productVersion)?.version ?? productVersion
-}`;
+export const APPKIT_USER_AGENT = `${productName}/${normalizedVersion}`;
