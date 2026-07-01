@@ -21,7 +21,7 @@
         "properties": {
           "source": {
             "type": "string",
-            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$",
+            "pattern": "^[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+$",
             "description": "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
             "examples": [
               "appkit_demo.public.revenue_metrics",
@@ -42,5 +42,5 @@
     }
   },
   "additionalProperties": false,
-  "description": "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes."
+  "description": "Schema for AppKit metric-views.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes."
 }
