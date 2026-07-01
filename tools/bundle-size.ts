@@ -12,6 +12,13 @@
  *      with esbuild, minified and gzipped, with dependencies kept external
  *      (`packages: "external"`). Reflects the reachable own-code cost per
  *      entry, consistent with deps being external/peer at publish time.
+ *   4. Per-entry composition (deep modes only, collapsed in the PR comment) —
+ *      from esbuild's metafile with code-splitting on: own-code size, initial
+ *      vs lazy-loaded chunks, and — for browser packages whose deps can be
+ *      bundled — the node_modules weight a consumer would pay (peerDeps stay
+ *      external). Node packages keep deps external (native addons can't bundle
+ *      and a server SDK never ships deps to a browser), so their node_modules
+ *      column reads "external".
  *
  * Modes:
  *   (default)              Measure both packages and print a console table.
@@ -50,6 +57,10 @@ interface PackageConfig {
   name: string;
   dir: string;
   platform: Platform;
+  // When true, the composition pass bundles dependencies (except peerDeps) to
+  // reveal node_modules weight. Only sound for browser packages: node packages
+  // have native deps that can't bundle and never ship deps to a browser.
+  bundleDeps: boolean;
   entries: { id: string; file: string }[];
 }
 
@@ -58,6 +69,7 @@ const PACKAGES: PackageConfig[] = [
     name: "@databricks/appkit",
     dir: "packages/appkit",
     platform: "node",
+    bundleDeps: false,
     entries: [
       { id: ".", file: "dist/index.js" },
       { id: "./beta", file: "dist/beta.js" },
@@ -67,6 +79,7 @@ const PACKAGES: PackageConfig[] = [
     name: "@databricks/appkit-ui",
     dir: "packages/appkit-ui",
     platform: "browser",
+    bundleDeps: true,
     entries: [
       { id: "./js", file: "dist/js/index.js" },
       { id: "./js/beta", file: "dist/js/beta.js" },
@@ -80,10 +93,22 @@ const PACKAGES: PackageConfig[] = [
 // so rounding noise never blocks a merge.
 const BUDGET = { maxIncreasePct: 5, minIncreaseBytes: 10 * 1024 };
 
+interface Composition {
+  own: number; // own-code minified bytes (source-attributed, deps excluded)
+  initialGzip: number; // entry chunk gzip
+  lazyGzip: number; // sum of dynamically-imported (lazy) chunk gzip
+  lazyChunks: number; // number of lazy chunks
+  // Deps-bundled view: what a consumer pays with node_modules bundled in
+  // (peerDeps still external). Null when deps stay external (node packages).
+  nodeModules: number | null; // node_modules minified bytes
+  bundledGzip: number | null; // total gzip with deps bundled
+}
+
 interface EntryMeasurement {
   id: string;
-  minified: number | null;
-  gzip: number | null;
+  minified: number | null; // total minified (own code, deps external)
+  gzip: number | null; // total gzip (own code, deps external) — headline import cost
+  composition?: Composition;
 }
 
 interface PackageMeasurement {
@@ -131,41 +156,132 @@ function measureTarball(dir: string): PackageMeasurement["tarball"] {
   }
 }
 
+interface Analysis {
+  totalMinified: number;
+  totalGzip: number;
+  own: number; // minified bytes attributed to non-node_modules inputs
+  nodeModules: number; // minified bytes attributed to node_modules inputs
+  initialGzip: number; // entry chunk gzip
+  lazyGzip: number; // sum of non-entry (lazy) chunk gzip
+  lazyChunks: number;
+}
+
+/**
+ * Bundle a single entry with code-splitting and read esbuild's metafile to
+ * attribute output bytes to own-code vs node_modules and to initial vs lazy
+ * chunks. When `external` is given, only those specifiers stay external (deps
+ * are bundled); otherwise all bare imports are external (`packages: "external"`).
+ */
+async function buildAndAnalyze(
+  absFile: string,
+  platform: Platform,
+  external?: string[],
+): Promise<Analysis> {
+  const result = await build({
+    entryPoints: [absFile],
+    bundle: true,
+    write: false,
+    minify: true,
+    splitting: true,
+    format: "esm",
+    platform,
+    metafile: true,
+    legalComments: "none",
+    logLevel: "silent",
+    outdir: "__bundle_size__", // naming only; write:false emits nothing to disk
+    loader: { ".css": "empty" },
+    ...(external ? { external } : { packages: "external" }),
+  });
+  const meta = result.metafile;
+  const a: Analysis = {
+    totalMinified: 0,
+    totalGzip: 0,
+    own: 0,
+    nodeModules: 0,
+    initialGzip: 0,
+    lazyGzip: 0,
+    lazyChunks: 0,
+  };
+  for (const [outPath, out] of Object.entries(meta.outputs)) {
+    if (!outPath.endsWith(".js")) continue;
+    a.totalMinified += out.bytes;
+    for (const [input, info] of Object.entries(out.inputs)) {
+      if (input.includes("node_modules")) a.nodeModules += info.bytesInOutput;
+      else a.own += info.bytesInOutput;
+    }
+    const file = result.outputFiles.find((f) => f.path.endsWith(outPath));
+    const gzip = file ? gzipSync(file.contents).byteLength : 0;
+    a.totalGzip += gzip;
+    if (out.entryPoint) a.initialGzip += gzip;
+    else {
+      a.lazyGzip += gzip;
+      a.lazyChunks += 1;
+    }
+  }
+  return a;
+}
+
 async function measureEntry(
   absFile: string,
   platform: Platform,
+  deep: boolean,
+  bundleExternal: string[] | null,
 ): Promise<Omit<EntryMeasurement, "id">> {
   if (!fs.existsSync(absFile)) return { minified: null, gzip: null };
   try {
-    const result = await build({
-      entryPoints: [absFile],
-      bundle: true,
-      write: false,
-      minify: true,
-      format: "esm",
-      platform,
-      packages: "external",
-      legalComments: "none",
-      logLevel: "silent",
-      loader: { ".css": "empty" },
-    });
-    const js =
-      result.outputFiles.find((f) => f.path.endsWith(".js")) ??
-      result.outputFiles[0];
-    return {
-      minified: js.contents.byteLength,
-      gzip: gzipSync(js.contents).byteLength,
+    // Own-code cost (deps external) — the headline, stable import cost.
+    const own = await buildAndAnalyze(absFile, platform);
+    const composition: Composition = {
+      own: own.own,
+      initialGzip: own.initialGzip,
+      lazyGzip: own.lazyGzip,
+      lazyChunks: own.lazyChunks,
+      nodeModules: null,
+      bundledGzip: null,
     };
+    // Deps-bundled view (browser packages, deep modes only). Best-effort: if a
+    // dep can't be bundled, leave the node_modules columns empty.
+    if (deep && bundleExternal) {
+      try {
+        const bundled = await buildAndAnalyze(
+          absFile,
+          platform,
+          bundleExternal,
+        );
+        composition.nodeModules = bundled.nodeModules;
+        composition.bundledGzip = bundled.totalGzip;
+      } catch {
+        // leave nodeModules/bundledGzip null
+      }
+    }
+    return { minified: own.totalMinified, gzip: own.totalGzip, composition };
   } catch {
     return { minified: null, gzip: null };
   }
 }
 
-async function measurePackage(pkg: PackageConfig): Promise<PackageMeasurement> {
+/** peerDependencies stay external in the consumer-cost view (consumer provides them). */
+function peerExternals(dir: string): string[] {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
+  );
+  return Object.keys(pkg.peerDependencies ?? {});
+}
+
+async function measurePackage(
+  pkg: PackageConfig,
+  deep: boolean,
+): Promise<PackageMeasurement> {
   const dir = path.join(REPO_ROOT, pkg.dir);
+  const bundleExternal = pkg.bundleDeps ? peerExternals(dir) : null;
   const entries: EntryMeasurement[] = [];
   for (const entry of pkg.entries) {
-    const cost = await measureEntry(path.join(dir, entry.file), pkg.platform);
+    const cost = await measureEntry(
+      path.join(dir, entry.file),
+      pkg.platform,
+      deep,
+      bundleExternal,
+    );
     entries.push({ id: entry.id, ...cost });
   }
   return {
@@ -176,11 +292,11 @@ async function measurePackage(pkg: PackageConfig): Promise<PackageMeasurement> {
   };
 }
 
-async function measureAll(): Promise<PackageMeasurement[]> {
+async function measureAll(deep: boolean): Promise<PackageMeasurement[]> {
   const results: PackageMeasurement[] = [];
   for (const pkg of PACKAGES) {
     try {
-      results.push(await measurePackage(pkg));
+      results.push(await measurePackage(pkg, deep));
     } catch (err) {
       console.error(`bundle-size: failed to measure ${pkg.name}:`, err);
     }
@@ -207,6 +323,19 @@ function formatDelta(current: number | null, base: number | null): string {
   const pct = base === 0 ? 0 : (delta / base) * 100;
   const sign = delta > 0 ? "+" : "-";
   return `${sign}${formatBytes(Math.abs(delta))} (${sign}${Math.abs(pct).toFixed(1)}%)`;
+}
+
+/** A value cell with an optional compact signed delta, e.g. "166 KB (+2 KB)". */
+function cell(
+  current: number | null,
+  base: number | null,
+  hasBaseline: boolean,
+): string {
+  const value = formatBytes(current);
+  if (!hasBaseline || current == null || base == null) return value;
+  const delta = current - base;
+  if (delta === 0) return value;
+  return `${value} (${delta > 0 ? "+" : "-"}${formatBytes(Math.abs(delta))})`;
 }
 
 /** True when the packed tarball grew past both budget gates. */
@@ -319,16 +448,35 @@ function renderMarkdown(
       );
     }
     lines.push("");
+    const bundleDeps = PACKAGES.find((p) => p.name === pkg.name)?.bundleDeps;
     lines.push(
-      "<details><summary>Per-entry import cost (minified + gzip, deps external)</summary>",
+      "<details><summary>Per-entry composition — own code (deps external) + lazy chunks; node_modules = weight if bundled</summary>",
       "",
-      "| Entry | main (gz) | this PR (gz) | Δ gz |",
-      "| --- | --- | --- | --- |",
+      "| Entry | Import cost (gz) | Own code (min) | Lazy (gz) | node_modules (min) | + deps total (gz) |",
+      "| --- | --- | --- | --- | --- | --- |",
     );
     for (const entry of pkg.entries) {
       const prev = base?.entries.find((e) => e.id === entry.id) ?? null;
+      const c = entry.composition;
+      const pc = prev?.composition ?? null;
+      const lazy =
+        c && c.lazyChunks > 0
+          ? `${formatBytes(c.lazyGzip)} · ${c.lazyChunks} chunk${c.lazyChunks > 1 ? "s" : ""}`
+          : "none";
+      const nodeModules =
+        c?.nodeModules != null
+          ? cell(c.nodeModules, pc?.nodeModules ?? null, Boolean(baseline))
+          : bundleDeps
+            ? "n/a"
+            : "external";
+      const bundled =
+        c?.bundledGzip != null
+          ? formatBytes(c.bundledGzip)
+          : bundleDeps
+            ? "n/a"
+            : "—";
       lines.push(
-        `| \`${entry.id}\` | ${formatBytes(prev?.gzip ?? null)} | ${formatBytes(entry.gzip)} | ${baseline ? formatDelta(entry.gzip, prev?.gzip ?? null) : "—"} |`,
+        `| \`${entry.id}\` | ${cell(entry.gzip, prev?.gzip ?? null, Boolean(baseline))} | ${cell(c?.own ?? null, pc?.own ?? null, Boolean(baseline))} | ${lazy} | ${nodeModules} | ${bundled} |`,
       );
     }
     lines.push("", "</details>", "");
@@ -359,7 +507,10 @@ async function main() {
     },
   });
 
-  const results = await measureAll();
+  // The composition pass (bundling deps for browser packages) is only needed
+  // for the baseline and the PR comparison, not the fast local build report.
+  const deep = Boolean(values.baseline || values.compare);
+  const results = await measureAll(deep);
 
   if (values.json) {
     fs.writeFileSync(values.json, JSON.stringify(results, null, 2));

@@ -14,13 +14,29 @@
       "entries": [
         {
           "id": ".",
-          "minified": 251286,
-          "gzip": 77538
+          "minified": 250758,
+          "gzip": 78284,
+          "composition": {
+            "own": 249483,
+            "initialGzip": 74186,
+            "lazyGzip": 4098,
+            "lazyChunks": 1,
+            "nodeModules": null,
+            "bundledGzip": null
+          }
         },
         {
           "id": "./beta",
-          "minified": 121264,
-          "gzip": 38455
+          "minified": 120500,
+          "gzip": 39881,
+          "composition": {
+            "own": 119365,
+            "initialGzip": 30732,
+            "lazyGzip": 9149,
+            "lazyChunks": 3,
+            "nodeModules": null,
+            "bundledGzip": null
+          }
         }
       ]
     },
@@ -39,22 +55,54 @@
         {
           "id": "./js",
           "minified": 11848,
-          "gzip": 4155
+          "gzip": 4155,
+          "composition": {
+            "own": 11574,
+            "initialGzip": 4155,
+            "lazyGzip": 0,
+            "lazyChunks": 0,
+            "nodeModules": 213288,
+            "bundledGzip": 54896
+          }
         },
         {
           "id": "./js/beta",
           "minified": 0,
-          "gzip": 20
+          "gzip": 20,
+          "composition": {
+            "own": 0,
+            "initialGzip": 20,
+            "lazyGzip": 0,
+            "lazyChunks": 0,
+            "nodeModules": 0,
+            "bundledGzip": 20
+          }
         },
         {
           "id": "./react",
           "minified": 182805,
-          "gzip": 47055
+          "gzip": 47055,
+          "composition": {
+            "own": 175304,
+            "initialGzip": 47055,
+            "lazyGzip": 0,
+            "lazyChunks": 0,
+            "nodeModules": 1909652,
+            "bundledGzip": 655106
+          }
         },
         {
           "id": "./react/beta",
           "minified": 0,
-          "gzip": 20
+          "gzip": 20,
+          "composition": {
+            "own": 0,
+            "initialGzip": 20,
+            "lazyGzip": 0,
+            "lazyChunks": 0,
+            "nodeModules": 0,
+            "bundledGzip": 20
+          }
         }
       ]
     }
