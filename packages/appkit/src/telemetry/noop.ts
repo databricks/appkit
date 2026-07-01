@@ -20,6 +20,7 @@ import {
   INVALID_SPAN_CONTEXT,
   type SpanStatusCode,
 } from "@opentelemetry/api";
+import { createNoopLogger } from "@opentelemetry/api-logs";
 
 class NonRecordingSpan implements Span {
   private readonly _spanContext: SpanContext;
@@ -94,4 +95,4 @@ class NoopTracer implements Tracer {
 
 export const NOOP_TRACER = new NoopTracer();
 export const NOOP_METER = createNoopMeter();
-export { NOOP_LOGGER } from "@opentelemetry/api-logs";
+export const NOOP_LOGGER = createNoopLogger();

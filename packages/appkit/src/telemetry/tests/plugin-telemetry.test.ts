@@ -1,6 +1,5 @@
-import { NOOP_LOGGER } from "@opentelemetry/api-logs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { NOOP_METER, NOOP_TRACER } from "../noop";
+import { NOOP_LOGGER, NOOP_METER, NOOP_TRACER } from "../noop";
 import type { TelemetryManager } from "../telemetry-manager";
 import { TelemetryProvider } from "../telemetry-provider";
 
@@ -19,9 +18,9 @@ vi.mock("@opentelemetry/api", () => ({
 }));
 
 vi.mock("@opentelemetry/api-logs", () => ({
-  NOOP_LOGGER: {
+  createNoopLogger: vi.fn(() => ({
     emit: vi.fn(),
-  },
+  })),
   logs: {
     getLogger: vi.fn(),
   },
