@@ -1,0 +1,62 @@
+{
+  "packages": [
+    {
+      "name": "@databricks/appkit",
+      "tarball": {
+        "packed": 761292,
+        "unpacked": 2795741
+      },
+      "dist": {
+        "raw": 2791325,
+        "gzip": 953653,
+        "fileCount": 667
+      },
+      "entries": [
+        {
+          "id": ".",
+          "minified": 251286,
+          "gzip": 77538
+        },
+        {
+          "id": "./beta",
+          "minified": 121264,
+          "gzip": 38455
+        }
+      ]
+    },
+    {
+      "name": "@databricks/appkit-ui",
+      "tarball": {
+        "packed": 304085,
+        "unpacked": 1288694
+      },
+      "dist": {
+        "raw": 1284725,
+        "gzip": 424673,
+        "fileCount": 483
+      },
+      "entries": [
+        {
+          "id": "./js",
+          "minified": 11848,
+          "gzip": 4155
+        },
+        {
+          "id": "./js/beta",
+          "minified": 0,
+          "gzip": 20
+        },
+        {
+          "id": "./react",
+          "minified": 182805,
+          "gzip": 47055
+        },
+        {
+          "id": "./react/beta",
+          "minified": 0,
+          "gzip": 20
+        }
+      ]
+    }
+  ]
+}
