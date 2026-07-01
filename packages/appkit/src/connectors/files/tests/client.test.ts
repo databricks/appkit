@@ -20,9 +20,13 @@ const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
       authenticate: vi.fn(),
     };
 
+    const mockApiClient = {
+      userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
+    };
     const mockClient = {
       files: mockFilesApi,
       config: mockConfig,
+      apiClient: mockApiClient,
     } as unknown as WorkspaceClient;
 
     class MockApiError extends Error {
@@ -536,6 +540,14 @@ describe("FilesConnector", () => {
       await connector.upload(mockClient, "file.txt", "data");
 
       expect(mockConfig.authenticate).toHaveBeenCalledWith(expect.any(Headers));
+    });
+
+    test("stamps the AppKit User-Agent from the SDK apiClient", async () => {
+      await connector.upload(mockClient, "file.txt", "data");
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const headers = init.headers as Headers;
+      expect(headers.get("User-Agent")).toBe("@databricks/appkit/9.9.9");
     });
 
     test("builds URL from client.config.host", async () => {

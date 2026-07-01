@@ -311,6 +311,7 @@ export class FilesConnector {
 
       const headers = new Headers({
         "Content-Type": "application/octet-stream",
+        "User-Agent": client.apiClient.userAgent(),
       });
       const fetchOptions: RequestInit = { method: "PUT", headers, body };
 

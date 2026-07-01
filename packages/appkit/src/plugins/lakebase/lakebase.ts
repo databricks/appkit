@@ -1,3 +1,4 @@
+import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { QueryResult, QueryResultRow } from "pg";
 import type { AgentToolDefinition, ToolProvider } from "shared";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import {
   type LakebasePoolManager,
   RoutingPool,
 } from "../../connectors/lakebase";
+import { getClientOptions } from "../../context/client-options";
 import { getUserContext } from "../../context/execution-context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
@@ -78,7 +80,12 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
    * context (set by `Plugin.asUser(req)` via AsyncLocalStorage).
    */
   async setup() {
-    const poolConfig = this.config.pool;
+    const poolConfig = {
+      ...this.config.pool,
+      workspaceClient:
+        this.config.pool?.workspaceClient ??
+        new WorkspaceClient({}, getClientOptions()),
+    };
     const user = await getUsernameWithApiLookup(poolConfig);
 
     const spPool = createLakebasePool({ ...poolConfig, user });

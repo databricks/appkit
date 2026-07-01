@@ -2732,8 +2732,11 @@ describe("FilesPlugin", () => {
           }),
         },
         // `_handleUpload` only routes through the connector's `upload()`,
-        // which uses host + authenticate + fetch. No `files.*` accessor is
-        // touched on the user client during this path.
+        // which uses host + authenticate + apiClient.userAgent() + fetch. No
+        // `files.*` accessor is touched on the user client during this path.
+        apiClient: {
+          userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
+        },
       };
 
       // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to
