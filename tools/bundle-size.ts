@@ -255,7 +255,9 @@ function chunkLabel(out: MetaOutput): string {
   const nm = source.lastIndexOf(marker);
   if (nm !== -1) {
     const parts = source.slice(nm + marker.length).split("/");
-    return parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+    return parts[0].startsWith("@") && parts[1]
+      ? `${parts[0]}/${parts[1]}`
+      : parts[0];
   }
   return path.basename(source);
 }
@@ -393,16 +395,17 @@ async function measurePackage(
   const dir = path.join(REPO_ROOT, pkg.dir);
   const manifest = readPackageJson(dir);
   const bundleExternal = pkg.bundleDeps ? peerExternals(manifest) : null;
-  const entries: EntryMeasurement[] = [];
-  for (const entry of deriveEntries(manifest)) {
-    const cost = await measureEntry(
-      path.join(dir, entry.file),
-      pkg.platform,
-      deep,
-      bundleExternal,
-    );
-    entries.push({ id: entry.id, ...cost });
-  }
+  const entries = await Promise.all(
+    deriveEntries(manifest).map(async (entry) => ({
+      id: entry.id,
+      ...(await measureEntry(
+        path.join(dir, entry.file),
+        pkg.platform,
+        deep,
+        bundleExternal,
+      )),
+    })),
+  );
   return {
     name: pkg.name,
     tarball: measureTarball(dir),
@@ -412,15 +415,17 @@ async function measurePackage(
 }
 
 async function measureAll(deep: boolean): Promise<PackageMeasurement[]> {
-  const results: PackageMeasurement[] = [];
-  for (const pkg of PACKAGES) {
-    try {
-      results.push(await measurePackage(pkg, deep));
-    } catch (err) {
-      console.error(`bundle-size: failed to measure ${pkg.name}:`, err);
-    }
-  }
-  return results;
+  // Packages (and their entries) are independent esbuild builds — run them
+  // concurrently. Promise.all preserves array order, so output stays stable.
+  const results = await Promise.all(
+    PACKAGES.map((pkg) =>
+      measurePackage(pkg, deep).catch((err) => {
+        console.error(`bundle-size: failed to measure ${pkg.name}:`, err);
+        return null;
+      }),
+    ),
+  );
+  return results.filter((r): r is PackageMeasurement => r !== null);
 }
 
 function formatBytes(n: number | null | undefined): string {
@@ -455,6 +460,19 @@ function cell(
   const delta = current - base;
   if (delta === 0) return value;
   return `${value} (${delta > 0 ? "+" : "-"}${formatBytes(Math.abs(delta))})`;
+}
+
+/**
+ * Neutralize characters in a dynamic label before it goes into a markdown
+ * table code-span in the PR comment. Chunk labels and export ids derive from
+ * file/dependency names, so strip backticks (break the code span), pipes
+ * (break the table) and angle brackets (HTML / `<!-- marker -->` injection).
+ */
+function mdSafe(s: string): string {
+  return s
+    .replace(/[`|<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** True when a size grew past both budget gates (percent AND absolute bytes). */
@@ -620,14 +638,14 @@ function renderMarkdown(
         exceedsBudget(c?.totalGzip ?? null, pc?.totalGzip ?? null);
       const total = `${cell(c?.totalGzip ?? null, pc?.totalGzip ?? null, hasBaseline)}${entryOverBudget ? " ⚠️" : ""}`;
       lines.push(
-        `| \`${entry.id}\` | ${cell(c?.initialGzip ?? null, pc?.initialGzip ?? null, hasBaseline)} | ${cell(c?.lazyGzip ?? null, pc?.lazyGzip ?? null, hasBaseline)} | ${total} | ${nodeModules} | ${cell(c?.own ?? null, pc?.own ?? null, hasBaseline)} |`,
+        `| \`${mdSafe(entry.id)}\` | ${cell(c?.initialGzip ?? null, pc?.initialGzip ?? null, hasBaseline)} | ${cell(c?.lazyGzip ?? null, pc?.lazyGzip ?? null, hasBaseline)} | ${total} | ${nodeModules} | ${cell(c?.own ?? null, pc?.own ?? null, hasBaseline)} |`,
       );
     }
     // Every emitted chunk, per entry.
     const chunkRows = pkg.entries.flatMap((entry) =>
       (entry.composition?.chunks ?? []).map(
         (chunk) =>
-          `| \`${entry.id}\` | \`${chunk.label}\` | ${chunk.kind} | ${formatBytes(chunk.gzip)} |`,
+          `| \`${mdSafe(entry.id)}\` | \`${mdSafe(chunk.label)}\` | ${chunk.kind} | ${formatBytes(chunk.gzip)} |`,
       ),
     );
     if (chunkRows.length > 0) {
@@ -678,6 +696,16 @@ async function main() {
   }
 
   if (values.baseline) {
+    // Never overwrite the baseline with a partial result: a missing package
+    // would make its gate fail open (deltas diff against null). Keep the
+    // existing baseline instead and signal failure.
+    if (results.length !== PACKAGES.length) {
+      console.error(
+        `bundle-size: measured ${results.length}/${PACKAGES.length} packages — refusing to write a partial baseline.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
     const baseline: BaselineFile = { packages: results };
     fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`);
     console.log(`Wrote baseline to ${path.relative(REPO_ROOT, BASELINE_PATH)}`);
