@@ -19,7 +19,6 @@ import {
 } from "./migration";
 import { readMetricConfig, resolveMetricConfig } from "./mv-registry/config";
 import { createWorkspaceDescribeFetcher } from "./mv-registry/describe";
-import { generateMetricsMetadataJson } from "./mv-registry/metadata";
 import { generateMetricTypeDeclarations } from "./mv-registry/render-types";
 import { emptyMetricSchema, syncMetrics } from "./mv-registry/sync";
 import type {
@@ -278,10 +277,6 @@ async function probeWarehouseState(
  * @param options.mvOutFile - optional output file for the MetricRegistry
  *   augmentation. Defaults to a sibling `metric-views.d.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `metric-views.json` is absent.
- * @param options.mvMetadataOutFile - optional output file for the
- *   build-time semantic metadata JSON bundle (`metric-views.metadata.json`).
- *   Defaults to a sibling of `mvOutFile`. Skipped entirely if
- *   `metric-views.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics} (tests inject a mock; production lazily builds a
  *   default WorkspaceClient-backed one). An injected fetcher always runs: it
@@ -295,7 +290,6 @@ export async function generateFromEntryPoint(options: {
   noCache?: boolean;
   mode?: PreflightMode;
   mvOutFile?: string;
-  mvMetadataOutFile?: string;
   metricFetcher?: DescribeFetcher;
 }) {
   const {
@@ -305,7 +299,6 @@ export async function generateFromEntryPoint(options: {
     noCache,
     mode = "non-blocking",
     mvOutFile,
-    mvMetadataOutFile,
     metricFetcher,
   } = options;
   const projectRoot = resolveProjectRoot(outFile);
@@ -360,9 +353,6 @@ export async function generateFromEntryPoint(options: {
   if (queryFolder) {
     const mvFile =
       mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
-    const mvMetadataFile =
-      mvMetadataOutFile ??
-      path.join(path.dirname(mvFile), METRIC_METADATA_FILE);
 
     let mvResult: SyncMetricViewsTypesResult;
     try {
@@ -370,7 +360,6 @@ export async function generateFromEntryPoint(options: {
         queryFolder,
         warehouseId,
         metricOutFile: mvFile,
-        metricMetadataOutFile: mvMetadataFile,
         cache: !noCache,
         metricFetcher,
         mode,
@@ -432,7 +421,6 @@ export async function generateFromEntryPoint(options: {
  */
 export interface SyncMetricViewsTypesResult {
   metricOutFile?: string;
-  metricMetadataOutFile?: string;
   schemas: MetricSchema[];
   failures: MetricSyncFailure[];
   /**
@@ -468,7 +456,6 @@ export interface SyncMetricViewsTypesResult {
  * @param options.queryFolder - folder that holds `metric-views.json` (conventionally `<root>/config/queries`). Returns early with `noConfig: true` when the file is absent — additive, never an error.
  * @param options.warehouseId - SQL warehouse used for `DESCRIBE TABLE EXTENDED`.
  * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
- * @param options.metricMetadataOutFile - output path for the semantic-metadata JSON bundle.
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching). Mirrors the `noCache` convention on {@link generateFromEntryPoint}: gate the cache READ (`!noCache`) and overwrite the `metrics` section on SAVE.
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
  *   (tests pass a mock; production lazily builds a WorkspaceClient-backed one).
@@ -478,7 +465,6 @@ export async function syncMetricViewsTypes(options: {
   queryFolder: string;
   warehouseId: string;
   metricOutFile: string;
-  metricMetadataOutFile: string;
   cache?: boolean;
   metricFetcher?: DescribeFetcher;
   mode?: "describe-now" | "non-blocking" | "blocking";
@@ -487,7 +473,6 @@ export async function syncMetricViewsTypes(options: {
     queryFolder,
     warehouseId,
     metricOutFile,
-    metricMetadataOutFile,
     cache: cacheEnabled,
     metricFetcher,
     mode = "describe-now",
@@ -767,22 +752,14 @@ export async function syncMetricViewsTypes(options: {
     "utf-8",
   );
 
-  await fs.mkdir(path.dirname(metricMetadataOutFile), { recursive: true });
-  await fs.writeFile(
-    metricMetadataOutFile,
-    generateMetricsMetadataJson(schemas),
-    "utf-8",
-  );
-
   logger.debug(
-    "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)%s",
+    "Wrote MetricRegistry augmentation for %d metric(s)%s",
     schemas.length,
     failures.length > 0 ? ` (${failures.length} failure(s))` : "",
   );
 
   return {
     metricOutFile,
-    metricMetadataOutFile,
     schemas,
     failures,
     fatalErrors,
@@ -810,13 +787,3 @@ export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
 export const METRIC_TYPES_FILE = "metric-views.d.ts";
-/**
- * Default filename for the build-time semantic-metadata JSON bundle, sibling of
- * {@link METRIC_TYPES_FILE}. Shape is `Record<metricKey, { measures,
- * dimensions }>` (UC FQN and execution lane are server-side concerns, kept out
- * of this client-shipped artifact). The consuming app imports it at build time
- * and registers it via `@databricks/appkit-ui/format`'s
- * `registerMetricsMetadata()`, so the React hook returns per-metric `metadata`
- * without a second network round-trip.
- */
-export const METRIC_METADATA_FILE = "metric-views.metadata.json";

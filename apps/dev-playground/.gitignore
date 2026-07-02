@@ -5,4 +5,3 @@ playwright-report/
 # Auto-generated types (regenerated on `pnpm dev` by appKitTypesPlugin)
 shared/appkit-types/serving.d.ts
 shared/appkit-types/metric-views.d.ts
-shared/appkit-types/metric-views.metadata.json

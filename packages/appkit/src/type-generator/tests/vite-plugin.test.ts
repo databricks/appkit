@@ -361,14 +361,14 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
     else process.env.DATABRICKS_WAREHOUSE_ID = savedWarehouseId;
   });
 
-  test("passes unset metric out files through as undefined so the generator defaults them to siblings of outFile", async () => {
+  test("passes an unset metric out file through as undefined so the generator defaults it to a sibling of outFile", async () => {
     await runPlugin();
     await flush();
 
-    // configResolved resolves only outFile (and explicitly-provided metric
-    // paths) against projectRoot (config.root/..). Unset metric options stay
+    // configResolved resolves only outFile (and an explicitly-provided metric
+    // path) against projectRoot (config.root/..). An unset metric option stays
     // undefined so generateFromEntryPoint computes its sibling-of-outFile
-    // defaults — identical final paths in the all-defaults case, since the
+    // default — identical final path in the all-defaults case, since the
     // default outFile below lives in shared/<TYPES_DIR>/.
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -377,15 +377,13 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
           `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
         ),
         mvOutFile: undefined,
-        mvMetadataOutFile: undefined,
       }),
     );
   });
 
-  test("custom mvOutFile/mvMetadataOutFile reach generateFromEntryPoint", async () => {
+  test("a custom mvOutFile reaches generateFromEntryPoint", async () => {
     const plugin = appKitTypesPlugin({
       mvOutFile: "custom/types/metric-views.d.ts",
-      mvMetadataOutFile: "custom/types/metric-views.metadata.json",
     });
     getHook<ConfigResolvedHook>(
       plugin,
@@ -401,10 +399,6 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
         mvOutFile: path.resolve(
           process.cwd(),
           "custom/types/metric-views.d.ts",
-        ),
-        mvMetadataOutFile: path.resolve(
-          process.cwd(),
-          "custom/types/metric-views.metadata.json",
         ),
       }),
     );

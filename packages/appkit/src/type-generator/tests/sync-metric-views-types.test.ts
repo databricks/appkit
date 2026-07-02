@@ -11,10 +11,10 @@ import type { DatabricksStatementExecutionResponse } from "../types";
  * callable in its default `describe-now` mode). A mock {@link DescribeFetcher} is
  * injected so the
  * pipeline (read config → resolve → [cache partition] → syncMetrics → write
- * artifacts) runs without a warehouse, asserting BOTH artifacts land for a
- * mixed fixture (a service-principal metric + an OBO metric; measures + a
- * time-typed dimension + a format spec) and that the shared typegen cache is
- * honored (default) / bypassed (`cache: false`).
+ * the .d.ts) runs without a warehouse, asserting the MetricRegistry
+ * augmentation lands for a mixed fixture (a service-principal metric + an OBO
+ * metric; measures + a time-typed dimension + a format spec) and that the
+ * shared typegen cache is honored (default) / bypassed (`cache: false`).
  */
 
 // In-memory stand-in for the on-disk typegen cache file so the focused metric
@@ -94,7 +94,6 @@ describe("syncMetricViewsTypes", () => {
   let tmpRoot: string;
   let queryFolder: string;
   let metricOutFile: string;
-  let metricMetadataOutFile: string;
 
   // A spy fetcher so cache tests can assert which FQNs were (re)described.
   const fetcher = vi.fn<DescribeFetcher>(async (fqn) => {
@@ -131,32 +130,24 @@ describe("syncMetricViewsTypes", () => {
       "appkit-types",
       "metric-views.d.ts",
     );
-    metricMetadataOutFile = path.join(
-      tmpRoot,
-      "shared",
-      "appkit-types",
-      "metric-views.metadata.json",
-    );
   });
 
   afterEach(() => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  test("writes BOTH artifacts for a mixed SP + OBO fixture", async () => {
+  test("writes the MetricRegistry augmentation for a mixed SP + OBO fixture", async () => {
     writeMixedConfig();
 
     const result = await syncMetricViewsTypes({
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
 
-    // Both artifacts exist on disk.
+    // The .d.ts exists on disk.
     expect(fs.existsSync(metricOutFile)).toBe(true);
-    expect(fs.existsSync(metricMetadataOutFile)).toBe(true);
 
     // Result reports both keys, no failures, config present.
     expect(result.noConfig).toBe(false);
@@ -166,7 +157,6 @@ describe("syncMetricViewsTypes", () => {
       "revenue",
     ]);
     expect(result.metricOutFile).toBe(metricOutFile);
-    expect(result.metricMetadataOutFile).toBe(metricMetadataOutFile);
 
     // --- metric-views.d.ts: MetricRegistry augmentation for both metrics ---
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
@@ -182,19 +172,9 @@ describe("syncMetricViewsTypes", () => {
     expect(declarations).toContain('lane: "sp"');
     // The TIMESTAMP dimension carries inferred time grains in its @timeGrain tag.
     expect(declarations).toContain("@timeGrain");
-
-    // --- metric-views.metadata.json: per-metric semantic bundle ---
-    const bundle = JSON.parse(fs.readFileSync(metricMetadataOutFile, "utf-8"));
-    // SP metric: currency format spec is preserved on the measure.
-    expect(bundle.revenue.measures.total_revenue.type).toBe("DECIMAL(38,2)");
-    expect(bundle.revenue.measures.total_revenue.format).toBe("$#,##0.00");
-    expect(bundle.revenue.dimensions.region.type).toBe("STRING");
-    // OBO metric: time-typed dimension carries its inferred time_grain set.
-    expect(bundle.churn.measures.churn_rate.type).toBe("DOUBLE");
-    expect(bundle.churn.dimensions.event_time.type).toBe("TIMESTAMP");
-    expect(bundle.churn.dimensions.event_time.time_grain).toEqual(
-      expect.arrayContaining(["day", "hour", "minute", "month", "year"]),
-    );
+    // The semantic metadata (format spec, SQL type) rides in the .d.ts's
+    // type-level `metadata` block — the sole carrier now the JSON is gone.
+    expect(declarations).toContain('"$#,##0.00"');
   });
 
   test("returns noConfig and writes nothing when metric-views.json is absent", async () => {
@@ -202,7 +182,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
 
@@ -210,7 +189,6 @@ describe("syncMetricViewsTypes", () => {
     expect(result.schemas).toEqual([]);
     expect(result.failures).toEqual([]);
     expect(fs.existsSync(metricOutFile)).toBe(false);
-    expect(fs.existsSync(metricMetadataOutFile)).toBe(false);
   });
 
   // --- cache behavior (default ON) -------------------------------------------
@@ -223,7 +201,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -236,7 +213,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     expect(fetcher).not.toHaveBeenCalled();
@@ -259,7 +235,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -271,7 +246,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       cache: false,
       metricFetcher: fetcher,
     });
@@ -295,7 +269,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     expect(first.failures).toHaveLength(1);
@@ -309,7 +282,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -326,7 +298,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
     const afterFirst = JSON.parse(mocks.cacheFile.contents ?? "{}");
@@ -347,7 +318,6 @@ describe("syncMetricViewsTypes", () => {
       queryFolder,
       warehouseId: "wh-1",
       metricOutFile,
-      metricMetadataOutFile,
       metricFetcher: fetcher,
     });
 

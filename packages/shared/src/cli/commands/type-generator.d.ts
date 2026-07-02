@@ -10,7 +10,7 @@
  * surface the `generate-types` CLI actually uses — `generateFromEntryPoint`
  * (which emits query AND, additively, metric-view types), `generateServingTypes`,
  * the two error classes the CLI catches by `name`, and the metric artifact
- * filename constants the CLI uses to report the emitted paths. Metric-view types
+ * filename constant the CLI uses to report the emitted path. Metric-view types
  * are produced inside `generateFromEntryPoint`, so the CLI no longer calls
  * `syncMetricViewsTypes` directly and that export is not mirrored.
  *
@@ -47,8 +47,7 @@ declare module "@databricks/appkit/type-generator" {
     noCache?: boolean;
   }): Promise<void>;
 
-  // Metric artifact filenames (written as siblings of the query out file). The
-  // CLI joins these with the out file's directory to report the emitted paths.
+  // Metric artifact filename (written as a sibling of the query out file). The
+  // CLI joins this with the out file's directory to report the emitted path.
   export const METRIC_TYPES_FILE: string;
-  export const METRIC_METADATA_FILE: string;
 }

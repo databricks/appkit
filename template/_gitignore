@@ -14,4 +14,3 @@ shared/appkit-types/serving.d.ts
 
 # Metric-view types (regenerated at build by `generate-types --wait`)
 shared/appkit-types/metric-views.d.ts
-shared/appkit-types/metric-views.metadata.json

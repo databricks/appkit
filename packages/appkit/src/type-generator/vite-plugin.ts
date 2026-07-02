@@ -38,13 +38,6 @@ interface AppKitTypesPluginOptions {
    * Defaults to a sibling of `outFile`, computed by the generator.
    */
   mvOutFile?: string;
-  /**
-   * Path to the metric semantic-metadata JSON file (relative to client folder).
-   * Build-time artifact — defaults to a sibling of {@link mvOutFile}
-   * (itself a sibling of `outFile`), computed by the generator. Skipped
-   * automatically when `metric-views.json` is absent.
-   */
-  mvMetadataOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -58,7 +51,6 @@ interface AppKitTypesPluginOptions {
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
   let mvOutFile: string | undefined;
-  let mvMetadataOutFile: string | undefined;
   let watchFolders: string[];
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
@@ -109,7 +101,6 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         noCache: false,
         mode,
         mvOutFile,
-        mvMetadataOutFile,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -312,19 +303,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         projectRoot,
         options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
-      // Metric out-paths resolve against projectRoot only when explicitly
-      // provided; unset options pass through as undefined so the generator
-      // computes its sibling-of-outFile defaults. In the all-defaults case
-      // the final paths are identical (the default outFile above lives in
+      // The metric out-path resolves against projectRoot only when explicitly
+      // provided; an unset option passes through as undefined so the generator
+      // computes its sibling-of-outFile default. In the all-defaults case the
+      // final path is identical (the default outFile above lives in
       // shared/<TYPES_DIR>/), and a customized outFile now keeps its metric
-      // siblings next to it instead of pinning them under shared/.
+      // sibling next to it instead of pinning it under shared/.
       mvOutFile =
         options?.mvOutFile !== undefined
           ? path.resolve(projectRoot, options.mvOutFile)
-          : undefined;
-      mvMetadataOutFile =
-        options?.mvMetadataOutFile !== undefined
-          ? path.resolve(projectRoot, options.mvMetadataOutFile)
           : undefined;
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),

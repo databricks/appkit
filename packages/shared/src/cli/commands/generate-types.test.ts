@@ -50,10 +50,9 @@ const {
 vi.mock("@databricks/appkit/type-generator", () => ({
   generateFromEntryPoint,
   generateServingTypes,
-  // The CLI joins these with the out file's directory to report the emitted
-  // metric artifacts; mirror the real exported constants.
+  // The CLI joins this with the out file's directory to report the emitted
+  // metric artifact; mirror the real exported constant.
   METRIC_TYPES_FILE: "metric-views.d.ts",
-  METRIC_METADATA_FILE: "metric-views.metadata.json",
 }));
 
 // Mock the detached spawn so we can assert how the worker is launched without
@@ -235,10 +234,10 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(acquireSpawnLock).not.toHaveBeenCalled();
   });
 
-  test("reports metric artifacts when config/queries/metric-views.json exists", async () => {
+  test("reports the metric artifact when config/queries/metric-views.json exists", async () => {
     // The metric path is additive: generateFromEntryPoint emits metric-views.d.ts
-    // + metric-views.metadata.json as siblings of the query out file whenever the
-    // config is present. The CLI announces them off the same dormancy signal.
+    // as a sibling of the query out file whenever the config is present. The CLI
+    // announces it off the same dormancy signal.
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
     fs.writeFileSync(
       path.join(tmpRoot, "config", "queries", "metric-views.json"),
@@ -252,12 +251,9 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(logged).toContain(
       `Generated metric types: ${path.join(path.dirname(outFile), "metric-views.d.ts")}`,
     );
-    expect(logged).toContain(
-      `Generated metric metadata: ${path.join(path.dirname(outFile), "metric-views.metadata.json")}`,
-    );
   });
 
-  test("omits metric artifact lines when metric-views.json is absent (dormant)", async () => {
+  test("omits the metric artifact line when metric-views.json is absent (dormant)", async () => {
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
 
     await runCli([tmpRoot, outFile, "wh-123"]);
@@ -265,6 +261,5 @@ describe("generate-types foreground spawn orchestration", () => {
     const logged = consoleLog.mock.calls.flat().map(String).join("\n");
     expect(logged).toContain("Generated query types:");
     expect(logged).not.toContain("Generated metric types:");
-    expect(logged).not.toContain("Generated metric metadata:");
   });
 });

@@ -34,12 +34,12 @@ const FQN_SEGMENT_NAMES = ["catalog", "schema", "metric_view"] as const;
 const FQN_SEGMENT_COUNT = FQN_SEGMENT_NAMES.length;
 
 /**
- * Locale-independent comparator (UTF-16 code-unit order) shared by BOTH artifact
- * key orderings. Plain `sort()` is locale-sensitive, so keys could order
- * differently across environments and invalidate the cache hash — this keeps the
- * ordering stable everywhere.
+ * Locale-independent comparator (UTF-16 code-unit order) for metric-view key
+ * ordering. Plain `sort()` is locale-sensitive, so keys could order differently
+ * across environments and invalidate the cache hash — this keeps the ordering
+ * stable everywhere.
  */
-export function compareKeys(a: string, b: string): number {
+function compareKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 

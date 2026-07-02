@@ -276,13 +276,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   const metricsDir = path.join(__dirname, "__output_metrics__");
   const queryFolder = path.join(metricsDir, "queries");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
-  // Defaults: metric artifacts are siblings of `outFile`.
+  // Default: the metric .d.ts is a sibling of `outFile`.
   const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
-  const metadataFile = path.join(
-    metricsDir,
-    "generated",
-    "metric-views.metadata.json",
-  );
 
   const describeResponse: DatabricksStatementExecutionResponse = {
     statement_id: "stmt-mock",
@@ -330,7 +325,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric-views.d.ts and metric-views.metadata.json when metric-views.json exists", async () => {
+  test("writes metric-views.d.ts when metric-views.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -347,10 +342,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain('"total_revenue": number');
     expect(declarations).toContain('"region": string');
-
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue.measures.total_revenue.type).toBe("DECIMAL(38,2)");
-    expect(bundle.revenue.dimensions.region.type).toBe("STRING");
+    // Semantic metadata (SQL type) rides in the .d.ts type-level `metadata`
+    // block — the sole carrier now that the JSON bundle is gone.
+    expect(declarations).toContain('"DECIMAL(38,2)"');
   });
 
   test("emits no metric artifacts and no errors when metric-views.json is absent", async () => {
@@ -365,7 +359,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // Query types are still written; the metric path stays fully dormant.
     expect(fs.existsSync(outFile)).toBe(true);
     expect(fs.existsSync(metricFile)).toBe(false);
-    expect(fs.existsSync(metadataFile)).toBe(false);
   });
 
   test("a failing metric fetcher warns but query type generation still succeeds", async () => {
@@ -406,8 +399,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     const declarations = fs.readFileSync(metricFile, "utf-8");
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain("measureKeys: string");
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
   });
 
   test("a non-terminal DESCRIBE response degrades without failing: no warn, one info line, permissive types", async () => {
@@ -454,9 +445,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain("measureKeys: string");
     expect(declarations).toContain("dimensionKeys: string");
     expect(declarations).toContain("timeGrains: string");
-    // The metadata bundle keeps its locked frontend-safe shape.
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
   });
 
   // ── Non-blocking warehouse gate: metric DESCRIBEs honor the #406 contract ──
@@ -499,9 +487,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect(declarations).toContain('lane: "obo"');
       expect(declarations).toContain("measureKeys: string");
       expect(declarations).toContain("timeGrains: string");
-      const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-      expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
-      expect(bundle.churn).toEqual({ measures: {}, dimensions: {} });
 
       // Nothing failed (we deliberately didn't probe each key), so no
       // per-key "metric sync failed" warnings — just the single
@@ -541,11 +526,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
         warehouse_id: "wh-1",
       }),
     );
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
-    );
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue.measures.total_revenue.type).toBe("DECIMAL(38,2)");
+    const declarations = fs.readFileSync(metricFile, "utf-8");
+    expect(declarations).toContain('"total_revenue": number');
+    // The SQL type rides in the .d.ts type-level `metadata` block.
+    expect(declarations).toContain('"DECIMAL(38,2)"');
   });
 
   // ── Blocking-mode preflight: mirrors the query path's ensure-running flow ──
@@ -741,8 +725,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     const declarations = fs.readFileSync(metricFile, "utf-8");
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain("measureKeys: string");
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
 
     // D′: the fatal skip is terminal — a deleted warehouse can never serve
     // these keys, so the degraded entries are pinned sticky (retry: false)
@@ -798,8 +780,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     // ... but degraded artifacts are still written before the throw.
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       "measureKeys: string",
     );
@@ -856,8 +836,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
     // degraded the key per Phase 1 semantics.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       "measureKeys: string",
     );
@@ -914,8 +892,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       const declarations = fs.readFileSync(metricFile, "utf-8");
       expect(declarations).toContain('"revenue"');
       expect(declarations).toContain("measureKeys: string");
-      const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-      expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
 
       // D′: terminal skip — sticky, like the decision-time fatal.
       const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
@@ -992,7 +968,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.existsSync(metricFile)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(metadataFile, "utf-8"))).toEqual({});
+    // An empty metricViews map emits an empty MetricRegistry augmentation.
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      "interface MetricRegistry {}",
+    );
   });
 
   test("an injected metricFetcher bypasses the gate even when non-blocking + stopped", async () => {
@@ -1040,8 +1019,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     ).resolves.toBeUndefined();
 
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      "measureKeys: string",
+    );
   });
 
   test("non-blocking: a deterministic status-probe failure (auth) is fatal after artifacts", async () => {
@@ -1076,8 +1056,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
     // No DESCRIBE ran; degraded artifacts still written before the throw.
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue).toEqual({ measures: {}, dimensions: {} });
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       "measureKeys: string",
     );
@@ -1089,11 +1067,6 @@ describe("generateFromEntryPoint — metric cache section", () => {
   const queryFolder = path.join(cacheTestDir, "queries");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
   const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
-  const metadataFile = path.join(
-    cacheTestDir,
-    "generated",
-    "metric-views.metadata.json",
-  );
 
   const describeResponseFor = (
     measure: string,
@@ -1156,7 +1129,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     fs.rmSync(cacheTestDir, { recursive: true, force: true });
   });
 
-  test("warm pass: unchanged config makes zero DESCRIBEs, zero probes, zero clients — artifacts rewritten byte-identical from cache", async () => {
+  test("warm pass: unchanged config makes zero DESCRIBEs, zero probes, zero clients — the .d.ts is rewritten byte-identical from cache", async () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue(
@@ -1166,11 +1139,9 @@ describe("generateFromEntryPoint — metric cache section", () => {
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     const firstDeclarations = fs.readFileSync(metricFile, "utf-8");
-    const firstBundle = fs.readFileSync(metadataFile, "utf-8");
 
-    // Wipe the artifacts so pass 2 provably rewrites them from cache alone.
+    // Wipe the artifact so pass 2 provably rewrites it from cache alone.
     fs.rmSync(metricFile);
-    fs.rmSync(metadataFile);
     vi.clearAllMocks();
 
     await expect(run()).resolves.toBeUndefined();
@@ -1180,7 +1151,6 @@ describe("generateFromEntryPoint — metric cache section", () => {
     // ... and the whole pass constructed zero SDK clients.
     expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toBe(firstDeclarations);
-    expect(fs.readFileSync(metadataFile, "utf-8")).toBe(firstBundle);
   });
 
   test("single-entry edit: only the edited key is re-described", async () => {
@@ -1277,18 +1247,17 @@ describe("generateFromEntryPoint — metric cache section", () => {
     vi.clearAllMocks();
     mocks.getWarehouseState.mockResolvedValue("STOPPED");
     fs.rmSync(metricFile);
-    fs.rmSync(metadataFile);
 
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
 
-    // The artifacts carry the cached REAL unions — not degraded-open types.
+    // The .d.ts carries the cached REAL unions — not degraded-open types —
+    // and its type-level `metadata` block still carries the SQL type.
     const declarations = fs.readFileSync(metricFile, "utf-8");
     expect(declarations).toContain('"total_revenue": number');
     expect(declarations).not.toContain("measureKeys: string");
-    const bundle = JSON.parse(fs.readFileSync(metadataFile, "utf-8"));
-    expect(bundle.revenue.measures.total_revenue.type).toBe("DECIMAL(38,2)");
+    expect(declarations).toContain('"DECIMAL(38,2)"');
     // The good entry survived the warehouse-down pass un-overwritten.
     expect(savedCache().metrics.revenue.retry).toBe(false);
   });

@@ -76,19 +76,17 @@ async function runGenerateTypes(
         });
         console.log(`Generated query types: ${resolvedOutFile}`);
 
-        // generateFromEntryPoint also emits metric-view types additively when
-        // config/queries/metric-views.json exists (it stays dormant otherwise),
-        // writing them as siblings of the query out file. Mirror that to report
-        // the artifacts; a degraded/failed view is warned (default non-blocking)
-        // or has already thrown (--wait) inside the call above.
+        // generateFromEntryPoint also emits the metric-view types additively
+        // when config/queries/metric-views.json exists (it stays dormant
+        // otherwise), writing metric-views.d.ts as a sibling of the query out
+        // file. Mirror that to report the artifact; a degraded/failed view is
+        // warned (default non-blocking) or has already thrown (--wait) inside
+        // the call above.
         const metricConfig = path.join(queryFolder, "metric-views.json");
         if (fs.existsSync(metricConfig)) {
           const typesDir = path.dirname(resolvedOutFile);
           console.log(
             `Generated metric types: ${path.join(typesDir, typeGen.METRIC_TYPES_FILE)}`,
-          );
-          console.log(
-            `Generated metric metadata: ${path.join(typesDir, typeGen.METRIC_METADATA_FILE)}`,
           );
         }
       }
