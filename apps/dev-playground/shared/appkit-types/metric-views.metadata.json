@@ -1,0 +1,63 @@
+{
+  "customers": {
+    "measures": {
+      "active_accounts": {
+        "type": "bigint"
+      },
+      "churn_rate": {
+        "type": "decimal"
+      },
+      "avg_ltv": {
+        "type": "double"
+      }
+    },
+    "dimensions": {
+      "segment": {
+        "type": "string"
+      },
+      "region": {
+        "type": "string"
+      },
+      "csm_email": {
+        "type": "string"
+      }
+    }
+  },
+  "revenue": {
+    "measures": {
+      "mrr": {
+        "type": "double"
+      },
+      "arr": {
+        "type": "double",
+        "description": "Annualized contract value across all active subscriptions"
+      },
+      "new_arr": {
+        "type": "double"
+      },
+      "churned_arr": {
+        "type": "double"
+      }
+    },
+    "dimensions": {
+      "region": {
+        "type": "string"
+      },
+      "segment": {
+        "type": "string"
+      },
+      "created_at": {
+        "type": "timestamp_ltz",
+        "time_grain": [
+          "day",
+          "hour",
+          "minute",
+          "month",
+          "quarter",
+          "week",
+          "year"
+        ]
+      }
+    }
+  }
+}
