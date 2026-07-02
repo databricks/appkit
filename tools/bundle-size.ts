@@ -751,8 +751,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  // Reached only by the explicit --baseline/--compare paths (the default path
-  // swallows its own errors above). Fail loudly so CI surfaces it.
+  // The default build-report path swallows its own errors above, so it never
+  // lands here. This catches unexpected --baseline/--compare failures and any
+  // argument-parsing error — fail loudly so CI surfaces it. (The no-arg build
+  // invocation can't reach here: parseArgs with no args doesn't throw.)
   console.error("bundle-size:", err);
   process.exitCode = 1;
 });
