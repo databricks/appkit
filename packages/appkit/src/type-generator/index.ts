@@ -331,34 +331,83 @@ export async function generateFromEntryPoint(options: {
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
   // Metric-view types: only emit when metric-views.json exists. The path is
-  // purely additive — apps that never adopt metric views must not produce
-  // empty noise. Delegate to the unified metric pipeline in
-  // syncMetricViewsTypes, forwarding this run's mode verbatim: `non-blocking`
-  // keeps its status-only #406 gate, `blocking` keeps its preflight, and both
-  // keep last-known-good cache serving + the sticky-degraded notice. The
-  // unified fn returns early with `noConfig: true` when metric-views.json is
-  // absent, so the additive "only when it exists" behavior is preserved here by
-  // simply ignoring that flag. Fatal preflight errors come back in
-  // `fatalErrors` (empty except for a deleted/deleting warehouse in blocking
-  // mode) so the end-of-run throw below surfaces them after the writes, exactly
-  // as the inline block did.
+  // purely additive — apps that never adopt metric views must not produce empty
+  // noise. Delegate to the unified metric pipeline in syncMetricViewsTypes,
+  // forwarding this run's mode verbatim: `non-blocking` keeps its status-only
+  // #406 gate, `blocking` keeps its preflight, and both keep last-known-good
+  // cache serving + the sticky-degraded notice. The unified fn returns early
+  // with `noConfig: true` when metric-views.json is absent, so the additive
+  // "only when it exists" behavior is preserved here by simply ignoring it.
+  //
+  // Failure surfacing mirrors the query path and follows this run's mode:
+  //   - a deleted/deleting-warehouse fatal preflight always surfaces (blocking
+  //     mode only) via `fatalErrors` — unchanged;
+  //   - in `blocking` mode (`--wait`, and the production Vite build) per-key
+  //     DESCRIBE failures (a bad/unreachable source — a config error) are folded
+  //     into `fatalErrors` too, so the end-of-run throw fails the build after the
+  //     writes: `--wait` must not ship permissive types for a misconfigured view;
+  //   - in `non-blocking` mode (the default CLI run, and dev Vite) nothing is
+  //     escalated here: syncMetricViewsTypes already warns per failed/degraded
+  //     view, permissive types were written, and a `--wait` rerun (or the
+  //     detached background worker) converges.
+  // A warehouse that merely isn't ready (degraded, NOT a per-key failure) is not
+  // escalated even under `--wait` — that stays the existing soft degrade so infra
+  // flakiness can't break a build; only a deleted/deleting warehouse is fatal (at
+  // preflight). A malformed metric-views.json (JSON parse, or FQN/schema
+  // validation) is the only way syncMetricViewsTypes throws; it's a deterministic
+  // developer error, re-thrown as a message-only TypegenFatalError that fails in
+  // every mode (like a query TypegenSyntaxError) instead of bubbling a raw stack.
   if (queryFolder) {
     const mvFile =
       mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
     const mvMetadataFile =
       mvMetadataOutFile ??
       path.join(path.dirname(mvFile), METRIC_METADATA_FILE);
-    const mvResult = await syncMetricViewsTypes({
-      queryFolder,
-      warehouseId,
-      metricOutFile: mvFile,
-      metricMetadataOutFile: mvMetadataFile,
-      cache: !noCache,
-      metricFetcher,
-      mode,
-    });
+
+    let mvResult: SyncMetricViewsTypesResult;
+    try {
+      mvResult = await syncMetricViewsTypes({
+        queryFolder,
+        warehouseId,
+        metricOutFile: mvFile,
+        metricMetadataOutFile: mvMetadataFile,
+        cache: !noCache,
+        metricFetcher,
+        mode,
+      });
+    } catch (configError) {
+      // syncMetricViewsTypes only throws for a malformed metric-views.json —
+      // re-throw as a message-only TypegenFatalError (see the note above).
+      throw new TypegenFatalError(
+        [
+          {
+            name: "metric-views.json",
+            message: getErrorDiagnostic(configError),
+          },
+        ],
+        warehouseId,
+      );
+    }
+
+    // Deleted/deleting-warehouse fatal preflight (blocking mode only); empty
+    // (no-op) when metric-views.json is absent or in non-blocking mode.
     for (const fe of mvResult.fatalErrors) {
       fatalErrors.push(fe);
+    }
+
+    // Blocking (`--wait` / prod Vite) escalates per-key DESCRIBE failures — a
+    // bad or unreachable source, i.e. a config error — to build failures so the
+    // end-of-run throw fails after the writes. A warehouse that's merely not
+    // ready stays degraded (the preflight above + syncMetrics own that), even
+    // under `--wait`; non-blocking leaves failures as syncMetricViewsTypes' own
+    // warnings (permissive types already written).
+    if (mode === "blocking") {
+      for (const failure of mvResult.failures) {
+        fatalErrors.push({
+          name: failure.key,
+          message: `metric view ${failure.key} (${failure.source}) could not be described: ${failure.reason}`,
+        });
+      }
     }
   }
 
@@ -395,21 +444,22 @@ export interface SyncMetricViewsTypesResult {
    * Per-key fatal preflight errors (empty except in the `blocking`-mode
    * deleted/deleting-warehouse and deterministic-preflight-failure cases). The
    * artifacts are still written; {@link generateFromEntryPoint} surfaces these
-   * by throwing {@link TypegenFatalError} after the writes. The CLI never sets
-   * `mode`, so for `"describe-now"` this is always empty.
+   * by throwing {@link TypegenFatalError} after the writes. A `"describe-now"`
+   * run sets no blocking preflight, so for that mode this is always empty.
    */
   fatalErrors: Array<{ name: string; message: string }>;
 }
 
 /**
- * Unified metric-view type-generation pipeline. Backs BOTH the `appkit mv sync`
- * CLI (default `"describe-now"` mode) and {@link generateFromEntryPoint}'s
- * metric section (which forwards its dev `"non-blocking"`/`"blocking"` mode).
+ * Unified metric-view type-generation pipeline behind {@link
+ * generateFromEntryPoint}'s metric section (which forwards its
+ * `"non-blocking"`/`"blocking"` mode). Also directly callable with the default
+ * `"describe-now"` mode for a focused, always-converge metric refresh.
  *
  * The shared typegen cache (the `metrics` section of `.appkit-types-cache.json`, same {@link metricCacheHash} change-detector and {@link MetricCacheEntry} shape) means a second run over an unchanged, healthy config makes zero warehouse calls. `cache === false` (the CLI's `--no-cache`) ignores the cached section entirely (every key becomes describe-needed) and overwrites it with this pass's results.
  *
  * The `mode` toggle is the ONLY axis that differs between callers:
- *   - `"describe-now"` (default, the CLI): no preflight, no status probe — DESCRIBE every key that isn't a clean cache hit. The hit predicate is STRICTER here: a degraded/sticky cached entry is NEVER served (it is re-described), so a focused `mv sync` always converges to correct types, and the sticky-degraded notice never fires (nothing degraded is served).
+ *   - `"describe-now"` (the default for a direct call): no preflight, no status probe — DESCRIBE every key that isn't a clean cache hit. The hit predicate is STRICTER here: a degraded/sticky cached entry is NEVER served (it is re-described), so a direct describe-now call always converges to correct types, and the sticky-degraded notice never fires (nothing degraded is served).
  *   - `"non-blocking"` (dev/Vite default): one status-only probe, DESCRIBE only when the warehouse is already RUNNING, else emit degraded artifacts immediately. Degraded cache hits ARE served (last-known-good) and surfaced via the sticky-degraded notice.
  *   - `"blocking"`: wait for / start the warehouse first (only a deleted/deleting one is fatal), then DESCRIBE. Degraded cache hits are served, same as non-blocking. A fatal preflight is reported via {@link SyncMetricViewsTypesResult.fatalErrors} (the artifacts are still written) so the caller can throw after the writes.
  *
@@ -422,7 +472,7 @@ export interface SyncMetricViewsTypesResult {
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching). Mirrors the `noCache` convention on {@link generateFromEntryPoint}: gate the cache READ (`!noCache`) and overwrite the `metrics` section on SAVE.
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
  *   (tests pass a mock; production lazily builds a WorkspaceClient-backed one).
- * @param options.mode - preflight/gate policy, default `"describe-now"`. See above; the CLI omits it (taking `"describe-now"`), {@link generateFromEntryPoint} forwards its own {@link PreflightMode}.
+ * @param options.mode - preflight/gate policy, default `"describe-now"`. See above; a direct call may omit it (taking `"describe-now"`), while {@link generateFromEntryPoint} forwards its own {@link PreflightMode}.
  */
 export async function syncMetricViewsTypes(options: {
   queryFolder: string;

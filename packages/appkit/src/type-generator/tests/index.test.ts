@@ -573,6 +573,96 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   });
 
+  test("blocking + a per-key DESCRIBE failure: escalates to a build failure (TypegenFatalError)", async () => {
+    writeMetricConfig();
+
+    // An injected fetcher always runs and bypasses preflight; throwing makes the
+    // key a deterministic DESCRIBE failure. Non-blocking only warns (covered
+    // above) — but `--wait` promised correct types, so it must fail the build.
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+      mode: "blocking",
+      metricFetcher: async () => {
+        throw new Error("DESCRIBE exploded");
+      },
+    }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain("revenue");
+    expect((error as Error).message).toContain("DESCRIBE exploded");
+
+    // Write-first semantics: the degraded artifacts still ship before the throw.
+    expect(fs.existsSync(metricFile)).toBe(true);
+  });
+
+  test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate", async () => {
+    writeMetricConfig();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      // PENDING = the warehouse answered but produced no rows yet → degraded, not
+      // a per-key failure. Unlike a bad source (which `--wait` fails), a not-ready
+      // warehouse stays a soft degrade even under `--wait`, so infra flakiness
+      // can't break the build (mirrors the STOPPED-resolve preflight case).
+      await expect(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-1",
+          mode: "blocking",
+          metricFetcher: async () => ({
+            statement_id: "stmt-mock",
+            status: { state: "PENDING" },
+          }),
+        }),
+      ).resolves.toBeUndefined();
+
+      const warned = warnSpy.mock.calls.flat().map(String).join("\n");
+      expect(warned).not.toContain("metric sync failed");
+      // Permissive artifacts still ship.
+      const declarations = fs.readFileSync(metricFile, "utf-8");
+      expect(declarations).toContain('"revenue"');
+      expect(declarations).toContain("measureKeys: string");
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  test("malformed metric-views.json: a clean TypegenFatalError, not a raw parse error (any mode)", async () => {
+    fs.writeFileSync(
+      path.join(queryFolder, "metric-views.json"),
+      "{ not valid",
+    );
+
+    // Default (non-blocking) mode: a malformed config is a deterministic
+    // developer error and must fail loudly in every mode, surfaced as a
+    // message-only TypegenFatalError rather than a bubbled SyntaxError stack.
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+    }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain("metric-views.json");
+    // Query types were written before the metric config was read.
+    expect(fs.existsSync(outFile)).toBe(true);
+  });
+
   test("blocking + STOPPED: preflight starts the warehouse and waits for RUNNING before DESCRIBEs", async () => {
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("STOPPED");

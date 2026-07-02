@@ -6,8 +6,10 @@ import type { DescribeFetcher } from "../mv-registry/types";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
 /**
- * Unit tests for the metric-only `syncMetricViewsTypes` export that backs the
- * `appkit mv sync` CLI. A mock {@link DescribeFetcher} is injected so the
+ * Unit tests for the metric-only `syncMetricViewsTypes` export — the unified
+ * metric pipeline behind `generateFromEntryPoint`'s metric section (and directly
+ * callable in its default `describe-now` mode). A mock {@link DescribeFetcher} is
+ * injected so the
  * pipeline (read config → resolve → [cache partition] → syncMetrics → write
  * artifacts) runs without a warehouse, asserting BOTH artifacts land for a
  * mixed fixture (a service-principal metric + an OBO metric; measures + a
