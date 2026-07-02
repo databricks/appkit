@@ -66,6 +66,14 @@ jobs:
         if: steps.version.outputs.version != ''
         run: pnpm build && pnpm --filter=docs build
 
+      # Regenerate the bundle-size baseline from the released build. finalize
+      # commits it (via the release App) so PRs diff against the last release.
+      # Non-fatal: a size-tooling glitch must never block a release.
+      - name: Bundle-size baseline
+        if: steps.version.outputs.version != ''
+        continue-on-error: true
+        run: pnpm exec tsx tools/bundle-size.ts --baseline
+
       - name: Dist
         if: steps.version.outputs.version != ''
         run: |
@@ -114,6 +122,7 @@ jobs:
             VERSION
             SHA256SUMS
             NOTICE.md
+            bundle-size-baseline.json
 
   template-artifact:
     needs: [prepare]

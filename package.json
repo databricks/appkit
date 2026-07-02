@@ -5,7 +5,10 @@
   "version": "0.0.2",
   "packageManager": "pnpm@10.21.0",
   "scripts": {
-    "build": "pnpm -r --filter=!docs build:package && pnpm sync:template && pnpm exec tsx tools/generate-plugin-doc-banners.ts",
+    "build": "pnpm -r --filter=!docs build:package && pnpm sync:template && pnpm exec tsx tools/generate-plugin-doc-banners.ts && pnpm exec tsx tools/bundle-size.ts",
+    "size": "tsx tools/bundle-size.ts",
+    "size:baseline": "tsx tools/bundle-size.ts --baseline",
+    "size:compare": "tsx tools/bundle-size.ts --compare",
     "sync:template": "appkit plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "biome check --write .",
