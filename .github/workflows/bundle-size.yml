@@ -69,5 +69,5 @@ jobs:
       - name: Fail if over budget
         if: steps.size.outputs.exceeded == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         run: |
-          echo "::error::A package's packed tarball grew past the bundle-size budget. See the PR comment for details. Reduce the size, or acknowledge the increase by updating bundle-size-baseline.json."
+          echo "::error::Bundle size over budget: a package's shipped tarball, or a browser entry's consumer bundle (deps included), grew past the budget. See the PR comment for details. Reduce the size, or acknowledge the increase by updating bundle-size-baseline.json."
           exit 1

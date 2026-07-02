@@ -65,34 +65,51 @@ interface PackageConfig {
   // reveal node_modules weight. Only sound for browser packages: node packages
   // have native deps that can't bundle and never ship deps to a browser.
   bundleDeps: boolean;
-  entries: { id: string; file: string }[];
 }
 
+// Entry points are derived from each package's publishConfig.exports at measure
+// time (see deriveEntries), so new published exports are picked up automatically.
 const PACKAGES: PackageConfig[] = [
   {
     name: "@databricks/appkit",
     dir: "packages/appkit",
     platform: "node",
     bundleDeps: false,
-    entries: [
-      { id: ".", file: "dist/index.js" },
-      { id: "./beta", file: "dist/beta.js" },
-      { id: "./type-generator", file: "dist/type-generator/index.js" },
-    ],
   },
   {
     name: "@databricks/appkit-ui",
     dir: "packages/appkit-ui",
     platform: "browser",
     bundleDeps: true,
-    entries: [
-      { id: "./js", file: "dist/js/index.js" },
-      { id: "./js/beta", file: "dist/js/beta.js" },
-      { id: "./react", file: "dist/react/index.js" },
-      { id: "./react/beta", file: "dist/react/beta.js" },
-    ],
   },
 ];
+
+/**
+ * Derive the JS entry points a consumer can import from the package's
+ * publishConfig.exports (the flattened map npm ships). Skips non-JS targets —
+ * type-only re-exports (.d.ts), styles (.css), and ./package.json. Sorted by
+ * subpath so the set is stable regardless of exports ordering.
+ */
+function deriveEntries(dir: string): { id: string; file: string }[] {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
+  );
+  const exportsMap: Record<string, unknown> =
+    pkg.publishConfig?.exports ?? pkg.exports ?? {};
+  const entries: { id: string; file: string }[] = [];
+  for (const [id, value] of Object.entries(exportsMap)) {
+    // publishConfig.exports values are strings here, but resolve a conditions
+    // object defensively in case the exports map is used as a fallback.
+    const target =
+      typeof value === "string"
+        ? value
+        : ((value as Record<string, string>)?.default ?? null);
+    if (typeof target !== "string" || !target.endsWith(".js")) continue;
+    entries.push({ id, file: target.replace(/^\.\//, "") });
+  }
+  entries.sort((a, b) => a.id.localeCompare(b.id));
+  return entries;
+}
 
 // Fail the PR check only when a package's packed tarball grows past BOTH gates,
 // so rounding noise never blocks a merge.
@@ -376,7 +393,7 @@ async function measurePackage(
   const dir = path.join(REPO_ROOT, pkg.dir);
   const bundleExternal = pkg.bundleDeps ? peerExternals(dir) : null;
   const entries: EntryMeasurement[] = [];
-  for (const entry of pkg.entries) {
+  for (const entry of deriveEntries(dir)) {
     const cost = await measureEntry(
       path.join(dir, entry.file),
       pkg.platform,
@@ -439,13 +456,44 @@ function cell(
   return `${value} (${delta > 0 ? "+" : "-"}${formatBytes(Math.abs(delta))})`;
 }
 
-/** True when the packed tarball grew past both budget gates. */
+/** True when a size grew past both budget gates (percent AND absolute bytes). */
 function exceedsBudget(current: number | null, base: number | null): boolean {
   if (current == null || base == null) return false;
   const delta = current - base;
   if (delta <= 0) return false;
   const pct = base === 0 ? 100 : (delta / base) * 100;
   return pct > BUDGET.maxIncreasePct && delta > BUDGET.minIncreaseBytes;
+}
+
+/**
+ * Whether a package trips the gate: the packed tarball (own shipped code) for
+ * every package, plus — for browser packages — any entry's consumer bundle
+ * (deps bundled), so a heavy new/updated dependency also fails the check.
+ */
+function packageExceedsBudget(
+  pkg: PackageMeasurement,
+  base: PackageMeasurement | null,
+  bundleDeps: boolean | undefined,
+): boolean {
+  if (
+    exceedsBudget(pkg.tarball?.packed ?? null, base?.tarball?.packed ?? null)
+  ) {
+    return true;
+  }
+  if (bundleDeps) {
+    for (const entry of pkg.entries) {
+      const prev = base?.entries.find((e) => e.id === entry.id);
+      if (
+        exceedsBudget(
+          entry.composition?.totalGzip ?? null,
+          prev?.composition?.totalGzip ?? null,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function printTable(
@@ -518,10 +566,8 @@ function renderMarkdown(
 
   for (const pkg of results) {
     const base = baseline?.packages.find((p) => p.name === pkg.name) ?? null;
-    const pkgExceeded = exceedsBudget(
-      pkg.tarball?.packed ?? null,
-      base?.tarball?.packed ?? null,
-    );
+    const bundleDeps = PACKAGES.find((p) => p.name === pkg.name)?.bundleDeps;
+    const pkgExceeded = packageExceedsBudget(pkg, base, bundleDeps);
     exceeded = exceeded || pkgExceeded;
 
     lines.push(`### \`${pkg.name}\`${pkgExceeded ? " ⚠️ over budget" : ""}`, "");
@@ -550,7 +596,6 @@ function renderMarkdown(
       `| **Total** | ${cell(pkg.dist.total.raw, bd?.total.raw ?? null, hasBaseline)} | ${cell(pkg.dist.total.gzip, bd?.total.gzip ?? null, hasBaseline)} |`,
       "",
     );
-    const bundleDeps = PACKAGES.find((p) => p.name === pkg.name)?.bundleDeps;
     const scope = bundleDeps
       ? "consumer bundle — deps bundled, peerDeps external"
       : "own code — deps external (as shipped)";
@@ -568,8 +613,13 @@ function renderMarkdown(
         c?.nodeModules != null
           ? cell(c.nodeModules, pc?.nodeModules ?? null, hasBaseline)
           : "external";
+      // Browser entries are gated on their consumer bundle — flag the offender.
+      const entryOverBudget =
+        bundleDeps &&
+        exceedsBudget(c?.totalGzip ?? null, pc?.totalGzip ?? null);
+      const total = `${cell(c?.totalGzip ?? null, pc?.totalGzip ?? null, hasBaseline)}${entryOverBudget ? " ⚠️" : ""}`;
       lines.push(
-        `| \`${entry.id}\` | ${cell(c?.initialGzip ?? null, pc?.initialGzip ?? null, hasBaseline)} | ${cell(c?.lazyGzip ?? null, pc?.lazyGzip ?? null, hasBaseline)} | ${cell(c?.totalGzip ?? null, pc?.totalGzip ?? null, hasBaseline)} | ${nodeModules} | ${cell(c?.own ?? null, pc?.own ?? null, hasBaseline)} |`,
+        `| \`${entry.id}\` | ${cell(c?.initialGzip ?? null, pc?.initialGzip ?? null, hasBaseline)} | ${cell(c?.lazyGzip ?? null, pc?.lazyGzip ?? null, hasBaseline)} | ${total} | ${nodeModules} | ${cell(c?.own ?? null, pc?.own ?? null, hasBaseline)} |`,
       );
     }
     // Every emitted chunk, per entry.
@@ -594,7 +644,7 @@ function renderMarkdown(
 
   if (exceeded) {
     lines.push(
-      `> ⚠️ A package's packed tarball grew by more than **${BUDGET.maxIncreasePct}%** (and >${formatBytes(BUDGET.minIncreaseBytes)}). This check will fail — reduce the size or acknowledge the increase by updating \`bundle-size-baseline.json\`.`,
+      `> ⚠️ Over budget: a package's shipped tarball, or a browser entry's consumer bundle (deps included), grew by more than **${BUDGET.maxIncreasePct}%** (and >${formatBytes(BUDGET.minIncreaseBytes)}). This check will fail — reduce the size, or acknowledge the increase by updating \`bundle-size-baseline.json\`.`,
     );
   }
 

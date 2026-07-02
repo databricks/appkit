@@ -3,13 +3,13 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 678467,
+        "packed": 678473,
         "unpacked": 2398820
       },
       "dist": {
         "total": {
           "raw": 2394404,
-          "gzip": 802675
+          "gzip": 802685
         },
         "js": {
           "raw": 705697,
@@ -17,7 +17,7 @@
         },
         "types": {
           "raw": 274553,
-          "gzip": 93028
+          "gzip": 93038
         },
         "maps": {
           "raw": 1403359,
