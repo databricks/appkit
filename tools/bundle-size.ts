@@ -661,6 +661,18 @@ function renderMarkdown(
     lines.push("", "</details>", "");
   }
 
+  // Deltas render inline in each cell as `value (+/-X)`, only when a value moved.
+  // If a baseline exists but nothing moved, say so — otherwise the all-plain
+  // tables read as if no comparison happened.
+  if (baseline && !exceeded && !/\([+-]/.test(lines.join("\n"))) {
+    const introIdx = lines.indexOf(
+      "Compared against `bundle-size-baseline.json` (main).",
+    );
+    if (introIdx !== -1) {
+      lines.splice(introIdx + 1, 0, "", "✅ No size changes vs the baseline.");
+    }
+  }
+
   if (exceeded) {
     lines.push(
       `> ⚠️ Over budget: a package's shipped tarball, or a browser entry's consumer bundle (deps included), grew by more than **${BUDGET.maxIncreasePct}%** (and >${formatBytes(BUDGET.minIncreaseBytes)}). This check will fail — reduce the size, or acknowledge the increase by updating \`bundle-size-baseline.json\`.`,
