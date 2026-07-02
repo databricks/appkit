@@ -698,47 +698,61 @@ async function main() {
     },
   });
 
-  // The composition pass (bundling deps for browser packages) is only needed
-  // for the baseline and the PR comparison, not the fast local build report.
+  // --baseline / --compare do the deep composition pass; the default build
+  // report stays fast (own-code only).
   const deep = Boolean(values.baseline || values.compare);
-  const results = await measureAll(deep);
 
-  if (values.json) {
-    fs.writeFileSync(values.json, JSON.stringify(results, null, 2));
-  }
+  const run = async () => {
+    const results = await measureAll(deep);
+    if (values.json) {
+      fs.writeFileSync(values.json, JSON.stringify(results, null, 2));
+    }
 
-  if (values.baseline) {
-    // Never overwrite the baseline with a partial result: a missing package
-    // would make its gate fail open (deltas diff against null). Keep the
-    // existing baseline instead and signal failure.
-    if (results.length !== PACKAGES.length) {
-      console.error(
-        `bundle-size: measured ${results.length}/${PACKAGES.length} packages — refusing to write a partial baseline.`,
+    if (values.baseline) {
+      // Never overwrite the baseline with a partial result: a missing package
+      // would make its gate fail open (deltas diff against null). Keep the
+      // existing baseline instead and signal failure.
+      if (results.length !== PACKAGES.length) {
+        console.error(
+          `bundle-size: measured ${results.length}/${PACKAGES.length} packages — refusing to write a partial baseline.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const baseline: BaselineFile = { packages: results };
+      fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`);
+      console.log(
+        `Wrote baseline to ${path.relative(REPO_ROOT, BASELINE_PATH)}`,
       );
-      process.exitCode = 1;
       return;
     }
-    const baseline: BaselineFile = { packages: results };
-    fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`);
-    console.log(`Wrote baseline to ${path.relative(REPO_ROOT, BASELINE_PATH)}`);
-    return;
-  }
 
-  if (values.compare) {
     const baseline = loadBaseline();
-    printTable(results, baseline);
-    const { body, exceeded } = renderMarkdown(results, baseline);
-    if (values.markdown) fs.writeFileSync(values.markdown, `${body}\n`);
-    writeGithubOutput("exceeded", String(exceeded));
-    return;
-  }
+    if (values.compare) {
+      printTable(results, baseline);
+      const { body, exceeded } = renderMarkdown(results, baseline);
+      if (values.markdown) fs.writeFileSync(values.markdown, `${body}\n`);
+      writeGithubOutput("exceeded", String(exceeded));
+      return;
+    }
 
-  // Default: local report at the end of a build. Show deltas if a baseline
-  // exists, but never fail the build.
-  printTable(results, loadBaseline());
+    // Default: local report at the end of a build.
+    printTable(results, baseline);
+  };
+
+  if (deep) {
+    // Explicit CI/dev commands — let failures surface (exit non-zero) so a
+    // broken --compare doesn't silently pass the gate with no comment.
+    await run();
+  } else {
+    // Appended to `pnpm build`; a measurement glitch must never break the build.
+    await run().catch((err) => console.error("bundle-size:", err));
+  }
 }
 
 main().catch((err) => {
-  // Default/measure path must not break `pnpm build`.
+  // Reached only by the explicit --baseline/--compare paths (the default path
+  // swallows its own errors above). Fail loudly so CI surfaces it.
   console.error("bundle-size:", err);
+  process.exitCode = 1;
 });
