@@ -36,7 +36,6 @@
       "entries": [
         {
           "id": ".",
-          "minified": 250758,
           "gzip": 78284,
           "composition": {
             "initialGzip": 75710,
@@ -65,7 +64,6 @@
         },
         {
           "id": "./beta",
-          "minified": 120500,
           "gzip": 39881,
           "composition": {
             "initialGzip": 39650,
@@ -109,7 +107,6 @@
         },
         {
           "id": "./type-generator",
-          "minified": 55019,
           "gzip": 19056,
           "composition": {
             "initialGzip": 19056,
@@ -164,7 +161,6 @@
       "entries": [
         {
           "id": "./js",
-          "minified": 11848,
           "gzip": 4155,
           "composition": {
             "initialGzip": 4309,
@@ -193,7 +189,6 @@
         },
         {
           "id": "./js/beta",
-          "minified": 0,
           "gzip": 20,
           "composition": {
             "initialGzip": 20,
@@ -212,7 +207,6 @@
         },
         {
           "id": "./react",
-          "minified": 182805,
           "gzip": 47055,
           "composition": {
             "initialGzip": 605334,
@@ -241,7 +235,6 @@
         },
         {
           "id": "./react/beta",
-          "minified": 0,
           "gzip": 20,
           "composition": {
             "initialGzip": 20,

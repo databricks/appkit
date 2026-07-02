@@ -84,16 +84,23 @@ const PACKAGES: PackageConfig[] = [
   },
 ];
 
+interface PackageJson {
+  publishConfig?: { exports?: Record<string, unknown> };
+  exports?: Record<string, unknown>;
+  peerDependencies?: Record<string, string>;
+}
+
+function readPackageJson(dir: string): PackageJson {
+  return JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
+}
+
 /**
  * Derive the JS entry points a consumer can import from the package's
  * publishConfig.exports (the flattened map npm ships). Skips non-JS targets —
  * type-only re-exports (.d.ts), styles (.css), and ./package.json. Sorted by
  * subpath so the set is stable regardless of exports ordering.
  */
-function deriveEntries(dir: string): { id: string; file: string }[] {
-  const pkg = JSON.parse(
-    fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
-  );
+function deriveEntries(pkg: PackageJson): { id: string; file: string }[] {
   const exportsMap: Record<string, unknown> =
     pkg.publishConfig?.exports ?? pkg.exports ?? {};
   const entries: { id: string; file: string }[] = [];
@@ -134,7 +141,6 @@ interface Composition {
 
 interface EntryMeasurement {
   id: string;
-  minified: number | null; // total minified (own code, deps external)
   gzip: number | null; // total gzip (own code, deps external) — headline import cost
   composition?: Composition;
 }
@@ -224,7 +230,6 @@ function measureTarball(dir: string): PackageMeasurement["tarball"] {
 }
 
 interface Analysis {
-  totalMinified: number;
   totalGzip: number;
   own: number; // minified bytes attributed to non-node_modules inputs
   nodeModules: number; // minified bytes attributed to node_modules inputs
@@ -305,7 +310,6 @@ async function buildAndAnalyze(
   }
 
   const a: Analysis = {
-    totalMinified: 0,
     totalGzip: 0,
     own: 0,
     nodeModules: 0,
@@ -315,7 +319,6 @@ async function buildAndAnalyze(
   };
   for (const p of jsChunks) {
     const out = outputs[p];
-    a.totalMinified += out.bytes;
     for (const [input, info] of Object.entries(out.inputs)) {
       if (input.includes("node_modules")) a.nodeModules += info.bytesInOutput;
       else a.own += info.bytesInOutput;
@@ -344,7 +347,7 @@ async function measureEntry(
   deep: boolean,
   bundleExternal: string[] | null,
 ): Promise<Omit<EntryMeasurement, "id">> {
-  if (!fs.existsSync(absFile)) return { minified: null, gzip: null };
+  if (!fs.existsSync(absFile)) return { gzip: null };
   try {
     // Headline import cost = own code with deps external (what our code weighs,
     // independent of dependency churn). Stable and attributable to our changes.
@@ -372,17 +375,14 @@ async function measureEntry(
       nodeModules,
       chunks: view.chunks,
     };
-    return { minified: own.totalMinified, gzip: own.totalGzip, composition };
+    return { gzip: own.totalGzip, composition };
   } catch {
-    return { minified: null, gzip: null };
+    return { gzip: null };
   }
 }
 
 /** peerDependencies stay external in the consumer-cost view (consumer provides them). */
-function peerExternals(dir: string): string[] {
-  const pkg = JSON.parse(
-    fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
-  );
+function peerExternals(pkg: PackageJson): string[] {
   return Object.keys(pkg.peerDependencies ?? {});
 }
 
@@ -391,9 +391,10 @@ async function measurePackage(
   deep: boolean,
 ): Promise<PackageMeasurement> {
   const dir = path.join(REPO_ROOT, pkg.dir);
-  const bundleExternal = pkg.bundleDeps ? peerExternals(dir) : null;
+  const manifest = readPackageJson(dir);
+  const bundleExternal = pkg.bundleDeps ? peerExternals(manifest) : null;
   const entries: EntryMeasurement[] = [];
-  for (const entry of deriveEntries(dir)) {
+  for (const entry of deriveEntries(manifest)) {
     const cost = await measureEntry(
       path.join(dir, entry.file),
       pkg.platform,
