@@ -94,6 +94,17 @@ The type generator:
 4. Generates TypeScript interfaces for query parameters and results
 5. Creates a `QueryRegistry` type for type-safe query execution
 
+### Parameters during `DESCRIBE QUERY`
+
+Type generation describes each query without binding real parameters, so it
+substitutes a placeholder default for every `:param` (e.g. `''` for a string).
+That breaks queries whose shape depends on a value — most notably dynamic table
+names via `IDENTIFIER(:catalog || '.schema.table')`. Annotate such parameters
+with a sample value (`-- @param catalog STRING = main`) so the describe call can
+resolve a real table. The sample value is used only at type-generation time; the
+runtime query still binds the actual parameter. See
+[SQL parameters → Sample values](../plugins/analytics.md#sample-values-for-type-generation).
+
 ## Using generated types
 
 Once types are generated, your IDE will provide autocomplete and type checking:

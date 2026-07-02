@@ -23,6 +23,7 @@
  * transport.
  */
 import type { AgentToolDefinition } from "shared";
+import { APPKIT_USER_AGENT } from "../../context/client-options";
 import { createLogger } from "../../logging/logger";
 import {
   assertResolvedHostSafe,
@@ -423,6 +424,7 @@ export class AppKitMcpClient {
 
     const authHeaders = await this.resolveAuthHeaders(options);
     const headers: Record<string, string> = {
+      "User-Agent": APPKIT_USER_AGENT,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...authHeaders,
@@ -497,6 +499,7 @@ export class AppKitMcpClient {
 
     const authHeaders = await this.resolveAuthHeaders(options);
     const headers: Record<string, string> = {
+      "User-Agent": APPKIT_USER_AGENT,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...authHeaders,

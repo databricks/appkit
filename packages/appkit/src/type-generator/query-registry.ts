@@ -5,8 +5,10 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
+import { getErrorDiagnostic, isConnectivityError } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
+import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
 import {
   type DatabricksStatementExecutionResponse,
   type QueryFatalError,
@@ -97,129 +99,6 @@ function parseError(raw: string): { code?: string; message: string } {
     }
   }
   return { message: raw };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (isObject(error) && typeof error.message === "string") {
-    return error.message;
-  }
-  return String(error);
-}
-
-function getErrorDiagnostic(error: unknown): string {
-  const seen = new Set<unknown>();
-  const messages: string[] = [];
-  const stack = [error];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined || seen.has(current)) continue;
-    seen.add(current);
-
-    const message = getErrorMessage(current);
-    if (
-      message &&
-      message !== "[object Object]" &&
-      !messages.includes(message)
-    ) {
-      messages.push(message);
-    }
-
-    const code = getErrorCode(current);
-    if (code && !messages.includes(code)) messages.push(code);
-
-    stack.push(...getErrorChildren(current));
-  }
-
-  return messages.length > 0 ? messages.join(": ") : getErrorMessage(error);
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!isObject(error)) return undefined;
-  const code = error.code ?? error.errno;
-  return typeof code === "string" ? code : undefined;
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (!isObject(error)) return undefined;
-  const direct = error.status ?? error.statusCode;
-  if (typeof direct === "number") return direct;
-  if (isObject(error.response) && typeof error.response.status === "number") {
-    return error.response.status;
-  }
-  return undefined;
-}
-
-function getErrorChildren(error: unknown): unknown[] {
-  if (!isObject(error)) return [];
-  const children: unknown[] = [];
-  if ("cause" in error) children.push(error.cause);
-  if (error instanceof AggregateError) children.push(...error.errors);
-  return children;
-}
-
-const CONNECTIVITY_ERROR_CODES = new Set([
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "ENOTFOUND",
-  "ETIMEDOUT",
-  "EAI_AGAIN",
-  "EAI_NODATA",
-  "EAI_NONAME",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-  "CERT_HAS_EXPIRED",
-  "DEPTH_ZERO_SELF_SIGNED_CERT",
-  "ERR_TLS_CERT_ALTNAME_INVALID",
-  "SELF_SIGNED_CERT_IN_CHAIN",
-  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
-]);
-
-function isConnectivityMessage(message: string): boolean {
-  return (
-    /\bconnection (?:refused|reset|timed out)\b/i.test(message) ||
-    /\bsocket hang up\b/i.test(message) ||
-    /\bnetwork error\b/i.test(message) ||
-    /\bcan'?t connect to\b/i.test(message) ||
-    /\bcertificate has expired\b/i.test(message) ||
-    /\bunable to verify the first certificate\b/i.test(message) ||
-    /\bupstream connect error or disconnect\/reset before headers\b/i.test(
-      message,
-    )
-  );
-}
-
-function isConnectivityError(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  const stack = [error];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined || seen.has(current)) continue;
-    seen.add(current);
-
-    const code = getErrorCode(current);
-    if (
-      code &&
-      (CONNECTIVITY_ERROR_CODES.has(code) || code.startsWith("UND_ERR_"))
-    ) {
-      return true;
-    }
-
-    const status = getErrorStatus(current);
-    if (status === 502 || status === 503 || status === 504) return true;
-
-    if (isConnectivityMessage(getErrorMessage(current))) return true;
-
-    stack.push(...getErrorChildren(current));
-  }
-
-  return false;
 }
 
 /**
@@ -345,8 +224,8 @@ export function convertToQueryType(
 
     // generate comment for column
     const comment = column.comment
-      ? `/** ${column.comment} */\n      `
-      : `/** @sqlType ${column.type_name} */\n      `;
+      ? `/** ${column.comment.replace(/\*\//g, "* /")} */\n      `
+      : `/** @sqlType ${column.type_name.replace(/\*\//g, "* /")} */\n      `;
 
     return `${comment}${name}: ${mappedType}`;
   });
@@ -401,12 +280,19 @@ function degradedType(
     : generateUnknownResultQuery(sql, queryName);
 }
 
+// Single source of truth for the `@param` type alternation, shared by
+// extractParameterTypes and extractParameterDefaults so the two can't drift.
+// Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the regex
+// engine doesn't greedy-match TIMESTAMP and leave `_NTZ` unconsumed.
+const PARAM_TYPE_ALTERNATION =
+  "STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY";
+
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
-  // Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the
-  // regex engine doesn't greedy-match TIMESTAMP and leave `_NTZ` unconsumed.
-  const regex =
-    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\b/gi;
+  const regex = new RegExp(
+    `--\\s*@param\\s+(\\w+)\\s+(${PARAM_TYPE_ALTERNATION})\\b`,
+    "gi",
+  );
   const matches = sql.matchAll(regex);
   for (const match of matches) {
     const [, paramName, paramType] = match;
@@ -443,6 +329,169 @@ export function defaultForType(sqlType: string | undefined): string {
     default:
       return "''";
   }
+}
+
+/**
+ * True when `raw` is already a single, well-formed SQL single-quoted string
+ * literal — i.e. it opens and closes with `'` and every interior quote is part
+ * of an escaped `''` pair. `'2024-01-01'` and `'O''Brien'` qualify;
+ * `'a' OR 1=1 OR 'b'` does not (it has lone interior quotes), so it is treated
+ * as raw content and re-escaped rather than trusted. A backslash also
+ * disqualifies it: Databricks/Spark treats `\` as an escape inside literals (so
+ * `'a\'` is unterminated), and we never trust such input — it is re-escaped.
+ */
+function isWellFormedStringLiteral(raw: string): boolean {
+  if (raw.length < 2 || !raw.startsWith("'") || !raw.endsWith("'")) {
+    return false;
+  }
+  const inner = raw.slice(1, -1);
+  if (inner.includes("\\")) return false;
+  return !inner.replace(/''/g, "").includes("'");
+}
+
+/**
+ * Format a user-supplied sample value as a SQL literal for substitution into
+ * the build-time DESCRIBE statement. Returns `null` when the value isn't valid
+ * for its type, so the caller falls back to the safe type-based placeholder
+ * instead of substituting attacker-controllable text.
+ *
+ * The value comes from a `.sql` file that may be shared via a template or
+ * dependency, so it must not be able to inject SQL into `DESCRIBE QUERY`:
+ * - string-like types are always emitted as one well-formed, fully-escaped
+ *   single-quoted literal (a pre-quoted literal is kept as-is, anything else is
+ *   quoted with both `\` and `'` doubled so neither can terminate the literal),
+ *   so the value can never break out of the string;
+ * - numeric / boolean / binary values must match a strict literal shape and are
+ *   rejected (`null`) otherwise, rather than being passed through verbatim.
+ */
+function formatSampleValue(
+  sqlType: string | undefined,
+  raw: string,
+): string | null {
+  switch (sqlType?.toUpperCase()) {
+    case "STRING":
+    case "DATE":
+    case "TIMESTAMP":
+    case "TIMESTAMP_NTZ":
+      return isWellFormedStringLiteral(raw)
+        ? raw
+        : `'${raw.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
+    case "NUMERIC":
+    case "DECIMAL":
+    case "BIGINT":
+    case "TINYINT":
+    case "SMALLINT":
+    case "INT":
+    case "FLOAT":
+    case "DOUBLE":
+      return /^[+-]?\d+(\.\d+)?$/.test(raw) ? raw : null;
+    case "BOOLEAN":
+      return /^(?:true|false)$/i.test(raw) ? raw.toLowerCase() : null;
+    case "BINARY":
+      return /^X'[0-9a-fA-F]*'$/i.test(raw) ? raw : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Parse optional describe-time sample values from `@param` annotations, e.g.
+ * `-- @param target_catalog STRING = main`. The value is substituted into the
+ * SQL **only during DESCRIBE QUERY** so type generation can resolve queries
+ * whose shape depends on a parameter value — most notably dynamic table names
+ * via `IDENTIFIER(:target_catalog || '.schema.table')`, where the empty-string
+ * default would otherwise produce malformed SQL. Runtime binding is unaffected:
+ * the analytics plugin still binds the real parameter at execution time, so the
+ * query stays portable across environments.
+ *
+ * Returns a map of parameter name to the formatted SQL literal to substitute.
+ */
+export function extractParameterDefaults(sql: string): Record<string, string> {
+  const defaults: Record<string, string> = {};
+  // Reuses PARAM_TYPE_ALTERNATION, then requires `= <value>` on the same line.
+  // All inter-token whitespace is horizontal-only (`[^\S\r\n]`, not `\s`): `\s`
+  // matches newlines, so a value-less line like `-- @param x STRING =` would let
+  // `\s*=\s*(.+?)` swallow the *next* line as the sample value. Restricting to
+  // same-line whitespace makes such a line simply not match, so it correctly
+  // falls back to the type placeholder.
+  const regex = new RegExp(
+    `--[^\\S\\r\\n]*@param[^\\S\\r\\n]+(\\w+)[^\\S\\r\\n]+(${PARAM_TYPE_ALTERNATION})[^\\S\\r\\n]*=[^\\S\\r\\n]*(.+?)[^\\S\\r\\n]*$`,
+    "gim",
+  );
+  for (const match of sql.matchAll(regex)) {
+    const [, paramName, paramType, rawValue] = match;
+    const formatted = formatSampleValue(paramType, rawValue);
+    // A value that fails type validation is dropped, not substituted: the param
+    // then falls back to the safe type-based placeholder during DESCRIBE.
+    if (formatted !== null) {
+      defaults[paramName] = formatted;
+    }
+  }
+  return defaults;
+}
+
+/**
+ * Replace `:param` placeholders with describe-time literals so `DESCRIBE QUERY`
+ * can run without bound parameters. Resolution order per parameter:
+ *   1. An explicit `-- @param name TYPE = value` sample value (wins), which lets
+ *      dynamic table names via `IDENTIFIER(...)` resolve to a real table.
+ *   2. Otherwise a placeholder default derived from the annotated/inferred type.
+ * Placeholders inside string literals or comments are left untouched.
+ */
+export function substituteParametersForDescribe(sql: string): string {
+  const protectedRanges = getProtectedRanges(sql);
+  const annotatedTypes = extractParameterTypes(sql);
+  const inferredTypes = inferParameterTypes(sql, protectedRanges);
+  const parameterTypes = { ...inferredTypes, ...annotatedTypes };
+  const parameterDefaults = extractParameterDefaults(sql);
+  return sql.replace(
+    /(?<!:):([a-zA-Z_]\w*)/g,
+    (original, paramName, offset) => {
+      if (isInsideProtectedRange(offset, protectedRanges)) {
+        return original;
+      }
+      const sampleValue = parameterDefaults[paramName];
+      if (sampleValue !== undefined) {
+        return sampleValue;
+      }
+      return defaultForType(parameterTypes[paramName]);
+    },
+  );
+}
+
+/**
+ * Append a remediation hint when a DESCRIBE failure looks like a dynamic
+ * identifier that couldn't be resolved: the query calls `IDENTIFIER(...)` and
+ * has at least one parameter without a describe-time sample value. These fail
+ * because typegen substitutes a placeholder default (e.g. `''`) that yields a
+ * malformed or non-existent table name. Steering the user to the `= value`
+ * annotation turns the fatal error into a one-line fix.
+ */
+function withIdentifierHint(
+  error: { code?: string; message: string },
+  sql: string,
+): { code?: string; message: string } {
+  if (!/\bIDENTIFIER\s*\(/i.test(sql)) {
+    return error;
+  }
+  const protectedRanges = getProtectedRanges(sql);
+  const params = extractParameters(sql, protectedRanges);
+  const defaults = extractParameterDefaults(sql);
+  const unresolved = params.filter(
+    (p) => !SERVER_INJECTED_PARAMS.includes(p) && defaults[p] === undefined,
+  );
+  if (unresolved.length === 0) {
+    return error;
+  }
+  const example = unresolved[0];
+  return {
+    ...error,
+    message: `${error.message}\n  Hint: this query uses IDENTIFIER() with parameter(s) ${unresolved
+      .map((p) => `:${p}`)
+      .join(
+        ", ",
+      )}. Give type generation a sample value so it can resolve the table, e.g. \`-- @param ${example} STRING = my_catalog\`. The runtime query still binds the real parameter.`,
+  };
 }
 
 /**
@@ -564,20 +613,17 @@ export async function generateQueriesFromDescribe(
       const annotatedTypes = extractParameterTypes(sql);
       const inferredTypes = inferParameterTypes(sql, protectedRanges);
       const parameterTypes = { ...inferredTypes, ...annotatedTypes };
-      const sqlWithDefaults = sql.replace(
-        /(?<!:):([a-zA-Z_]\w*)/g,
-        (original, paramName, offset) => {
-          if (isInsideProtectedRange(offset, protectedRanges)) {
-            return original;
-          }
-          return defaultForType(parameterTypes[paramName]);
-        },
-      );
+      // substituteParametersForDescribe applies `-- @param name TYPE = value`
+      // sample values (e.g. for IDENTIFIER table names) ahead of type defaults;
+      // parameterDefaults is recomputed here only to skip them in the warn loop.
+      const parameterDefaults = extractParameterDefaults(sql);
+      const sqlWithDefaults = substituteParametersForDescribe(sql);
 
       // Warn about unresolved parameters
       const allParams = extractParameters(sql, protectedRanges);
       for (const param of allParams) {
         if (SERVER_INJECTED_PARAMS.includes(param)) continue;
+        if (parameterDefaults[param]) continue;
         if (parameterTypes[param]) continue;
         logger.warn(
           '%s: parameter ":%s" has no type annotation or inference. Add %s to the query file.',
@@ -726,15 +772,9 @@ export async function generateQueriesFromDescribe(
         `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
       );
 
-      // Some serverless warehouses reject JSON_ARRAY+INLINE for DESCRIBE — and
-      // they signal the rejection two different ways: either as a thrown error,
-      // or as a `status.state === "FAILED"` response. Both paths funnel through
-      // this matcher so we can retry with ARROW_STREAM+INLINE consistently.
-      const looksLikeFormatRejection = (msg: string): boolean =>
-        msg.includes("JSON_ARRAY") &&
-        (msg.includes("not supported") ||
-          msg.includes("INVALID_PARAMETER_VALUE") ||
-          msg.includes("NOT_IMPLEMENTED"));
+      // Shared across this run's DESCRIBE QUERY calls: discover the warehouse's
+      // result format once, then reuse it.
+      const describeFormat: DescribeFormatMemo = {};
 
       const describeOne = async ({
         index,
@@ -743,56 +783,16 @@ export async function generateQueriesFromDescribe(
         sqlHash,
         cleanedSql,
       }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-        // Prefer JSON_ARRAY + INLINE so `data_array` parsing works directly.
-        // Some serverless warehouses reject this combination — fall back to
-        // ARROW_STREAM + INLINE (still inline, just a different format) and
-        // let `convertToQueryType` decode the inline attachment. Forcing
-        // INLINE on the retry avoids EXTERNAL_LINKS, which would silently
-        // produce empty `data_array` and degrade types to `unknown`.
-        let result: DatabricksStatementExecutionResponse;
-        try {
-          result = (await client.statementExecution.executeStatement({
-            statement: `DESCRIBE QUERY ${cleanedSql}`,
-            warehouse_id: warehouseId,
-            format: "JSON_ARRAY",
-            disposition: "INLINE",
-          })) as DatabricksStatementExecutionResponse;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (looksLikeFormatRejection(msg)) {
-            logger.debug(
-              "Warehouse rejected JSON_ARRAY+INLINE for %s (thrown), retrying with ARROW_STREAM+INLINE",
-              queryName,
-            );
-            result = (await client.statementExecution.executeStatement({
-              statement: `DESCRIBE QUERY ${cleanedSql}`,
-              warehouse_id: warehouseId,
-              format: "ARROW_STREAM",
-              disposition: "INLINE",
-            })) as DatabricksStatementExecutionResponse;
-          } else {
-            throw err;
-          }
-        }
-
-        // Some warehouses surface the format rejection as `status.state ===
-        // "FAILED"` instead of throwing. Detect that shape and retry with
-        // ARROW_STREAM before we degrade the type to `unknown`.
-        if (
-          result.status.state === "FAILED" &&
-          looksLikeFormatRejection(result.status.error?.message ?? "")
-        ) {
-          logger.debug(
-            "Warehouse rejected JSON_ARRAY+INLINE for %s (state=FAILED), retrying with ARROW_STREAM+INLINE",
-            queryName,
-          );
-          result = (await client.statementExecution.executeStatement({
-            statement: `DESCRIBE QUERY ${cleanedSql}`,
-            warehouse_id: warehouseId,
-            format: "ARROW_STREAM",
-            disposition: "INLINE",
-          })) as DatabricksStatementExecutionResponse;
-        }
+        // describeAdaptive negotiates the result format with the warehouse
+        // (JSON_ARRAY for standard DBSQL, ARROW_STREAM for Reyden) and returns
+        // an already-normalized response, so the state classification below
+        // reads it directly.
+        const result = await describeAdaptive(
+          client,
+          `DESCRIBE QUERY ${cleanedSql}`,
+          warehouseId,
+          describeFormat,
+        );
 
         completed++;
         spinner.update(
@@ -820,7 +820,7 @@ export async function generateQueriesFromDescribe(
             status: "syntax",
             index,
             schema: { name: queryName, type },
-            error: parseError(sqlError),
+            error: withIdentifierHint(parseError(sqlError), sql),
           };
         }
 

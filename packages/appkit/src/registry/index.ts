@@ -29,7 +29,7 @@ export * from "./types";
  * }
  * ```
  *
- * @see {@link https://www.databricks.com/devhub/docs/appkit/v0/ | AppKit Documentation}
+ * @see {@link https://developers.databricks.com/docs/appkit/v0/ | AppKit Documentation}
  */
 // TODO: We may want to open a PR to https://github.com/SchemaStore/schemastore
 // export const MANIFEST_SCHEMA_ID =

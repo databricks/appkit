@@ -1,0 +1,60 @@
+name: Eval PR Comment
+
+# Posts a small comment on every new PR with a link to the evals-monitor app,
+# where the author can start an eval for their PR. We post a link rather than
+# triggering the job from CI because GitHub Actions runners cannot reach the
+# dogfood.staging workspace (network perimeter).
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Serialize per-PR so a rapid open+reopen can't race the marker check and
+# double-post. cancel-in-progress: false — the queued run still executes and
+# deterministically sees the prior run's comment (then skips); there's no
+# "latest commit wins" semantics here, the posted link is identical either way.
+concurrency:
+  group: eval-pr-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  post-eval-link:
+    name: Post eval link comment
+    # Skip fork PRs: their GITHUB_TOKEN is read-only (createComment would 403),
+    # and the evals-monitor app is internal — the link is useless to external
+    # contributors anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Post eval link comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const marker = "<!-- pr-eval-link -->";
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const url = `https://evals-monitor-6051921418418893.staging.aws.databricksapps.com/prs/appkit/${issue_number}`;
+
+            // Idempotent: skip if we've already commented on this PR.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            if (comments.some((c) => c.body?.includes(marker))) return;
+
+            const body = `${marker}\n> 🔬 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Go to Evals Monitor →**](${url})`;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });

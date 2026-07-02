@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit-ui",
   "type": "module",
-  "version": "0.41.4",
+  "version": "0.43.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -87,7 +87,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
-    "dompurify": "3.3.3",
+    "dompurify": "3.4.11",
     "echarts": "6.0.0",
     "echarts-for-react": "3.0.5",
     "embla-carousel-react": "8.6.0",
