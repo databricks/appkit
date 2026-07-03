@@ -10,7 +10,7 @@ AppKit can automatically generate TypeScript types for your SQL queries, providi
 
 Generate type-safe TypeScript declarations for query keys, parameters, and result rows.
 
-All generated files live in `shared/appkit-types/`, one per concern: `analytics.d.ts` (SQL query types), `serving.d.ts` (model-serving endpoint types), and — when you adopt UC Metric Views — `metric-views.d.ts`. A single command (and the Vite plugin) produces them all in one pass; see [Metric-view types](#metric-view-types). The `.d.ts` files use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["shared/appkit-types"]` in your tsconfig.
+All generated files live in `shared/appkit-types/`, one per concern: `analytics.d.ts` (SQL query types), `serving.d.ts` (model-serving endpoint types), and `metric-views.d.ts`. A single command (and the Vite plugin) produces them all in one pass; see [Metric-view types](#metric-view-types). The `.d.ts` files use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["shared/appkit-types"]` in your tsconfig.
 
 ## Vite plugin: `appKitTypesPlugin`
 
@@ -84,12 +84,6 @@ npx @databricks/appkit generate-types --wait
 
 In blocking mode the generator starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes your queries. It fails only when the configured warehouse no longer exists (deleted/deleting), so a transient outage or a cold warehouse degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
 
-### Should you commit generated types?
-
-Everything under `shared/appkit-types/` is a **build artifact**, not source. What you version is the input — your `config/queries/*.sql` files and `config/queries/metric-views.json` — while the generated `.d.ts` files are reproduced from those inputs on every build. The app template gitignores them for this reason: `prebuild` runs `generate-types --wait` before `vite build`, so the accurate types are always regenerated (against a live warehouse) and baked into the bundle at build time. Because the bundle is what deploys, the source-tree copies never need to be committed, and committing them only risks a stale artifact drifting from the queries. The template's `_gitignore` already excludes `serving.d.ts` and `metric-views.d.ts` on this basis.
-
-The only input that must be committed is `config/queries/metric-views.json` itself — it declares which views exist and is the source the generated files are derived from.
-
 ## Metric-view types
 
 `generate-types` (and the Vite plugin) emit metric-view types **additively** — there is no separate command. When a `config/queries/metric-views.json` file is present, the same run that generates your query types also DESCRIBEs each declared [UC Metric View](../plugins/analytics.md) and writes `metric-views.d.ts` into `shared/appkit-types/`:
@@ -105,7 +99,10 @@ If `metric-views.json` is absent the metric path stays dormant (nothing is emitt
   "$schema": "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
   "metricViews": {
     "revenue": { "source": "catalog.schema.revenue_metrics" },
-    "customers": { "source": "catalog.schema.customer_metrics", "executor": "user" }
+    "customers": {
+      "source": "catalog.schema.customer_metrics",
+      "executor": "user"
+    }
   }
 }
 ```
@@ -149,7 +146,7 @@ const { data } = useAnalyticsQuery("users_list", {
 });
 
 // TypeScript knows the shape of the result rows
-data?.forEach(row => {
+data?.forEach((row) => {
   console.log(row.email); // ✓ autocomplete works
 });
 ```
