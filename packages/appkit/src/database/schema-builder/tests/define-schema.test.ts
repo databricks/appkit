@@ -65,7 +65,25 @@ describe("defineSchema — basic build", () => {
   });
 });
 
-describe("defineSchema — engine maps", () => {
+describe("defineSchema — engine maps (no relations)", () => {
+  const schema = defineSchema((t) => ({
+    users: t.table("users", { id: id() }),
+    tags: t.table("tags", { id: id(), label: text() }),
+  }));
+
+  it("$engine carries a handle per table", () => {
+    expect(Object.keys(schema.$engine).sort()).toEqual(["tags", "users"]);
+  });
+
+  it("leaves $relations empty on every table", () => {
+    for (const tbl of Object.values(schema.$tables)) {
+      const relations: ResolvedRelation[] = tbl.$relations;
+      expect(relations).toEqual([]);
+    }
+  });
+});
+
+describe("defineSchema — engine maps (with relations)", () => {
   const schema = defineSchema((t) => ({
     users: t.table("users", { id: id() }),
     posts: t.table("posts", {
@@ -78,23 +96,36 @@ describe("defineSchema — engine maps", () => {
     }),
   }));
 
-  it("leaves $engineRelations empty", () => {
-    expect(schema.$engineRelations).toEqual({});
-  });
-
-  it("$engineSchema is deep-equal to $engine when there are no relations", () => {
-    expect(schema.$engineSchema).toEqual(schema.$engine);
-  });
-
-  it("$engine carries a handle per table", () => {
+  it("$engine carries only the table handles", () => {
     expect(Object.keys(schema.$engine).sort()).toEqual(["posts", "users"]);
   });
 
-  it("leaves $relations empty on every table", () => {
-    for (const tbl of Object.values(schema.$tables)) {
-      const relations: ResolvedRelation[] = tbl.$relations;
-      expect(relations).toEqual([]);
-    }
+  it("resolves the forward toOne on the FK owner", () => {
+    const relations: ResolvedRelation[] = schema.$tables.posts.$relations;
+    expect(relations).toEqual([
+      {
+        name: "users",
+        cardinality: "toOne",
+        localColumn: "authorId",
+        targetTable: "users",
+        targetColumn: "id",
+        inferred: false,
+      },
+    ]);
+  });
+
+  it("infers the reverse toMany on the FK target", () => {
+    const relations: ResolvedRelation[] = schema.$tables.users.$relations;
+    expect(relations).toEqual([
+      {
+        name: "posts",
+        cardinality: "toMany",
+        localColumn: "id",
+        targetTable: "posts",
+        targetColumn: "authorId",
+        inferred: true,
+      },
+    ]);
   });
 });
 

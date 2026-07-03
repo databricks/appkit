@@ -53,4 +53,16 @@ describe("ownerColumnName", () => {
   it("returns undefined when no owner column is declared", () => {
     expect(ownerColumnName(schema.$tables.posts)).toBeUndefined();
   });
+
+  it("rejects tables with multiple owner columns", () => {
+    expect(() =>
+      defineSchema((t) => ({
+        users: t.table("users", {
+          id: id(),
+          email: text().owner(),
+          accountId: text().owner(),
+        }),
+      })),
+    ).toThrow(/multiple \.owner\(\) columns/);
+  });
 });

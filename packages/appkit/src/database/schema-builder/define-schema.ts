@@ -1,6 +1,7 @@
 import { ColumnBuilder } from "./columns";
 import { buildEngineTables } from "./engine/tables";
 import { mirrorStorageKind, resolveFkRef } from "./fk";
+import { buildRelations } from "./relations";
 import {
   type AppKitTable,
   type ColumnRef,
@@ -10,6 +11,7 @@ import {
   SchemaBuildError,
   type TableHandle,
 } from "./types";
+import { deriveInsertSchema, deriveUpdateSchema } from "./validators";
 
 interface RawTable {
   name: string;
@@ -52,6 +54,17 @@ export function defineSchema(
           } satisfies ColumnRef,
         });
       }
+
+      const ownerColumns = Object.values(metas).filter((meta) => meta.isOwner);
+      if (ownerColumns.length > 1) {
+        const ownerNames = ownerColumns
+          .map((meta) => meta.columnName)
+          .join(", ");
+        throw new SchemaBuildError(
+          `Table "${name}" declares multiple .owner() columns (${ownerNames}). Only one owner column is supported.`,
+        );
+      }
+
       raw.set(name, { name, metas, handle });
       return handle as TableHandle<typeof columns>;
     },
@@ -115,9 +128,15 @@ export function defineSchema(
     tables[name] = handle;
   }
 
+  buildRelations(tables);
+
   // Map the returned keys back to the built handles (returned values ARE handles).
   const byHandle = new Map<AppKitTable, string>();
-  for (const [name, t] of Object.entries(tables)) byHandle.set(t, name);
+  for (const [name, t] of Object.entries(tables)) {
+    byHandle.set(t, name);
+    t.$insertSchema = deriveInsertSchema(t);
+    t.$updateSchema = deriveUpdateSchema(t);
+  }
   const result: Record<string, AppKitTable> = {};
   for (const [key, value] of Object.entries(returned)) {
     const name = byHandle.get(value);
@@ -136,7 +155,5 @@ export function defineSchema(
     $schemaName: schemaName,
     $tables: result,
     $engine: engineMap,
-    $engineRelations: {},
-    $engineSchema: { ...engineMap },
   };
 }
