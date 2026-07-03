@@ -127,10 +127,6 @@ export interface Schema {
   $tables: Record<string, AppKitTable>;
   /** @internal opaque engine table handles */
   $engine: Record<string, EngineTable>;
-  /** @internal engine relations */
-  $engineRelations: Record<string, unknown>;
-  /** @internal engine schema */
-  $engineSchema: Record<string, unknown>;
 }
 
 export class SchemaBuildError extends Error {

@@ -13,6 +13,7 @@ export {
   varchar,
 } from "./columns";
 export { defineSchema, type SchemaBuilderContext } from "./define-schema";
+export { buildEngineRelations } from "./engine/relations";
 export { fk } from "./fk";
 export {
   APPKIT_TABLE,
@@ -21,6 +22,7 @@ export {
   ownerColumnName,
   privateColumnNames,
 } from "./private";
+export { buildRelations } from "./relations";
 export type {
   AppKitTable,
   ColumnMeta,
@@ -32,3 +34,4 @@ export type {
   TableHandle,
 } from "./types";
 export { SchemaBuildError } from "./types";
+export { deriveInsertSchema, deriveUpdateSchema } from "./validators";
