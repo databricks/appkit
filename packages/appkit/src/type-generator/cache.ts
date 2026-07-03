@@ -26,17 +26,19 @@ interface CacheEntry {
  * `hash` is md5 over `"<source>|<lane>"` — the two config inputs that
  * determine a DESCRIBE — so editing either invalidates the entry. `schema`
  * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
- * design), letting a warm pass regenerate both metric artifacts without a
- * single warehouse call. `retry: true` marks a SELF-CONVERGING degraded
- * outcome (DESCRIBE skipped behind a not-running warehouse, unanswered, or
- * transiently failed): the cached schema still renders artifacts, but the
- * next eligible pass re-describes exactly these keys so degraded schemas
- * converge to real ones. A degraded schema with `retry: false` is a STICKY
- * failure — a deterministic DESCRIBE failure (bad FQN, unparseable
- * response, zero columns) or a deleted warehouse — that re-describing the
- * unchanged entry cannot fix; it hits like any cached entry until the
- * config hash changes or the cache is bypassed, and the type generator
- * warns about it on every pass that serves it.
+ * design), letting a warm pass regenerate the metric artifact without a
+ * single warehouse call.
+ *
+ * The cache holds ONLY successful (non-degraded) describes. A degraded
+ * outcome — DESCRIBE skipped behind a not-running or deleted warehouse,
+ * unanswered, or a per-key failure — is rendered into the emitted artifact
+ * but never written here (mirroring the query path, which "Never persists
+ * `result: unknown`"). A key that degraded on one pass is therefore left
+ * uncached and simply re-described on the next eligible pass; there is no
+ * sticky degraded entry to serve. `retry` is vestigial — always `false`,
+ * mirroring the query path's only cache write — and is retained solely for
+ * on-disk shape compatibility with existing version-3 caches (the revival
+ * gate still checks it is a boolean).
  */
 export interface MetricCacheEntry {
   hash: string;

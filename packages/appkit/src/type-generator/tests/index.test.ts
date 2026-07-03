@@ -726,13 +726,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain("measureKeys: string");
 
-    // D′: the fatal skip is terminal — a deleted warehouse can never serve
-    // these keys, so the degraded entries are pinned sticky (retry: false)
-    // and later passes surface them via the sticky-hit notice instead of
-    // re-describing forever.
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
-    expect(metrics.revenue.retry).toBe(false);
-    expect(metrics.revenue.schema.degraded).toBe(true);
+    // The degraded outcome is NEVER cached (mirrors the query path): the key is
+    // left uncached so a later pass re-probes, and no stale/sticky entry can be
+    // served on a subsequent --wait run.
+    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
+    expect(metrics.revenue).toBeUndefined();
   });
 
   test("blocking + preflight wait rejects with a timeout: fatal after artifacts (no silent stall)", async () => {
@@ -784,10 +782,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       "measureKeys: string",
     );
 
-    // Terminal skip → sticky, like the decision-time fatal.
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
-    expect(metrics.revenue.retry).toBe(false);
-    expect(metrics.revenue.schema.degraded).toBe(true);
+    // The degraded outcome is not cached — the key stays uncached for the next
+    // pass to re-probe.
+    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
+    expect(metrics.revenue).toBeUndefined();
   });
 
   test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw", async () => {
@@ -840,11 +838,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       "measureKeys: string",
     );
 
-    // D′: a still-startable warehouse is transient degradation — cached with
-    // retry: true so the next describe-capable pass converges it.
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
-    expect(metrics.revenue.retry).toBe(true);
-    expect(metrics.revenue.schema.degraded).toBe(true);
+    // The degraded outcome is not cached; the key stays uncached and the next
+    // describe-capable pass re-probes it (convergence via re-describe, not via a
+    // cached retry flag).
+    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
+    expect(metrics.revenue).toBeUndefined();
   });
 
   test.each<[string, boolean]>([
@@ -854,7 +852,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // STARTING probe → wait-only; a DELETED resolve is fatal there too.
     ["STARTING", false],
   ])(
-    "blocking + warehouse deleted mid-wait (probe read %s): fatal after artifacts, sticky cache entry",
+    "blocking + warehouse deleted mid-wait (probe read %s): fatal after artifacts, degraded outcome not cached",
     async (probedState, startsWarehouse) => {
       writeMetricConfig();
       mocks.getWarehouseState.mockResolvedValue(probedState);
@@ -893,10 +891,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect(declarations).toContain('"revenue"');
       expect(declarations).toContain("measureKeys: string");
 
-      // D′: terminal skip — sticky, like the decision-time fatal.
-      const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics;
-      expect(metrics.revenue.retry).toBe(false);
-      expect(metrics.revenue.schema.degraded).toBe(true);
+      // The degraded outcome is not cached — no sticky entry to serve later.
+      const metrics =
+        JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
+      expect(metrics.revenue).toBeUndefined();
     },
   );
 
@@ -1196,8 +1194,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     await expect(run()).resolves.toBeUndefined();
 
     // Pass 1: churn added while the warehouse is down. The gate skips its
-    // DESCRIBE; churn is cached degraded with retry: true. revenue stays a
-    // hit and its good entry is NOT overwritten.
+    // DESCRIBE; churn degrades and is NOT cached (only good describes are). The
+    // revenue hit is untouched and keeps its cached good entry.
     vi.clearAllMocks();
     mocks.getWarehouseState.mockResolvedValue("STOPPED");
     writeConfig({
@@ -1206,16 +1204,17 @@ describe("generateFromEntryPoint — metric cache section", () => {
     });
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    expect(savedCache().metrics.churn.retry).toBe(true);
-    expect(savedCache().metrics.churn.schema.degraded).toBe(true);
+    // churn degraded → left uncached; revenue's good entry survived.
+    expect(savedCache().metrics.churn).toBeUndefined();
     expect(savedCache().metrics.revenue.retry).toBe(false);
+    expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
     // Artifacts mix the cached real schema with the degraded newcomer.
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       '"total_revenue": number',
     );
 
-    // Pass 2: blocking with the warehouse RUNNING. Only the retry-flagged
-    // key is described; the hit is untouched.
+    // Pass 2: blocking with the warehouse RUNNING. churn is uncached, so it is
+    // the only key re-described; the revenue hit is untouched.
     vi.clearAllMocks();
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue(
@@ -1228,7 +1227,9 @@ describe("generateFromEntryPoint — metric cache section", () => {
         statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`churn` AS JSON",
       }),
     );
+    // churn now has a good cached entry.
     expect(savedCache().metrics.churn.retry).toBe(false);
+    expect(savedCache().metrics.churn.schema.degraded).not.toBe(true);
 
     const refreshed = fs.readFileSync(metricFile, "utf-8");
     expect(refreshed).toContain('"monthly_churn": number');
@@ -1385,9 +1386,9 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(metrics.revenue.retry).toBe(false);
   });
 
-  // ── D′ sticky/transient retry semantics ───────────────────────────────
+  // ── Degraded outcomes are never cached (mirrors the query path) ────────
 
-  test("D′ write matrix: transient failures and non-terminal states retry, deterministic failures stick", async () => {
+  test("write matrix: every degraded outcome is left uncached; only a successful describe is cached", async () => {
     writeConfig({
       failed_stmt: { source: "demo.sales.failed_stmt" },
       fetch_reject: { source: "demo.sales.fetch_reject" },
@@ -1439,72 +1440,47 @@ describe("generateFromEntryPoint — metric cache section", () => {
     }
 
     const metrics = savedCache().metrics;
-    // Transient fetch rejection → re-describe next eligible pass.
-    expect(metrics.fetch_reject.retry).toBe(true);
-    expect(metrics.fetch_reject.schema.degraded).toBe(true);
-    // Non-terminal statement state (not a failure at all) → retry.
-    expect(metrics.pending.retry).toBe(true);
-    expect(metrics.pending.schema.degraded).toBe(true);
-    // Deterministic failures → STICKY: degraded schema cached, no retry.
-    for (const key of ["failed_stmt", "no_rows", "no_columns"]) {
-      expect(metrics[key].retry).toBe(false);
-      expect(metrics[key].schema.degraded).toBe(true);
+    // Every degraded outcome — transient (fetch reject, PENDING) OR
+    // deterministic (FAILED statement, zero rows, zero columns) — is left
+    // uncached, so the next eligible pass simply re-describes it. No sticky
+    // entry, no cached degrade to serve.
+    for (const key of [
+      "fetch_reject",
+      "pending",
+      "failed_stmt",
+      "no_rows",
+      "no_columns",
+    ]) {
+      expect(metrics[key]).toBeUndefined();
     }
-    // Success → real schema, no retry.
+    // Only the successful describe is cached — a real schema, retry: false.
     expect(metrics.good.retry).toBe(false);
     expect(metrics.good.schema.degraded).toBeUndefined();
   });
 
-  test.each<[string, boolean]>([
-    // Startable / transient states converge on a later pass → retry.
-    ["STOPPED", true],
-    ["STARTING", true],
-    // A deleted warehouse can never converge → sticky.
-    ["DELETED", false],
-    ["DELETING", false],
-  ])(
-    "D′ gate skip: a %s probe caches the skipped keys with retry: %s",
-    async (state, retry) => {
+  test.each<string>(["STOPPED", "STARTING", "DELETED", "DELETING"])(
+    "gate skip: a %s probe leaves the skipped keys uncached (never sticky)",
+    async (state) => {
       writeConfig({ revenue: { source: "demo.sales.revenue" } });
       mocks.getWarehouseState.mockResolvedValue(state);
 
       // Non-blocking never throws — even for a deleted warehouse the pass
-      // degrades; only the cache disposition differs.
+      // degrades. The degraded outcome is not cached regardless of state, so
+      // the key is re-probed next pass rather than pinned.
       await expect(run()).resolves.toBeUndefined();
       expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-      const metrics = savedCache().metrics;
-      expect(metrics.revenue.retry).toBe(retry);
-      expect(metrics.revenue.schema.degraded).toBe(true);
+      expect(savedCache().metrics?.revenue).toBeUndefined();
+      // The permissive artifact is still written this pass.
+      expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+        "measureKeys: string",
+      );
     },
   );
 
-  test("D′ gate skip on DELETED: the sticky entry hits on the next pass and surfaces via the notice", async () => {
-    writeConfig({ revenue: { source: "demo.sales.revenue" } });
-    mocks.getWarehouseState.mockResolvedValue("DELETED");
-    await expect(run()).resolves.toBeUndefined();
-    expect(savedCache().metrics.revenue.retry).toBe(false);
-
-    // Warm pass: the sticky entry is a HIT — zero describes, zero probes —
-    // and the notice names it.
-    vi.clearAllMocks();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      await expect(run()).resolves.toBeUndefined();
-      expect(mocks.executeStatement).not.toHaveBeenCalled();
-      expect(mocks.getWarehouseState).not.toHaveBeenCalled();
-      const stickyLines = warnSpy.mock.calls
-        .map((call) => call.map(String).join(" "))
-        .filter((line) => line.includes("cached failure"));
-      expect(stickyLines).toHaveLength(1);
-      expect(stickyLines[0]).toContain("revenue");
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  test("sticky-hit notice: a warm pass over a sticky entry describes nothing and warns once naming the key", async () => {
-    // Pass 1: a deterministic DESCRIBE failure pins the key sticky.
+  test("a re-run after a degraded pass re-describes the key (no sticky serve)", async () => {
+    // Pass 1: a deterministic DESCRIBE failure degrades the key. It is NOT
+    // cached, and the describing pass reports the failure itself.
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
@@ -1514,45 +1490,65 @@ describe("generateFromEntryPoint — metric cache section", () => {
     const firstWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(run()).resolves.toBeUndefined();
-      // The describing pass reports the failure itself — the cached-failure
-      // notice is reserved for passes that merely SERVE the sticky entry.
       const warned = firstWarnSpy.mock.calls.flat().map(String).join("\n");
       expect(warned).toContain("metric sync failed for revenue");
+      // No sticky-cache "cached failure" notice exists anymore.
       expect(warned).not.toContain("cached failure");
     } finally {
       firstWarnSpy.mockRestore();
     }
-    expect(savedCache().metrics.revenue.retry).toBe(false);
+    expect(savedCache().metrics?.revenue).toBeUndefined();
 
-    // Pass 2 (warm): hash match + retry: false ⇒ HIT. No describes, no
-    // probes, exactly one warn naming the key and the escape hatches.
+    // Pass 2: the key is uncached, so it is RE-DESCRIBED (not served from a
+    // sticky entry). This time the source resolves — it converges to a real
+    // schema with no --no-cache needed.
     vi.clearAllMocks();
+    mocks.getWarehouseState.mockResolvedValue("RUNNING");
+    mocks.executeStatement.mockResolvedValue(
+      describeResponseFor("total_revenue"),
+    );
+    await expect(run()).resolves.toBeUndefined();
+    expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+    expect(savedCache().metrics.revenue.retry).toBe(false);
+    expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      '"total_revenue": number',
+    );
+  });
+
+  test("--wait over a still-bad source re-describes and fails the build (never green from a cached degrade)", async () => {
+    // Pass 1 (non-blocking): bad source degrades, uncached.
+    writeConfig({ revenue: { source: "demo.sales.revenue" } });
+    mocks.getWarehouseState.mockResolvedValue("RUNNING");
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-mock",
+      status: { state: "FAILED", error: { message: "no such table" } },
+    });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(run()).resolves.toBeUndefined();
-      expect(mocks.executeStatement).not.toHaveBeenCalled();
-      expect(mocks.getWarehouseState).not.toHaveBeenCalled();
-
-      const warnedLines = warnSpy.mock.calls.map((call) =>
-        call.map(String).join(" "),
-      );
-      const stickyLines = warnedLines.filter((line) =>
-        line.includes("cached failure"),
-      );
-      expect(stickyLines).toHaveLength(1);
-      expect(stickyLines[0]).toContain("revenue");
-      expect(stickyLines[0]).toContain("metric-views.json");
-      expect(stickyLines[0]).toContain("--no-cache");
-      // Nothing was described, so no fresh per-key failure warns.
-      expect(warnedLines.join("\n")).not.toContain("metric sync failed");
     } finally {
       warnSpy.mockRestore();
     }
+    expect(savedCache().metrics?.revenue).toBeUndefined();
 
-    // The sticky degraded schema still renders permissive artifacts.
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      "measureKeys: string",
+    // Pass 2 (--wait / blocking): the key is uncached, so --wait re-describes
+    // it against the still-bad source and escalates to a build failure — it
+    // can NOT green-build by serving a cached degrade (the bug this replaces).
+    vi.clearAllMocks();
+    mocks.getWarehouseState.mockResolvedValue("RUNNING");
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-mock",
+      status: { state: "FAILED", error: { message: "no such table" } },
+    });
+    const error = await run({ mode: "blocking" }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
     );
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
   });
 
   test("no sticky-hit notice when the warm pass serves only good entries", async () => {
@@ -1576,7 +1572,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     }
   });
 
-  test("sticky convergence: editing the source (hash change) re-describes a sticky key", async () => {
+  test("convergence: editing the source (hash change) re-describes a previously degraded key", async () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
@@ -1586,10 +1582,11 @@ describe("generateFromEntryPoint — metric cache section", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(run()).resolves.toBeUndefined();
-      expect(savedCache().metrics.revenue.retry).toBe(false);
+      // Degraded → not cached.
+      expect(savedCache().metrics?.revenue).toBeUndefined();
 
-      // The user fixes the FQN: hash changes, the sticky entry is
-      // invalidated, and the key converges to a real schema.
+      // The user fixes the FQN: the uncached key is re-described (a new hash
+      // would force it too) and converges to a real schema.
       vi.clearAllMocks();
       mocks.getWarehouseState.mockResolvedValue("RUNNING");
       mocks.executeStatement.mockResolvedValue(
@@ -1617,7 +1614,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     );
   });
 
-  test("sticky convergence: noCache re-describes a sticky key despite the matching hash", async () => {
+  test("convergence: noCache re-describes a previously degraded key", async () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
@@ -1627,7 +1624,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(run()).resolves.toBeUndefined();
-      expect(savedCache().metrics.revenue.retry).toBe(false);
+      // Degraded → not cached.
+      expect(savedCache().metrics?.revenue).toBeUndefined();
 
       vi.clearAllMocks();
       mocks.getWarehouseState.mockResolvedValue("RUNNING");
