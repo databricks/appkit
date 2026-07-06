@@ -4,243 +4,182 @@ import { createLogger } from "../logging/logger";
 
 const logger = createLogger("stream:arrow");
 
-type ResultManifest = sql.ResultManifest;
 type ExternalLink = sql.ExternalLink;
 
 interface ArrowStreamOptions {
-  maxConcurrentDownloads: number;
+  /** Idle timeout (ms) for a single chunk: no progress → abort the download. */
   timeout: number;
+  /** Attempts to establish a chunk's response before any bytes are yielded. */
   retries: number;
-}
-
-/**
- * Result from zero-copy Arrow chunk processing.
- * Contains raw IPC bytes without server-side parsing.
- */
-interface ArrowRawResult {
-  /** Concatenated raw Arrow IPC bytes */
-  data: Uint8Array;
-  /** Schema from Databricks manifest (not parsed from Arrow) */
-  schema: ResultManifest["schema"];
 }
 
 const BACKOFF_MULTIPLIER = 1000;
 
+/**
+ * Streams Arrow IPC bytes for a completed statement's EXTERNAL_LINKS chunks
+ * without ever buffering a whole chunk — each chunk's response body is piped
+ * through as it arrives, so peak memory is a single network read rather than
+ * a full chunk (let alone the full result). No Arrow parsing on the server;
+ * the client parses the concatenated IPC bytes.
+ */
 export class ArrowStreamProcessor {
-  static readonly DEFAULT_MAX_CONCURRENT_DOWNLOADS = 5;
   static readonly DEFAULT_TIMEOUT = 30000;
   static readonly DEFAULT_RETRIES = 3;
 
-  constructor(
-    private options: ArrowStreamOptions = {
-      maxConcurrentDownloads:
-        ArrowStreamProcessor.DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-      timeout: ArrowStreamProcessor.DEFAULT_TIMEOUT,
-      retries: ArrowStreamProcessor.DEFAULT_RETRIES,
-    },
-  ) {
+  private options: ArrowStreamOptions;
+
+  constructor(options?: Partial<ArrowStreamOptions>) {
     this.options = {
-      maxConcurrentDownloads:
-        options.maxConcurrentDownloads ??
-        ArrowStreamProcessor.DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-      timeout: options.timeout ?? ArrowStreamProcessor.DEFAULT_TIMEOUT,
-      retries: options.retries ?? ArrowStreamProcessor.DEFAULT_RETRIES,
+      timeout: options?.timeout ?? ArrowStreamProcessor.DEFAULT_TIMEOUT,
+      retries: options?.retries ?? ArrowStreamProcessor.DEFAULT_RETRIES,
     };
   }
 
   /**
-   * Process Arrow chunks using zero-copy proxy pattern.
+   * Stream Arrow chunks in array order, piping each chunk's response body.
    *
-   * Downloads raw IPC bytes from external links and concatenates them
-   * without parsing into Arrow Tables on the server. This reduces:
-   * - Memory usage by ~50% (no parsed Table representation)
-   * - CPU usage (no tableFromIPC/tableToIPC calls)
-   *
-   * The client is responsible for parsing the IPC bytes.
-   *
-   * @param chunks - External links to Arrow IPC data
-   * @param schema - Schema from Databricks manifest
-   * @param signal - Optional abort signal
-   * @returns Raw concatenated IPC bytes with schema
+   * Yields network-sized pieces as they arrive (not whole chunks), so peak
+   * memory is one read buffer. Chunks are fetched sequentially; the
+   * concatenation of everything yielded is byte-identical to the raw Arrow
+   * result, so the client parses it exactly as a buffered response.
    */
-  async processChunks(
+  async *streamChunks(
     chunks: ExternalLink[],
-    schema: ResultManifest["schema"],
     signal?: AbortSignal,
-  ): Promise<ArrowRawResult> {
+  ): AsyncGenerator<Uint8Array, void, unknown> {
     if (chunks.length === 0) {
       throw ValidationError.missingField("chunks");
     }
 
-    const buffers = await this.downloadChunksRaw(chunks, signal);
-    const data = this.concatenateBuffers(buffers);
-
-    return { data, schema };
+    for (const chunk of chunks) {
+      yield* this.streamChunkBody(chunk, signal);
+    }
   }
 
   /**
-   * Download all chunks as raw bytes with concurrency control.
+   * Pipe one chunk's response body.
+   *
+   * Retry applies only while *establishing* the response (connection failure
+   * or non-2xx) — once bytes have been yielded downstream we cannot re-fetch,
+   * so a mid-body failure propagates and the caller aborts the response. An
+   * idle timeout, reset before every read, aborts a stalled download.
    */
-  private async downloadChunksRaw(
-    chunks: ExternalLink[],
-    signal?: AbortSignal,
-  ): Promise<Uint8Array[]> {
-    const semaphore = new Semaphore(this.options.maxConcurrentDownloads);
-
-    const downloadPromises = chunks.map(async (chunk) => {
-      await semaphore.acquire();
-      try {
-        return await this.downloadChunkRaw(chunk, signal);
-      } finally {
-        semaphore.release();
-      }
-    });
-
-    return Promise.all(downloadPromises);
-  }
-
-  /**
-   * Download a single chunk as raw bytes with retry logic.
-   */
-  private async downloadChunkRaw(
+  private async *streamChunkBody(
     chunk: ExternalLink,
     signal?: AbortSignal,
-  ): Promise<Uint8Array> {
-    let lastError: Error | null = null;
+  ): AsyncGenerator<Uint8Array, void, unknown> {
+    const externalLink = chunk.external_link;
+    if (!externalLink) {
+      // A missing link cannot be fixed by retrying — fail loudly.
+      throw ExecutionError.statementFailed(
+        `External link missing for chunk ${chunk.chunk_index}`,
+      );
+    }
+
+    let response: Response | undefined;
+    let controller: AbortController | undefined;
+    let onOuterAbort: (() => void) | undefined;
+    let lastError: unknown;
 
     for (let attempt = 0; attempt < this.options.retries; attempt++) {
-      const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => {
-        timeoutController.abort();
-      }, this.options.timeout);
+      if (signal?.aborted) throw ExecutionError.canceled();
 
-      const combinedSignal = signal
-        ? this.combineAbortSignals(signal, timeoutController.signal)
-        : timeoutController.signal;
+      const attemptController = new AbortController();
+      const listener = () => attemptController.abort();
+      signal?.addEventListener("abort", listener, { once: true });
+      const timer = setTimeout(
+        () => attemptController.abort(),
+        this.options.timeout,
+      );
 
       try {
-        const externalLink = chunk.external_link;
-        if (!externalLink) {
-          logger.error("External link is required for chunk: %O", chunk);
-          continue;
-        }
-
-        const response = await fetch(externalLink, {
-          signal: combinedSignal,
+        const r = await fetch(externalLink, {
+          signal: attemptController.signal,
         });
-
-        if (!response.ok) {
+        clearTimeout(timer);
+        if (!r.ok) {
           throw ExecutionError.statementFailed(
-            `Failed to download chunk ${chunk.chunk_index}: ${response.status} ${response.statusText}`,
+            `Failed to download chunk ${chunk.chunk_index}: ${r.status} ${r.statusText}`,
           );
         }
-
-        const arrayBuffer = await response.arrayBuffer();
-        return new Uint8Array(arrayBuffer);
+        // Keep this attempt's controller alive to drive the body read + idle
+        // timeout below.
+        response = r;
+        controller = attemptController;
+        onOuterAbort = listener;
+        break;
       } catch (error) {
-        lastError = error as Error;
-
-        if (timeoutController.signal.aborted) {
-          lastError = new Error(
-            `Chunk ${chunk.chunk_index} download timed out after ${this.options.timeout}ms`,
-          );
-        }
-
-        if (signal?.aborted) {
-          throw ExecutionError.canceled();
-        }
-
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", listener);
+        lastError = error;
+        if (signal?.aborted) throw ExecutionError.canceled();
         if (attempt < this.options.retries - 1) {
-          await this.delay(2 ** attempt * BACKOFF_MULTIPLIER);
+          await this.delay(2 ** attempt * BACKOFF_MULTIPLIER, signal);
+        }
+      }
+    }
+
+    if (!response || !controller) {
+      throw ExecutionError.statementFailed(
+        `Failed to download chunk ${chunk.chunk_index} after ${this.options.retries} attempts: ${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }`,
+      );
+    }
+
+    const body = response.body;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (!body) return; // empty chunk (0 rows)
+      const reader = body.getReader();
+      try {
+        while (true) {
+          // Reset the idle timeout before each read: a stalled body (no bytes
+          // for `timeout` ms) aborts the download rather than hanging.
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(
+            () => controller.abort(),
+            this.options.timeout,
+          );
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength > 0) yield value;
         }
       } finally {
-        clearTimeout(timeoutId);
+        // Release the stream on early exit (downstream abort / error).
+        reader.cancel().catch(() => {});
       }
+    } catch (error) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      logger.error(
+        "Failed streaming chunk %s body: %O",
+        chunk.chunk_index,
+        error,
+      );
+      throw error instanceof ExecutionError
+        ? error
+        : ExecutionError.statementFailed(
+            `Failed streaming chunk ${chunk.chunk_index}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+    } finally {
+      clearTimeout(idleTimer);
+      if (onOuterAbort) signal?.removeEventListener("abort", onOuterAbort);
     }
-
-    throw ExecutionError.statementFailed(
-      `Failed to download chunk ${chunk.chunk_index} after ${this.options.retries} attempts: ${lastError?.message}`,
-    );
   }
 
-  /**
-   * Concatenate multiple Uint8Array buffers into a single buffer.
-   * Pre-allocates the result array for efficiency.
-   */
-  private concatenateBuffers(buffers: Uint8Array[]): Uint8Array {
-    if (buffers.length === 0) {
-      throw ValidationError.missingField("buffers");
-    }
-
-    if (buffers.length === 1) {
-      return buffers[0];
-    }
-
-    const totalLength = buffers.reduce((sum, buf) => sum + buf.length, 0);
-    const result = new Uint8Array(totalLength);
-
-    let offset = 0;
-    for (const buffer of buffers) {
-      result.set(buffer, offset);
-      offset += buffer.length;
-    }
-
-    return result;
-  }
-
-  /**
-   * Combines multiple AbortSignals into one.
-   * The combined signal aborts when any of the input signals abort.
-   */
-  private combineAbortSignals(...signals: AbortSignal[]): AbortSignal {
-    const controller = new AbortController();
-
-    for (const signal of signals) {
-      if (signal.aborted) {
-        controller.abort();
-        return controller.signal;
-      }
-      signal.addEventListener("abort", () => controller.abort(), {
-        once: true,
-      });
-    }
-
-    return controller.signal;
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-}
-
-class Semaphore {
-  private permits: number;
-  private waiting: (() => void)[] = [];
-
-  constructor(permits: number) {
-    this.permits = permits;
-  }
-
-  async acquire(): Promise<void> {
-    if (this.permits > 0) {
-      this.permits--;
-      return;
-    }
-
-    return new Promise<void>((resolve) => {
-      this.waiting.push(resolve);
+  private delay(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(ExecutionError.canceled());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
-  }
-
-  release(): void {
-    if (this.waiting.length > 0) {
-      const next = this.waiting.shift();
-
-      if (next) {
-        next();
-      }
-    } else {
-      this.permits++;
-    }
   }
 }

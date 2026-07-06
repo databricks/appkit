@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 let lastConnectArgs: any = null;
 let capturedCallbacks: {
@@ -52,71 +52,82 @@ describe("useAnalyticsQuery", () => {
     capturedCallbacks = {};
   });
 
-  test("fetches an arrow message (warehouse statement id) via /arrow-result", async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("fetches ARROW_STREAM results as raw Arrow bytes directly from the query endpoint (no SSE)", async () => {
     const fakeTable = { numRows: 1, schema: { fields: [] } };
     const fakeBytes = new Uint8Array([1, 2, 3]);
-    mockFetchArrow.mockResolvedValueOnce(fakeBytes);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => fakeBytes.buffer,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal("fetch", fetchMock);
     mockProcessArrowBuffer.mockResolvedValueOnce(fakeTable);
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
-    await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow", statement_id: "stmt-warehouse-1" }),
-    });
-
     await waitFor(() => {
       expect(result.current.data).toBe(fakeTable);
     });
 
-    expect(mockFetchArrow).toHaveBeenCalledTimes(1);
-    expect(mockFetchArrow).toHaveBeenCalledWith(
-      "/api/analytics/arrow-result/stmt-warehouse-1",
+    // ARROW_STREAM never opens an SSE stream — the bytes come straight back
+    // on a direct POST to the query endpoint.
+    expect(mockConnectSSE).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/analytics/query/q");
+    expect(init.method).toBe("POST");
+    // No column-names header → decode with the raw Arrow schema names.
+    expect(mockProcessArrowBuffer).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      undefined,
     );
-    expect(mockProcessArrowBuffer).toHaveBeenCalledWith(fakeBytes);
+    expect(result.current.loading).toBe(false);
   });
 
-  test("fetches an arrow message with synthetic inline- id through the same /arrow-result path", async () => {
-    // The client must treat inline and external-links responses uniformly —
-    // it never decodes base64 locally. The /arrow-result route on the
-    // server is the only place that knows which path the bytes came from.
+  test("relabels ARROW_STREAM columns from the X-Appkit-Arrow-Columns header", async () => {
     const fakeTable = { numRows: 1, schema: { fields: [] } };
-    const fakeBytes = new Uint8Array([1, 2, 3, 4, 5]);
-    mockFetchArrow.mockResolvedValueOnce(fakeBytes);
+    const names = ["name", "totalSpend"];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      headers: {
+        get: (h: string) =>
+          h === "X-Appkit-Arrow-Columns"
+            ? encodeURIComponent(JSON.stringify(names))
+            : null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
     mockProcessArrowBuffer.mockResolvedValueOnce(fakeTable);
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
-    await lastConnectArgs.onMessage({
-      data: JSON.stringify({
-        type: "arrow",
-        statement_id: "inline-abc-xyz",
-      }),
-    });
-
     await waitFor(() => {
       expect(result.current.data).toBe(fakeTable);
     });
 
-    expect(mockFetchArrow).toHaveBeenCalledTimes(1);
-    expect(mockFetchArrow).toHaveBeenCalledWith(
-      "/api/analytics/arrow-result/inline-abc-xyz",
+    // The parsed manifest names are handed to the decoder for relabeling.
+    expect(mockProcessArrowBuffer).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      names,
     );
   });
 
-  test("surfaces an error when the arrow fetch fails", async () => {
-    mockFetchArrow.mockRejectedValueOnce(new Error("network"));
+  test("surfaces an error when the ARROW_STREAM fetch fails", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("boom"));
+    vi.stubGlobal("fetch", fetchMock);
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
-
-    await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow", statement_id: "stmt-1" }),
-    });
 
     await waitFor(() => {
       expect(result.current.error).toBe(
@@ -126,27 +137,28 @@ describe("useAnalyticsQuery", () => {
     expect(result.current.loading).toBe(false);
   });
 
-  test("rejects the retired arrow_inline message type as schema-invalid", async () => {
-    // arrow_inline was the prior wire shape. The discriminated union no
-    // longer accepts it, so it falls through to the generic error/code
-    // branch — but critically, it must NEVER trigger ArrowClient calls.
+  test("surfaces a structured errorCode from an ARROW_STREAM JSON error body", async () => {
+    // On a pre-first-byte failure the server responds with a JSON
+    // `{ error, errorCode }` body; the hook exposes both so consumers can
+    // branch on the stable code (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK).
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: "Result too large for JSON format",
+        errorCode: "RESULT_TOO_LARGE_FOR_JSON_FALLBACK",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
-    await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: "AQID" }),
-    });
-
     await waitFor(() => {
-      expect(
-        result.current.loading ||
-          result.current.error ||
-          result.current.data === null,
-      ).toBeTruthy();
+      expect(result.current.error).toBe("Result too large for JSON format");
     });
-    expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
-    expect(mockFetchArrow).not.toHaveBeenCalled();
+    expect(result.current.errorCode).toBe("RESULT_TOO_LARGE_FOR_JSON_FALLBACK");
+    expect(result.current.loading).toBe(false);
   });
 
   test("normalizes an empty result message (no data field) to []", async () => {
@@ -208,15 +220,14 @@ describe("useAnalyticsQuery", () => {
   });
 
   test("a server error event carrying a structured errorCode exposes it on the hook return value", async () => {
-    // The SSE error broadcaster forwards an `errorCode` field for
-    // UI branching (e.g. INLINE_ARROW_STASH_EXHAUSTED). The hook
-    // surfaces both the human `error` text AND the structured
-    // `errorCode` so consumers can branch on the stable identifier
-    // instead of substring-matching the sanitized human message.
+    // The SSE error broadcaster forwards an `errorCode` field for UI
+    // branching. The hook surfaces both the human `error` text AND the
+    // structured `errorCode` so consumers can branch on the stable
+    // identifier instead of substring-matching the sanitized human message.
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { result } = renderHook(() =>
-      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+      useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),
     );
 
     await lastConnectArgs.onMessage({
@@ -224,7 +235,7 @@ describe("useAnalyticsQuery", () => {
         type: "error",
         error: "Server is at capacity, please retry",
         code: "UPSTREAM_ERROR",
-        errorCode: "INLINE_ARROW_STASH_EXHAUSTED",
+        errorCode: "RESULT_TOO_LARGE_FOR_JSON_FALLBACK",
       }),
     });
 
@@ -232,7 +243,7 @@ describe("useAnalyticsQuery", () => {
       expect(result.current.error).toBe("Server is at capacity, please retry");
     });
     expect(result.current.loading).toBe(false);
-    expect(result.current.errorCode).toBe("INLINE_ARROW_STASH_EXHAUSTED");
+    expect(result.current.errorCode).toBe("RESULT_TOO_LARGE_FOR_JSON_FALLBACK");
 
     errorSpy.mockRestore();
   });
@@ -446,26 +457,6 @@ describe("useAnalyticsQuery", () => {
       });
 
       expect(result.current.data).toBeNull();
-    });
-
-    test("ignores late arrow envelope after the controller was aborted", async () => {
-      const { result } = renderHook(() =>
-        useAnalyticsQuery("test_query", null, { format: "ARROW_STREAM" }),
-      );
-
-      await waitFor(() => expect(capturedCallbacks.signal).toBeDefined());
-
-      markAborted();
-
-      await act(async () => {
-        await capturedCallbacks.onMessage?.({
-          data: JSON.stringify({ type: "arrow", statement_id: "stmt-123" }),
-        });
-      });
-
-      expect(mockFetchArrow).not.toHaveBeenCalled();
-      expect(result.current.data).toBeNull();
-      expect(result.current.error).toBeNull();
     });
   });
 });

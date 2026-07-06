@@ -15,6 +15,14 @@ export interface IAnalyticsConfig extends BasePluginConfig {
    * `ConfigurationError`.
    */
   autoStartWarehouse?: boolean;
+  /**
+   * Fail-fast ceiling (ms) for an `ARROW_STREAM` query to produce its first
+   * byte (warehouse readiness + execute + first chunk). Past this, a stuck or
+   * overloaded warehouse returns a `503` (`WAREHOUSE_UNAVAILABLE`) instead of
+   * hanging until the client disconnects. Defaults to 2 min. Once the first
+   * byte arrives the stream is not time-bounded.
+   */
+  arrowFirstByteTimeoutMs?: number;
 }
 
 /**

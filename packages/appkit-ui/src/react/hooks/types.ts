@@ -96,10 +96,10 @@ export interface UseAnalyticsQueryResult<T> {
   error: string | null;
   /**
    * Structured upstream error code when the server attaches one to the
-   * SSE error payload (e.g. `INLINE_ARROW_STASH_EXHAUSTED`,
-   * `RESULT_TOO_LARGE_FOR_JSON_FALLBACK`, `NOT_IMPLEMENTED`). Prefer
-   * branching UI on this stable identifier rather than substring-
-   * matching `error`, which is a free-form sanitized message.
+   * error payload (e.g. `RESULT_TOO_LARGE_FOR_JSON_FALLBACK`,
+   * `ARROW_DELIVERY_UNSUPPORTED`, `NOT_IMPLEMENTED`). Prefer branching UI
+   * on this stable identifier rather than substring-matching `error`,
+   * which is a free-form sanitized message.
    */
   errorCode: string | null;
   /**

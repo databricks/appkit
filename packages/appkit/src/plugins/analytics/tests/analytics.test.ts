@@ -19,8 +19,7 @@ import {
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
-import { AnalyticsPlugin, analytics } from "../analytics";
-import { InlineArrowStash } from "../inline-arrow-stash";
+import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
 // Mock CacheManager singleton with actual caching behavior
@@ -103,100 +102,6 @@ describe("Analytics Plugin", () => {
         "/query/:query_key",
         expect.any(Function),
       );
-    });
-
-    test("should register GET route for arrow results", () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router } = createMockRouter();
-
-      plugin.injectRoutes(router);
-
-      expect(router.get).toHaveBeenCalledTimes(1);
-      expect(router.get).toHaveBeenCalledWith(
-        "/arrow-result/:jobId",
-        expect.any(Function),
-      );
-    });
-
-    test("/arrow-result/inline-* drains the stash and serves bytes as application/vnd.apache.arrow.stream", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      plugin.injectRoutes(router);
-
-      const arrowBytes = new Uint8Array([0xff, 0xfe, 0xfd, 0xfc]);
-      const { id } = (plugin as any).inlineArrowStash.put("global", arrowBytes);
-      expect(id.startsWith("inline-")).toBe(true);
-
-      const handler = getHandler("GET", "/arrow-result/:jobId");
-      const mockReq = createMockRequest({ params: { jobId: id } });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(mockRes.setHeader).toHaveBeenCalledWith(
-        "Content-Type",
-        "application/vnd.apache.arrow.stream",
-      );
-      expect(mockRes.setHeader).toHaveBeenCalledWith(
-        "Content-Length",
-        String(arrowBytes.length),
-      );
-      expect(mockRes.setHeader).toHaveBeenCalledWith(
-        "Cache-Control",
-        "no-store",
-      );
-      expect(mockRes.send).toHaveBeenCalledTimes(1);
-      const sentBuf = (mockRes.send as any).mock.calls[0][0] as Buffer;
-      expect(Buffer.isBuffer(sentBuf)).toBe(true);
-      expect(Array.from(sentBuf)).toEqual(Array.from(arrowBytes));
-
-      // Drain-on-read: a second fetch must return 410, not the bytes again.
-      const secondRes = createMockResponse();
-      await handler(mockReq, secondRes);
-      expect(secondRes.status).toHaveBeenCalledWith(410);
-    });
-
-    test("/arrow-result/inline-* returns 410 when the stash entry never existed", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("GET", "/arrow-result/:jobId");
-      const mockReq = createMockRequest({
-        params: { jobId: "inline-does-not-exist" },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(410);
-      expect(mockRes.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          error: expect.stringMatching(/expired or unknown/),
-        }),
-      );
-    });
-
-    test("/arrow-result/inline-* returns 410 when the stash entry belongs to a different user", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      plugin.injectRoutes(router);
-
-      // Stash entry keyed to user-a, but the request resolves to "global"
-      // (no x-forwarded-user header) — keys differ, take must return
-      // nothing, and the entry stays put (single-user view).
-      const bytes = new Uint8Array([1, 2, 3]);
-      const { id } = (plugin as any).inlineArrowStash.put("user-a", bytes);
-
-      const handler = getHandler("GET", "/arrow-result/:jobId");
-      const mockReq = createMockRequest({ params: { jobId: id } });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(410);
-      // The entry must still be there for the real owner.
-      expect((plugin as any).inlineArrowStash.take(id, "user-a")).toBeDefined();
     });
 
     test("/query/:query_key should return 400 when query_key is missing", async () => {
@@ -834,7 +739,7 @@ describe("Analytics Plugin", () => {
       });
     });
 
-    test("/query/:query_key should fall back ARROW_STREAM from INLINE to EXTERNAL_LINKS when warehouse rejects INLINE", async () => {
+    test("/query/:query_key falls back ARROW_STREAM INLINE→EXTERNAL_LINKS and streams the preserved links in-context", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -843,6 +748,11 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
+      // INLINE rejected → EXTERNAL_LINKS. The result carries the pre-signed
+      // `external_links` resolved in this request's context, so the route
+      // streams them directly — no second getStatement under the ambient
+      // service-principal context.
+      const links = [{ external_link: "https://example.com/chunk-0" }];
       const executeMock = vi
         .fn()
         .mockRejectedValueOnce(
@@ -851,9 +761,20 @@ describe("Analytics Plugin", () => {
           ),
         )
         .mockResolvedValueOnce({
-          result: { statement_id: "stmt-1", status: { state: "SUCCEEDED" } },
+          result: {
+            statement_id: "stmt-1",
+            status: { state: "SUCCEEDED" },
+            columnNames: ["group_key", "cost_usd"],
+            external_links: links,
+          },
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
+
+      const extBytes = new Uint8Array([9, 8, 7]);
+      const streamExternalLinksMock = vi.fn(function* (_chunks: unknown) {
+        yield extBytes;
+      });
+      (plugin as any).SQLClient.streamExternalLinks = streamExternalLinksMock;
 
       plugin.injectRoutes(router);
 
@@ -866,16 +787,221 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // First call: INLINE (rejected)
+      // First call INLINE (rejected), second EXTERNAL_LINKS (fallback).
       expect(executeMock.mock.calls[0][1]).toMatchObject({
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
-      // Second call: EXTERNAL_LINKS (fallback)
       expect(executeMock.mock.calls[1][1]).toMatchObject({
         disposition: "EXTERNAL_LINKS",
         format: "ARROW_STREAM",
       });
+      // Streams the pre-signed links from the execute response (no re-fetch).
+      expect(streamExternalLinksMock).toHaveBeenCalledTimes(1);
+      expect(streamExternalLinksMock.mock.calls[0][0]).toBe(links);
+      // Bytes stream on the response body with the Arrow content type — no
+      // JSON error, no missingData throw.
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.apache.arrow.stream",
+      );
+      // Manifest names (from EXTERNAL_LINKS result) ride the header too.
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "X-Appkit-Arrow-Columns",
+        encodeURIComponent(JSON.stringify(["group_key", "cost_usd"])),
+      );
+      expect(mockRes.json).not.toHaveBeenCalled();
+      const written = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as Buffer,
+      );
+      expect(written).toHaveLength(1);
+      expect(Array.from(written[0])).toEqual([9, 8, 7]);
+    });
+
+    test("OBO: .obo.sql ARROW_STREAM external-links streams under the user context", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      // `.obo.sql` → isAsUser true → the route must run through asUser(req).
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: true,
+      });
+
+      const links = [{ external_link: "https://example.com/obo-chunk-0" }];
+      // Fake user-context executor: INLINE rejected, EXTERNAL_LINKS resolves
+      // with the pre-signed links (resolved with the user's identity).
+      const userExecutorQuery = vi.fn(async (_q, _p, fp) => {
+        if (fp.disposition === "INLINE") {
+          throw new Error(
+            "INVALID_PARAMETER_VALUE: The format field must be JSON_ARRAY when the disposition field is INLINE.",
+          );
+        }
+        return {
+          external_links: links,
+          columnNames: ["a"],
+          statement_id: "obo-stmt",
+        };
+      });
+      const asUserSpy = vi
+        .spyOn(plugin as any, "asUser")
+        .mockReturnValue({ query: userExecutorQuery });
+
+      const streamExternalLinksMock = vi.fn(function* (_chunks: unknown) {
+        yield new Uint8Array([1, 2, 3]);
+      });
+      (plugin as any).SQLClient.streamExternalLinks = streamExternalLinksMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // The user context (asUser) executor ran the queries — not the SP `this`.
+      expect(asUserSpy).toHaveBeenCalledWith(mockReq);
+      expect(userExecutorQuery).toHaveBeenCalled();
+      // The links the user-context executor resolved are streamed directly —
+      // no re-fetch under a different identity.
+      expect(streamExternalLinksMock).toHaveBeenCalledTimes(1);
+      expect(streamExternalLinksMock.mock.calls[0][0]).toBe(links);
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.apache.arrow.stream",
+      );
+    });
+
+    test("ARROW_STREAM: a stuck warehouse fails fast with a 503 WAREHOUSE_UNAVAILABLE", async () => {
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        arrowFirstByteTimeoutMs: 20,
+      });
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      (plugin as any).SQLClient.ensureWarehouseRunning = vi
+        .fn()
+        .mockResolvedValue(undefined);
+      // Warehouse never produces a first byte — only settles when aborted.
+      (plugin as any).SQLClient.executeStatement = vi.fn(
+        (_c: unknown, _i: unknown, signal?: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () =>
+              reject(
+                new DOMException("The operation was aborted.", "AbortError"),
+              ),
+            );
+          }),
+      );
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(503);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({ errorCode: "WAREHOUSE_UNAVAILABLE" }),
+      );
+    });
+
+    test("ARROW_STREAM: a schema too wide for the header advertises a columns-ref instead", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      // 2000 columns → the encoded header value exceeds the size cap.
+      const wideNames = Array.from({ length: 2000 }, (_, i) => `column_${i}`);
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: {
+          attachment: Buffer.from([1, 2, 3]).toString("base64"),
+          columnNames: wideNames,
+          statement_id: "stmt-wide",
+        },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const setHeaderCalls = (mockRes.setHeader as any).mock.calls.map(
+        (c: any[]) => c[0],
+      );
+      expect(setHeaderCalls).toContain("X-Appkit-Arrow-Columns-Ref");
+      expect(setHeaderCalls).not.toContain("X-Appkit-Arrow-Columns");
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "X-Appkit-Arrow-Columns-Ref",
+        "stmt-wide",
+      );
+    });
+
+    test("GET /columns/:statementId returns the manifest column names", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.getColumnNames = vi
+        .fn()
+        .mockResolvedValue(["name", "spend"]);
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("GET", "/columns/:statementId");
+      const mockReq = createMockRequest({
+        params: { statementId: "stmt-wide" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({ columns: ["name", "spend"] });
+    });
+
+    test("GET /columns/:statementId falls back to the service principal when the user identity can't read it (OBO)", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      // User identity 404s (e.g. the statement was executed by the SP, which
+      // the user can't `getStatement`); the SP `this` resolves it.
+      const spGetColumns = vi.fn().mockResolvedValue(["a", "b"]);
+      (plugin as any).SQLClient.getColumnNames = spGetColumns;
+      const userGetColumnNames = vi
+        .fn()
+        .mockRejectedValue(new Error("RESOURCE_DOES_NOT_EXIST"));
+      const asUserSpy = vi
+        .spyOn(plugin as any, "asUser")
+        .mockReturnValue({ _getColumnNames: userGetColumnNames });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("GET", "/columns/:statementId");
+      const mockReq = createMockRequest({ params: { statementId: "stmt-x" } });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Tried the user identity first, then fell back to the service principal.
+      expect(asUserSpy).toHaveBeenCalledWith(mockReq);
+      expect(userGetColumnNames).toHaveBeenCalledWith("stmt-x");
+      expect(spGetColumns).toHaveBeenCalled();
+      expect(mockRes.json).toHaveBeenCalledWith({ columns: ["a", "b"] });
     });
 
     test("/query/:query_key falls back on a structured ExecutionError.errorCode without scanning the message", async () => {
@@ -1039,7 +1165,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("/query/:query_key stashes ARROW_STREAM INLINE bytes and emits an arrow message with a synthetic inline- id", async () => {
+    test("/query/:query_key streams ARROW_STREAM INLINE bytes directly on the response body (no SSE, no stash)", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1049,10 +1175,16 @@ describe("Analytics Plugin", () => {
       });
 
       // Real base64 so the route can decode it via Buffer.from(..., "base64").
+      // `columnNames` is what the connector attaches from the manifest (the
+      // Arrow schema itself is positional col_N).
       const arrowBytes = new Uint8Array([1, 2, 3, 4, 5]);
       const fakeAttachment = Buffer.from(arrowBytes).toString("base64");
       const executeMock = vi.fn().mockResolvedValue({
-        result: { attachment: fakeAttachment, row_count: 1 },
+        result: {
+          attachment: fakeAttachment,
+          row_count: 1,
+          columnNames: ["name", "totalSpend"],
+        },
       });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
@@ -1067,160 +1199,34 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // The route should not fall back to EXTERNAL_LINKS — INLINE succeeded.
-      expect(executeMock).toHaveBeenCalledTimes(1);
-      expect(executeMock.mock.calls[0][1]).toMatchObject({
-        disposition: "INLINE",
-        format: "ARROW_STREAM",
-      });
-      // SSE payload: unified `arrow` message with an inline- prefixed id.
-      // The base64 attachment must NOT appear on the SSE channel.
-      const writeCalls = (mockRes.write as any).mock.calls.map(
-        (c: any[]) => c[0] as string,
-      );
-      // Skip the leading warehouse_status event the route always emits;
-      // the terminal result/arrow/error payload is the one under test.
-      const payload = writeCalls.find(
-        (s: string) =>
-          s.startsWith("data: ") && !s.includes("warehouse_status"),
-      );
-      expect(payload).toBeDefined();
-      expect(payload).toContain('"type":"arrow"');
-      expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
-      expect(payload).not.toContain("arrow_inline");
-      expect(payload).not.toContain(fakeAttachment);
-
-      // The decoded bytes should be in the stash, keyed by the same
-      // synthetic id; a subsequent /arrow-result fetch will drain them.
-      const idMatch = payload?.match(/"statement_id":"(inline-[^"]+)"/);
-      expect(idMatch).not.toBeNull();
-      const inlineId = idMatch?.[1];
-      const stashed = (plugin as any).inlineArrowStash.take(inlineId, "global");
-      expect(stashed).toBeDefined();
-      expect(Array.from(stashed)).toEqual(Array.from(arrowBytes));
-    });
-
-    test("/query/:query_key spills the already-decoded bytes into the stash overflow pool when the regular pool is full — single execution, no double-billing", async () => {
-      // The regular stash put may refuse new entries when at cap. We must
-      // NOT respond by re-executing the same statement with EXTERNAL_LINKS:
-      // the warehouse has already been billed, the bytes are already
-      // decoded server-side, and a second execution can return a divergent
-      // result for non-deterministic SQL (CURRENT_TIMESTAMP, RAND, late
-      // rows). The stash's overflow pool absorbs the bytes so the client
-      // still gets an inline- id pointing at the original result.
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-
-      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
-        query: "SELECT * FROM test",
-        isAsUser: false,
-      });
-
-      const fakeAttachment = Buffer.from(new Uint8Array([1, 2, 3])).toString(
-        "base64",
-      );
-      const executeMock = vi.fn().mockResolvedValueOnce({
-        result: { attachment: fakeAttachment, row_count: 1 },
-      });
-      (plugin as any).SQLClient.executeStatement = executeMock;
-
-      // Force the regular pool to be at cap so the put spills into overflow.
-      // We construct a tiny stash and pre-fill the regular pool.
-      const tinyStash = new InlineArrowStash({
-        maxBytes: 4,
-        maxOverflowBytes: 64,
-      });
-      tinyStash.put("filler", new Uint8Array([9, 9, 9, 9]));
-      (plugin as any).inlineArrowStash = tinyStash;
-
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("POST", "/query/:query_key");
-      const mockReq = createMockRequest({
-        params: { query_key: "test_query" },
-        body: { parameters: {}, format: "ARROW_STREAM" },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      // Single execution: no EXTERNAL_LINKS retry.
+      // INLINE succeeded — a single execution, no EXTERNAL_LINKS fallback.
       expect(executeMock).toHaveBeenCalledTimes(1);
       expect(executeMock.mock.calls[0][1]).toMatchObject({
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
 
-      // SSE payload carries an inline- id pointing at the overflow entry.
-      const writeCalls = (mockRes.write as any).mock.calls.map(
-        (c: any[]) => c[0] as string,
+      // Bytes stream straight back on the response body with the Arrow
+      // content type — no SSE frames, no stash, no JSON error.
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.apache.arrow.stream",
       );
-      // Skip the leading warehouse_status event the route always emits;
-      // the terminal result/arrow/error payload is the one under test.
-      const payload = writeCalls.find(
-        (s: string) =>
-          s.startsWith("data: ") && !s.includes("warehouse_status"),
+      // Manifest column names ride a response header so the client can relabel
+      // the positional Arrow schema.
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "X-Appkit-Arrow-Columns",
+        encodeURIComponent(JSON.stringify(["name", "totalSpend"])),
       );
-      expect(payload).toBeDefined();
-      expect(payload).toContain('"type":"arrow"');
-      expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
+      expect(mockRes.json).not.toHaveBeenCalled();
+      expect(mockRes.end).toHaveBeenCalled();
 
-      // Bytes landed in the overflow pool, regular pool size unchanged.
-      expect(tinyStash.overflowSize()).toBe(3);
-      expect(tinyStash.size()).toBe(4);
-    });
-
-    test("/query/:query_key surfaces a stable error when both regular and overflow pools are exhausted — never silently double-bills", async () => {
-      // When even the overflow pool cannot fit the payload, the route
-      // surfaces INLINE_ARROW_STASH_EXHAUSTED instead of re-running the
-      // statement on EXTERNAL_LINKS. The previous behavior (silent retry)
-      // double-billed the warehouse and could return divergent results.
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-
-      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
-        query: "SELECT * FROM test",
-        isAsUser: false,
-      });
-
-      const fakeAttachment = Buffer.from(new Uint8Array([1, 2, 3])).toString(
-        "base64",
+      const written = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as Buffer,
       );
-      const executeMock = vi.fn().mockResolvedValueOnce({
-        result: { attachment: fakeAttachment, row_count: 1 },
-      });
-      (plugin as any).SQLClient.executeStatement = executeMock;
-
-      // Force both put paths to refuse: spy returns null unconditionally.
-      vi.spyOn((plugin as any).inlineArrowStash, "put").mockReturnValue(null);
-
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("POST", "/query/:query_key");
-      const mockReq = createMockRequest({
-        params: { query_key: "test_query" },
-        body: { parameters: {}, format: "ARROW_STREAM" },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      // Single execution: never re-runs on EXTERNAL_LINKS.
-      expect(executeMock).toHaveBeenCalledTimes(1);
-
-      // SSE error payload carries the stable errorCode for UI branching.
-      // The writer emits separate lines (`id:`, `event: error`, `data: ...`)
-      // — join them so we can match across the framing.
-      const writeCalls = (mockRes.write as any).mock.calls.map(
-        (c: any[]) => c[0] as string,
-      );
-      const errorFrame = writeCalls
-        .filter((s: string) => s.startsWith("data: "))
-        .join("\n");
-      expect(errorFrame).toContain("INLINE_ARROW_STASH_EXHAUSTED");
-      // Client-safe message reaches the wire; raw upstream text does not.
-      expect(errorFrame).toContain("Server is at capacity");
-      expect(errorFrame).not.toContain("Inline Arrow stash exhausted");
+      expect(written).toHaveLength(1);
+      expect(Buffer.isBuffer(written[0])).toBe(true);
+      expect(Array.from(written[0])).toEqual(Array.from(arrowBytes));
     });
 
     test("/query/:query_key falls back JSON_ARRAY to ARROW_STREAM INLINE when warehouse refuses JSON_ARRAY for INLINE", async () => {
@@ -1685,6 +1691,58 @@ describe("Analytics Plugin", () => {
       const plugin = new AnalyticsPlugin({ name: "analytics" });
       const entries = plugin.toolkit({ prefix: "", only: ["query"] });
       expect(Object.keys(entries)).toEqual(["query"]);
+    });
+  });
+
+  describe("writeChunk backpressure", () => {
+    // A response stub that is always backpressured (`write` → false) and lets
+    // the test fire lifecycle events. The shared `createMockResponse` returns a
+    // truthy `write`, so it never exercises the backpressure branch.
+    function backpressuredRes() {
+      const listeners: Record<string, Array<() => void>> = {};
+      return {
+        write: vi.fn(() => false),
+        once: vi.fn(function (this: unknown, ev: string, h: () => void) {
+          listeners[ev] ??= [];
+          listeners[ev].push(h);
+          return this;
+        }),
+        off: vi.fn(function (this: unknown, ev: string, h: () => void) {
+          if (listeners[ev]) {
+            listeners[ev] = listeners[ev].filter((x) => x !== h);
+          }
+          return this;
+        }),
+        emit(ev: string) {
+          for (const h of [...(listeners[ev] ?? [])]) h();
+        },
+        listenerCount(ev: string) {
+          return (listeners[ev] ?? []).length;
+        },
+      };
+    }
+
+    test("resolves once the socket drains and detaches its listeners", async () => {
+      const res = backpressuredRes();
+      const pending = writeChunk(res as never, new Uint8Array([1, 2, 3]));
+      res.emit("drain");
+      await expect(pending).resolves.toBeUndefined();
+      expect(res.listenerCount("drain")).toBe(0);
+      expect(res.listenerCount("close")).toBe(0);
+      expect(res.listenerCount("error")).toBe(0);
+    });
+
+    test("rejects (does not hang) when the client disconnects mid-backpressure", async () => {
+      const res = backpressuredRes();
+      const pending = writeChunk(res as never, new Uint8Array([1, 2, 3]));
+      // The socket closes while backpressured — `drain` will never fire. If
+      // writeChunk only awaited `drain`, this promise (and the stream feeding
+      // it) would hang forever.
+      res.emit("close");
+      await expect(pending).rejects.toThrow();
+      expect(res.listenerCount("drain")).toBe(0);
+      expect(res.listenerCount("close")).toBe(0);
+      expect(res.listenerCount("error")).toBe(0);
     });
   });
 });

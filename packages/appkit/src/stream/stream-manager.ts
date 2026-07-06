@@ -309,7 +309,7 @@ export class StreamManager {
           error instanceof AppKitError
             ? error.clientMessage
             : "Internal server error";
-        // Upstream structured code (e.g. INLINE_ARROW_STASH_EXHAUSTED,
+        // Upstream structured code (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
         // NOT_IMPLEMENTED). UI should branch on this, not on `error`.
         const upstreamCode =
           error instanceof ExecutionError ? error.errorCode : undefined;

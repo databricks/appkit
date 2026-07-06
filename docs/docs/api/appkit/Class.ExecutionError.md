@@ -164,7 +164,7 @@ get clientMessage(): string;
 Execution errors default to a generic message — the raw warehouse /
 SDK text in `.message` often includes statement fragments, internal
 paths, and correlation IDs. UI code should branch on `errorCode`
-(`INLINE_ARROW_STASH_EXHAUSTED`, `NOT_IMPLEMENTED`, etc.) and not on
+(`RESULT_TOO_LARGE_FOR_JSON_FALLBACK`, `NOT_IMPLEMENTED`, etc.) and not on
 the human string.
 
 ##### Returns
@@ -255,26 +255,6 @@ static resultsClosed(): ExecutionError;
 ```
 
 Create an execution error for closed/expired results
-
-#### Returns
-
-`ExecutionError`
-
-***
-
-### stashExhausted()
-
-```ts
-static stashExhausted(): ExecutionError;
-```
-
-Create an execution error for the inline Arrow stash being unable to
-accept a payload (both regular and overflow pools at cap).
-
-The route deliberately surfaces this rather than silently re-running
-the statement on EXTERNAL_LINKS — a second execution can be billed
-and return divergent results for non-deterministic SQL. Operators
-should tune stash capacity or back off load when this fires.
 
 #### Returns
 
