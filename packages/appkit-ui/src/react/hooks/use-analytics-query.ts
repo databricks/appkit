@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { AnalyticsSseMessage } from "shared";
 import { ArrowClient, connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
@@ -115,20 +114,15 @@ async function handleAnalyticsSseMessage<ResultType>(
     return;
   }
 
-  // The error/code branch below predates the SSE wire schema and can fire
-  // for messages that don't match any AnalyticsSseMessage variant (e.g.
-  // server-side error events from executeStream). Validate the known
-  // result/arrow variants first; fall through to error handling otherwise.
-  const validated = AnalyticsSseMessage.safeParse(parsed);
-  const msg = validated.success ? validated.data : null;
-
-  // success - JSON format. The wire schema makes `data` optional (e.g. an
-  // empty result set may omit it), so normalize the missing case to an
-  // explicit empty array rather than letting `undefined` bleed into the
-  // hook's `T | null` state.
-  if (msg?.type === "result") {
+  // JSON result. The SSE wire schema is intentionally loose (`data` is an
+  // optional array of unknown values), so a structural check is enough here —
+  // no need to ship a schema validator (zod, ~60 KB gz) to the browser just
+  // to read our own same-origin server's messages. Missing or non-array
+  // `data` normalizes to [] so `undefined` never bleeds into the hook's
+  // `T | null` state.
+  if (parsed.type === "result") {
     ctx.setLoading(false);
-    ctx.setData((msg.data ?? []) as ResultType);
+    ctx.setData((Array.isArray(parsed.data) ? parsed.data : []) as ResultType);
     ctx.unpublishWarehouseStatus();
     return;
   }
@@ -160,17 +154,12 @@ async function handleAnalyticsSseMessage<ResultType>(
     return;
   }
 
-  // The payload matched neither AnalyticsSseMessage nor an error event —
-  // surface a generic error rather than silently dropping it.
-  if (!validated.success) {
-    console.error(
-      "[useAnalyticsQuery] Malformed SSE payload",
-      validated.error.flatten(),
-    );
-    ctx.setLoading(false);
-    ctx.setError(GENERIC_LOAD_ERROR);
-    ctx.unpublishWarehouseStatus();
-  }
+  // Not a warehouse-status, result, or error event — surface a generic error
+  // rather than silently dropping an unrecognized payload.
+  console.error("[useAnalyticsQuery] Unrecognized SSE payload", parsed);
+  ctx.setLoading(false);
+  ctx.setError(GENERIC_LOAD_ERROR);
+  ctx.unpublishWarehouseStatus();
 }
 
 interface ArrowDirectContext {
