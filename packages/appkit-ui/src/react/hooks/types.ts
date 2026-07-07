@@ -57,6 +57,35 @@ export interface UseAnalyticsQueryOptions<
   autoStart?: boolean;
 }
 
+/**
+ * SQL warehouse lifecycle state surfaced by `useAnalyticsQuery`.
+ * Mirrors the states emitted by the analytics plugin (which mirror the
+ * Databricks SQL SDK `sql.State`).
+ */
+export type WarehouseState =
+  | "RUNNING"
+  | "STARTING"
+  | "STOPPED"
+  | "STOPPING"
+  | "DELETED"
+  | "DELETING";
+
+/**
+ * Snapshot of warehouse readiness streamed by the analytics route before the
+ * SQL result. Useful for rendering "warehouse starting…" affordances during
+ * cold starts instead of a frozen spinner.
+ *
+ * Note: the SDK's `health.summary` is intentionally NOT included on the wire
+ * — it's free-form operator-oriented diagnostic text (cluster IDs, capacity
+ * reasons, internal RPC errors) that must not reach end users; it stays in
+ * server-side telemetry only.
+ */
+export interface WarehouseStatus {
+  state: WarehouseState;
+  /** Milliseconds elapsed since the route began waiting for the warehouse. */
+  elapsedMs: number;
+}
+
 /** Result state returned by useAnalyticsQuery */
 export interface UseAnalyticsQueryResult<T> {
   /** Latest query result data */
@@ -65,6 +94,12 @@ export interface UseAnalyticsQueryResult<T> {
   loading: boolean;
   /** Error state of the query */
   error: string | null;
+  /**
+   * Latest warehouse status emitted by the server while waiting for the SQL
+   * warehouse to reach RUNNING. `null` until the first status event arrives;
+   * remains `null` for cache hits where the server skips the readiness check.
+   */
+  warehouseStatus: WarehouseStatus | null;
 }
 
 /**

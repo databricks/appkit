@@ -52,6 +52,123 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.43.1](https://github.com/databricks/appkit/compare/v0.43.0...v0.43.1) (2026-07-07)
+
+### appkit-ui
+
+* **appkit-ui:** enable tree-shaking with sideEffects flag and modular echarts imports ([#442](https://github.com/databricks/appkit/issues/442)) ([b0fdd19](https://github.com/databricks/appkit/commit/b0fdd198adce7c06e34123adbec7b5cf72ec8f4b)), closes [package.json#sideEffects](https://github.com/databricks/package.json/issues/sideEffects)
+
+
+## [0.43.0](https://github.com/databricks/appkit/compare/v0.42.0...v0.43.0) (2026-07-01)
+
+* attribute outbound Databricks requests to AppKit consistently ([#453](https://github.com/databricks/appkit/issues/453)) ([d37f5f1](https://github.com/databricks/appkit/commit/d37f5f1aca462d62dc773f6bc24e5886499f21fd))
+
+
+## [0.42.0](https://github.com/databricks/appkit/compare/v0.41.7...v0.42.0) (2026-07-01)
+
+* skip dev warehouse auto-resolution in agentic mode ([#460](https://github.com/databricks/appkit/issues/460)) ([29b33da](https://github.com/databricks/appkit/commit/29b33da982a5fcd5e76b15ffd41a65e2233b4151))
+
+
+## [0.41.7](https://github.com/databricks/appkit/compare/v0.41.6...v0.41.7) (2026-07-01)
+
+### deps
+
+* **deps:** bump vulnerable transitive deps to patched versions ([#405](https://github.com/databricks/appkit/issues/405)) ([#434](https://github.com/databricks/appkit/issues/434)) ([36a3ce1](https://github.com/databricks/appkit/commit/36a3ce1ed45c23acb9f7c385d92f31c2fa369929))
+
+
+## [0.41.6](https://github.com/databricks/appkit/compare/v0.41.5...v0.41.6) (2026-06-24)
+
+### type-generator
+
+* **type-generator:** support IDENTIFIER() params via describe-time sample values ([#383](https://github.com/databricks/appkit/issues/383)) ([#435](https://github.com/databricks/appkit/issues/435)) ([4f03a79](https://github.com/databricks/appkit/commit/4f03a7917fe6d23773a701a832925f24f28cb673))
+
+
+## [0.41.5](https://github.com/databricks/appkit/compare/v0.41.4...v0.41.5) (2026-06-16)
+
+### appkit-ui
+
+* **appkit-ui:** dark mode fixes for charts ([#452](https://github.com/databricks/appkit/issues/452)) ([c0400f7](https://github.com/databricks/appkit/commit/c0400f7cf2a581ba41ef7fdefc69d7966b726c24))
+
+
+## [0.41.4](https://github.com/databricks/appkit/compare/v0.41.3...v0.41.4) (2026-06-12)
+
+### appkit
+
+* **appkit:** keep SSE generator alive for a grace window so reconnection resumes ([#445](https://github.com/databricks/appkit/issues/445)) ([f81fff1](https://github.com/databricks/appkit/commit/f81fff1ceee17234b57f60de5ebd97dd4c008639))
+
+
+## [0.41.3](https://github.com/databricks/appkit/compare/v0.41.2...v0.41.3) (2026-06-12)
+
+### appkit-ui
+
+* **appkit-ui:** escape heatmap tooltip values to prevent XSS ([#437](https://github.com/databricks/appkit/issues/437)) ([d73ff25](https://github.com/databricks/appkit/commit/d73ff25b82b2018f4dc38df335e9fe4fbd484155))
+
+
+## [0.41.2](https://github.com/databricks/appkit/compare/v0.41.1...v0.41.2) (2026-06-11)
+
+### connectors
+
+* **connectors:** singleflight ensureWarehouseRunning per warehouse ([#420](https://github.com/databricks/appkit/issues/420)) ([494edcc](https://github.com/databricks/appkit/commit/494edcc0aa825857b327c89abb12545a98e83410)), closes [#419](https://github.com/databricks/appkit/issues/419)
+
+
+## [0.41.1](https://github.com/databricks/appkit/compare/v0.41.0...v0.41.1) (2026-06-09)
+
+### appkit
+
+* **appkit:** trim x-forwarded-user in core OBO path ([#427](https://github.com/databricks/appkit/issues/427)) ([9d94cab](https://github.com/databricks/appkit/commit/9d94cab656111aeec82ff32d08b4dc2b7150cccf))
+
+
+## [0.41.0](https://github.com/databricks/appkit/compare/v0.40.0...v0.41.0) (2026-06-09)
+
+### shared
+
+* **shared:** add scaffolding rule to treat init output as starter code ([#423](https://github.com/databricks/appkit/issues/423)) ([ab6f4e2](https://github.com/databricks/appkit/commit/ab6f4e284a677f37d40a4033a1cb750560aa57e6))
+
+
+## [0.40.0](https://github.com/databricks/appkit/compare/v0.39.0...v0.40.0) (2026-06-05)
+
+### appkit
+
+* **appkit:** non-blocking typegen on Analytics ([#406](https://github.com/databricks/appkit/issues/406)) ([31ab42e](https://github.com/databricks/appkit/commit/31ab42e0a2b99a5f71b51782b6efedaaa16f21d8))
+
+### appkit-ui
+
+* **appkit-ui:** generic ResourceStatusProvider + indicator (with analytics adapter) ([#416](https://github.com/databricks/appkit/issues/416)) ([2609f34](https://github.com/databricks/appkit/commit/2609f34040d0e9c872be6d72ab55160f8da7d9e4)), closes [#415](https://github.com/databricks/appkit/issues/415)
+
+
+## [0.39.0](https://github.com/databricks/appkit/compare/v0.38.1...v0.39.0) (2026-06-05)
+
+### analytics
+
+* **analytics:** auto-start SQL warehouse and stream warehouse_status SSE events ([#415](https://github.com/databricks/appkit/issues/415)) ([2f107d0](https://github.com/databricks/appkit/commit/2f107d0403cb777444890ee57092025f17db471b))
+
+
 ## [0.38.1](https://github.com/databricks/appkit/compare/v0.38.0...v0.38.1) (2026-05-25)
 
 ### appkit

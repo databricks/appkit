@@ -10,6 +10,10 @@ import type {
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
+import {
+  DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+  type WarehouseStatusUpdate,
+} from "../../connectors/sql-warehouse/client";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
@@ -18,6 +22,7 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -26,12 +31,62 @@ import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
+  AnalyticsStreamMessage,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
+  WarehouseStatus,
 } from "./types";
 import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
+
+/**
+ * Bridges a callback-emitting async function into an async iterable.
+ *
+ * `start(emit)` runs concurrently; every value passed to `emit` is yielded
+ * in order. The iterable completes when `start`'s promise resolves and
+ * re-throws (after draining) if it rejects. Lets a callback-based progress
+ * API (e.g. SQL warehouse readiness) be consumed with `for await`.
+ */
+async function* streamCallbacks<T>(
+  start: (emit: (value: T) => void) => Promise<void>,
+): AsyncGenerator<T, void, unknown> {
+  const queue: T[] = [];
+  let wake: (() => void) | null = null;
+  let settled = false;
+  let error: unknown = null;
+
+  const notify = (): void => {
+    wake?.();
+    wake = null;
+  };
+
+  // The .then(_, err => ...) chain converts a rejection into a resolved
+  // promise; the consumer surfaces `error` after draining the queue.
+  void start((value) => {
+    queue.push(value);
+    notify();
+  }).then(
+    () => {
+      settled = true;
+      notify();
+    },
+    (err) => {
+      error = err;
+      settled = true;
+      notify();
+    },
+  );
+
+  while (!settled || queue.length > 0) {
+    while (queue.length > 0) yield queue.shift() as T;
+    if (settled) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+  }
+  if (error) throw error;
+}
 
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
@@ -173,15 +228,18 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               disposition: "EXTERNAL_LINKS",
               format: "ARROW_STREAM",
             },
-            type: "arrow",
+            type: "arrow" as const,
           }
         : {
-            type: "result",
+            type: "result" as const,
           };
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
-    const defaultConfig: PluginExecuteConfig = {
+    // Cache/retry/timeout are scoped to the SQL execution itself (inner
+    // `execute`) so the warehouse-readiness phase isn't subject to retries
+    // and the generator value never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
@@ -196,26 +254,92 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       },
     };
 
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // user-scoped trace context still apply.
     const streamExecutionSettings: StreamExecutionSettings = {
-      default: defaultConfig,
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
     };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
 
     await executor.executeStream(
       res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
+        );
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            },
+          };
+        }
+
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            const processedParams =
+              await self.queryProcessor.processQueryParams(query, parameters);
+            const result = await executor.query(
+              query,
+              processedParams,
+              queryParameters.formatParameters,
+              sig,
+            );
+            return { type: queryParameters.type, ...result };
+          },
+          { default: sqlConfig },
+          executorKey,
         );
 
-        const result = await executor.query(
-          query,
-          processedParams,
-          queryParameters.formatParameters,
-          signal,
-        );
+        if (!sqlResult.ok) {
+          const msg = sqlResult.message;
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("operation was aborted") ||
+            lower.includes("the request was aborted") ||
+            lower.includes("statement was canceled")
+          ) {
+            const err = new DOMException(
+              lower.includes("canceled") ? msg : "The operation was aborted.",
+              "AbortError",
+            );
+            throw err;
+          }
+          const inner = msg.startsWith("Statement failed: ")
+            ? msg.slice("Statement failed: ".length)
+            : msg;
+          throw ExecutionError.statementFailed(inner);
+        }
 
-        return { type: queryParameters.type, ...result };
+        yield sqlResult.data as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,

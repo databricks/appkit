@@ -100,11 +100,11 @@ export function OboProductsPanel() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <Card className="border-2 border-amber-200">
+      <Card className="border border-warning/30">
         <CardHeader className="pb-0 gap-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-100 rounded-lg flex-shrink-0 self-start">
-              <ShieldCheck className="h-6 w-6 text-amber-600" />
+            <div className="p-2 bg-warning/10 rounded-lg flex-shrink-0 self-start">
+              <ShieldCheck className="h-6 w-6 text-warning" />
             </div>
             <div className="flex-1 min-w-0">
               <CardTitle>Raw Driver — On-Behalf-Of (OBO)</CardTitle>
@@ -222,7 +222,7 @@ export function OboProductsPanel() {
       {/* Side-by-side comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* My products (OBO, RLS filtered) */}
-        <Card className="border-amber-200">
+        <Card className="border-warning/30">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -242,7 +242,7 @@ export function OboProductsPanel() {
           <CardContent>
             {myLoading && (
               <div className="flex items-center gap-2 text-warning py-4">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <div className="w-2 h-2 bg-warning rounded-full animate-pulse" />
                 Loading...
               </div>
             )}
@@ -283,7 +283,7 @@ export function OboProductsPanel() {
           <CardContent>
             {allLoading && (
               <div className="flex items-center gap-2 text-warning py-4">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <div className="w-2 h-2 bg-warning rounded-full animate-pulse" />
                 Loading...
               </div>
             )}

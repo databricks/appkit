@@ -43,6 +43,16 @@
           "type": "number",
           "default": 30000,
           "description": "Query execution timeout in milliseconds"
+        },
+        "warehouseStartupTimeoutMs": {
+          "type": "number",
+          "default": 300000,
+          "description": "Maximum time (ms) to wait for a STOPPED/STARTING SQL warehouse to reach RUNNING before failing the request"
+        },
+        "autoStartWarehouse": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, a STOPPED SQL warehouse is auto-started on the first analytics request. Set to false for cost-controlled deployments where billable warehouse starts must not be triggered by user requests."
         }
       }
     }

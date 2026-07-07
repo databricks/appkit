@@ -107,6 +107,13 @@ export function createMockRequest(overrides: any = {}) {
         result: { data: [] },
       }),
     },
+    // Analytics route now calls `warehouses.get` before issuing SQL to
+    // ensure the warehouse is RUNNING. Default to RUNNING so existing
+    // tests that only care about SQL behaviour aren't affected.
+    warehouses: {
+      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
+      start: vi.fn().mockResolvedValue(undefined),
+    },
   };
 
   const req = {
@@ -203,6 +210,13 @@ export function createMockWorkspaceClient() {
         status: { state: "SUCCEEDED" },
         result: { data: [] },
       }),
+    },
+    // Analytics route now calls `warehouses.get` before issuing SQL to
+    // ensure the warehouse is RUNNING. Default to RUNNING so existing
+    // tests that only care about SQL behaviour aren't affected.
+    warehouses: {
+      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
+      start: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
@@ -345,11 +359,20 @@ export async function parseSSEResponse(response: Response): Promise<any> {
 export function createConfigurableMockWorkspaceClient() {
   const executeStatement = vi.fn();
   const getStatement = vi.fn();
+  // Analytics route now calls `warehouses.get` before issuing SQL; default to
+  // RUNNING so callers that don't care about warehouse readiness don't have
+  // to wire it up.
+  const warehousesGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
+  const warehousesStart = vi.fn().mockResolvedValue(undefined);
 
   const client = {
     statementExecution: {
       executeStatement,
       getStatement,
+    },
+    warehouses: {
+      get: warehousesGet,
+      start: warehousesStart,
     },
   };
 
@@ -358,6 +381,8 @@ export function createConfigurableMockWorkspaceClient() {
     mocks: {
       executeStatement,
       getStatement,
+      warehousesGet,
+      warehousesStart,
     },
   };
 }

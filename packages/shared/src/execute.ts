@@ -11,6 +11,9 @@ export interface StreamConfig {
   maxPersistentBuffers?: number;
   heartbeatInterval?: number;
   maxActiveStreams?: number;
+  // ms to keep a generator alive after the last client disconnects, so a
+  // reconnecting client can resume before the stream is aborted
+  disconnectGraceMs?: number;
 }
 
 /** Retry configuration for the RetryInterceptor. Uses exponential backoff with full jitter between attempts. */

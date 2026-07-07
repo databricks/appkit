@@ -35,6 +35,7 @@ import { AppManager } from "../../app";
 import { CacheManager } from "../../cache";
 import { getUserContext } from "../../context/execution-context";
 import { ServiceContext } from "../../context/service-context";
+import { AuthenticationError } from "../../errors/authentication";
 import { StreamManager } from "../../stream";
 import type { ITelemetry, TelemetryProvider } from "../../telemetry";
 import { TelemetryManager } from "../../telemetry";
@@ -124,6 +125,17 @@ class CallablePlugin extends Plugin<BasePluginConfig> {
   }
 }
 
+/**
+ * Exposes the `protected resolveUserId(req)` so the whitespace-normalization
+ * tests can assert on the resolved identity directly (the value that feeds
+ * the analytics per-user cache key / executorKey).
+ */
+class ResolveProbePlugin extends ProbePlugin {
+  resolve(req: express.Request): string {
+    return this.resolveUserId(req);
+  }
+}
+
 /** Exports returns `undefined` — must be treated as `{}`. */
 class NullExportsPlugin extends Plugin<BasePluginConfig> {
   exports(): undefined {
@@ -149,6 +161,41 @@ function createReqWithObo(): express.Request {
 function createReqWithoutToken(): express.Request {
   return {
     header: () => undefined,
+  } as unknown as express.Request;
+}
+
+/**
+ * OBO request with a caller-supplied `x-forwarded-user` value. Used by the
+ * whitespace-normalization tests to feed padded / whitespace-only identities
+ * through the same code path as `createReqWithObo`.
+ */
+function createReqWithUser(forwardedUser: string): express.Request {
+  return {
+    header: (name: string) => {
+      const map: Record<string, string> = {
+        "x-forwarded-access-token": "user-token-abc",
+        "x-forwarded-user": forwardedUser,
+        "x-forwarded-email": "alice@example.com",
+      };
+      return map[name.toLowerCase()];
+    },
+  } as unknown as express.Request;
+}
+
+/**
+ * OBO request with a caller-supplied `x-forwarded-access-token` value (and a
+ * valid user). Used by the token-trim tests.
+ */
+function createReqWithToken(forwardedToken: string): express.Request {
+  return {
+    header: (name: string) => {
+      const map: Record<string, string> = {
+        "x-forwarded-access-token": forwardedToken,
+        "x-forwarded-user": "alice",
+        "x-forwarded-email": "alice@example.com",
+      };
+      return map[name.toLowerCase()];
+    },
   } as unknown as express.Request;
 }
 
@@ -582,6 +629,145 @@ describe("Plugin.asUser proxy", () => {
 
       expect(exports.meta).toEqual({ version: 1 });
       expect(exports.label).toBe("hello");
+    });
+  });
+
+  // ── Whitespace normalization of x-forwarded-user (PR0 / OBO hardening) ──
+  //
+  // The core OBO path trims `x-forwarded-user` at both read sites
+  // (`resolveUserId` and `asUser`). These tests lock that behavior so a
+  // whitespace-variant header can never (a) mint a distinct identity or
+  // (b) fork the per-user analytics cache key (which derives from the
+  // value `resolveUserId` returns — see analytics `executorKey`).
+  describe("x-forwarded-user whitespace normalization", () => {
+    test("resolveUserId trims a padded x-forwarded-user to the bare id", () => {
+      const plugin = new ResolveProbePlugin(config);
+
+      expect(plugin.resolve(createReqWithUser(" alice "))).toBe("alice");
+    });
+
+    test("resolveUserId returns the same id for padded and unpadded headers", () => {
+      const plugin = new ResolveProbePlugin(config);
+
+      const padded = plugin.resolve(createReqWithUser(" alice "));
+      const unpadded = plugin.resolve(createReqWithUser("alice"));
+
+      // Same resolved id => same analytics per-user cache key (the cache key
+      // derives from this resolved id via `executorKey`), so whitespace can
+      // neither fork the cache nor bypass per-user isolation.
+      expect(padded).toBe(unpadded);
+      expect(padded).toBe("alice");
+    });
+
+    test("asUser with a padded header builds the same identity as the unpadded case", () => {
+      const plugin = new ProbePlugin(config);
+
+      const padded = plugin.asUser(createReqWithUser(" alice ")).observeSync();
+      const unpadded = plugin.asUser(createReqWithUser("alice")).observeSync();
+
+      // The identity flowing into the user context is the trimmed value.
+      expect(padded).toBe("alice");
+      expect(unpadded).toBe("alice");
+      expect(padded).toBe(unpadded);
+    });
+
+    test("asUser passes the trimmed id into ServiceContext.createUserContext", () => {
+      const plugin = new ProbePlugin(config);
+
+      plugin.asUser(createReqWithUser(" alice "));
+
+      // The first positional arg is the token, the second is the user id —
+      // it must be the trimmed value, never the padded " alice ".
+      expect(serviceContextMock.createUserContextSpy).toHaveBeenCalledWith(
+        "user-token-abc",
+        "alice",
+        undefined,
+        "alice@example.com",
+      );
+    });
+
+    describe("whitespace-only header takes the missing-header path", () => {
+      let originalNodeEnv: string | undefined;
+
+      beforeEach(() => {
+        originalNodeEnv = process.env.NODE_ENV;
+      });
+
+      afterEach(() => {
+        process.env.NODE_ENV = originalNodeEnv;
+      });
+
+      test("resolveUserId throws AuthenticationError in production", () => {
+        process.env.NODE_ENV = "production";
+        const plugin = new ResolveProbePlugin(config);
+
+        // A whitespace-only header trims to "" (falsy) and is treated as
+        // missing — it must NOT become a "   " identity.
+        expect(() => plugin.resolve(createReqWithUser("   "))).toThrow(
+          AuthenticationError,
+        );
+        // The message must be the purpose-built missingUserId() text, not the
+        // doubled "Missing Missing … in request headers" the old missingToken()
+        // call produced.
+        expect(() => plugin.resolve(createReqWithUser("   "))).toThrow(
+          /User ID not available in request headers/,
+        );
+      });
+
+      test("resolveUserId falls back to the context user id in development", () => {
+        process.env.NODE_ENV = "development";
+        const plugin = new ResolveProbePlugin(config);
+
+        // Dev fallback resolves to the current context user id (here: the
+        // mocked service principal), never the raw "   " header.
+        const resolved = plugin.resolve(createReqWithUser("   "));
+        expect(resolved).not.toBe("   ");
+        expect(resolved).toBe(serviceContextMock.serviceContext.serviceUserId);
+      });
+    });
+  });
+
+  // `asUser` also trims `x-forwarded-access-token` at read time, so a
+  // whitespace-only token is treated as missing (not forwarded to the SDK as a
+  // bogus credential), and a padded token is normalized before it reaches
+  // ServiceContext.
+  describe("x-forwarded-access-token whitespace handling", () => {
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+    });
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("asUser throws in production when the token is whitespace-only", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = new ProbePlugin(config);
+
+      // "   " trims to "" (falsy) → treated as a missing token rather than
+      // being forwarded to ServiceContext.createUserContext as a bogus value.
+      expect(() => plugin.asUser(createReqWithToken("   "))).toThrow(
+        AuthenticationError,
+      );
+      expect(() => plugin.asUser(createReqWithToken("   "))).toThrow(
+        /Missing user token in request headers/,
+      );
+    });
+
+    test("asUser passes the trimmed token into ServiceContext.createUserContext", () => {
+      const plugin = new ProbePlugin(config);
+
+      plugin.asUser(createReqWithToken(" user-token-abc "));
+
+      // First positional arg is the token — it must be the trimmed value.
+      expect(serviceContextMock.createUserContextSpy).toHaveBeenCalledWith(
+        "user-token-abc",
+        "alice",
+        undefined,
+        "alice@example.com",
+      );
     });
   });
 });

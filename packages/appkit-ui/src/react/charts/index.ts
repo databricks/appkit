@@ -24,6 +24,7 @@ export {
 } from "../hooks/use-chart-data";
 export { BaseChart, type BaseChartProps } from "./base";
 export { createChart } from "./create-chart";
+export { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 export { ChartWrapper, type ChartWrapperProps } from "./wrapper";
 
 // ============================================================================
@@ -62,6 +63,7 @@ export {
 
 export {
   useAllThemeColors,
+  useChartUITokens,
   useThemeColors,
 } from "./theme";
 
@@ -109,6 +111,7 @@ export type {
   ChartColorPalette,
   ChartData,
   ChartType,
+  ChartUITokens,
   // Data formats
   DataFormat,
   DataProps,

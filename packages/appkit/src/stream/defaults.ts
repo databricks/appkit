@@ -6,4 +6,5 @@ export const streamDefaults = {
   maxPersistentBuffers: 10000, // 10000 buffers
   heartbeatInterval: 10 * 1000, // 10 seconds
   maxActiveStreams: 1000, // 1000 streams
+  disconnectGraceMs: 15_000, // 15 seconds
 } as const;

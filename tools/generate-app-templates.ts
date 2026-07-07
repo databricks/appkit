@@ -193,7 +193,19 @@ function postProcess(appDir: string, app: AppTemplate): void {
   const envTmplBody = readFileSync(join(TEMPLATE_PATH, ".env.tmpl"), "utf-8");
   writeFileSync(join(appDir, ".env.tmpl"), envTmplHeader + envTmplBody);
 
-  // 2. Sync appkit.plugins.json based on server imports (discovers available plugins
+  // 2. Copy databricks.yml.tmpl from the source template so that
+  //    `databricks apps init --template <pre-rendered>` can render it
+  //    with the user's project name, workspace host, and --set values.
+  //    The static databricks.yml remains as a readable reference;
+  //    copyTemplate()'s lexical walk order ensures the .tmpl version
+  //    overwrites it in the output.
+  const databricksYmlTmpl = readFileSync(
+    join(TEMPLATE_PATH, "databricks.yml.tmpl"),
+    "utf-8",
+  );
+  writeFileSync(join(appDir, "databricks.yml.tmpl"), databricksYmlTmpl);
+
+  // 3. Sync appkit.plugins.json based on server imports (discovers available plugins
   //    and marks the ones used in the plugins array as required).
   const syncStatus = run(
     "node",
@@ -205,7 +217,7 @@ function postProcess(appDir: string, app: AppTemplate): void {
     process.exit(syncStatus);
   }
 
-  // 3. Replace the resolved workspace host URL with a placeholder.
+  // 4. Replace the resolved workspace host URL with a placeholder.
   const databricksYmlPath = join(appDir, "databricks.yml");
   const yml = readFileSync(databricksYmlPath, "utf-8");
   const fixedYml = yml.replace(

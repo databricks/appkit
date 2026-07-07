@@ -1,6 +1,7 @@
 import type { Table } from "apache-arrow";
 import { useMemo } from "react";
 import type { ChartData, DataFormat } from "../charts/types";
+import type { WarehouseStatus } from "./types";
 import { useAnalyticsQuery } from "./use-analytics-query";
 
 /** Threshold for auto-selecting Arrow format (row count hint) */
@@ -38,6 +39,13 @@ export interface UseChartDataResult {
   error: string | null;
   /** Whether the data is empty */
   isEmpty: boolean;
+  /**
+   * Latest warehouse readiness status from SSE. Retains the last value
+   * (including `RUNNING`) until the next `start()`; `null` only before
+   * the first event. Use with `loading` to distinguish warehouse warm-up
+   * from in-flight SQL fetch.
+   */
+  warehouseStatus: WarehouseStatus | null;
 }
 
 // ============================================================================
@@ -117,6 +125,7 @@ export function useChartData(options: UseChartDataOptions): UseChartDataResult {
     data: rawData,
     loading,
     error,
+    warehouseStatus,
   } = useAnalyticsQuery(queryKey, parameters, {
     autoStart: true,
     format: resolvedFormat,
@@ -179,5 +188,6 @@ export function useChartData(options: UseChartDataOptions): UseChartDataResult {
     loading,
     error,
     isEmpty,
+    warehouseStatus,
   };
 }
