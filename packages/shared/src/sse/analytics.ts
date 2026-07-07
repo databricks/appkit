@@ -3,25 +3,21 @@ import { z } from "zod";
 /**
  * Wire protocol for analytics SSE messages emitted by `/api/analytics/query`.
  *
- * These schemas are the single source of truth for the contract between the
- * server (`AnalyticsPlugin._handleQueryRoute`) and the client
+ * The SSE channel carries only the JSON_ARRAY path (warehouse-readiness
+ * events + a `result` message of rows). ARROW_STREAM does NOT use SSE —
+ * the server streams the raw Arrow IPC bytes back on the query response body
+ * (`_handleArrowStreamQuery`) and the client reads them directly
+ * (`fetchArrowDirect`), so there is no `arrow` message type here.
+ *
+ * These schemas are the single source of truth for the JSON contract between
+ * the server (`AnalyticsPlugin._handleQueryRoute`) and the client
  * (`useAnalyticsQuery`). Both sides validate with the same schema:
  *
- * - Server uses the typed builders (`makeResultMessage`, `makeArrowMessage`)
- *   to construct messages with compile-time guarantees that all required
- *   fields are present.
- * - Client calls `AnalyticsSseMessage.parse(JSON.parse(event.data))` to fail
- *   loudly on a malformed payload instead of silently treating an undefined
- *   field as data.
- *
- * Arrow payloads — inline or external-links — never traverse the SSE control
- * channel; both flow through `/api/analytics/arrow-result/:jobId` and are
- * differentiated by an `inline-` prefix on the job id (see
- * `InlineArrowStash`). The wire shape from the client's perspective is
- * therefore uniform: an `arrow` message carries an id, the client fetches.
- *
- * Adding a new message variant requires a schema update here, which keeps
- * server and client in lockstep.
+ * - Server uses the typed builder (`makeResultMessage`) to construct messages
+ *   with compile-time guarantees that all required fields are present.
+ * - Client calls `AnalyticsSseMessage.safeParse(JSON.parse(event.data))` to
+ *   fail loudly on a malformed payload instead of silently treating an
+ *   undefined field as data.
  */
 
 /** Successful row-shaped result (JSON_ARRAY format, or empty results). */
@@ -60,30 +56,16 @@ export interface AnalyticsResultMessage {
 }
 
 /**
- * ARROW_STREAM result delivered via /arrow-result/:jobId. The id is either:
- * - the warehouse-issued `statement_id` for EXTERNAL_LINKS responses, or
- * - a synthetic `inline-<uuid>` id pointing at the server-side
- *   `InlineArrowStash` for INLINE responses.
- *
- * Both shapes are fetched the same way; the prefix tells the route handler
- * which path to take.
+ * Every message the analytics SSE stream may emit. Currently only the
+ * row-shaped `result` message (JSON_ARRAY path); `warehouse_status` and
+ * `error` events are handled off-schema by the client. ARROW_STREAM never
+ * uses SSE.
  */
-export const AnalyticsArrowMessage = z.object({
-  type: z.literal("arrow"),
-  statement_id: z.string().min(1),
-  status: z.unknown().optional(),
-});
-export type AnalyticsArrowMessage = z.infer<typeof AnalyticsArrowMessage>;
-
-/** Discriminated union of every message the analytics SSE stream may emit. */
-export const AnalyticsSseMessage = z.discriminatedUnion("type", [
-  AnalyticsResultMessage,
-  AnalyticsArrowMessage,
-]);
+export const AnalyticsSseMessage = AnalyticsResultMessage;
 export type AnalyticsSseMessage = z.infer<typeof AnalyticsSseMessage>;
 
 // ────────────────────────────────────────────────────────────────────────────
-// Typed builders — call from the server route handler. The compiler enforces
+// Typed builder — call from the server route handler. The compiler enforces
 // that every required field is supplied, and the return type narrows so
 // downstream code (executeStream / SSE writer) keeps full type information.
 // ────────────────────────────────────────────────────────────────────────────
@@ -93,11 +75,4 @@ export function makeResultMessage(
   extras: { status?: unknown; statement_id?: string } = {},
 ): AnalyticsResultMessage {
   return { type: "result", data, ...extras };
-}
-
-export function makeArrowMessage(
-  statement_id: string,
-  extras: { status?: unknown } = {},
-): AnalyticsArrowMessage {
-  return { type: "arrow", statement_id, ...extras };
 }

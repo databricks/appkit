@@ -40,7 +40,7 @@ export class ExecutionError extends AppKitError {
    * Execution errors default to a generic message — the raw warehouse /
    * SDK text in `.message` often includes statement fragments, internal
    * paths, and correlation IDs. UI code should branch on `errorCode`
-   * (`INLINE_ARROW_STASH_EXHAUSTED`, `NOT_IMPLEMENTED`, etc.) and not on
+   * (`RESULT_TOO_LARGE_FOR_JSON_FALLBACK`, `NOT_IMPLEMENTED`, etc.) and not on
    * the human string.
    */
   override get clientMessage(): string {
@@ -107,24 +107,5 @@ export class ExecutionError extends AppKitError {
     return new ExecutionError(`No ${dataType} found in response`, {
       context: { dataType },
     });
-  }
-
-  /**
-   * Create an execution error for the inline Arrow stash being unable to
-   * accept a payload (both regular and overflow pools at cap).
-   *
-   * The route deliberately surfaces this rather than silently re-running
-   * the statement on EXTERNAL_LINKS — a second execution can be billed
-   * and return divergent results for non-deterministic SQL. Operators
-   * should tune stash capacity or back off load when this fires.
-   */
-  static stashExhausted(): ExecutionError {
-    return new ExecutionError(
-      "Inline Arrow stash exhausted; retry shortly or increase stash capacity",
-      {
-        errorCode: "INLINE_ARROW_STASH_EXHAUSTED",
-        clientMessage: "Server is at capacity, please retry",
-      },
-    );
   }
 }

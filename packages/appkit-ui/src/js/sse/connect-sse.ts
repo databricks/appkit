@@ -19,8 +19,8 @@ export async function connectSSE<Payload = unknown>(
     retryDelay = 2000,
     maxRetries = 3,
     // 1 MiB — matches the server's `streamDefaults.maxEventSize`. SSE
-    // carries only short JSON control messages; bulk Arrow payloads flow
-    // over plain HTTP via `/api/analytics/arrow-result/:jobId`, so this
+    // carries only short JSON control messages; bulk Arrow payloads stream
+    // back as the raw HTTP response body of the query request, so this
     // buffer never needs to hold multi-MiB attachments.
     maxBufferSize = 1 * 1024 * 1024,
     timeout = 300000, // 5 minutes

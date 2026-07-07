@@ -1,4 +1,4 @@
-import type { Field, Table } from "apache-arrow";
+import type { Field, Table, Vector } from "apache-arrow";
 import {
   DATE_FIELD_PATTERNS,
   METADATA_DATE_PATTERNS,
@@ -23,14 +23,40 @@ export class ArrowClient {
    * Lazily loads the Apache Arrow library on first use.
    *
    * @param buffer - The Arrow IPC format buffer
+   * @param columnNames - Optional real column names to relabel the schema
+   *   with. Databricks encodes ARROW_STREAM schemas positionally (`col_0`,
+   *   …); the analytics server sends the manifest names in a response header
+   *   so charts can look columns up by their real name. Relabels in-place by
+   *   rebuilding the Table around the existing vectors (no re-decode). A
+   *   no-op when the names already match, the count differs, or the names
+   *   aren't unique.
    * @returns Promise resolving to an Arrow Table
    */
-  static async processArrowBuffer(buffer: Uint8Array): Promise<Table> {
+  static async processArrowBuffer(
+    buffer: Uint8Array,
+    columnNames?: string[],
+  ): Promise<Table> {
     try {
       const arrow = await getArrowModule();
       // Initialize type ID sets now that Arrow is loaded
       await initializeTypeIdSets();
-      return arrow.tableFromIPC(buffer);
+      const table = arrow.tableFromIPC(buffer);
+
+      if (!columnNames || columnNames.length !== table.numCols) return table;
+      const fields = table.schema.fields;
+      const targetNames = columnNames.map((n, i) =>
+        n && n.length > 0 ? n : fields[i].name,
+      );
+      if (targetNames.every((n, i) => n === fields[i].name)) return table;
+      if (new Set(targetNames).size !== targetNames.length) return table;
+
+      const children: Record<string, Vector> = {};
+      for (let i = 0; i < fields.length; i++) {
+        const child = table.getChildAt(i);
+        if (!child) return table;
+        children[targetNames[i]] = child;
+      }
+      return new arrow.Table(children);
     } catch (error) {
       throw new Error(
         `Failed to process Arrow buffer: ${

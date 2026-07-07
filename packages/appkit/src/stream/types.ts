@@ -26,7 +26,7 @@ export interface SSEError {
   error: string;
   code: SSEErrorCode;
   /**
-   * Upstream-domain structured code (e.g. `INLINE_ARROW_STASH_EXHAUSTED`,
+   * Upstream-domain structured code (e.g. `RESULT_TOO_LARGE_FOR_JSON_FALLBACK`,
    * `NOT_IMPLEMENTED`). UI code should branch on this instead of parsing
    * the human-readable `error` string.
    */

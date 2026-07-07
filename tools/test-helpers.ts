@@ -140,9 +140,16 @@ export function createMockResponse() {
   const eventListeners: Record<string, Array<(...args: any[]) => void>> = {};
 
   const res = {
+    // Flips to true once headers/body have gone out — mirrors Express so
+    // streaming handlers can branch between a JSON error (pre-headers) and
+    // aborting the socket (mid-stream).
+    headersSent: false,
     status: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
-    send: vi.fn().mockReturnThis(),
+    send: vi.fn(function (this: any) {
+      this.headersSent = true;
+      return this;
+    }),
     sendStatus: vi.fn().mockReturnThis(),
     end: vi.fn(function (this: any) {
       this.writableEnded = true;
@@ -154,9 +161,16 @@ export function createMockResponse() {
       }
       return this;
     }),
-    write: vi.fn().mockReturnThis(),
-    setHeader: vi.fn().mockReturnThis(),
+    write: vi.fn(function (this: any) {
+      this.headersSent = true;
+      return this;
+    }),
+    setHeader: vi.fn(function (this: any) {
+      this.headersSent = true;
+      return this;
+    }),
     flushHeaders: vi.fn().mockReturnThis(),
+    destroy: vi.fn().mockReturnThis(),
     on: vi.fn(function (
       this: any,
       event: string,
@@ -166,6 +180,18 @@ export function createMockResponse() {
         eventListeners[event] = [];
       }
       eventListeners[event].push(handler);
+      return this;
+    }),
+    off: vi.fn(function (
+      this: any,
+      event: string,
+      handler: (...args: any[]) => void,
+    ) {
+      if (eventListeners[event]) {
+        eventListeners[event] = eventListeners[event].filter(
+          (h) => h !== handler,
+        );
+      }
       return this;
     }),
     writableEnded: false,
