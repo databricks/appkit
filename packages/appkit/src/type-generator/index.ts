@@ -228,22 +228,14 @@ declare module "@databricks/appkit-ui/react" {
 }
 
 /**
- * Status-only probe for the metric-view gate in {@link generateFromEntryPoint}:
- * what state is the warehouse in right now?
+ * Status-only probe for the metric-view gate in {@link generateFromEntryPoint}
  *
- * Uses {@link getWarehouseState} (`warehouses.get`) — a read-only GET that can
- * never start the warehouse — unlike the metric DESCRIBE statements it guards,
- * whose execution auto-starts a stopped warehouse and waits on it.
+ * Uses {@link getWarehouseState} (`warehouses.get`) —
+ * a read-only GET that can never start the warehouse
  *
- * Returns the observed state so the gate can decide whether to DESCRIBE now
- * (only when RUNNING) or emit degraded artifacts for a later pass to refresh.
- * Degraded outcomes are never cached, so a not-running warehouse — transient
- * (STOPPED/STARTING) or terminal (DELETED/DELETING) — simply leaves its keys
- * uncached to be re-probed next pass; a terminal warehouse is only ever a hard
- * failure via the blocking preflight. Takes the lazy client *getter* (not a
- * client) so the probe also absorbs client construction failure. A connectivity
- * blip returns `undefined`, which the gate reads as transient not-running; a
- * deterministic failure (auth, bad id) is re-thrown so the gate can classify it
+ * Takes the lazy client *getter* so the probe also absorbs client construction failure.
+ * A connectivity blip returns `undefined`, which the gate reads as transient not-running;
+ * a deterministic failure (auth, bad id) is re-thrown so the gate can classify it
  * fatal rather than silently degrading.
  */
 async function probeWarehouseState(
@@ -326,33 +318,7 @@ export async function generateFromEntryPoint(options: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
-  // Metric-view types: only emit when metric-views.json exists. The path is
-  // purely additive — apps that never adopt metric views must not produce empty
-  // noise. Delegate to the unified metric pipeline in syncMetricViewsTypes,
-  // forwarding this run's mode verbatim: `non-blocking` keeps its status-only
-  // #406 gate, `blocking` keeps its preflight, and both serve only good (never
-  // degraded) cache hits. The unified fn returns early
-  // with `noConfig: true` when metric-views.json is absent, so the additive
-  // "only when it exists" behavior is preserved here by simply ignoring it.
-  //
-  // Failure surfacing mirrors the query path and follows this run's mode:
-  //   - a deleted/deleting-warehouse fatal preflight always surfaces (blocking
-  //     mode only) via `fatalErrors` — unchanged;
-  //   - in `blocking` mode (`--wait`, and the production Vite build) per-key
-  //     DESCRIBE failures (a bad/unreachable source — a config error) are folded
-  //     into `fatalErrors` too, so the end-of-run throw fails the build after the
-  //     writes: `--wait` must not ship permissive types for a misconfigured view;
-  //   - in `non-blocking` mode (the default CLI run, and dev Vite) nothing is
-  //     escalated here: syncMetricViewsTypes already warns per failed/degraded
-  //     view, permissive types were written, and a `--wait` rerun (or the
-  //     detached background worker) converges.
-  // A warehouse that merely isn't ready (degraded, NOT a per-key failure) is not
-  // escalated even under `--wait` — that stays the existing soft degrade so infra
-  // flakiness can't break a build; only a deleted/deleting warehouse is fatal (at
-  // preflight). A malformed metric-views.json (JSON parse, or FQN/schema
-  // validation) is the only way syncMetricViewsTypes throws; it's a deterministic
-  // developer error, re-thrown as a message-only TypegenFatalError that fails in
-  // every mode (like a query TypegenSyntaxError) instead of bubbling a raw stack.
+  // Metric-view types: only emit when metric-views.json exists.
   if (queryFolder) {
     const mvFile =
       mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
@@ -368,8 +334,7 @@ export async function generateFromEntryPoint(options: {
         mode,
       });
     } catch (configError) {
-      // syncMetricViewsTypes only throws for a malformed metric-views.json —
-      // re-throw as a message-only TypegenFatalError (see the note above).
+      // syncMetricViewsTypes only throws for a malformed metric-views.json — re-throw as a message-only TypegenFatalError.
       throw new TypegenFatalError(
         [
           {
@@ -381,18 +346,14 @@ export async function generateFromEntryPoint(options: {
       );
     }
 
-    // Deleted/deleting-warehouse fatal preflight (blocking mode only); empty
-    // (no-op) when metric-views.json is absent or in non-blocking mode.
+    // Deleted/deleting-warehouse fatal preflight (blocking mode only);
+    // empty (no-op) when metric-views.json is absent or in non-blocking mode.
     for (const fe of mvResult.fatalErrors) {
       fatalErrors.push(fe);
     }
 
-    // Blocking (`--wait` / prod Vite) escalates per-key DESCRIBE failures — a
-    // bad or unreachable source, i.e. a config error — to build failures so the
-    // end-of-run throw fails after the writes. A warehouse that's merely not
-    // ready stays degraded (the preflight above + syncMetrics own that), even
-    // under `--wait`; non-blocking leaves failures as syncMetricViewsTypes' own
-    // warnings (permissive types already written).
+    // Blocking (`--wait` / prod Vite) escalates per-key DESCRIBE failures — a bad or unreachable source, i.e. a config error
+    // to build failures so the end-of-run throw fails after the writes.
     if (mode === "blocking") {
       for (const failure of mvResult.failures) {
         fatalErrors.push({
@@ -428,7 +389,7 @@ export interface SyncMetricViewsTypesResult {
   failures: MetricSyncFailure[];
   /**
    * `true` when no `metric-views.json` was found in the query folder, so nothing
-   * was synced. The metric path is additive — its absence is not an error.
+   * was synced.
    */
   noConfig: boolean;
   /**
@@ -447,24 +408,13 @@ export interface SyncMetricViewsTypesResult {
  * `"non-blocking"`/`"blocking"` mode). Also directly callable with the default
  * `"describe-now"` mode for a focused, always-converge metric refresh.
  *
- * The shared typegen cache (the `metrics` section of `.appkit-types-cache.json`, same {@link metricCacheHash} change-detector and {@link MetricCacheEntry} shape) means a second run over an unchanged, healthy config makes zero warehouse calls. `cache === false` (the CLI's `--no-cache`) ignores the cached section entirely (every key becomes describe-needed) and overwrites it with this pass's results.
  *
- * The `mode` toggle is the ONLY axis that differs between callers:
- *   - `"describe-now"` (the default for a direct call): no preflight, no status probe — DESCRIBE every key that isn't a clean cache hit.
- *   - `"non-blocking"` (dev/Vite default): one status-only probe, DESCRIBE only when the warehouse is already RUNNING, else emit degraded artifacts immediately.
- *
- * Across every mode the cache holds only successful describes — a degraded outcome is written into the emitted artifacts but never cached (mirroring the query path, which "Never persists `result: unknown`"). So a cache hit is always a good schema, and a key that degraded on one pass is simply re-described on the next; there is no sticky degraded entry and no "serve stale permissive types" path.
- *   - `"blocking"`: wait for / start the warehouse first (only a deleted/deleting one is fatal), then DESCRIBE. Degraded cache hits are served, same as non-blocking. A fatal preflight is reported via {@link SyncMetricViewsTypesResult.fatalErrors} (the artifacts are still written) so the caller can throw after the writes.
- *
- * An injected `metricFetcher` always runs — it hits no warehouse, so it bypasses both the blocking preflight and the non-blocking gate regardless of mode.
- *
- * @param options.queryFolder - folder that holds `metric-views.json` (conventionally `<root>/config/queries`). Returns early with `noConfig: true` when the file is absent — additive, never an error.
+ * @param options.queryFolder - folder that holds `metric-views.json` (`<root>/config/queries`).
  * @param options.warehouseId - SQL warehouse used for `DESCRIBE TABLE EXTENDED`.
  * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
- * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching). Mirrors the `noCache` convention on {@link generateFromEntryPoint}: gate the cache READ (`!noCache`) and overwrite the `metrics` section on SAVE.
+ * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching).
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
- *   (tests pass a mock; production lazily builds a WorkspaceClient-backed one).
- * @param options.mode - preflight/gate policy, default `"describe-now"`. See above; a direct call may omit it (taking `"describe-now"`), while {@link generateFromEntryPoint} forwards its own {@link PreflightMode}.
+ * @param options.mode - preflight/gate policy, default `"describe-now"`.
  */
 export async function syncMetricViewsTypes(options: {
   queryFolder: string;
@@ -582,12 +532,6 @@ export async function syncMetricViewsTypes(options: {
     }
   }
 
-  // Honor the non-blocking preflight contract for metric DESCRIBEs: a
-  // `DESCRIBE TABLE EXTENDED ... AS JSON` waits up to 30s per key and auto-starts
-  // a stopped warehouse. So one status-only probe decides whether to DESCRIBE now or
-  // emit degraded artifacts for a later blocking run;
-  // it keeps the observed state so the skip can tell a transient not-running warehouse
-  // from a terminal DELETED/DELETING one.
   let gateState: WarehouseState | undefined;
   let describeNow =
     metricFetcher !== undefined ||
@@ -597,9 +541,6 @@ export async function syncMetricViewsTypes(options: {
     try {
       gateState = await probeWarehouseState(getMvClient, warehouseId);
     } catch (err) {
-      // probeWarehouseState only throws on a deterministic failure (auth, bad
-      // warehouse id) — a connectivity blip already returned undefined. Pin it
-      // fatal through the same path as a fatal blocking preflight.
       preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
     }
     describeNow = gateState === "RUNNING";
@@ -663,12 +604,7 @@ export async function syncMetricViewsTypes(options: {
   } else {
     // Un-probed DESCRIBEs deliberately skipped, not failures: emit each
     // describe-needed key as a degraded schema so both artifacts exist; cache
-    // hits keep serving last-known-good. These degraded schemas are not cached
-    // (see the write block), so every skipped key — whether the warehouse is
-    // transiently not-running or terminally DELETED — is re-probed on the next
-    // pass rather than pinned. (A DELETED warehouse is only ever fatal via the
-    // blocking preflight above; non-blocking degrades and stays resilient, per
-    // the non-blocking typegen contract.)
+    // hits keep serving last-known-good.
     described = describeNeeded.map(emptyMetricSchema);
     logger.info(
       "Warehouse %s is not running — wrote degraded metric types (permissive) for %d metric view(s) (%s); they will refresh once the warehouse is available.",
@@ -678,20 +614,7 @@ export async function syncMetricViewsTypes(options: {
     );
   }
 
-  // Persist outcomes for exactly the keys this pass owned (the describe-needed
-  // set); hits were partitioned out above and are never rewritten, so a
-  // warehouse-down pass keeps last-known-good entries.
-  //
-  // Only a SUCCESSFUL (non-degraded) describe is cached — mirroring the query
-  // path, which caches a describe result and "Never persists `result: unknown`"
-  // (query-registry.ts). A degraded outcome (skipped behind a not-running or
-  // deleted warehouse, unanswered, or a per-key DESCRIBE failure) is written
-  // into the in-memory `schemas` that render this pass's .d.ts, but is NEVER
-  // cached: the key stays uncached, so the next eligible pass simply
-  // re-describes it. Any stale entry for a now-degraded key is deleted, so the
-  // invariant "the cache holds only good schemas" holds after every pass — no
-  // sticky degraded entry can be served (the bug this replaces), and `--wait`
-  // re-describes a still-bad source every run instead of serving it green.
+  // Cache only successful schema results for describe-needed keys; remove stale cache for degraded ones.
   for (let i = 0; i < describeNeeded.length; i++) {
     // syncMetrics return one schema per entry in entry order, so described[i] always belongs to describeNeeded[i].
     const entry = describeNeeded[i];

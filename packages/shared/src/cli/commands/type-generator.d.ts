@@ -1,5 +1,5 @@
 /**
- * Ambient, intentionally narrowed mirror of `@databricks/appkit/type-generator`.
+ * Intentionally narrowed mirror of `@databricks/appkit/type-generator`.
  *
  * `shared` is a leaf package and must not statically depend on `appkit`, so the
  * CLI loads the type-generator via a dynamic `import(...)` and this declares its
@@ -13,11 +13,6 @@ declare module "@databricks/appkit/type-generator" {
     outFile: string;
     warehouseId: string;
     noCache?: boolean;
-    // Warehouse preflight policy. "non-blocking" emits cached/`unknown` query
-    // types and permissive metric types and returns immediately, warning on any
-    // degraded/failed metric view; "blocking" (the CLI's `--wait`) waits for a
-    // startable warehouse, treats a stopped one as fatal, and fails the run on
-    // any metric view that still can't be described.
     mode?: "non-blocking" | "blocking";
   }): Promise<void>;
 

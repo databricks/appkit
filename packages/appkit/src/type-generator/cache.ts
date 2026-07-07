@@ -28,17 +28,6 @@ interface CacheEntry {
  * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
  * design), letting a warm pass regenerate the metric artifact without a
  * single warehouse call.
- *
- * The cache holds ONLY successful (non-degraded) describes. A degraded
- * outcome — DESCRIBE skipped behind a not-running or deleted warehouse,
- * unanswered, or a per-key failure — is rendered into the emitted artifact
- * but never written here (mirroring the query path, which "Never persists
- * `result: unknown`"). A key that degraded on one pass is therefore left
- * uncached and simply re-described on the next eligible pass; there is no
- * sticky degraded entry to serve. `retry` is vestigial — always `false`,
- * mirroring the query path's only cache write — and is retained solely for
- * on-disk shape compatibility with existing version-3 caches (the revival
- * gate still checks it is a boolean).
  */
 export interface MetricCacheEntry {
   hash: string;
@@ -53,12 +42,7 @@ export interface MetricCacheEntry {
  * hand-edits, truncation, or a stale writer can leave entries whose shape no
  * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
  * cache MISS (re-describe) rather than crash the pass or render revived
- * garbage into the artifacts. Checks exactly what the renderers and the
- * metadata bundle consume: `hash` string, `retry` boolean, and a schema with
- * `key`/`source` strings, a valid lane, an optional boolean `degraded`, and
- * measure/dimension arrays whose elements carry `name`/`type` strings
- * (other column fields are optional). Deliberately inline — the shared Zod
- * schemas must not enter the type-generator's runtime path.
+ * garbage into the artifacts.
  */
 export function isRevivableMetricCacheEntry(entry: unknown): boolean {
   if (typeof entry !== "object" || entry === null) return false;
@@ -95,11 +79,6 @@ export function isRevivableMetricCacheEntry(entry: unknown): boolean {
  * @property version - the version of the cache
  * @property queries - the queries in the cache
  * @property metrics - cached metric-view schemas keyed by metric key.
- *   OPTIONAL on purpose: version "3" files written before this section
- *   existed load unchanged (absent ⇒ treated as empty by the metric path),
- *   and the query path's `noCache` reinit literal stays valid as-is. The
- *   section rides through the query path's load → mutate → save cycle as a
- *   plain sibling key, so query-side saves preserve it byte-for-byte.
  */
 interface Cache {
   version: string;
