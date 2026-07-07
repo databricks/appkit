@@ -1,14 +1,18 @@
-// Type declarations for optional @databricks/appkit/type-generator module
+/**
+ * Intentionally narrowed mirror of `@databricks/appkit/type-generator`.
+ *
+ * `shared` is a leaf package and must not statically depend on `appkit`, so the
+ * CLI loads the type-generator via a dynamic `import(...)` and this declares its
+ * shape without a build-time dependency. There is NO compile-time link to the
+ * real exports — if they change, re-sync this by hand against
+ * `packages/appkit/src/type-generator/index.ts`.
+ */
 declare module "@databricks/appkit/type-generator" {
   export function generateFromEntryPoint(options: {
     queryFolder?: string;
     outFile: string;
     warehouseId: string;
     noCache?: boolean;
-    // Warehouse preflight policy. "non-blocking" never probes the warehouse and
-    // never describes (emits cached/`unknown` types and returns immediately);
-    // "blocking" waits for a startable warehouse and treats a stopped one as
-    // fatal.
     mode?: "non-blocking" | "blocking";
   }): Promise<void>;
 
