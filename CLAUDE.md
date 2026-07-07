@@ -1,420 +1,125 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
-## About This Repository
+## About
 
-Databricks AppKit is a modular TypeScript SDK for building Databricks applications with a plugin-based architecture. This is a **pnpm monorepo** using **Turbo** for build orchestration.
+Databricks AppKit is a modular TypeScript SDK for building Databricks apps with a plugin-based architecture. It's a **pnpm monorepo** (`pnpm@10`) orchestrated with **Turbo**, bundled with **tsdown**, and linted/formatted with **Biome** (not ESLint/Prettier).
 
-## API documentation
-View AppKit API reference (docs only, NOT for scaffolding):
+## API Documentation
+
+View the AppKit API reference (docs only — NOT for scaffolding/init):
 
 ```bash
-# ONLY for viewing documentation - do NOT use for init/scaffold
-npx @databricks/appkit docs <query>
+npx @databricks/appkit docs            # ALWAYS run this index FIRST
+npx @databricks/appkit docs <query>    # then view a section
+npx @databricks/appkit docs --full     # full index, all entries
 ```
 
-**IMPORTANT**: ALWAYS run `npx @databricks/appkit docs` (no query) FIRST to see the documentation index. DO NOT guess paths - use the index to find correct paths.
-
-Examples:
-- Documentation index: `npx @databricks/appkit docs`
-- View a section: `npx @databricks/appkit docs "appkit-ui API reference"`
-- Full index (all API entries): `npx @databricks/appkit docs --full`
-- View specific doc: `npx @databricks/appkit docs ./docs/plugins/analytics.md`
+**Do not guess doc paths** — find them from the index. The full props/plugin API lives here, e.g. `npx @databricks/appkit docs ./docs/plugins.md`.
 
 ## Repository Structure
 
 ```
-/packages/
-  /appkit/          - Core SDK with plugin architecture
-  /appkit-ui/       - React components and JS utilities
-  /lakebase/        - Standalone Lakebase (PostgreSQL) connector package
-  /shared/          - Shared TypeScript types across packages
-
-/apps/
-  /clean-app/       - Minimal standalone app template (Vite + React + Express)
-  /dev-playground/  - Reference application
-    /server/        - Node.js backend with AppKit
-    /client/        - React frontend (Vite + React 19)
-
-/docs/              - Docusaurus documentation site
-
-/template/          - App template used by `databricks apps init`
-
-/tools/
-  - setup.sh                         - Initial repository setup
-  - playground/deploy-playground.ts  - Deploy dev-playground to Databricks workspace
-  - generate-registry-types.ts       - Generate plugin registry types
-  - generate-schema-types.ts         - Generate JSON schema TypeScript types
-  - generate-app-templates.ts        - Generate app templates
-  - check-licenses.ts                - License compliance checks
-  - build-notice.ts                  - Build NOTICE.md from dependencies
-  - check-template-deps.ts           - Validate template package.json dependencies are pinned
-  - finalize-release.ts              - Apply release changes (changelog, versions, tags) for secure repo
+packages/
+  appkit/      Core SDK (plugin architecture, CLI, connectors)
+  appkit-ui/   React components + JS utilities
+  lakebase/    Standalone Lakebase (PostgreSQL) connector
+  shared/      Shared TypeScript types (bundled inline into packages)
+apps/
+  clean-app/        Minimal standalone template (Vite + React + Express)
+  dev-playground/   Reference app — server/ (Node + AppKit), client/ (Vite + React 19)
+docs/         Docusaurus site
+template/     App template used by `databricks apps init`
+tools/        Build/release/codegen scripts (see package.json scripts)
 ```
 
-## Development Commands
+## Common Commands
 
-### Initial Setup
-```bash
-npm install --global corepack@latest
-corepack enable pnpm
-pnpm setup:repo
-```
-
-After setup, configure `.env` in `apps/dev-playground/server/.env`:
-```
-DATABRICKS_HOST=your-workspace-url
-```
-
-### Development Workflow
-```bash
-pnpm dev              # Build all packages + watch mode (sets NODE_ENV=development)
-pnpm dev:inspect      # Dev mode with Node.js inspector for debugging
-
-# Individual package commands (from root)
-pnpm --filter=dev-playground dev     # Run only dev-playground in watch mode
-```
-
-### Building
-```bash
-pnpm build            # Build all packages (runs pnpm -r build:package)
-pnpm build:watch      # Watch mode for all packages except dev-playground
-pnpm pack:sdk         # Build and package SDK for distribution
-```
-
-### Production
-```bash
-pnpm start            # Build everything and run dev-playground in production mode
-```
-
-### Testing
-```bash
-pnpm test             # Run tests with coverage (vitest)
-pnpm test:watch       # Run tests in watch mode
-```
-
-**Test Projects:**
-- `appkit-ui`: Uses jsdom environment (for React components)
-- `appkit`: Uses node environment (for Node.js SDK)
-
-### Code Quality
-```bash
-pnpm lint             # Lint with Biome
-pnpm lint:fix         # Lint and auto-fix
-pnpm format           # Format with Biome
-pnpm format:check     # Check formatting
-pnpm check            # Run Biome check (lint + format)
-pnpm check:fix        # Auto-fix with Biome
-pnpm typecheck        # TypeScript type checking across all packages
-```
-
-### After Making Changes
-After completing code changes, always run:
-1. **Build and generate docs:** `pnpm build && pnpm docs:build`
-2. **Lint fix and typecheck:** `pnpm check:fix && pnpm -r typecheck`
-
-### AppKit CLI
-When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
+The full command set is in root `package.json`. Most-used:
 
 ```bash
-npx appkit plugin sync --write    # Sync plugin manifests into appkit.plugins.json
-npx appkit plugin create         # Scaffold a new plugin (interactive, uses @clack/prompts)
-npx appkit plugin validate       # Validate manifest(s) against the JSON schema
-npx appkit plugin list           # List plugins (from appkit.plugins.json or --dir)
-npx appkit plugin add-resource   # Add a resource requirement to a plugin (interactive)
+pnpm setup:repo       # one-time setup (corepack + pnpm enable first)
+pnpm dev              # build all + Turbo watch (NODE_ENV=development)
+pnpm build            # build packages, sync template, gen doc banners
+pnpm test             # vitest run with coverage (test:watch for watch)
+pnpm check:fix        # Biome lint + format, autofix
+pnpm typecheck        # tsc across all packages (pnpm -r typecheck)
+pnpm deploy:playground
 ```
 
-### Deployment
+Test environments: `appkit-ui` → jsdom (React), `appkit` → node.
+
+### After Making Changes — always run
+1. `pnpm build && pnpm docs:build`
+2. `pnpm check:fix && pnpm -r typecheck`
+
+### AppKit CLI (after `pnpm build`)
 ```bash
-pnpm pack:sdk                      # Package SDK for deployment
-pnpm deploy:playground             # Deploy dev-playground to Databricks
-
-# Environment variables for deployment:
-export DATABRICKS_PROFILE=your-profile              # CLI profile name
-export DATABRICKS_APP_NAME=your-app-name            # App name (prefixed with username if not provided)
-export DATABRICKS_WORKSPACE_DIR=your-workspace-dir  # Workspace directory path
+npx appkit plugin sync --write    # sync manifests → appkit.plugins.json
+npx appkit plugin create          # scaffold a plugin (interactive)
+npx appkit plugin validate        # validate manifest(s) against schema
+npx appkit plugin list
+npx appkit plugin add-resource    # add a resource requirement (interactive)
 ```
 
-### Cleanup
+### Monorepo Dependencies
 ```bash
-pnpm clean            # Remove build artifacts
-pnpm clean:full       # Remove build artifacts + node_modules
+pnpm add -Dw <pkg>                          # root dev tool
+pnpm --filter=@databricks/appkit add <pkg>  # package-specific
+pnpm --filter=dev-playground add <pkg>      # app-specific
 ```
+Workspace deps use `"@databricks/shared": "workspace:*"`. New packages extend root `tsconfig.json` and need `build:package` + `build:watch` scripts.
 
-### Releasing
+## Architecture
 
-This project uses a two-stage release pipeline. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` is released independently.
-
-#### Stage 1: Prepare (this repo)
-
-The `prepare-release` workflow runs automatically on push to `main`:
-1. Determines version from conventional commits using [release-it](https://github.com/release-it/release-it) with `.release-it.json`
-2. Generates changelog diff
-3. Builds, packs, and uploads artifacts (`.tgz`, changelog, SHA256 digests)
-4. **Does NOT** commit, tag, push, or publish — only uploads artifacts
-
-Lakebase has a separate `prepare-release-lakebase` workflow triggered by changes to `packages/lakebase/**`.
-
-#### Stage 2: Publish (secure repo)
-
-A private secure release repo polls for new artifacts every 15 minutes:
-1. Downloads and verifies SHA256 digests (fail-closed)
-2. Runs security scan
-3. Publishes to npm via OIDC Trusted Publishing (no stored tokens)
-4. Applies changelog, bumps versions, commits, tags, and pushes back to this repo via GitHub App
-5. Creates GitHub Release
-6. Runs template sync
-
-Manual fallback: `workflow_dispatch` with a specific run ID on the secure repo.
-
-#### Local Preview
-
-```bash
-# Preview next version and changelog (no side effects)
-pnpm release:dry
-```
-
-#### Version Bumps (Conventional Commits)
-
-- `feat:` → Minor version bump (0.1.0 → 0.2.0)
-- `fix:` → Patch version bump (0.1.0 → 0.1.1)
-- `feat!:` or `BREAKING CHANGE:` → Major version bump (0.1.0 → 1.0.0)
-
-## Architecture Overview
-
-### Plugin System
-
-For full props API, see: `npx @databricks/appkit docs ./docs/plugins.md`.
-
-### Execution Interceptor Pattern
-
-Plugins use `execute()` or `executeStream()` which apply interceptors in this order:
-1. **TelemetryInterceptor** (outermost) - Traces execution span
-2. **TimeoutInterceptor** - AbortSignal timeout
-3. **RetryInterceptor** - Exponential backoff retry
-4. **CacheInterceptor** (innermost) - TTL-based caching
-
-Example:
+### Plugin execution interceptors
+`execute()` / `executeStream()` apply interceptors outermost→innermost:
+**Telemetry** → **Timeout** → **Retry** → **Cache**.
 ```typescript
-await this.execute(
-  () => expensiveOperation(),
-  {
-    cache: { ttl: 60000 },        // Cache for 60 seconds
-    retry: { maxRetries: 3 },      // Retry up to 3 times
-    timeout: 5000,                 // 5 second timeout
-    telemetry: { traces: true }    // Enable tracing
-  }
-);
+await this.execute(() => expensiveOperation(), {
+  cache: { ttl: 60000 }, retry: { maxRetries: 3 }, timeout: 5000, telemetry: { traces: true },
+});
 ```
 
-### Server-Sent Events (SSE) Streaming
+### Request flow
+React client → HTTP POST / SSE → Express → routes `/api/{plugin-name}/{endpoint}` → `Plugin.injectRoutes()` → `this.execute()` → Databricks services. Dev: Vite HMR + `tsx watch`. Prod: static `client/dist` + compiled server bundle.
 
-The SDK has built-in SSE support with automatic reconnection:
+### SSE streaming
+Built-in via `StreamManager`: connection-ID stream tracking, event ring buffer for replay on reconnect (`Last-Event-ID`), per-stream abort signals, heartbeats.
 
-**Key Features:**
-- Connection ID-based stream tracking
-- Event ring buffer for missed event replay (reconnection)
-- Per-stream abort signals for cancellation
-- Automatic heartbeat to keep connections alive
+### Analytics query naming convention (non-obvious)
+Queries live in `config/queries/`; file name sets execution context:
+- `<key>.sql` — runs as **service principal** (shared cache)
+- `<key>.obo.sql` — runs as **user** (on-behalf-of, per-user cache)
 
-**StreamManager** handles:
-- New stream creation with AsyncGenerator handler
-- Client reconnection with Last-Event-ID header
-- Graceful error handling and cleanup
+Parameterize all queries. Execute via `POST /api/analytics/query/:query_key`.
 
-### Telemetry (OpenTelemetry)
+### Lakebase
+Two layers: the standalone `@databricks/lakebase` package (`packages/lakebase/`, OAuth refresh + ORM helpers) and a thin AppKit wrapper (`packages/appkit/src/connectors/lakebase/`) adding logger integration. `createLakebasePool()` reads `PGHOST`/`PGDATABASE`/`LAKEBASE_ENDPOINT` and returns a standard `pg.Pool`. ORM examples (Drizzle/Sequelize/TypeORM) in `apps/dev-playground/server/lakebase-examples/`.
 
-**TelemetryManager** (singleton):
-- Initializes tracer, meter, logger providers
-- Auto-instrumentations for Node.js, Express, HTTP
-- Exports to OTEL_EXPORTER_OTLP_ENDPOINT (if configured)
+### Type generation
+`tools/generate-registry-types.ts` builds plugin registry types so `AppKit.myPlugin.method()` is typed from registered plugins. Telemetry is OpenTelemetry (`TelemetryManager` singleton + per-plugin `TelemetryProvider`).
 
-**TelemetryProvider** (per-plugin):
-- Plugin name as default tracer/meter scope
-- Supports traces, metrics, logs (configurable per plugin)
+## Dev-Playground
 
-### Analytics Query Pattern
+Backend `apps/dev-playground/server/`: `index.ts` wires plugins; example plugins (`reconnect-`, `telemetry-example-`, `config-demo-`, `lakebase-examples-`) demonstrate features.
+Frontend `apps/dev-playground/client/`: TanStack Router file-based routes in `src/routes/<page>.route.tsx`, root layout `__root.tsx`. **Add a page:** create the route file + nav link in `__root.tsx` (route tree regenerates on build).
 
-The AnalyticsPlugin provides SQL query execution:
-- Queries stored in `config/queries/`
-- Query file naming determines execution context:
-  - `<query_key>.sql` - Executes as service principal (shared cache)
-  - `<query_key>.obo.sql` - Executes as user (OBO = On-Behalf-Of, per-user cache)
-- All queries should be parameterized (use placeholders)
-- POST `/api/analytics/query/:query_key` - Execute query with parameters
-- Built-in caching with configurable TTL
-- Databricks SQL Warehouse connector for execution
+## Environment
 
-### Lakebase Connector
-
-Lakebase support is split into two layers:
-
-1. **`@databricks/lakebase` package** (`packages/lakebase/`) - Standalone connector with OAuth token refresh, ORM helpers, and full API. See the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
-2. **AppKit integration** (`packages/appkit/src/connectors/lakebase/`) - Thin wrapper that adds AppKit logger integration and re-exports the standalone package.
-
-**Quick Example:**
-```typescript
-import { createLakebasePool } from '@databricks/appkit';
-
-// Reads from PGHOST, PGDATABASE, LAKEBASE_ENDPOINT env vars
-const pool = createLakebasePool();
-
-// Standard pg.Pool API
-const result = await pool.query('SELECT * FROM users');
-```
-
-**ORM Integration:**
-Works with Drizzle, Sequelize, TypeORM - see the `@databricks/lakebase` README and `apps/dev-playground/server/lakebase-examples/` for examples.
-
-### Frontend-Backend Interaction
-
-```
-React Client (Vite)
-  ↓ HTTP POST / SSE
-Express Server
-  ↓ Routes: /api/{plugin-name}/{endpoint}
-Plugin.injectRoutes()
-  ↓ this.execute() with interceptors
-Databricks Services (SQL Warehouse, APIs)
-```
-
-**Dev Mode:**
-- Vite dev server with HMR
-- Hot-reload for backend code with tsx watch
-
-**Production Mode:**
-- Static file serving from `client/dist`
-- Compiled server bundle
-
-## Build System
-
-### Bundler: tsdown
-
-**tsdown** is used for fast TypeScript bundling with tree-shaking:
-- **unbundle mode** - Preserves module structure (faster builds, better tree-shaking)
-- **Shared package bundled inline** - `shared` package is bundled with noExternal
-- **npm dependencies external** - Keeps bundle size small
-- **Generates .d.ts** - Type definitions with proper resolution
-
-### Frontend: Vite (rolldown-vite fork)
-
-The frontend uses `rolldown-vite@7.1.14`, a performance-optimized Vite fork.
-
-**Key plugins:**
-- `@vitejs/plugin-react` - React Fast Refresh
-- `@tanstack/router-plugin` - File-based routing with auto code-splitting
-
-### Formatter/Linter: Biome
-
-Biome is used instead of ESLint/Prettier for faster performance:
-- Lint-staged integration via husky
-- Configured in `biome.json` (if present)
-
-## Working with the Monorepo
-
-### Adding Dependencies
-
-```bash
-# Root dependencies (dev tools)
-pnpm add -Dw <package>
-
-# Package-specific dependencies
-pnpm --filter=@databricks/appkit add <package>
-
-# App dependencies
-pnpm --filter=dev-playground add <package>
-```
-
-### Creating New Packages
-
-Packages should:
-1. Be added to `packages/` directory
-2. Have a `package.json` with workspace protocol dependencies: `"@databricks/shared": "workspace:*"`
-3. Extend root `tsconfig.json`
-4. Include `build:package` and `build:watch` scripts
-
-### Type Generation
-
-`tools/generate-registry-types.ts` creates plugin registry types at build time. This enables:
-```typescript
-const AppKit = await createApp({ plugins: [...] });
-AppKit.myPlugin.method();  // Typed based on registered plugins
-```
-
-## Dev-Playground App Structure
-
-The reference app demonstrates AppKit usage:
-
-**Backend (`apps/dev-playground/server/`):**
-- `index.ts` - Creates AppKit with server, analytics, and custom plugins
-- `reconnect-plugin.ts` - Example plugin with SSE reconnection
-- `telemetry-example-plugin.ts` - Example plugin with telemetry
-- `config-demo-plugin.ts` - Example plugin with client config
-- `lakebase-examples-plugin.ts` - Lakebase ORM integration examples
-- `lakebase-examples/` - Drizzle, Sequelize, TypeORM, and raw driver examples
-
-**Frontend (`apps/dev-playground/client/`):**
-- Vite + React 19 + TypeScript
-- TanStack Router for file-based routing (routes in `src/routes/`)
-- Components from `@databricks/appkit-ui`
-- Route files: `src/routes/<page-name>.route.tsx`
-- Root layout: `src/routes/__root.tsx`
-
-**Adding a New Page:**
-1. Create `src/routes/<page-name>.route.tsx`
-2. Add navigation link in `__root.tsx`
-3. Route tree regenerates automatically on build
-
-## Environment Configuration
-
-**Required for dev-playground:**
+`apps/dev-playground/server/.env`:
 ```env
 DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-DATABRICKS_WAREHOUSE_ID=your-warehouse-id  # Optional, for analytics
+DATABRICKS_WAREHOUSE_ID=...                  # optional, for analytics
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  # optional telemetry
 ```
 
-**Optional telemetry:**
-```env
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318  # OpenTelemetry collector
-```
+## Commits
 
-## Commit Conventions
+- **Sign off (DCO required):** `git commit -s -m "..."`
+- **Conventional commits** (enforced by commitlint): `feat:` (minor), `fix:` (patch), `feat!:`/`BREAKING CHANGE:` (major), plus `chore:`/`docs:`/`refactor:`/`test:`.
 
-**Developer Certificate of Origin (DCO):**
-All commits must be signed off with:
-```bash
-git commit -s -m "Your commit message"
-```
+## Releasing
 
-This certifies you have the right to contribute under the open source license.
-
-**Commit Format:**
-This project uses conventional commits (enforced by commitlint):
-- `feat:` - New feature
-- `fix:` - Bug fix
-- `chore:` - Maintenance
-- `docs:` - Documentation
-- `refactor:` - Code refactoring
-- `test:` - Test changes
-
-## Important Context
-
-### Key Dependencies
-- `@databricks/sdk-experimental` v0.16.0 - Databricks services SDK
-- `express` - HTTP server
-- `zod` - Runtime validation
-- `OpenTelemetry` - Observability (traces, metrics, logs)
-
-### Design Philosophy
-1. **Plugin-first** - Everything is a plugin for modularity
-2. **Type-safe** - Heavy TypeScript usage with runtime validation (Zod)
-3. **Streaming-first** - Built-in SSE support with reconnection
-4. **Observability** - OpenTelemetry integration is first-class
-5. **Dev Experience** - HMR, hot-reload, source maps, inspection tools
-
-### Graceful Shutdown
-The server handles SIGTERM/SIGINT with:
-- 15-second timeout
-- Aborts in-flight operations
-- Closes connections gracefully
+Two-stage pipeline (details in `.github/workflows/` and `.release-it.json`): `prepare-release` builds + uploads artifacts on push to `main`; a secure repo verifies, publishes to npm via OIDC, then commits version/changelog/tag back. `appkit` + `appkit-ui` release together; `@databricks/lakebase` releases independently. Preview locally with `pnpm release:dry`.
