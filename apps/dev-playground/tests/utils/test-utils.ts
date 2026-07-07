@@ -1,4 +1,5 @@
 import type { Page, Request } from "@playwright/test";
+import { tableFromJSON, tableToIPC } from "apache-arrow";
 import {
   mockAnalyticsData,
   mockReconnectMessages,
@@ -27,65 +28,68 @@ function getSSEHeaders() {
   };
 }
 
+/** Maps a query URL to its mock rows (matched by query-key substring). */
+const ANALYTICS_MOCK: Array<readonly [string, readonly unknown[]]> = [
+  ["spend_summary", mockAnalyticsData.spendSummary],
+  ["apps_list", mockAnalyticsData.appsList],
+  ["untagged_apps", mockAnalyticsData.untaggedApps],
+  ["spend_data", mockAnalyticsData.spendData],
+  ["top_contributors", mockAnalyticsData.topContributors],
+  ["app_activity_heatmap", mockAnalyticsData.appActivityHeatmap],
+  ["sql_helpers_test", mockAnalyticsData.sqlHelpersTest],
+];
+
+function resolveAnalyticsMock(url: string): readonly unknown[] {
+  return ANALYTICS_MOCK.find(([key]) => url.includes(key))?.[1] ?? [];
+}
+
+/**
+ * Build raw Arrow IPC stream bytes from mock rows — the format `fetchArrowDirect`
+ * expects for `format: "ARROW_STREAM"` (raw bytes on the response body, not SSE).
+ * Array/object cells are stringified so Arrow can infer a primitive column type,
+ * mirroring how the warehouse serializes complex types; chart-relevant columns
+ * (names, numbers) are unaffected.
+ */
+function toArrowIPC(rows: readonly unknown[]): Buffer {
+  const flat = rows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row as Record<string, unknown>).map(([k, v]) => [
+        k,
+        v !== null && typeof v === "object" ? JSON.stringify(v) : v,
+      ]),
+    ),
+  );
+  return Buffer.from(tableToIPC(tableFromJSON(flat), "stream"));
+}
+
 export async function setupMockAPI(page: Page) {
   await page.route("**/api/analytics/query/**", async (route) => {
-    const url = route.request().url();
+    const data = resolveAnalyticsMock(route.request().url());
 
-    if (url.includes("spend_summary")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.spendSummary),
-      });
+    // ARROW_STREAM requests read raw Arrow IPC bytes off the response body
+    // (see fetchArrowDirect); everything else consumes the SSE/JSON result.
+    let requestFormat: string | undefined;
+    try {
+      requestFormat = route.request().postDataJSON()?.format;
+    } catch {
+      // Non-JSON body (e.g. a GET) — treat as the SSE/JSON path.
     }
-    if (url.includes("apps_list")) {
+
+    if (requestFormat === "ARROW_STREAM" && data.length > 0) {
       return route.fulfill({
         status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.appsList),
-      });
-    }
-    if (url.includes("untagged_apps")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.untaggedApps),
-      });
-    }
-    if (url.includes("spend_data")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.spendData),
-      });
-    }
-    if (url.includes("top_contributors")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.topContributors),
-      });
-    }
-    if (url.includes("app_activity_heatmap")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.appActivityHeatmap),
-      });
-    }
-    if (url.includes("sql_helpers_test")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.sqlHelpersTest),
+        headers: {
+          "Content-Type": "application/vnd.apache.arrow.stream",
+          "Cache-Control": "no-store",
+        },
+        body: toArrowIPC(data),
       });
     }
 
-    // Default empty response for unknown queries
     return route.fulfill({
       status: 200,
       headers: getSSEHeaders(),
-      body: createSSEResponse([]),
+      body: createSSEResponse(data),
     });
   });
 
