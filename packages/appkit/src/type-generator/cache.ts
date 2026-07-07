@@ -26,17 +26,8 @@ interface CacheEntry {
  * `hash` is md5 over `"<source>|<lane>"` — the two config inputs that
  * determine a DESCRIBE — so editing either invalidates the entry. `schema`
  * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
- * design), letting a warm pass regenerate both metric artifacts without a
- * single warehouse call. `retry: true` marks a SELF-CONVERGING degraded
- * outcome (DESCRIBE skipped behind a not-running warehouse, unanswered, or
- * transiently failed): the cached schema still renders artifacts, but the
- * next eligible pass re-describes exactly these keys so degraded schemas
- * converge to real ones. A degraded schema with `retry: false` is a STICKY
- * failure — a deterministic DESCRIBE failure (bad FQN, unparseable
- * response, zero columns) or a deleted warehouse — that re-describing the
- * unchanged entry cannot fix; it hits like any cached entry until the
- * config hash changes or the cache is bypassed, and the type generator
- * warns about it on every pass that serves it.
+ * design), letting a warm pass regenerate the metric artifact without a
+ * single warehouse call.
  */
 export interface MetricCacheEntry {
   hash: string;
@@ -51,12 +42,7 @@ export interface MetricCacheEntry {
  * hand-edits, truncation, or a stale writer can leave entries whose shape no
  * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
  * cache MISS (re-describe) rather than crash the pass or render revived
- * garbage into the artifacts. Checks exactly what the renderers and the
- * metadata bundle consume: `hash` string, `retry` boolean, and a schema with
- * `key`/`source` strings, a valid lane, an optional boolean `degraded`, and
- * measure/dimension arrays whose elements carry `name`/`type` strings
- * (other column fields are optional). Deliberately inline — the shared Zod
- * schemas must not enter the type-generator's runtime path.
+ * garbage into the artifacts.
  */
 export function isRevivableMetricCacheEntry(entry: unknown): boolean {
   if (typeof entry !== "object" || entry === null) return false;
@@ -93,11 +79,6 @@ export function isRevivableMetricCacheEntry(entry: unknown): boolean {
  * @property version - the version of the cache
  * @property queries - the queries in the cache
  * @property metrics - cached metric-view schemas keyed by metric key.
- *   OPTIONAL on purpose: version "3" files written before this section
- *   existed load unchanged (absent ⇒ treated as empty by the metric path),
- *   and the query path's `noCache` reinit literal stays valid as-is. The
- *   section rides through the query path's load → mutate → save cycle as a
- *   plain sibling key, so query-side saves preserve it byte-for-byte.
  */
 interface Cache {
   version: string;
