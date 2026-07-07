@@ -769,7 +769,6 @@ export default function DonutChartExample() {
 
 import * as React from "react"
 import { Minus, Plus } from "lucide-react"
-import { Bar, BarChart, ResponsiveContainer } from "recharts"
 
 import {
   Button,
@@ -782,48 +781,6 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@databricks/appkit-ui/react"
-
-const data = [
-  {
-    goal: 400,
-  },
-  {
-    goal: 300,
-  },
-  {
-    goal: 200,
-  },
-  {
-    goal: 300,
-  },
-  {
-    goal: 200,
-  },
-  {
-    goal: 278,
-  },
-  {
-    goal: 189,
-  },
-  {
-    goal: 239,
-  },
-  {
-    goal: 300,
-  },
-  {
-    goal: 200,
-  },
-  {
-    goal: 278,
-  },
-  {
-    goal: 189,
-  },
-  {
-    goal: 349,
-  },
-]
 
 export default function DrawerExample() {
   const [goal, setGoal] = React.useState(350)
@@ -873,19 +830,6 @@ export default function DrawerExample() {
                 <Plus />
                 <span className="sr-only">Increase</span>
               </Button>
-            </div>
-            <div className="mt-3 h-[120px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data}>
-                  <Bar
-                    dataKey="goal"
-                    style={{
-                      fill: "hsl(var(--foreground))",
-                      opacity: 0.9,
-                    }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
             </div>
           </div>
           <DrawerFooter>
