@@ -34,8 +34,4 @@ declare module "@databricks/appkit/type-generator" {
     outFile: string;
     noCache?: boolean;
   }): Promise<void>;
-
-  // Metric artifact filename (written as a sibling of the query out file). The
-  // CLI joins this with the out file's directory to report the emitted path.
-  export const METRIC_TYPES_FILE: string;
 }

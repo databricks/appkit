@@ -81,12 +81,16 @@ async function runGenerateTypes(
         // otherwise), writing metric-views.d.ts as a sibling of the query out
         // file. Mirror that to report the artifact; a degraded/failed view is
         // warned (default non-blocking) or has already thrown (--wait) inside
-        // the call above.
+        // the call above. The filename is hardcoded here (like analytics.d.ts /
+        // serving.d.ts above) rather than read off the dynamic import: reading
+        // an appkit path constant across the package boundary is the only thing
+        // that would force `./type-generator` to be its own tsdown entry, since
+        // the functions we call are already anchored by appkit's Vite plugins.
         const metricConfig = path.join(queryFolder, "metric-views.json");
         if (fs.existsSync(metricConfig)) {
           const typesDir = path.dirname(resolvedOutFile);
           console.log(
-            `Generated metric types: ${path.join(typesDir, typeGen.METRIC_TYPES_FILE)}`,
+            `Generated metric types: ${path.join(typesDir, "metric-views.d.ts")}`,
           );
         }
       }

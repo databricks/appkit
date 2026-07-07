@@ -50,9 +50,6 @@ const {
 vi.mock("@databricks/appkit/type-generator", () => ({
   generateFromEntryPoint,
   generateServingTypes,
-  // The CLI joins this with the out file's directory to report the emitted
-  // metric artifact; mirror the real exported constant.
-  METRIC_TYPES_FILE: "metric-views.d.ts",
 }));
 
 // Mock the detached spawn so we can assert how the worker is launched without

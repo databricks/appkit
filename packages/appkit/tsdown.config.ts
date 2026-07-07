@@ -4,14 +4,7 @@ export default defineConfig([
   {
     publint: true,
     name: "@databricks/appkit",
-    // `./type-generator` is a public subpath export consumed cross-package by the
-    // `appkit generate-types` CLI via a dynamic import Rolldown can't see. It must
-    // be its own entry so the names the CLI imports at runtime
-    // (generateFromEntryPoint — which additively emits metric-view types — and
-    // generateServingTypes) are preserved under unbundle tree-shaking. Without it,
-    // the subpath's runtime exports collapse to only the names appkit's own Vite
-    // plugins import — silently dropping the CLI's.
-    entry: ["src/index.ts", "src/beta.ts", "src/type-generator/index.ts"],
+    entry: ["src/index.ts", "src/beta.ts"],
     outDir: "dist",
     hash: false,
     format: "esm",
