@@ -6,6 +6,7 @@ import type {
   AgentToolDefinition,
 } from "shared";
 import { stream as servingStream } from "../connectors/serving/client";
+import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
 const DEFAULT_MAX_SSE_LINE_CHARS = 1024 * 1024;
@@ -307,6 +308,7 @@ export class DatabricksAdapter implements AgentAdapter {
         const response = await fetch(endpointUrl, {
           method: "POST",
           headers: {
+            "User-Agent": APPKIT_USER_AGENT,
             "Content-Type": "application/json",
             ...authHeaders,
           },
@@ -406,6 +408,7 @@ export class DatabricksAdapter implements AgentAdapter {
       const sdk = await import("@databricks/sdk-experimental");
       workspaceClient = new sdk.WorkspaceClient(
         {},
+        getClientOptions(),
       ) as unknown as WorkspaceClientLike;
     }
 

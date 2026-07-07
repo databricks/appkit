@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { FALLBACK_UI_TOKENS } from "../constants";
 import {
   buildCartesianOption,
   buildHeatmapOption,
@@ -14,6 +15,9 @@ interface EChartsOption {
   legend?: unknown;
   tooltip?: {
     formatter?: (params: { data: [number, number, number] }) => string;
+    backgroundColor?: string;
+    borderColor?: string;
+    textStyle?: { color: string };
   };
   xAxis: { type: string; data?: unknown[] };
   yAxis: { type: string; data?: unknown[] };
@@ -58,6 +62,14 @@ function asRadarOption(result: Record<string, unknown>): RadarOption {
   return result as unknown as RadarOption;
 }
 
+// Distinct UI tokens so theming assertions are unambiguous
+const TEST_UI = {
+  axisLabel: "#a11111",
+  axisTitle: "#b22222",
+  grid: "#c33333",
+  tooltipBg: "#d44444",
+};
+
 // Base context used across tests
 const createBaseContext = (
   overrides: Partial<OptionBuilderContext> = {},
@@ -68,6 +80,7 @@ const createBaseContext = (
   colors: ["#ff0000", "#00ff00", "#0000ff"],
   title: "Test Chart",
   showLegend: true,
+  ui: TEST_UI,
   ...overrides,
 });
 
@@ -588,6 +601,7 @@ describe("buildHeatmapOption", () => {
     colors: ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
     title: "Activity Heatmap",
     showLegend: false,
+    ui: TEST_UI,
     // Heatmap-specific
     yAxisData: ["Mon", "Tue", "Wed"],
     heatmapData: [
@@ -672,5 +686,245 @@ describe("buildHeatmapOption", () => {
     expect(output).toBe(
       "&lt;img src=x onerror=alert(1)&gt;, &lt;script&gt;alert(2)&lt;/script&gt;: 10",
     );
+  });
+});
+
+describe("axis & UI theming", () => {
+  type AxisShape = {
+    axisLabel: { color?: string; rotate?: number; width?: number };
+    axisLine: { lineStyle: { color: string } };
+    axisTick: { lineStyle: { color: string } };
+    splitLine: { lineStyle: { color: string } };
+    nameTextStyle?: { color: string };
+  };
+  type TextStyled = { textStyle: { color: string } };
+
+  test("applies ui tokens to cartesian axes, title, and legend", () => {
+    const ctx = createBaseContext({
+      yFields: ["a", "b"],
+      yDataMap: { a: [1, 2], b: [3, 4] },
+    });
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "bar",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+
+    const xAxis = opt.xAxis as AxisShape;
+    const yAxis = opt.yAxis as AxisShape;
+    expect(xAxis.axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect(xAxis.axisLine.lineStyle.color).toBe(TEST_UI.grid);
+    expect(yAxis.axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect(yAxis.splitLine.lineStyle.color).toBe(TEST_UI.grid);
+    expect((opt.title as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
+    expect((opt.legend as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("preserves x-axis formatter/rotate while setting label color", () => {
+    const ctx = createBaseContext({
+      xData: Array.from({ length: 15 }, (_, i) => `Item${i}`),
+      yDataMap: { value: Array(15).fill(10) },
+    });
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "bar",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+
+    const xAxis = opt.xAxis as AxisShape;
+    expect(xAxis.axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect(xAxis.axisLabel.rotate).toBe(45);
+  });
+
+  test("applies ui tokens to horizontal bar axes (preserving label width)", () => {
+    const ctx = createBaseContext();
+    const opt = buildHorizontalBarOption(ctx, false);
+
+    const xAxis = opt.xAxis as AxisShape;
+    const yAxis = opt.yAxis as AxisShape;
+    expect(yAxis.axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect(yAxis.axisLabel.width).toBe(100);
+    expect(xAxis.axisLine.lineStyle.color).toBe(TEST_UI.grid);
+  });
+
+  test("applies ui tokens to heatmap axes and visualMap", () => {
+    const ctx: HeatmapContext = {
+      ...createBaseContext({ showLegend: false }),
+      yAxisData: ["Mon", "Tue"],
+      heatmapData: [
+        [0, 0, 10],
+        [1, 0, 20],
+      ],
+      min: 10,
+      max: 20,
+      showLabels: false,
+    };
+    const opt = buildHeatmapOption(ctx);
+
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect((opt.yAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+    expect((opt.visualMap as TextStyled).textStyle.color).toBe(
+      TEST_UI.axisTitle,
+    );
+  });
+
+  test("applies ui tokens to pie legend", () => {
+    const ctx = createBaseContext({ showLegend: true });
+    const opt = buildPieOption(ctx, "pie", 0, true, "outside");
+    expect((opt.legend as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("applies ui tokens to radar", () => {
+    const ctx = createBaseContext();
+    const opt = buildRadarOption(ctx, true);
+    const radar = opt.radar as {
+      axisName: { color: string };
+      axisLine: { lineStyle: { color: string } };
+      splitLine: { lineStyle: { color: string } };
+    };
+    expect(radar.axisName.color).toBe(TEST_UI.axisTitle);
+    expect(radar.splitLine.lineStyle.color).toBe(TEST_UI.grid);
+  });
+
+  test("applies ui tokens to radar legend (multi-series)", () => {
+    const ctx = createBaseContext({
+      yFields: ["a", "b"],
+      yDataMap: { a: [1, 2, 3], b: [4, 5, 6] },
+      showLegend: true,
+    });
+    const opt = buildRadarOption(ctx, true);
+    expect((opt.legend as TextStyled).textStyle.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("applies axis-label color on scatter x-axis", () => {
+    const ctx = createBaseContext();
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "scatter",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+  });
+
+  test("applies axis-label color on time-series x-axis", () => {
+    const ctx = createBaseContext();
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "line",
+      isTimeSeries: true,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(TEST_UI.axisLabel);
+  });
+
+  test("falls back to default UI tokens when ui is omitted", () => {
+    const ctx = createBaseContext({ ui: undefined });
+    const opt = buildCartesianOption({
+      ...ctx,
+      chartType: "bar",
+      isTimeSeries: false,
+      stacked: false,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 8,
+    });
+
+    expect((opt.xAxis as AxisShape).axisLabel.color).toBe(
+      FALLBACK_UI_TOKENS.axisLabel,
+    );
+    expect((opt.yAxis as AxisShape).splitLine.lineStyle.color).toBe(
+      FALLBACK_UI_TOKENS.grid,
+    );
+    expect((opt.title as TextStyled).textStyle.color).toBe(
+      FALLBACK_UI_TOKENS.axisTitle,
+    );
+    expect((opt.tooltip as { backgroundColor: string }).backgroundColor).toBe(
+      FALLBACK_UI_TOKENS.tooltipBg,
+    );
+  });
+});
+
+describe("tooltip theming", () => {
+  test("themes cartesian tooltip (background, border, text)", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(
+      buildCartesianOption({
+        ...ctx,
+        chartType: "bar",
+        isTimeSeries: false,
+        stacked: false,
+        smooth: false,
+        showSymbol: false,
+        symbolSize: 8,
+      }),
+    );
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    expect(opt.tooltip?.textStyle?.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("themes horizontal bar tooltip while keeping axisPointer", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildHorizontalBarOption(ctx, false));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(
+      (opt.tooltip as { axisPointer?: { type: string } }).axisPointer?.type,
+    ).toBe("shadow");
+  });
+
+  test("themes pie tooltip while keeping the formatter", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildPieOption(ctx, "pie", 0, true, "outside"));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    expect((opt.tooltip as { formatter?: string }).formatter).toBe(
+      "{b}: {c} ({d}%)",
+    );
+  });
+
+  test("themes radar tooltip", () => {
+    const ctx = createBaseContext();
+    const opt = asOption(buildRadarOption(ctx, true));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.textStyle?.color).toBe(TEST_UI.axisTitle);
+  });
+
+  test("themes heatmap tooltip while keeping the escaping formatter", () => {
+    const ctx: HeatmapContext = {
+      ...createBaseContext({ showLegend: false }),
+      yAxisData: ["Mon", "Tue"],
+      heatmapData: [
+        [0, 0, 10],
+        [1, 0, 20],
+      ],
+      min: 10,
+      max: 20,
+      showLabels: false,
+    };
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+    expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
+    // Formatter still runs (and still escapes) on top of the themed tooltip.
+    expect(opt.tooltip?.formatter?.({ data: [0, 0, 10] })).toBe("A, Mon: 10");
   });
 });

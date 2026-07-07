@@ -338,7 +338,7 @@ export function OrdersPanel() {
         <CardContent>
           {ordersLoading && (
             <div className="flex items-center gap-2 text-warning py-8">
-              <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+              <div className="w-2 h-2 bg-warning rounded-full animate-pulse" />
               Loading orders...
             </div>
           )}

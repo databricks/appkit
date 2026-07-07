@@ -1,0 +1,257 @@
+{
+  "packages": [
+    {
+      "name": "@databricks/appkit",
+      "tarball": {
+        "packed": 674148,
+        "unpacked": 2386195
+      },
+      "dist": {
+        "total": {
+          "raw": 2381750,
+          "gzip": 797897
+        },
+        "js": {
+          "raw": 702696,
+          "gzip": 245275
+        },
+        "types": {
+          "raw": 274230,
+          "gzip": 92925
+        },
+        "maps": {
+          "raw": 1394029,
+          "gzip": 455879
+        },
+        "css": {
+          "raw": 0,
+          "gzip": 0
+        },
+        "other": {
+          "raw": 10795,
+          "gzip": 3818
+        },
+        "fileCount": 518
+      },
+      "entries": [
+        {
+          "id": ".",
+          "gzip": 78099,
+          "composition": {
+            "initialGzip": 75525,
+            "lazyGzip": 2574,
+            "totalGzip": 78099,
+            "own": 248907,
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 71427,
+                "kind": "initial"
+              },
+              {
+                "label": "utils.js",
+                "gzip": 4098,
+                "kind": "initial"
+              },
+              {
+                "label": "remote-tunnel-manager.js",
+                "gzip": 2574,
+                "kind": "lazy"
+              }
+            ]
+          }
+        },
+        {
+          "id": "./beta",
+          "gzip": 39885,
+          "composition": {
+            "initialGzip": 39654,
+            "lazyGzip": 231,
+            "totalGzip": 39885,
+            "own": 119365,
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 30501,
+                "kind": "initial"
+              },
+              {
+                "label": "databricks.js",
+                "gzip": 5808,
+                "kind": "initial"
+              },
+              {
+                "label": "service-context.js",
+                "gzip": 3125,
+                "kind": "initial"
+              },
+              {
+                "label": "client-options.js",
+                "gzip": 220,
+                "kind": "initial"
+              },
+              {
+                "label": "databricks.js",
+                "gzip": 128,
+                "kind": "lazy"
+              },
+              {
+                "label": "index.js",
+                "gzip": 103,
+                "kind": "lazy"
+              }
+            ]
+          }
+        },
+        {
+          "id": "./type-generator",
+          "gzip": 18895,
+          "composition": {
+            "initialGzip": 18895,
+            "lazyGzip": 0,
+            "totalGzip": 18895,
+            "own": 54388,
+            "nodeModules": null,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 18895,
+                "kind": "initial"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "@databricks/appkit-ui",
+      "tarball": {
+        "packed": 304702,
+        "unpacked": 1283810
+      },
+      "dist": {
+        "total": {
+          "raw": 1279802,
+          "gzip": 423125
+        },
+        "js": {
+          "raw": 362534,
+          "gzip": 119983
+        },
+        "types": {
+          "raw": 208579,
+          "gzip": 74715
+        },
+        "maps": {
+          "raw": 691829,
+          "gzip": 225081
+        },
+        "css": {
+          "raw": 16860,
+          "gzip": 3346
+        },
+        "other": {
+          "raw": 0,
+          "gzip": 0
+        },
+        "fileCount": 466
+      },
+      "entries": [
+        {
+          "id": "./js",
+          "gzip": 4155,
+          "composition": {
+            "initialGzip": 4309,
+            "lazyGzip": 50587,
+            "totalGzip": 54896,
+            "own": 11585,
+            "nodeModules": 213288,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 4189,
+                "kind": "initial"
+              },
+              {
+                "label": "chunk",
+                "gzip": 120,
+                "kind": "initial"
+              },
+              {
+                "label": "apache-arrow",
+                "gzip": 50587,
+                "kind": "lazy"
+              }
+            ]
+          }
+        },
+        {
+          "id": "./js/beta",
+          "gzip": 20,
+          "composition": {
+            "initialGzip": 20,
+            "lazyGzip": 0,
+            "totalGzip": 20,
+            "own": 0,
+            "nodeModules": 0,
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 20,
+                "kind": "initial"
+              }
+            ]
+          }
+        },
+        {
+          "id": "./react",
+          "gzip": 47218,
+          "composition": {
+            "initialGzip": 439108,
+            "lazyGzip": 49772,
+            "totalGzip": 488880,
+            "own": 170232,
+            "nodeModules": 1402951,
+            "chunks": [
+              {
+                "label": "index.js",
+                "gzip": 436958,
+                "kind": "initial"
+              },
+              {
+                "label": "tslib",
+                "gzip": 2150,
+                "kind": "initial"
+              },
+              {
+                "label": "apache-arrow",
+                "gzip": 49772,
+                "kind": "lazy"
+              }
+            ]
+          }
+        },
+        {
+          "id": "./react/beta",
+          "gzip": 20,
+          "composition": {
+            "initialGzip": 20,
+            "lazyGzip": 0,
+            "totalGzip": 20,
+            "own": 0,
+            "nodeModules": 0,
+            "chunks": [
+              {
+                "label": "beta.js",
+                "gzip": 20,
+                "kind": "initial"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

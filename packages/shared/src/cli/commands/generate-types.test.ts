@@ -230,4 +230,33 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(spawn).not.toHaveBeenCalled();
     expect(acquireSpawnLock).not.toHaveBeenCalled();
   });
+
+  test("reports the metric artifact when config/queries/metric-views.json exists", async () => {
+    // The metric path is additive: generateFromEntryPoint emits metric-views.d.ts
+    // as a sibling of the query out file whenever the config is present. The CLI
+    // announces it off the same dormancy signal.
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    fs.writeFileSync(
+      path.join(tmpRoot, "config", "queries", "metric-views.json"),
+      JSON.stringify({ metricViews: { revenue: { source: "c.s.revenue" } } }),
+    );
+
+    await runCli([tmpRoot, outFile, "wh-123"]);
+
+    const logged = consoleLog.mock.calls.flat().map(String);
+    expect(logged).toContain(`Generated query types: ${outFile}`);
+    expect(logged).toContain(
+      `Generated metric types: ${path.join(path.dirname(outFile), "metric-views.d.ts")}`,
+    );
+  });
+
+  test("omits the metric artifact line when metric-views.json is absent (dormant)", async () => {
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+
+    await runCli([tmpRoot, outFile, "wh-123"]);
+
+    const logged = consoleLog.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("Generated query types:");
+    expect(logged).not.toContain("Generated metric types:");
+  });
 });

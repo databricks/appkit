@@ -1,10 +1,10 @@
 /**
  * AppKit metric-source schema.
  *
- * Single source of truth for `metric.json`
+ * Single source of truth for `metric-views.json`
  * the config that activates the Analytics' metric-view path.
  *
- * `metric.json` declares UC Metric Views under a single `metricViews` map.
+ * `metric-views.json` declares UC Metric Views under a single `metricViews` map.
  * Each entry binds a metric key to a UC metric view FQN plus the executor
  * the query runs as:
  * - `executor: "app_service_principal"` (default) — queried as the app service
@@ -18,6 +18,26 @@
  */
 
 import { z } from "zod";
+import { UC_FQN_PATTERN } from "./metric-fqn";
+
+/**
+ * Three-part Unity Catalog FQN matcher, composed from the single-segment
+ * {@link UC_FQN_PATTERN} so the per-segment grammar has exactly one source of
+ * truth (shared by the type-generator runtime, which imports the zod-free
+ * {@link UC_FQN_PATTERN} directly — see `./metric-fqn.ts`).
+ *
+ * `UC_FQN_PATTERN` is `^<segment>+$`; stripping its `^`/`$` anchors yields the
+ * per-segment sub-pattern, which is joined with literal dots into
+ * `^<segment>\.<segment>\.<segment>$`. Exactly three dot-separated segments,
+ * each a valid UC object name. Arity (and the per-segment length cap) is also
+ * enforced structurally by the type-generator's `resolveMetricConfig`.
+ */
+const UC_FQN_SEGMENT_SOURCE = UC_FQN_PATTERN.source
+  .replace(/^\^/, "")
+  .replace(/\$$/, "");
+const UC_THREE_PART_FQN_PATTERN = new RegExp(
+  `^${UC_FQN_SEGMENT_SOURCE}\\.${UC_FQN_SEGMENT_SOURCE}\\.${UC_FQN_SEGMENT_SOURCE}$`,
+);
 
 export const metricKeySchema = z
   .string()
@@ -41,9 +61,7 @@ export const metricEntrySchema = z
   .object({
     source: z
       .string()
-      .regex(
-        /^[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$/,
-      )
+      .regex(UC_THREE_PART_FQN_PATTERN)
       .describe(
         "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
       )
@@ -75,7 +93,7 @@ export const metricSourceSchema = z
   })
   .strict()
   .describe(
-    "Schema for AppKit metric.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
+    "Schema for AppKit metric-views.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
   );
 
 export type MetricKey = z.infer<typeof metricKeySchema>;

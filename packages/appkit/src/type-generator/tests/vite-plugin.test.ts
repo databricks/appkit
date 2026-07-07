@@ -37,6 +37,9 @@ vi.mock("@databricks/sdk-experimental", () => ({
 }));
 
 const { appKitTypesPlugin } = await import("../vite-plugin");
+// Real constant values: the "../index" mock spreads the actual module, so these
+// are the genuine defaults the plugin resolves outFile from.
+const { ANALYTICS_TYPES_FILE, TYPES_DIR } = await import("../index");
 
 // The plugin hooks are loosely typed on Vite's Plugin; cast to the shapes we
 // actually drive so we can call them directly without a Vite build.
@@ -257,6 +260,148 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     );
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+  });
+
+  test("a metric-views.json change triggers a regeneration like a .sql edit", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    await buildStart();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // The metric-view config rides the exact same watcher → single-flight
+    // regenerate flow as a .sql edit (no separate machinery).
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "metric-views.json"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+  });
+
+  test("an unrelated file change does not trigger a regeneration", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    await buildStart();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // Inside the watched folder, but neither .sql nor metric-views.json.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "foo.txt"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+  });
+
+  test("a legacy-metric-views.json change does NOT regenerate; metric-views.json still does (basename match, not suffix)", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+    const buildStart = getHook<BuildStartHook>(plugin, "buildStart");
+
+    await buildStart();
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // Suffix-matches "metric-views.json" but is a different file — the
+    // basename check must not fire for it.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "legacy-metric-views.json"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+
+    // The real config file still triggers.
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "queries", "metric-views.json"),
+    );
+    await flush();
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("appKitTypesPlugin — metric option plumbing", () => {
+  const savedNodeEnv = process.env.NODE_ENV;
+  const savedWarehouseId = process.env.DATABRICKS_WAREHOUSE_ID;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+    // Keep the warehouse watch inert (DELETED no-ops) so only the foreground
+    // generate's arguments are asserted.
+    mocks.getWarehouseState.mockResolvedValue("DELETED" as WarehouseState);
+    mocks.startWarehouse.mockResolvedValue(undefined);
+    mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
+    process.env.NODE_ENV = "development";
+    process.env.DATABRICKS_WAREHOUSE_ID = "wh-test";
+  });
+
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedNodeEnv;
+
+    if (savedWarehouseId === undefined)
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+    else process.env.DATABRICKS_WAREHOUSE_ID = savedWarehouseId;
+  });
+
+  test("passes an unset metric out file through as undefined so the generator defaults it to a sibling of outFile", async () => {
+    await runPlugin();
+    await flush();
+
+    // configResolved resolves only outFile (and an explicitly-provided metric
+    // path) against projectRoot (config.root/..). An unset metric option stays
+    // undefined so generateFromEntryPoint computes its sibling-of-outFile
+    // default — identical final path in the all-defaults case, since the
+    // default outFile below lives in shared/<TYPES_DIR>/.
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outFile: path.resolve(
+          process.cwd(),
+          `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
+        ),
+        mvOutFile: undefined,
+      }),
+    );
+  });
+
+  test("a custom mvOutFile reaches generateFromEntryPoint", async () => {
+    const plugin = appKitTypesPlugin({
+      mvOutFile: "custom/types/metric-views.d.ts",
+    });
+    getHook<ConfigResolvedHook>(
+      plugin,
+      "configResolved",
+    )({
+      root: path.join(process.cwd(), "client"),
+    });
+    await getHook<BuildStartHook>(plugin, "buildStart")();
+    await flush();
+
+    expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mvOutFile: path.resolve(
+          process.cwd(),
+          "custom/types/metric-views.d.ts",
+        ),
+      }),
+    );
   });
 });
 

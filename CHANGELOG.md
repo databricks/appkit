@@ -66,6 +66,56 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.43.1](https://github.com/databricks/appkit/compare/v0.43.0...v0.43.1) (2026-07-07)
+
+### appkit-ui
+
+* **appkit-ui:** enable tree-shaking with sideEffects flag and modular echarts imports ([#442](https://github.com/databricks/appkit/issues/442)) ([b0fdd19](https://github.com/databricks/appkit/commit/b0fdd198adce7c06e34123adbec7b5cf72ec8f4b)), closes [package.json#sideEffects](https://github.com/databricks/package.json/issues/sideEffects)
+
+
+## [0.43.0](https://github.com/databricks/appkit/compare/v0.42.0...v0.43.0) (2026-07-01)
+
+* attribute outbound Databricks requests to AppKit consistently ([#453](https://github.com/databricks/appkit/issues/453)) ([d37f5f1](https://github.com/databricks/appkit/commit/d37f5f1aca462d62dc773f6bc24e5886499f21fd))
+
+
+## [0.42.0](https://github.com/databricks/appkit/compare/v0.41.7...v0.42.0) (2026-07-01)
+
+* skip dev warehouse auto-resolution in agentic mode ([#460](https://github.com/databricks/appkit/issues/460)) ([29b33da](https://github.com/databricks/appkit/commit/29b33da982a5fcd5e76b15ffd41a65e2233b4151))
+
+
+## [0.41.7](https://github.com/databricks/appkit/compare/v0.41.6...v0.41.7) (2026-07-01)
+
+### deps
+
+* **deps:** bump vulnerable transitive deps to patched versions ([#405](https://github.com/databricks/appkit/issues/405)) ([#434](https://github.com/databricks/appkit/issues/434)) ([36a3ce1](https://github.com/databricks/appkit/commit/36a3ce1ed45c23acb9f7c385d92f31c2fa369929))
+
+
+## [0.41.6](https://github.com/databricks/appkit/compare/v0.41.5...v0.41.6) (2026-06-24)
+
+### type-generator
+
+* **type-generator:** support IDENTIFIER() params via describe-time sample values ([#383](https://github.com/databricks/appkit/issues/383)) ([#435](https://github.com/databricks/appkit/issues/435)) ([4f03a79](https://github.com/databricks/appkit/commit/4f03a7917fe6d23773a701a832925f24f28cb673))
+
+
+## [0.41.5](https://github.com/databricks/appkit/compare/v0.41.4...v0.41.5) (2026-06-16)
+
+### appkit-ui
+
+* **appkit-ui:** dark mode fixes for charts ([#452](https://github.com/databricks/appkit/issues/452)) ([c0400f7](https://github.com/databricks/appkit/commit/c0400f7cf2a581ba41ef7fdefc69d7966b726c24))
+
+
 ## [0.41.4](https://github.com/databricks/appkit/compare/v0.41.3...v0.41.4) (2026-06-12)
 
 ### appkit
