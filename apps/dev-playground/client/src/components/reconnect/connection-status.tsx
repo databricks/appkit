@@ -49,7 +49,12 @@ export function ConnectionStatus({
       <Timeline status={status} messageCount={messageCount} />
 
       <div className="flex items-center justify-center gap-2">
-        <h2 className="text-4xl font-bold text-foreground">{messageCount}</h2>
+        <h2
+          data-testid="message-count"
+          className="text-4xl font-bold text-foreground"
+        >
+          {messageCount}
+        </h2>
         <p className="text-base text-muted-foreground">/ 5 messages received</p>
       </div>
     </Card>

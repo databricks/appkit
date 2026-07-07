@@ -33,6 +33,11 @@ const DEV_WAREHOUSE_WATCH_MAX_MS = 60_000;
 interface AppKitTypesPluginOptions {
   /* Path to the output d.ts file (relative to client folder). */
   outFile?: string;
+  /**
+   * Path to the metric registry d.ts file (relative to client folder).
+   * Defaults to a sibling of `outFile`, computed by the generator.
+   */
+  mvOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -45,6 +50,7 @@ interface AppKitTypesPluginOptions {
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
+  let mvOutFile: string | undefined;
   let watchFolders: string[];
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
@@ -94,6 +100,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         warehouseId,
         noCache: false,
         mode,
+        mvOutFile,
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -182,9 +189,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    *
    * Post-probe behaviour by state:
    *  - RUNNING → describe right away (the dev foreground degraded, so a running
-   *    warehouse would otherwise never get real types — this is the case Phase 3
-   *    restores). `waitUntilRunning` returns immediately for an already-running
-   *    warehouse, then the blocking regenerate fires.
+   *    warehouse would otherwise never get real types). `waitUntilRunning`
+   *    returns immediately for an already-running warehouse, then the blocking
+   *    regenerate fires.
    *  - STARTING → it's already coming up; just wait for RUNNING, then describe.
    *  - STOPPED / STOPPING → kick off a start, wait for RUNNING, then describe.
    *  - DELETED / DELETING → return (a deleted warehouse can't be started, and
@@ -296,6 +303,16 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         projectRoot,
         options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
+      // The metric out-path resolves against projectRoot only when explicitly
+      // provided; an unset option passes through as undefined so the generator
+      // computes its sibling-of-outFile default. In the all-defaults case the
+      // final path is identical (the default outFile above lives in
+      // shared/<TYPES_DIR>/), and a customized outFile now keeps its metric
+      // sibling next to it instead of pinning it under shared/.
+      mvOutFile =
+        options?.mvOutFile !== undefined
+          ? path.resolve(projectRoot, options.mvOutFile)
+          : undefined;
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),
       ];
@@ -326,13 +343,21 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           changedFile.startsWith(folder),
         );
 
-        if (isWatchedFile && changedFile.endsWith(".sql")) {
+        if (
+          isWatchedFile &&
+          (changedFile.endsWith(".sql") ||
+            // Basename equality, not endsWith: a sibling like
+            // "legacy-metric-views.json" must not trigger a regenerate —
+            // only the real config file does.
+            path.basename(changedFile) === "metric-views.json")
+        ) {
           // Route through the single-flight runner (was fire-and-forget
           // generate(), which could race the initial build / watch). This is a
           // dev-only hook, so degrade instantly (non-blocking), then re-arm the
-          // warehouse watch so the edited query is re-described in the background
-          // against the running warehouse (or once a still-starting one warms
-          // up), landing fresh blocking-described types.
+          // warehouse watch so the edited query or metric-view source is
+          // re-described in the background against the running warehouse (or
+          // once a still-starting one warms up), landing fresh
+          // blocking-described types.
           void runGenerate("non-blocking");
           armWarehouseWatch();
         }

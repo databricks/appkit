@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   createTimeSeriesData,
+  escapeHtml,
   formatLabel,
   sortTimeSeriesAscending,
   toChartArray,
@@ -126,6 +127,39 @@ describe("formatLabel", () => {
 
   test("handles mixed camelCase and snake_case", () => {
     expect(formatLabel("total_spendAmount")).toBe("Total Spend Amount");
+  });
+});
+
+describe("escapeHtml", () => {
+  test("escapes all five HTML special characters", () => {
+    expect(escapeHtml("&")).toBe("&amp;");
+    expect(escapeHtml("<")).toBe("&lt;");
+    expect(escapeHtml(">")).toBe("&gt;");
+    expect(escapeHtml('"')).toBe("&quot;");
+    expect(escapeHtml("'")).toBe("&#39;");
+  });
+
+  test("escapes all special characters in a combined string", () => {
+    expect(escapeHtml(`<img src="x" onerror='alert(1)'>&`)).toBe(
+      "&lt;img src=&quot;x&quot; onerror=&#39;alert(1)&#39;&gt;&amp;",
+    );
+  });
+
+  test("escapes ampersand first so generated entities are not double-encoded", () => {
+    // "&" is replaced before "<" and ">", so the entities produced by
+    // escaping "<" and ">" keep their single "&" prefix.
+    expect(escapeHtml("<&>")).toBe("&lt;&amp;&gt;");
+  });
+
+  test("double-escapes pre-escaped input (expected for raw data)", () => {
+    // escapeHtml assumes raw, unescaped input; already-escaped entities
+    // are escaped again. This is intentional for untrusted data.
+    expect(escapeHtml("&amp;")).toBe("&amp;amp;");
+  });
+
+  test("leaves safe strings unchanged", () => {
+    expect(escapeHtml("hello world 123")).toBe("hello world 123");
+    expect(escapeHtml("")).toBe("");
   });
 });
 

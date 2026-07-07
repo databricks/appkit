@@ -2,12 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   convertToQueryType,
   defaultForType,
+  extractParameterDefaults,
   extractParameters,
   extractParameterTypes,
   getProtectedRanges,
   inferParameterTypes,
   normalizeTypeName,
   SERVER_INJECTED_PARAMS,
+  substituteParametersForDescribe,
 } from "../query-registry";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
@@ -588,5 +590,192 @@ describe("substitution skips protected ranges", () => {
     expect(result).toContain(":skip_me");
     expect(result).not.toContain(":keep");
     expect(result).toContain("id = ''");
+  });
+});
+
+describe("extractParameterDefaults", () => {
+  test("returns empty object when no sample values are present", () => {
+    const sql =
+      "-- @param startDate DATE\nSELECT * FROM t WHERE d = :startDate";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("quotes string-like sample values", () => {
+    const sql = [
+      "-- @param target_catalog STRING = main",
+      "-- @param since DATE = 2024-01-01",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      target_catalog: "'main'",
+      since: "'2024-01-01'",
+    });
+  });
+
+  test("passes numeric and boolean sample values through verbatim", () => {
+    const sql = [
+      "-- @param limit INT = 100",
+      "-- @param ratio DOUBLE = 0.5",
+      "-- @param active BOOLEAN = true",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      limit: "100",
+      ratio: "0.5",
+      active: "true",
+    });
+  });
+
+  test("leaves already-quoted values untouched and escapes embedded quotes", () => {
+    const sql = [
+      "-- @param a STRING = 'pre-quoted'",
+      "-- @param b STRING = O'Brien",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      a: "'pre-quoted'",
+      b: "'O''Brien'",
+    });
+  });
+
+  test("ignores @param lines without a value", () => {
+    const sql = "-- @param onlyType STRING\nSELECT 1";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("rejects numeric sample values that aren't plain numbers (no injection)", () => {
+    const sql = [
+      "-- @param n INT = 0) UNION SELECT secret FROM creds --",
+      "-- @param r DOUBLE = 1; DROP TABLE x",
+      "SELECT 1",
+    ].join("\n");
+    // Both fail strict numeric validation and are dropped (not substituted),
+    // so they fall back to the safe type default during DESCRIBE.
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("rejects non-boolean BOOLEAN sample values", () => {
+    const sql = "-- @param flag BOOLEAN = 1 OR 1=1\nSELECT 1";
+    expect(extractParameterDefaults(sql)).toEqual({});
+  });
+
+  test("accepts well-formed BINARY and rejects malformed BINARY", () => {
+    expect(
+      extractParameterDefaults("-- @param b BINARY = X'00'\nSELECT 1"),
+    ).toEqual({ b: "X'00'" });
+    expect(
+      extractParameterDefaults("-- @param b BINARY = X'00' OR 1=1\nSELECT 1"),
+    ).toEqual({});
+  });
+
+  test("neutralizes a string value that isn't a well-formed literal by escaping it", () => {
+    const sql = ["-- @param x STRING = 'a' OR 1=1 OR 'b'", "SELECT 1"].join(
+      "\n",
+    );
+    // The lone interior quotes mean this isn't a single well-formed literal, so
+    // it's treated as raw content and fully escaped — one inert string literal,
+    // no SQL break-out.
+    expect(extractParameterDefaults(sql)).toEqual({
+      x: "'''a'' OR 1=1 OR ''b'''",
+    });
+  });
+
+  test("escapes backslashes so a string value can't break out via \\'", () => {
+    // Databricks/Spark treats `\` as an escape inside string literals, so
+    // doubling only `'` is not enough: `x\' UNION ...` quoted as `'x\'' ...'`
+    // would let `\'` escape the first quote and the next `'` close the literal,
+    // turning the rest into executable SQL. Escaping `\` -> `\\` first keeps the
+    // value as one inert literal.
+    const sql = [
+      "-- @param x STRING = x\\' UNION SELECT secret FROM creds --",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(sql)).toEqual({
+      x: "'x\\\\'' UNION SELECT secret FROM creds --'",
+    });
+    // A backslash-bearing "looks pre-quoted" value is not trusted either: it is
+    // re-escaped rather than passed through (an unterminated `'a\'`).
+    expect(
+      extractParameterDefaults("-- @param y STRING = 'a\\'\nSELECT 1"),
+    ).toEqual({ y: "'''a\\\\'''" });
+  });
+
+  test("a value-less `=` line does not swallow the following line", () => {
+    // `\s` would match the newline and capture the next line as the value; the
+    // horizontal-only whitespace class makes this line simply not match, so the
+    // param falls back to its type placeholder during DESCRIBE.
+    const blankValue = ["-- @param target_catalog STRING =", "SELECT 1"].join(
+      "\n",
+    );
+    expect(extractParameterDefaults(blankValue)).toEqual({});
+
+    // ...and it must not consume the *next* @param annotation either.
+    const blankThenNext = [
+      "-- @param a STRING =",
+      "-- @param b INT = 5",
+      "SELECT 1",
+    ].join("\n");
+    expect(extractParameterDefaults(blankThenNext)).toEqual({ b: "5" });
+  });
+});
+
+describe("substituteParametersForDescribe (IDENTIFIER support, #383)", () => {
+  test("empty-string default produces malformed SQL for IDENTIFIER params", () => {
+    // Reproduces the bug: with no sample value, an untyped IDENTIFIER param
+    // collapses to '' and yields IDENTIFIER('' || '.schema.table'), a leading-dot
+    // identifier that Databricks rejects with PARSE_SYNTAX_ERROR.
+    const sql = "SELECT * FROM IDENTIFIER(:target_catalog || '.sales.nation')";
+    expect(substituteParametersForDescribe(sql)).toBe(
+      "SELECT * FROM IDENTIFIER('' || '.sales.nation')",
+    );
+  });
+
+  test("sample value resolves IDENTIFIER to a real, describable table", () => {
+    const sql = [
+      "-- @param target_catalog STRING = main",
+      "SELECT * FROM IDENTIFIER(:target_catalog || '.sales.nation')",
+    ].join("\n");
+    const out = substituteParametersForDescribe(sql);
+    expect(out).toContain("IDENTIFIER('main' || '.sales.nation')");
+    expect(out).not.toContain(":target_catalog");
+  });
+
+  test("sample value wins over the type-based default", () => {
+    const sql = [
+      "-- @param status STRING = active",
+      "SELECT * FROM t WHERE status = :status",
+    ].join("\n");
+    expect(substituteParametersForDescribe(sql)).toContain("status = 'active'");
+  });
+
+  test("falls back to the type default when no sample value is given", () => {
+    const sql = ["-- @param limit INT", "SELECT * FROM t LIMIT :limit"].join(
+      "\n",
+    );
+    expect(substituteParametersForDescribe(sql)).toBe(
+      "-- @param limit INT\nSELECT * FROM t LIMIT 0",
+    );
+  });
+
+  test("does not substitute placeholders inside string literals", () => {
+    const sql = "SELECT ':target_catalog' AS lit, :target_catalog AS p";
+    const sql2 = ["-- @param target_catalog STRING = main", sql].join("\n");
+    const out = substituteParametersForDescribe(sql2);
+    expect(out).toContain("':target_catalog' AS lit");
+    expect(out).toContain("'main' AS p");
+  });
+
+  test("rejects an injection attempt in a numeric param, falling back to the placeholder", () => {
+    const sql = [
+      "-- @param n INT = 1); DROP TABLE x --",
+      "SELECT * FROM t LIMIT :n",
+    ].join("\n");
+    const out = substituteParametersForDescribe(sql);
+    // The malicious value is dropped; :n falls back to the INT default 0, so the
+    // payload never reaches the executable LIMIT clause. (It survives only in the
+    // @param comment line, which is inert.)
+    expect(out).toContain("SELECT * FROM t LIMIT 0");
+    expect(out).not.toContain(":n");
+    expect(out).not.toContain("LIMIT 1)");
   });
 });

@@ -45,10 +45,19 @@ export class StreamRegistry {
     const allStreams = this.streams.getAll();
 
     for (const stream of allStreams) {
+      this._clearGraceTimer(stream);
       stream.abortController.abort("Server shutdown");
     }
 
     this.streams.clear();
+  }
+
+  // clear a pending grace timer so a removed stream isn't pinned until it fires
+  private _clearGraceTimer(stream: StreamEntry): void {
+    if (stream.disconnectGraceTimer) {
+      clearTimeout(stream.disconnectGraceTimer);
+      stream.disconnectGraceTimer = undefined;
+    }
   }
 
   // evict the oldest stream from the registry
@@ -83,6 +92,7 @@ export class StreamRegistry {
           }
         }
       }
+      this._clearGraceTimer(oldestStream);
       oldestStream.abortController.abort("Stream evicted");
       this.streams.remove(oldestStream.streamId);
     }
