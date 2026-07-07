@@ -19,7 +19,13 @@ import {
 import * as echarts from "echarts/core";
 import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
-import ReactEChartsCore from "echarts-for-react/lib/core";
+// Import the ESM core build, not `echarts-for-react/lib/core` (CJS). The package
+// has no `exports` map, so `/lib/core` resolves to the literal CommonJS file
+// whose default export is `module.exports`; under ESM default-import interop a
+// consumer's bundler hands back the whole `{ default, __esModule }` object rather
+// than the component, so `<ReactEChartsCore/>` renders an object and React throws
+// "Element type is invalid". `esm/core` is real ESM with a true `export default`.
+import ReactEChartsCore from "echarts-for-react/esm/core";
 import { useCallback, useMemo, useRef } from "react";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
