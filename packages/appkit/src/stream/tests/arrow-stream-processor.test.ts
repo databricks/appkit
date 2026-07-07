@@ -85,6 +85,46 @@ describe("ArrowStreamProcessor.streamChunks", () => {
     ]);
   });
 
+  test("does not abort a healthy download when the consumer stalls between reads (backpressure)", async () => {
+    // Body emits [1] immediately, then nothing until the test enqueues more.
+    // It errors if the attempt's abort signal fires — mirroring a real fetch
+    // being aborted. If the idle timer stayed armed across the downstream
+    // `yield`, a slow consumer would trip it and kill this healthy stream.
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    globalThis.fetch = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            bodyController = c;
+            c.enqueue(new Uint8Array([1]));
+          },
+        });
+        init?.signal?.addEventListener("abort", () =>
+          bodyController.error(new Error("idle-aborted")),
+        );
+        return { ok: true, status: 200, body } as unknown as Response;
+      },
+    );
+
+    const p = new ArrowStreamProcessor({ timeout: 50, retries: 1 });
+    const gen = p.streamChunks(mockChunks(1));
+
+    const first = await gen.next();
+    expect([...(first.value as Uint8Array)]).toEqual([1]);
+
+    // Consumer stalls well past the 50ms idle timeout while suspended at yield.
+    await new Promise((r) => setTimeout(r, 120));
+
+    // The download is still healthy — the rest streams through.
+    bodyController.enqueue(new Uint8Array([2]));
+    bodyController.close();
+
+    const second = await gen.next();
+    expect(second.done).toBe(false);
+    expect([...(second.value as Uint8Array)]).toEqual([2]);
+    expect((await gen.next()).done).toBe(true);
+  });
+
   test("downloads lazily — one fetch per pulled chunk, not all upfront", async () => {
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     const iterator = processor.streamChunks(mockChunks(3));

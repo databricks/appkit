@@ -498,25 +498,12 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }, firstByteTimeoutMs);
 
     try {
-      const workspaceClient = getWorkspaceClient();
-      const warehouseId = await getWarehouseId();
-      const startupTimeoutMs =
-        this.config.warehouseStartupTimeoutMs ??
-        DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
-      const autoStart = this.config.autoStartWarehouse ?? true;
-
-      await this.SQLClient.ensureWarehouseRunning(
-        workspaceClient,
-        warehouseId,
-        {
-          signal,
-          timeoutMs: startupTimeoutMs,
-          autoStart,
-          // No SSE progress channel on the direct-binary path — readiness is
-          // simply awaited.
-          onStatus: () => {},
-        },
-      );
+      // Run warehouse readiness in the SAME identity context as the query:
+      // for `.obo.sql`, `executor` is the `asUser(req)` proxy, so
+      // `getWorkspaceClient()` inside resolves to the user's client (matching
+      // the SSE path). Calling it bare here would auto-start the warehouse as
+      // the service principal even for OBO requests.
+      await executor._ensureArrowWarehouseReady(signal);
 
       const processedParams = await this.queryProcessor.processQueryParams(
         query,
@@ -594,6 +581,28 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     } finally {
       res.off("close", onClose);
     }
+  }
+
+  /**
+   * Await SQL warehouse readiness for the direct-binary Arrow path. There is no
+   * SSE progress channel here — readiness is simply awaited, bounded by the
+   * caller's abort signal / fail-fast timeout. Invoked via the request executor
+   * (`asUser(req)` for `.obo.sql`) so `getWorkspaceClient()` resolves in the
+   * correct identity context rather than defaulting to the service principal.
+   */
+  async _ensureArrowWarehouseReady(signal: AbortSignal): Promise<void> {
+    const workspaceClient = getWorkspaceClient();
+    const warehouseId = await getWarehouseId();
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStart = this.config.autoStartWarehouse ?? true;
+    await this.SQLClient.ensureWarehouseRunning(workspaceClient, warehouseId, {
+      signal,
+      timeoutMs: startupTimeoutMs,
+      autoStart,
+      onStatus: () => {},
+    });
   }
 
   /**
@@ -714,6 +723,15 @@ export function writeChunk(
   bytes: Uint8Array,
 ): Promise<void> {
   const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // If the socket is already gone, `res.write` won't return true and the
+  // `drain`/`close`/`error` events have already fired — so the promise below
+  // would never settle, wedging the for-await loop and the upstream reader.
+  // Reject up front instead.
+  if (res.destroyed || res.writableEnded) {
+    return Promise.reject(
+      new DOMException("The response stream closed", "AbortError"),
+    );
+  }
   if (res.write(buf)) return Promise.resolve();
   // Backpressured: resolve on `drain`, but also settle on `close`/`error`. A
   // client that disconnects mid-backpressure never emits `drain` on the

@@ -843,9 +843,13 @@ describe("Analytics Plugin", () => {
           statement_id: "obo-stmt",
         };
       });
-      const asUserSpy = vi
-        .spyOn(plugin as any, "asUser")
-        .mockReturnValue({ query: userExecutorQuery });
+      // Warehouse readiness must run through the user-context executor too, so
+      // `getWorkspaceClient()` resolves to the user (not the SP) for `.obo.sql`.
+      const ensureReadyMock = vi.fn().mockResolvedValue(undefined);
+      const asUserSpy = vi.spyOn(plugin as any, "asUser").mockReturnValue({
+        query: userExecutorQuery,
+        _ensureArrowWarehouseReady: ensureReadyMock,
+      });
 
       const streamExternalLinksMock = vi.fn(function* (_chunks: unknown) {
         yield new Uint8Array([1, 2, 3]);
@@ -862,9 +866,11 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // The user context (asUser) executor ran the queries — not the SP `this`.
+      // The user context (asUser) executor ran the queries AND the warehouse
+      // readiness — not the SP `this`.
       expect(asUserSpy).toHaveBeenCalledWith(mockReq);
       expect(userExecutorQuery).toHaveBeenCalled();
+      expect(ensureReadyMock).toHaveBeenCalled();
       // The links the user-context executor resolved are streamed directly —
       // no re-fetch under a different identity.
       expect(streamExternalLinksMock).toHaveBeenCalledTimes(1);
@@ -1743,6 +1749,24 @@ describe("Analytics Plugin", () => {
       expect(res.listenerCount("drain")).toBe(0);
       expect(res.listenerCount("close")).toBe(0);
       expect(res.listenerCount("error")).toBe(0);
+    });
+
+    test("rejects up front if the socket is already closed when called", async () => {
+      // Socket already destroyed before writeChunk runs: `close`/`error` have
+      // already fired, so attaching listeners would never settle. The guard
+      // must reject without writing or waiting.
+      const res = {
+        destroyed: true,
+        writableEnded: false,
+        write: vi.fn(() => false),
+        once: vi.fn(),
+        off: vi.fn(),
+      };
+      await expect(
+        writeChunk(res as never, new Uint8Array([1, 2, 3])),
+      ).rejects.toThrow();
+      expect(res.write).not.toHaveBeenCalled();
+      expect(res.once).not.toHaveBeenCalled();
     });
   });
 });

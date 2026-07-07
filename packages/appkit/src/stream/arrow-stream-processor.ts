@@ -134,14 +134,22 @@ export class ArrowStreamProcessor {
       const reader = body.getReader();
       try {
         while (true) {
-          // Reset the idle timeout before each read: a stalled body (no bytes
-          // for `timeout` ms) aborts the download rather than hanging.
-          clearTimeout(idleTimer);
+          // The idle timeout must cover ONLY the upstream read, never the
+          // downstream `yield`. Arm it right before `reader.read()` and clear
+          // it the instant the read resolves — if it stayed armed across the
+          // yield, a slow client backpressuring `writeChunk` would look like an
+          // upstream stall and abort a perfectly healthy download.
           idleTimer = setTimeout(
             () => controller.abort(),
             this.options.timeout,
           );
-          const { done, value } = await reader.read();
+          let done: boolean;
+          let value: Uint8Array | undefined;
+          try {
+            ({ done, value } = await reader.read());
+          } finally {
+            clearTimeout(idleTimer);
+          }
           if (done) break;
           if (value && value.byteLength > 0) yield value;
         }
