@@ -1,0 +1,73 @@
+name: Bundle Size
+
+# On PRs: build the packages, diff their sizes against the committed baseline
+# (bundle-size-baseline.json), post a sticky comment, and fail the check only
+# when a package's packed tarball grows past the budget in tools/bundle-size.ts.
+#
+# The baseline is refreshed by the release pipeline, not here: prepare-release
+# regenerates bundle-size-baseline.json from the released build and uploads it,
+# and finalize-release.ts commits it via the release App (the only actor allowed
+# to push to protected main). So PRs diff against the last released version.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/appkit/**'
+      - 'packages/appkit-ui/**'
+      - 'packages/shared/**'
+      - 'bundle-size-baseline.json'
+      - 'tools/bundle-size.ts'
+      - '.github/workflows/bundle-size.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Report bundle size
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write # setup-jfrog-npm exchanges an OIDC token for registry auth
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build packages
+        run: pnpm build
+      - name: Compare bundle size against baseline
+        id: size
+        run: pnpm exec tsx tools/bundle-size.ts --compare --markdown bundle-size-comment.md
+
+      # Fork PRs get a read-only GITHUB_TOKEN, so commenting would 403 and the
+      # gate would surface a failure the author can't act on. Skip both for
+      # forks — the sizes are still printed in the job log above.
+      - name: Upsert bundle-size comment
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          COMMENT_PATH: bundle-size-comment.md
+        with:
+          script: |
+            const upsert = require('./.github/scripts/upsert-bundle-size-comment.cjs');
+            await upsert({ github, context });
+
+      - name: Fail if over budget
+        if: steps.size.outputs.exceeded == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "::error::Bundle size over budget: a package's shipped tarball, or a browser entry's consumer bundle (deps included), grew past the budget. See the PR comment for details. Reduce the size, or acknowledge the increase by updating bundle-size-baseline.json."
+          exit 1

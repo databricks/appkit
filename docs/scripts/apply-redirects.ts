@@ -1,5 +1,5 @@
 /**
- * Replaces all generated HTML pages with redirect pages pointing to DevHub.
+ * Replaces all generated HTML pages with redirect pages pointing to developers.databricks.com.
  * Run AFTER `docusaurus build` so that llms.txt and .md files are generated
  * from the original HTML content first.
  *
@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUILD_DIR = join(__dirname, "../build");
-const DEVHUB_BASE = "https://www.databricks.com/devhub/docs/appkit/v0";
+const DOCS_BASE = "https://developers.databricks.com/docs/appkit/v0";
 
 function generateRedirectHtml(targetUrl: string): string {
   return `<!DOCTYPE html>
@@ -48,7 +48,7 @@ if (!existsSync(BUILD_DIR)) {
   process.exit(1);
 }
 
-console.log("Applying DevHub redirects to HTML pages...");
+console.log("Applying developers.databricks.com redirects to HTML pages...");
 
 const htmlFiles = findHtmlFiles(BUILD_DIR);
 let count = 0;
@@ -59,11 +59,12 @@ for (const htmlPath of htmlFiles) {
     .slice(BUILD_DIR.length)
     .replace(/\/index\.html$/, "");
 
-  // Map /docs/{path} → devhub /{path} (devhub flattens the /docs/ prefix)
+  // Map /docs/{path} → /{path} (the target base already includes /docs/appkit/v0,
+  // so strip the local docusaurus /docs/ route prefix before appending)
   const pathWithoutDocs = relativePath.replace(/^\/docs\/?/, "/");
-  const devhubUrl = `${DEVHUB_BASE}${pathWithoutDocs || "/"}`;
+  const targetUrl = `${DOCS_BASE}${pathWithoutDocs || "/"}`;
 
-  writeFileSync(htmlPath, generateRedirectHtml(devhubUrl));
+  writeFileSync(htmlPath, generateRedirectHtml(targetUrl));
   count++;
 }
 
@@ -77,13 +78,13 @@ const notFoundHtml = `<!DOCTYPE html>
     (function() {
       var path = window.location.pathname.replace(/^\\/appkit\\/?/, '/');
       path = path.replace(/^\\/docs\\/?/, '/');
-      var target = "${DEVHUB_BASE}" + path + window.location.search + window.location.hash;
+      var target = "${DOCS_BASE}" + path + window.location.search + window.location.hash;
       window.location.replace(target);
     })();
   </script>
 </head>
 <body>
-  <p>Redirecting to <a href="${DEVHUB_BASE}/">AppKit Documentation</a>&hellip;</p>
+  <p>Redirecting to <a href="${DOCS_BASE}/">AppKit Documentation</a>&hellip;</p>
 </body>
 </html>`;
 writeFileSync(join(BUILD_DIR, "404.html"), notFoundHtml);

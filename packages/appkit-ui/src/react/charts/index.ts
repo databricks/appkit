@@ -63,6 +63,7 @@ export {
 
 export {
   useAllThemeColors,
+  useChartUITokens,
   useThemeColors,
 } from "./theme";
 
@@ -110,6 +111,7 @@ export type {
   ChartColorPalette,
   ChartData,
   ChartType,
+  ChartUITokens,
   // Data formats
   DataFormat,
   DataProps,

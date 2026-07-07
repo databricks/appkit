@@ -1,0 +1,11 @@
+{
+  "metricViews": {
+    "revenue": {
+      "source": "appkit_demo.public.revenue_metrics"
+    },
+    "customers": {
+      "source": "appkit_demo.public.customer_metrics",
+      "executor": "user"
+    }
+  }
+}

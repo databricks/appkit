@@ -75,6 +75,14 @@ async function runGenerateTypes(
           mode,
         });
         console.log(`Generated query types: ${resolvedOutFile}`);
+
+        const metricConfig = path.join(queryFolder, "metric-views.json");
+        if (fs.existsSync(metricConfig)) {
+          const typesDir = path.dirname(resolvedOutFile);
+          console.log(
+            `Generated metric types: ${path.join(typesDir, "metric-views.d.ts")}`,
+          );
+        }
       }
     } else {
       console.error(

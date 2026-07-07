@@ -1,0 +1,50 @@
+name: Close Inactive PRs
+
+on:
+  schedule:
+    # Run daily at 08:00 UTC
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  stale:
+    name: Mark and Close Inactive PRs
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
+        with:
+          # Only operate on pull requests, leave issues untouched.
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+
+          # Mark a PR stale after 23 days of inactivity, then close it 7 days
+          # later — closing inactive PRs roughly one month after their last update.
+          days-before-pr-stale: 23
+          days-before-pr-close: 7
+
+          stale-pr-label: stale
+          exempt-pr-labels: no-stale,work-in-progress,dependencies
+
+          stale-pr-message: >
+            This pull request has had no activity for 23 days and has been marked as stale.
+            It will be closed in 7 days if there is no further activity. Add a comment,
+            push a commit, or apply the `no-stale` label to keep it open.
+          close-pr-message: >
+            This pull request has been automatically closed because it had no activity
+            for a month. Feel free to reopen it if you would like to continue the work.
+
+          # Process the oldest PRs first and cap operations per run to stay
+          # within API rate limits.
+          ascending: true
+          operations-per-run: 60
