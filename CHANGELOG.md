@@ -76,6 +76,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.43.1](https://github.com/databricks/appkit/compare/v0.43.0...v0.43.1) (2026-07-07)
+
+### appkit-ui
+
+* **appkit-ui:** enable tree-shaking with sideEffects flag and modular echarts imports ([#442](https://github.com/databricks/appkit/issues/442)) ([b0fdd19](https://github.com/databricks/appkit/commit/b0fdd198adce7c06e34123adbec7b5cf72ec8f4b)), closes [package.json#sideEffects](https://github.com/databricks/package.json/issues/sideEffects)
+
+
 ## [0.43.0](https://github.com/databricks/appkit/compare/v0.42.0...v0.43.0) (2026-07-01)
 
 * attribute outbound Databricks requests to AppKit consistently ([#453](https://github.com/databricks/appkit/issues/453)) ([d37f5f1](https://github.com/databricks/appkit/commit/d37f5f1aca462d62dc773f6bc24e5886499f21fd))
