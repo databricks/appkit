@@ -48,6 +48,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
 | [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
+| [GenerationParams](Interface.GenerationParams.md) | Optional generation parameters forwarded to the OpenAI-compatible serving request body. Names match the serving API wire keys. Only keys that are set are sent — undefined values are omitted so the endpoint applies its own defaults. Ranges are not validated here; the serving endpoint validates. |
 | [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [JobAPI](Interface.JobAPI.md) | User-facing API for a single configured job. |

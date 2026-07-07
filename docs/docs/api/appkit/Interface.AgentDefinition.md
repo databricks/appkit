@@ -37,6 +37,20 @@ future calls and accumulate unbounded state in the default
 
 ***
 
+### generationParams?
+
+```ts
+optional generationParams: GenerationParams;
+```
+
+Optional generation parameters (`temperature`, `top_p`, `stop`,
+`frequency_penalty`, `presence_penalty`) forwarded to the OpenAI-compatible
+serving request body. Only set keys are sent. Applied only when AppKit
+builds the adapter itself (string or omitted `model`); when you pass a
+pre-built `AgentAdapter`, configure generation params on it directly.
+
+***
+
 ### instructions
 
 ```ts
