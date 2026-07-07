@@ -338,6 +338,20 @@ describe("ServiceContext", () => {
       expect(await state.warehouseId).toBe("env-wh-abc");
     });
 
+    test("should skip auto-resolve in dev mode when agentic mode is enabled", async () => {
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.NODE_ENV = "development";
+      process.env.DATABRICKS_APPS_AGENTIC_MODE = "true";
+
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
+      // Must not attempt to list warehouses in agentic mode.
+      expect(mockApiRequest).not.toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/2.0/sql/warehouses" }),
+      );
+    });
+
     test("should auto-discover warehouse in development mode", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "development";

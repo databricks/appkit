@@ -5,16 +5,12 @@ import {
   type sql,
   WorkspaceClient,
 } from "@databricks/sdk-experimental";
-import { coerce } from "semver";
-import {
-  name as productName,
-  version as productVersion,
-} from "../../package.json";
 import {
   AuthenticationError,
   ConfigurationError,
   InitializationError,
 } from "../errors";
+import { getClientOptions } from "./client-options";
 import type { UserContext } from "./user-context";
 
 /**
@@ -30,19 +26,6 @@ export interface ServiceContextState {
   warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
   workspaceId: Promise<string>;
-}
-
-function getClientOptions(): ClientOptions {
-  const isDev = process.env.NODE_ENV === "development";
-  const semver = coerce(productVersion);
-  const normalizedVersion = (semver?.version ??
-    productVersion) as ClientOptions["productVersion"];
-
-  return {
-    product: productName,
-    productVersion: normalizedVersion,
-    ...(isDev && { userAgentExtra: { mode: "dev" } }),
-  };
 }
 
 /**
@@ -236,7 +219,11 @@ export class ServiceContext {
       return process.env.DATABRICKS_WAREHOUSE_ID;
     }
 
-    if (process.env.NODE_ENV === "development") {
+    const agenticMode =
+      process.env.DATABRICKS_APPS_AGENTIC_MODE === "true" ||
+      process.env.DATABRICKS_APPS_AGENTIC_MODE === "1";
+
+    if (process.env.NODE_ENV === "development" && !agenticMode) {
       const response = (await client.apiClient.request({
         path: "/api/2.0/sql/warehouses",
         method: "GET",

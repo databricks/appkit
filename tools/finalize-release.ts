@@ -88,6 +88,17 @@ if (existsSync(noticeSrc)) {
   console.log("✓ NOTICE.md copied");
 }
 
+// 3b. Copy the bundle-size baseline if present (regenerated during
+// prepare-release from the released build). Committed below via `git add -A`
+// so PRs diff against the last released version. appkit stream only.
+if (stream === "appkit") {
+  const baselineSrc = join(artifactsDir, "bundle-size-baseline.json");
+  if (existsSync(baselineSrc)) {
+    copyFileSync(baselineSrc, join(ROOT, "bundle-size-baseline.json"));
+    console.log("✓ bundle-size-baseline.json copied");
+  }
+}
+
 // 4. Commit and tag (do NOT push)
 run("git", ["add", "-A"]);
 run("git", ["commit", "-s", "-m", `chore: release ${tag} [skip ci]`]);

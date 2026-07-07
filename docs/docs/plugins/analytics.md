@@ -61,6 +61,34 @@ at the call site.
 - `FLOAT`, `DOUBLE` — bind via `sql.float()` / `sql.double()`
 - `NUMERIC`, `DECIMAL` — bind via `sql.numeric()` (pass strings for precision)
 
+### Sample values for type generation
+
+Some queries only have a valid shape once a parameter has a concrete value — most
+commonly a dynamic table name built with `IDENTIFIER()`. During type generation
+AppKit runs `DESCRIBE QUERY` with placeholder defaults, so an unresolved parameter
+collapses to an empty string and produces invalid SQL
+(`IDENTIFIER('' || '.schema.table')` → `PARSE_SYNTAX_ERROR`).
+
+Append `= value` to a `-- @param` annotation to give type generation a sample
+value. It is used **only** while describing the query; at runtime the real
+parameter is still bound, so the query stays portable across environments:
+
+```sql
+-- @param target_catalog STRING = main
+SELECT *
+FROM IDENTIFIER(:target_catalog || '.sales.nation')
+```
+
+Type generation describes `main.sales.nation` to infer the result columns, while
+the deployed app binds whatever catalog the caller passes. String, `DATE`, and
+`TIMESTAMP` values are quoted automatically (`= main` → `'main'`), and an
+already-quoted literal is kept as-is (`= '2024-01-01'`). Numeric, `BOOLEAN`, and
+`BINARY` values are validated against a strict literal shape (`= 100`, `= true`,
+`= X'00'`); a value that doesn't match — anything that could otherwise inject SQL
+into the describe statement — is ignored and the parameter falls back to its
+type-based placeholder, so a sample value can never break out of the
+`DESCRIBE QUERY`.
+
 ## Server-injected parameters
 
 `:workspaceId` is **injected by the server** and **must not** be annotated:
