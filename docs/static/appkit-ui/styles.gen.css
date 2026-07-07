@@ -56,7 +56,6 @@
     --default-font-family: var(--font-sans);
     --default-mono-font-family: var(--font-mono);
     --radius: var(--radius);
-    --color-border: var(--border);
   }
 }
 @layer base {
@@ -407,9 +406,6 @@
   .my-0 {
     margin-block: calc(var(--spacing) * 0);
   }
-  .my-0\.5 {
-    margin-block: calc(var(--spacing) * 0.5);
-  }
   .my-1 {
     margin-block: calc(var(--spacing) * 1);
   }
@@ -639,9 +635,6 @@
   .h-\[1\.15rem\] {
     height: 1.15rem;
   }
-  .h-\[120px\] {
-    height: 120px;
-  }
   .h-\[150px\] {
     height: 150px;
   }
@@ -707,12 +700,6 @@
   }
   .w-\(--sidebar-width\) {
     width: var(--sidebar-width);
-  }
-  .w-0 {
-    width: calc(var(--spacing) * 0);
-  }
-  .w-1 {
-    width: calc(var(--spacing) * 1);
   }
   .w-1\/2 {
     width: calc(1/2 * 100%);
@@ -1233,10 +1220,6 @@
     border-style: var(--tw-border-style);
     border-width: 0px;
   }
-  .border-\[1\.5px\] {
-    border-style: var(--tw-border-style);
-    border-width: 1.5px;
-  }
   .border-y {
     border-block-style: var(--tw-border-style);
     border-block-width: 1px;
@@ -1261,17 +1244,8 @@
     --tw-border-style: dashed;
     border-style: dashed;
   }
-  .border-\(--color-border\) {
-    border-color: var(--color-border);
-  }
   .border-border {
     border-color: var(--border);
-  }
-  .border-border\/50 {
-    border-color: var(--border);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--border) 50%, transparent);
-    }
   }
   .border-border\/60 {
     border-color: var(--border);
@@ -1296,9 +1270,6 @@
   }
   .border-l-transparent {
     border-left-color: transparent;
-  }
-  .bg-\(--color-bg\) {
-    background-color: var(--color-bg);
   }
   .bg-accent {
     background-color: var(--accent);
@@ -1768,10 +1739,6 @@
   }
   .shadow-sm {
     --tw-shadow: 0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
-    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
-  }
-  .shadow-xl {
-    --tw-shadow: 0 20px 25px -5px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
   .shadow-xs {
@@ -4386,84 +4353,6 @@
       }
     }
   }
-  .\[\&_\.recharts-cartesian-axis-tick_text\]\:fill-muted-foreground {
-    & .recharts-cartesian-axis-tick text {
-      fill: var(--muted-foreground);
-    }
-  }
-  .\[\&_\.recharts-cartesian-grid_line\[stroke\=\'\#ccc\'\]\]\:stroke-border\/50 {
-    & .recharts-cartesian-grid line[stroke='#ccc'] {
-      stroke: var(--border);
-      @supports (color: color-mix(in lab, red, red)) {
-        stroke: color-mix(in oklab, var(--border) 50%, transparent);
-      }
-    }
-  }
-  .\[\&_\.recharts-curve\.recharts-tooltip-cursor\]\:stroke-border {
-    & .recharts-curve.recharts-tooltip-cursor {
-      stroke: var(--border);
-    }
-  }
-  .\[\&_\.recharts-dot\[stroke\=\'\#fff\'\]\]\:stroke-transparent {
-    & .recharts-dot[stroke='#fff'] {
-      stroke: transparent;
-    }
-  }
-  .\[\&_\.recharts-layer\]\:outline-hidden {
-    & .recharts-layer {
-      --tw-outline-style: none;
-      outline-style: none;
-      @media (forced-colors: active) {
-        outline: 2px solid transparent;
-        outline-offset: 2px;
-      }
-    }
-  }
-  .\[\&_\.recharts-polar-grid_\[stroke\=\'\#ccc\'\]\]\:stroke-border {
-    & .recharts-polar-grid [stroke='#ccc'] {
-      stroke: var(--border);
-    }
-  }
-  .\[\&_\.recharts-radial-bar-background-sector\]\:fill-muted {
-    & .recharts-radial-bar-background-sector {
-      fill: var(--muted);
-    }
-  }
-  .\[\&_\.recharts-rectangle\.recharts-tooltip-cursor\]\:fill-muted {
-    & .recharts-rectangle.recharts-tooltip-cursor {
-      fill: var(--muted);
-    }
-  }
-  .\[\&_\.recharts-reference-line_\[stroke\=\'\#ccc\'\]\]\:stroke-border {
-    & .recharts-reference-line [stroke='#ccc'] {
-      stroke: var(--border);
-    }
-  }
-  .\[\&_\.recharts-sector\]\:outline-hidden {
-    & .recharts-sector {
-      --tw-outline-style: none;
-      outline-style: none;
-      @media (forced-colors: active) {
-        outline: 2px solid transparent;
-        outline-offset: 2px;
-      }
-    }
-  }
-  .\[\&_\.recharts-sector\[stroke\=\'\#fff\'\]\]\:stroke-transparent {
-    & .recharts-sector[stroke='#fff'] {
-      stroke: transparent;
-    }
-  }
-  .\[\&_\.recharts-surface\]\:outline-hidden {
-    & .recharts-surface {
-      --tw-outline-style: none;
-      outline-style: none;
-      @media (forced-colors: active) {
-        outline: 2px solid transparent;
-        outline-offset: 2px;
-      }
-    }
-  }
   .\[\&_\[cmdk-group-heading\]\]\:px-2 {
     & [cmdk-group-heading] {
       padding-inline: calc(var(--spacing) * 2);
@@ -5116,26 +5005,6 @@
     &>svg {
       width: calc(var(--spacing) * 4);
       height: calc(var(--spacing) * 4);
-    }
-  }
-  .\[\&\>svg\]\:h-2\.5 {
-    &>svg {
-      height: calc(var(--spacing) * 2.5);
-    }
-  }
-  .\[\&\>svg\]\:h-3 {
-    &>svg {
-      height: calc(var(--spacing) * 3);
-    }
-  }
-  .\[\&\>svg\]\:w-2\.5 {
-    &>svg {
-      width: calc(var(--spacing) * 2.5);
-    }
-  }
-  .\[\&\>svg\]\:w-3 {
-    &>svg {
-      width: calc(var(--spacing) * 3);
     }
   }
   .\[\&\>svg\]\:shrink-0 {

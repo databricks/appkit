@@ -85,14 +85,14 @@ import { DropdownMenuCheckboxItem } from '@databricks/appkit-ui';
 | `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
 | `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
 | `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
-| `align` | `enum` |  | - | - |
 | `side` | `enum` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
+| `align` | `enum` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
-| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
 | `sticky` | `enum` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
 | `updatePositionStrategy` | `enum` |  | - | - |
@@ -350,7 +350,7 @@ import { DropdownMenuSub } from '@databricks/appkit-ui';
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
-| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
 | `sticky` | `enum` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
 | `updatePositionStrategy` | `enum` |  | - | - |
