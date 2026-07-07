@@ -1,5 +1,31 @@
+// Type-only import: erased at compile time, does not pull the full echarts
+// bundle in. The `ECharts` type is used for the stored ECharts instance ref.
 import type { ECharts } from "echarts";
-import ReactECharts from "echarts-for-react";
+import {
+  BarChart,
+  HeatmapChart,
+  LineChart,
+  PieChart,
+  RadarChart,
+  ScatterChart,
+} from "echarts/charts";
+import {
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+  VisualMapComponent,
+} from "echarts/components";
+import * as echarts from "echarts/core";
+import { LegacyGridContainLabel } from "echarts/features";
+import { CanvasRenderer } from "echarts/renderers";
+// Import the ESM core build, not `echarts-for-react/lib/core` (CJS). The package
+// has no `exports` map, so `/lib/core` resolves to the literal CommonJS file
+// whose default export is `module.exports`; under ESM default-import interop a
+// consumer's bundler hands back the whole `{ default, __esModule }` object rather
+// than the component, so `<ReactEChartsCore/>` renders an object and React throws
+// "Element type is invalid". `esm/core` is real ESM with a true `export default`.
+import ReactEChartsCore from "echarts-for-react/esm/core";
 import { useCallback, useMemo, useRef } from "react";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
@@ -17,6 +43,46 @@ import type {
   ChartType,
   Orientation,
 } from "./types";
+
+// ============================================================================
+// ECharts Registration (modular imports for tree-shaking)
+// ============================================================================
+// Only the chart types and components used by the option builders in
+// `options.ts` are registered. Importing from `echarts/core` instead of the
+// full `echarts` entry keeps unused chart types (graph, sankey, gauge, ...)
+// out of consumer bundles.
+//
+// If you add a new chart type or use a new ECharts feature (e.g. dataZoom,
+// toolbox, markLine), register it here. Consumers passing custom `options`
+// that need extra features can register them in their own app via
+// `import { use } from "echarts/core"`.
+//
+// Note: tooltip-driven axisPointer is bundled with `TooltipComponent`, so no
+// explicit AxisPointerComponent registration is needed.
+//
+// This `use()` call must stay co-located in the same module as `BaseChart`:
+// `package.json#sideEffects` declares JS modules side-effect free, so moving
+// registration to a separate import-for-side-effect module would let bundlers
+// drop it during tree-shaking.
+echarts.use([
+  // Series types used by the option builders
+  LineChart, // line + area charts (area = line with areaStyle)
+  BarChart, // bar + horizontal bar charts
+  PieChart, // pie + donut charts
+  ScatterChart,
+  HeatmapChart,
+  RadarChart,
+  // Components referenced by built options
+  TitleComponent, // `title`
+  TooltipComponent, // `tooltip`
+  LegendComponent, // `legend`
+  GridComponent, // `grid` / `xAxis` / `yAxis`
+  VisualMapComponent, // `visualMap` (heatmap color scale)
+  // Features
+  LegacyGridContainLabel, // `grid.containLabel` (cartesian option builder)
+  // Renderer (BaseChart always renders with `renderer: "canvas"`)
+  CanvasRenderer,
+]);
 
 // ============================================================================
 // Palette Selection
@@ -88,7 +154,17 @@ export interface BaseChartProps {
   min?: number;
   /** Max value for heatmap color scale */
   max?: number;
-  /** Additional ECharts options to merge */
+  /**
+   * Additional ECharts options to merge.
+   *
+   * Only the built-in feature set is registered by this package, so options
+   * referencing extra ECharts features (`dataZoom`, `toolbox`, `markLine`,
+   * `markArea`, `graphic`, `dataset`, top-level `axisPointer`, ...) require
+   * registering them in your app via `import { use } from "echarts/core"`.
+   * This only works when your `echarts` resolves to the same module
+   * instance/version as this package's (the registry is a singleton;
+   * duplicate echarts copies won't share registrations).
+   */
   options?: Record<string, unknown>;
   /** Additional CSS classes */
   className?: string;
@@ -139,7 +215,7 @@ export function BaseChart({
 
   // Callback ref pattern: captures the ECharts instance when ReactECharts mounts
   // This ensures we always have a stable reference to the actual instance
-  const chartRefCallback = useCallback((node: ReactECharts | null) => {
+  const chartRefCallback = useCallback((node: ReactEChartsCore | null) => {
     // Dispose previous instance if component is being replaced
     if (
       echartsInstanceRef.current &&
@@ -285,8 +361,9 @@ export function BaseChart({
   }
 
   return (
-    <ReactECharts
+    <ReactEChartsCore
       ref={chartRefCallback}
+      echarts={echarts}
       option={option}
       style={{ height }}
       className={className}

@@ -3,6 +3,9 @@
   "type": "module",
   "version": "0.0.1",
   "private": true,
+  "sideEffects": [
+    "**/cli/**"
+  ],
   "exports": {
     ".": {
       "development": "./src/index.ts",
