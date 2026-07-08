@@ -1,0 +1,41 @@
+# Conversation
+
+Render-prop convenience over `useChat` + `useScrollToBottom`. Streams Responses-API SSE from an AppKit `agents()`-backed endpoint, captures the server-allocated `threadId` for multi-turn continuity, and auto-sticks the scroll container to the bottom while the user is at the bottom. Drop down to the underlying hooks for non-standard layouts (split panes, virtualized lists, external send buttons).
+
+
+## Conversation
+
+Render-prop convenience over `useChat` + `useScrollToBottom`. Streams
+Responses-API SSE from an AppKit `agents()`-backed endpoint, captures
+the server-allocated `threadId` for multi-turn continuity, and
+auto-sticks the scroll container to the bottom while the user is at
+the bottom. Drop down to the underlying hooks for non-standard
+layouts (split panes, virtualized lists, external send buttons).
+
+
+**Source:** [`packages/appkit-ui/src/react/chat/headless/conversation.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/chat/headless/conversation.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `children` | `(props: ConversationRenderProps<TMessage>) => ReactNode` | ✓ | - | Render prop receiving merged `useChat` + `useScrollToBottom` state. |
+| `api` | `string` | ✓ | - | Chat endpoint URL (e.g. "/api/agents/chat"). |
+| `id` | `string` |  | - | Stable chat id. Defaults to a fresh UUID per mount. |
+| `messages` | `TMessage[]` |  | - | Initial messages (e.g. when hydrating from history). |
+| `headers` | `Resolvable<Record<string, string> \| Headers>` |  | - | Extra fetch headers forwarded to the transport. |
+| `onData` | `ChatOnDataCallback<TMessage>` |  | - | Fires for every `data-*` chunk (e.g. `data-approval-pending`). |
+| `onStreamPart` | `((chunk: UIMessageChunk) => void)` |  | - | Fires synchronously for every chunk. Unaffected by render throttling. |
+| `onError` | `((error: Error) => void)` |  | - | Called on stream errors. |
+
+
+
+### Usage
+
+```tsx
+import { Conversation } from '@databricks/appkit-ui';
+
+<Conversation /* props */ />
+```
+

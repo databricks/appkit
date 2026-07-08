@@ -8,7 +8,12 @@
   ],
   "workspaces": {
     "packages/appkit-ui": {
-      "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
+      "ignoreDependencies": [
+        "@ai-sdk/react",
+        "ai",
+        "tailwindcss",
+        "tw-animate-css"
+      ]
     }
   },
   "ignore": [

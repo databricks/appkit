@@ -218,6 +218,9 @@
   .pointer-events-none {
     pointer-events: none;
   }
+  .collapse {
+    visibility: collapse;
+  }
   .invisible {
     visibility: hidden;
   }
@@ -640,6 +643,9 @@
   }
   .h-\[200px\] {
     height: 200px;
+  }
+  .h-\[600px\] {
+    height: 600px;
   }
   .h-\[calc\(100\%-1px\)\] {
     height: calc(100% - 1px);
@@ -1514,11 +1520,17 @@
   .text-center {
     text-align: center;
   }
+  .text-end {
+    text-align: end;
+  }
   .text-left {
     text-align: left;
   }
   .text-right {
     text-align: right;
+  }
+  .text-start {
+    text-align: start;
   }
   .align-middle {
     vertical-align: middle;
@@ -1884,6 +1896,9 @@
   }
   .\[--cell-size\:--spacing\(8\)\] {
     --cell-size: calc(var(--spacing) * 8);
+  }
+  .paused {
+    animation-play-state: paused;
   }
   .running {
     animation-play-state: running;

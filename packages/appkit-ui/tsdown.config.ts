@@ -14,6 +14,7 @@ export default defineConfig([
       "src/js/beta.ts",
       "src/react/index.ts",
       "src/react/beta.ts",
+      "src/react/chat/index.ts",
     ],
     outDir: "dist",
     platform: "browser",
