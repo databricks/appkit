@@ -197,4 +197,69 @@ describe("ArrowStreamProcessor.streamChunks", () => {
     ).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  test("re-resolves an expired chunk link before retrying, then streams the fresh one", async () => {
+    // First attempt hits an expired (403) link; the refresher mints a fresh
+    // URL that the retry succeeds against.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: streamOf(new Uint8Array([42])),
+      } as unknown as Response);
+    globalThis.fetch = fetchMock;
+
+    const refresh = vi.fn(async (chunkIndex: number) => ({
+      chunk_index: chunkIndex,
+      external_link: "https://example.com/fresh-link",
+    }));
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+    const bytes = await drain(
+      p.streamChunks(mockChunks(1), undefined, refresh),
+    );
+
+    expect(refresh).toHaveBeenCalledWith(0, undefined);
+    // The retry fetched the fresh URL, not the stale one.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
+      "https://example.com/fresh-link",
+    );
+    expect(bytes).toEqual([42]);
+  }, 10000);
+
+  test("survives a refresher that throws — keeps retrying the current link", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: streamOf(new Uint8Array([7])),
+      } as unknown as Response);
+    globalThis.fetch = fetchMock;
+
+    const refresh = vi.fn(async () => {
+      throw new Error("re-resolve failed");
+    });
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+    const bytes = await drain(
+      p.streamChunks(mockChunks(1), undefined, refresh),
+    );
+
+    expect(refresh).toHaveBeenCalled();
+    // Refresh failure is swallowed; the retry still runs against the original.
+    expect(bytes).toEqual([7]);
+  }, 10000);
 });

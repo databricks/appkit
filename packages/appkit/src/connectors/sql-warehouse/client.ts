@@ -12,7 +12,10 @@ import {
   ValidationError,
 } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
+import {
+  ArrowStreamProcessor,
+  type RefreshChunkLink,
+} from "../../stream/arrow-stream-processor";
 import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
@@ -914,8 +917,12 @@ export class SQLWarehouseConnector {
         return this._validateArrowAttachment(response, result.attachment);
       }
 
-      // External links: data fetched separately via statement_id.
-      if (result?.external_links) {
+      // External links: data fetched separately via statement_id. An empty
+      // array is a zero-row result (some warehouses emit `external_links: []`
+      // rather than omitting it) — it must NOT go down the streaming path
+      // (`streamChunks([])` rejects), so fall through to synthesize an empty
+      // Arrow table below.
+      if (result?.external_links && result.external_links.length > 0) {
         return this.updateWithArrowStatus(response, workspaceClient, signal);
       }
 
@@ -1054,6 +1061,7 @@ export class SQLWarehouseConnector {
       status: sql.StatementStatus;
       columnNames?: string[];
       external_links?: sql.ExternalLink[];
+      refreshChunkLink?: RefreshChunkLink;
     };
   }> {
     const statementId = response.statement_id as string;
@@ -1075,6 +1083,13 @@ export class SQLWarehouseConnector {
           statementId,
           response,
           signal,
+        ),
+        // Bound to this caller's identity so the streamer can re-mint an
+        // expired chunk link mid-download (links live <= 15 min; a large/slow
+        // result can outlast the earliest ones).
+        refreshChunkLink: this._makeChunkLinkRefresher(
+          workspaceClient,
+          statementId,
         ),
       },
     };
@@ -1133,6 +1148,27 @@ export class SQLWarehouseConnector {
   }
 
   /**
+   * A closure that re-mints a single chunk's pre-signed link via
+   * `getStatementResultChunkN`, bound to the caller's workspace client +
+   * statement id. Created here (in the caller's identity context) so the
+   * streamer — which runs outside that context — can refresh an expired link
+   * for `.obo.sql` statements without a cross-identity `getStatement`.
+   */
+  private _makeChunkLinkRefresher(
+    workspaceClient: WorkspaceClient,
+    statementId: string,
+  ): RefreshChunkLink {
+    return async (chunkIndex, signal) => {
+      const chunk =
+        await workspaceClient.statementExecution.getStatementResultChunkN(
+          { statement_id: statementId, chunk_index: chunkIndex },
+          this._createContext(signal),
+        );
+      return chunk.external_links?.find((l) => l.chunk_index === chunkIndex);
+    };
+  }
+
+  /**
    * Stream already-resolved EXTERNAL_LINKS chunks as raw Arrow IPC bytes, one
    * chunk in memory at a time. Takes the `external_links` the caller already
    * has from `executeStatement` (see {@link updateWithArrowStatus}), so there
@@ -1142,8 +1178,9 @@ export class SQLWarehouseConnector {
   streamExternalLinks(
     chunks: sql.ExternalLink[],
     signal?: AbortSignal,
+    refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    return this.arrowProcessor.streamChunks(chunks, signal);
+    return this.arrowProcessor.streamChunks(chunks, signal, refresh);
   }
 
   /**

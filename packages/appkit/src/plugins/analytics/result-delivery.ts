@@ -3,6 +3,7 @@ import { type DataType, Type, tableFromIPC } from "apache-arrow";
 import type { SQLTypeMarker } from "shared";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
+import type { RefreshChunkLink } from "../../stream/arrow-stream-processor";
 
 /**
  * Centralized disposition/format fallback for analytics result delivery.
@@ -41,6 +42,7 @@ export interface QueryExecutor {
         columnNames?: string[];
         statement_id?: string;
         status?: unknown;
+        refreshChunkLink?: RefreshChunkLink;
       }
     | undefined
   >;
@@ -51,7 +53,27 @@ export interface ArrowChunkStreamer {
   streamExternalLinks(
     chunks: sql.ExternalLink[],
     signal?: AbortSignal,
+    refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown>;
+}
+
+/** The arrow delivery mode a warehouse actually supports. */
+export type ArrowCapability = "inline" | "external";
+
+/** Optional per-warehouse capability memo, avoiding a doomed probe per query. */
+interface ArrowDeliveryOptions {
+  /**
+   * When `"external"`, skip the `INLINE+ARROW_STREAM` attempt and go straight
+   * to `EXTERNAL_LINKS` — a standard warehouse rejects INLINE arrow on every
+   * query, so once we've learned that, the probe is pure waste. `"inline"` or
+   * undefined attempts INLINE first (the common/Reyden path).
+   */
+  capabilityHint?: ArrowCapability;
+  /**
+   * Called once the working delivery mode is known, so the caller can memoize
+   * it per warehouse for subsequent queries.
+   */
+  onCapabilityResolved?: (capability: ArrowCapability) => void;
 }
 
 /**
@@ -69,21 +91,40 @@ type DispositionRejection =
   | "external-links-unsupported" // EXTERNAL_LINKS not implemented
   | null;
 
+/**
+ * Whether an error is a disposition/format *capability* rejection — the only
+ * class of error a fallback should react to. Gated on the two structured codes
+ * Databricks emits for capability mismatches (`INVALID_PARAMETER_VALUE`,
+ * `NOT_IMPLEMENTED`); auth, permission, and SQL errors carry other codes and
+ * never match. This is deliberately message-independent: a Databricks wording
+ * change must not turn a capability rejection into a hard 500.
+ */
+function isCapabilityRejection(err: unknown): boolean {
+  const structuredCode =
+    err instanceof ExecutionError ? err.errorCode : undefined;
+  if (
+    structuredCode === "INVALID_PARAMETER_VALUE" ||
+    structuredCode === "NOT_IMPLEMENTED"
+  ) {
+    return true;
+  }
+  const lower = (
+    err instanceof Error ? err.message : String(err)
+  ).toLowerCase();
+  return (
+    lower.includes("invalid_parameter_value") ||
+    lower.includes("not_implemented")
+  );
+}
+
 export function classifyDispositionRejection(
   err: unknown,
 ): DispositionRejection {
+  // Auth / permission / SQL errors carry other codes → never fall back.
+  if (!isCapabilityRejection(err)) return null;
+
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
-
-  const structuredCode =
-    err instanceof ExecutionError ? err.errorCode : undefined;
-  const hasCapabilityCode =
-    structuredCode === "INVALID_PARAMETER_VALUE" ||
-    structuredCode === "NOT_IMPLEMENTED" ||
-    lower.includes("invalid_parameter_value") ||
-    lower.includes("not_implemented");
-  // Auth / permission / SQL errors carry other codes → never fall back.
-  if (!hasCapabilityCode) return null;
 
   // EXTERNAL_LINKS disposition not implemented (Reyden).
   if (
@@ -150,38 +191,54 @@ export async function* deliverArrowBytes(
   processedParams: Record<string, SQLTypeMarker | null | undefined> | undefined,
   out: { columnNames?: string[]; statementId?: string },
   signal?: AbortSignal,
+  opts?: ArrowDeliveryOptions,
 ): AsyncGenerator<Uint8Array, void, unknown> {
-  try {
-    const result = await executor.query(
-      query,
-      processedParams,
-      { disposition: "INLINE", format: "ARROW_STREAM" },
-      signal,
-    );
-    if (result?.attachment) {
-      out.columnNames = result.columnNames;
-      out.statementId = result.statement_id;
-      // Decode base64 once; yield a view over the Buffer (no copy, no parse).
-      const decoded = Buffer.from(result.attachment, "base64");
-      yield new Uint8Array(
-        decoded.buffer,
-        decoded.byteOffset,
-        decoded.byteLength,
+  // Skip the INLINE probe when a prior query already learned this warehouse
+  // only serves arrow via EXTERNAL_LINKS (standard warehouses reject INLINE
+  // arrow on every query, so probing each time is pure waste).
+  if (opts?.capabilityHint !== "external") {
+    try {
+      const result = await executor.query(
+        query,
+        processedParams,
+        { disposition: "INLINE", format: "ARROW_STREAM" },
+        signal,
       );
-      return;
+      if (result?.attachment) {
+        opts?.onCapabilityResolved?.("inline");
+        out.columnNames = result.columnNames;
+        out.statementId = result.statement_id;
+        // Decode base64 once; yield a view over the Buffer (no copy, no parse).
+        const decoded = Buffer.from(result.attachment, "base64");
+        yield new Uint8Array(
+          decoded.buffer,
+          decoded.byteOffset,
+          decoded.byteLength,
+        );
+        return;
+      }
+      // INLINE succeeded but returned no attachment (rare: inline data_array
+      // under ARROW_STREAM). Fall through to EXTERNAL_LINKS.
+      logger.warn(
+        "ARROW_STREAM INLINE returned no attachment; falling back to EXTERNAL_LINKS",
+      );
+    } catch (err: unknown) {
+      if (signal?.aborted) throw err;
+      // Any capability-coded rejection of INLINE+ARROW_STREAM means this
+      // warehouse won't serve arrow inline — try EXTERNAL_LINKS. We
+      // intentionally do NOT require the message to match a specific phrase
+      // ("must be JSON_ARRAY", …): the errorCode gate already excludes auth/SQL
+      // errors, and relying on exact wording would turn a Databricks message
+      // reword into a hard 500 on every standard warehouse. Worst case for a
+      // genuinely bad parameter that happens to carry a capability code: one
+      // wasted re-execution that fails identically on EXTERNAL_LINKS and
+      // propagates.
+      if (!isCapabilityRejection(err)) throw err;
+      logger.warn(
+        "ARROW_STREAM INLINE rejected by warehouse, falling back to EXTERNAL_LINKS: %s",
+        errMessage(err),
+      );
     }
-    // INLINE succeeded but returned no attachment (rare: inline data_array
-    // under ARROW_STREAM). Fall through to EXTERNAL_LINKS.
-    logger.warn(
-      "ARROW_STREAM INLINE returned no attachment; falling back to EXTERNAL_LINKS",
-    );
-  } catch (err: unknown) {
-    if (signal?.aborted) throw err;
-    if (classifyDispositionRejection(err) !== "needs-json-inline") throw err;
-    logger.warn(
-      "ARROW_STREAM INLINE rejected by warehouse, falling back to EXTERNAL_LINKS: %s",
-      errMessage(err),
-    );
   }
 
   let ext: Awaited<ReturnType<QueryExecutor["query"]>>;
@@ -205,13 +262,19 @@ export async function* deliverArrowBytes(
   if (!ext?.external_links) {
     throw ExecutionError.missingData("external_links");
   }
+  opts?.onCapabilityResolved?.("external");
   out.columnNames = ext.columnNames;
   out.statementId = ext.statement_id;
   // Stream the pre-signed links resolved in THIS request's execution context
   // (user creds for `.obo.sql`, service principal otherwise). Pre-signed URLs
   // need no auth to download, so there is no second `getStatement` under a
-  // mismatched identity.
-  yield* streamer.streamExternalLinks(ext.external_links, signal);
+  // mismatched identity. `refreshChunkLink` (also bound to this context) lets
+  // the streamer re-mint a link that expires mid-download.
+  yield* streamer.streamExternalLinks(
+    ext.external_links,
+    signal,
+    ext.refreshChunkLink,
+  );
 }
 
 /** JSON row result plus the metadata the SSE `result` message forwards. */

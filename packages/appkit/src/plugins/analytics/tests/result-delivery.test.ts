@@ -163,8 +163,13 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
       { disposition: "INLINE", format: "ARROW_STREAM" },
       { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" },
     ]);
-    // Streams the links resolved in-context (no re-fetch): passed straight through.
-    expect(streamer.streamExternalLinks).toHaveBeenCalledWith(links, undefined);
+    // Streams the links resolved in-context (no re-fetch): passed straight
+    // through, along with the (here absent) chunk-link refresher.
+    expect(streamer.streamExternalLinks).toHaveBeenCalledWith(
+      links,
+      undefined,
+      undefined,
+    );
     expect(out.columnNames).toEqual(["a", "b"]);
     expect(chunks).toEqual([extBytes]);
   });
@@ -253,6 +258,99 @@ describe("decodeArrowAttachmentToRows", () => {
     expect(rows).toEqual([
       { name: "r0", spend: "v0" },
       { name: "r1", spend: "v1" },
+    ]);
+  });
+});
+
+describe("deliverArrowBytes — capability memo", () => {
+  test("reports 'inline' when the INLINE attempt succeeds", async () => {
+    const { executor } = executorFrom(async () => ({
+      attachment: arrowBase64(["col_0", "col_1"]),
+      columnNames: ["a", "b"],
+      statement_id: "s",
+    }));
+    const streamer: ArrowChunkStreamer = {
+      streamExternalLinks: vi.fn(async function* () {}),
+    };
+    const resolved: string[] = [];
+    await collect(
+      deliverArrowBytes(
+        executor,
+        streamer,
+        "SELECT 1",
+        undefined,
+        {},
+        undefined,
+        {
+          onCapabilityResolved: (c) => resolved.push(c),
+        },
+      ),
+    );
+    expect(resolved).toEqual(["inline"]);
+  });
+
+  test("reports 'external' after falling back to EXTERNAL_LINKS", async () => {
+    const links = [{ external_link: "https://x/0" }];
+    const { executor } = executorFrom(async (fp) => {
+      if (fp.disposition === "INLINE") {
+        throw reject(
+          "INVALID_PARAMETER_VALUE",
+          "The format field must be JSON_ARRAY when the disposition field is INLINE.",
+        );
+      }
+      return { external_links: links, columnNames: ["a"], statement_id: "s" };
+    });
+    const streamer: ArrowChunkStreamer = {
+      streamExternalLinks: vi.fn(async function* () {
+        yield new Uint8Array([1]);
+      }),
+    };
+    const resolved: string[] = [];
+    await collect(
+      deliverArrowBytes(
+        executor,
+        streamer,
+        "SELECT 1",
+        undefined,
+        {},
+        undefined,
+        {
+          onCapabilityResolved: (c) => resolved.push(c),
+        },
+      ),
+    );
+    expect(resolved).toEqual(["external"]);
+  });
+
+  test("capabilityHint 'external' skips the INLINE probe entirely", async () => {
+    const links = [{ external_link: "https://x/0" }];
+    const { executor, calls } = executorFrom(async (fp) => {
+      if (fp.disposition === "INLINE") {
+        throw new Error("INLINE should not have been attempted");
+      }
+      return { external_links: links, columnNames: ["a"], statement_id: "s" };
+    });
+    const streamer: ArrowChunkStreamer = {
+      streamExternalLinks: vi.fn(async function* () {
+        yield new Uint8Array([1]);
+      }),
+    };
+    await collect(
+      deliverArrowBytes(
+        executor,
+        streamer,
+        "SELECT 1",
+        undefined,
+        {},
+        undefined,
+        {
+          capabilityHint: "external",
+        },
+      ),
+    );
+    // Only EXTERNAL_LINKS was attempted — no wasted INLINE probe.
+    expect(calls).toEqual([
+      { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" },
     ]);
   });
 });

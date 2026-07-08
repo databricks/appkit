@@ -30,7 +30,12 @@ import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
-import { deliverArrowBytes, deliverJsonResult } from "./result-delivery";
+import {
+  type ArrowCapability,
+  deliverArrowBytes,
+  deliverJsonResult,
+  type QueryExecutor,
+} from "./result-delivery";
 import {
   type AnalyticsQueryResponse,
   type AnalyticsStreamMessage,
@@ -100,6 +105,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   // analytics services
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
+
+  /**
+   * In-process memo of which arrow delivery mode each warehouse supports
+   * (keyed by warehouse id). A standard warehouse rejects `INLINE+ARROW_STREAM`
+   * on every query, so once learned we skip that doomed probe; Reyden stays
+   * `"inline"`. Capability is a property of the warehouse, not the user, so it
+   * is not user-scoped. Bounded by the number of distinct warehouses a process
+   * talks to (effectively one).
+   */
+  private _arrowCapability = new Map<string, ArrowCapability>();
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -260,7 +275,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // to EXTERNAL_LINKS and streams those chunks. JSON keeps the SSE path
     // below (it carries warehouse-readiness progress + cached rows).
     if (format === "ARROW_STREAM") {
-      await this._handleArrowStreamQuery(req, res, query, isAsUser, parameters);
+      await this._handleArrowStreamQuery(
+        req,
+        res,
+        query_key,
+        query,
+        isAsUser,
+        parameters,
+      );
       return;
     }
 
@@ -474,11 +496,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   private async _handleArrowStreamQuery(
     req: express.Request,
     res: express.Response,
+    query_key: string,
     query: string,
     isAsUser: boolean,
     parameters: IAnalyticsQueryRequest["parameters"],
   ): Promise<void> {
     const executor = isAsUser ? this.asUser(req) : this;
+    const executorKey = isAsUser ? this.resolveUserId(req) : "global";
     const abortController = new AbortController();
     const onClose = () => abortController.abort();
     res.on("close", onClose);
@@ -510,16 +534,35 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         parameters,
       );
 
+      const warehouseId = await getWarehouseId();
+
       // Populated by `deliverArrowBytes` from the result manifest before the
       // first chunk is yielded, so the header below carries the real names.
       const columnsRef: { columnNames?: string[]; statementId?: string } = {};
       const bytes = deliverArrowBytes(
-        executor,
+        // Wrap the executor so the INLINE attempt runs through the interceptor
+        // chain (cache + retry), matching the JSON path. Only inline attachments
+        // are cached; EXTERNAL_LINKS carry expiring pre-signed URLs and are
+        // never cached (see `_arrowCachingExecutor`).
+        this._arrowCachingExecutor(
+          executor,
+          query_key,
+          query,
+          parameters,
+          executorKey,
+        ),
         this.SQLClient,
         query,
         processedParams,
         columnsRef,
         signal,
+        {
+          // Skip the doomed INLINE probe on a warehouse already known to need
+          // EXTERNAL_LINKS; remember the resolved mode for next time.
+          capabilityHint: this._arrowCapability.get(warehouseId),
+          onCapabilityResolved: (capability) =>
+            this._arrowCapability.set(warehouseId, capability),
+        },
       );
       const first = await bytes.next();
       // First byte in hand — stop the fail-fast clock.
@@ -538,11 +581,10 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       res.end();
     } catch (error) {
       clearTimeout(failFast);
-      if (res.headersSent) {
-        logger.error("Arrow query stream failed mid-flight: %O", error);
-        res.destroy(error instanceof Error ? error : new Error(String(error)));
-        return;
-      }
+      // Fail-fast timeout: the warehouse never produced a first byte. This also
+      // aborts the signal, so it must be handled before the generic
+      // `signal.aborted` branch below. Headers aren't sent yet (we time out
+      // before the first chunk), so a clean 503 is still possible.
       if (timedOut) {
         logger.warn(
           "Arrow query timed out before first byte after %dms",
@@ -556,8 +598,18 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         });
         return;
       }
+      // Client disconnect / unmount aborts the signal (see `onClose`). That's
+      // routine UI behavior, not a server error — tear down quietly whether it
+      // fires before or after headers. Checked before the headersSent branch so
+      // a mid-stream disconnect doesn't spam ERROR logs / alerting.
       if (signal.aborted) {
-        res.end();
+        if (res.headersSent) res.destroy();
+        else res.end();
+        return;
+      }
+      if (res.headersSent) {
+        logger.error("Arrow query stream failed mid-flight: %O", error);
+        res.destroy(error instanceof Error ? error : new Error(String(error)));
         return;
       }
       logger.error("Arrow query error: %O", error);
@@ -603,6 +655,66 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       autoStart,
       onStatus: () => {},
     });
+  }
+
+  /**
+   * Wrap an executor so the `INLINE + ARROW_STREAM` attempt is served from
+   * (and populates) the same per-user TTL cache the JSON path uses — otherwise
+   * every arrow chart render is a fresh warehouse execution, unlike its JSON
+   * twin. Caching is deliberately scoped to inline attachments:
+   *
+   * - INLINE results carry a bounded (<=25 MiB) base64 `attachment` with the
+   *   same lifecycle as cached JSON rows — safe to cache.
+   * - EXTERNAL_LINKS results carry short-lived pre-signed URLs that expire in
+   *   minutes; caching them would serve dead links, so those pass through
+   *   uncached (only the tiny link metadata would be cached anyway).
+   *
+   * Uses `this.cache.getOrExecute` directly rather than `this.execute()`
+   * because `execute()` reduces a thrown error to `{ ok:false, message }`,
+   * dropping the `errorCode` the capability fallback classifies on. The cache
+   * re-throws `AppKitError`s intact and never caches a rejection, so the
+   * INLINE→EXTERNAL_LINKS fallback still sees the structured rejection.
+   */
+  private _arrowCachingExecutor(
+    executor: AnalyticsPlugin,
+    query_key: string,
+    query: string,
+    parameters: IAnalyticsQueryRequest["parameters"],
+    executorKey: string,
+  ): QueryExecutor {
+    const hashedQuery = this.queryProcessor.hashQuery(query);
+    const cache = this.cache;
+    const ttl = queryDefaults.cache?.ttl;
+    return {
+      query: (q, params, formatParameters, signal) => {
+        // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
+        // short-lived pre-signed URLs, so those pass straight through.
+        if (
+          formatParameters.disposition !== "INLINE" ||
+          formatParameters.format !== "ARROW_STREAM"
+        ) {
+          return executor.query(q, params, formatParameters, signal);
+        }
+        // On a standard warehouse this throws a capability rejection — the
+        // cache never stores a rejection, so the fallback still sees the
+        // structured error. On Reyden it returns a bounded (<=25 MiB)
+        // attachment that caches like the JSON path's rows. The shared signal
+        // dedupes concurrent renders (e.g. React StrictMode double-mount).
+        return cache.getOrExecute(
+          [
+            "analytics:query:arrow",
+            query_key,
+            JSON.stringify(parameters),
+            hashedQuery,
+            executorKey,
+          ],
+          (sharedSignal) =>
+            executor.query(q, params, formatParameters, sharedSignal ?? signal),
+          executorKey,
+          { ttl, callerSignal: signal },
+        );
+      },
+    };
   }
 
   /**

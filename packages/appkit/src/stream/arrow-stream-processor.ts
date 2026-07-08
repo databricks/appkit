@@ -6,6 +6,19 @@ const logger = createLogger("stream:arrow");
 
 type ExternalLink = sql.ExternalLink;
 
+/**
+ * Re-mint a chunk's pre-signed URL. DBSQL external links expire in <= 15 min,
+ * so a large result whose tail chunks are reached after the earlier chunks
+ * finish draining can hit an expired link; this fetches a fresh one for the
+ * given chunk index. Created in the request's identity context (it captures the
+ * caller's workspace client), so it stays valid even though streaming runs
+ * outside that context. Returns `undefined` if the link can't be re-resolved.
+ */
+export type RefreshChunkLink = (
+  chunkIndex: number,
+  signal?: AbortSignal,
+) => Promise<ExternalLink | undefined>;
+
 interface ArrowStreamOptions {
   /** Idle timeout (ms) for a single chunk: no progress → abort the download. */
   timeout: number;
@@ -46,13 +59,14 @@ export class ArrowStreamProcessor {
   async *streamChunks(
     chunks: ExternalLink[],
     signal?: AbortSignal,
+    refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown> {
     if (chunks.length === 0) {
       throw ValidationError.missingField("chunks");
     }
 
     for (const chunk of chunks) {
-      yield* this.streamChunkBody(chunk, signal);
+      yield* this.streamChunkBody(chunk, signal, refresh);
     }
   }
 
@@ -67,8 +81,9 @@ export class ArrowStreamProcessor {
   private async *streamChunkBody(
     chunk: ExternalLink,
     signal?: AbortSignal,
+    refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    const externalLink = chunk.external_link;
+    let externalLink = chunk.external_link;
     if (!externalLink) {
       // A missing link cannot be fixed by retrying — fail loudly.
       throw ExecutionError.statementFailed(
@@ -115,6 +130,24 @@ export class ArrowStreamProcessor {
         if (signal?.aborted) throw ExecutionError.canceled();
         if (attempt < this.options.retries - 1) {
           await this.delay(2 ** attempt * BACKOFF_MULTIPLIER, signal);
+          // Pre-signed URLs expire (<= 15 min). Before retrying, re-mint this
+          // chunk's link — a stale URL would just 403 again on the same address.
+          // Only meaningful before any bytes are yielded (below), which is why
+          // this lives in the establish-response loop.
+          if (refresh && chunk.chunk_index != null) {
+            try {
+              const fresh = await refresh(chunk.chunk_index, signal);
+              if (fresh?.external_link) externalLink = fresh.external_link;
+            } catch (refreshError) {
+              // Keep retrying the current URL; surface the original error if
+              // all attempts fail.
+              logger.warn(
+                "Failed to re-resolve link for chunk %s: %O",
+                chunk.chunk_index,
+                refreshError,
+              );
+            }
+          }
         }
       }
     }

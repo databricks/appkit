@@ -861,6 +861,12 @@ describe("Analytics Plugin", () => {
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
         body: { parameters: {}, format: "ARROW_STREAM" },
+        // OBO requests carry the forwarded user identity; the arrow cache key
+        // is scoped per user, so `resolveUserId` reads this header.
+        headers: {
+          "x-forwarded-user": "user@example.com",
+          "x-forwarded-access-token": "user-token",
+        },
       });
       const mockRes = createMockResponse();
 
@@ -1095,7 +1101,7 @@ describe("Analytics Plugin", () => {
       });
     });
 
-    test("/query/:query_key does NOT fall back when only one of INLINE/ARROW_STREAM appears in the error", async () => {
+    test("/query/:query_key does NOT fall back on a non-capability error (auth/SQL)", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1104,13 +1110,14 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
-      // Realistic non-format error that mentions just one of the keywords —
-      // e.g. an unrelated INVALID_PARAMETER_VALUE about a different param.
+      // A genuine SQL/permission error carries no capability error code
+      // (INVALID_PARAMETER_VALUE / NOT_IMPLEMENTED), so it must NOT trigger a
+      // wasted EXTERNAL_LINKS attempt — it propagates as-is.
       const executeMock = vi
         .fn()
         .mockRejectedValue(
           new Error(
-            'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"INLINE is not a valid value for parameter `mode`"}',
+            'Response from server (Bad Request) {"error_code":"TABLE_OR_VIEW_NOT_FOUND","message":"Table or view not found: foo"}',
           ),
         );
       (plugin as any).SQLClient.executeStatement = executeMock;
@@ -1126,15 +1133,58 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // The retry interceptor may attempt the query multiple times, but the
-      // analytics plugin must never escalate to EXTERNAL_LINKS for an error
-      // that doesn't actually indicate a format/disposition rejection.
+      // The retry interceptor may attempt the query multiple times, but every
+      // attempt stays on INLINE — a non-capability error never escalates to
+      // EXTERNAL_LINKS.
       for (const call of executeMock.mock.calls) {
         expect(call[1]).toMatchObject({
           disposition: "INLINE",
           format: "ARROW_STREAM",
         });
       }
+    });
+
+    test("/query/:query_key falls back on a capability-coded rejection regardless of exact wording", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // A capability-coded rejection with wording we don't pattern-match
+      // (Databricks could reword at any time). The errorCode gate alone must be
+      // enough to escalate to EXTERNAL_LINKS — otherwise a message reword would
+      // 500 every standard warehouse.
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"this disposition/format combination is not available here"}',
+          ),
+        )
+        .mockResolvedValueOnce({
+          result: { statement_id: "stmt-1", status: { state: "SUCCEEDED" } },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      });
     });
 
     test("/query/:query_key should not fall back for non-format errors", async () => {

@@ -46,20 +46,35 @@ function resolveAnalyticsMock(url: string): readonly unknown[] {
 /**
  * Build raw Arrow IPC stream bytes from mock rows — the format `fetchArrowDirect`
  * expects for `format: "ARROW_STREAM"` (raw bytes on the response body, not SSE).
- * Array/object cells are stringified so Arrow can infer a primitive column type,
- * mirroring how the warehouse serializes complex types; chart-relevant columns
- * (names, numbers) are unaffected.
+ *
+ * Mirrors a real Databricks warehouse: the Arrow schema is encoded
+ * *positionally* (`col_0`, `col_1`, …) and the real names are returned
+ * separately for the `X-Appkit-Arrow-Columns` header, so the client's relabel
+ * path (positional schema → real names) is exercised end-to-end — that path
+ * was the live bug and is otherwise only unit-tested.
+ *
+ * Array/object cells are stringified so Arrow can infer a primitive column
+ * type, matching how the warehouse serializes complex types; chart-relevant
+ * columns (names, numbers) are unaffected.
  */
-function toArrowIPC(rows: readonly unknown[]): Buffer {
-  const flat = rows.map((row) =>
-    Object.fromEntries(
-      Object.entries(row as Record<string, unknown>).map(([k, v]) => [
-        k,
+function toArrowIPC(rows: readonly unknown[]): {
+  body: Buffer;
+  columnNames: string[];
+} {
+  const columnNames = Object.keys(rows[0] as Record<string, unknown>);
+  const positional = rows.map((row) => {
+    const values = Object.values(row as Record<string, unknown>);
+    return Object.fromEntries(
+      values.map((v, i) => [
+        `col_${i}`,
         v !== null && typeof v === "object" ? JSON.stringify(v) : v,
       ]),
-    ),
-  );
-  return Buffer.from(tableToIPC(tableFromJSON(flat), "stream"));
+    );
+  });
+  return {
+    body: Buffer.from(tableToIPC(tableFromJSON(positional), "stream")),
+    columnNames,
+  };
 }
 
 export async function setupMockAPI(page: Page) {
@@ -76,13 +91,20 @@ export async function setupMockAPI(page: Page) {
     }
 
     if (requestFormat === "ARROW_STREAM" && data.length > 0) {
+      const { body, columnNames } = toArrowIPC(data);
       return route.fulfill({
         status: 200,
         headers: {
           "Content-Type": "application/vnd.apache.arrow.stream",
           "Cache-Control": "no-store",
+          // Real warehouses encode the schema positionally (col_N) and send
+          // the aliased names in this header; the client relabels the decoded
+          // Table. Mirror that so the relabel path is covered.
+          "X-Appkit-Arrow-Columns": encodeURIComponent(
+            JSON.stringify(columnNames),
+          ),
         },
-        body: toArrowIPC(data),
+        body,
       });
     }
 

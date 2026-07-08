@@ -293,6 +293,32 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       expect(transformed.result.statement_id).toBe("stmt-ext");
     });
 
+    test("empty external_links array is a zero-row result → synthesizes an empty table (not the streaming path)", async () => {
+      const connector = createConnector();
+      // Some warehouses emit `external_links: []` for a zero-row result rather
+      // than omitting it. An empty array must NOT go down the streaming path
+      // (streamChunks([]) rejects) — synthesize an empty Arrow table instead.
+      const response = {
+        statement_id: "stmt-empty-ext",
+        status: { state: "SUCCEEDED" },
+        manifest: {
+          format: "ARROW_STREAM",
+          schema: {
+            columns: [{ name: "x", type_text: "INT", type_name: "INT" }],
+          },
+          total_row_count: 0,
+        },
+        result: { external_links: [] },
+      } as unknown as sql.StatementResponse;
+
+      const transformed = await transform(connector, response);
+      const attachment: string = transformed.result.attachment;
+      expect(typeof attachment).toBe("string");
+      const table = tableFromIPC(Buffer.from(attachment, "base64"));
+      expect(table.numRows).toBe(0);
+      expect(table.schema.fields.map((f) => f.name)).toEqual(["x"]);
+    });
+
     test("does NOT synthesize an attachment when schema is missing", async () => {
       const connector = createConnector();
       const response = {
