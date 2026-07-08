@@ -369,24 +369,7 @@ export class SQLWarehouseConnector {
             );
           }
 
-          if (error instanceof Error && error.name === "AbortError") {
-            throw error;
-          }
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          // Preserve the SDK's structured ApiError.errorCode (e.g.
-          // "INVALID_PARAMETER_VALUE", "BAD_REQUEST") through the wrap so
-          // callers can branch on a stable identifier rather than
-          // substring-matching the message.
-          const sdkErrorCode =
-            error && typeof error === "object" && "errorCode" in error
-              ? (error as { errorCode?: unknown }).errorCode
-              : undefined;
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
-          );
+          this._rethrowStatementError(error);
         } finally {
           // remove abort handler
           if (abortHandler && signal) {
@@ -877,20 +860,7 @@ export class SQLWarehouseConnector {
           });
 
           // error logging is handled by executeStatement's catch block (gated on isAborted)
-          if (error instanceof Error && error.name === "AbortError") {
-            throw error;
-          }
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          const sdkErrorCode =
-            error && typeof error === "object" && "errorCode" in error
-              ? (error as { errorCode?: unknown }).errorCode
-              : undefined;
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
-          );
+          this._rethrowStatementError(error);
         } finally {
           span.end();
         }
@@ -1199,6 +1169,31 @@ export class SQLWarehouseConnector {
       this._createContext(signal),
     );
     return arrowColumnNames(response);
+  }
+
+  /**
+   * Normalize an error caught during statement execution/polling and rethrow.
+   * Abort and already-structured `AppKitError`s pass through untouched;
+   * anything else is wrapped as an `ExecutionError`, preserving the SDK's
+   * structured `ApiError.errorCode` (e.g. "INVALID_PARAMETER_VALUE",
+   * "BAD_REQUEST") so callers can branch on a stable identifier rather than
+   * substring-matching the message.
+   */
+  private _rethrowStatementError(error: unknown): never {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof AppKitError) {
+      throw error;
+    }
+    const sdkErrorCode =
+      error && typeof error === "object" && "errorCode" in error
+        ? (error as { errorCode?: unknown }).errorCode
+        : undefined;
+    throw ExecutionError.statementFailed(
+      error instanceof Error ? error.message : String(error),
+      typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
+    );
   }
 
   // create context for cancellation token
