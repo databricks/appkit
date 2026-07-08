@@ -80,14 +80,14 @@ import { PopoverAnchor } from '@databricks/appkit-ui';
 | `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | Event handler called when an interaction happens outside the `DismissableLayer`. Specifically, when a `pointerdown` event happens outside or focus moves outside of it. Can be prevented. |
 | `onOpenAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on open. Can be prevented. |
 | `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
-| `align` | `enum` |  | - | - |
 | `side` | `enum` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
+| `align` | `enum` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
-| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
 | `sticky` | `enum` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
 | `updatePositionStrategy` | `enum` |  | - | - |
