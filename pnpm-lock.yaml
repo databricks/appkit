@@ -15,7 +15,7 @@ importers:
   .:
     devDependencies:
       '@arethetypeswrong/core':
-        specifier: ^0.18.4
+        specifier: 0.18.4
         version: 0.18.4
       '@biomejs/biome':
         specifier: 2.2.6
