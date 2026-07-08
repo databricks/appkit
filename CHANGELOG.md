@@ -78,6 +78,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.44.0](https://github.com/databricks/appkit/compare/v0.43.1...v0.44.0) (2026-07-08)
+
+### lakebase
+
+* **lakebase:** support CJS consumers and validate exports via attw ([#408](https://github.com/databricks/appkit/issues/408)) ([c9d5cda](https://github.com/databricks/appkit/commit/c9d5cdaf80903f705191b0471380aa4ffb6772cf))
+
+
 ## [0.43.1](https://github.com/databricks/appkit/compare/v0.43.0...v0.43.1) (2026-07-07)
 
 ### appkit-ui
