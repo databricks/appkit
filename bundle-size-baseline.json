@@ -3,7 +3,7 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 727721,
+        "packed": 727720,
         "unpacked": 2550712
       },
       "dist": {
@@ -64,11 +64,11 @@
         },
         {
           "id": "./beta",
-          "gzip": 40062,
+          "gzip": 40063,
           "composition": {
-            "initialGzip": 39831,
+            "initialGzip": 39832,
             "lazyGzip": 231,
-            "totalGzip": 40062,
+            "totalGzip": 40063,
             "own": 119920,
             "nodeModules": null,
             "chunks": [
@@ -79,7 +79,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 5807,
+                "gzip": 5808,
                 "kind": "initial"
               },
               {
@@ -128,21 +128,21 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 313659,
-        "unpacked": 1314754
+        "packed": 313597,
+        "unpacked": 1314080
       },
       "dist": {
         "total": {
-          "raw": 1310746,
-          "gzip": 434328
+          "raw": 1310134,
+          "gzip": 434210
         },
         "js": {
-          "raw": 377356,
-          "gzip": 125186
+          "raw": 377132,
+          "gzip": 125150
         },
         "types": {
-          "raw": 210262,
-          "gzip": 75512
+          "raw": 209874,
+          "gzip": 75430
         },
         "maps": {
           "raw": 706268,
@@ -207,17 +207,17 @@
         },
         {
           "id": "./react",
-          "gzip": 47663,
+          "gzip": 45960,
           "composition": {
-            "initialGzip": 439553,
+            "initialGzip": 438067,
             "lazyGzip": 49772,
-            "totalGzip": 489325,
-            "own": 171715,
-            "nodeModules": 1402952,
+            "totalGzip": 487839,
+            "own": 167329,
+            "nodeModules": 1402934,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 437403,
+                "gzip": 435917,
                 "kind": "initial"
               },
               {

@@ -59,6 +59,7 @@ This Software contains code from the following open source projects:
 | [commander](https://www.npmjs.com/package/commander) | 2.20.3, 5.1.0, 7.2.0, 8.3.0, 10.0.1, 12.1.0 | MIT | https://github.com/tj/commander.js#readme |
 | [dompurify](https://www.npmjs.com/package/dompurify) | 3.4.11 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
+| [drizzle-orm](https://www.npmjs.com/package/drizzle-orm) | 0.45.1 | Apache-2.0 | https://orm.drizzle.team |
 | [echarts](https://www.npmjs.com/package/echarts) | 6.0.0 | Apache-2.0 | https://echarts.apache.org |
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
