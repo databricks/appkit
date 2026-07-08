@@ -2,6 +2,3 @@ packages:
   - "packages/*"
   - "apps/*"
   - "docs"
-
-patchedDependencies:
-  "@arethetypeswrong/core": "patches/@arethetypeswrong__core.patch"
