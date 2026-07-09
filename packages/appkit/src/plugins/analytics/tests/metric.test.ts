@@ -11,7 +11,11 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { AnalyticsPlugin } from "../analytics";
-import { buildMetricSql, loadMetricRegistry } from "../metric";
+import {
+  buildMetricSql,
+  loadMetricRegistry,
+  validateMetricRequest,
+} from "../metric";
 import type { IAnalyticsConfig, MetricRegistration } from "../types";
 
 // Mirror the analytics.test.ts CacheManager mock so the inner `execute`'s
@@ -163,6 +167,109 @@ describe("analytics metric route (Phase 1)", () => {
       expect(statement).toBe(
         "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics LIMIT 10",
       );
+    });
+  });
+
+  // ── Phase 2: dimensions + GROUP BY ALL. No date_trunc — timeGrain is held
+  // this phase (grain target TBD), so dimensions render bare.
+  describe("buildMetricSql dimensions + GROUP BY", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("measures + dimensions → SELECT MEASURE(...), <dim> FROM <fqn> GROUP BY ALL", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+    });
+
+    test("dimensions are sorted for a deterministic SELECT list", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["segment", "region"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, region, segment FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+    });
+
+    test("measures sort before dimensions in the SELECT list", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["revenue", "arr"],
+        dimensions: ["region"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+    });
+
+    test("empty dimensions array → no GROUP BY (ungrouped)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: [],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics",
+      );
+    });
+
+    test("dimensions + limit compose GROUP BY ALL then LIMIT", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region"],
+        limit: 100,
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, region FROM cat.sch.revenue_metrics GROUP BY ALL LIMIT 100",
+      );
+    });
+
+    test("timeGrain is parsed but not yet applied (grain target TBD) — dimension renders bare, no date_trunc", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["order_date"],
+        timeGrain: "month",
+      });
+      // The held-timeGrain seam: the grain does not alter the SQL. The
+      // dimension is emitted bare — NOT wrapped in date_trunc().
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, order_date FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+      expect(statement).not.toContain("date_trunc");
+    });
+  });
+
+  // ── Phase 2: dimension grammar gate. A dimension failing
+  // DIMENSION_NAME_PATTERN throws inside buildMetricSql before SQL is built.
+  describe("buildMetricSql dimension grammar gate", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("throws before building SQL for an injection-shaped dimension", () => {
+      expect(() =>
+        buildMetricSql(registration, {
+          measures: ["arr"],
+          dimensions: ["region; DROP TABLE users"],
+        }),
+      ).toThrow(/not a valid identifier/);
+    });
+
+    test("throws for a dimension with a backtick / quote", () => {
+      expect(() =>
+        buildMetricSql(registration, {
+          measures: ["arr"],
+          dimensions: ["region`"],
+        }),
+      ).toThrow(/not a valid identifier/);
     });
   });
 
@@ -417,5 +524,658 @@ describe("loadMetricRegistry", () => {
       }),
     );
     expect(() => loadMetricRegistry(dir)).toThrow(/Invalid metric-views.json/);
+  });
+});
+
+// ── Phase 2: the structured filter engine (translator + validator).
+// Registry-free: names are grammar-gated, values are parameterized. No
+// allowlist, no op⇄dimension-type check.
+describe("metric — filter translator", () => {
+  const registration: MetricRegistration = {
+    key: "revenue",
+    source: "cat.sch.revenue_metrics",
+    lane: "sp",
+  };
+
+  // Render a filter via buildMetricSql and return the WHERE fragment + params.
+  function render(filter: unknown) {
+    const { statement, parameters } = buildMetricSql(registration, {
+      measures: ["arr"],
+      filter: filter as never,
+    });
+    const match = statement.match(/ WHERE (.+?)( GROUP BY| LIMIT|$)/);
+    const where = match ? match[1] : null;
+    return { statement, where, parameters };
+  }
+
+  describe("operators (12 unit tests)", () => {
+    test("equals → `<col> = :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      });
+      expect(where).toBe("region = :f_0");
+      expect(parameters).toEqual({
+        f_0: { __sql_type: "STRING", value: "EMEA" },
+      });
+    });
+
+    test("notEquals → `<col> <> :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notEquals",
+        values: ["EMEA"],
+      });
+      expect(where).toBe("region <> :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
+    });
+
+    test("in → `<col> IN (:f_0, :f_1, ...)`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "in",
+        values: ["EMEA", "APAC", "AMER"],
+      });
+      expect(where).toBe("region IN (:f_0, :f_1, :f_2)");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
+      expect(parameters.f_1).toEqual({ __sql_type: "STRING", value: "APAC" });
+      expect(parameters.f_2).toEqual({ __sql_type: "STRING", value: "AMER" });
+    });
+
+    test("notIn → `<col> NOT IN (:f_0, :f_1, ...)`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notIn",
+        values: ["EMEA", "APAC"],
+      });
+      expect(where).toBe("region NOT IN (:f_0, :f_1)");
+      expect(Object.keys(parameters)).toHaveLength(2);
+    });
+
+    test("gt → `<col> > :f_0` (numeric value bound as INT)", () => {
+      const { where, parameters } = render({
+        member: "deal_size",
+        operator: "gt",
+        values: [10000],
+      });
+      expect(where).toBe("deal_size > :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "INT", value: "10000" });
+    });
+
+    test("gte → `<col> >= :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "gte",
+        values: [5000],
+      });
+      expect(where).toBe("deal_size >= :f_0");
+    });
+
+    test("lt → `<col> < :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "lt",
+        values: [100],
+      });
+      expect(where).toBe("deal_size < :f_0");
+    });
+
+    test("lte → `<col> <= :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "lte",
+        values: [50000],
+      });
+      expect(where).toBe("deal_size <= :f_0");
+    });
+
+    test("contains → `<col> LIKE :f_0` (value wrapped in %...%)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "contains",
+        values: ["MEA"],
+      });
+      expect(where).toBe("region LIKE :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "%MEA%" });
+    });
+
+    test("notContains → `<col> NOT LIKE :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notContains",
+        values: ["test"],
+      });
+      expect(where).toBe("region NOT LIKE :f_0");
+      expect(parameters.f_0).toEqual({
+        __sql_type: "STRING",
+        value: "%test%",
+      });
+    });
+
+    test("set → `<col> IS NOT NULL` (no bind)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "set",
+      });
+      expect(where).toBe("region IS NOT NULL");
+      expect(parameters).toEqual({});
+    });
+
+    test("notSet → `<col> IS NULL` (no bind)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notSet",
+      });
+      expect(where).toBe("region IS NULL");
+      expect(parameters).toEqual({});
+    });
+  });
+
+  describe("AND/OR composition", () => {
+    test("flat AND group renders predicates joined by AND", () => {
+      const { where, parameters } = render({
+        and: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "segment", operator: "equals", values: ["Enterprise"] },
+        ],
+      });
+      expect(where).toBe("(region = :f_0 AND segment = :f_1)");
+      expect(parameters.f_0.value).toBe("EMEA");
+      expect(parameters.f_1.value).toBe("Enterprise");
+    });
+
+    test("flat OR group renders predicates joined by OR", () => {
+      const { where } = render({
+        or: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "region", operator: "equals", values: ["APAC"] },
+        ],
+      });
+      expect(where).toBe("(region = :f_0 OR region = :f_1)");
+    });
+
+    test("AND-of-OR composes nested groups", () => {
+      const { where } = render({
+        and: [
+          { member: "region", operator: "in", values: ["EMEA", "APAC"] },
+          {
+            or: [
+              { member: "segment", operator: "equals", values: ["Enterprise"] },
+              { member: "deal_size", operator: "gt", values: [50000] },
+            ],
+          },
+        ],
+      });
+      expect(where).toContain("(region IN (");
+      expect(where).toContain(" AND ");
+      expect(where).toContain("OR");
+    });
+
+    test("OR-of-AND composes nested groups", () => {
+      const { where } = render({
+        or: [
+          {
+            and: [
+              { member: "region", operator: "equals", values: ["EMEA"] },
+              { member: "segment", operator: "equals", values: ["Enterprise"] },
+            ],
+          },
+          { member: "region", operator: "equals", values: ["APAC"] },
+        ],
+      });
+      expect(where).toMatch(/^\(.+ OR .+\)$/);
+      expect(where).toContain(" AND ");
+    });
+
+    test("empty `and: []` group emits no WHERE clause", () => {
+      const { statement, parameters } = buildMetricSql(registration, {
+        measures: ["arr"],
+        filter: { and: [] },
+      });
+      expect(statement).not.toContain("WHERE");
+      expect(parameters).toEqual({});
+    });
+
+    test("empty `or: []` renders 1 = 0 (defense in depth past the validator)", () => {
+      // The validator rejects `or: []` (see cardinality tests), but if a bypass
+      // ever reaches the renderer, an empty disjunction must render vacuous-
+      // false — never drop the predicate (which would mean "match everything").
+      const { where } = render({ or: [] });
+      expect(where).toBe("1 = 0");
+    });
+  });
+
+  describe("depth cap", () => {
+    test("rejects 9 levels of AND nesting at preCheckFilterDepth (before Zod)", () => {
+      let node: unknown = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 9; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], filter: node }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
+    test("accepts exactly 8 levels of AND nesting (validator)", () => {
+      let node: unknown = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 8; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], filter: node }),
+      ).not.toThrow();
+    });
+
+    test("renderFilter independently rejects nesting past the depth cap", () => {
+      // Second, independent depth enforcement: even if a payload bypasses the
+      // pre-Zod pre-check and Zod's superRefine, the SQL renderer re-checks the
+      // depth as defense in depth. Build 9-deep and call buildMetricSql
+      // directly (skipping validateMetricRequest).
+      let node: unknown = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 9; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        buildMetricSql(registration, {
+          measures: ["arr"],
+          filter: node as never,
+        }),
+      ).toThrow(/nesting exceeds the maximum depth/);
+    });
+
+    test("rejects pathologically deep filter without stack-overflow (pre-parse cap)", () => {
+      let node: unknown = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 10_000; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], filter: node }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
+    test("rejects deep `or` even when paired with empty `and` (else-if bypass guard)", () => {
+      let deepOr: unknown = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 10_000; i += 1) {
+        deepOr = { or: [deepOr] };
+      }
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { and: [], or: [deepOr] } as never,
+        }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
+    test("rejects breadth-DoS: a single group with too many children", () => {
+      const wide = Array.from({ length: 1000 }, () => ({
+        member: "region",
+        operator: "equals" as const,
+        values: ["EMEA"],
+      }));
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], filter: { and: wide } }),
+      ).toThrowError(/fields:.*filter/);
+    });
+  });
+
+  describe("parameterization safety (no values in rendered SQL)", () => {
+    test("string values do not appear verbatim in the SQL string", () => {
+      const sneaky = "EMEA' OR '1'='1";
+      const { statement } = render({
+        member: "region",
+        operator: "equals",
+        values: [sneaky],
+      });
+      expect(statement).not.toContain(sneaky);
+      expect(statement).toContain(":f_0");
+    });
+
+    test("numeric values do not appear verbatim in the SQL string", () => {
+      const { statement } = render({
+        member: "deal_size",
+        operator: "gt",
+        values: [987654321],
+      });
+      expect(statement).not.toContain("987654321");
+      expect(statement).toContain(":f_0");
+    });
+
+    test("LIKE wildcard is the only value transformation; the original string is not in SQL", () => {
+      const { statement } = render({
+        member: "region",
+        operator: "contains",
+        values: ["dangerous%"],
+      });
+      expect(statement).not.toContain("dangerous");
+      expect(statement).toContain(":f_0");
+    });
+
+    test("IN values are individually bound (not concatenated)", () => {
+      const { statement, parameters } = render({
+        member: "region",
+        operator: "in",
+        values: ["A", "B", "C"],
+      });
+      expect(statement).not.toMatch(/region IN \([^:]/);
+      expect(Object.keys(parameters)).toHaveLength(3);
+    });
+
+    test("a filter member failing DIMENSION_NAME_PATTERN throws before SQL is built", () => {
+      expect(() =>
+        render({
+          member: "region; DROP TABLE foo --",
+          operator: "equals",
+          values: ["x"],
+        }),
+      ).toThrowError(/not a valid identifier/);
+    });
+  });
+
+  describe("validator — operator + cardinality (registry-free)", () => {
+    test("rejects an unknown operator", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "startsWith" as never,
+            values: ["E"],
+          },
+        }),
+      ).toThrowError(/fields:.*filter\.operator/);
+    });
+
+    test("rejects equals with zero values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "equals", values: [] },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects equals with multiple values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "equals", values: ["A", "B"] },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects in with empty values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "in", values: [] },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects set with values (cardinality — must be absent)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "set", values: ["EMEA"] },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("accepts set with no values", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "set" },
+        }),
+      ).not.toThrow();
+    });
+
+    test("accepts notSet with an empty values array", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "notSet", values: [] },
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects `contains` with a non-string value", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "contains",
+            values: [42 as unknown as string],
+          },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects a filter predicate with too many values (DoS guard)", () => {
+      const big = Array.from({ length: 2000 }, (_, i) => `v${i}`);
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "region", operator: "in", values: big },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects a bare-array filter (not a Predicate or { and }/{ or } group)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: [
+            { member: "region", operator: "in", values: ["EMEA"] },
+          ] as never,
+        }),
+      ).toThrow();
+    });
+
+    test("rejects empty `or` group (empty disjunction is vacuously false)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { or: [] },
+        }),
+      ).toThrowError(/fields:.*filter\.or/);
+    });
+
+    test("accepts empty `and` group (no constraint contributed)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { and: [] },
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects an unknown operator at depth (nested filter)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: {
+            and: [
+              { member: "region", operator: "equals", values: ["EMEA"] },
+              {
+                member: "segment",
+                operator: "matches" as never,
+                values: ["X"],
+              },
+            ],
+          },
+        }),
+      ).toThrowError(/fields:.*filter\.and\.1\.operator/);
+    });
+
+    test("well-formed-but-unknown member is NOT rejected locally (no allowlist)", () => {
+      // The dropped-allowlist posture: a grammar-valid member that isn't a
+      // real dimension passes validation AND SQL construction — it reaches the
+      // warehouse, which is the authority on whether the column exists.
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          filter: { member: "ghost_column", operator: "equals", values: ["x"] },
+        }),
+      ).not.toThrow();
+      const { where } = render({
+        member: "ghost_column",
+        operator: "equals",
+        values: ["x"],
+      });
+      expect(where).toBe("ghost_column = :f_0");
+    });
+  });
+
+  describe("timeGrain (grammar-shaped, not yet applied)", () => {
+    test("a grammar-valid timeGrain is accepted structurally", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "month",
+        }),
+      ).not.toThrow();
+    });
+
+    test("a timeGrain failing TIME_GRAIN_PATTERN is rejected", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "MONTH; DROP TABLE t",
+        }),
+      ).toThrowError(/fields:.*timeGrain/);
+    });
+
+    test("timeGrain with no dimensions is accepted (held: no cross-field rule this phase)", () => {
+      // The #341 '400 when timeGrain set with no time-typed dimension' rule is
+      // deliberately NOT implemented — the grain target is TBD. The grammar
+      // shape is still enforced; the token simply does not alter SQL.
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], timeGrain: "day" }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("sort-before-hash (predicate ordering inside groups)", () => {
+    test("predicate order does not affect the rendered SQL within an AND group", () => {
+      const a = render({
+        and: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "segment", operator: "equals", values: ["Ent"] },
+        ],
+      });
+      const b = render({
+        and: [
+          { member: "segment", operator: "equals", values: ["Ent"] },
+          { member: "region", operator: "equals", values: ["EMEA"] },
+        ],
+      });
+      expect(a.where).toBe(b.where);
+    });
+  });
+
+  // The warehouse-authoritative unknown-name parity test (sanitized
+  // clientMessage/errorCode envelope) lands here because the Phase 1 harness
+  // can drive the metric route end-to-end and assert on the SSE error bytes.
+  describe("warehouse-authoritative unknown-name parity", () => {
+    let config: IAnalyticsConfig;
+    let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+    beforeEach(async () => {
+      config = { timeout: 5000 };
+      setupDatabricksEnv();
+      mockCacheStore.clear();
+      ServiceContext.reset();
+      serviceContextMock = await mockServiceContext();
+    });
+
+    afterEach(() => {
+      serviceContextMock?.restore();
+    });
+
+    test("a well-formed-but-unknown measure reaches the warehouse and surfaces a sanitized error envelope", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      setRegistry(plugin, {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp",
+        },
+      });
+
+      // The warehouse rejects the unknown column. The raw text carries the
+      // offending name; the connector wraps it in an ExecutionError whose
+      // `.message` is server-log-only and whose `clientMessage` is sanitized.
+      const { ExecutionError } = await import("../../../errors/execution");
+      const rawWarehouseText =
+        "[UNRESOLVED_COLUMN] A column with name `ghost_measure` cannot be resolved";
+      const executeMock = vi
+        .fn()
+        .mockRejectedValue(
+          ExecutionError.statementFailed(rawWarehouseText, "UNRESOLVED_COLUMN"),
+        );
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      const mockReq = createMockRequest({
+        params: { key: "revenue" },
+        // grammar-valid, but not a real measure — NOT rejected locally.
+        body: { measures: ["ghost_measure"] },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // The well-formed-unknown measure was NOT rejected locally — it reached
+      // the warehouse (parity with the raw `.sql` flow).
+      expect(executeMock).toHaveBeenCalled();
+      expect(executeMock.mock.calls[0][1]).toEqual(
+        expect.objectContaining({
+          statement:
+            "SELECT MEASURE(ghost_measure) AS ghost_measure FROM cat.sch.revenue_metrics",
+        }),
+      );
+
+      // The SSE error envelope carries a sanitized clientMessage + structured
+      // errorCode — the raw warehouse text (with the offending column name)
+      // never reaches the client payload (#329 scrubbing, inherited).
+      const errorWrites = (mockRes.write as any).mock.calls
+        .map((call: any[]) => call[0] as string)
+        .filter((s: string) => s.startsWith("data: "));
+      const errorPayload = errorWrites.find((s: string) =>
+        s.includes('"errorCode"'),
+      );
+      expect(errorPayload).toBeTruthy();
+      expect(errorPayload).toContain('"errorCode":"UNRESOLVED_COLUMN"');
+      expect(errorPayload).toContain('"error":"Query execution failed"');
+      expect(errorPayload).not.toContain("ghost_measure");
+      expect(errorPayload).not.toContain("UNRESOLVED_COLUMN]");
+    });
   });
 });
