@@ -29,6 +29,11 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
+import {
+  buildMetricSql,
+  loadMetricRegistry,
+  validateMetricRequest,
+} from "./metric";
 import { QueryProcessor } from "./query";
 import {
   type ArrowCapability,
@@ -41,6 +46,7 @@ import {
   type AnalyticsStreamMessage,
   type IAnalyticsConfig,
   type IAnalyticsQueryRequest,
+  type MetricRegistration,
   normalizeAnalyticsFormat,
   type WarehouseStatus,
 } from "./types";
@@ -116,6 +122,25 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    */
   private _arrowCapability = new Map<string, ArrowCapability>();
 
+  /**
+   * Metric-view registry parsed from `config/queries/metric-views.json`, keyed
+   * by metric key. Loaded lazily on the first `/metric/:key` request and
+   * memoized (see {@link _getMetricRegistry}). Empty when no config is present
+   * — the metric-view path stays dormant until an app opts in.
+   */
+  private metricRegistry: Record<string, MetricRegistration> | null = null;
+
+  /**
+   * Latched error from the most recent {@link loadMetricRegistry} attempt.
+   * `null` means the registry loaded cleanly (or `metric-views.json` was absent
+   * — also fine; metric views are opt-in). When non-null, every `/metric/:key`
+   * request returns 503 `METRIC_REGISTRY_LOAD_FAILED` so a broken config
+   * (unreadable file, invalid JSON, schema violation) surfaces as a clear
+   * server status rather than masquerading as a 404 for every key. The full
+   * reason goes to telemetry only.
+   */
+  private metricRegistryLoadError: string | null = null;
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -134,6 +159,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       path: "/query/:query_key",
       handler: async (req: express.Request, res: express.Response) => {
         await this._handleQueryRoute(req, res);
+      },
+    });
+
+    // Metric-view route. Registered parallel to `/query`; measures a
+    // registered UC Metric View over the same SSE envelope. Dormant until
+    // `config/queries/metric-views.json` exists (no config → empty registry →
+    // 404, nothing executes).
+    this.route(router, {
+      name: "metric",
+      method: "post",
+      path: "/metric/:key",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleMetricRoute(req, res);
       },
     });
 
@@ -410,6 +448,253 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) and sanitized `clientMessage`
           // survive to the SSE error payload. Fall back to a generic
           // statement failure only if the original wasn't an AppKitError.
+          if (originalError instanceof AppKitError) {
+            throw originalError;
+          }
+          const inner = msg.startsWith("Statement failed: ")
+            ? msg.slice("Statement failed: ".length)
+            : msg;
+          throw ExecutionError.statementFailed(inner);
+        }
+
+        yield sqlResult.data as AnalyticsStreamMessage;
+      },
+      streamExecutionSettings,
+      executorKey,
+    );
+  }
+
+  /**
+   * Lazily load and memoize the metric registry from
+   * `config/queries/metric-views.json`.
+   *
+   * A malformed config latches `metricRegistryLoadError` and yields an empty
+   * registry so the route can return a 503 (distinguishing a broken deployment
+   * from an unknown key, which is a 404). Loading is deferred to the first
+   * `/metric/:key` request rather than the constructor so apps that never adopt
+   * metric views pay no parse cost and a config error can't break plugin
+   * construction.
+   */
+  private _getMetricRegistry(): Record<string, MetricRegistration> {
+    if (this.metricRegistry === null) {
+      try {
+        this.metricRegistry = loadMetricRegistry();
+        this.metricRegistryLoadError = null;
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn("Failed to load metric registry: %s", reason);
+        this.metricRegistry = {};
+        this.metricRegistryLoadError = reason;
+      }
+    }
+    return this.metricRegistry;
+  }
+
+  /**
+   * Handle metric-view execution requests (`POST /api/analytics/metric/:key`).
+   *
+   * Mirrors {@link _handleQueryRoute}'s JSON SSE path: the outer
+   * `executeStream` disables cache/retry and streams warehouse-readiness
+   * (`warehouse_status`) events, then the inner `execute` builds the metric SQL
+   * and delivers rows through {@link deliverJsonResult} as a `result` message.
+   * The `originalError` re-throw discipline preserves each error's structured
+   * `errorCode`/`clientMessage` for the SSE error payload.
+   *
+   * SP lane only in this phase — every registered metric runs as the service
+   * principal; OBO dispatch is wired in a later phase.
+   */
+  async _handleMetricRoute(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { key } = req.params;
+
+    logger.debug(req, "Executing metric: %s", key);
+
+    const event = logger.event(req);
+    event?.setComponent("analytics", "executeMetric").setContext("analytics", {
+      metric_key: key,
+      plugin: this.name,
+    });
+
+    if (!key) {
+      res.status(400).json({ error: "metric key is required" });
+      return;
+    }
+
+    const registry = this._getMetricRegistry();
+
+    // Surface a registry-load failure on the route. Without this, a malformed
+    // metric-views.json would yield 404 for every key — identical to "key
+    // never registered" — and hide the deployment error. Full reason →
+    // telemetry only.
+    if (this.metricRegistryLoadError !== null) {
+      event?.setContext("analytics", {
+        metric_registry_load_error: this.metricRegistryLoadError,
+      });
+      res.status(503).json({
+        error: "Metric registry not available",
+        code: "METRIC_REGISTRY_LOAD_FAILED",
+      });
+      return;
+    }
+
+    const registration = registry[key];
+    if (!registration) {
+      // Don't echo the user-supplied `key` back in the public response —
+      // confirming "metric X is not registered" lets a probe enumerate keys by
+      // elimination. The 404 status stays (useful for tooling); the body is
+      // generic and detail goes to telemetry only.
+      event?.setContext("analytics", { unknown_metric_key: key });
+      res.status(404).json({ error: "Metric not found" });
+      return;
+    }
+
+    // Validate the body on the canonical error path. `validateMetricRequest`
+    // throws a `ValidationError` (400) whose message names only field paths,
+    // never raw values.
+    let request: ReturnType<typeof validateMetricRequest>;
+    try {
+      request = validateMetricRequest(req.body ?? {});
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({ error: err.message, code: err.code });
+        return;
+      }
+      event?.setContext("analytics", {
+        unexpected_error: err instanceof Error ? err.message : String(err),
+        metric_key: key,
+      });
+      logger.warn(
+        req,
+        "Unexpected throw during metric request validation for %s: %s",
+        key,
+        err instanceof Error ? err.message : String(err),
+      );
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+
+    // SP lane only in this phase: the default executor + shared cache key. OBO
+    // dispatch (asUser(req) + per-user key) arrives in a later phase.
+    const executor = this;
+    const executorKey = "sp";
+
+    const cacheConfig = {
+      ...queryDefaults.cache,
+      cacheKey: ["analytics:metric", key, JSON.stringify(request), executorKey],
+    };
+
+    // Cache/retry/timeout scoped to the SQL execution itself (inner `execute`)
+    // so the warehouse-readiness phase isn't retried and the generator value
+    // never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
+      ...queryDefaults,
+      cache: cacheConfig,
+    };
+
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // trace context still apply.
+    const streamExecutionSettings: StreamExecutionSettings = {
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
+    };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
+
+    await executor.executeStream(
+      res,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
+        );
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            },
+          };
+        }
+
+        // `execute()` reduces a thrown error to `{ status, message }`,
+        // dropping the rich fields (`errorCode`, `clientMessage`). Capture the
+        // original here so we can re-throw it intact — the SSE error path
+        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
+        let originalError: unknown;
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            try {
+              const { statement, parameters } = buildMetricSql(
+                registration,
+                request,
+              );
+              const processedParams =
+                await self.queryProcessor.processQueryParams(
+                  statement,
+                  Object.keys(parameters).length > 0 ? parameters : undefined,
+                );
+              // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
+              // an ARROW_STREAM-inline fallback, returning plain rows in a
+              // `result` message — byte-identical envelope to `/query`.
+              return await self._executeJsonArrayPath(
+                executor,
+                statement,
+                processedParams,
+                sig,
+              );
+            } catch (err) {
+              originalError = err;
+              throw err;
+            }
+          },
+          { default: sqlConfig },
+          executorKey,
+        );
+
+        if (!sqlResult.ok) {
+          const msg = sqlResult.message;
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("operation was aborted") ||
+            lower.includes("the request was aborted") ||
+            lower.includes("statement was canceled")
+          ) {
+            const err = new DOMException(
+              lower.includes("canceled") ? msg : "The operation was aborted.",
+              "AbortError",
+            );
+            throw err;
+          }
+          // Re-throw the original error so its structured `errorCode` and
+          // sanitized `clientMessage` survive to the SSE error payload. Fall
+          // back to a generic statement failure only if it wasn't an
+          // AppKitError.
           if (originalError instanceof AppKitError) {
             throw originalError;
           }
