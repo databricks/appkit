@@ -143,17 +143,61 @@ export interface MetricRegistration {
 }
 
 /**
+ * v1 filter operator vocabulary — exactly twelve names. The runtime tuple
+ * `METRIC_FILTER_OPERATORS` (next to the validator in `metric.ts`) is the
+ * server-side source of truth; this union mirrors it statically.
+ */
+export type MetricFilterOperatorName =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "set"
+  | "notSet";
+
+/**
+ * A single filter predicate — the leaf node of the recursive
+ * {@link MetricFilter} tree. `member` is a dimension name (grammar-gated, not
+ * allowlisted); `values` is bound through parameterized `:f_<idx>` bind vars
+ * and never interpolated into the SQL string.
+ */
+export interface MetricPredicate {
+  member: string;
+  operator: MetricFilterOperatorName;
+  values?: ReadonlyArray<string | number>;
+}
+
+/**
+ * Recursive filter expression for the metric-view request body: a leaf
+ * {@link MetricPredicate} or an `{ and: [...] }` / `{ or: [...] }` group. The
+ * shape is intentionally non-generic server-side — per-metric narrowing (if
+ * any) lives client-side.
+ */
+export type MetricFilter =
+  | MetricPredicate
+  | { and: ReadonlyArray<MetricFilter> }
+  | { or: ReadonlyArray<MetricFilter> };
+
+/**
  * Validated request body for `POST /api/analytics/metric/:key`.
  *
- * `measures` is required; `dimensions`, `filter`, and `timeGrain` are part of
- * the wire shape but their SQL is not built yet (a later phase adds grouping,
- * time-grain truncation, and the structured filter translator). `filter` is
- * typed `unknown` until that phase pins down the recursive predicate shape.
+ * `measures` is required. `dimensions` drive `GROUP BY ALL`; `filter` is the
+ * recursive structured predicate tree translated into a parameterized `WHERE`
+ * clause. `timeGrain` is accepted structurally (grammar-shaped) but its SQL
+ * application is deferred — the runtime target of the grain is an open design
+ * question being resolved separately, so it currently does not alter the
+ * emitted SQL.
  */
 export interface IAnalyticsMetricRequest {
   measures: string[];
   dimensions?: string[];
-  filter?: unknown;
+  filter?: MetricFilter;
   timeGrain?: string;
   limit?: number;
   format?: AnalyticsFormat;
