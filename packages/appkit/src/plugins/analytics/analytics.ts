@@ -31,6 +31,8 @@ import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import {
   buildMetricSql,
+  composeMetricCacheKey,
+  deriveMetricExecutorKey,
   loadMetricRegistry,
   validateMetricRequest,
 } from "./metric";
@@ -500,8 +502,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * The `originalError` re-throw discipline preserves each error's structured
    * `errorCode`/`clientMessage` for the SSE error payload.
    *
-   * SP lane only in this phase — every registered metric runs as the service
-   * principal; OBO dispatch is wired in a later phase.
+   * Lane dispatch is driven by the registration: an SP-lane metric runs as the
+   * app service principal (shared cache); an OBO-lane metric runs
+   * on-behalf-of the requesting user via `asUser(req)` (per-user cache keyed by
+   * a hash of the user identity). The executor + key are computed inside a
+   * try so a missing/whitespace OBO identity lands on the canonical 401 path.
    */
   async _handleMetricRoute(
     req: express.Request,
@@ -575,14 +580,52 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // SP lane only in this phase: the default executor + shared cache key. OBO
-    // dispatch (asUser(req) + per-user key) arrives in a later phase.
-    const executor = this;
-    const executorKey = "sp";
+    // Lane dispatch. The lane comes from the registration (the entry's
+    // `executor` in metric-views.json), NOT a URL segment or `.obo.sql`
+    // filename: an OBO-lane metric runs on-behalf-of the requesting user
+    // (per-user cache via `asUser(req)`), an SP-lane metric as the app service
+    // principal (shared cache). Compute the executor + key INSIDE a try (as
+    // `_handleQueryRoute` does) so `asUser(req)`/`resolveUserId(req)` and
+    // `deriveMetricExecutorKey`'s missing-identity throw land on the canonical
+    // 401 envelope instead of surfacing as an uncaught 500 out of the stream.
+    let executor: AnalyticsPlugin;
+    let executorKey: string;
+    try {
+      const isObo = registration.lane === "obo";
+      executor = isObo ? this.asUser(req) : this;
+      executorKey = deriveMetricExecutorKey({
+        lane: registration.lane,
+        userIdentity: isObo ? this.resolveUserId(req) : undefined,
+      });
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
 
+    // Cache key. Composed over the canonicalized args (sorted measures/
+    // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
+    // the `executorKey` — `"sp"` shares the cache across all users, a per-user
+    // identity hash isolates OBO callers. Delivery is JSON-only in v1 (the
+    // route always routes through `_executeJsonArrayPath`), so the key salts on
+    // a stable "JSON_ARRAY" constant rather than `request.format`: two calls
+    // that deliver identically must not fork the cache on an unused format
+    // field.
     const cacheConfig = {
       ...queryDefaults.cache,
-      cacheKey: ["analytics:metric", key, JSON.stringify(request), executorKey],
+      cacheKey: composeMetricCacheKey({
+        metricKey: key,
+        measures: request.measures,
+        dimensions: request.dimensions,
+        timeGrain: request.timeGrain,
+        timeDimension: request.timeDimension,
+        filter: request.filter,
+        format: "JSON_ARRAY",
+        executorKey,
+        limit: request.limit,
+      }),
     };
 
     // Cache/retry/timeout scoped to the SQL execution itself (inner `execute`)

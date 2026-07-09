@@ -10,13 +10,20 @@ import {
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
+import { AuthenticationError } from "../../../errors";
 import { AnalyticsPlugin } from "../analytics";
 import {
   buildMetricSql,
+  composeMetricCacheKey,
+  deriveMetricExecutorKey,
   loadMetricRegistry,
   validateMetricRequest,
 } from "../metric";
-import type { IAnalyticsConfig, MetricRegistration } from "../types";
+import type {
+  IAnalyticsConfig,
+  MetricFilter,
+  MetricRegistration,
+} from "../types";
 
 // Mirror the analytics.test.ts CacheManager mock so the inner `execute`'s
 // cache interceptor is a no-op pass-through (each request re-executes).
@@ -1261,5 +1268,403 @@ describe("metric — filter translator", () => {
       expect(errorPayload).not.toContain("ghost_measure");
       expect(errorPayload).not.toContain("UNRESOLVED_COLUMN]");
     });
+  });
+});
+
+// ── Phase 3: cache-key composition. `composeMetricCacheKey` produces the
+// array `CacheManager.generateKey` concatenates + sha256s; the invariants
+// below are what make the cache both correct (semantically equal calls collapse)
+// and safe (distinct args / executors never collide).
+describe("composeMetricCacheKey", () => {
+  const base: {
+    metricKey: string;
+    measures: string[];
+    format: string;
+    executorKey: string;
+  } = {
+    metricKey: "revenue",
+    measures: ["arr"],
+    format: "JSON_ARRAY",
+    executorKey: "sp",
+  };
+
+  test("measure ORDER does not affect the key (sorted before hashing)", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      measures: ["arr", "revenue"],
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      measures: ["revenue", "arr"],
+    });
+    expect(a).toEqual(b);
+  });
+
+  test("dimension ORDER does not affect the key (sorted before hashing)", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region", "segment"],
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      dimensions: ["segment", "region"],
+    });
+    expect(a).toEqual(b);
+  });
+
+  test("different measures → different keys", () => {
+    const a = composeMetricCacheKey({ ...base, measures: ["arr"] });
+    const b = composeMetricCacheKey({ ...base, measures: ["mrr"] });
+    expect(a).not.toEqual(b);
+  });
+
+  test("different dimensions → different keys", () => {
+    const a = composeMetricCacheKey({ ...base, dimensions: ["region"] });
+    const b = composeMetricCacheKey({ ...base, dimensions: ["segment"] });
+    expect(a).not.toEqual(b);
+  });
+
+  test("different timeGrain → different keys", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date"],
+      timeGrain: "day",
+      timeDimension: "order_date",
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date"],
+      timeGrain: "month",
+      timeDimension: "order_date",
+    });
+    expect(a).not.toEqual(b);
+  });
+
+  test("different timeDimension → different keys (new field salts the key)", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date", "ship_date"],
+      timeGrain: "day",
+      timeDimension: "order_date",
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date", "ship_date"],
+      timeGrain: "day",
+      timeDimension: "ship_date",
+    });
+    expect(a).not.toEqual(b);
+  });
+
+  test("different limit → different keys", () => {
+    const a = composeMetricCacheKey({ ...base, limit: 10 });
+    const b = composeMetricCacheKey({ ...base, limit: 20 });
+    expect(a).not.toEqual(b);
+  });
+
+  test("predicate ORDER inside a group does not affect the key (canonicalizeFilter)", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      filter: {
+        and: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "segment", operator: "equals", values: ["Ent"] },
+        ],
+      } as MetricFilter,
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      filter: {
+        and: [
+          { member: "segment", operator: "equals", values: ["Ent"] },
+          { member: "region", operator: "equals", values: ["EMEA"] },
+        ],
+      } as MetricFilter,
+    });
+    expect(a).toEqual(b);
+  });
+
+  test("distinct filter VALUES → distinct keys", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      filter: {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      } as MetricFilter,
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      filter: {
+        member: "region",
+        operator: "equals",
+        values: ["APAC"],
+      } as MetricFilter,
+    });
+    expect(a).not.toEqual(b);
+  });
+
+  test("a filter present vs absent → different keys", () => {
+    const withFilter = composeMetricCacheKey({
+      ...base,
+      filter: {
+        member: "region",
+        operator: "set",
+      } as MetricFilter,
+    });
+    const withoutFilter = composeMetricCacheKey({ ...base });
+    expect(withFilter).not.toEqual(withoutFilter);
+  });
+
+  test("SP vs OBO (same args) → different keys via executorKey", () => {
+    const sp = composeMetricCacheKey({ ...base, executorKey: "sp" });
+    const obo = composeMetricCacheKey({
+      ...base,
+      executorKey: deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice",
+      }),
+    });
+    expect(sp).not.toEqual(obo);
+  });
+});
+
+// ── Phase 3: executor-key isolation. The key is what scopes the cache — `"sp"`
+// shares it across all callers, a per-user hash isolates OBO callers. The raw
+// identity must never enter the key verbatim (privacy: cache keys are logged
+// and persisted).
+describe("deriveMetricExecutorKey", () => {
+  test("SP lane → literal 'sp' (shared cache)", () => {
+    expect(deriveMetricExecutorKey({ lane: "sp" })).toBe("sp");
+  });
+
+  test("SP lane ignores any supplied identity", () => {
+    expect(deriveMetricExecutorKey({ lane: "sp", userIdentity: "alice" })).toBe(
+      "sp",
+    );
+  });
+
+  test("OBO lane hashes the identity — raw identity never appears in the key", () => {
+    const key = deriveMetricExecutorKey({
+      lane: "obo",
+      userIdentity: "alice@example.com",
+    });
+    expect(key).toMatch(/^[a-f0-9]{64}$/);
+    expect(key).not.toContain("alice");
+  });
+
+  test("OBO same identity → stable key (cache hits work)", () => {
+    const a = deriveMetricExecutorKey({ lane: "obo", userIdentity: "alice" });
+    const b = deriveMetricExecutorKey({ lane: "obo", userIdentity: "alice" });
+    expect(a).toBe(b);
+  });
+
+  test("OBO identity is trimmed before hashing (whitespace does not fork the scope)", () => {
+    const padded = deriveMetricExecutorKey({
+      lane: "obo",
+      userIdentity: "  alice  ",
+    });
+    const bare = deriveMetricExecutorKey({
+      lane: "obo",
+      userIdentity: "alice",
+    });
+    expect(padded).toBe(bare);
+  });
+
+  test("OBO different identities → different keys (isolation holds)", () => {
+    const alice = deriveMetricExecutorKey({
+      lane: "obo",
+      userIdentity: "alice",
+    });
+    const bob = deriveMetricExecutorKey({ lane: "obo", userIdentity: "bob" });
+    expect(alice).not.toBe(bob);
+  });
+
+  test("OBO empty identity → throws AuthenticationError (no shared 'anonymous' scope)", () => {
+    expect(() =>
+      deriveMetricExecutorKey({ lane: "obo", userIdentity: "" }),
+    ).toThrow(AuthenticationError);
+  });
+
+  test("OBO whitespace-only identity → throws AuthenticationError", () => {
+    expect(() =>
+      deriveMetricExecutorKey({ lane: "obo", userIdentity: "   " }),
+    ).toThrow(AuthenticationError);
+  });
+
+  test("OBO missing (undefined/null) identity → throws AuthenticationError", () => {
+    expect(() => deriveMetricExecutorKey({ lane: "obo" })).toThrow(
+      AuthenticationError,
+    );
+    expect(() =>
+      deriveMetricExecutorKey({ lane: "obo", userIdentity: null }),
+    ).toThrow(AuthenticationError);
+  });
+});
+
+// ── Phase 3: lane dispatch at the handler level. The lane comes from the
+// registration (the entry's `executor` in metric-views.json), NOT the URL:
+// OBO-lane routes through `asUser(req)`, SP-lane through the default executor.
+// A missing/whitespace OBO identity must land on the canonical 401 envelope,
+// never an out-of-envelope 500.
+describe("metric route — lane dispatch (Phase 3)", () => {
+  let config: IAnalyticsConfig;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeEach(async () => {
+    config = { timeout: 5000 };
+    setupDatabricksEnv();
+    mockCacheStore.clear();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
+  });
+
+  test("OBO-lane registration routes through asUser(req)", async () => {
+    const plugin = new AnalyticsPlugin(config);
+    const { router, getHandler } = createMockRouter();
+    setRegistry(plugin, {
+      revenue: {
+        key: "revenue",
+        source: "cat.sch.revenue_metrics",
+        lane: "obo",
+      },
+    });
+
+    const asUserSpy = vi.spyOn(plugin, "asUser");
+    const executeMock = vi
+      .fn()
+      .mockResolvedValue({ result: { data: [{ arr: 1 }] } });
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+      headers: {
+        "x-forwarded-access-token": "user-token",
+        "x-forwarded-user": "alice",
+      },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    // The OBO lane dispatched through the user-scoped executor…
+    expect(asUserSpy).toHaveBeenCalledWith(mockReq);
+    // …and the SQL still reached the warehouse and streamed a result.
+    expect(executeMock).toHaveBeenCalled();
+    expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
+  });
+
+  test("SP-lane registration uses the default executor (asUser not called)", async () => {
+    const plugin = new AnalyticsPlugin(config);
+    const { router, getHandler } = createMockRouter();
+    setRegistry(plugin, {
+      revenue: {
+        key: "revenue",
+        source: "cat.sch.revenue_metrics",
+        lane: "sp",
+      },
+    });
+
+    const asUserSpy = vi.spyOn(plugin, "asUser");
+    const executeMock = vi
+      .fn()
+      .mockResolvedValue({ result: { data: [{ arr: 1 }] } });
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+      // Even with user headers present, an SP-lane metric must NOT impersonate.
+      headers: {
+        "x-forwarded-access-token": "user-token",
+        "x-forwarded-user": "alice",
+      },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(asUserSpy).not.toHaveBeenCalled();
+    expect(executeMock).toHaveBeenCalled();
+    expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
+  });
+
+  test("OBO metric with no user identity → canonical 401, no SQL executed", async () => {
+    const plugin = new AnalyticsPlugin(config);
+    const { router, getHandler } = createMockRouter();
+    setRegistry(plugin, {
+      revenue: {
+        key: "revenue",
+        source: "cat.sch.revenue_metrics",
+        lane: "obo",
+      },
+    });
+
+    const executeMock = vi.fn();
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/metric/:key");
+    // No x-forwarded-* headers at all → the OBO dispatch throws an
+    // AuthenticationError, caught and returned as a canonical 401 envelope.
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "AUTHENTICATION_ERROR" }),
+    );
+    // Landed on the 401 path before any SQL and without opening the SSE stream.
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(mockRes.write).not.toHaveBeenCalled();
+  });
+
+  test("OBO metric with whitespace-only user identity → canonical 401", async () => {
+    const plugin = new AnalyticsPlugin(config);
+    const { router, getHandler } = createMockRouter();
+    setRegistry(plugin, {
+      revenue: {
+        key: "revenue",
+        source: "cat.sch.revenue_metrics",
+        lane: "obo",
+      },
+    });
+
+    const executeMock = vi.fn();
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+      headers: {
+        "x-forwarded-access-token": "user-token",
+        "x-forwarded-user": "   ",
+      },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "AUTHENTICATION_ERROR" }),
+    );
+    expect(executeMock).not.toHaveBeenCalled();
   });
 });

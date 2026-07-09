@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { type SQLTypeMarker, sql as sqlHelpers } from "shared";
@@ -7,7 +8,7 @@ import { z } from "zod";
 // type-generator's runtime, which pulls the zod-free `metric-fqn.ts` from the
 // same tree) so the runtime and the generated JSON schema validate identically.
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
-import { ValidationError } from "../../errors";
+import { AuthenticationError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type {
   IAnalyticsMetricRequest,
@@ -1000,4 +1001,138 @@ function renderDimensionClause(
     return `date_trunc('${timeGrain}', ${dim}) AS ${dim}`;
   }
   return dim;
+}
+
+/**
+ * Compose the cache key for a metric-view request.
+ *
+ * Reserved namespace `metric` separates metric-view caches from query caches.
+ * The returned array is consumed by `CacheManager.generateKey`, which
+ * concatenates and sha256-hashes the parts — the per-concern structure keeps
+ * the key inspectable in tests and debug logs without giving up determinism.
+ *
+ * Sort-before-hash collapses semantically equivalent calls onto one entry:
+ *  - `measures` / `dimensions`: lexicographic sort.
+ *  - `filter`: predicates inside each AND/OR group are stable-sorted by
+ *    `(member, operator)` and the group kind (`and` vs `or`) is preserved by
+ *    {@link canonicalizeFilter}; values are included verbatim so distinct
+ *    filter values yield distinct keys.
+ *
+ * `timeGrain` AND `timeDimension` both salt the key: each independently
+ * changes the emitted SQL (the grain literal and which column is bucketed), so
+ * two calls that differ only in one of them must not share a cache entry.
+ *
+ * `executorKey` is `"sp"` for SP-lane entries (shared cache) or a sha256 hash
+ * of the end user's identity for OBO-lane entries (per-user isolation) — see
+ * {@link deriveMetricExecutorKey}.
+ */
+export function composeMetricCacheKey(input: {
+  metricKey: string;
+  measures: string[];
+  dimensions?: string[];
+  timeGrain?: string;
+  timeDimension?: string;
+  filter?: MetricFilter;
+  format: string;
+  executorKey: string;
+  limit?: number;
+}): string[] {
+  const sortedMeasures = [...input.measures].sort();
+  const sortedDimensions = [...(input.dimensions ?? [])].sort();
+  const filterFingerprint =
+    input.filter !== undefined ? canonicalizeFilter(input.filter) : "_";
+  return [
+    "metric",
+    input.metricKey,
+    input.format,
+    sortedMeasures.join(","),
+    sortedDimensions.join(","),
+    input.timeGrain ?? "_",
+    input.timeDimension ?? "_",
+    filterFingerprint,
+    typeof input.limit === "number" ? String(input.limit) : "_",
+    input.executorKey,
+  ];
+}
+
+/**
+ * Derive the cache executor key from a metric registration's lane and the
+ * caller's user identity.
+ *
+ * Returns `"sp"` for SP-lane entries (every caller shares the cache) and a
+ * sha256 hex digest of the user identity for OBO-lane entries (each user gets
+ * an isolated cache scope).
+ *
+ * The user identity is hashed — never stored verbatim — so the cache layer
+ * (which logs keys at debug level and persists them in any cache backend)
+ * never sees raw user emails or principal names. A stable, opaque token is
+ * exactly what we need: same user → same key (so cache hits work), different
+ * users → different keys (so isolation holds), and reverse lookup is
+ * infeasible.
+ *
+ * For OBO requests without a resolvable identity (missing or whitespace-only
+ * user id), throw `AuthenticationError.missingUserId()` rather than falling
+ * back to a shared `"anonymous"` sentinel — distinct misconfigured callers
+ * would otherwise collide into one cache scope and read each other's cached
+ * results. The route computes this inside its try/catch, so the throw lands on
+ * the canonical 401 envelope.
+ */
+export function deriveMetricExecutorKey(input: {
+  lane: MetricLane;
+  userIdentity?: string | null;
+}): string {
+  if (input.lane === "sp") {
+    return "sp";
+  }
+  // OBO lane — hash the user identity so the raw email/principal never reaches
+  // the cache layer. Missing/whitespace identity is a hard auth failure: the
+  // alternative ("anonymous" sentinel) collides every misconfigured caller
+  // into a single cache scope, so user A's results could leak to user B.
+  const identity = input.userIdentity?.trim();
+  if (!identity) {
+    throw AuthenticationError.missingUserId();
+  }
+  return createHash("sha256").update(identity).digest("hex");
+}
+
+/**
+ * Produce a deterministic string fingerprint of the filter tree.
+ *
+ * The fingerprint sorts predicates within each AND/OR group by
+ * `(member, operator)` and recursively canonicalizes nested groups. Values are
+ * included verbatim so cache entries differ when the filter targets different
+ * values (`region in [EMEA]` vs `region in [APAC]` → different keys; `equals A`
+ * vs `equals B` → different keys), while order-insensitive predicate lists
+ * collapse to the same key.
+ */
+function canonicalizeFilter(node: MetricFilter): string {
+  if (node === null || typeof node !== "object") {
+    return "_";
+  }
+
+  if ("and" in node || "or" in node) {
+    const groupKey = "and" in node ? "and" : "or";
+    const children = (
+      node as { and?: ReadonlyArray<MetricFilter> } & {
+        or?: ReadonlyArray<MetricFilter>;
+      }
+    )[groupKey];
+
+    if (!Array.isArray(children) || children.length === 0) {
+      return `${groupKey}()`;
+    }
+
+    const sorted = sortFilterChildren(children);
+    const childFingerprints = sorted.map(canonicalizeFilter);
+    return `${groupKey}(${childFingerprints.join(",")})`;
+  }
+
+  // Leaf predicate. Use JSON.stringify (not String) for the value segment so
+  // strings carrying the `|` separator cannot collide with split arrays —
+  // e.g. `["a", "b"]` and `["a|string:b"]` stay distinct fingerprints.
+  const p = node as MetricPredicate;
+  const valuesPart = p.values
+    ? p.values.map((v) => `${typeof v}:${JSON.stringify(v)}`).join("|")
+    : "";
+  return `p(${p.member}/${p.operator}/${valuesPart})`;
 }
