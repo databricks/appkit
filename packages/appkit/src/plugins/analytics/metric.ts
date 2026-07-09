@@ -61,9 +61,10 @@ const MEASURE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const DIMENSION_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
- * Time-grain token shape. Accepted structurally so a hostile token can never
- * reach the SQL string, but the grain is NOT applied to any SQL this phase —
- * see the seam in {@link renderDimensionClause}.
+ * Time-grain token shape. This grammar gate is the security boundary for the
+ * grain: it is interpolated as a single-quoted `date_trunc` unit literal (NOT
+ * a bind param) in {@link renderDimensionClause}, so the pattern is what keeps
+ * a hostile token out of that quoted position.
  */
 const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
 
@@ -244,8 +245,10 @@ function assertSafeFqn(fqn: string): void {
  * per-operator value cardinality, and AND/OR depth).
  *
  * `filter` is recursive (`Predicate | { and: [...] } | { or: [...] }`), built
- * with `z.lazy`. `timeGrain` is accepted as a grammar-shaped token but its SQL
- * application is deferred (see {@link renderDimensionClause}).
+ * with `z.lazy`. `timeGrain` buckets `timeDimension` via `date_trunc` (see
+ * {@link renderDimensionClause}); the two cross-field rules (grain requires
+ * timeDimension; timeDimension must be one of dimensions) live in the
+ * `superRefine` below.
  */
 
 /** A leaf predicate: `{ member, operator, values? }`, no extra keys. */
@@ -302,13 +305,26 @@ const metricRequestSchema = z
       })
       .optional(),
     filter: filterSchema.optional(),
-    // Grammar-shaped only: the token is validated for safety but its SQL is
-    // not built this phase (grain target TBD).
+    // Grammar-shaped bucketing grain, applied to `timeDimension` via
+    // `date_trunc`. The token is validated for safety here; the grain literal
+    // is interpolated (single-quoted, never a bind param) in
+    // `renderDimensionClause`, so this pattern gate is the security boundary.
     timeGrain: z
       .string()
       .min(1, { message: "timeGrain cannot be empty" })
       .regex(TIME_GRAIN_PATTERN, {
         message: "timeGrain must match /^[a-z][a-z_]*$/",
+      })
+      .optional(),
+    // The single dimension `timeGrain` applies to via `date_trunc`. Grammar-
+    // gated as a SQL identifier (column reference, cannot be parameterized).
+    // Cross-field rules in `superRefine`: required when `timeGrain` is set, and
+    // must be one of `dimensions`.
+    timeDimension: z
+      .string()
+      .min(1, { message: "timeDimension cannot be empty" })
+      .regex(DIMENSION_NAME_PATTERN, {
+        message: "timeDimension must match /^[a-zA-Z_][a-zA-Z0-9_]*$/",
       })
       .optional(),
     limit: z
@@ -325,6 +341,28 @@ const metricRequestSchema = z
   .superRefine((value, ctx) => {
     if (value.filter != null) {
       validateFilterTree(value.filter, ctx, ["filter"], 0);
+    }
+
+    // Cross-field grain rules. `timeGrain` buckets exactly one selected
+    // dimension via `date_trunc`, so it requires an explicit `timeDimension`,
+    // and that dimension must be selected (so it is in the SELECT list and
+    // `GROUP BY ALL`).
+    if (value.timeGrain != null && value.timeDimension == null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "timeDimension is required when timeGrain is set",
+        path: ["timeDimension"],
+      });
+    }
+    if (
+      value.timeDimension != null &&
+      !(value.dimensions ?? []).includes(value.timeDimension)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "timeDimension must be one of dimensions",
+        path: ["timeDimension"],
+      });
     }
   }) as z.ZodType<IAnalyticsMetricRequest>;
 
@@ -580,8 +618,10 @@ export function validateMetricRequest(body: unknown): IAnalyticsMetricRequest {
  *  - The `WHERE` clause is rendered from the recursive filter tree. Every value
  *    flows through Statement Execution's named bind-var path (`:f_<idx>`); no
  *    value is ever interpolated as a literal.
- *  - `timeGrain` currently has NO effect on the emitted SQL — see the seam in
- *    {@link renderDimensionClause}.
+ *  - When `timeGrain` is set, the `timeDimension` column renders as
+ *    `date_trunc('<grain>', <col>) AS <col>` (the grain is a grammar-gated
+ *    single-quoted literal, not a bind param); other dimensions render bare —
+ *    see {@link renderDimensionClause}.
  *
  * Returns `{ statement, parameters }` where `parameters` is the named bind-var
  * dictionary the plugin's `query()` consumes.
@@ -626,7 +666,9 @@ export function buildMetricSql(
 
   const dimensionClauses = [...dimensions]
     .sort()
-    .map((d) => renderDimensionClause(d, request.timeGrain));
+    .map((d) =>
+      renderDimensionClause(d, request.timeGrain, request.timeDimension),
+    );
 
   const selectList = [...measureClauses, ...dimensionClauses].join(", ");
   const groupByClause = dimensions.length > 0 ? " GROUP BY ALL" : "";
@@ -929,15 +971,33 @@ function bindLikeValue(
 /**
  * Render a single SELECT-list clause for a dimension.
  *
- * timeGrain application deferred — see PR2 grain-target decision; dimension
- * renders bare for now. When the grain target is settled, a time-typed
- * dimension will render as `date_trunc('<grain>', <col>) AS <col>` here; the
- * `timeGrain` token is already accepted (grammar-shaped) upstream so the wire
- * contract is stable across that change.
+ * When `timeGrain` is set and `dim` is the request's `timeDimension`, the
+ * column is bucketed: `date_trunc('<grain>', <col>) AS <col>`. Every other
+ * dimension renders bare. Both the grain literal and the column identifier are
+ * grammar-gated before they reach the SQL string:
+ *
+ *  - The grain is single-quoted (it is a `date_trunc` unit literal, NOT a bind
+ *    param) and `TIME_GRAIN_PATTERN` upstream is the control that keeps a
+ *    hostile token out of that quoted position.
+ *  - The column cannot be parameterized (it is an identifier), so it is
+ *    re-checked against {@link DIMENSION_NAME_PATTERN} here as belt-and-
+ *    suspenders even though the schema already gated `timeDimension`.
+ *
+ * The aliasing keeps result-row keys stable (`{ order_date: ... }`) regardless
+ * of whether the grain was applied.
  */
 function renderDimensionClause(
   dim: string,
-  _timeGrain: string | undefined,
+  timeGrain: string | undefined,
+  timeDimension: string | undefined,
 ): string {
+  if (timeGrain != null && dim === timeDimension) {
+    if (!DIMENSION_NAME_PATTERN.test(dim)) {
+      throw new Error(
+        `Refusing to build SQL: timeDimension "${dim}" is not a valid identifier.`,
+      );
+    }
+    return `date_trunc('${timeGrain}', ${dim}) AS ${dim}`;
+  }
   return dim;
 }

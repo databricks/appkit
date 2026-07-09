@@ -170,8 +170,8 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimensions + GROUP BY ALL. No date_trunc — timeGrain is held
-  // this phase (grain target TBD), so dimensions render bare.
+  // ── Phase 2: dimensions + GROUP BY ALL. Bare dimensions here; date_trunc
+  // grain application (via timeDimension) is covered in its own block below.
   describe("buildMetricSql dimensions + GROUP BY", () => {
     const registration: MetricRegistration = {
       key: "revenue",
@@ -230,18 +230,54 @@ describe("analytics metric route (Phase 1)", () => {
       );
     });
 
-    test("timeGrain is parsed but not yet applied (grain target TBD) — dimension renders bare, no date_trunc", () => {
+    test("no timeGrain → all dimensions render bare (no date_trunc)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["order_date", "region"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, order_date, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+      expect(statement).not.toContain("date_trunc");
+    });
+  });
+
+  // ── Phase 2a: timeGrain + timeDimension → date_trunc on the named column.
+  // The grain is a grammar-gated single-quoted literal; the column keeps its
+  // plain alias; other dimensions render bare; GROUP BY ALL is present.
+  describe("buildMetricSql timeGrain + timeDimension (date_trunc)", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("buckets only the timeDimension via date_trunc; other dimensions bare", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["order_date", "region"],
+        timeGrain: "month",
+        timeDimension: "order_date",
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr, date_trunc('month', order_date) AS order_date, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+      );
+      expect(statement).toContain(
+        "date_trunc('month', order_date) AS order_date",
+      );
+      expect(statement).toContain(" GROUP BY ALL");
+    });
+
+    test("the grain literal is threaded through (day) for the timeDimension", () => {
       const { statement } = buildMetricSql(registration, {
         measures: ["arr"],
         dimensions: ["order_date"],
-        timeGrain: "month",
+        timeGrain: "day",
+        timeDimension: "order_date",
       });
-      // The held-timeGrain seam: the grain does not alter the SQL. The
-      // dimension is emitted bare — NOT wrapped in date_trunc().
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, order_date FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, date_trunc('day', order_date) AS order_date FROM cat.sch.revenue_metrics GROUP BY ALL",
       );
-      expect(statement).not.toContain("date_trunc");
     });
   });
 
@@ -1049,13 +1085,14 @@ describe("metric — filter translator", () => {
     });
   });
 
-  describe("timeGrain (grammar-shaped, not yet applied)", () => {
-    test("a grammar-valid timeGrain is accepted structurally", () => {
+  describe("timeGrain + timeDimension (validator)", () => {
+    test("a grammar-valid timeGrain + timeDimension (in dimensions) is accepted", () => {
       expect(() =>
         validateMetricRequest({
           measures: ["arr"],
           dimensions: ["order_date"],
           timeGrain: "month",
+          timeDimension: "order_date",
         }),
       ).not.toThrow();
     });
@@ -1066,17 +1103,64 @@ describe("metric — filter translator", () => {
           measures: ["arr"],
           dimensions: ["order_date"],
           timeGrain: "MONTH; DROP TABLE t",
+          timeDimension: "order_date",
         }),
       ).toThrowError(/fields:.*timeGrain/);
     });
 
-    test("timeGrain with no dimensions is accepted (held: no cross-field rule this phase)", () => {
-      // The #341 '400 when timeGrain set with no time-typed dimension' rule is
-      // deliberately NOT implemented — the grain target is TBD. The grammar
-      // shape is still enforced; the token simply does not alter SQL.
+    test("a capitalized grain (Month) is rejected by the grammar gate", () => {
       expect(() =>
-        validateMetricRequest({ measures: ["arr"], timeGrain: "day" }),
-      ).not.toThrow();
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "Month",
+          timeDimension: "order_date",
+        }),
+      ).toThrowError(/fields:.*timeGrain/);
+    });
+
+    test("a timeDimension failing DIMENSION_NAME_PATTERN is rejected", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "month",
+          timeDimension: "order_date; DROP TABLE t",
+        }),
+      ).toThrowError(/fields:.*timeDimension/);
+    });
+
+    test("timeGrain without timeDimension → 400 (grain requires a target)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "day",
+        }),
+      ).toThrowError(/fields:.*timeDimension/);
+    });
+
+    test("timeDimension not in dimensions → 400 (must be selectable + in GROUP BY ALL)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          timeGrain: "month",
+          timeDimension: "order_date",
+        }),
+      ).toThrowError(/fields:.*timeDimension/);
+    });
+
+    test("timeDimension not in dimensions → 400 even without timeGrain", () => {
+      // The dimensions-membership rule holds independent of timeGrain: a
+      // timeDimension that isn't selected can never be bucketed or grouped.
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          timeDimension: "order_date",
+        }),
+      ).toThrowError(/fields:.*timeDimension/);
     });
   });
 

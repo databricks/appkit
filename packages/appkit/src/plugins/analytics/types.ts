@@ -189,16 +189,22 @@ export type MetricFilter =
  *
  * `measures` is required. `dimensions` drive `GROUP BY ALL`; `filter` is the
  * recursive structured predicate tree translated into a parameterized `WHERE`
- * clause. `timeGrain` is accepted structurally (grammar-shaped) but its SQL
- * application is deferred — the runtime target of the grain is an open design
- * question being resolved separately, so it currently does not alter the
- * emitted SQL.
+ * clause. `timeGrain` buckets the single dimension named by `timeDimension`
+ * via `date_trunc`; it requires `timeDimension`, and `timeDimension` must be
+ * one of `dimensions` so it is selected and in `GROUP BY ALL`. Both tokens are
+ * grammar-gated before they reach SQL.
  */
 export interface IAnalyticsMetricRequest {
   measures: string[];
   dimensions?: string[];
   filter?: MetricFilter;
   timeGrain?: string;
+  /**
+   * The single dimension that `timeGrain` buckets via `date_trunc`. Must be
+   * one of `dimensions` (so it is selected and in `GROUP BY ALL`) and is
+   * required whenever `timeGrain` is set. Grammar-gated as a SQL identifier.
+   */
+  timeDimension?: string;
   limit?: number;
   format?: AnalyticsFormat;
 }
