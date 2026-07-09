@@ -112,3 +112,49 @@ export interface AnalyticsQueryResponse {
   row_count: number;
   data: any[];
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Metric views — POST /api/analytics/metric/:key
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Execution lane for a registered metric view, derived from the entry's
+ * `executor` in `metric-views.json`:
+ *   - `"sp"`  ← `executor: "app_service_principal"` — queried as the app
+ *     service principal (cache shared across all users).
+ *   - `"obo"` ← `executor: "user"` — queried on-behalf-of the requesting
+ *     user (per-user cache). OBO dispatch is wired in a later phase.
+ */
+export type MetricLane = "sp" | "obo";
+
+/**
+ * A single registered metric view, loaded from `config/queries/metric-views.json`.
+ *
+ * The registration carries only what the runtime needs to build and dispatch
+ * SQL: the metric `key`, the three-part UC FQN `source`, and the `lane`. There
+ * is intentionally NO build-time measure/dimension metadata here — the security
+ * boundary is the grammar gate plus parameterized values, not a name allowlist,
+ * so the runtime never enumerates known measures/dimensions.
+ */
+export interface MetricRegistration {
+  key: string;
+  source: string;
+  lane: MetricLane;
+}
+
+/**
+ * Validated request body for `POST /api/analytics/metric/:key`.
+ *
+ * `measures` is required; `dimensions`, `filter`, and `timeGrain` are part of
+ * the wire shape but their SQL is not built yet (a later phase adds grouping,
+ * time-grain truncation, and the structured filter translator). `filter` is
+ * typed `unknown` until that phase pins down the recursive predicate shape.
+ */
+export interface IAnalyticsMetricRequest {
+  measures: string[];
+  dimensions?: string[];
+  filter?: unknown;
+  timeGrain?: string;
+  limit?: number;
+  format?: AnalyticsFormat;
+}
