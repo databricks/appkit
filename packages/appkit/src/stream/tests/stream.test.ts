@@ -410,21 +410,30 @@ describe("StreamManager", () => {
   });
 
   describe("error handling", () => {
-    test("should send error event when handler throws", async () => {
+    test("should send a sanitized error event when handler throws — raw error text is kept server-side only", async () => {
+      // The SSE error broadcaster never echoes a bare Error's `.message`
+      // to the wire: that path can carry statement fragments, internal
+      // object names, and correlation IDs (CWE-209). Non-AppKitError
+      // throws collapse to "Internal server error"; AppKitErrors carry
+      // their `clientMessage` (sanitized) and `errorCode` (structured).
       const { mockRes, events } = createMockResponse();
 
       async function* generator() {
         yield { type: "start" };
-        throw new Error("Test error");
+        throw new Error("Test error with /internal/path and corrId=abc-123");
       }
 
       await streamManager.stream(mockRes as any, generator);
 
       expect(events).toContain('data: {"type":"start"}\n\n');
       expect(events).toContain("event: error\n");
-      expect(events).toContain(
-        'data: {"error":"Test error","code":"INTERNAL_ERROR"}\n\n',
-      );
+      const dataLines = events.filter((e) => e.startsWith("data: "));
+      const errorLine = dataLines.find((e) => e.includes('"error"'));
+      expect(errorLine).toContain('"error":"Internal server error"');
+      expect(errorLine).toContain('"code":"INTERNAL_ERROR"');
+      // The raw Error.message must not appear anywhere on the wire.
+      expect(events.join("")).not.toContain("/internal/path");
+      expect(events.join("")).not.toContain("corrId=abc-123");
       expect(mockRes.end).toHaveBeenCalled();
     });
 
@@ -690,10 +699,15 @@ describe("StreamManager", () => {
 
       await streamManager.stream(mockRes2 as any, generator2, { streamId });
 
-      const replayedError = events2.some((e) =>
-        e.includes("Something went wrong"),
+      // The buffered error event must be replayed — sanitized, not raw.
+      // We don't pin the exact wording (that's a separate test) but we
+      // do require the error frame to be present.
+      const replayedError = events2.some(
+        (e) => e.startsWith("data:") && e.includes('"error"'),
       );
       expect(replayedError).toBe(true);
+      // And the raw thrown message must not have leaked.
+      expect(events2.join("")).not.toContain("Something went wrong");
     });
 
     test("should detect buffer overflow on completed stream and close connection", async () => {

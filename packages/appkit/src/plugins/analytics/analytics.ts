@@ -1,12 +1,13 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
-import type {
-  AgentToolDefinition,
-  IAppRouter,
-  PluginExecuteConfig,
-  SQLTypeMarker,
-  StreamExecutionSettings,
-  ToolProvider,
+import {
+  type AgentToolDefinition,
+  type AnalyticsSseMessage,
+  type IAppRouter,
+  makeResultMessage,
+  type PluginExecuteConfig,
+  type SQLTypeMarker,
+  type StreamExecutionSettings,
+  type ToolProvider,
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
@@ -22,21 +23,27 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { ExecutionError } from "../../errors";
+import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
-import type {
-  AnalyticsQueryResponse,
-  AnalyticsStreamMessage,
-  IAnalyticsConfig,
-  IAnalyticsQueryRequest,
-  WarehouseStatus,
+import {
+  type ArrowCapability,
+  deliverArrowBytes,
+  deliverJsonResult,
+  type QueryExecutor,
+} from "./result-delivery";
+import {
+  type AnalyticsQueryResponse,
+  type AnalyticsStreamMessage,
+  type IAnalyticsConfig,
+  type IAnalyticsQueryRequest,
+  normalizeAnalyticsFormat,
+  type WarehouseStatus,
 } from "./types";
-import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
@@ -99,6 +106,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
+  /**
+   * In-process memo of which arrow delivery mode each warehouse supports
+   * (keyed by warehouse id). A standard warehouse rejects `INLINE+ARROW_STREAM`
+   * on every query, so once learned we skip that doomed probe; Reyden stays
+   * `"inline"`. Capability is a property of the warehouse, not the user, so it
+   * is not user-scoped. Bounded by the number of distinct warehouses a process
+   * talks to (effectively one).
+   */
+  private _arrowCapability = new Map<string, ArrowCapability>();
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -111,19 +128,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   injectRoutes(router: IAppRouter) {
-    // Arrow data downloads always run as service principal and bypass the
-    // interceptor chain (execute/executeStream). The original query execution
-    // handles OBO via executeStream(); this endpoint fetches pre-computed
-    // results by job ID.
-    this.route(router, {
-      name: "arrow",
-      method: "get",
-      path: "/arrow-result/:jobId",
-      handler: async (req: express.Request, res: express.Response) => {
-        await this._handleArrowRoute(req, res);
-      },
-    });
-
     this.route<AnalyticsQueryResponse>(router, {
       name: "query",
       method: "post",
@@ -132,47 +136,81 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         await this._handleQueryRoute(req, res);
       },
     });
+
+    // Column-names fallback for very wide Arrow schemas whose names don't fit
+    // in the `X-Appkit-Arrow-Columns` response header (see
+    // `_setArrowColumnsHeader`). The client hits this with the statement id
+    // from `X-Appkit-Arrow-Columns-Ref`.
+    this.route(router, {
+      name: "arrow-columns",
+      method: "get",
+      path: "/columns/:statementId",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleColumnsRoute(req, res);
+      },
+    });
   }
 
   /**
-   * Handle Arrow data download requests.
-   * When called via asUser(req), uses the user's Databricks credentials.
+   * Column-names fallback endpoint. Re-derives the real column names from the
+   * statement's result manifest (stateless — no server cache), for the client
+   * to relabel a positional Arrow schema when the names were too large for the
+   * response header.
    */
-  async _handleArrowRoute(
+  async _handleColumnsRoute(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const { jobId } = req.params;
-      const workspaceClient = getWorkspaceClient();
-
-      logger.debug("Processing Arrow job request for jobId=%s", jobId);
-
-      const event = logger.event(req);
-      event?.setComponent("analytics", "getArrowData").setContext("analytics", {
-        job_id: jobId,
-        plugin: this.name,
-      });
-
-      const result = await this.getArrowData(workspaceClient, jobId);
-
-      res.setHeader("Content-Type", "application/octet-stream");
-      res.setHeader("Content-Length", result.data.length.toString());
-      res.setHeader("Cache-Control", "public, max-age=3600");
-
-      logger.debug(
-        "Sending Arrow buffer: %d bytes for job %s",
-        result.data.length,
-        jobId,
-      );
-      res.send(Buffer.from(result.data));
-    } catch (error) {
-      logger.error("Arrow job error: %O", error);
-      res.status(404).json({
-        error: error instanceof Error ? error.message : "Arrow job not found",
-        plugin: this.name,
-      });
+    const { statementId } = req.params;
+    const columns = await this._resolveColumnNames(req, statementId);
+    if (columns && columns.length > 0) {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ columns });
+      return;
     }
+    res.status(404).json({
+      error: "Column names unavailable",
+      plugin: this.name,
+    });
+  }
+
+  /**
+   * Resolve a statement's real column names, trying the user's identity first
+   * (required for `.obo.sql` statements, which the service principal cannot
+   * `getStatement`) then falling back to the service principal (for
+   * SP-executed statements). Returns undefined if neither identity can read it,
+   * so the client falls back to the raw positional Arrow schema names.
+   */
+  private async _resolveColumnNames(
+    req: express.Request,
+    statementId: string,
+  ): Promise<string[] | undefined> {
+    const attempts: Array<() => Promise<string[] | undefined>> = [
+      () => this.asUser(req)._getColumnNames(statementId),
+      () => this._getColumnNames(statementId),
+    ];
+    for (const attempt of attempts) {
+      try {
+        const columns = await attempt();
+        if (columns && columns.length > 0) return columns;
+      } catch (error) {
+        logger.debug(
+          "Arrow column-names lookup attempt failed for %s: %O",
+          statementId,
+          error,
+        );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Fetch column names in the current execution context. Proxied by `asUser`,
+   * so `getWorkspaceClient()` resolves to the user's client when invoked via
+   * `this.asUser(req)` and the service principal's otherwise.
+   */
+  async _getColumnNames(statementId: string): Promise<string[] | undefined> {
+    return this.SQLClient.getColumnNames(getWorkspaceClient(), statementId);
   }
 
   /**
@@ -186,6 +224,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const { query_key } = req.params;
     const { parameters, format: rawFormat = "JSON_ARRAY" } =
       req.body as IAnalyticsQueryRequest;
+
+    if (
+      rawFormat !== "JSON_ARRAY" &&
+      rawFormat !== "ARROW_STREAM" &&
+      rawFormat !== "JSON" &&
+      rawFormat !== "ARROW"
+    ) {
+      res.status(400).json({
+        error: `Invalid format: ${String(rawFormat)}. Expected "JSON_ARRAY" or "ARROW_STREAM".`,
+      });
+      return;
+    }
+
     const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
@@ -217,41 +268,48 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     const { query, isAsUser } = queryResult;
 
+    // ARROW_STREAM streams the raw Arrow IPC bytes back as the HTTP response
+    // body — no SSE, no server-side stash, no second /arrow-result request.
+    // INLINE attachments are piped straight through (the bytes are already in
+    // hand from executeStatement); a warehouse that refuses INLINE falls back
+    // to EXTERNAL_LINKS and streams those chunks. JSON keeps the SSE path
+    // below (it carries warehouse-readiness progress + cached rows).
+    if (format === "ARROW_STREAM") {
+      await this._handleArrowStreamQuery(
+        req,
+        res,
+        query_key,
+        query,
+        isAsUser,
+        parameters,
+      );
+      return;
+    }
+
     // get execution context - user-scoped if .obo.sql, otherwise service principal
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
-    const queryParameters =
-      format === "ARROW_STREAM"
-        ? {
-            formatParameters: {
-              disposition: "EXTERNAL_LINKS",
-              format: "ARROW_STREAM",
-            },
-            type: "arrow" as const,
-          }
-        : {
-            type: "result" as const,
-          };
-
     const hashedQuery = this.queryProcessor.hashQuery(query);
+
+    const cacheConfig = {
+      ...queryDefaults.cache,
+      cacheKey: [
+        "analytics:query",
+        query_key,
+        JSON.stringify(parameters),
+        format,
+        hashedQuery,
+        executorKey,
+      ],
+    };
 
     // Cache/retry/timeout are scoped to the SQL execution itself (inner
     // `execute`) so the warehouse-readiness phase isn't subject to retries
     // and the generator value never leaks into the cache.
     const sqlConfig: PluginExecuteConfig = {
       ...queryDefaults,
-      cache: {
-        ...queryDefaults.cache,
-        cacheKey: [
-          "analytics:query",
-          query_key,
-          JSON.stringify(parameters),
-          JSON.stringify(format),
-          hashedQuery,
-          executorKey,
-        ],
-      },
+      cache: cacheConfig,
     };
 
     // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
@@ -303,17 +361,32 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           };
         }
 
+        // `execute()` reduces a thrown error to `{ status, message }`,
+        // dropping the rich fields (`errorCode`, `clientMessage`) the
+        // fallback's `ExecutionError`s carry. Capture the original here so
+        // we can re-throw it intact — the SSE error path
+        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
+        let originalError: unknown;
         const sqlResult = await executor.execute(
           async (sig) => {
-            const processedParams =
-              await self.queryProcessor.processQueryParams(query, parameters);
-            const result = await executor.query(
-              query,
-              processedParams,
-              queryParameters.formatParameters,
-              sig,
-            );
-            return { type: queryParameters.type, ...result };
+            try {
+              const processedParams =
+                await self.queryProcessor.processQueryParams(query, parameters);
+              // JSON_ARRAY path: tries INLINE + JSON_ARRAY and, if the
+              // warehouse only accepts ARROW_STREAM for INLINE, retries as
+              // ARROW_STREAM and decodes server-side — returning the SSE
+              // `result` message with plain rows. (ARROW_STREAM requests are
+              // handled earlier via `_handleArrowStreamQuery`.)
+              return await self._executeJsonArrayPath(
+                executor,
+                query,
+                processedParams,
+                sig,
+              );
+            } catch (err) {
+              originalError = err;
+              throw err;
+            }
           },
           { default: sqlConfig },
           executorKey,
@@ -333,6 +406,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
             );
             throw err;
           }
+          // Re-throw the original error so its structured `errorCode` (e.g.
+          // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) and sanitized `clientMessage`
+          // survive to the SSE error payload. Fall back to a generic
+          // statement failure only if the original wasn't an AppKitError.
+          if (originalError instanceof AppKitError) {
+            throw originalError;
+          }
           const inner = msg.startsWith("Statement failed: ")
             ? msg.slice("Statement failed: ".length)
             : msg;
@@ -344,6 +424,297 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       streamExecutionSettings,
       executorKey,
     );
+  }
+
+  /**
+   * JSON_ARRAY SSE path. Delegates the disposition/format fallback to
+   * {@link deliverJsonResult} (INLINE JSON_ARRAY → on `needs-arrow-inline`,
+   * INLINE ARROW_STREAM decoded to rows) and wraps the rows in a `result`
+   * message. External links are never used for the JSON fallback.
+   */
+  private async _executeJsonArrayPath(
+    executor: AnalyticsPlugin,
+    query: string,
+    processedParams:
+      | Record<string, SQLTypeMarker | null | undefined>
+      | undefined,
+    signal?: AbortSignal,
+  ): Promise<AnalyticsSseMessage> {
+    const result = await deliverJsonResult(
+      executor,
+      query,
+      processedParams,
+      signal,
+    );
+    return makeResultMessage(result.data, {
+      status: result.status,
+      statement_id: result.statement_id,
+    });
+  }
+
+  /**
+   * Attach the real column names so the client can relabel the positional
+   * Arrow schema (Databricks encodes ARROW_STREAM columns as col_0, …).
+   *
+   * Small schemas ride `X-Appkit-Arrow-Columns` directly. A very wide schema
+   * whose URL-encoded names would blow the HTTP header size limit instead
+   * advertises the statement id in `X-Appkit-Arrow-Columns-Ref`, and the
+   * client fetches the names from `GET /columns/:statementId`.
+   */
+  private _setArrowColumnsHeader(
+    res: express.Response,
+    columnsRef: { columnNames?: string[]; statementId?: string },
+  ): void {
+    const names = columnsRef.columnNames;
+    if (!names || names.length === 0) return;
+
+    const encoded = encodeURIComponent(JSON.stringify(names));
+    if (encoded.length <= MAX_ARROW_COLUMNS_HEADER_BYTES) {
+      res.setHeader("X-Appkit-Arrow-Columns", encoded);
+      return;
+    }
+    if (columnsRef.statementId) {
+      res.setHeader("X-Appkit-Arrow-Columns-Ref", columnsRef.statementId);
+    } else {
+      logger.warn(
+        "Arrow column names exceed the header limit and no statement id is available for the fallback endpoint; client will fall back to the raw schema names",
+      );
+    }
+  }
+
+  /**
+   * ARROW_STREAM query handler: stream the raw Arrow IPC bytes back as the
+   * HTTP response body — no SSE, no server-side stash, no second
+   * `/arrow-result` request.
+   *
+   * The first chunk is pulled before headers are sent so a failure still
+   * yields a clean JSON error; once bytes are in flight a mid-stream failure
+   * can only abort the socket. Warehouse readiness is awaited (no SSE
+   * progress on this path) — a no-op for a warm warehouse, a blocking wait
+   * on a cold start. Runs under the user's context for `.obo.sql` queries.
+   */
+  private async _handleArrowStreamQuery(
+    req: express.Request,
+    res: express.Response,
+    query_key: string,
+    query: string,
+    isAsUser: boolean,
+    parameters: IAnalyticsQueryRequest["parameters"],
+  ): Promise<void> {
+    const executor = isAsUser ? this.asUser(req) : this;
+    const executorKey = isAsUser ? this.resolveUserId(req) : "global";
+    const abortController = new AbortController();
+    const onClose = () => abortController.abort();
+    res.on("close", onClose);
+    const signal = abortController.signal;
+
+    // Fail-fast: bound the wait for the first byte (warehouse readiness +
+    // execute + first chunk) so a stuck/overloaded warehouse returns a clear
+    // 503 instead of hanging until the client gives up. Cleared once the
+    // first chunk arrives — a legitimately long stream is never interrupted.
+    const firstByteTimeoutMs =
+      this.config.arrowFirstByteTimeoutMs ??
+      DEFAULT_ARROW_FIRST_BYTE_TIMEOUT_MS;
+    let timedOut = false;
+    const failFast = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, firstByteTimeoutMs);
+
+    try {
+      // Run warehouse readiness in the SAME identity context as the query:
+      // for `.obo.sql`, `executor` is the `asUser(req)` proxy, so
+      // `getWorkspaceClient()` inside resolves to the user's client (matching
+      // the SSE path). Calling it bare here would auto-start the warehouse as
+      // the service principal even for OBO requests.
+      await executor._ensureArrowWarehouseReady(signal);
+
+      const processedParams = await this.queryProcessor.processQueryParams(
+        query,
+        parameters,
+      );
+
+      const warehouseId = await getWarehouseId();
+
+      // Populated by `deliverArrowBytes` from the result manifest before the
+      // first chunk is yielded, so the header below carries the real names.
+      const columnsRef: { columnNames?: string[]; statementId?: string } = {};
+      const bytes = deliverArrowBytes(
+        // Wrap the executor so the INLINE attempt runs through the interceptor
+        // chain (cache + retry), matching the JSON path. Only inline attachments
+        // are cached; EXTERNAL_LINKS carry expiring pre-signed URLs and are
+        // never cached (see `_arrowCachingExecutor`).
+        this._arrowCachingExecutor(
+          executor,
+          query_key,
+          query,
+          parameters,
+          executorKey,
+        ),
+        this.SQLClient,
+        query,
+        processedParams,
+        columnsRef,
+        signal,
+        {
+          // Skip the doomed INLINE probe on a warehouse already known to need
+          // EXTERNAL_LINKS; remember the resolved mode for next time.
+          capabilityHint: this._arrowCapability.get(warehouseId),
+          onCapabilityResolved: (capability) =>
+            this._arrowCapability.set(warehouseId, capability),
+        },
+      );
+      const first = await bytes.next();
+      // First byte in hand — stop the fail-fast clock.
+      clearTimeout(failFast);
+
+      res.setHeader("Content-Type", "application/vnd.apache.arrow.stream");
+      res.setHeader("Cache-Control", "no-store");
+      this._setArrowColumnsHeader(res, columnsRef);
+
+      if (!first.done) {
+        await writeChunk(res, first.value);
+        for await (const buf of bytes) {
+          await writeChunk(res, buf);
+        }
+      }
+      res.end();
+    } catch (error) {
+      clearTimeout(failFast);
+      // Fail-fast timeout: the warehouse never produced a first byte. This also
+      // aborts the signal, so it must be handled before the generic
+      // `signal.aborted` branch below. Headers aren't sent yet (we time out
+      // before the first chunk), so a clean 503 is still possible.
+      if (timedOut) {
+        logger.warn(
+          "Arrow query timed out before first byte after %dms",
+          firstByteTimeoutMs,
+        );
+        res.status(503).json({
+          error:
+            "The SQL warehouse is starting or overloaded and did not respond in time. Please retry.",
+          errorCode: "WAREHOUSE_UNAVAILABLE",
+          plugin: this.name,
+        });
+        return;
+      }
+      // Client disconnect / unmount aborts the signal (see `onClose`). That's
+      // routine UI behavior, not a server error — tear down quietly whether it
+      // fires before or after headers. Checked before the headersSent branch so
+      // a mid-stream disconnect doesn't spam ERROR logs / alerting.
+      if (signal.aborted) {
+        if (res.headersSent) res.destroy();
+        else res.end();
+        return;
+      }
+      if (res.headersSent) {
+        logger.error("Arrow query stream failed mid-flight: %O", error);
+        res.destroy(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      logger.error("Arrow query error: %O", error);
+      // Do not echo upstream / SDK error text — it can include statement
+      // fragments and correlation ids. Keep the structured code so the
+      // client can branch (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
+      // ARROW_DELIVERY_UNSUPPORTED).
+      const errorCode =
+        error instanceof ExecutionError ? error.errorCode : undefined;
+      res.status(500).json({
+        // `clientMessage` is the sanitized, actionable text (e.g. "Re-run with
+        // JSON_ARRAY" for ARROW_DELIVERY_UNSUPPORTED); it never carries raw
+        // warehouse/SDK strings. Fall back to a generic message otherwise.
+        error:
+          error instanceof AppKitError
+            ? error.clientMessage
+            : "Unable to execute query",
+        errorCode,
+        plugin: this.name,
+      });
+    } finally {
+      res.off("close", onClose);
+    }
+  }
+
+  /**
+   * Await SQL warehouse readiness for the direct-binary Arrow path. There is no
+   * SSE progress channel here — readiness is simply awaited, bounded by the
+   * caller's abort signal / fail-fast timeout. Invoked via the request executor
+   * (`asUser(req)` for `.obo.sql`) so `getWorkspaceClient()` resolves in the
+   * correct identity context rather than defaulting to the service principal.
+   */
+  async _ensureArrowWarehouseReady(signal: AbortSignal): Promise<void> {
+    const workspaceClient = getWorkspaceClient();
+    const warehouseId = await getWarehouseId();
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStart = this.config.autoStartWarehouse ?? true;
+    await this.SQLClient.ensureWarehouseRunning(workspaceClient, warehouseId, {
+      signal,
+      timeoutMs: startupTimeoutMs,
+      autoStart,
+      onStatus: () => {},
+    });
+  }
+
+  /**
+   * Wrap an executor so the `INLINE + ARROW_STREAM` attempt is served from
+   * (and populates) the same per-user TTL cache the JSON path uses — otherwise
+   * every arrow chart render is a fresh warehouse execution, unlike its JSON
+   * twin. Caching is deliberately scoped to inline attachments:
+   *
+   * - INLINE results carry a bounded (<=25 MiB) base64 `attachment` with the
+   *   same lifecycle as cached JSON rows — safe to cache.
+   * - EXTERNAL_LINKS results carry short-lived pre-signed URLs that expire in
+   *   minutes; caching them would serve dead links, so those pass through
+   *   uncached (only the tiny link metadata would be cached anyway).
+   *
+   * Uses `this.cache.getOrExecute` directly rather than `this.execute()`
+   * because `execute()` reduces a thrown error to `{ ok:false, message }`,
+   * dropping the `errorCode` the capability fallback classifies on. The cache
+   * re-throws `AppKitError`s intact and never caches a rejection, so the
+   * INLINE→EXTERNAL_LINKS fallback still sees the structured rejection.
+   */
+  private _arrowCachingExecutor(
+    executor: AnalyticsPlugin,
+    query_key: string,
+    query: string,
+    parameters: IAnalyticsQueryRequest["parameters"],
+    executorKey: string,
+  ): QueryExecutor {
+    const hashedQuery = this.queryProcessor.hashQuery(query);
+    const cache = this.cache;
+    const ttl = queryDefaults.cache?.ttl;
+    return {
+      query: (q, params, formatParameters, signal) => {
+        // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
+        // short-lived pre-signed URLs, so those pass straight through.
+        if (
+          formatParameters.disposition !== "INLINE" ||
+          formatParameters.format !== "ARROW_STREAM"
+        ) {
+          return executor.query(q, params, formatParameters, signal);
+        }
+        // On a standard warehouse this throws a capability rejection — the
+        // cache never stores a rejection, so the fallback still sees the
+        // structured error. On Reyden it returns a bounded (<=25 MiB)
+        // attachment that caches like the JSON path's rows. The shared signal
+        // dedupes concurrent renders (e.g. React StrictMode double-mount).
+        return cache.getOrExecute(
+          [
+            "analytics:query:arrow",
+            query_key,
+            JSON.stringify(parameters),
+            hashedQuery,
+            executorKey,
+          ],
+          (sharedSignal) =>
+            executor.query(q, params, formatParameters, sharedSignal ?? signal),
+          executorKey,
+          { ttl, callerSignal: signal },
+        );
+      },
+    };
   }
 
   /**
@@ -385,17 +756,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     );
 
     return response.result;
-  }
-
-  /**
-   * Get Arrow-formatted data for a completed query job.
-   */
-  protected async getArrowData(
-    workspaceClient: WorkspaceClient,
-    jobId: string,
-    signal?: AbortSignal,
-  ): Promise<ReturnType<typeof this.SQLClient.getArrowData>> {
-    return await this.SQLClient.getArrowData(workspaceClient, jobId, signal);
   }
 
   async shutdown(): Promise<void> {
@@ -461,6 +821,71 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     };
   }
 }
+
+/**
+ * Write one chunk to the response honoring backpressure: if the socket
+ * buffer is full (`res.write` returns false), wait for `drain` before
+ * resolving so a slow client can't balloon Node's internal write queue and
+ * defeat the constant-memory goal of streaming.
+ *
+ * @internal exported for unit testing the backpressure/disconnect behavior.
+ */
+export function writeChunk(
+  res: express.Response,
+  bytes: Uint8Array,
+): Promise<void> {
+  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // If the socket is already gone, `res.write` won't return true and the
+  // `drain`/`close`/`error` events have already fired — so the promise below
+  // would never settle, wedging the for-await loop and the upstream reader.
+  // Reject up front instead.
+  if (res.destroyed || res.writableEnded) {
+    return Promise.reject(
+      new DOMException("The response stream closed", "AbortError"),
+    );
+  }
+  if (res.write(buf)) return Promise.resolve();
+  // Backpressured: resolve on `drain`, but also settle on `close`/`error`. A
+  // client that disconnects mid-backpressure never emits `drain` on the
+  // destroyed socket, so waiting on `drain` alone would wedge this promise —
+  // and with it the awaiting for-await loop and the upstream Arrow reader —
+  // forever. Rejecting instead unwinds the stream so its `finally` can cancel
+  // the reader.
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      res.off("drain", onDrain);
+      res.off("close", onClose);
+      res.off("error", onClose);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new DOMException("The response stream closed", "AbortError"));
+    };
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+    res.once("error", onClose);
+  });
+}
+
+/**
+ * Fail-fast ceiling on the wait for the first Arrow byte (warehouse
+ * readiness + execute + first chunk). Past this a stuck/overloaded warehouse
+ * yields a clear 503 instead of hanging. Override per plugin via
+ * `arrowFirstByteTimeoutMs`.
+ */
+const DEFAULT_ARROW_FIRST_BYTE_TIMEOUT_MS = 120_000;
+
+/**
+ * Byte ceiling for the `X-Appkit-Arrow-Columns` header value. Beyond this (a
+ * very wide schema) the names are served via the `/columns/:statementId`
+ * fallback endpoint instead of the header. Kept well under the common ~8 KiB
+ * per-header limit.
+ */
+const MAX_ARROW_COLUMNS_HEADER_BYTES = 6000;
 
 /**
  * @internal

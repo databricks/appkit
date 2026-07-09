@@ -43,6 +43,7 @@ console.error(error.toJSON()); // Safe for logging, sensitive values redacted
 ```ts
 new AppKitError(message: string, options?: {
   cause?: Error;
+  clientMessage?: string;
   context?: Record<string, unknown>;
 }): AppKitError;
 ```
@@ -52,8 +53,9 @@ new AppKitError(message: string, options?: {
 | Parameter | Type |
 | ------ | ------ |
 | `message` | `string` |
-| `options?` | \{ `cause?`: `Error`; `context?`: `Record`\<`string`, `unknown`\>; \} |
+| `options?` | \{ `cause?`: `Error`; `clientMessage?`: `string`; `context?`: `Record`\<`string`, `unknown`\>; \} |
 | `options.cause?` | `Error` |
+| `options.clientMessage?` | `string` |
 | `options.context?` | `Record`\<`string`, `unknown`\> |
 
 #### Returns
@@ -67,6 +69,24 @@ Error.constructor
 ```
 
 ## Properties
+
+### \_clientMessage?
+
+```ts
+protected readonly optional _clientMessage: string;
+```
+
+Client-safe error message. When set, callers serializing the error to
+a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`
+— `message` may contain raw upstream / SDK text including statement
+fragments, internal object names, and correlation IDs.
+
+Subclasses can set this in their constructor for a fixed sanitized
+string. When unset, `clientMessage` defaults to a generic per-code
+string (see the getter), and the raw `message` is kept server-side
+only.
+
+***
 
 ### cause?
 
@@ -121,6 +141,23 @@ abstract readonly statusCode: number;
 ```
 
 HTTP status code suggestion (can be overridden)
+
+## Accessors
+
+### clientMessage
+
+#### Get Signature
+
+```ts
+get clientMessage(): string;
+```
+
+Sanitized message safe to forward to clients. Override in subclasses
+if a more specific default is appropriate.
+
+##### Returns
+
+`string`
 
 ## Methods
 

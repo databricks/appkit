@@ -93,7 +93,7 @@ describe("isQueryProps", () => {
     const props = {
       queryKey: "test_query",
       parameters: { limit: 100 },
-      format: "json" as const,
+      format: "json_array" as const,
     };
 
     expect(isQueryProps(props as any)).toBe(true);

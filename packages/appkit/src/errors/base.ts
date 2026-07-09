@@ -46,19 +46,45 @@ export abstract class AppKitError extends Error {
   /** Additional context for the error */
   readonly context?: Record<string, unknown>;
 
+  /**
+   * Client-safe error message. When set, callers serializing the error to
+   * a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`
+   * — `message` may contain raw upstream / SDK text including statement
+   * fragments, internal object names, and correlation IDs.
+   *
+   * Subclasses can set this in their constructor for a fixed sanitized
+   * string. When unset, `clientMessage` defaults to a generic per-code
+   * string (see the getter), and the raw `message` is kept server-side
+   * only.
+   */
+  protected readonly _clientMessage?: string;
+
   constructor(
     message: string,
-    options?: { cause?: Error; context?: Record<string, unknown> },
+    options?: {
+      cause?: Error;
+      context?: Record<string, unknown>;
+      clientMessage?: string;
+    },
   ) {
     super(message);
     this.name = this.constructor.name;
     this.cause = options?.cause;
     this.context = options?.context;
+    this._clientMessage = options?.clientMessage;
 
     // Maintains proper stack trace for where the error was thrown
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, this.constructor);
     }
+  }
+
+  /**
+   * Sanitized message safe to forward to clients. Override in subclasses
+   * if a more specific default is appropriate.
+   */
+  get clientMessage(): string {
+    return this._clientMessage ?? "An internal error occurred";
   }
 
   /**
