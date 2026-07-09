@@ -1,5 +1,5 @@
 import type { sql } from "@databricks/sdk-experimental";
-import { type DataType, Type, tableFromIPC } from "apache-arrow";
+import { type DataType, type Field, Type, tableFromIPC } from "apache-arrow";
 import type { SQLTypeMarker } from "shared";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -354,19 +354,6 @@ export async function deliverJsonResult(
 const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
 const JSON_ARRAY_FALLBACK_MAX_BYTES = 64 * 1024 * 1024;
 
-/**
- * Replacer for nested `JSON.stringify`. Arrow values include `bigint` (which
- * spec'd `JSON.stringify` throws on), `Uint8Array` (would serialize as an
- * index map), and `Date` (would lose timezone in a nested struct). Coerce
- * each to the string form the warehouse itself emits under native JSON_ARRAY.
- */
-function nestedJsonReplacer(_key: string, value: unknown): unknown {
-  if (typeof value === "bigint") return value.toString();
-  if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
-  if (value instanceof Date) return value.toISOString();
-  return value;
-}
-
 /** Render an apache-arrow Decimal cell to a fixed-point string. */
 function formatDecimalCell(
   value: { toString(): string },
@@ -394,6 +381,84 @@ function formatTimestampCell(epochMs: number, hasTimezone: boolean): string {
 /** Render an apache-arrow Date cell to `yyyy-MM-dd` (UTC). */
 function formatDateCell(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Render a single scalar Arrow value to the string form the warehouse emits
+ * under native JSON_ARRAY. Used for both top-level cells and (recursively, via
+ * {@link renderNestedValue}) scalar leaves inside List/Struct/Map columns,
+ * keyed on the Arrow field type so a nested `DECIMAL` keeps its scale and a
+ * nested `TIMESTAMP` becomes ISO-8601 instead of raw epoch-ms.
+ */
+function formatScalarCell(value: unknown, type: DataType): string {
+  switch (type.typeId) {
+    case Type.Decimal:
+      return formatDecimalCell(
+        value as { toString(): string },
+        (type as DataType & { scale: number }).scale,
+      );
+    case Type.Timestamp:
+      return formatTimestampCell(
+        Number(value),
+        (type as DataType & { timezone?: string | null }).timezone != null,
+      );
+    case Type.Date:
+      return formatDateCell(Number(value));
+    default:
+      if (value instanceof Uint8Array) {
+        return Buffer.from(value).toString("base64");
+      }
+      if (value instanceof Date) return value.toISOString();
+      return String(value);
+  }
+}
+
+/**
+ * Recursively render a nested Arrow value (List / Struct / Map, or a scalar
+ * leaf) to the plain JS shape the warehouse nests inside a JSON_ARRAY cell:
+ * structs and maps become objects, lists become arrays, and every scalar leaf
+ * is stringified per {@link formatScalarCell}. The caller `JSON.stringify`s the
+ * result so nested columns match the warehouse's native `data_array` exactly.
+ */
+function renderNestedValue(value: unknown, type: DataType): unknown {
+  if (value == null) return null;
+  switch (type.typeId) {
+    case Type.List:
+    case Type.FixedSizeList: {
+      const itemType = (type as DataType & { children: Field[] }).children[0]
+        .type;
+      const out: unknown[] = [];
+      for (const item of value as Iterable<unknown>) {
+        out.push(renderNestedValue(item, itemType));
+      }
+      return out;
+    }
+    case Type.Struct: {
+      const fields = (type as DataType & { children: Field[] }).children;
+      const obj: Record<string, unknown> = {};
+      for (const field of fields) {
+        obj[field.name] = renderNestedValue(
+          (value as Record<string, unknown>)[field.name],
+          field.type,
+        );
+      }
+      return obj;
+    }
+    case Type.Map: {
+      // A Map is a List<Struct<key, value>>; the value child carries the type.
+      const entriesType = (type as DataType & { children: Field[] }).children[0]
+        .type;
+      const valueType = (entriesType as DataType & { children: Field[] })
+        .children[1].type;
+      const obj: Record<string, unknown> = {};
+      for (const [k, v] of value as Iterable<[unknown, unknown]>) {
+        obj[String(k)] = renderNestedValue(v, valueType);
+      }
+      return obj;
+    }
+    default:
+      return formatScalarCell(value, type);
+  }
 }
 
 /** Parse a STRING cell that looks like JSON into an object/array. */
@@ -457,19 +522,19 @@ export function decodeArrowAttachmentToRows(
       }
       switch (type.typeId) {
         case Type.Decimal:
-          row[name] = formatDecimalCell(
-            v as { toString(): string },
-            (type as DataType & { scale: number }).scale,
-          );
-          continue;
         case Type.Timestamp:
-          row[name] = formatTimestampCell(
-            Number(v),
-            (type as DataType & { timezone?: string | null }).timezone != null,
-          );
-          continue;
         case Type.Date:
-          row[name] = formatDateCell(Number(v));
+          row[name] = formatScalarCell(v, type);
+          continue;
+        // Nested columns (STRUCT / ARRAY / MAP) arrive on the native
+        // JSON_ARRAY wire as a JSON string with every scalar leaf stringified
+        // by type; render the same shape and stringify so callers cannot tell
+        // the fallback path from the native one.
+        case Type.List:
+        case Type.FixedSizeList:
+        case Type.Struct:
+        case Type.Map:
+          row[name] = JSON.stringify(renderNestedValue(v, type));
           continue;
       }
       if (
@@ -480,12 +545,10 @@ export function decodeArrowAttachmentToRows(
         row[name] = String(v);
       } else if (typeof v === "string") {
         row[name] = maybeParseJsonString(v);
-      } else if (v instanceof Date) {
-        row[name] = v.toISOString();
       } else if (v instanceof Uint8Array) {
         row[name] = Buffer.from(v).toString("base64");
       } else {
-        row[name] = JSON.stringify(v, nestedJsonReplacer);
+        row[name] = formatScalarCell(v, type);
       }
     }
     rows.push(row);
