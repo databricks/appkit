@@ -80,6 +80,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.45.0](https://github.com/databricks/appkit/compare/v0.44.0...v0.45.0) (2026-07-09)
+
+* decode inline Arrow IPC + warehouse-compat fallback ([#329](https://github.com/databricks/appkit/issues/329)) ([86bebff](https://github.com/databricks/appkit/commit/86bebffa389bcbac087edd200954b7efe3123a9f))
+
+
 ## [0.44.0](https://github.com/databricks/appkit/compare/v0.43.1...v0.44.0) (2026-07-08)
 
 ### lakebase
