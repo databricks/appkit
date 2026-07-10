@@ -47,7 +47,7 @@ interface EvalRunner {
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
-  summarize(results: unknown[]): { allPassed: boolean };
+  summarize(results: unknown[]): { allPassed: boolean; passRate: number };
 }
 
 /**
@@ -90,6 +90,7 @@ interface EvalOptions {
   judgeModel?: string;
   warehouse?: string;
   concurrency?: string;
+  minPassRate?: string;
 }
 
 async function runAgentEval(
@@ -207,7 +208,21 @@ async function runAgentEval(
     );
   }
 
-  if (!runner.summarize(summary.results).allPassed) {
+  const stats = runner.summarize(summary.results);
+  const minPassRate = opts.minPassRate
+    ? Number.parseFloat(opts.minPassRate)
+    : undefined;
+  if (minPassRate !== undefined && !Number.isNaN(minPassRate)) {
+    // Threshold mode: gate on the aggregate pass rate rather than requiring
+    // every eval to pass.
+    const ok = stats.passRate >= minPassRate;
+    console.log(
+      `Pass rate ${(stats.passRate * 100).toFixed(0)}% (threshold ${(
+        minPassRate * 100
+      ).toFixed(0)}%) — ${ok ? "OK" : "below threshold"}`,
+    );
+    if (!ok) process.exitCode = 1;
+  } else if (!stats.allPassed) {
     process.exitCode = 1;
   }
 }
@@ -257,5 +272,9 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--concurrency <n>",
     "Max evals/dataset rows to drive concurrently (default: 1, serial)",
+  )
+  .option(
+    "--min-pass-rate <rate>",
+    "Gate on aggregate pass rate (0..1) instead of requiring every eval to pass; exit 1 when below",
   )
   .action(runAgentEval);

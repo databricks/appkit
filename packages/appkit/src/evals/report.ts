@@ -7,6 +7,8 @@ export interface EvalSummary {
   skipped: number;
   /** True when no eval failed (skips don't count as failures). */
   allPassed: boolean;
+  /** Fraction of scored (non-skipped) evals that passed, 0..1 (1 when none scored). */
+  passRate: number;
 }
 
 export function summarize(results: EvalResult[]): EvalSummary {
@@ -18,12 +20,14 @@ export function summarize(results: EvalResult[]): EvalSummary {
     else if (r.passed) passed++;
     else failed++;
   }
+  const scored = passed + failed;
   return {
     total: results.length,
     passed,
     failed,
     skipped,
     allPassed: failed === 0,
+    passRate: scored === 0 ? 1 : passed / scored,
   };
 }
 
