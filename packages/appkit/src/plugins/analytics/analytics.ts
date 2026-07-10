@@ -32,8 +32,9 @@ import manifest from "./manifest.json";
 import {
   buildMetricSql,
   composeMetricCacheKey,
+  QUERIES_DIR as DEFAULT_QUERIES_DIR,
   deriveMetricExecutorKey,
-  loadMetricRegistry,
+  getMetricRegistry,
   validateMetricRequest,
 } from "./metric";
 import { QueryProcessor } from "./query";
@@ -125,28 +126,18 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   private _arrowCapability = new Map<string, ArrowCapability>();
 
   /**
-   * Metric-view registry parsed from `config/queries/metric-views.json`, keyed
-   * by metric key. Loaded lazily on the first `/metric/:key` request and
-   * memoized (see {@link _getMetricRegistry}). Empty when no config is present
-   * — the metric-view path stays dormant until an app opts in.
+   * Directory the metric-view registry is read from (holds
+   * `metric-views.json`). Defaults to `config/queries/` under the process cwd
+   * — the same directory the `.sql` query path uses. Overridable ONLY via
+   * `config.queriesDir` for tests (see {@link IAnalyticsConfig.queriesDir}).
    */
-  private metricRegistry: Record<string, MetricRegistration> | null = null;
-
-  /**
-   * Latched error from the most recent {@link loadMetricRegistry} attempt.
-   * `null` means the registry loaded cleanly (or `metric-views.json` was absent
-   * — also fine; metric views are opt-in). When non-null, every `/metric/:key`
-   * request returns 503 `METRIC_REGISTRY_LOAD_FAILED` so a broken config
-   * (unreadable file, invalid JSON, schema violation) surfaces as a clear
-   * server status rather than masquerading as a 404 for every key. The full
-   * reason goes to telemetry only.
-   */
-  private metricRegistryLoadError: string | null = null;
+  private readonly _queriesDir: string;
 
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
     this.queryProcessor = new QueryProcessor();
+    this._queriesDir = config.queriesDir ?? DEFAULT_QUERIES_DIR;
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
@@ -467,32 +458,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Lazily load and memoize the metric registry from
-   * `config/queries/metric-views.json`.
-   *
-   * A malformed config latches `metricRegistryLoadError` and yields an empty
-   * registry so the route can return a 503 (distinguishing a broken deployment
-   * from an unknown key, which is a 404). Loading is deferred to the first
-   * `/metric/:key` request rather than the constructor so apps that never adopt
-   * metric views pay no parse cost and a config error can't break plugin
-   * construction.
-   */
-  private _getMetricRegistry(): Record<string, MetricRegistration> {
-    if (this.metricRegistry === null) {
-      try {
-        this.metricRegistry = loadMetricRegistry();
-        this.metricRegistryLoadError = null;
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        logger.warn("Failed to load metric registry: %s", reason);
-        this.metricRegistry = {};
-        this.metricRegistryLoadError = reason;
-      }
-    }
-    return this.metricRegistry;
-  }
-
-  /**
    * Handle metric-view execution requests (`POST /api/analytics/metric/:key`).
    *
    * Mirrors {@link _handleQueryRoute}'s JSON SSE path: the outer
@@ -527,15 +492,20 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    const registry = this._getMetricRegistry();
-
-    // Surface a registry-load failure on the route. Without this, a malformed
-    // metric-views.json would yield 404 for every key — identical to "key
-    // never registered" — and hide the deployment error. Full reason →
-    // telemetry only.
-    if (this.metricRegistryLoadError !== null) {
+    // Resolve the registry from disk (cached + mtime-revalidated by
+    // `getMetricRegistry`, so the steady-state cost is one `stat`). A malformed
+    // config throws → 503, distinguishing a broken deployment from an unknown
+    // key (404). The failure is NOT latched: `getMetricRegistry` only caches on
+    // a successful parse, so fixing `metric-views.json` heals on the next
+    // request. Full reason → telemetry only.
+    let registry: Record<string, MetricRegistration>;
+    try {
+      registry = await getMetricRegistry(this._queriesDir);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn(req, "Failed to load metric registry: %s", reason);
       event?.setContext("analytics", {
-        metric_registry_load_error: this.metricRegistryLoadError,
+        metric_registry_load_error: reason,
       });
       res.status(503).json({
         error: "Metric registry not available",
@@ -546,10 +516,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     // Own-property lookup: never resolve `key` to an inherited
     // `Object.prototype` member (`__proto__`, `constructor`, `toString`, …).
-    // The loader already builds a null-prototype registry, but the load-error
-    // fallback and test-injected registries are plain objects, so gate the
-    // read here too — an inherited hit would otherwise bypass the 404 below
-    // and flow a non-registration value into execution.
+    // `getMetricRegistry` returns a null-prototype map, but gate the read here
+    // too as defense-in-depth — an inherited hit would otherwise bypass the 404
+    // below and flow a non-registration value into execution.
     const registration = Object.hasOwn(registry, key)
       ? registry[key]
       : undefined;
