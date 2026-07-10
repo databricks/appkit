@@ -35,6 +35,8 @@ interface EvalRunner {
       sqlWarehouseId?: string;
     };
     judge?: { host: string; token: string; model: string };
+    workspaceClient?: unknown;
+    warehouseId?: string;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -42,7 +44,13 @@ interface EvalRunner {
     host?: string;
     token?: string;
   }): Promise<{ host: string; token: string } | undefined>;
+  resolveWorkspaceClient(opts: {
+    profile?: string;
+    host?: string;
+    token?: string;
+  }): unknown;
   formatEvalHeadline(result: unknown): string;
+  evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
   summarize(results: unknown[]): { allPassed: boolean };
@@ -88,6 +96,7 @@ interface EvalOptions {
   judgeModel?: string;
   concurrency?: number;
   warehouseId?: string;
+  warehouse?: string;
 }
 
 /** Resolved Databricks host + bearer (either field may be absent). */
@@ -199,6 +208,15 @@ async function runAgentEval(
       token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
     })) ?? {};
 
+  // Managed-dataset reads: a workspace client (same profile/host/token) + a SQL
+  // warehouse. Only needed by evals that declare `dataset`.
+  const warehouseId = opts.warehouse ?? process.env.DATABRICKS_WAREHOUSE_ID;
+  const workspaceClient = runner.resolveWorkspaceClient({
+    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
+    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
+    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
+  });
+
   let summary: EvalRunSummary;
   try {
     summary = await runner.runEvalsInDir({
@@ -210,6 +228,8 @@ async function runAgentEval(
       concurrency: opts.concurrency,
       mlflow: resolveMlflow(opts, auth),
       judge: resolveJudge(opts, auth),
+      workspaceClient,
+      warehouseId,
       onEvent: makeProgressReporter(runner, opts.url),
     });
   } catch (err) {
@@ -280,6 +300,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--warehouse-id <id>",
     "SQL warehouse id for writing assessments to UC-backed experiments (default: MLFLOW_TRACING_SQL_WAREHOUSE_ID or DATABRICKS_WAREHOUSE_ID)",
+  )
+  .option(
+    "--warehouse <id>",
+    "SQL warehouse id for reading managed evaluation datasets (default: DATABRICKS_WAREHOUSE_ID)",
   )
   .option(
     "--judge-model <endpoint>",
