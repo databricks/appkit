@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { z } from "zod";
@@ -29,9 +29,10 @@ const logger = createLogger("analytics:metric");
 /**
  * Default queries directory. Mirrors `AppManager`'s
  * `path.resolve(process.cwd(), "config/queries")` so dev mode and production
- * share a single source of truth for where metric config lives.
+ * share a single source of truth for where metric config lives. Exported so
+ * `AnalyticsPlugin` can default `config.queriesDir` to the same path.
  */
-const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
+export const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
 const METRIC_CONFIG_FILE = "metric-views.json";
 
 /**
@@ -154,28 +155,33 @@ function laneFromExecutor(
 /**
  * Read and validate `config/queries/metric-views.json` into a metric registry.
  *
- * Synchronous by design — registration is a pure config parse with no
- * warehouse round-trip, no `DESCRIBE`, and no build-time metadata bundle. The
- * single `metricViews` map makes keys unique by construction, so there is no
- * cross-lane duplicate-key check.
+ * Async and stateless — registration is a pure config parse with no warehouse
+ * round-trip, no `DESCRIBE`, and no build-time metadata bundle. The single
+ * `metricViews` map makes keys unique by construction, so there is no
+ * cross-lane duplicate-key check. Async I/O (rather than `readFileSync`) keeps
+ * the event loop free: metric views are already heavier than a plain `.sql`
+ * query on the warehouse side, so the SDK layer must not add a blocking read
+ * on top. Caching + mtime-revalidation is layered on top by
+ * {@link getMetricRegistry} — this function always hits disk.
  *
  * Returns an empty registry when the file is absent: the metric-view path is
  * additive and dormant until an app opts in by adding the config. A malformed
  * file (unreadable, invalid JSON, or schema violation) throws — the caller
- * latches the failure so the route can surface a 503 rather than masking a
- * broken deployment as a 404 for every key.
+ * surfaces a 503 rather than masking a broken deployment as a 404 for every
+ * key. The failure is NOT cached (see {@link getMetricRegistry}), so fixing the
+ * file heals on the next request.
  */
-export function loadMetricRegistry(
+export async function loadMetricRegistry(
   queriesDir: string = QUERIES_DIR,
-): Record<string, MetricRegistration> {
+): Promise<Record<string, MetricRegistration>> {
   const metricPath = path.join(queriesDir, METRIC_CONFIG_FILE);
 
   let raw: string;
   try {
-    raw = fs.readFileSync(metricPath, "utf8");
+    raw = await fs.readFile(metricPath, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
+      return Object.create(null);
     }
     throw err;
   }
@@ -216,6 +222,100 @@ export function loadMetricRegistry(
     "Loaded metric registry: %d entry(ies)",
     Object.keys(registry).length,
   );
+  return registry;
+}
+
+/**
+ * Signature of the config file the cached registry was parsed from: its
+ * modification time and size. Cheap to obtain (one `stat`) and sufficient to
+ * detect an edit — the same pair file-watching tools compare. A content hash
+ * would mean reading the file, which is exactly the cost the cache avoids.
+ */
+interface RegistryCacheSignature {
+  mtimeMs: number;
+  size: number;
+}
+
+/**
+ * Module-level registry cache, keyed by the resolved queries directory.
+ *
+ * Keyed by DIR (not by plugin instance) because the registry is a pure
+ * function of the config file at that path — warehouse-independent, and two
+ * `AnalyticsPlugin` instances pointed at the same `config/queries/` MUST see
+ * the same registry. Instance state would parse the identical file twice and
+ * risk divergence; a dir-keyed module cache shares one parse.
+ */
+const metricRegistryCache = new Map<
+  string,
+  {
+    signature: RegistryCacheSignature;
+    registry: Record<string, MetricRegistration>;
+  }
+>();
+
+/**
+ * Resolve the metric registry for `queriesDir`, re-reading + re-parsing only
+ * when `metric-views.json` has changed since the cached copy.
+ *
+ * Behaves like the sibling `.sql` query path (which re-reads per request) but
+ * cheaper: the steady-state cost is a single async `stat`, and the read +
+ * `JSON.parse` + zod validation are skipped when the file's `(mtimeMs, size)`
+ * signature is unchanged. This delivers the agreed semantics without the old
+ * permanent memo:
+ *
+ *  - **Hot-reload** — editing a working config bumps `mtimeMs`, so the next
+ *    request re-parses and serves the new registry with no server restart.
+ *  - **Self-heal** — a load failure is NOT cached (we only populate the cache
+ *    on a successful parse), so a fixed config is picked up on the next
+ *    request instead of latching a 503 forever.
+ *  - **Dormant** — an absent file `stat`s as `ENOENT` → empty registry; adding
+ *    the file later is picked up on the next request.
+ *
+ * Concurrency: two simultaneous cold requests may both `stat`+read before
+ * either populates the cache. That is a harmless redundant read of the same
+ * file (the sibling `.sql` path does not single-flight either), so no lock is
+ * taken.
+ *
+ * @throws Propagates {@link loadMetricRegistry}'s throw on a malformed file so
+ * the route can surface a 503; the cache is left untouched on failure.
+ */
+export async function getMetricRegistry(
+  queriesDir: string = QUERIES_DIR,
+): Promise<Record<string, MetricRegistration>> {
+  const metricPath = path.join(queriesDir, METRIC_CONFIG_FILE);
+
+  let signature: RegistryCacheSignature | null;
+  try {
+    const stats = await fs.stat(metricPath);
+    signature = { mtimeMs: stats.mtimeMs, size: stats.size };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // Absent file → dormant. Drop any stale cache entry (the file may have
+      // been deleted) and return an empty registry without touching the cache.
+      metricRegistryCache.delete(queriesDir);
+      signature = null;
+    } else {
+      throw err;
+    }
+  }
+
+  if (signature === null) {
+    return Object.create(null);
+  }
+
+  const cached = metricRegistryCache.get(queriesDir);
+  if (
+    cached !== undefined &&
+    cached.signature.mtimeMs === signature.mtimeMs &&
+    cached.signature.size === signature.size
+  ) {
+    return cached.registry;
+  }
+
+  // Cold or stale: re-read + re-parse. Cache ONLY on success so a malformed
+  // file never latches — the next request re-attempts and heals.
+  const registry = await loadMetricRegistry(queriesDir);
+  metricRegistryCache.set(queriesDir, { signature, registry });
   return registry;
 }
 
