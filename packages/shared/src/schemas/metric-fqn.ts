@@ -140,21 +140,54 @@ export function isValidFqn(fqn: string): boolean {
  * @throws If any segment contains a control character or newline.
  */
 export function quoteFqnForSql(fqn: string): string {
-  // Reject anything that cannot be represented inside a backtick-quoted
-  // identifier. \p{Cc} is the Unicode "control" category, which covers C0
-  // (incl. \n, \r, \t), DEL, and C1 — i.e. every control character/newline.
-  const CONTROL_OR_NEWLINE = /\p{Cc}/u;
-  return fqn
-    .split(".")
-    .map((segment) => {
-      if (CONTROL_OR_NEWLINE.test(segment)) {
-        throw new Error(
-          `Cannot quote FQN segment "${segment}" for SQL: it contains a control character or newline, which has no valid escape inside a backtick-quoted identifier.`,
-        );
-      }
-      // Double every backtick — the only break-out from a backtick-quoted
-      // identifier — then wrap the whole segment in backticks.
-      return `\`${segment.replace(/`/g, "``")}\``;
-    })
-    .join(".");
+  return fqn.split(".").map(quoteIdentifier).join(".");
+}
+
+/**
+ * The Unicode "control" category (`\p{Cc}`): C0 (incl. `\n`, `\r`, `\t`), DEL,
+ * and C1 — every control character/newline. These have no valid escape inside
+ * a backtick-quoted identifier, so a name containing one cannot be safely
+ * quoted and is rejected.
+ */
+const CONTROL_OR_NEWLINE = /\p{Cc}/u;
+
+/**
+ * Is `name` a column/measure/dimension identifier that {@link quoteIdentifier}
+ * can safely escape? True for any non-empty string free of control characters
+ * and newlines.
+ *
+ * This is the **column-identifier** grammar — deliberately broader than the
+ * FQN-segment grammar ({@link UC_FQN_PATTERN}, which also forbids `.` and `/`
+ * because they are FQN structural characters). A metric view's measure or
+ * dimension is a single *delimited* column identifier: once backtick-quoted it
+ * may legally contain dots, slashes, spaces, hyphens, and non-ASCII — anything
+ * but a control character. The type-generator emits DESCRIBE column names
+ * verbatim into the generated `measureKeys`/`dimensionKeys` unions, so the
+ * runtime must accept exactly what can be safely quoted, or a generated name
+ * would typecheck but fail at runtime.
+ */
+export function isValidColumnName(name: string): boolean {
+  return name.length > 0 && !CONTROL_OR_NEWLINE.test(name);
+}
+
+/**
+ * Quote a SINGLE identifier (one column/measure/dimension name, or one FQN
+ * segment) as a backtick-delimited identifier for safe SQL interpolation.
+ *
+ * Unlike {@link quoteFqnForSql}, this does NOT split on `.` — the whole input
+ * is one identifier, so a column literally named `net.revenue` becomes
+ * `` `net.revenue` `` (one identifier), not `` `net`.`revenue` `` (two). The
+ * backtick — the only break-out character — is doubled; control characters and
+ * newlines have no valid escape and are rejected.
+ *
+ * @throws If `name` contains a control character or newline.
+ */
+export function quoteIdentifier(name: string): string {
+  if (CONTROL_OR_NEWLINE.test(name)) {
+    throw new Error(
+      `Cannot quote identifier "${name}" for SQL: it contains a control character or newline, which has no valid escape inside a backtick-quoted identifier.`,
+    );
+  }
+  // Double every backtick, then wrap in backticks.
+  return `\`${name.replace(/`/g, "``")}\``;
 }

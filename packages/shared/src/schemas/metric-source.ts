@@ -18,7 +18,25 @@
  */
 
 import { z } from "zod";
-import { UC_FQN_PATTERN } from "./metric-fqn";
+import { MAX_UC_OBJECT_NAME_LENGTH, UC_FQN_PATTERN } from "./metric-fqn";
+
+/**
+ * Safety cap on the number of declared metric views — a typo / DoS guard, NOT
+ * a Unity Catalog limit. Mirrors the type-generator's `MAX_METRIC_VIEWS` so
+ * runtime config validation and type generation accept exactly the same
+ * configs (a config that fails generation must not silently pass at runtime).
+ */
+const MAX_METRIC_VIEWS = 200;
+
+/**
+ * Whole-FQN length cap: three max-length UC object names plus the two dots.
+ * The per-segment cap ({@link MAX_UC_OBJECT_NAME_LENGTH}) is enforced in the
+ * `superRefine` below; this whole-string bound is the declarative half (it
+ * serializes to a JSON-schema `maxLength`, whereas the per-segment check — like
+ * the entry-count cap — cannot be expressed declaratively and lives in the
+ * refinement, so it is a runtime/type-generator gate only).
+ */
+const MAX_FQN_LENGTH = MAX_UC_OBJECT_NAME_LENGTH * 3 + 2;
 
 /**
  * Three-part Unity Catalog FQN matcher, composed from the single-segment
@@ -62,6 +80,7 @@ export const metricEntrySchema = z
     source: z
       .string()
       .regex(UC_THREE_PART_FQN_PATTERN)
+      .max(MAX_FQN_LENGTH)
       .describe(
         "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
       )
@@ -94,7 +113,39 @@ export const metricSourceSchema = z
   .strict()
   .describe(
     "Schema for AppKit metric-views.json — declares Unity Catalog Metric View sources for the analytics plugin's metric-view path. Each entry under 'metricViews' binds a metric key to a UC metric view FQN and an executor ('app_service_principal' shared cache, or 'user' per-user cache). Object form (rather than bare string) at v1 enables future per-entry option growth without breaking changes.",
-  );
+  )
+  // Caps that cannot be expressed declaratively (zod 4's `z.record` has no
+  // `.max`, and a per-dot-segment length bound isn't a whole-string
+  // `maxLength`). Enforced here so runtime config validation matches the
+  // type-generator's `resolveMetricConfig` exactly — a config that fails type
+  // generation must not silently pass at runtime. These refinements are
+  // invisible to `z.toJSONSchema`, so the generated JSON schema carries only
+  // the declarative `maxLength` on `source`; runtime + type-generator remain
+  // the authoritative gates for the entry-count and per-segment caps.
+  .superRefine((value, ctx) => {
+    const entries = value.metricViews ? Object.entries(value.metricViews) : [];
+
+    if (entries.length > MAX_METRIC_VIEWS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `too many metric views: ${entries.length} declared, exceeding the maximum of ${MAX_METRIC_VIEWS}`,
+        path: ["metricViews"],
+      });
+    }
+
+    for (const [key, entry] of entries) {
+      const segments = entry.source.split(".");
+      for (let i = 0; i < segments.length; i++) {
+        if (segments[i].length > MAX_UC_OBJECT_NAME_LENGTH) {
+          ctx.addIssue({
+            code: "custom",
+            message: `metric source segment ${i + 1} is ${segments[i].length} characters, exceeding the per-segment maximum of ${MAX_UC_OBJECT_NAME_LENGTH}`,
+            path: ["metricViews", key, "source"],
+          });
+        }
+      }
+    }
+  });
 
 export type MetricKey = z.infer<typeof metricKeySchema>;
 export type MetricExecutor = z.infer<typeof metricExecutorSchema>;

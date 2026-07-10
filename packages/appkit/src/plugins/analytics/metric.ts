@@ -8,8 +8,10 @@ import { z } from "zod";
 // type-generator's runtime, which pulls the zod-free `metric-fqn.ts` from the
 // same tree) so the runtime and the generated JSON schema validate identically.
 import {
+  isValidColumnName,
   isValidFqn,
   quoteFqnForSql,
+  quoteIdentifier,
 } from "../../../../shared/src/schemas/metric-fqn";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
 import { AuthenticationError, ValidationError } from "../../errors";
@@ -36,32 +38,20 @@ export const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
 const METRIC_CONFIG_FILE = "metric-views.json";
 
 /**
- * Validate measure names before they are interpolated into `MEASURE(<m>)`.
+ * Measure, dimension, and filter-member names are **column identifiers**: they
+ * are validated by the shared {@link isValidColumnName} (rejects only control
+ * characters / newlines) and backtick-quoted via {@link quoteIdentifier} at
+ * every interpolation point. Quoting — not a narrow ASCII allowlist — is the
+ * injection boundary, so the runtime accepts the full delimited-identifier
+ * grammar the type-generator emits from DESCRIBE (hyphens, dots, non-ASCII).
+ * There is deliberately NO name allowlist: a well-formed-but-unknown column
+ * falls through to the warehouse and surfaces as a sanitized canonical error.
  *
- * Measure names cannot be parameterized — they are SQL identifiers, not
- * literals. This conservative identifier shape is the security boundary for
- * the interpolated tokens: there is deliberately NO name allowlist, so a
- * well-formed-but-unknown measure falls through to the warehouse and surfaces
- * as a sanitized canonical error (parity with the raw `.sql` flow).
- */
-const MEASURE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-/**
- * Dimension name pattern. Matches the identifier shape we accept for measures
- * — column references cannot be parameterized in SQL, so they must be
- * conservatively safe identifiers (no spaces, no quotes, no SQL operators).
- * This grammar gate is the security boundary for interpolated dimension
- * tokens: there is deliberately NO name allowlist, so a well-formed-but-unknown
- * dimension falls through to the warehouse and surfaces as a sanitized
- * canonical error.
- */
-const DIMENSION_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-/**
- * Time-grain token shape. This grammar gate is the security boundary for the
- * grain: it is interpolated as a single-quoted `date_trunc` unit literal (NOT
- * a bind param) in {@link renderDimensionClause}, so the pattern is what keeps
- * a hostile token out of that quoted position.
+ * Time-grain token shape. Unlike the column identifiers above, the grain is
+ * interpolated as a single-quoted `date_trunc` unit LITERAL (NOT a bind param,
+ * NOT a delimited identifier) in {@link renderDimensionClause}, so it keeps a
+ * narrow keyword-shaped gate — that pattern is what keeps a hostile token out
+ * of the quoted-literal position.
  */
 const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
 
@@ -227,11 +217,22 @@ export async function loadMetricRegistry(
 
 /**
  * Signature of the config file the cached registry was parsed from: its
- * modification time and size. Cheap to obtain (one `stat`) and sufficient to
- * detect an edit — the same pair file-watching tools compare. A content hash
- * would mean reading the file, which is exactly the cost the cache avoids.
+ * change time, modification time, and size — all from one `stat`, no read.
+ *
+ * `ctimeMs` (inode change time) is the key guard against a stale serve: it
+ * bumps on ANY metadata or content change and, unlike `mtimeMs`, cannot be
+ * restored to a prior value by tooling (`utimes` sets atime/mtime but not
+ * ctime). So an edit that preserves both size and mtime — a same-length value
+ * swap (e.g. repointing `source` to an equal-length FQN, or flipping
+ * `executor` between two equal-length values) on a coarse-mtime filesystem —
+ * still changes ctime and invalidates the cache. Without it, such an edit
+ * could serve a stale `source`/`lane`, reintroducing the exact stale-serve
+ * class the cache-key `source` salt was added to prevent, one layer up.
+ * A content hash would be stronger still but requires reading the file, which
+ * is the cost this cache exists to avoid.
  */
 interface RegistryCacheSignature {
+  ctimeMs: number;
   mtimeMs: number;
   size: number;
 }
@@ -254,14 +255,27 @@ const metricRegistryCache = new Map<
 >();
 
 /**
+ * Clear the module-level registry cache.
+ *
+ * @internal FOR TESTS ONLY. The cache is keyed by directory and lives for the
+ * process; production never needs to clear it (a changed file is picked up via
+ * the stat signature). Tests that reuse a directory — or assert cold-load
+ * behavior — call this in `beforeEach`/`afterEach` so isolation is intentional
+ * rather than relying on each test happening to use a unique temp dir.
+ */
+export function __resetMetricRegistryCache(): void {
+  metricRegistryCache.clear();
+}
+
+/**
  * Resolve the metric registry for `queriesDir`, re-reading + re-parsing only
  * when `metric-views.json` has changed since the cached copy.
  *
  * Behaves like the sibling `.sql` query path (which re-reads per request) but
  * cheaper: the steady-state cost is a single async `stat`, and the read +
- * `JSON.parse` + zod validation are skipped when the file's `(mtimeMs, size)`
- * signature is unchanged. This delivers the agreed semantics without the old
- * permanent memo:
+ * `JSON.parse` + zod validation are skipped when the file's
+ * `(ctimeMs, mtimeMs, size)` signature is unchanged. This delivers the agreed
+ * semantics without the old permanent memo:
  *
  *  - **Hot-reload** — editing a working config bumps `mtimeMs`, so the next
  *    request re-parses and serves the new registry with no server restart.
@@ -287,7 +301,11 @@ export async function getMetricRegistry(
   let signature: RegistryCacheSignature | null;
   try {
     const stats = await fs.stat(metricPath);
-    signature = { mtimeMs: stats.mtimeMs, size: stats.size };
+    signature = {
+      ctimeMs: stats.ctimeMs,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+    };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       // Absent file → dormant. Drop any stale cache entry (the file may have
@@ -295,6 +313,11 @@ export async function getMetricRegistry(
       metricRegistryCache.delete(queriesDir);
       signature = null;
     } else {
+      // Any other stat error (EACCES / EIO / ELOOP / …) is deliberately fatal
+      // for THIS request → the route surfaces a 503, consistent with the
+      // malformed-config → 503 path. It is not latched: with the self-heal
+      // design a transient error clears on the next request, which is strictly
+      // better than the old memo that could latch-and-serve-stale.
       throw err;
     }
   }
@@ -306,6 +329,7 @@ export async function getMetricRegistry(
   const cached = metricRegistryCache.get(queriesDir);
   if (
     cached !== undefined &&
+    cached.signature.ctimeMs === signature.ctimeMs &&
     cached.signature.mtimeMs === signature.mtimeMs &&
     cached.signature.size === signature.size
   ) {
@@ -374,7 +398,11 @@ const filterPredicateSchema: z.ZodType<MetricPredicate> = z
   .object({
     member: z
       .string()
-      .min(1, { message: "filter predicate 'member' cannot be empty" }),
+      .min(1, { message: "filter predicate 'member' cannot be empty" })
+      .refine(isValidColumnName, {
+        message:
+          "filter predicate 'member' contains a character that cannot be used in a SQL identifier (control character or newline)",
+      }),
     operator: z.string().min(1, {
       message: "filter predicate 'operator' cannot be empty",
     }) as z.ZodType<MetricFilterOperatorName>,
@@ -411,13 +439,29 @@ const filterSchema: z.ZodType<MetricFilter> = z.lazy(() =>
 const metricRequestSchema = z
   .object({
     measures: z
-      .array(z.string().min(1, "measure name cannot be empty"))
+      .array(
+        z
+          .string()
+          .min(1, "measure name cannot be empty")
+          .refine(isValidColumnName, {
+            message:
+              "measure name contains a character that cannot be used in a SQL identifier (control character or newline)",
+          }),
+      )
       .min(1, "at least one measure is required")
       .max(METRIC_MEASURES_MAX, {
         message: `measures length exceeds the maximum of ${METRIC_MEASURES_MAX}`,
       }),
     dimensions: z
-      .array(z.string().min(1, "dimension name cannot be empty"))
+      .array(
+        z
+          .string()
+          .min(1, "dimension name cannot be empty")
+          .refine(isValidColumnName, {
+            message:
+              "dimension name contains a character that cannot be used in a SQL identifier (control character or newline)",
+          }),
+      )
       .max(METRIC_DIMENSIONS_MAX, {
         message: `dimensions length exceeds the maximum of ${METRIC_DIMENSIONS_MAX}`,
       })
@@ -434,15 +478,16 @@ const metricRequestSchema = z
         message: "timeGrain must match /^[a-z][a-z_]*$/",
       })
       .optional(),
-    // The single dimension `timeGrain` applies to via `date_trunc`. Grammar-
-    // gated as a SQL identifier (column reference, cannot be parameterized).
-    // Cross-field rules in `superRefine`: required when `timeGrain` is set, and
-    // must be one of `dimensions`.
+    // The single dimension `timeGrain` applies to via `date_trunc`. A column
+    // identifier (backtick-quoted at interpolation), so it accepts the full
+    // delimited-identifier grammar. Cross-field rules in `superRefine`:
+    // required when `timeGrain` is set, and must be one of `dimensions`.
     timeDimension: z
       .string()
       .min(1, { message: "timeDimension cannot be empty" })
-      .regex(DIMENSION_NAME_PATTERN, {
-        message: "timeDimension must match /^[a-zA-Z_][a-zA-Z0-9_]*$/",
+      .refine(isValidColumnName, {
+        message:
+          "timeDimension contains a character that cannot be used in a SQL identifier (control character or newline)",
       })
       .optional(),
     limit: z
@@ -765,12 +810,12 @@ export function validateMetricRequest(body: unknown): IAnalyticsMetricRequest {
  *    [LIMIT n]
  *
  * Notes:
- *  - Every measure and dimension is gated by {@link MEASURE_NAME_PATTERN} /
- *    {@link DIMENSION_NAME_PATTERN} before it is interpolated (column
- *    references cannot be parameterized — they are SQL identifiers), and the
- *    FQN is validated and backtick-quoted by {@link quoteSafeFqn}. There is
- *    deliberately NO name allowlist — the grammar gate (plus quoting for the
- *    FQN) is the security boundary. No user-supplied string reaches the SQL
+ *  - Every measure and dimension is validated by {@link isValidColumnName} and
+ *    backtick-quoted by {@link quoteIdentifier} before it is interpolated
+ *    (column references cannot be parameterized — they are SQL identifiers),
+ *    and the FQN is validated and quoted by {@link quoteSafeFqn}. There is
+ *    deliberately NO name allowlist — quoting is the security boundary. No
+ *    user-supplied string reaches the SQL
  *    string without passing a grammar gate.
  *  - `GROUP BY ALL` is added when at least one dimension is requested. UC
  *    requires GROUP BY when MEASURE() is mixed with non-aggregated columns;
@@ -800,8 +845,13 @@ export function buildMetricSql(
     throw new Error("buildMetricSql requires at least one measure.");
   }
 
+  // Defense-in-depth re-gate: `validateMetricRequest` already rejects any name
+  // `isValidColumnName` refuses, but `buildMetricSql` is exported and may be
+  // reached without it. `quoteIdentifier` throws on a control/newline name, so
+  // the quoting below is itself the boundary; the explicit check keeps the
+  // error message uniform with the other interpolated tokens.
   for (const m of request.measures) {
-    if (!MEASURE_NAME_PATTERN.test(m)) {
+    if (!isValidColumnName(m)) {
       throw new Error(
         `Refusing to build SQL: measure "${m}" is not a valid identifier.`,
       );
@@ -810,7 +860,7 @@ export function buildMetricSql(
 
   const dimensions = request.dimensions ?? [];
   for (const d of dimensions) {
-    if (!DIMENSION_NAME_PATTERN.test(d)) {
+    if (!isValidColumnName(d)) {
       throw new Error(
         `Refusing to build SQL: dimension "${d}" is not a valid identifier.`,
       );
@@ -818,12 +868,15 @@ export function buildMetricSql(
   }
 
   // Deterministic order so cache keys collapse semantically equivalent calls.
-  // Alias each measure to its plain name so result rows have keys matching the
-  // registered measure (`{ arr: 1234 }`) rather than the SQL-function
-  // serialization Databricks returns by default (`{ "measure(arr)": 1234 }`).
+  // Alias each measure to its plain name (backtick-quoted) so result rows have
+  // keys matching the registered measure (`{ "net-revenue": 1234 }`) rather
+  // than the SQL-function serialization Databricks returns by default. The
+  // warehouse reports the aliased column under the UNQUOTED name (backticks are
+  // delimiters, not part of the name), so `MEASURE(`x`) AS `x`` yields a row
+  // key of exactly `x` — preserved through result materialization.
   const measureClauses = [...request.measures]
     .sort()
-    .map((m) => `MEASURE(${m}) AS ${m}`);
+    .map((m) => `MEASURE(${quoteIdentifier(m)}) AS ${quoteIdentifier(m)}`);
 
   const dimensionClauses = [...dimensions]
     .sort()
@@ -880,9 +933,9 @@ interface FilterRenderState {
  * validator bypass cannot turn `or: []` into "match everything").
  *
  * Defense-in-depth: even though the request body's filter has already been
- * validated, every member name is re-checked against {@link
- * DIMENSION_NAME_PATTERN} here. If validation is ever bypassed, the SQL
- * constructor still refuses to interpolate an unknown-shaped identifier.
+ * validated, every member name is re-checked against {@link isValidColumnName}
+ * here and backtick-quoted. If validation is ever bypassed, the SQL
+ * constructor still refuses to interpolate a name it cannot safely quote.
  */
 function renderFilter(
   node: MetricFilter,
@@ -944,7 +997,7 @@ function renderFilter(
   // Leaf predicate — grammar-gate the member and operator, then render.
   const predicate = node as MetricPredicate;
 
-  if (!DIMENSION_NAME_PATTERN.test(predicate.member)) {
+  if (!isValidColumnName(predicate.member)) {
     throw new Error(
       `Refusing to build SQL: filter member "${predicate.member}" is not a valid identifier.`,
     );
@@ -984,15 +1037,15 @@ function sortFilterChildren(
       !("or" in child)
     ) {
       const p = child as MetricPredicate;
-      // Separate the fields with "/" so the (member, operator) pair maps to
-      // the sort key injectively. A delimiter-free concatenation collides —
-      // member "ab" + op "c" and member "a" + op "bc" both → "abc" — which
-      // tie-breaks two distinct pairs to input order and forks the cache key
-      // on semantically equal filters. "/" can never appear in either field
-      // (members match DIMENSION_NAME_PATTERN, operators are the alpha-only
-      // enum), matching the leaf-fingerprint delimiter canonicalizeFilter
-      // already uses.
-      key = `${p.member}/${p.operator}`;
+      // JSON.stringify the (member, operator) pair so the sort key is
+      // injective regardless of content. A plain delimiter is unsafe now that
+      // members accept the full delimited-identifier grammar (a member may
+      // contain "/", ".", etc.): `member "a/b" + op "c"` and
+      // `member "a" + op "b/c"` would both collapse to "a/b/c" under any
+      // single-char separator, tie-breaking distinct pairs to input order.
+      // JSON encoding escapes any separator, so distinct pairs map to distinct
+      // keys — the same technique canonicalizeFilter uses for values.
+      key = JSON.stringify([p.member, p.operator]);
       isPredicate = true;
     } else {
       // Nested groups don't have a single (member, operator) — keep their
@@ -1034,7 +1087,11 @@ function renderPredicate(
   params: Record<string, SQLTypeMarker>,
   state: FilterRenderState,
 ): string {
-  const col = predicate.member;
+  // Backtick-quote the column identifier (defense-in-depth: the member was
+  // already validated by `isValidColumnName` in `renderFilter`). Quoting is
+  // what lets a delimited column name — hyphens, dots, non-ASCII — reach SQL
+  // safely; the bound value still flows through `:f_<idx>` params, never here.
+  const col = quoteIdentifier(predicate.member);
   const op = predicate.operator;
   const values = predicate.values ?? [];
 
@@ -1153,8 +1210,8 @@ function bindLikeValue(
  *    every other interpolated identifier (measures, dimensions, `timeDimension`,
  *    the FQN) is re-gated in the builder.
  *  - The column cannot be parameterized (it is an identifier), so it is
- *    re-checked against {@link DIMENSION_NAME_PATTERN} here as belt-and-
- *    suspenders even though the schema already gated `timeDimension`.
+ *    re-checked against {@link isValidColumnName} and backtick-quoted here as
+ *    belt-and-suspenders even though the schema already gated `timeDimension`.
  *
  * The aliasing keeps result-row keys stable (`{ order_date: ... }`) regardless
  * of whether the grain was applied.
@@ -1165,19 +1222,23 @@ function renderDimensionClause(
   timeDimension: string | undefined,
 ): string {
   if (timeGrain != null && dim === timeDimension) {
-    if (!DIMENSION_NAME_PATTERN.test(dim)) {
+    if (!isValidColumnName(dim)) {
       throw new Error(
         `Refusing to build SQL: timeDimension "${dim}" is not a valid identifier.`,
       );
     }
+    // The grain is interpolated as a single-quoted `date_trunc` unit literal
+    // (NOT a bind param), so it stays gated by the narrow TIME_GRAIN_PATTERN —
+    // it is a keyword, not a delimited identifier.
     if (!TIME_GRAIN_PATTERN.test(timeGrain)) {
       throw new Error(
         `Refusing to build SQL: timeGrain "${timeGrain}" is not a valid grain token.`,
       );
     }
-    return `date_trunc('${timeGrain}', ${dim}) AS ${dim}`;
+    const quoted = quoteIdentifier(dim);
+    return `date_trunc('${timeGrain}', ${quoted}) AS ${quoted}`;
   }
-  return dim;
+  return quoteIdentifier(dim);
 }
 
 /**
@@ -1318,12 +1379,14 @@ function canonicalizeFilter(node: MetricFilter): string {
     return `${groupKey}(${childFingerprints.join(",")})`;
   }
 
-  // Leaf predicate. Use JSON.stringify (not String) for the value segment so
-  // strings carrying the `|` separator cannot collide with split arrays —
-  // e.g. `["a", "b"]` and `["a|string:b"]` stay distinct fingerprints.
+  // Leaf predicate. JSON.stringify every structural part — member, operator,
+  // and each value (with its type) — so no content can be confused with a
+  // separator. This matters now that `member` accepts the full delimited-
+  // identifier grammar (it may contain "/", ".", etc.): a bare
+  // `p(${member}/${operator}/...)` would let `member "a", op "b"` collide with
+  // `member "a/b"` and fork/merge cache entries. Encoding the whole tuple as
+  // JSON makes the fingerprint injective regardless of member/value content.
   const p = node as MetricPredicate;
-  const valuesPart = p.values
-    ? p.values.map((v) => `${typeof v}:${JSON.stringify(v)}`).join("|")
-    : "";
-  return `p(${p.member}/${p.operator}/${valuesPart})`;
+  const valuesPart = (p.values ?? []).map((v) => [typeof v, v]);
+  return `p(${JSON.stringify([p.member, p.operator, valuesPart])})`;
 }
