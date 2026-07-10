@@ -3,13 +3,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+// `quoteFqnForSql` now lives in the shared zod-free leaf alongside the FQN
+// grammar (moved so the analytics runtime can reuse it); the describe seam
+// imports it from there.
+import { quoteFqnForSql } from "../../../../shared/src/schemas/metric-fqn";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
 import { readMetricConfig, resolveMetricConfig } from "../mv-registry/config";
 import {
   createWorkspaceDescribeFetcher,
   extractMetricColumns,
   parseDescribeTableExtendedJson,
-  quoteFqnForSql,
 } from "../mv-registry/describe";
 import { generateMetricTypeDeclarations } from "../mv-registry/render-types";
 import { syncMetrics } from "../mv-registry/sync";
