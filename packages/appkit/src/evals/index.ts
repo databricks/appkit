@@ -43,6 +43,7 @@ export {
   type EvalProgress,
   type EvalRunSummary,
   type RunEvalsOptions,
+  runBounded,
   runEvalsInDir,
 } from "./run-evals";
 export type {

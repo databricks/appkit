@@ -31,6 +31,7 @@ interface EvalRunner {
     judge?: { host: string; token: string; model: string };
     workspaceClient?: unknown;
     warehouseId?: string;
+    maxConcurrency?: number;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -88,6 +89,7 @@ interface EvalOptions {
   experiment?: string;
   judgeModel?: string;
   warehouse?: string;
+  concurrency?: string;
 }
 
 async function runAgentEval(
@@ -130,6 +132,13 @@ async function runAgentEval(
   const warehouseId = opts.warehouse ?? process.env.DATABRICKS_WAREHOUSE_ID;
   const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
+  // Drive up to N evals/rows concurrently (default serial). Ignore junk input.
+  const parsedConcurrency = opts.concurrency
+    ? Number.parseInt(opts.concurrency, 10)
+    : undefined;
+  const maxConcurrency =
+    parsedConcurrency && parsedConcurrency > 0 ? parsedConcurrency : undefined;
+
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
     switch (event.type) {
@@ -166,6 +175,7 @@ async function runAgentEval(
     judge,
     workspaceClient,
     warehouseId,
+    maxConcurrency,
     onEvent,
   });
   console.log(`\n${runner.formatSummaryLine(summary.results)}`);
@@ -243,5 +253,9 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--judge-model <endpoint>",
     "Databricks serving endpoint to use as the LLM judge for t.judge.* (default: APPKIT_JUDGE_MODEL)",
+  )
+  .option(
+    "--concurrency <n>",
+    "Max evals/dataset rows to drive concurrently (default: 1, serial)",
   )
   .action(runAgentEval);

@@ -41,6 +41,11 @@ export interface RunEvalsOptions {
   warehouseId?: string;
   /** Wall-clock timestamp (ms) for run create/finish — pass `Date.now()`. */
   now?: number;
+  /**
+   * Max evals/dataset rows to drive concurrently. Defaults to `1` (serial).
+   * Values below 1 are clamped to 1. Output order is preserved regardless.
+   */
+  maxConcurrency?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
   onEvent?: (event: EvalProgress) => void;
 }
@@ -104,6 +109,48 @@ export function resolveEvalDefault(mod: unknown): EvalDefinition | undefined {
 }
 
 /**
+ * Run `tasks` through a bounded worker pool and return their results in the
+ * SAME order as the input, regardless of completion order. Each task receives
+ * its input index so callers can key on it. `limit` is clamped to at least 1
+ * (and to the task count); at `limit === 1` this is a serial loop. Individual
+ * task rejections are surfaced per-slot via `settle` rather than aborting
+ * siblings — but eval tasks never reject (failures become results).
+ */
+export async function runBounded<T, R>(
+  tasks: ReadonlyArray<T>,
+  limit: number,
+  worker: (task: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(tasks.length);
+  const workers = Math.max(1, Math.min(Math.floor(limit) || 1, tasks.length));
+  let next = 0;
+  async function pump(): Promise<void> {
+    // Each worker pulls the next unclaimed index until the queue drains, so a
+    // fast task immediately picks up more work instead of waiting on siblings.
+    while (next < tasks.length) {
+      const index = next++;
+      results[index] = await worker(tasks[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, () => pump()));
+  return results;
+}
+
+/** One unit of work: a single {@link runEval} call bound to its output slot. */
+interface WorkItem {
+  /** File index (used for progress `index`, matches serial behavior). */
+  index: number;
+  /** Display id, including the `[row i/n]` suffix for dataset rows. */
+  rowId: string;
+  def: EvalDefinition;
+  /** Parent dir agent, used when `def.agent` is unset. */
+  dirAgent: string;
+  row: DatasetRow | undefined;
+  /** Set when the file failed to load or the dataset failed to read. */
+  error?: string;
+}
+
+/**
  * Discover, load, and run every eval under each agent's `evals/` dir, driving
  * the agents on a running app. Never throws for an individual eval — load/run
  * failures become non-passing {@link EvalResult}s.
@@ -149,9 +196,13 @@ export async function runEvalsInDir(
     emit({ type: "run-created", runId });
   }
 
-  const results: EvalResult[] = [];
-  // `total` counts eval files, not dataset rows: row counts aren't known until
-  // each file loads. Per-row detail is carried in the result id (`[row i/n]`).
+  // Expand discovered files into a flat, ordered work list SERIALLY: loading
+  // an eval and reading its dataset are cheap next to the agent turns, and
+  // doing them in order preserves both output ordering and error handling
+  // (a load/dataset failure becomes a non-passing result in its own slot).
+  // `total` counts eval files, not dataset rows: per-row detail is carried in
+  // the result id (`[row i/n]`).
+  const items: WorkItem[] = [];
   for (let index = 0; index < discovered.length; index++) {
     const d = discovered[index];
     const id = `${d.agent}/${d.id}`;
@@ -160,15 +211,15 @@ export async function runEvalsInDir(
     try {
       def = await loadEval(d.file);
     } catch (err) {
-      emit({ type: "start", id, index, total });
-      const result: EvalResult = {
-        id,
-        assertions: [],
-        passed: false,
+      items.push({
+        index,
+        rowId: id,
+        // No def loaded; placeholder def is never run (error short-circuits).
+        def: { test: () => {} },
+        dirAgent: d.agent,
+        row: undefined,
         error: err instanceof Error ? err.message : String(err),
-      };
-      results.push(result);
-      emit({ type: "result", result, index, total });
+      });
       continue;
     }
 
@@ -199,39 +250,58 @@ export async function runEvalsInDir(
         def.dataset && rows.length > 1
           ? `${id} [row ${r + 1}/${rows.length}]`
           : id;
-      emit({ type: "start", id: rowId, index, total });
+      items.push({
+        index,
+        rowId,
+        def,
+        dirAgent: d.agent,
+        row: rows[r],
+        error: datasetError,
+      });
+    }
+  }
+
+  // Run the per-row `runEval` calls through a bounded pool. `runBounded`
+  // places each result in its input slot, so `results` keeps discovery/row
+  // order regardless of completion order. Progress events fire live and may
+  // interleave when maxConcurrency > 1.
+  const results = await runBounded(
+    items,
+    options.maxConcurrency ?? 1,
+    async (item): Promise<EvalResult> => {
+      emit({ type: "start", id: item.rowId, index: item.index, total });
 
       let result: EvalResult;
-      if (datasetError) {
+      if (item.error) {
         result = {
-          id: rowId,
+          id: item.rowId,
           assertions: [],
           passed: false,
-          error: datasetError,
+          error: item.error,
         };
       } else {
         // A fresh driver per row: each row is an independent conversation, so
-        // its thread must not carry over the previous row's history. (Multiple
+        // its thread must not carry over another row's history. (Multiple
         // `t.send`s within one row still share the thread — that's the driver's
         // per-instance behavior.)
         const driver = createHttpDriver({
           baseUrl: options.baseUrl,
-          agent: def.agent ?? d.agent,
+          agent: item.def.agent ?? item.dirAgent,
           headers: options.headers,
           mlflowRunId: runId,
         });
-        result = await runEval(def, {
-          id: rowId,
+        result = await runEval(item.def, {
+          id: item.rowId,
           driver,
           strict: options.strict,
-          row: rows[r],
+          row: item.row,
         });
       }
 
-      results.push(result);
-      emit({ type: "result", result, index, total });
-    }
-  }
+      emit({ type: "result", result, index: item.index, total });
+      return result;
+    },
+  );
 
   if (mlflowClient && runId) {
     const report = await reportToMlflow(mlflowClient, results);
