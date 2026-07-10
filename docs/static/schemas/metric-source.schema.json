@@ -21,6 +21,7 @@
         "properties": {
           "source": {
             "type": "string",
+            "maxLength": 767,
             "pattern": "^[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+\\.[^\\x00-\\x20\\x7f./]+$",
             "description": "Three-part Unity Catalog FQN of the metric view: <catalog>.<schema>.<metric_view>",
             "examples": [

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -13,6 +13,7 @@ import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { AnalyticsPlugin } from "../analytics";
 import {
+  __resetMetricRegistryCache,
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
@@ -129,6 +130,7 @@ describe("analytics metric route (Phase 1)", () => {
 
   afterEach(() => {
     serviceContextMock?.restore();
+    __resetMetricRegistryCache();
     while (tempRegistryDirs.length > 0) {
       const dir = tempRegistryDirs.pop();
       if (dir) rmSync(dir, { recursive: true, force: true });
@@ -149,28 +151,46 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Grammar gate — the primary security test (replaces #341's
-  // fail-closed-503 allowlist test). A measure that fails MEASURE_NAME_PATTERN
-  // throws inside buildMetricSql BEFORE any SQL string is constructed.
-  describe("buildMetricSql grammar gate", () => {
+  // ── Identifier safety — the primary security test. Measure/dimension names
+  // are backtick-quoted (not narrow-gated) at interpolation, so an injection-
+  // shaped name is NEUTRALIZED by quoting rather than rejected: it becomes an
+  // inert (if nonexistent) column the warehouse resolves away. Only a name
+  // that cannot be safely quoted at all — one containing a control character
+  // or newline — is refused.
+  describe("buildMetricSql identifier safety (quoting)", () => {
     const registration: MetricRegistration = {
       key: "revenue",
       source: "cat.sch.revenue_metrics",
       lane: "sp",
     };
 
-    test("throws before building SQL for an injection-shaped measure", () => {
-      expect(() =>
-        buildMetricSql(registration, {
-          measures: ["arr; DROP TABLE users"],
-        }),
-      ).toThrow(/not a valid identifier/);
+    test("neutralizes an injection-shaped measure by quoting (no breakout)", () => {
+      // `arr; DROP TABLE users` has no control chars, so it is a valid (if
+      // nonexistent) column name: quoted whole, the `;` and `DROP` are inert
+      // inside the backtick-delimited identifier — not separate statements.
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr; DROP TABLE users"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr; DROP TABLE users`) AS `arr; DROP TABLE users` FROM `cat`.`sch`.`revenue_metrics`",
+      );
     });
 
-    test("throws for a measure with a backtick / quote", () => {
+    test("neutralizes a backtick in a measure by doubling it", () => {
+      // The one real breakout char is the backtick; quoteIdentifier doubles it
+      // so it cannot close the identifier early.
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr`"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr```) AS `arr``` FROM `cat`.`sch`.`revenue_metrics`",
+      );
+    });
+
+    test("throws for a measure containing a control character (cannot be quoted)", () => {
       expect(() =>
-        buildMetricSql(registration, { measures: ["arr`"] }),
-      ).toThrow(/not a valid identifier/);
+        buildMetricSql(registration, { measures: ["arr\ndrop"] }),
+      ).toThrow(/not a valid identifier|control character/);
     });
 
     test("throws when no measures are supplied", () => {
@@ -200,7 +220,7 @@ describe("analytics metric route (Phase 1)", () => {
         { measures: ["arr"] },
       );
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM `prod-data`.`analytics`.`revenue`",
+        "SELECT MEASURE(`arr`) AS `arr` FROM `prod-data`.`analytics`.`revenue`",
       );
     });
 
@@ -214,7 +234,7 @@ describe("analytics metric route (Phase 1)", () => {
         { measures: ["arr"] },
       );
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`re``v`",
+        "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`re``v`",
       );
     });
   });
@@ -227,12 +247,12 @@ describe("analytics metric route (Phase 1)", () => {
       lane: "sp",
     };
 
-    test("single measure → SELECT MEASURE(m) AS m FROM <fqn>", () => {
+    test("single measure → SELECT MEASURE(`m`) AS `m` FROM <fqn>", () => {
       const { statement, parameters } = buildMetricSql(registration, {
         measures: ["arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
+        "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics`",
       );
       expect(parameters).toEqual({});
     });
@@ -242,7 +262,7 @@ describe("analytics metric route (Phase 1)", () => {
         measures: ["revenue", "arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue FROM `cat`.`sch`.`revenue_metrics`",
+        "SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue` FROM `cat`.`sch`.`revenue_metrics`",
       );
     });
 
@@ -252,7 +272,7 @@ describe("analytics metric route (Phase 1)", () => {
         limit: 10.9,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics` LIMIT 10",
+        "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics` LIMIT 10",
       );
     });
   });
@@ -272,7 +292,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -282,7 +302,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["segment", "region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region, segment FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -292,7 +312,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -302,7 +322,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: [],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
+        "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics`",
       );
     });
 
@@ -313,7 +333,7 @@ describe("analytics metric route (Phase 1)", () => {
         limit: 100,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL LIMIT 100",
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL LIMIT 100",
       );
     });
 
@@ -323,7 +343,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["order_date", "region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, order_date, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, `order_date`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
       expect(statement).not.toContain("date_trunc");
     });
@@ -347,10 +367,10 @@ describe("analytics metric route (Phase 1)", () => {
         timeDimension: "order_date",
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, date_trunc('month', order_date) AS order_date, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, date_trunc('month', `order_date`) AS `order_date`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
       expect(statement).toContain(
-        "date_trunc('month', order_date) AS order_date",
+        "date_trunc('month', `order_date`) AS `order_date`",
       );
       expect(statement).toContain(" GROUP BY ALL");
     });
@@ -363,7 +383,7 @@ describe("analytics metric route (Phase 1)", () => {
         timeDimension: "order_date",
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, date_trunc('day', order_date) AS order_date FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        "SELECT MEASURE(`arr`) AS `arr`, date_trunc('day', `order_date`) AS `order_date` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -383,31 +403,43 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimension grammar gate. A dimension failing
-  // DIMENSION_NAME_PATTERN throws inside buildMetricSql before SQL is built.
-  describe("buildMetricSql dimension grammar gate", () => {
+  // ── Phase 2: dimension identifier safety. A dimension is backtick-quoted at
+  // interpolation, so an injection-shaped name is neutralized (inert quoted
+  // column), and only an unquotable (control-char) name throws.
+  describe("buildMetricSql dimension identifier safety (quoting)", () => {
     const registration: MetricRegistration = {
       key: "revenue",
       source: "cat.sch.revenue_metrics",
       lane: "sp",
     };
 
-    test("throws before building SQL for an injection-shaped dimension", () => {
-      expect(() =>
-        buildMetricSql(registration, {
-          measures: ["arr"],
-          dimensions: ["region; DROP TABLE users"],
-        }),
-      ).toThrow(/not a valid identifier/);
+    test("neutralizes an injection-shaped dimension by quoting", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region; DROP TABLE users"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region; DROP TABLE users` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+      );
     });
 
-    test("throws for a dimension with a backtick / quote", () => {
+    test("neutralizes a backtick in a dimension by doubling it", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region`"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region``` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+      );
+    });
+
+    test("throws for a dimension containing a control character", () => {
       expect(() =>
         buildMetricSql(registration, {
           measures: ["arr"],
-          dimensions: ["region`"],
+          dimensions: ["region\tbad"],
         }),
-      ).toThrow(/not a valid identifier/);
+      ).toThrow(/not a valid identifier|control character/);
     });
   });
 
@@ -447,7 +479,7 @@ describe("analytics metric route (Phase 1)", () => {
         expect.anything(),
         expect.objectContaining({
           statement:
-            "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
+            "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics`",
           warehouse_id: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
@@ -766,6 +798,7 @@ describe("loadMetricRegistry", () => {
   });
 
   afterEach(() => {
+    __resetMetricRegistryCache();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -837,6 +870,53 @@ describe("loadMetricRegistry", () => {
     );
   });
 
+  test("rejects more than 200 metric views (runtime parity with typegen cap)", async () => {
+    // A config that fails type generation (MAX_METRIC_VIEWS) must not silently
+    // pass at runtime. z.record has no `.max` in zod 4, so this is enforced by
+    // the schema's superRefine.
+    const metricViews: Record<string, { source: string }> = {};
+    for (let i = 0; i < 201; i++) {
+      metricViews[`m_${i}`] = { source: `cat.sch.view_${i}` };
+    }
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({ metricViews }),
+    );
+    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+      /Invalid metric-views.json/,
+    );
+  });
+
+  test("rejects an FQN segment longer than 255 chars (per-segment cap)", async () => {
+    // The per-segment length cap is not expressible as a whole-string
+    // maxLength; the schema's superRefine enforces it so runtime matches the
+    // typegen resolver.
+    const longSegment = "a".repeat(256);
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: `cat.sch.${longSegment}` } },
+      }),
+    );
+    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+      /Invalid metric-views.json/,
+    );
+  });
+
+  test("accepts exactly 200 views and a 255-char segment (boundary)", async () => {
+    const metricViews: Record<string, { source: string }> = {};
+    for (let i = 0; i < 200; i++) {
+      metricViews[`m_${i}`] = { source: `cat.sch.view_${i}` };
+    }
+    // One entry with a segment at exactly the 255 limit — must pass.
+    metricViews.m_0 = { source: `cat.sch.${"a".repeat(255)}` };
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({ metricViews }),
+    );
+    await expect(loadMetricRegistry(dir)).resolves.toBeDefined();
+  });
+
   test("re-reads only after the file changes (mtime-validated cache)", async () => {
     // getMetricRegistry caches by dir and revalidates via stat; a second call
     // with no change returns the same object, and a rewrite is picked up.
@@ -862,6 +942,51 @@ describe("loadMetricRegistry", () => {
     const third = await getMetricRegistry(dir);
     expect(third).not.toBe(first);
     expect(Object.keys(third).sort()).toEqual(["orders", "revenue"]);
+  });
+
+  test("picks up a SAME-SIZE edit (ctime invalidation, not just size)", async () => {
+    // The failure mode size+mtime alone would miss: rewrite the config to the
+    // EXACT same byte length (repoint `source` to an equal-length FQN). `size`
+    // is unchanged and a coarse-mtime FS might not advance `mtimeMs`, but
+    // `ctimeMs` bumps on any write — so the new source must be served.
+    const p = path.join(dir, "metric-views.json");
+    writeFileSync(
+      p,
+      JSON.stringify({
+        metricViews: { revenue: { source: "cat.sch.rev_aaa" } },
+      }),
+    );
+    const before = await getMetricRegistry(dir);
+    expect(before.revenue?.source).toBe("cat.sch.rev_aaa");
+
+    // Same-length replacement: "rev_aaa" → "rev_bbb" keeps the file byte-count
+    // identical, so `size` cannot disambiguate.
+    const sizeBefore = statSync(p).size;
+    writeFileSync(
+      p,
+      JSON.stringify({
+        metricViews: { revenue: { source: "cat.sch.rev_bbb" } },
+      }),
+    );
+    expect(statSync(p).size).toBe(sizeBefore); // same size, as designed
+
+    const after = await getMetricRegistry(dir);
+    expect(after.revenue?.source).toBe("cat.sch.rev_bbb");
+  });
+
+  test("__resetMetricRegistryCache forces a cold re-read", async () => {
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
+      }),
+    );
+    const first = await getMetricRegistry(dir);
+    __resetMetricRegistryCache();
+    const second = await getMetricRegistry(dir);
+    // Cleared cache → fresh parse → a new object (not the memoized instance).
+    expect(second).not.toBe(first);
+    expect(Object.keys(second)).toEqual(["revenue"]);
   });
 });
 
@@ -893,7 +1018,7 @@ describe("metric — filter translator", () => {
         operator: "equals",
         values: ["EMEA"],
       });
-      expect(where).toBe("region = :f_0");
+      expect(where).toBe("`region` = :f_0");
       expect(parameters).toEqual({
         f_0: { __sql_type: "STRING", value: "EMEA" },
       });
@@ -905,7 +1030,7 @@ describe("metric — filter translator", () => {
         operator: "notEquals",
         values: ["EMEA"],
       });
-      expect(where).toBe("region <> :f_0");
+      expect(where).toBe("`region` <> :f_0");
       expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
     });
 
@@ -915,7 +1040,7 @@ describe("metric — filter translator", () => {
         operator: "in",
         values: ["EMEA", "APAC", "AMER"],
       });
-      expect(where).toBe("region IN (:f_0, :f_1, :f_2)");
+      expect(where).toBe("`region` IN (:f_0, :f_1, :f_2)");
       expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
       expect(parameters.f_1).toEqual({ __sql_type: "STRING", value: "APAC" });
       expect(parameters.f_2).toEqual({ __sql_type: "STRING", value: "AMER" });
@@ -927,7 +1052,7 @@ describe("metric — filter translator", () => {
         operator: "notIn",
         values: ["EMEA", "APAC"],
       });
-      expect(where).toBe("region NOT IN (:f_0, :f_1)");
+      expect(where).toBe("`region` NOT IN (:f_0, :f_1)");
       expect(Object.keys(parameters)).toHaveLength(2);
     });
 
@@ -937,7 +1062,7 @@ describe("metric — filter translator", () => {
         operator: "gt",
         values: [10000],
       });
-      expect(where).toBe("deal_size > :f_0");
+      expect(where).toBe("`deal_size` > :f_0");
       expect(parameters.f_0).toEqual({ __sql_type: "INT", value: "10000" });
     });
 
@@ -947,7 +1072,7 @@ describe("metric — filter translator", () => {
         operator: "gte",
         values: [5000],
       });
-      expect(where).toBe("deal_size >= :f_0");
+      expect(where).toBe("`deal_size` >= :f_0");
     });
 
     test("lt → `<col> < :f_0`", () => {
@@ -956,7 +1081,7 @@ describe("metric — filter translator", () => {
         operator: "lt",
         values: [100],
       });
-      expect(where).toBe("deal_size < :f_0");
+      expect(where).toBe("`deal_size` < :f_0");
     });
 
     test("lte → `<col> <= :f_0`", () => {
@@ -965,7 +1090,7 @@ describe("metric — filter translator", () => {
         operator: "lte",
         values: [50000],
       });
-      expect(where).toBe("deal_size <= :f_0");
+      expect(where).toBe("`deal_size` <= :f_0");
     });
 
     test("contains → `<col> LIKE :f_0` (value wrapped in %...%)", () => {
@@ -974,7 +1099,7 @@ describe("metric — filter translator", () => {
         operator: "contains",
         values: ["MEA"],
       });
-      expect(where).toBe("region LIKE :f_0");
+      expect(where).toBe("`region` LIKE :f_0");
       expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "%MEA%" });
     });
 
@@ -984,7 +1109,7 @@ describe("metric — filter translator", () => {
         operator: "notContains",
         values: ["test"],
       });
-      expect(where).toBe("region NOT LIKE :f_0");
+      expect(where).toBe("`region` NOT LIKE :f_0");
       expect(parameters.f_0).toEqual({
         __sql_type: "STRING",
         value: "%test%",
@@ -996,7 +1121,7 @@ describe("metric — filter translator", () => {
         member: "region",
         operator: "set",
       });
-      expect(where).toBe("region IS NOT NULL");
+      expect(where).toBe("`region` IS NOT NULL");
       expect(parameters).toEqual({});
     });
 
@@ -1005,7 +1130,7 @@ describe("metric — filter translator", () => {
         member: "region",
         operator: "notSet",
       });
-      expect(where).toBe("region IS NULL");
+      expect(where).toBe("`region` IS NULL");
       expect(parameters).toEqual({});
     });
   });
@@ -1018,7 +1143,7 @@ describe("metric — filter translator", () => {
           { member: "segment", operator: "equals", values: ["Enterprise"] },
         ],
       });
-      expect(where).toBe("(region = :f_0 AND segment = :f_1)");
+      expect(where).toBe("(`region` = :f_0 AND `segment` = :f_1)");
       expect(parameters.f_0.value).toBe("EMEA");
       expect(parameters.f_1.value).toBe("Enterprise");
     });
@@ -1030,7 +1155,7 @@ describe("metric — filter translator", () => {
           { member: "region", operator: "equals", values: ["APAC"] },
         ],
       });
-      expect(where).toBe("(region = :f_0 OR region = :f_1)");
+      expect(where).toBe("(`region` = :f_0 OR `region` = :f_1)");
     });
 
     test("AND-of-OR composes nested groups", () => {
@@ -1045,7 +1170,7 @@ describe("metric — filter translator", () => {
           },
         ],
       });
-      expect(where).toContain("(region IN (");
+      expect(where).toContain("(`region` IN (");
       expect(where).toContain(" AND ");
       expect(where).toContain("OR");
     });
@@ -1219,14 +1344,25 @@ describe("metric — filter translator", () => {
       expect(Object.keys(parameters)).toHaveLength(3);
     });
 
-    test("a filter member failing DIMENSION_NAME_PATTERN throws before SQL is built", () => {
+    test("an injection-shaped filter member is neutralized by quoting", () => {
+      // No control char → a valid (if nonexistent) column name: quoted whole,
+      // the `;`/`DROP`/`--` are inert inside the backtick-delimited identifier.
+      const { where } = render({
+        member: "region; DROP TABLE foo --",
+        operator: "equals",
+        values: ["x"],
+      });
+      expect(where).toBe("`region; DROP TABLE foo --` = :f_0");
+    });
+
+    test("a filter member with a control character throws before SQL is built", () => {
       expect(() =>
         render({
-          member: "region; DROP TABLE foo --",
+          member: "region\ndrop",
           operator: "equals",
           values: ["x"],
         }),
-      ).toThrowError(/not a valid identifier/);
+      ).toThrowError(/not a valid identifier|control character/);
     });
   });
 
@@ -1383,7 +1519,7 @@ describe("metric — filter translator", () => {
         operator: "equals",
         values: ["x"],
       });
-      expect(where).toBe("ghost_column = :f_0");
+      expect(where).toBe("`ghost_column` = :f_0");
     });
   });
 
@@ -1407,7 +1543,7 @@ describe("metric — filter translator", () => {
     });
 
     test("rejects a name that is BOTH a measure and a dimension", () => {
-      // The corruption case: `SELECT MEASURE(x) AS x, x ... GROUP BY ALL`
+      // The corruption case: `SELECT MEASURE(`x`) AS `x`, x ... GROUP BY ALL`
       // materializes two `x` columns and the second overwrites the first.
       expect(() =>
         validateMetricRequest({
@@ -1613,7 +1749,7 @@ describe("metric — filter translator", () => {
       expect(executeMock.mock.calls[0][1]).toEqual(
         expect.objectContaining({
           statement:
-            "SELECT MEASURE(ghost_measure) AS ghost_measure FROM `cat`.`sch`.`revenue_metrics`",
+            "SELECT MEASURE(`ghost_measure`) AS `ghost_measure` FROM `cat`.`sch`.`revenue_metrics`",
         }),
       );
 
