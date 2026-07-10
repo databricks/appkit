@@ -544,7 +544,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    const registration = registry[key];
+    // Own-property lookup: never resolve `key` to an inherited
+    // `Object.prototype` member (`__proto__`, `constructor`, `toString`, …).
+    // The loader already builds a null-prototype registry, but the load-error
+    // fallback and test-injected registries are plain objects, so gate the
+    // read here too — an inherited hit would otherwise bypass the 404 below
+    // and flow a non-registration value into execution.
+    const registration = Object.hasOwn(registry, key)
+      ? registry[key]
+      : undefined;
     if (!registration) {
       // Don't echo the user-supplied `key` back in the public response —
       // confirming "metric X is not registered" lets a probe enumerate keys by

@@ -18,6 +18,7 @@ import type {
   MetricPredicate,
   MetricRegistration,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics:metric");
 
@@ -202,7 +203,13 @@ export function loadMetricRegistry(
     throw new Error(`Invalid metric-views.json at ${metricPath}: ${issues}`);
   }
 
-  const registry: Record<string, MetricRegistration> = {};
+  // Null-prototype map so a metric key that collides with an inherited
+  // `Object.prototype` member (`__proto__`, `constructor`, `toString`, …)
+  // cannot resolve to a truthy non-registration at the `registry[key]` read
+  // site and slip past the unknown-key 404. Keys are still grammar-gated by
+  // `metricKeySchema` (identifier shape), but the null prototype removes the
+  // whole class of inherited-property lookups as a boundary.
+  const registry: Record<string, MetricRegistration> = Object.create(null);
   for (const [key, entry] of Object.entries(result.data.metricViews ?? {})) {
     registry[key] = {
       key,
@@ -342,6 +349,48 @@ const metricRequestSchema = z
   .superRefine((value, ctx) => {
     if (value.filter != null) {
       validateFilterTree(value.filter, ctx, ["filter"], 0);
+    }
+
+    // Uniqueness. Measures and dimensions become SELECT columns aliased to
+    // their own name (`MEASURE(x) AS x`, `x`); the warehouse returns one row
+    // object keyed by column name, so a repeated name — a duplicate measure, a
+    // duplicate dimension, or a name appearing as BOTH a measure and a
+    // dimension — collapses to a single key and silently drops a value during
+    // row materialization. Reject the collision here rather than emit SQL that
+    // corrupts rows. (The grammar gate at build time is a safety boundary, not
+    // a uniqueness check, so this lives in validation.)
+    const seen = new Set<string>();
+    const collided = new Set<string>();
+    for (const name of [...value.measures, ...(value.dimensions ?? [])]) {
+      if (seen.has(name)) {
+        collided.add(name);
+      }
+      seen.add(name);
+    }
+    if (collided.size > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "measures and dimensions must be unique across both lists (a name cannot repeat, nor appear as both a measure and a dimension)",
+        path: ["measures"],
+      });
+    }
+
+    // Delivery format. The metric route delivers JSON rows only at v1 (the
+    // cache salts on a fixed "JSON_ARRAY" and the route always routes through
+    // the JSON path). Accepting an Arrow format would silently return JSON —
+    // reject it loudly until Arrow parity ships. Legacy aliases normalize
+    // first (`JSON`→`JSON_ARRAY`, `ARROW`→`ARROW_STREAM`).
+    if (
+      value.format != null &&
+      normalizeAnalyticsFormat(value.format) !== "JSON_ARRAY"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "format: only JSON_ARRAY is supported on the metric route at v1 (ARROW_STREAM is not yet implemented)",
+        path: ["format"],
+      });
     }
 
     // Cross-field grain rules. `timeGrain` buckets exactly one selected
@@ -824,7 +873,15 @@ function sortFilterChildren(
       !("or" in child)
     ) {
       const p = child as MetricPredicate;
-      key = `${p.member}${p.operator}`;
+      // Separate the fields with "/" so the (member, operator) pair maps to
+      // the sort key injectively. A delimiter-free concatenation collides —
+      // member "ab" + op "c" and member "a" + op "bc" both → "abc" — which
+      // tie-breaks two distinct pairs to input order and forks the cache key
+      // on semantically equal filters. "/" can never appear in either field
+      // (members match DIMENSION_NAME_PATTERN, operators are the alpha-only
+      // enum), matching the leaf-fingerprint delimiter canonicalizeFilter
+      // already uses.
+      key = `${p.member}/${p.operator}`;
       isPredicate = true;
     } else {
       // Nested groups don't have a single (member, operator) — keep their
