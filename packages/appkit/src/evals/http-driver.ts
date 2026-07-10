@@ -26,22 +26,34 @@ export interface HttpDriverOptions {
 /** Mutable running totals accumulated while draining one turn's SSE stream. */
 interface DriveState {
   reply: string;
-  toolCalls: string[];
-  seen: Set<string>;
+  /** Captured tool calls, keyed by `call_id ?? name` (dedupe). */
+  toolCalls: Map<string, ToolCall>;
   ok: boolean;
   traceId?: string;
 }
 
-/** Record a `function_call` output item once per call id (deduped). */
+/**
+ * Record a `function_call` output item, keyed by `call_id ?? name`, capturing
+ * its parsed arguments. A later `done` event's fuller args win over the initial
+ * `added` event's (often empty) args.
+ */
 function recordToolCall(
-  item: { type?: string; name?: string; call_id?: string } | undefined,
+  item:
+    | { type?: string; name?: string; call_id?: string; arguments?: string }
+    | undefined,
   state: DriveState,
 ): void {
   if (item?.type !== "function_call" || !item.name) return;
   const key = item.call_id ?? item.name;
-  if (state.seen.has(key)) return;
-  state.seen.add(key);
-  state.toolCalls.push(item.name);
+  const args = parseArgs(item.arguments);
+  const existing = state.toolCalls.get(key);
+  if (!existing) {
+    state.toolCalls.set(key, { name: item.name, args });
+  } else if (Object.keys(args).length > 0) {
+    // The initial `added` event may carry empty args while the later `done`
+    // carries the full arguments — keep the fuller set.
+    existing.args = args;
+  }
 }
 
 /** Apply an `appkit.metadata` event's thread/trace ids. */
@@ -52,6 +64,24 @@ function applyMetadata(
 ): void {
   if (data?.threadId) setThread(data.threadId);
   if (data?.mlflowTraceId) state.traceId = data.mlflowTraceId;
+}
+
+/** A single captured tool call, deduped by `call_id ?? name`. */
+type ToolCall = { name: string; args: Record<string, unknown> };
+
+/** Parse a function-call `arguments` JSON string; `{}` on missing/invalid. */
+function parseArgs(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== "string" || raw.trim() === "") return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Parse a single Responses-API SSE `data:` payload into the running totals. */
@@ -73,6 +103,7 @@ function applyEvent(
       type?: string;
       name?: string;
       call_id?: string;
+      arguments?: string;
       content?: Array<{ text?: string }>;
     };
     recordToolCall(item, state);
@@ -147,13 +178,19 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
           signal,
         });
       } catch {
-        return { reply: "", toolCalls: [], succeeded: false };
+        return {
+          reply: "",
+          toolCalls: [],
+          toolCallDetails: [],
+          succeeded: false,
+        };
       }
 
       if (!res.ok || !res.body) {
         return {
           reply: "",
           toolCalls: [],
+          toolCallDetails: [],
           succeeded: false,
           sessionId: threadId,
         };
@@ -161,8 +198,7 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
 
       const state: DriveState = {
         reply: "",
-        toolCalls: [],
-        seen: new Set<string>(),
+        toolCalls: new Map<string, ToolCall>(),
         ok: true,
       };
       const setThread = (id: string) => {
@@ -193,9 +229,11 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
       // throwing, so mark an aborted turn failed explicitly.
       if (signal.aborted) state.ok = false;
 
+      const toolCallDetails = [...state.toolCalls.values()];
       return {
         reply: state.reply,
-        toolCalls: state.toolCalls,
+        toolCalls: toolCallDetails.map((c) => c.name),
+        toolCallDetails,
         succeeded: state.ok,
         sessionId: threadId,
         traceId: state.traceId,

@@ -3,6 +3,7 @@ import { judgeClosedQA, judgeCustom, judgeFactuality } from "./judge";
 import type {
   AssertionHandle,
   AssertionResult,
+  DriveResult,
   EvalDefinition,
   EvalDriver,
   EvalResult,
@@ -19,6 +20,24 @@ class SkipSignal extends Error {
     super("eval skipped");
     this.name = "SkipSignal";
   }
+}
+
+/**
+ * Deep partial match: every key in `expected` is present in `actual` and equal,
+ * recursing into nested plain objects so extra actual keys are ignored.
+ */
+function deepContains(actual: unknown, expected: unknown): boolean {
+  if (isPlainObject(expected)) {
+    if (!isPlainObject(actual)) return false;
+    return Object.keys(expected).every((key) =>
+      deepContains(actual[key], expected[key]),
+    );
+  }
+  return actual === expected;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface RunEvalOptions {
@@ -45,6 +64,7 @@ export async function runEval(
   let reply = "";
   let lastInput = "";
   let toolCalls: string[] = [];
+  let toolCallDetails: DriveResult["toolCallDetails"] = [];
   let sessionId: string | undefined;
   let lastTraceId: string | undefined;
   let lastSucceeded = false;
@@ -98,6 +118,7 @@ export async function runEval(
       const r = await options.driver.send(message);
       reply = r.reply;
       toolCalls = r.toolCalls;
+      toolCallDetails = r.toolCallDetails;
       sessionId = r.sessionId;
       lastSucceeded = r.succeeded;
       if (r.traceId) lastTraceId = r.traceId;
@@ -136,6 +157,21 @@ export async function runEval(
         `expected tool "${name}" to be called (called: ${
           toolCalls.length ? toolCalls.join(", ") : "none"
         })`,
+      );
+    },
+    calledToolWith(name, expected) {
+      const matching = toolCallDetails.filter((c) => c.name === name);
+      const pass = matching.some((c) => deepContains(c.args, expected));
+      const seen = matching.length
+        ? matching.map((c) => JSON.stringify(c.args)).join(", ")
+        : "not called";
+      return record(
+        `calledToolWith(${name})`,
+        pass,
+        undefined,
+        `expected tool "${name}" to be called with ${JSON.stringify(
+          expected,
+        )} (args seen: ${seen})`,
       );
     },
     check(value: string, matcher: Matcher) {
