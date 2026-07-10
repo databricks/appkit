@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
-
 import { MlflowClient } from "../connectors/mlflow";
+import type { WorkspaceClient } from "../workspace-client";
+import { type DatasetRow, readEvalDataset } from "./dataset";
 import { type DiscoveredEval, discoverEvalFiles } from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge, teardownJudge } from "./judge";
@@ -47,6 +48,13 @@ export interface RunEvalsOptions {
    * Databricks serving endpoint (`model`).
    */
   judge?: { host: string; token: string; model: string };
+  /**
+   * Workspace client used to read managed evaluation datasets (for evals that
+   * declare `dataset`). Required alongside {@link warehouseId} for those evals.
+   */
+  workspaceClient?: WorkspaceClient;
+  /** SQL warehouse id used to read managed evaluation datasets. */
+  warehouseId?: string;
   /** Wall-clock timestamp (ms) for run create/finish — pass `Date.now()`. */
   now?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
@@ -110,17 +118,23 @@ export function resolveEvalDefault(mod: unknown): EvalDefinition | undefined {
 }
 
 /**
- * Load and run a single discovered eval. Never throws — a load/run failure
- * becomes a non-passing {@link EvalResult} so one bad eval can't abort the run.
+ * Run one eval turn against a fresh driver. Never throws — a run failure becomes
+ * a non-passing {@link EvalResult} so one bad eval can't abort the run. `row`
+ * binds the current managed-dataset row (see {@link resolveDatasetRows}), or is
+ * `undefined` for a plain single-run eval.
  */
 async function runOne(
   d: DiscoveredEval,
   id: string,
+  def: EvalDefinition,
+  row: DatasetRow | undefined,
   runId: string | undefined,
   options: RunEvalsOptions,
 ): Promise<EvalResult> {
   try {
-    const def = await loadEval(d.file);
+    // A fresh driver per row: each row is an independent conversation whose
+    // thread must not carry over the previous row's history. (Multiple
+    // `t.send`s within one row still share the thread — the driver's behavior.)
     const driver = createHttpDriver({
       baseUrl: options.baseUrl,
       agent: def.agent ?? d.agent,
@@ -128,7 +142,7 @@ async function runOne(
       mlflowRunId: runId,
       timeoutMs: options.timeoutMs,
     });
-    return await runEval(def, { id, driver, strict: options.strict });
+    return await runEval(def, { id, driver, strict: options.strict, row });
   } catch (err) {
     return {
       id,
@@ -136,6 +150,89 @@ async function runOne(
       passed: false,
       error: err instanceof Error ? err.message : String(err),
     };
+  }
+}
+
+/**
+ * Resolve the rows a (possibly dataset-driven) eval runs over. A plain eval
+ * yields a single `undefined` row; a dataset eval reads its Unity Catalog table
+ * via {@link readEvalDataset}. On misconfiguration or read failure, returns a
+ * single `undefined` row plus an `error`, so the eval still surfaces one result.
+ */
+async function resolveDatasetRows(
+  def: EvalDefinition,
+  options: RunEvalsOptions,
+): Promise<{ rows: Array<DatasetRow | undefined>; error?: string }> {
+  if (!def.dataset) return { rows: [undefined] };
+  if (!options.workspaceClient || !options.warehouseId) {
+    return {
+      rows: [undefined],
+      error:
+        "dataset eval requires a workspace client and warehouse (pass --warehouse)",
+    };
+  }
+  try {
+    const rows = await readEvalDataset(options.workspaceClient, {
+      table: def.dataset.table,
+      warehouseId: options.warehouseId,
+      limit: def.dataset.limit,
+    });
+    return { rows: rows.length ? rows : [undefined] };
+  } catch (err) {
+    return {
+      rows: [undefined],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Load one discovered eval and run it, expanding a dataset-driven eval into one
+ * run per row. Appends one result per row to `results`, emitting `start`/
+ * `result` around each. Never throws: a load or dataset-read failure surfaces as
+ * a non-passing result. `total` counts eval files, not rows — per-row detail is
+ * carried in the result id (`[row i/n]`).
+ */
+async function runDiscovered(
+  d: DiscoveredEval,
+  index: number,
+  total: number,
+  runId: string | undefined,
+  options: RunEvalsOptions,
+  emit: (event: EvalProgress) => void,
+  results: EvalResult[],
+): Promise<void> {
+  const id = `${d.agent}/${d.id}`;
+
+  let def: EvalDefinition;
+  try {
+    def = await loadEval(d.file);
+  } catch (err) {
+    emit({ type: "start", id, index, total });
+    const result: EvalResult = {
+      id,
+      assertions: [],
+      passed: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    results.push(result);
+    emit({ type: "result", result, index, total });
+    return;
+  }
+
+  const { rows, error: datasetError } = await resolveDatasetRows(def, options);
+
+  for (let r = 0; r < rows.length; r++) {
+    const rowId =
+      def.dataset && rows.length > 1
+        ? `${id} [row ${r + 1}/${rows.length}]`
+        : id;
+    emit({ type: "start", id: rowId, index, total });
+    const result: EvalResult = datasetError
+      ? { id: rowId, assertions: [], passed: false, error: datasetError }
+      : await runOne(d, rowId, def, rows[r], runId, options);
+    results.push(result);
+    emit({ type: "result", result, index, total });
   }
 }
 
@@ -236,20 +333,22 @@ export async function runEvalsInDir(
       emit({ type: "run-created", runId });
     }
 
-    // Run evals through a bounded pool so independent turns overlap instead of
-    // summing their latencies. runOne never throws, so a pool worker never
-    // rejects; results preserve discovery order (mapPool writes by index).
-    const results = await mapPool(
+    // Run each eval through the bounded pool — one in-flight stream per eval, so
+    // the pool respects the server's per-user stream cap (see mapPool/concurrency).
+    // A dataset eval expands into per-row runs that execute serially within its
+    // slot; results preserve discovery order (mapPool writes by index) and row
+    // order within each file. `total` counts eval files, not dataset rows — per-row
+    // detail is carried in the result id (`[row i/n]`).
+    const perFile = await mapPool(
       discovered,
       options.concurrency ?? DEFAULT_CONCURRENCY,
       async (d, index) => {
-        const id = `${d.agent}/${d.id}`;
-        emit({ type: "start", id, index, total });
-        const result = await runOne(d, id, runId, options);
-        emit({ type: "result", result, index, total });
-        return result;
+        const fileResults: EvalResult[] = [];
+        await runDiscovered(d, index, total, runId, options, emit, fileResults);
+        return fileResults;
       },
     );
+    const results = perFile.flat();
 
     const summary: EvalRunSummary = { results };
     const mlflow = await finalizeMlflow(mlflowClient, runId, results, options);
