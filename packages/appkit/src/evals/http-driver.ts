@@ -13,13 +13,30 @@ export interface HttpDriverOptions {
   mlflowRunId?: string;
 }
 
+/** A single captured tool call, deduped by `call_id ?? name`. */
+type ToolCall = { name: string; args: Record<string, unknown> };
+
+/** Parse a function-call `arguments` JSON string; `{}` on missing/invalid. */
+function parseArgs(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== "string" || raw.trim() === "") return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 /** Parse a single Responses-API SSE `data:` payload into the running totals. */
 function applyEvent(
   event: Record<string, unknown>,
   state: {
     reply: string;
-    toolCalls: string[];
-    seen: Set<string>;
+    toolCalls: Map<string, ToolCall>;
     ok: boolean;
     traceId?: string;
   },
@@ -38,13 +55,18 @@ function applyEvent(
     type === "response.output_item.done"
   ) {
     const item = event.item as
-      | { type?: string; name?: string; call_id?: string }
+      | { type?: string; name?: string; call_id?: string; arguments?: string }
       | undefined;
     if (item?.type === "function_call" && item.name) {
       const key = item.call_id ?? item.name;
-      if (!state.seen.has(key)) {
-        state.seen.add(key);
-        state.toolCalls.push(item.name);
+      const args = parseArgs(item.arguments);
+      const existing = state.toolCalls.get(key);
+      if (!existing) {
+        state.toolCalls.set(key, { name: item.name, args });
+      } else if (Object.keys(args).length > 0) {
+        // The initial `added` event may carry empty args while the later
+        // `done` carries the full arguments — keep the fuller set.
+        existing.args = args;
       }
     }
     return;
@@ -92,13 +114,19 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
           }),
         });
       } catch {
-        return { reply: "", toolCalls: [], succeeded: false };
+        return {
+          reply: "",
+          toolCalls: [],
+          toolCallDetails: [],
+          succeeded: false,
+        };
       }
 
       if (!res.ok || !res.body) {
         return {
           reply: "",
           toolCalls: [],
+          toolCallDetails: [],
           succeeded: false,
           sessionId: threadId,
         };
@@ -106,8 +134,7 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
 
       const state = {
         reply: "",
-        toolCalls: [] as string[],
-        seen: new Set<string>(),
+        toolCalls: new Map<string, ToolCall>(),
         ok: true,
         traceId: undefined as string | undefined,
       };
@@ -139,9 +166,11 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
         reader.releaseLock();
       }
 
+      const toolCallDetails = [...state.toolCalls.values()];
       return {
         reply: state.reply,
-        toolCalls: state.toolCalls,
+        toolCalls: toolCallDetails.map((c) => c.name),
+        toolCallDetails,
         succeeded: state.ok,
         sessionId: threadId,
         traceId: state.traceId,
