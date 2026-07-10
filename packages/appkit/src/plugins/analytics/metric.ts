@@ -7,6 +7,10 @@ import { z } from "zod";
 // `metric-views.json`. Imported from the shared source directly (matching the
 // type-generator's runtime, which pulls the zod-free `metric-fqn.ts` from the
 // same tree) so the runtime and the generated JSON schema validate identically.
+import {
+  isValidFqn,
+  quoteFqnForSql,
+} from "../../../../shared/src/schemas/metric-fqn";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
 import { AuthenticationError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -29,16 +33,6 @@ const logger = createLogger("analytics:metric");
  */
 const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
 const METRIC_CONFIG_FILE = "metric-views.json";
-
-/**
- * Three-part UC FQN matcher. The registry is parsed against the landed
- * `metricSourceSchema`, which already validates `source` via the composed
- * `UC_THREE_PART_FQN_PATTERN`; this is a belt-and-suspenders runtime fence for
- * any code path that constructs SQL from a `source` outside that parse (the FQN
- * cannot be parameterized — it is interpolated into the SQL string).
- */
-const FQN_PATTERN =
-  /^[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$/;
 
 /**
  * Validate measure names before they are interpolated into `MEASURE(<m>)`.
@@ -226,19 +220,35 @@ export function loadMetricRegistry(
 }
 
 /**
- * SQL identifier safety guard — the FQN ships in the SQL string (it cannot be
- * parameterized) so we re-check the regex at construction time.
+ * Validate a metric-view FQN and return it backtick-quoted for interpolation.
  *
- * The registry loader already enforces the FQN grammar via `metricSourceSchema`;
- * this is a runtime fence for any future code path that constructs SQL outside
- * of a parsed registry.
+ * The FQN ships in the SQL string — it cannot be parameterized — so it passes
+ * two shared, zod-free gates at construction time:
+ *
+ *  1. {@link isValidFqn} — the three-part UC grammar (exactly three segments,
+ *     each matching `UC_FQN_PATTERN`). This is the SAME predicate the
+ *     type-generator's describe seam uses and is derived from the same
+ *     per-segment charset as the canonical Zod schema, so config-time,
+ *     generation-time, and runtime accept exactly the same names.
+ *  2. {@link quoteFqnForSql} — backtick-quotes each segment (doubling embedded
+ *     backticks) so the FQN cannot break out of its identifier position. This
+ *     is the injection boundary; it is why the runtime can accept the full UC
+ *     quoted-identifier grammar (hyphens, non-ASCII) rather than the narrow
+ *     ASCII allowlist it used before.
+ *
+ * The registry loader already enforces the grammar via `metricSourceSchema`;
+ * this re-gate is defense-in-depth for any code path that reaches
+ * `buildMetricSql` without going through a parsed registry (it is exported),
+ * matching how measures, dimensions, and the grain are each re-gated at their
+ * interpolation points.
  */
-function assertSafeFqn(fqn: string): void {
-  if (!FQN_PATTERN.test(fqn)) {
+function quoteSafeFqn(fqn: string): string {
+  if (!isValidFqn(fqn)) {
     throw new Error(
       `Refusing to build SQL: "${fqn}" is not a valid three-part UC FQN.`,
     );
   }
+  return quoteFqnForSql(fqn);
 }
 
 /**
@@ -658,9 +668,10 @@ export function validateMetricRequest(body: unknown): IAnalyticsMetricRequest {
  *  - Every measure and dimension is gated by {@link MEASURE_NAME_PATTERN} /
  *    {@link DIMENSION_NAME_PATTERN} before it is interpolated (column
  *    references cannot be parameterized — they are SQL identifiers), and the
- *    FQN is re-checked by {@link assertSafeFqn}. There is deliberately NO name
- *    allowlist — the grammar gate is the security boundary. No user-supplied
- *    string reaches the SQL string without passing a grammar gate.
+ *    FQN is validated and backtick-quoted by {@link quoteSafeFqn}. There is
+ *    deliberately NO name allowlist — the grammar gate (plus quoting for the
+ *    FQN) is the security boundary. No user-supplied string reaches the SQL
+ *    string without passing a grammar gate.
  *  - `GROUP BY ALL` is added when at least one dimension is requested. UC
  *    requires GROUP BY when MEASURE() is mixed with non-aggregated columns;
  *    `GROUP BY ALL` is the documented form that works without re-listing each
@@ -683,7 +694,7 @@ export function buildMetricSql(
   statement: string;
   parameters: Record<string, SQLTypeMarker>;
 } {
-  assertSafeFqn(registration.source);
+  const quotedSource = quoteSafeFqn(registration.source);
 
   if (request.measures.length === 0) {
     throw new Error("buildMetricSql requires at least one measure.");
@@ -743,7 +754,7 @@ export function buildMetricSql(
     }
   }
 
-  const statement = `SELECT ${selectList} FROM ${registration.source}${whereClause}${groupByClause}${limitClause}`;
+  const statement = `SELECT ${selectList} FROM ${quotedSource}${whereClause}${groupByClause}${limitClause}`;
   return { statement, parameters };
 }
 
@@ -1035,8 +1046,12 @@ function bindLikeValue(
  * grammar-gated before they reach the SQL string:
  *
  *  - The grain is single-quoted (it is a `date_trunc` unit literal, NOT a bind
- *    param) and `TIME_GRAIN_PATTERN` upstream is the control that keeps a
- *    hostile token out of that quoted position.
+ *    param), so it is re-checked against {@link TIME_GRAIN_PATTERN} here before
+ *    interpolation. The schema also gates it, but `buildMetricSql` is exported
+ *    and may be reached on a path that bypasses `validateMetricRequest`, so the
+ *    grammar gate is applied at the interpolation point too — matching how
+ *    every other interpolated identifier (measures, dimensions, `timeDimension`,
+ *    the FQN) is re-gated in the builder.
  *  - The column cannot be parameterized (it is an identifier), so it is
  *    re-checked against {@link DIMENSION_NAME_PATTERN} here as belt-and-
  *    suspenders even though the schema already gated `timeDimension`.
@@ -1053,6 +1068,11 @@ function renderDimensionClause(
     if (!DIMENSION_NAME_PATTERN.test(dim)) {
       throw new Error(
         `Refusing to build SQL: timeDimension "${dim}" is not a valid identifier.`,
+      );
+    }
+    if (!TIME_GRAIN_PATTERN.test(timeGrain)) {
+      throw new Error(
+        `Refusing to build SQL: timeGrain "${timeGrain}" is not a valid grain token.`,
       );
     }
     return `date_trunc('${timeGrain}', ${dim}) AS ${dim}`;
@@ -1075,9 +1095,16 @@ function renderDimensionClause(
  *    {@link canonicalizeFilter}; values are included verbatim so distinct
  *    filter values yield distinct keys.
  *
- * `timeGrain` AND `timeDimension` both salt the key: each independently
- * changes the emitted SQL (the grain literal and which column is bucketed), so
- * two calls that differ only in one of them must not share a cache entry.
+ * `source` (the metric view's UC FQN) salts the key so that repointing a
+ * metric `key` to a different FQN in `metric-views.json` cannot serve rows
+ * cached under the old source within the TTL — `metricKey` alone is not enough
+ * because the key→source binding is mutable config.
+ *
+ * `timeGrain` salts the key whenever set. `timeDimension` only salts the key
+ * when `timeGrain` is also set, because `renderDimensionClause` only applies
+ * `date_trunc('<grain>', <timeDimension>)` when a grain is present — with no
+ * grain the field has no effect on the emitted SQL, so including it would fork
+ * the cache on an input that produced identical SQL.
  *
  * `executorKey` is `"sp"` for SP-lane entries (shared cache) or a sha256 hash
  * of the end user's identity for OBO-lane entries (per-user isolation) — see
@@ -1085,6 +1112,7 @@ function renderDimensionClause(
  */
 export function composeMetricCacheKey(input: {
   metricKey: string;
+  source: string;
   measures: string[];
   dimensions?: string[];
   timeGrain?: string;
@@ -1098,14 +1126,20 @@ export function composeMetricCacheKey(input: {
   const sortedDimensions = [...(input.dimensions ?? [])].sort();
   const filterFingerprint =
     input.filter !== undefined ? canonicalizeFilter(input.filter) : "_";
+  // `timeDimension` only changes the SQL when `timeGrain` is set (see
+  // renderDimensionClause); keying on it otherwise would fork the cache on a
+  // no-op field.
+  const timeDimensionPart =
+    input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
   return [
     "metric",
     input.metricKey,
+    input.source,
     input.format,
     sortedMeasures.join(","),
     sortedDimensions.join(","),
     input.timeGrain ?? "_",
-    input.timeDimension ?? "_",
+    timeDimensionPart,
     filterFingerprint,
     typeof input.limit === "number" ? String(input.limit) : "_",
     input.executorKey,

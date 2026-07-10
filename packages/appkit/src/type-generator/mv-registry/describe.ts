@@ -1,7 +1,13 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+// Grammar + SQL-quoting for metric-view FQNs live together in the shared,
+// zod-free leaf so the type-generator and the analytics runtime validate and
+// escape against one source of truth (see the module doc in metric-fqn.ts).
+import {
+  isValidFqn,
+  quoteFqnForSql,
+} from "../../../../shared/src/schemas/metric-fqn";
 import { type DescribeFormatMemo, describeAdaptive } from "../statement-result";
 import type { DatabricksStatementExecutionResponse } from "../types";
-import { isValidFqn } from "./config";
 import type { DescribeFetcher, MetricColumnMetadata } from "./types";
 
 /**
@@ -282,49 +288,6 @@ function inferTimeGrains(type: string): string[] | undefined {
     return ["day", "month", "quarter", "week", "year"];
   }
   return undefined;
-}
-
-/**
- * Quote a dot-separated FQN for safe interpolation into a Spark/Databricks SQL
- * statement.
- *
- * Each dot-split segment is wrapped in backtick-quoted-identifier syntax. The
- * one character that can break out of a backtick-quoted identifier is the
- * backtick itself, escaped by doubling (`` ` `` → `` `` ``) — so every backtick
- * inside a segment is doubled before the segment is wrapped. Control characters
- * and newlines have no valid escape inside a quoted identifier, so a segment
- * containing one is rejected outright.
- *
- * This is a pure, standalone escaper: it is intentionally independent of FQN
- * naming validation ({@link isValidFqn}). Naming validation decides whether an
- * FQN is an acceptable metric source; this function only guarantees that
- * whatever it is handed cannot break out of the quoted identifier it produces.
- *
- * An ordinary identifier is unchanged apart from the wrapping backticks:
- * `catalog.schema.view` → `` `catalog`.`schema`.`view` ``.
- *
- * @param fqn - Dot-separated identifier (e.g. `catalog.schema.view`).
- * @returns The backtick-quoted, escaped identifier ready for interpolation.
- * @throws If any segment contains a control character or newline.
- */
-export function quoteFqnForSql(fqn: string): string {
-  // Reject anything that cannot be represented inside a backtick-quoted
-  // identifier. \p{Cc} is the Unicode "control" category, which covers C0
-  // (incl. \n, \r, \t), DEL, and C1 — i.e. every control character/newline.
-  const CONTROL_OR_NEWLINE = /\p{Cc}/u;
-  return fqn
-    .split(".")
-    .map((segment) => {
-      if (CONTROL_OR_NEWLINE.test(segment)) {
-        throw new Error(
-          `Cannot quote FQN segment "${segment}" for SQL: it contains a control character or newline, which has no valid escape inside a backtick-quoted identifier.`,
-        );
-      }
-      // Double every backtick — the only break-out from a backtick-quoted
-      // identifier — then wrap the whole segment in backticks.
-      return `\`${segment.replace(/`/g, "``")}\``;
-    })
-    .join(".");
 }
 
 /**

@@ -81,3 +81,80 @@ export const MAX_UC_OBJECT_NAME_LENGTH = 255;
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: UC explicitly prohibits ASCII control characters in object names; this negated class encodes that rule.
 export const UC_FQN_PATTERN = /^[^\x00-\x20\x7f./]+$/;
+
+/** A metric view FQN is exactly three segments: catalog.schema.metric_view. */
+const FQN_SEGMENT_COUNT = 3;
+
+/**
+ * Total predicate: is `fqn` a well-formed three-part UC metric view FQN?
+ *
+ * Well-formed = exactly three non-empty, dot-separated segments, each a valid
+ * Unity Catalog object name per {@link UC_FQN_PATTERN}. This is the shared,
+ * zod-free grammar check reused by every layer that must agree on FQN shape:
+ * the type-generator's config resolver and describe seam, and the analytics
+ * runtime's SQL builder. It is the boolean sibling of the composed
+ * `UC_THREE_PART_FQN_PATTERN` regex in `./metric-source.ts` (which stays a
+ * regex so zod can emit a JSON-schema `pattern`); both derive their per-segment
+ * charset from {@link UC_FQN_PATTERN}, so they cannot diverge.
+ *
+ * @note Segment length ({@link MAX_UC_OBJECT_NAME_LENGTH}) is NOT checked here —
+ * an over-long but otherwise legal name is still "valid shape". Callers that
+ * care about the length cap enforce it separately with their own message.
+ *
+ * @example
+ * isValidFqn("main.analytics.revenue");   // true
+ * isValidFqn("prod-data.analytics.rev");   // true (hyphens are UC-legal)
+ * isValidFqn("main.analytics");            // false (only two segments)
+ */
+export function isValidFqn(fqn: string): boolean {
+  const segments = fqn.split(".");
+  if (segments.length !== FQN_SEGMENT_COUNT) {
+    return false;
+  }
+  return segments.every((segment) => UC_FQN_PATTERN.test(segment));
+}
+
+/**
+ * Quote a dot-separated FQN for safe interpolation into a Spark/Databricks SQL
+ * statement.
+ *
+ * Each dot-split segment is wrapped in backtick-quoted-identifier syntax. The
+ * one character that can break out of a backtick-quoted identifier is the
+ * backtick itself, escaped by doubling (`` ` `` → `` `` ``) — so every backtick
+ * inside a segment is doubled before the segment is wrapped. Control characters
+ * and newlines have no valid escape inside a quoted identifier, so a segment
+ * containing one is rejected outright.
+ *
+ * This is a pure, standalone escaper: it is intentionally independent of FQN
+ * naming validation ({@link isValidFqn}). Naming validation decides whether an
+ * FQN is an acceptable metric source; this function only guarantees that
+ * whatever it is handed cannot break out of the quoted identifier it produces.
+ * Grammar and quoting live together here so a metric source is validated and
+ * escaped against one shared source of truth.
+ *
+ * An ordinary identifier is unchanged apart from the wrapping backticks:
+ * `catalog.schema.view` → `` `catalog`.`schema`.`view` ``.
+ *
+ * @param fqn - Dot-separated identifier (e.g. `catalog.schema.view`).
+ * @returns The backtick-quoted, escaped identifier ready for interpolation.
+ * @throws If any segment contains a control character or newline.
+ */
+export function quoteFqnForSql(fqn: string): string {
+  // Reject anything that cannot be represented inside a backtick-quoted
+  // identifier. \p{Cc} is the Unicode "control" category, which covers C0
+  // (incl. \n, \r, \t), DEL, and C1 — i.e. every control character/newline.
+  const CONTROL_OR_NEWLINE = /\p{Cc}/u;
+  return fqn
+    .split(".")
+    .map((segment) => {
+      if (CONTROL_OR_NEWLINE.test(segment)) {
+        throw new Error(
+          `Cannot quote FQN segment "${segment}" for SQL: it contains a control character or newline, which has no valid escape inside a backtick-quoted identifier.`,
+        );
+      }
+      // Double every backtick — the only break-out from a backtick-quoted
+      // identifier — then wrap the whole segment in backticks.
+      return `\`${segment.replace(/`/g, "``")}\``;
+    })
+    .join(".");
+}

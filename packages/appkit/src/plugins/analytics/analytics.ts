@@ -625,6 +625,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       ...queryDefaults.cache,
       cacheKey: composeMetricCacheKey({
         metricKey: key,
+        source: registration.source,
         measures: request.measures,
         dimensions: request.dimensions,
         timeGrain: request.timeGrain,
