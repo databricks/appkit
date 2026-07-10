@@ -115,6 +115,46 @@ describe("runEval", () => {
     expect(result.error).toBe("boom");
   });
 
+  test("atLeast() gates by default — a below-threshold score fails the eval", async () => {
+    // A scored matcher standing in for a judge (which shares the same handle).
+    const scored = (score: number) => (): { pass: boolean; score: number } => ({
+      pass: score >= 0.5,
+      score,
+    });
+    const def = defineEval({
+      async test(t) {
+        await t.send("q");
+        t.check(t.reply, scored(0.2)).atLeast(0.5); // gate, below threshold
+      },
+    });
+    const result = await runEval(def, {
+      id: "gate",
+      driver: fakeDriver({ reply: "x" }),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.assertions[0].severity).toBe("gate");
+  });
+
+  test("atLeast().soft() demotes so a below-threshold score only tracks", async () => {
+    const scored = (score: number) => (): { pass: boolean; score: number } => ({
+      pass: score >= 0.5,
+      score,
+    });
+    const def = defineEval({
+      async test(t) {
+        await t.send("q");
+        t.check(t.reply, scored(0.2)).atLeast(0.5).soft();
+      },
+    });
+    const result = await runEval(def, {
+      id: "soft-judge",
+      driver: fakeDriver({ reply: "x" }),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.assertions[0].severity).toBe("soft");
+    expect(result.assertions[0].pass).toBe(false);
+  });
+
   test("t.reset() forwards to the driver to start a fresh conversation", async () => {
     const reset = vi.fn();
     const driver: EvalDriver = {

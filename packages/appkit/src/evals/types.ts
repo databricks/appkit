@@ -42,7 +42,11 @@ export interface AssertionHandle {
   gate(): AssertionHandle;
   /** Demote to a tracked metric — doesn't fail unless running with `strict`. */
   soft(): AssertionHandle;
-  /** Soft assertion that passes only when the score is at least `threshold`. */
+  /**
+   * Set the pass threshold for a scored assertion: it passes only when the
+   * score is at least `threshold`. Keeps the current severity (gate unless also
+   * chained with `.soft()`).
+   */
   atLeast(threshold: number): AssertionHandle;
 }
 
@@ -107,9 +111,10 @@ export interface TestContext {
   check(value: string, matcher: Matcher): AssertionHandle;
   /**
    * LLM-as-judge scoring of the last reply (via autoevals → a Databricks judge
-   * model). Each returns a scored, soft-by-default assertion; chain `.atLeast(n)`
-   * to set the pass threshold or `.gate()` to make it a hard gate. Requires the
-   * judge to be configured (`--judge-model`).
+   * model). Each returns a scored assertion that gates by default (a miss fails
+   * the eval); chain `.atLeast(n)` to change the pass threshold or `.soft()` to
+   * demote to a tracked-only metric. Requires the judge to be configured
+   * (`--judge-model`).
    */
   judge: {
     /** Score factuality of the reply against an expected reference. */
