@@ -1,3 +1,11 @@
+export {
+  type DatabricksAuth,
+  MlflowClient,
+  normalizeHost,
+  type PostResult,
+  type ResolveDatabricksAuthOptions,
+  resolveDatabricksAuth,
+} from "../connectors/mlflow";
 export { defineEval, defineEvalConfig } from "./define-eval";
 export { type DiscoveredEval, discoverEvalFiles } from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";
@@ -11,7 +19,6 @@ export { equals, includes, matches } from "./matchers";
 export {
   type Assessment,
   buildAssessments,
-  type MlflowReportOptions,
   type ReportOutcome,
   reportToMlflow,
 } from "./mlflow-report";

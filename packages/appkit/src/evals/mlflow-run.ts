@@ -1,4 +1,4 @@
-import { type MlflowRestOptions, mlflowPost } from "./mlflow-rest";
+import type { MlflowClient } from "../connectors/mlflow";
 import type { EvalResult } from "./types";
 
 /** Run tag value that makes a run appear under the experiment's "Evaluation runs". */
@@ -28,14 +28,14 @@ interface MlflowMetric {
  * `mlflow.sourceRun` trace metadata and log results before finishing.
  */
 export async function createEvalRun(
-  options: MlflowRestOptions & {
+  client: MlflowClient,
+  options: {
     experimentId: string;
     runName?: string;
     startTime: number;
   },
 ): Promise<string> {
-  const created = await mlflowPost<CreateRunResponse>(
-    options,
+  const created = await client.post<CreateRunResponse>(
     "/api/2.0/mlflow/runs/create",
     {
       experiment_id: options.experimentId,
@@ -89,7 +89,8 @@ export interface FinishOutcome {
  * or it would be left stuck in RUNNING forever.
  */
 export async function finishEvalRun(
-  options: MlflowRestOptions & {
+  client: MlflowClient,
+  options: {
     runId: string;
     results: EvalResult[];
     endTime: number;
@@ -100,7 +101,7 @@ export async function finishEvalRun(
   const metrics = aggregateMetrics(options.results, options.endTime);
   if (metrics.length) {
     try {
-      await mlflowPost(options, "/api/2.0/mlflow/runs/log-batch", {
+      await client.post("/api/2.0/mlflow/runs/log-batch", {
         run_id: options.runId,
         metrics,
       });
@@ -110,7 +111,7 @@ export async function finishEvalRun(
   }
 
   try {
-    await mlflowPost(options, "/api/2.0/mlflow/runs/update", {
+    await client.post("/api/2.0/mlflow/runs/update", {
       run_id: options.runId,
       status: "FINISHED",
       end_time: options.endTime,

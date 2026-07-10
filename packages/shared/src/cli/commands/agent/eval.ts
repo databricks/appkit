@@ -31,6 +31,11 @@ interface EvalRunner {
     judge?: { host: string; token: string; model: string };
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
+  resolveDatabricksAuth(opts: {
+    profile?: string;
+    host?: string;
+    token?: string;
+  }): Promise<{ host: string; token: string } | undefined>;
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
@@ -70,6 +75,7 @@ interface EvalOptions {
   strict?: boolean;
   root?: string;
   header?: string[];
+  profile?: string;
   databricksHost?: string;
   databricksToken?: string;
   experiment?: string;
@@ -82,11 +88,19 @@ async function runAgentEval(
 ): Promise<void> {
   const runner = await loadRunner();
 
-  // Create a native MLflow "Evaluation run" when Databricks creds + an
-  // experiment are available (traces live in the app; the run + scores are
-  // driven from here, so this side needs creds).
-  const host = opts.databricksHost ?? process.env.DATABRICKS_HOST;
-  const token = opts.databricksToken ?? process.env.DATABRICKS_TOKEN;
+  // Resolve Databricks host + bearer the AppKit-native way: an explicit
+  // host/token (or DATABRICKS_* env) wins; otherwise the SDK mints an OAuth
+  // token from the CLI profile — so no hand-set PAT is required.
+  const auth = await runner.resolveDatabricksAuth({
+    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
+    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
+    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
+  });
+  const host = auth?.host;
+  const token = auth?.token;
+
+  // Create a native MLflow "Evaluation run" when creds + an experiment are
+  // available (traces live in the app; the run + scores are driven from here).
   const experimentId = opts.experiment ?? process.env.MLFLOW_EXPERIMENT_ID;
   const mlflow =
     host && token && experimentId ? { host, token, experimentId } : undefined;
@@ -158,8 +172,8 @@ async function runAgentEval(
     }
   } else {
     console.log(
-      "\nMLflow evaluation run skipped — set DATABRICKS_HOST + DATABRICKS_TOKEN" +
-        " + MLFLOW_EXPERIMENT_ID (or the matching flags) to create one.",
+      "\nMLflow evaluation run skipped — pass --experiment (or set" +
+        " MLFLOW_EXPERIMENT_ID) plus --profile/--databricks-host to create one.",
     );
   }
 
@@ -185,6 +199,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--header <header...>",
     "Extra request header as 'Key: value' (repeatable)",
+  )
+  .option(
+    "--profile <name>",
+    "Databricks CLI profile to authenticate with via OAuth (default: DATABRICKS_CONFIG_PROFILE)",
   )
   .option(
     "--databricks-host <host>",

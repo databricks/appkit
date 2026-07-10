@@ -1,4 +1,5 @@
 import type { LiveSpan } from "mlflow-tracing";
+import { normalizeHost } from "../../connectors/mlflow";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("agents");
@@ -25,7 +26,7 @@ function experimentId(): string | undefined {
 function normalizedDatabricksHost(): string | undefined {
   const raw = process.env.DATABRICKS_HOST?.trim();
   if (!raw) return undefined;
-  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return normalizeHost(raw);
 }
 
 /**

@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { MlflowClient } from "../connectors/mlflow";
 import { discoverEvalFiles } from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge } from "./judge";
@@ -117,15 +118,22 @@ export async function runEvalsInDir(
   emit({ type: "discovered", total });
 
   if (options.judge) {
-    await configureJudge(options.judge);
+    await configureJudge({
+      client: new MlflowClient(options.judge.host, options.judge.token),
+      token: options.judge.token,
+      model: options.judge.model,
+    });
   }
 
   // Create the MLflow evaluation run up front so each eval's trace can be
-  // linked to it as it runs.
+  // linked to it as it runs. One client is shared by run create/finish and the
+  // per-trace assessment writes.
   let runId: string | undefined;
+  let mlflowClient: MlflowClient | undefined;
   if (options.mlflow) {
-    runId = await createEvalRun({
-      ...options.mlflow,
+    mlflowClient = new MlflowClient(options.mlflow.host, options.mlflow.token);
+    runId = await createEvalRun(mlflowClient, {
+      experimentId: options.mlflow.experimentId,
       runName: `appkit-eval ${new Date(now).toISOString()}`,
       startTime: now,
     });
@@ -161,10 +169,9 @@ export async function runEvalsInDir(
     emit({ type: "result", result, index, total });
   }
 
-  if (options.mlflow && runId) {
-    const report = await reportToMlflow(results, options.mlflow);
-    const finish = await finishEvalRun({
-      ...options.mlflow,
+  if (mlflowClient && runId) {
+    const report = await reportToMlflow(mlflowClient, results);
+    const finish = await finishEvalRun(mlflowClient, {
       runId,
       results,
       endTime: options.now ?? Date.now(),

@@ -1,4 +1,4 @@
-import { normalizeHost } from "./mlflow-rest";
+import type { MlflowClient } from "../connectors/mlflow";
 
 /**
  * LLM-as-judge scoring via the `autoevals` library (the same scorers eve uses),
@@ -17,8 +17,8 @@ let mod: AutoEvals | undefined;
 let enabled = false;
 
 export interface JudgeConfig {
-  /** Databricks host (scheme optional). */
-  host: string;
+  /** Client for the workspace hosting the judge serving endpoint. */
+  client: MlflowClient;
   /** Bearer token for the serving endpoint. */
   token: string;
   /** Serving endpoint name used as the judge model. */
@@ -39,7 +39,7 @@ export interface JudgeScore {
 export async function configureJudge(config: JudgeConfig): Promise<void> {
   try {
     mod = await import("autoevals");
-    process.env.OPENAI_BASE_URL = `${normalizeHost(config.host)}/serving-endpoints`;
+    process.env.OPENAI_BASE_URL = config.client.servingEndpointsUrl();
     process.env.OPENAI_API_KEY = config.token;
     mod.init({ defaultModel: config.model });
     enabled = true;
@@ -67,7 +67,7 @@ export function toJudgeScore(s: {
 function ensure(): AutoEvals {
   if (!enabled || !mod) {
     throw new Error(
-      "LLM judge is not configured. Set --judge-model (and DATABRICKS_HOST/DATABRICKS_TOKEN) to use t.judge.*",
+      "LLM judge is not configured. Pass --judge-model and authenticate via --profile (or DATABRICKS_HOST/DATABRICKS_TOKEN) to use t.judge.*",
     );
   }
   return mod;

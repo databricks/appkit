@@ -1,4 +1,4 @@
-import { normalizeHost } from "./mlflow-rest";
+import type { MlflowClient } from "../connectors/mlflow";
 import type { EvalResult } from "./types";
 
 /** A Feedback assessment in the MLflow REST proto-JSON shape. */
@@ -9,13 +9,6 @@ export interface Assessment {
   feedback: { value: unknown };
   rationale?: string;
   metadata?: Record<string, string>;
-}
-
-export interface MlflowReportOptions {
-  /** Databricks workspace host (scheme optional — normalized). */
-  host: string;
-  /** Bearer token for the MLflow REST API. */
-  token: string;
 }
 
 export interface ReportOutcome {
@@ -79,34 +72,9 @@ export function buildAssessments(result: EvalResult): Assessment[] {
   return out;
 }
 
-async function postAssessment(
-  host: string,
-  token: string,
-  assessment: Assessment,
-): Promise<{ ok: boolean; status?: number; error?: string }> {
-  const url = `${normalizeHost(host)}/api/3.0/mlflow/traces/${encodeURIComponent(
-    assessment.trace_id,
-  )}/assessments`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ assessment }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, status: res.status, error: text.slice(0, 500) };
-    }
-    return { ok: true };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+/** REST path for writing a Feedback assessment onto a trace. */
+function assessmentPath(traceId: string): string {
+  return `/api/3.0/mlflow/traces/${encodeURIComponent(traceId)}/assessments`;
 }
 
 /**
@@ -114,8 +82,8 @@ async function postAssessment(
  * API. Never throws — failures are collected so the run still reports.
  */
 export async function reportToMlflow(
+  client: MlflowClient,
   results: EvalResult[],
-  options: MlflowReportOptions,
 ): Promise<ReportOutcome> {
   const outcome: ReportOutcome = { written: 0, skipped: 0, failures: [] };
   for (const result of results) {
@@ -125,7 +93,9 @@ export async function reportToMlflow(
       continue;
     }
     for (const assessment of assessments) {
-      const res = await postAssessment(options.host, options.token, assessment);
+      const res = await client.postResult(assessmentPath(assessment.trace_id), {
+        assessment,
+      });
       if (res.ok) {
         outcome.written++;
       } else {
