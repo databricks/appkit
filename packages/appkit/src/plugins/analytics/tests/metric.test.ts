@@ -466,6 +466,43 @@ describe("analytics metric route (Phase 1)", () => {
       expect(mockRes.json).toHaveBeenCalledWith({ error: "Metric not found" });
     });
 
+    test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
+      "inherited Object.prototype key %j → 404, no execution (own-property lookup)",
+      async (dangerousKey) => {
+        const plugin = new AnalyticsPlugin(config);
+        const { router, getHandler } = createMockRouter();
+        // A real (own) entry so the registry is populated but does NOT contain
+        // the dangerous key. Without the own-property guard, `registry[key]`
+        // would resolve the inherited prototype member and slip past the 404.
+        setRegistry(plugin, {
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        });
+
+        const executeMock = vi.fn();
+        (plugin as any).SQLClient.executeStatement = executeMock;
+
+        plugin.injectRoutes(router);
+        const handler = getHandler("POST", "/metric/:key");
+        const mockReq = createMockRequest({
+          params: { key: dangerousKey },
+          body: { measures: ["arr"] },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(404);
+        expect(mockRes.json).toHaveBeenCalledWith({
+          error: "Metric not found",
+        });
+        expect(executeMock).not.toHaveBeenCalled();
+      },
+    );
+
     test("malformed registry → 503 METRIC_REGISTRY_LOAD_FAILED", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
@@ -552,6 +589,22 @@ describe("loadMetricRegistry", () => {
       source: "cat.sch.customer_metrics",
       lane: "obo",
     });
+  });
+
+  test("registry has a null prototype (no inherited-property lookups)", () => {
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
+      }),
+    );
+
+    const registry = loadMetricRegistry(dir);
+    expect(Object.getPrototypeOf(registry)).toBeNull();
+    // A key that would resolve to a truthy inherited member on a plain object
+    // resolves to undefined here.
+    expect((registry as Record<string, unknown>).toString).toBeUndefined();
+    expect((registry as Record<string, unknown>).__proto__).toBeUndefined();
   });
 
   test("malformed JSON throws", () => {
@@ -1092,6 +1145,73 @@ describe("metric — filter translator", () => {
     });
   });
 
+  describe("validator — measure/dimension uniqueness", () => {
+    // Measures and dimensions become SELECT columns aliased to their own name;
+    // a repeated name collapses to a single row-object key and silently drops
+    // a value during row materialization, so uniqueness is enforced up front.
+    test("rejects a duplicate measure", () => {
+      expect(() =>
+        validateMetricRequest({ measures: ["arr", "arr"] }),
+      ).toThrowError(/fields:.*measures/);
+    });
+
+    test("rejects a duplicate dimension", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region", "region"],
+        }),
+      ).toThrowError(/fields:.*measures/);
+    });
+
+    test("rejects a name that is BOTH a measure and a dimension", () => {
+      // The corruption case: `SELECT MEASURE(x) AS x, x ... GROUP BY ALL`
+      // materializes two `x` columns and the second overwrites the first.
+      expect(() =>
+        validateMetricRequest({
+          measures: ["revenue"],
+          dimensions: ["revenue"],
+        }),
+      ).toThrowError(/fields:.*measures/);
+    });
+
+    test("accepts distinct measures and dimensions (no false positive)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr", "mrr"],
+          dimensions: ["region", "segment"],
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("validator — format (JSON-only at v1)", () => {
+    test("accepts JSON_ARRAY", () => {
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], format: "JSON_ARRAY" }),
+      ).not.toThrow();
+    });
+
+    test("accepts the legacy JSON alias (normalizes to JSON_ARRAY)", () => {
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], format: "JSON" }),
+      ).not.toThrow();
+    });
+
+    test("rejects ARROW_STREAM (not implemented on the metric route)", () => {
+      // Fail loud rather than silently deliver JSON for an Arrow request.
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], format: "ARROW_STREAM" }),
+      ).toThrowError(/fields:.*format/);
+    });
+
+    test("rejects the legacy ARROW alias (normalizes to ARROW_STREAM)", () => {
+      expect(() =>
+        validateMetricRequest({ measures: ["arr"], format: "ARROW" }),
+      ).toThrowError(/fields:.*format/);
+    });
+  });
+
   describe("timeGrain + timeDimension (validator)", () => {
     test("a grammar-valid timeGrain + timeDimension (in dimensions) is accepted", () => {
       expect(() =>
@@ -1378,6 +1498,32 @@ describe("composeMetricCacheKey", () => {
         and: [
           { member: "segment", operator: "equals", values: ["Ent"] },
           { member: "region", operator: "equals", values: ["EMEA"] },
+        ],
+      } as MetricFilter,
+    });
+    expect(a).toEqual(b);
+  });
+
+  test("predicate ORDER is stable for two ops on the SAME member (sort-key delimiter)", () => {
+    // Same member, different operators — the sort key is `${member}/${operator}`,
+    // so the "/" delimiter (not a raw concatenation) is what disambiguates the
+    // pair and keeps the ordering — and thus the key — independent of input
+    // order. Two range bounds on one column is the everyday shape of this.
+    const a = composeMetricCacheKey({
+      ...base,
+      filter: {
+        and: [
+          { member: "revenue", operator: "gt", values: [100] },
+          { member: "revenue", operator: "lt", values: [200] },
+        ],
+      } as MetricFilter,
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      filter: {
+        and: [
+          { member: "revenue", operator: "lt", values: [200] },
+          { member: "revenue", operator: "gt", values: [100] },
         ],
       } as MetricFilter,
     });
