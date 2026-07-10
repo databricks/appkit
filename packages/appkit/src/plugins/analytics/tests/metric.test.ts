@@ -137,6 +137,36 @@ describe("analytics metric route (Phase 1)", () => {
         ),
       ).toThrow(/not a valid three-part UC FQN/);
     });
+
+    test("accepts a hyphenated UC-legal FQN and backtick-quotes it", () => {
+      // Regression for the grammar divergence: `prod-data` is a legal UC
+      // object name (hyphens are allowed in quoted identifiers) and passes the
+      // shared schema + typegen, but the old narrow runtime pattern
+      // [a-zA-Z0-9_-] anchored per segment REJECTED it — a latent prod break on
+      // a documented-legal name. The builder now accepts it and quotes every
+      // segment, so it reaches the warehouse as valid SQL rather than throwing.
+      const { statement } = buildMetricSql(
+        { key: "x", source: "prod-data.analytics.revenue", lane: "sp" },
+        { measures: ["arr"] },
+      );
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr FROM `prod-data`.`analytics`.`revenue`",
+      );
+    });
+
+    test("backtick-quoting neutralizes an injection-shaped FQN segment", () => {
+      // A source carrying a backtick would break out of the quoted identifier
+      // if interpolated raw; quoteFqnForSql doubles it. (isValidFqn rejects
+      // most such names first, but the quoting is the actual injection
+      // boundary — this asserts it, not just the grammar gate.)
+      const { statement } = buildMetricSql(
+        { key: "x", source: "cat.sch.re`v", lane: "sp" },
+        { measures: ["arr"] },
+      );
+      expect(statement).toBe(
+        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`re``v`",
+      );
+    });
   });
 
   // ── Measures-only SQL shape.
@@ -152,7 +182,7 @@ describe("analytics metric route (Phase 1)", () => {
         measures: ["arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics",
+        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
       );
       expect(parameters).toEqual({});
     });
@@ -162,7 +192,7 @@ describe("analytics metric route (Phase 1)", () => {
         measures: ["revenue", "arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue FROM cat.sch.revenue_metrics",
+        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue FROM `cat`.`sch`.`revenue_metrics`",
       );
     });
 
@@ -172,7 +202,7 @@ describe("analytics metric route (Phase 1)", () => {
         limit: 10.9,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics LIMIT 10",
+        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics` LIMIT 10",
       );
     });
   });
@@ -192,7 +222,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -202,7 +232,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["segment", "region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region, segment FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, region, segment FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -212,7 +242,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, MEASURE(revenue) AS revenue, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
     });
 
@@ -222,7 +252,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: [],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics",
+        "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
       );
     });
 
@@ -233,7 +263,7 @@ describe("analytics metric route (Phase 1)", () => {
         limit: 100,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, region FROM cat.sch.revenue_metrics GROUP BY ALL LIMIT 100",
+        "SELECT MEASURE(arr) AS arr, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL LIMIT 100",
       );
     });
 
@@ -243,7 +273,7 @@ describe("analytics metric route (Phase 1)", () => {
         dimensions: ["order_date", "region"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, order_date, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, order_date, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
       expect(statement).not.toContain("date_trunc");
     });
@@ -267,7 +297,7 @@ describe("analytics metric route (Phase 1)", () => {
         timeDimension: "order_date",
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, date_trunc('month', order_date) AS order_date, region FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, date_trunc('month', order_date) AS order_date, region FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
       expect(statement).toContain(
         "date_trunc('month', order_date) AS order_date",
@@ -283,8 +313,23 @@ describe("analytics metric route (Phase 1)", () => {
         timeDimension: "order_date",
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) AS arr, date_trunc('day', order_date) AS order_date FROM cat.sch.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, date_trunc('day', order_date) AS order_date FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
       );
+    });
+
+    test("a grammar-invalid timeGrain throws in the builder (defense-in-depth, even if validation is bypassed)", () => {
+      // buildMetricSql is exported and may be reached on a path that skips
+      // validateMetricRequest, so the grain — interpolated into a single-quoted
+      // date_trunc literal — is re-gated at the interpolation point. A quote-
+      // breakout payload must be refused by the builder itself.
+      expect(() =>
+        buildMetricSql(registration, {
+          measures: ["arr"],
+          dimensions: ["order_date"],
+          timeGrain: "month'); DROP TABLE t;--",
+          timeDimension: "order_date",
+        }),
+      ).toThrow(/not a valid grain token/);
     });
   });
 
@@ -349,7 +394,8 @@ describe("analytics metric route (Phase 1)", () => {
       expect(executeMock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          statement: "SELECT MEASURE(arr) AS arr FROM cat.sch.revenue_metrics",
+          statement:
+            "SELECT MEASURE(arr) AS arr FROM `cat`.`sch`.`revenue_metrics`",
           warehouse_id: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
@@ -1369,7 +1415,7 @@ describe("metric — filter translator", () => {
       expect(executeMock.mock.calls[0][1]).toEqual(
         expect.objectContaining({
           statement:
-            "SELECT MEASURE(ghost_measure) AS ghost_measure FROM cat.sch.revenue_metrics",
+            "SELECT MEASURE(ghost_measure) AS ghost_measure FROM `cat`.`sch`.`revenue_metrics`",
         }),
       );
 
@@ -1398,15 +1444,54 @@ describe("metric — filter translator", () => {
 describe("composeMetricCacheKey", () => {
   const base: {
     metricKey: string;
+    source: string;
     measures: string[];
     format: string;
     executorKey: string;
   } = {
     metricKey: "revenue",
+    source: "cat.sch.revenue_metrics",
     measures: ["arr"],
     format: "JSON_ARRAY",
     executorKey: "sp",
   };
+
+  test("same key but different source → different keys (config repoint is not stale-served)", () => {
+    const a = composeMetricCacheKey({ ...base, source: "cat.sch.old_view" });
+    const b = composeMetricCacheKey({ ...base, source: "cat.sch.new_view" });
+    expect(a).not.toEqual(b);
+  });
+
+  test("timeDimension does NOT fork the key when timeGrain is absent (no SQL effect)", () => {
+    // Without a grain, renderDimensionClause emits the bare column, so
+    // timeDimension has no effect on the SQL — two such calls must cache-hit.
+    const withTd = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date"],
+      timeDimension: "order_date",
+    });
+    const withoutTd = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date"],
+    });
+    expect(withTd).toEqual(withoutTd);
+  });
+
+  test("timeDimension DOES fork the key when timeGrain is set (changes the SQL)", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date", "region"],
+      timeGrain: "month",
+      timeDimension: "order_date",
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      dimensions: ["order_date", "region"],
+      timeGrain: "month",
+      timeDimension: "region",
+    });
+    expect(a).not.toEqual(b);
+  });
 
   test("measure ORDER does not affect the key (sorted before hashing)", () => {
     const a = composeMetricCacheKey({

@@ -94,26 +94,13 @@ function isValidMetricKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 }
 
-/**
- * Total predicate: is `fqn` a well-formed three-part UC metric view FQN?
- *
- * Well-formed = exactly three non-empty, dot-separated segments, each a valid
- * Unity Catalog object name per the shared {@link UC_FQN_PATTERN} (the single
- * source of truth, also used by the canonical Zod schema). Used as the
- * defense-in-depth re-check at the describe fetcher seam; {@link resolveMetricConfig}
- * runs the same checks but with specific, staged error messages.
- *
- * @note Segment length ({@link MAX_FQN_SEGMENT_LENGTH}) is NOT checked here —
- * an over-long but otherwise legal name is still "valid shape". The length cap
- * is a separate concern enforced (with its own message) in resolveMetricConfig.
- */
-export function isValidFqn(fqn: string): boolean {
-  const segments = fqn.split(".");
-  if (segments.length !== FQN_SEGMENT_COUNT) {
-    return false;
-  }
-  return segments.every((segment) => UC_FQN_PATTERN.test(segment));
-}
+// `isValidFqn` (the three-part UC FQN predicate) now lives in the shared
+// zod-free leaf alongside `UC_FQN_PATTERN` and `quoteFqnForSql`, so the
+// type-generator and the analytics runtime share one grammar + one escaper.
+// `resolveMetricConfig` below intentionally does NOT call it — it re-derives
+// the same checks inline so it can emit specific, staged error messages
+// (arity, per-segment charset, per-segment length) rather than a single
+// boolean.
 
 /**
  * Field allowlists enforced by {@link resolveMetricConfig}.
