@@ -48,13 +48,15 @@ vi.mock("../storage/persistent", () => ({
   }),
 }));
 
-// Mock WorkspaceClient (preserve Time, TimeUnits, and other SDK exports)
-vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
+// Mock createWorkspaceClient (preserve Time, TimeUnits, and other wrapper exports)
+vi.mock("../../workspace-client", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@databricks/sdk-experimental")>();
+    await importOriginal<typeof import("../../workspace-client")>();
   return {
     ...actual,
-    WorkspaceClient: vi.fn().mockImplementation(() => ({})),
+    createWorkspaceClient: vi.fn().mockImplementation(() => ({
+      toLegacyWorkspaceClient: () => ({}),
+    })),
   };
 });
 
@@ -976,7 +978,7 @@ describe("CacheManager", () => {
     });
 
     test("should re-throw ApiError without wrapping", async () => {
-      const { ApiError } = await import("@databricks/sdk-experimental");
+      const { ApiError } = await import("../../workspace-client");
       const cache = await CacheManager.getInstance({
         storage: createMockStorage(),
       });

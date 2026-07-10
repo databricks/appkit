@@ -1,5 +1,4 @@
 import http, { type Server } from "node:http";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import {
   afterAll,
   beforeAll,
@@ -9,6 +8,7 @@ import {
   test,
 } from "vitest";
 import { FilesConnector } from "../../connectors/files/client";
+import { createWorkspaceClient } from "../../workspace-client";
 import { getClientOptions } from "../client-options";
 
 /**
@@ -24,10 +24,12 @@ describe("User-Agent attribution (wire)", () => {
   let capturedUserAgents: string[];
 
   const newClient = () =>
-    new WorkspaceClient(
-      { host, token: "test-token", authType: "pat" },
-      getClientOptions(),
-    );
+    createWorkspaceClient({
+      host,
+      token: "test-token",
+      authType: "pat",
+      clientOptions: getClientOptions(),
+    });
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {

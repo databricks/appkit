@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type {
   BasePlugin,
   CacheConfig,
@@ -21,6 +20,7 @@ import { uiVariants } from "../plugins/ui-variants";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import type { WorkspaceClient } from "../workspace-client";
 import { LifecycleManager } from "./lifecycle-manager";
 import { isToolProvider, PluginContext } from "./plugin-context";
 

@@ -18,10 +18,15 @@ vi.mock("../fetcher", () => ({
   fetchOpenApiSchema: (...args: any[]) => mockFetchOpenApiSchema(...args),
 }));
 
-// Mock WorkspaceClient
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({ config: {} })),
-}));
+// Mock the wrapper's client factory
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => ({ config: {} }),
+  };
+});
 
 const CHAT_OPENAPI_SPEC = {
   openapi: "3.1.0",

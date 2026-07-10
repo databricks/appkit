@@ -1,7 +1,7 @@
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import { describe, expect, test } from "vitest";
 import { SQLWarehouseConnector } from "../../../connectors";
+import { createWorkspaceClient } from "../../../workspace-client";
 import { deliverArrowBytes, type QueryExecutor } from "../result-delivery";
 
 /**
@@ -28,7 +28,7 @@ const warehouseId = process.env.APPKIT_INTEGRATION_WAREHOUSE_ID;
 
 describe.runIf(!!warehouseId)("arrow delivery (live warehouse)", () => {
   test("ARROW_STREAM delivers valid Arrow with real column names", async () => {
-    const client = new WorkspaceClient({});
+    const client = createWorkspaceClient();
     const connector = new SQLWarehouseConnector({ timeout: 120_000 });
 
     const executor: QueryExecutor = {

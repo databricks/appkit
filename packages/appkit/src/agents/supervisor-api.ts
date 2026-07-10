@@ -13,6 +13,7 @@ import {
 } from "../connectors/serving/client";
 import { createLogger } from "../logging/logger";
 import { readSseEvents } from "../stream";
+import { createWorkspaceClient } from "../workspace-client";
 
 const logger = createLogger("agents:supervisor-api");
 
@@ -877,14 +878,13 @@ export async function fromSupervisorApi(
 ): Promise<AgentAdapter> {
   let client = options.workspaceClient;
   if (!client) {
-    const sdk = await import("@databricks/sdk-experimental");
-    // The SDK's concrete `WorkspaceClient` provides everything
-    // `WorkspaceClientLike` needs (`apiClient.request` + `config.ensureResolved`)
-    // but its `apiClient.request` signature is narrower than our structural
+    // The wrapper's client provides everything `WorkspaceClientLike` needs
+    // (`apiClient.request` + `config.ensureResolved`) but its
+    // `apiClient.request` signature is narrower than our structural
     // `Record<string, unknown>` shape, so a direct assignment doesn't type.
     // The cast bridges the structural gap — same pattern the serving
     // connector uses for `ApiClientLike`.
-    client = new sdk.WorkspaceClient({}) as unknown as WorkspaceClientLike;
+    client = createWorkspaceClient() as unknown as WorkspaceClientLike;
   }
 
   await client.config.ensureResolved();

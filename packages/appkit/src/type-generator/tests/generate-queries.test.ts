@@ -23,12 +23,17 @@ vi.mock("node:fs/promises", () => ({
   },
 }));
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({
-    statementExecution: { executeStatement: mocks.executeStatement },
-    warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
-  })),
-}));
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => ({
+      statementExecution: { executeStatement: mocks.executeStatement },
+      warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
+    }),
+  };
+});
 
 vi.mock("../spinner", () => ({
   Spinner: vi.fn(() => ({

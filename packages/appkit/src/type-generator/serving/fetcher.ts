@@ -1,5 +1,5 @@
-import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
+import { ApiError, type WorkspaceClient } from "../../workspace-client";
 
 const logger = createLogger("type-generator:serving:fetcher");
 

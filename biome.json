@@ -42,6 +42,22 @@
       },
       "security": {
         "noDangerouslySetInnerHtml": "off"
+      },
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": [
+                  "@databricks/sdk-experimental",
+                  "@databricks/sdk-experimental/**"
+                ],
+                "message": "Import the Databricks SDK only through the wrapper in packages/appkit/src/workspace-client. Add a re-export there if you need a new symbol."
+              }
+            ]
+          }
+        }
       }
     }
   },
@@ -57,5 +73,20 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/appkit/src/workspace-client/**",
+        "packages/lakebase/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
 }

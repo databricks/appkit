@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import { createLogger } from "../../logging/logger";
 import type {
@@ -17,6 +16,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import { ApiError, type WorkspaceClient } from "../../workspace-client";
 import {
   contentTypeFromPath,
   FILES_MAX_READ_SIZE,

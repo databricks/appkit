@@ -39,10 +39,15 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
   return { mockClient, MockApiError, mockCacheInstance };
 });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => mockClient),
-  ApiError: MockApiError,
-}));
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: (..._args: unknown[]) => mockClient,
+    ApiError: MockApiError,
+  };
+});
 
 vi.mock("../../../context", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../context")>();

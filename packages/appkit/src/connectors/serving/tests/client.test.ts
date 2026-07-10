@@ -1,5 +1,5 @@
-import { Context } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { Context } from "../../../workspace-client";
 import { invoke, stream } from "../client";
 
 function createMockClient(host = "https://test.databricks.com") {

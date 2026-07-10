@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import { createLakebasePool } from "../connectors/lakebase";
 import { getClientOptions } from "../context/client-options";
@@ -8,6 +7,7 @@ import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
+import { ApiError, createWorkspaceClient } from "../workspace-client";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
 
@@ -171,7 +171,9 @@ export class CacheManager {
 
     // try to use lakebase storage
     try {
-      const workspaceClient = new WorkspaceClient({}, getClientOptions());
+      const workspaceClient = createWorkspaceClient({
+        clientOptions: getClientOptions(),
+      }).toLegacyWorkspaceClient();
       const pool = createLakebasePool({ workspaceClient });
       const persistentStorage = new PersistentStorage(config, pool);
 

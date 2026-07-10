@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 // Grammar + SQL-quoting for metric-view FQNs live together in the shared,
 // zod-free leaf so the type-generator and the analytics runtime validate and
 // escape against one source of truth (see the module doc in metric-fqn.ts).
@@ -6,6 +5,7 @@ import {
   isValidFqn,
   quoteFqnForSql,
 } from "../../../../shared/src/schemas/metric-fqn";
+import type { WorkspaceClient } from "../../workspace-client";
 import { type DescribeFormatMemo, describeAdaptive } from "../statement-result";
 import type { DatabricksStatementExecutionResponse } from "../types";
 import type { DescribeFetcher, MetricColumnMetadata } from "./types";

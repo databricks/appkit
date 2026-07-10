@@ -2,6 +2,7 @@ import "reflect-metadata";
 import {
   analytics,
   createApp,
+  createWorkspaceClient,
   type FilePolicy,
   files,
   genie,
@@ -18,14 +19,13 @@ import {
   supervisorTools,
   tool,
 } from "@databricks/appkit/beta";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
 
 function createMockClient() {
-  const client = new WorkspaceClient({
+  const client = createWorkspaceClient({
     host: "http://localhost",
     token: "e2e",
     authType: "pat",

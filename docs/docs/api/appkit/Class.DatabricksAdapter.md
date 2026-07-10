@@ -12,12 +12,11 @@ fallback parsing for models that output tool calls as text.
 ## Examples
 
 ```ts
-import { createApp, createAgent, agents } from "@databricks/appkit";
+import { createApp, createAgent, agents, createWorkspaceClient } from "@databricks/appkit";
 import { DatabricksAdapter } from "@databricks/appkit/beta";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 
 const adapter = DatabricksAdapter.fromServingEndpoint({
-  workspaceClient: new WorkspaceClient({}),
+  workspaceClient: createWorkspaceClient(),
   endpointName: "my-endpoint",
 });
 

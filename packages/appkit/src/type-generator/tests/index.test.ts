@@ -92,18 +92,23 @@ vi.mock("../warehouse-status", async (importOriginal) => {
   };
 });
 
-// index.ts lazily constructs at most ONE `new WorkspaceClient({})` per pass
-// for the whole metric path (status probe + blocking preflight + default
-// DESCRIBE fetcher share it). Stub the SDK so no real credentials are needed;
-// `executeStatement` doubles as the "was any metric DESCRIBE actually
-// issued?" spy and the constructor mock doubles as the client-count spy.
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({
-    statementExecution: { executeStatement: mocks.executeStatement },
-  })),
-}));
+// index.ts lazily constructs at most ONE client per pass for the whole metric
+// path (status probe + blocking preflight + default DESCRIBE fetcher share it).
+// Stub the wrapper so no real credentials are needed; `executeStatement`
+// doubles as the "was any metric DESCRIBE actually issued?" spy and the
+// createWorkspaceClient mock doubles as the client-count spy.
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: vi.fn(() => ({
+      statementExecution: { executeStatement: mocks.executeStatement },
+    })),
+  };
+});
 
-const { WorkspaceClient } = await import("@databricks/sdk-experimental");
+const { createWorkspaceClient } = await import("../../workspace-client");
 const { generateFromEntryPoint, TypegenFatalError, TypegenSyntaxError } =
   await import("../index");
 // The "../cache" mock spreads the actual module, so this is the real hashSQL —
@@ -1008,7 +1013,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     expect(mocks.startWarehouse).not.toHaveBeenCalled();
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
-    expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
+    expect(vi.mocked(createWorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       '"total_revenue": number',
     );
@@ -1033,7 +1038,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The pass both probed AND described — one shared client total.
     expect(mocks.getWarehouseState).toHaveBeenCalledTimes(1);
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(WorkspaceClient)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createWorkspaceClient)).toHaveBeenCalledTimes(1);
   });
 
   test("empty metricViews map: no probe, no preflight, no client — empty artifacts still ship", async () => {
@@ -1053,7 +1058,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
+    expect(vi.mocked(createWorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.existsSync(metricFile)).toBe(true);
     // An empty metricViews map emits an empty MetricRegistry augmentation.
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
@@ -1240,7 +1245,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     // All keys were hits, so the gate never even probed the warehouse ...
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     // ... and the whole pass constructed zero SDK clients.
-    expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
+    expect(vi.mocked(createWorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toBe(firstDeclarations);
   });
 

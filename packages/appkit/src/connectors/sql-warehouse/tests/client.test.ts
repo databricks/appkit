@@ -1,6 +1,6 @@
-import type { sql } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import { describe, expect, test, vi } from "vitest";
+import type { sql } from "../../../workspace-client";
 
 vi.mock("../../../telemetry", () => {
   const mockMeter = {
