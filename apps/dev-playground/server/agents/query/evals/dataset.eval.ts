@@ -40,9 +40,10 @@ export default defineEval({
     await t.send(userMessage(t.input));
     t.succeeded();
 
-    // Each guideline is judged against the reply (soft, threshold 0.5). Skipped
-    // cleanly when no judge model is configured, so the eval still exercises the
-    // dataset read + drive path without one.
+    // Each guideline is judged against the reply — gate by default, so a miss
+    // fails the eval (chain `.soft()` to only track it). Skipped cleanly when no
+    // judge model is configured, so the eval still exercises the dataset read +
+    // drive path without one.
     if (isJudgeConfigured()) {
       for (const guideline of guidelines(t.expected)) {
         (await t.judge.closedQA(guideline)).atLeast(0.5);
