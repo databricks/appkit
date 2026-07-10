@@ -1,4 +1,8 @@
-import { defineEval, isJudgeConfigured } from "@databricks/appkit/beta";
+import {
+  defineEval,
+  isJudgeConfigured,
+  userTurns,
+} from "@databricks/appkit/beta";
 
 /**
  * Dataset-driven eval: runs once per row of a Databricks managed evaluation
@@ -13,16 +17,11 @@ import { defineEval, isJudgeConfigured } from "@databricks/appkit/beta";
  * Row shape produced by the MLflow managed-dataset UI:
  *   inputs        {"messages":[{"role":"user","content":"..."}]}
  *   expectations  {"guidelines":{"value":["...","..."]}}   (optional)
+ *
+ * A row's `messages` can be a full multi-turn conversation. We replay each USER
+ * turn in order against one shared thread (below); interleaved assistant turns
+ * in the row are ignored — the agent generates its own responses.
  */
-
-/** Pull the last user message out of an MLflow `{messages:[...]}` input. */
-function userMessage(input: Record<string, unknown>): string {
-  const messages = Array.isArray(input.messages)
-    ? (input.messages as Array<{ role?: string; content?: string }>)
-    : [];
-  const last = [...messages].reverse().find((m) => m.role === "user");
-  return last?.content ?? "";
-}
 
 /** Read `expectations.guidelines` — the UI wraps the array as `{value: [...]}`. */
 function guidelines(expected: Record<string, unknown> | undefined): string[] {
@@ -35,9 +34,12 @@ export default defineEval({
   // Point at your own managed evaluation dataset (catalog.schema.table).
   dataset: { table: "main.mario.appkit_eval_dataset" },
   async test(t) {
-    // One turn per row. For a multi-turn conversation, call `t.send` again
-    // (same thread); to start an independent turn in the same test, `t.reset()`.
-    await t.send(userMessage(t.input));
+    // Replay every user turn in the row against one thread, so the agent sees
+    // the accumulating conversation. A single-user-turn row sends once. The
+    // runner gives each row a fresh driver, so rows don't bleed into each other.
+    for (const turn of userTurns(t.input)) {
+      await t.send(turn);
+    }
     t.succeeded();
 
     // Each guideline is judged against the reply — gate by default, so a miss

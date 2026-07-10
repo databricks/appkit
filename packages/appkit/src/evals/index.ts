@@ -11,6 +11,7 @@ export {
   type DatasetRow,
   type ReadEvalDatasetOptions,
   readEvalDataset,
+  userTurns,
 } from "./dataset";
 export { defineEval, defineEvalConfig } from "./define-eval";
 export { type DiscoveredEval, discoverEvalFiles } from "./discover";

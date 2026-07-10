@@ -8,7 +8,7 @@ vi.mock("../../connectors", () => ({
   },
 }));
 
-import { readEvalDataset } from "../dataset";
+import { readEvalDataset, userTurns } from "../dataset";
 
 const client = {} as never;
 
@@ -88,5 +88,47 @@ describe("readEvalDataset", () => {
       }),
     ).rejects.toThrow(/Invalid dataset table/);
     expect(executeStatement).not.toHaveBeenCalled();
+  });
+});
+
+describe("userTurns", () => {
+  test("returns all user contents in order", () => {
+    expect(
+      userTurns({
+        messages: [
+          { role: "user", content: "first" },
+          { role: "user", content: "second" },
+        ],
+      }),
+    ).toEqual(["first", "second"]);
+  });
+
+  test("ignores assistant/system turns, keeps user order", () => {
+    expect(
+      userTurns({
+        messages: [
+          { role: "system", content: "be helpful" },
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "hello" },
+          { role: "user", content: "follow up" },
+        ],
+      }),
+    ).toEqual(["hi", "follow up"]);
+  });
+
+  test("a single user message yields one turn", () => {
+    expect(
+      userTurns({ messages: [{ role: "user", content: "only" }] }),
+    ).toEqual(["only"]);
+  });
+
+  test("missing content becomes an empty string", () => {
+    expect(userTurns({ messages: [{ role: "user" }] })).toEqual([""]);
+  });
+
+  test("missing or non-array messages yields []", () => {
+    expect(userTurns({})).toEqual([]);
+    expect(userTurns({ messages: "nope" })).toEqual([]);
+    expect(userTurns({ messages: [] })).toEqual([]);
   });
 });
