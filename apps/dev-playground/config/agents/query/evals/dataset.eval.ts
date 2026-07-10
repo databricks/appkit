@@ -33,7 +33,7 @@ function guidelines(expected: Record<string, unknown> | undefined): string[] {
 export default defineEval({
   description: "Query agent satisfies each dataset row's guidelines",
   // Point at your own managed evaluation dataset (catalog.schema.table).
-  dataset: { table: "main.default.appkit_eval_dataset" },
+  dataset: { table: "main.mario.appkit_eval_dataset" },
   async test(t) {
     // One turn per row. For a multi-turn conversation, call `t.send` again
     // (same thread); to start an independent turn in the same test, `t.reset()`.
