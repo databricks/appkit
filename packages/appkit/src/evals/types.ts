@@ -56,6 +56,8 @@ export interface DriveResult {
   reply: string;
   /** Names of tools the agent called during the turn. */
   toolCalls: string[];
+  /** Tool calls with their parsed arguments, in call order. */
+  toolCallDetails: Array<{ name: string; args: Record<string, unknown> }>;
   /** Whether the turn completed without an agent/stream error. */
   succeeded: boolean;
   /** Thread/session id, when the driver exposes one. */
@@ -107,6 +109,15 @@ export interface TestContext {
   succeeded(): AssertionHandle;
   /** Assert a tool was called during the run (gate by default). */
   calledTool(name: string): AssertionHandle;
+  /**
+   * Assert a tool was called with arguments that deep-contain `expected`: every
+   * key in `expected` must equal the actual argument (recursively for nested
+   * objects), so extra arguments are ignored. Gate by default.
+   */
+  calledToolWith(
+    name: string,
+    expected: Record<string, unknown>,
+  ): AssertionHandle;
   /** Assert a value against a matcher, e.g. `t.check(t.reply, includes("Sunny"))`. */
   check(value: string, matcher: Matcher): AssertionHandle;
   /**
