@@ -16,6 +16,7 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
+  getMetricRegistry,
   loadMetricRegistry,
   validateMetricRequest,
 } from "../metric";
@@ -60,13 +61,58 @@ vi.mock("../../../cache", () => ({
   },
 }));
 
-/** Feed the plugin a registry directly, bypassing the disk config parse. */
-function setRegistry(
-  plugin: AnalyticsPlugin,
-  registry: Record<string, MetricRegistration>,
+// Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
+// test. Using real files (via the test-only `queriesDir` config) exercises the
+// actual stat → read → cache path in `getMetricRegistry` rather than poking
+// private plugin state.
+const tempRegistryDirs: string[] = [];
+
+/**
+ * Write a `metric-views.json` into a fresh temp dir and return the dir, for use
+ * as `new AnalyticsPlugin({ ...config, queriesDir })`. Accepts the internal
+ * `MetricRegistration` shape (matching the old `setRegistry` helper) and maps
+ * each entry's `lane` back to the config's `executor` field.
+ */
+function registryDir(registry: Record<string, MetricRegistration>): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
+  tempRegistryDirs.push(dir);
+  const metricViews: Record<string, { source: string; executor: string }> = {};
+  for (const [key, reg] of Object.entries(registry)) {
+    metricViews[key] = {
+      source: reg.source,
+      executor: reg.lane === "obo" ? "user" : "app_service_principal",
+    };
+  }
+  writeFileSync(
+    path.join(dir, "metric-views.json"),
+    JSON.stringify({ metricViews }),
+  );
+  return dir;
+}
+
+/**
+ * Overwrite the `metric-views.json` in an existing temp dir (for hot-reload /
+ * self-heal tests). `raw` lets a test write deliberately malformed content.
+ */
+function writeRegistry(
+  dir: string,
+  content: Record<string, MetricRegistration> | string,
 ): void {
-  (plugin as any).metricRegistry = registry;
-  (plugin as any).metricRegistryLoadError = null;
+  const body =
+    typeof content === "string"
+      ? content
+      : JSON.stringify({
+          metricViews: Object.fromEntries(
+            Object.entries(content).map(([key, reg]) => [
+              key,
+              {
+                source: reg.source,
+                executor: reg.lane === "obo" ? "user" : "app_service_principal",
+              },
+            ]),
+          ),
+        });
+  writeFileSync(path.join(dir, "metric-views.json"), body);
 }
 
 describe("analytics metric route (Phase 1)", () => {
@@ -83,6 +129,10 @@ describe("analytics metric route (Phase 1)", () => {
 
   afterEach(() => {
     serviceContextMock?.restore();
+    while (tempRegistryDirs.length > 0) {
+      const dir = tempRegistryDirs.pop();
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe("injectRoutes", () => {
@@ -365,15 +415,17 @@ describe("analytics metric route (Phase 1)", () => {
   // byte-identical to the /query route's JSON SSE path.
   describe("_handleMetricRoute SSE envelope", () => {
     test("streams warehouse_status then a result message with aliased rows", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      setRegistry(plugin, {
-        revenue: {
-          key: "revenue",
-          source: "cat.sch.revenue_metrics",
-          lane: "sp",
-        },
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        queriesDir: registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
       });
+      const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn().mockResolvedValue({
         result: { data: [{ arr: 1234 }] },
@@ -410,15 +462,17 @@ describe("analytics metric route (Phase 1)", () => {
     });
 
     test("emits warehouse_status before result for a STARTING warehouse", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      setRegistry(plugin, {
-        revenue: {
-          key: "revenue",
-          source: "cat.sch.revenue_metrics",
-          lane: "sp",
-        },
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        queriesDir: registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
       });
+      const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn().mockResolvedValue({
         result: { data: [{ arr: 1 }] },
@@ -461,15 +515,17 @@ describe("analytics metric route (Phase 1)", () => {
     });
 
     test("returns 400 when the body fails structural validation", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      setRegistry(plugin, {
-        revenue: {
-          key: "revenue",
-          source: "cat.sch.revenue_metrics",
-          lane: "sp",
-        },
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        queriesDir: registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
       });
+      const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
       const handler = getHandler("POST", "/metric/:key");
@@ -488,15 +544,17 @@ describe("analytics metric route (Phase 1)", () => {
   // ── 503-vs-404 latching + dormancy.
   describe("registry latching and dormancy", () => {
     test("unknown key against a valid registry → 404 (generic body)", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      setRegistry(plugin, {
-        revenue: {
-          key: "revenue",
-          source: "cat.sch.revenue_metrics",
-          lane: "sp",
-        },
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        queriesDir: registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
       });
+      const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
       const handler = getHandler("POST", "/metric/:key");
@@ -515,18 +573,20 @@ describe("analytics metric route (Phase 1)", () => {
     test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
       "inherited Object.prototype key %j → 404, no execution (own-property lookup)",
       async (dangerousKey) => {
-        const plugin = new AnalyticsPlugin(config);
+        const plugin = new AnalyticsPlugin({
+          ...config,
+          queriesDir: registryDir({
+            revenue: {
+              key: "revenue",
+              source: "cat.sch.revenue_metrics",
+              lane: "sp",
+            },
+          }),
+        });
         const { router, getHandler } = createMockRouter();
         // A real (own) entry so the registry is populated but does NOT contain
         // the dangerous key. Without the own-property guard, `registry[key]`
         // would resolve the inherited prototype member and slip past the 404.
-        setRegistry(plugin, {
-          revenue: {
-            key: "revenue",
-            source: "cat.sch.revenue_metrics",
-            lane: "sp",
-          },
-        });
 
         const executeMock = vi.fn();
         (plugin as any).SQLClient.executeStatement = executeMock;
@@ -550,11 +610,13 @@ describe("analytics metric route (Phase 1)", () => {
     );
 
     test("malformed registry → 503 METRIC_REGISTRY_LOAD_FAILED", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
+      tempRegistryDirs.push(dir);
+      // A real malformed config on disk (invalid JSON) → the loader throws →
+      // the route surfaces a 503, exercising the actual load path.
+      writeRegistry(dir, "{ not valid json");
+      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
       const { router, getHandler } = createMockRouter();
-      // Latch a load error directly (as a malformed config would).
-      (plugin as any).metricRegistry = {};
-      (plugin as any).metricRegistryLoadError = "Invalid metric-views.json";
 
       plugin.injectRoutes(router);
       const handler = getHandler("POST", "/metric/:key");
@@ -571,6 +633,104 @@ describe("analytics metric route (Phase 1)", () => {
         error: "Metric registry not available",
         code: "METRIC_REGISTRY_LOAD_FAILED",
       });
+    });
+
+    test("self-heal: a fixed config is picked up on the next request (no restart)", async () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
+      tempRegistryDirs.push(dir);
+      writeRegistry(dir, "{ not valid json");
+      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
+      const { router, getHandler } = createMockRouter();
+      const executeMock = vi
+        .fn()
+        .mockResolvedValue({ result: { data: [{ arr: 1 }] } });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+
+      // First request: malformed → 503, and the failure is NOT cached.
+      const res1 = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"] },
+        }),
+        res1,
+      );
+      expect(res1.status).toHaveBeenCalledWith(503);
+
+      // Fix the file. mtime changes, so the next request re-parses and serves
+      // it — no server restart, no latched 503.
+      writeRegistry(dir, {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp",
+        },
+      });
+      const res2 = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"] },
+        }),
+        res2,
+      );
+      expect(res2.status).not.toHaveBeenCalledWith(503);
+      expect(res2.status).not.toHaveBeenCalledWith(404);
+      expect(executeMock).toHaveBeenCalled();
+    });
+
+    test("hot-reload: a new key added to a working config is visible next request", async () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
+      tempRegistryDirs.push(dir);
+      writeRegistry(dir, {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp",
+        },
+      });
+      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
+      const { router, getHandler } = createMockRouter();
+      const executeMock = vi
+        .fn()
+        .mockResolvedValue({ result: { data: [{ arr: 1 }] } });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+
+      // `orders` is not registered yet → 404.
+      const res1 = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "orders" },
+          body: { measures: ["cnt"] },
+        }),
+        res1,
+      );
+      expect(res1.status).toHaveBeenCalledWith(404);
+
+      // Add `orders` to the config. The mtime bump invalidates the cache, so
+      // the next request sees it without a restart.
+      writeRegistry(dir, {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp",
+        },
+        orders: { key: "orders", source: "cat.sch.order_metrics", lane: "sp" },
+      });
+      const res2 = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "orders" },
+          body: { measures: ["cnt"] },
+        }),
+        res2,
+      );
+      expect(res2.status).not.toHaveBeenCalledWith(404);
+      expect(executeMock).toHaveBeenCalled();
     });
 
     test("no metric-views.json present → registry empty, unknown key 404, nothing executes", async () => {
@@ -609,11 +769,11 @@ describe("loadMetricRegistry", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("absent metric-views.json → empty registry (dormancy)", () => {
-    expect(loadMetricRegistry(dir)).toEqual({});
+  test("absent metric-views.json → empty registry (dormancy)", async () => {
+    expect(await loadMetricRegistry(dir)).toEqual({});
   });
 
-  test("derives lane from executor (default sp, user → obo)", () => {
+  test("derives lane from executor (default sp, user → obo)", async () => {
     writeFileSync(
       path.join(dir, "metric-views.json"),
       JSON.stringify({
@@ -624,7 +784,7 @@ describe("loadMetricRegistry", () => {
       }),
     );
 
-    const registry = loadMetricRegistry(dir);
+    const registry = await loadMetricRegistry(dir);
     expect(registry.revenue).toEqual({
       key: "revenue",
       source: "cat.sch.revenue_metrics",
@@ -637,7 +797,7 @@ describe("loadMetricRegistry", () => {
     });
   });
 
-  test("registry has a null prototype (no inherited-property lookups)", () => {
+  test("registry has a null prototype (no inherited-property lookups)", async () => {
     writeFileSync(
       path.join(dir, "metric-views.json"),
       JSON.stringify({
@@ -645,7 +805,7 @@ describe("loadMetricRegistry", () => {
       }),
     );
 
-    const registry = loadMetricRegistry(dir);
+    const registry = await loadMetricRegistry(dir);
     expect(Object.getPrototypeOf(registry)).toBeNull();
     // A key that would resolve to a truthy inherited member on a plain object
     // resolves to undefined here.
@@ -653,19 +813,55 @@ describe("loadMetricRegistry", () => {
     expect((registry as Record<string, unknown>).__proto__).toBeUndefined();
   });
 
-  test("malformed JSON throws", () => {
-    writeFileSync(path.join(dir, "metric-views.json"), "{ not json");
-    expect(() => loadMetricRegistry(dir)).toThrow(/Failed to parse/);
+  test("absent file yields a null-prototype (dormant) registry too", async () => {
+    // The ENOENT dormancy path must also be prototype-free — a metric key
+    // colliding with an inherited member can't 200 against an empty registry.
+    const registry = await loadMetricRegistry(dir);
+    expect(Object.getPrototypeOf(registry)).toBeNull();
   });
 
-  test("schema-invalid config throws", () => {
+  test("malformed JSON throws", async () => {
+    writeFileSync(path.join(dir, "metric-views.json"), "{ not json");
+    await expect(loadMetricRegistry(dir)).rejects.toThrow(/Failed to parse/);
+  });
+
+  test("schema-invalid config throws", async () => {
     writeFileSync(
       path.join(dir, "metric-views.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "not-a-three-part-fqn" } },
       }),
     );
-    expect(() => loadMetricRegistry(dir)).toThrow(/Invalid metric-views.json/);
+    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+      /Invalid metric-views.json/,
+    );
+  });
+
+  test("re-reads only after the file changes (mtime-validated cache)", async () => {
+    // getMetricRegistry caches by dir and revalidates via stat; a second call
+    // with no change returns the same object, and a rewrite is picked up.
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
+      }),
+    );
+    const first = await getMetricRegistry(dir);
+    const second = await getMetricRegistry(dir);
+    expect(second).toBe(first); // same cached object, no re-parse
+
+    writeFileSync(
+      path.join(dir, "metric-views.json"),
+      JSON.stringify({
+        metricViews: {
+          revenue: { source: "cat.sch.revenue_metrics" },
+          orders: { source: "cat.sch.order_metrics" },
+        },
+      }),
+    );
+    const third = await getMetricRegistry(dir);
+    expect(third).not.toBe(first);
+    expect(Object.keys(third).sort()).toEqual(["orders", "revenue"]);
   });
 });
 
@@ -1375,15 +1571,17 @@ describe("metric — filter translator", () => {
     });
 
     test("a well-formed-but-unknown measure reaches the warehouse and surfaces a sanitized error envelope", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-      setRegistry(plugin, {
-        revenue: {
-          key: "revenue",
-          source: "cat.sch.revenue_metrics",
-          lane: "sp",
-        },
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        queriesDir: registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
       });
+      const { router, getHandler } = createMockRouter();
 
       // The warehouse rejects the unknown column. The raw text carries the
       // offending name; the connector wraps it in an ExecutionError whose
@@ -1755,15 +1953,17 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO-lane registration routes through asUser(req)", async () => {
-    const plugin = new AnalyticsPlugin(config);
-    const { router, getHandler } = createMockRouter();
-    setRegistry(plugin, {
-      revenue: {
-        key: "revenue",
-        source: "cat.sch.revenue_metrics",
-        lane: "obo",
-      },
+    const plugin = new AnalyticsPlugin({
+      ...config,
+      queriesDir: registryDir({
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "obo",
+        },
+      }),
     });
+    const { router, getHandler } = createMockRouter();
 
     const asUserSpy = vi.spyOn(plugin, "asUser");
     const executeMock = vi
@@ -1793,15 +1993,17 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("SP-lane registration uses the default executor (asUser not called)", async () => {
-    const plugin = new AnalyticsPlugin(config);
-    const { router, getHandler } = createMockRouter();
-    setRegistry(plugin, {
-      revenue: {
-        key: "revenue",
-        source: "cat.sch.revenue_metrics",
-        lane: "sp",
-      },
+    const plugin = new AnalyticsPlugin({
+      ...config,
+      queriesDir: registryDir({
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp",
+        },
+      }),
     });
+    const { router, getHandler } = createMockRouter();
 
     const asUserSpy = vi.spyOn(plugin, "asUser");
     const executeMock = vi
@@ -1830,15 +2032,17 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO metric with no user identity → canonical 401, no SQL executed", async () => {
-    const plugin = new AnalyticsPlugin(config);
-    const { router, getHandler } = createMockRouter();
-    setRegistry(plugin, {
-      revenue: {
-        key: "revenue",
-        source: "cat.sch.revenue_metrics",
-        lane: "obo",
-      },
+    const plugin = new AnalyticsPlugin({
+      ...config,
+      queriesDir: registryDir({
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "obo",
+        },
+      }),
     });
+    const { router, getHandler } = createMockRouter();
 
     const executeMock = vi.fn();
     (plugin as any).SQLClient.executeStatement = executeMock;
@@ -1865,15 +2069,17 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO metric with whitespace-only user identity → canonical 401", async () => {
-    const plugin = new AnalyticsPlugin(config);
-    const { router, getHandler } = createMockRouter();
-    setRegistry(plugin, {
-      revenue: {
-        key: "revenue",
-        source: "cat.sch.revenue_metrics",
-        lane: "obo",
-      },
+    const plugin = new AnalyticsPlugin({
+      ...config,
+      queriesDir: registryDir({
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "obo",
+        },
+      }),
     });
+    const { router, getHandler } = createMockRouter();
 
     const executeMock = vi.fn();
     (plugin as any).SQLClient.executeStatement = executeMock;
