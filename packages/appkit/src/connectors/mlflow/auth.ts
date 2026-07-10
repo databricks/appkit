@@ -34,9 +34,8 @@ export async function resolveDatabricksAuth(
   }
 
   try {
-    const client = new WorkspaceClient(
-      options.profile ? { profile: options.profile } : {},
-    );
+    const client = resolveWorkspaceClient(options);
+    if (!client) return undefined;
     const headers = new Headers();
     // Mints the OAuth access token (or reuses a PAT from the profile) and adds
     // an `Authorization: Bearer <token>` header — the same call the connectors
@@ -49,6 +48,32 @@ export async function resolveDatabricksAuth(
       (await client.config.getHost()).toString().replace(/\/+$/, "");
     if (!token || !host) return undefined;
     return { host, token };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Construct a Databricks `WorkspaceClient` for the eval runner — the object the
+ * SDK-backed connectors (e.g. `SQLWarehouseConnector`) take. An explicit
+ * host+token builds a PAT client; otherwise the profile (or ambient config) is
+ * used and the SDK resolves credentials, minting OAuth as needed. Returns
+ * `undefined` if construction throws (missing/invalid config).
+ */
+export function resolveWorkspaceClient(
+  options: ResolveDatabricksAuthOptions = {},
+): WorkspaceClient | undefined {
+  try {
+    if (options.host && options.token) {
+      return new WorkspaceClient({
+        host: options.host,
+        token: options.token,
+        authType: "pat",
+      });
+    }
+    return new WorkspaceClient(
+      options.profile ? { profile: options.profile } : {},
+    );
   } catch {
     return undefined;
   }

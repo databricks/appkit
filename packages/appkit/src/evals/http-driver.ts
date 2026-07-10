@@ -73,6 +73,9 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
   let threadId: string | undefined;
 
   return {
+    reset(): void {
+      threadId = undefined;
+    },
     async send(message: string): Promise<DriveResult> {
       let res: Response;
       try {

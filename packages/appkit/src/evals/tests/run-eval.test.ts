@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { defineEval } from "../define-eval";
 import { includes } from "../matchers";
 import { runEval } from "../run-eval";
@@ -113,5 +113,37 @@ describe("runEval", () => {
     const result = await runEval(def, { id: "boom", driver: fakeDriver({}) });
     expect(result.passed).toBe(false);
     expect(result.error).toBe("boom");
+  });
+
+  test("t.reset() forwards to the driver to start a fresh conversation", async () => {
+    const reset = vi.fn();
+    const driver: EvalDriver = {
+      send: async () => ({ reply: "", toolCalls: [], succeeded: true }),
+      reset,
+    };
+    const def = defineEval({
+      async test(t) {
+        await t.send("first");
+        t.reset();
+        await t.send("second");
+      },
+    });
+    await runEval(def, { id: "reset", driver });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  test("t.reset() is a no-op when the driver has no reset", async () => {
+    const def = defineEval({
+      async test(t) {
+        t.reset();
+        await t.send("hi");
+      },
+    });
+    // fakeDriver has no reset(); this must not throw.
+    const result = await runEval(def, {
+      id: "no-reset",
+      driver: fakeDriver({}),
+    });
+    expect(result.passed).toBe(true);
   });
 });

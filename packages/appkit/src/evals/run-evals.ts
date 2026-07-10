@@ -1,5 +1,7 @@
 import { pathToFileURL } from "node:url";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { MlflowClient } from "../connectors/mlflow";
+import { type DatasetRow, readEvalDataset } from "./dataset";
 import { discoverEvalFiles } from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge } from "./judge";
@@ -30,6 +32,13 @@ export interface RunEvalsOptions {
    * Databricks serving endpoint (`model`).
    */
   judge?: { host: string; token: string; model: string };
+  /**
+   * Workspace client used to read managed evaluation datasets (for evals that
+   * declare `dataset`). Required alongside {@link warehouseId} for those evals.
+   */
+  workspaceClient?: WorkspaceClient;
+  /** SQL warehouse id used to read managed evaluation datasets. */
+  warehouseId?: string;
   /** Wall-clock timestamp (ms) for run create/finish — pass `Date.now()`. */
   now?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
@@ -141,32 +150,87 @@ export async function runEvalsInDir(
   }
 
   const results: EvalResult[] = [];
+  // `total` counts eval files, not dataset rows: row counts aren't known until
+  // each file loads. Per-row detail is carried in the result id (`[row i/n]`).
   for (let index = 0; index < discovered.length; index++) {
     const d = discovered[index];
     const id = `${d.agent}/${d.id}`;
-    emit({ type: "start", id, index, total });
 
-    let result: EvalResult;
+    let def: EvalDefinition | undefined;
     try {
-      const def = await loadEval(d.file);
-      const driver = createHttpDriver({
-        baseUrl: options.baseUrl,
-        agent: def.agent ?? d.agent,
-        headers: options.headers,
-        mlflowRunId: runId,
-      });
-      result = await runEval(def, { id, driver, strict: options.strict });
+      def = await loadEval(d.file);
     } catch (err) {
-      result = {
+      emit({ type: "start", id, index, total });
+      const result: EvalResult = {
         id,
         assertions: [],
         passed: false,
         error: err instanceof Error ? err.message : String(err),
       };
+      results.push(result);
+      emit({ type: "result", result, index, total });
+      continue;
     }
 
-    results.push(result);
-    emit({ type: "result", result, index, total });
+    // Resolve dataset rows up front; a dataset eval with no rows still runs
+    // once with an empty row so a misconfiguration surfaces as a result.
+    let rows: Array<DatasetRow | undefined> = [undefined];
+    let datasetError: string | undefined;
+    if (def.dataset) {
+      if (!options.workspaceClient || !options.warehouseId) {
+        datasetError =
+          "dataset eval requires a workspace client and warehouse (pass --warehouse)";
+      } else {
+        try {
+          rows = await readEvalDataset(options.workspaceClient, {
+            table: def.dataset.table,
+            warehouseId: options.warehouseId,
+            limit: def.dataset.limit,
+          });
+          if (rows.length === 0) rows = [undefined];
+        } catch (err) {
+          datasetError = err instanceof Error ? err.message : String(err);
+        }
+      }
+    }
+
+    for (let r = 0; r < rows.length; r++) {
+      const rowId =
+        def.dataset && rows.length > 1
+          ? `${id} [row ${r + 1}/${rows.length}]`
+          : id;
+      emit({ type: "start", id: rowId, index, total });
+
+      let result: EvalResult;
+      if (datasetError) {
+        result = {
+          id: rowId,
+          assertions: [],
+          passed: false,
+          error: datasetError,
+        };
+      } else {
+        // A fresh driver per row: each row is an independent conversation, so
+        // its thread must not carry over the previous row's history. (Multiple
+        // `t.send`s within one row still share the thread — that's the driver's
+        // per-instance behavior.)
+        const driver = createHttpDriver({
+          baseUrl: options.baseUrl,
+          agent: def.agent ?? d.agent,
+          headers: options.headers,
+          mlflowRunId: runId,
+        });
+        result = await runEval(def, {
+          id: rowId,
+          driver,
+          strict: options.strict,
+          row: rows[r],
+        });
+      }
+
+      results.push(result);
+      emit({ type: "result", result, index, total });
+    }
   }
 
   if (mlflowClient && runId) {

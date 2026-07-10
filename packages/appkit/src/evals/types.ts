@@ -66,18 +66,39 @@ export interface DriveResult {
  */
 export interface EvalDriver {
   send(message: string): Promise<DriveResult>;
+  /**
+   * Drop the current conversation so the next `send` starts a fresh thread.
+   * Optional: drivers without a session concept omit it.
+   */
+  reset?(): void;
 }
 
 /** The `t` context passed to an eval's `test` function. */
 export interface TestContext {
   /** Send a user message to the agent and capture its response. */
   send(message: string): Promise<void>;
+  /**
+   * Start a fresh conversation: the next `send` opens a new thread with no
+   * history. Use to run several independent one-shot checks in one test.
+   * Consecutive `send`s (without a `reset`) stay in one multi-turn conversation.
+   */
+  reset(): void;
   /** The last assistant reply. */
   readonly reply: string;
   /** Tools called during the last turn. */
   readonly toolCalls: string[];
   /** The current session/thread id, if any. */
   readonly sessionId: string | undefined;
+  /**
+   * The current dataset row's `inputs` when the eval is dataset-driven (see
+   * {@link EvalDefinition.dataset}); `{}` for a plain single-run eval.
+   */
+  readonly input: Record<string, unknown>;
+  /**
+   * The current dataset row's `expectations` (ground truth / guidelines), or
+   * `undefined` when the row has none or the eval isn't dataset-driven.
+   */
+  readonly expected: Record<string, unknown> | undefined;
   /** Assert the last turn completed successfully (gate by default). */
   succeeded(): AssertionHandle;
   /** Assert a tool was called during the run (gate by default). */
@@ -119,6 +140,13 @@ export interface EvalDefinition {
   tags?: string[];
   /** Per-eval timeout. */
   timeoutMs?: number;
+  /**
+   * Run this eval once per row of a Databricks managed evaluation dataset (a
+   * Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns).
+   * Each row is bound to `t.input`/`t.expected`. Requires the runner to have a
+   * workspace client + warehouse (`--warehouse`). Omit for a single-run eval.
+   */
+  dataset?: { table: string; limit?: number };
   /** The eval body: drive the agent and assert on its behavior. */
   test(t: TestContext): Promise<void> | void;
 }

@@ -29,6 +29,8 @@ interface EvalRunner {
     headers?: Record<string, string>;
     mlflow?: { host: string; token: string; experimentId: string };
     judge?: { host: string; token: string; model: string };
+    workspaceClient?: unknown;
+    warehouseId?: string;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -36,6 +38,11 @@ interface EvalRunner {
     host?: string;
     token?: string;
   }): Promise<{ host: string; token: string } | undefined>;
+  resolveWorkspaceClient(opts: {
+    profile?: string;
+    host?: string;
+    token?: string;
+  }): unknown;
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
@@ -80,6 +87,7 @@ interface EvalOptions {
   databricksToken?: string;
   experiment?: string;
   judgeModel?: string;
+  warehouse?: string;
 }
 
 async function runAgentEval(
@@ -111,6 +119,15 @@ async function runAgentEval(
     judgeModel && host && token
       ? { host, token, model: judgeModel }
       : undefined;
+
+  // Managed-dataset reads: a workspace client (same profile/host/token) + a SQL
+  // warehouse. Only needed by evals that declare `dataset`.
+  const warehouseId = opts.warehouse ?? process.env.DATABRICKS_WAREHOUSE_ID;
+  const workspaceClient = runner.resolveWorkspaceClient({
+    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
+    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
+    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
+  });
 
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
@@ -146,6 +163,8 @@ async function runAgentEval(
     headers: opts.header ? parseHeaders(opts.header) : undefined,
     mlflow,
     judge,
+    workspaceClient,
+    warehouseId,
     onEvent,
   });
   console.log(`\n${runner.formatSummaryLine(summary.results)}`);
@@ -215,6 +234,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--experiment <id>",
     "MLflow experiment id for the evaluation run (default: MLFLOW_EXPERIMENT_ID)",
+  )
+  .option(
+    "--warehouse <id>",
+    "SQL warehouse id for reading managed evaluation datasets (default: DATABRICKS_WAREHOUSE_ID)",
   )
   .option(
     "--judge-model <endpoint>",
