@@ -96,14 +96,19 @@ async function runAgentEval(
 ): Promise<void> {
   const runner = await loadRunner();
 
-  // Resolve Databricks host + bearer the AppKit-native way: an explicit
-  // host/token (or DATABRICKS_* env) wins; otherwise the SDK mints an OAuth
-  // token from the CLI profile — so no hand-set PAT is required.
-  const auth = await runner.resolveDatabricksAuth({
+  // Databricks credentials shared by auth resolution and the workspace client:
+  // an explicit flag/DATABRICKS_* env wins, else the SDK resolves from the CLI
+  // profile.
+  const credentials = {
     profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
     host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
     token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
-  });
+  };
+
+  // Resolve Databricks host + bearer the AppKit-native way: an explicit
+  // host/token wins; otherwise the SDK mints an OAuth token from the CLI
+  // profile — so no hand-set PAT is required.
+  const auth = await runner.resolveDatabricksAuth(credentials);
   const host = auth?.host;
   const token = auth?.token;
 
@@ -123,11 +128,7 @@ async function runAgentEval(
   // Managed-dataset reads: a workspace client (same profile/host/token) + a SQL
   // warehouse. Only needed by evals that declare `dataset`.
   const warehouseId = opts.warehouse ?? process.env.DATABRICKS_WAREHOUSE_ID;
-  const workspaceClient = runner.resolveWorkspaceClient({
-    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
-    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
-    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
-  });
+  const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
