@@ -25,6 +25,7 @@ interface EvalRunner {
     rootDir?: string;
     baseUrl: string;
     filter?: string;
+    tags?: string[];
     strict?: boolean;
     headers?: Record<string, string>;
     concurrency?: number;
@@ -37,6 +38,7 @@ interface EvalRunner {
     judge?: { host: string; token: string; model: string };
     workspaceClient?: unknown;
     warehouseId?: string;
+    timeoutMs?: number;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -89,6 +91,7 @@ interface EvalOptions {
   strict?: boolean;
   root?: string;
   header?: string[];
+  tag?: string[];
   profile?: string;
   databricksHost?: string;
   databricksToken?: string;
@@ -96,6 +99,7 @@ interface EvalOptions {
   judgeModel?: string;
   concurrency?: number;
   warehouseId?: string;
+  timeout?: string;
   minPassRate?: string;
 }
 
@@ -217,12 +221,20 @@ async function runAgentEval(
   const warehouseId = opts.warehouseId ?? process.env.DATABRICKS_WAREHOUSE_ID;
   const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
+  // Runner-level default per-eval timeout (ms). A per-eval `timeoutMs` wins.
+  const parsedTimeout = opts.timeout
+    ? Number.parseInt(opts.timeout, 10)
+    : undefined;
+  const timeoutMs =
+    parsedTimeout && parsedTimeout > 0 ? parsedTimeout : undefined;
+
   let summary: EvalRunSummary;
   try {
     summary = await runner.runEvalsInDir({
       rootDir: opts.root,
       baseUrl: opts.url,
       filter,
+      tags: opts.tag,
       strict: opts.strict,
       headers: opts.header ? parseHeaders(opts.header) : undefined,
       concurrency: opts.concurrency,
@@ -230,6 +242,7 @@ async function runAgentEval(
       judge: resolveJudge(opts, auth),
       workspaceClient,
       warehouseId,
+      timeoutMs,
       onEvent: makeProgressReporter(runner, opts.url),
     });
   } catch (err) {
@@ -296,6 +309,10 @@ export const agentEvalCommand = new Command("eval")
     "Extra request header as 'Key: value' (repeatable)",
   )
   .option(
+    "--tag <tag...>",
+    "Only run evals tagged with one of these tags (repeatable)",
+  )
+  .option(
     "--profile <name>",
     "Databricks CLI profile to authenticate with via OAuth (default: DATABRICKS_CONFIG_PROFILE)",
   )
@@ -318,6 +335,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--judge-model <endpoint>",
     "Databricks serving endpoint to use as the LLM judge for t.judge.* (default: APPKIT_JUDGE_MODEL)",
+  )
+  .option(
+    "--timeout <ms>",
+    "Default per-eval timeout in ms (a per-eval timeoutMs overrides it)",
   )
   .option(
     "--min-pass-rate <rate>",
