@@ -40,6 +40,8 @@ export {
   formatEvalDetail,
   formatEvalHeadline,
   formatEvalResults,
+  formatResultsJson,
+  formatResultsJUnit,
   formatSummaryLine,
   summarize,
 } from "./report";

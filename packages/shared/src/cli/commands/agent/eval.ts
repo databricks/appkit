@@ -1,4 +1,5 @@
-import { Command } from "commander";
+import fs from "node:fs";
+import { Command, Option } from "commander";
 
 interface EvalRunSummary {
   results: unknown[];
@@ -50,6 +51,8 @@ interface EvalRunner {
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
+  formatResultsJson(results: unknown[]): string;
+  formatResultsJUnit(results: unknown[]): string;
   summarize(results: unknown[]): { allPassed: boolean; passRate: number };
 }
 
@@ -97,6 +100,8 @@ interface EvalOptions {
   timeout?: string;
   retries?: string;
   minPassRate?: string;
+  reporter?: "text" | "json" | "junit";
+  output?: string;
 }
 
 async function runAgentEval(
@@ -161,23 +166,35 @@ async function runAgentEval(
   const retries =
     parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
 
+  // In a machine reporter (json/junit), stdout is reserved for the report (it
+  // may be piped), so human-facing lines go to stderr and the per-eval live
+  // streaming is suppressed. Text mode keeps its current stdout behavior.
+  const reporter = opts.reporter ?? "text";
+  const machine = reporter !== "text";
+  const info = (msg: string): void => {
+    if (machine) console.error(msg);
+    else console.log(msg);
+  };
+
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
     switch (event.type) {
       case "discovered":
-        console.log(
+        info(
           `Running ${event.total} eval${event.total === 1 ? "" : "s"} against ${opts.url}\n`,
         );
         break;
       case "run-created":
-        console.log(`MLflow evaluation run: ${event.runId}\n`);
+        info(`MLflow evaluation run: ${event.runId}\n`);
         break;
       case "start":
+        if (machine) break;
         process.stdout.write(
           `▸ [${event.index + 1}/${event.total}] ${event.id} … `,
         );
         break;
       case "result": {
+        if (machine) break;
         process.stdout.write(`${runner.evalGlyph(event.result)}\n`);
         for (const line of runner.formatEvalDetail(event.result)) {
           console.log(line);
@@ -203,11 +220,14 @@ async function runAgentEval(
     retries,
     onEvent,
   });
-  console.log(`\n${runner.formatSummaryLine(summary.results)}`);
+
+  // The final human summary always shows (stderr for machine reporters so it
+  // never pollutes the report on stdout/file).
+  info(`\n${runner.formatSummaryLine(summary.results)}`);
 
   if (summary.mlflow) {
     const { report, finish } = summary.mlflow;
-    console.log(
+    info(
       `MLflow: ${report.written} assessment(s) written` +
         (report.skipped ? `, ${report.skipped} skipped` : "") +
         (report.failures.length ? `, ${report.failures.length} failed` : ""),
@@ -226,10 +246,25 @@ async function runAgentEval(
       );
     }
   } else {
-    console.log(
+    info(
       "\nMLflow evaluation run skipped — pass --experiment (or set" +
         " MLFLOW_EXPERIMENT_ID) plus --profile/--databricks-host to create one.",
     );
+  }
+
+  // Machine-readable report: build the string with a pure formatter, then emit
+  // it to --output <file> or stdout (kept clean of the human noise above).
+  if (machine) {
+    const report =
+      reporter === "json"
+        ? runner.formatResultsJson(summary.results)
+        : runner.formatResultsJUnit(summary.results);
+    if (opts.output) {
+      fs.writeFileSync(opts.output, `${report}\n`);
+      info(`Wrote ${reporter} report to ${opts.output}`);
+    } else {
+      process.stdout.write(`${report}\n`);
+    }
   }
 
   const stats = runner.summarize(summary.results);
@@ -240,7 +275,7 @@ async function runAgentEval(
     // Threshold mode: gate on the aggregate pass rate rather than requiring
     // every eval to pass.
     const ok = stats.passRate >= minPassRate;
-    console.log(
+    info(
       `Pass rate ${(stats.passRate * 100).toFixed(0)}% (threshold ${(
         minPassRate * 100
       ).toFixed(0)}%) — ${ok ? "OK" : "below threshold"}`,
@@ -312,5 +347,17 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--min-pass-rate <rate>",
     "Gate on aggregate pass rate (0..1) instead of requiring every eval to pass; exit 1 when below",
+  )
+  .addOption(
+    new Option(
+      "--reporter <format>",
+      "Report format: text (live console), json (dashboards), or junit (CI test reporters)",
+    )
+      .choices(["text", "json", "junit"])
+      .default("text"),
+  )
+  .option(
+    "--output <file>",
+    "Write the json/junit report to this file instead of stdout (ignored for text)",
   )
   .action(runAgentEval);
