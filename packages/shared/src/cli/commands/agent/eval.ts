@@ -39,6 +39,7 @@ interface EvalRunner {
     workspaceClient?: unknown;
     warehouseId?: string;
     timeoutMs?: number;
+    retries?: number;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -100,6 +101,7 @@ interface EvalOptions {
   concurrency?: number;
   warehouseId?: string;
   timeout?: string;
+  retries?: string;
   minPassRate?: string;
 }
 
@@ -228,6 +230,14 @@ async function runAgentEval(
   const timeoutMs =
     parsedTimeout && parsedTimeout > 0 ? parsedTimeout : undefined;
 
+  // Extra attempts for evals that fail on an infra error (turn/timeout). Junk
+  // or negative input falls back to no retries.
+  const parsedRetries = opts.retries
+    ? Number.parseInt(opts.retries, 10)
+    : undefined;
+  const retries =
+    parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
+
   let summary: EvalRunSummary;
   try {
     summary = await runner.runEvalsInDir({
@@ -243,6 +253,7 @@ async function runAgentEval(
       workspaceClient,
       warehouseId,
       timeoutMs,
+      retries,
       onEvent: makeProgressReporter(runner, opts.url),
     });
   } catch (err) {
@@ -339,6 +350,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--timeout <ms>",
     "Default per-eval timeout in ms (a per-eval timeoutMs overrides it)",
+  )
+  .option(
+    "--retries <n>",
+    "Re-run an eval up to N times when it fails on an infra error (turn/timeout); assertion failures are not retried",
   )
   .option(
     "--min-pass-rate <rate>",

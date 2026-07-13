@@ -49,6 +49,7 @@ export {
   type EvalRunSummary,
   type RunEvalsOptions,
   runEvalsInDir,
+  runWithRetries,
 } from "./run-evals";
 export type {
   AssertionHandle,

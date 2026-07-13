@@ -71,6 +71,13 @@ export interface RunEvalsOptions {
    * it wins over an agent's `evals.config.ts` `timeoutMs`. Unbounded when unset.
    */
   timeoutMs?: number;
+  /**
+   * Re-run an eval up to this many extra times when it fails on an
+   * infrastructure error (a thrown error or timeout — `result.error` set), to
+   * absorb transient turn/stream flakiness. Assertion failures are NEVER
+   * retried (a wrong reply is real signal, not flake). Defaults to `0`.
+   */
+  retries?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
   onEvent?: (event: EvalProgress) => void;
 }
@@ -182,23 +189,25 @@ async function runOne(
   options: RunEvalsOptions,
 ): Promise<EvalResult> {
   try {
-    // A fresh driver per row: each row is an independent conversation whose
-    // thread must not carry over the previous row's history. (Multiple
-    // `t.send`s within one row still share the thread — the driver's behavior.)
-    const driver = createHttpDriver({
-      baseUrl: options.baseUrl,
-      agent: def.agent ?? d.agent,
-      headers: options.headers,
-      mlflowRunId: runId,
-      timeoutMs: options.timeoutMs,
-    });
-    return await runEval(def, {
-      id,
-      driver,
-      strict: options.strict,
-      row,
-      timeoutMs: options.timeoutMs,
-    });
+    // Retry only on an infrastructure error (`result.error` — a thrown error or
+    // timeout), to absorb transient turn/stream flakiness; assertion failures
+    // are real signal and returned on the first try. Each attempt gets a fresh
+    // driver, so its thread never carries over the failed attempt's history.
+    return await runWithRetries(options.retries ?? 0, () =>
+      runEval(def, {
+        id,
+        driver: createHttpDriver({
+          baseUrl: options.baseUrl,
+          agent: def.agent ?? d.agent,
+          headers: options.headers,
+          mlflowRunId: runId,
+          timeoutMs: options.timeoutMs,
+        }),
+        strict: options.strict,
+        row,
+        timeoutMs: options.timeoutMs,
+      }),
+    );
   } catch (err) {
     return {
       id,
@@ -289,6 +298,25 @@ async function runDiscovered(
       : await runOne(d, rowId, def, rows[r], runId, options);
     results.push(result);
     emit({ type: "result", result, index, total });
+  }
+}
+
+/**
+ * Run `attempt` up to `1 + retries` times, stopping as soon as it returns a
+ * result without an `error` (infra failures — thrown errors or timeouts — set
+ * `error`; assertion failures do not, so a failed-but-completed eval is returned
+ * on the first try and never retried). Returns the last result when every
+ * attempt errored. `retries` below 0 is treated as 0.
+ */
+export async function runWithRetries(
+  retries: number,
+  attempt: (attemptNumber: number) => Promise<EvalResult>,
+): Promise<EvalResult> {
+  const maxAttempts = 1 + Math.max(0, retries);
+  let result: EvalResult;
+  for (let n = 1; ; n++) {
+    result = await attempt(n);
+    if (!result.error || n >= maxAttempts) return result;
   }
 }
 
