@@ -61,6 +61,13 @@ export interface RunEvalsOptions {
    * Wins over an agent's `evals.config.ts` `timeoutMs`.
    */
   timeoutMs?: number;
+  /**
+   * Re-run an eval up to this many extra times when it fails on an
+   * infrastructure error (a thrown error or timeout — `result.error` set), to
+   * absorb transient turn/stream flakiness. Assertion failures are NEVER
+   * retried (a wrong reply is real signal, not flake). Defaults to `0`.
+   */
+  retries?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
   onEvent?: (event: EvalProgress) => void;
 }
@@ -185,6 +192,25 @@ export async function runBounded<T, R>(
   }
   await Promise.all(Array.from({ length: workers }, () => pump()));
   return results;
+}
+
+/**
+ * Run `attempt` up to `1 + retries` times, stopping as soon as it returns a
+ * result without an `error` (infra failures — thrown errors or timeouts — set
+ * `error`; assertion failures do not, so a failed-but-completed eval is returned
+ * on the first try and never retried). Returns the last result when every
+ * attempt errored. `retries` below 0 is treated as 0.
+ */
+export async function runWithRetries(
+  retries: number,
+  attempt: (attemptNumber: number) => Promise<EvalResult>,
+): Promise<EvalResult> {
+  const maxAttempts = 1 + Math.max(0, retries);
+  let result: EvalResult;
+  for (let n = 1; ; n++) {
+    result = await attempt(n);
+    if (!result.error || n >= maxAttempts) return result;
+  }
 }
 
 /**
@@ -402,23 +428,25 @@ export async function runEvalsInDir(
           error: item.error,
         };
       } else {
-        // A fresh driver per row: each row is an independent conversation, so
-        // its thread must not carry over another row's history. (Multiple
-        // `t.send`s within one row still share the thread — that's the driver's
-        // per-instance behavior.)
-        const driver = createHttpDriver({
-          baseUrl: options.baseUrl,
-          agent: item.def.agent ?? item.dirAgent,
-          headers: options.headers,
-          mlflowRunId: runId,
-        });
-        result = await runEval(item.def, {
-          id: item.rowId,
-          driver,
-          strict: options.strict,
-          row: item.row,
-          timeoutMs: item.timeoutMs,
-        });
+        // Retry only on an infrastructure error (`result.error` — a thrown
+        // error or timeout), to absorb transient turn/stream flakiness;
+        // assertion failures are real signal and returned on the first try.
+        // Each attempt gets a fresh driver so its thread doesn't carry over the
+        // failed attempt's history.
+        result = await runWithRetries(options.retries ?? 0, () =>
+          runEval(item.def, {
+            id: item.rowId,
+            driver: createHttpDriver({
+              baseUrl: options.baseUrl,
+              agent: item.def.agent ?? item.dirAgent,
+              headers: options.headers,
+              mlflowRunId: runId,
+            }),
+            strict: options.strict,
+            row: item.row,
+            timeoutMs: item.timeoutMs,
+          }),
+        );
       }
 
       emit({ type: "result", result, index: item.index, total });

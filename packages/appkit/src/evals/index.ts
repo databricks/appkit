@@ -50,6 +50,7 @@ export {
   type RunEvalsOptions,
   runBounded,
   runEvalsInDir,
+  runWithRetries,
 } from "./run-evals";
 export type {
   AssertionHandle,
