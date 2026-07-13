@@ -35,6 +35,19 @@ function isFile(p: string): boolean {
   }
 }
 
+/** List the agent directory names under `<rootDir>/config/agents/` (empty if absent). */
+function listAgents(rootDir: string): { agentsDir: string; agents: string[] } {
+  const agentsDir = path.join(rootDir, "config", "agents");
+  try {
+    const agents = readdirSync(agentsDir).filter((n) =>
+      isDir(path.join(agentsDir, n)),
+    );
+    return { agentsDir, agents };
+  } catch {
+    return { agentsDir, agents: [] };
+  }
+}
+
 /** Recursively collect `*.eval.ts` files (skips `evals.config.ts`). */
 function walkEvalFiles(dir: string): string[] {
   const out: string[] = [];
@@ -61,17 +74,8 @@ function walkEvalFiles(dir: string): string[] {
  * dir with `.eval.ts` stripped. Returns a stable, sorted list.
  */
 export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
-  const agentsDir = path.join(rootDir, "config", "agents");
+  const { agentsDir, agents } = listAgents(rootDir);
   const out: DiscoveredEval[] = [];
-
-  let agents: string[];
-  try {
-    agents = readdirSync(agentsDir).filter((n) =>
-      isDir(path.join(agentsDir, n)),
-    );
-  } catch {
-    return out;
-  }
 
   for (const agent of agents) {
     const evalsDir = path.join(agentsDir, agent, "evals");
@@ -98,17 +102,8 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
  * config file are omitted. Returns a stable, sorted list.
  */
 export function discoverEvalConfigs(rootDir: string): DiscoveredEvalConfig[] {
-  const agentsDir = path.join(rootDir, "config", "agents");
+  const { agentsDir, agents } = listAgents(rootDir);
   const out: DiscoveredEvalConfig[] = [];
-
-  let agents: string[];
-  try {
-    agents = readdirSync(agentsDir).filter((n) =>
-      isDir(path.join(agentsDir, n)),
-    );
-  } catch {
-    return out;
-  }
 
   for (const agent of agents) {
     const file = path.join(agentsDir, agent, "evals", "evals.config.ts");

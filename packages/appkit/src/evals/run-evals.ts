@@ -308,13 +308,12 @@ export async function runEvalsInDir(
   // `evals.config.ts` `maxConcurrency` governs the single shared work pool, so
   // it can't be applied per-agent without splitting the pool. CLI wins; else
   // the highest value any agent's config requests (the pool ceiling); else 1.
-  const configMaxConcurrency = [...configs.values()]
+  const configConcurrencies = [...configs.values()]
     .map((c) => c.maxConcurrency)
-    .filter((n): n is number => typeof n === "number")
-    .reduce<number | undefined>(
-      (max, n) => (max === undefined ? n : Math.max(max, n)),
-      undefined,
-    );
+    .filter((n): n is number => typeof n === "number");
+  const configMaxConcurrency = configConcurrencies.length
+    ? Math.max(...configConcurrencies)
+    : undefined;
   const maxConcurrency = options.maxConcurrency ?? configMaxConcurrency ?? 1;
 
   const total = loaded.length;
