@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { discoverEvalFiles } from "../discover";
+import { discoverEvalConfigs, discoverEvalFiles } from "../discover";
 
 let root: string;
 
@@ -38,5 +38,24 @@ describe("discoverEvalFiles", () => {
 
   test("returns empty when there is no config/agents dir", () => {
     expect(discoverEvalFiles(root)).toEqual([]);
+  });
+});
+
+describe("discoverEvalConfigs", () => {
+  test("finds each agent's evals.config.ts, omits agents without one", () => {
+    write("config/agents/support/evals/basic.eval.ts");
+    write("config/agents/support/evals/evals.config.ts");
+    write("config/agents/analyst/evals/sql.eval.ts");
+
+    const found = discoverEvalConfigs(root);
+
+    expect(found.map((c) => c.agent)).toEqual(["support"]);
+    expect(found[0].file).toBe(
+      path.join(root, "config/agents/support/evals/evals.config.ts"),
+    );
+  });
+
+  test("returns empty when there is no config/agents dir", () => {
+    expect(discoverEvalConfigs(root)).toEqual([]);
   });
 });

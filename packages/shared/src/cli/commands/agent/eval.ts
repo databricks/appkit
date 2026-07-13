@@ -25,6 +25,7 @@ interface EvalRunner {
     rootDir?: string;
     baseUrl: string;
     filter?: string;
+    tags?: string[];
     strict?: boolean;
     headers?: Record<string, string>;
     mlflow?: { host: string; token: string; experimentId: string };
@@ -32,6 +33,7 @@ interface EvalRunner {
     workspaceClient?: unknown;
     warehouseId?: string;
     maxConcurrency?: number;
+    timeoutMs?: number;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -83,6 +85,7 @@ interface EvalOptions {
   strict?: boolean;
   root?: string;
   header?: string[];
+  tag?: string[];
   profile?: string;
   databricksHost?: string;
   databricksToken?: string;
@@ -90,6 +93,7 @@ interface EvalOptions {
   judgeModel?: string;
   warehouse?: string;
   concurrency?: string;
+  timeout?: string;
   minPassRate?: string;
 }
 
@@ -140,6 +144,13 @@ async function runAgentEval(
   const maxConcurrency =
     parsedConcurrency && parsedConcurrency > 0 ? parsedConcurrency : undefined;
 
+  // Runner-level default per-eval timeout (ms). A per-eval `timeoutMs` wins.
+  const parsedTimeout = opts.timeout
+    ? Number.parseInt(opts.timeout, 10)
+    : undefined;
+  const timeoutMs =
+    parsedTimeout && parsedTimeout > 0 ? parsedTimeout : undefined;
+
   // Stream progress as evals run, instead of going silent until the end.
   const onEvent = (event: EvalProgress): void => {
     switch (event.type) {
@@ -170,6 +181,7 @@ async function runAgentEval(
     rootDir: opts.root,
     baseUrl: opts.url,
     filter,
+    tags: opts.tag,
     strict: opts.strict,
     headers: opts.header ? parseHeaders(opts.header) : undefined,
     mlflow,
@@ -177,6 +189,7 @@ async function runAgentEval(
     workspaceClient,
     warehouseId,
     maxConcurrency,
+    timeoutMs,
     onEvent,
   });
   console.log(`\n${runner.formatSummaryLine(summary.results)}`);
@@ -246,6 +259,10 @@ export const agentEvalCommand = new Command("eval")
     "Extra request header as 'Key: value' (repeatable)",
   )
   .option(
+    "--tag <tag...>",
+    "Only run evals tagged with one of these tags (repeatable)",
+  )
+  .option(
     "--profile <name>",
     "Databricks CLI profile to authenticate with via OAuth (default: DATABRICKS_CONFIG_PROFILE)",
   )
@@ -272,6 +289,10 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--concurrency <n>",
     "Max evals/dataset rows to drive concurrently (default: 1, serial)",
+  )
+  .option(
+    "--timeout <ms>",
+    "Default per-eval timeout in ms (a per-eval timeoutMs overrides it)",
   )
   .option(
     "--min-pass-rate <rate>",

@@ -11,9 +11,25 @@ export interface DiscoveredEval {
   agent: string;
 }
 
+/** A per-agent `evals.config.ts` found under `config/agents/<agent>/evals/`. */
+export interface DiscoveredEvalConfig {
+  /** Absolute path to the `evals.config.ts` file. */
+  file: string;
+  /** The agent id whose evals this config applies to. */
+  agent: string;
+}
+
 function isDir(p: string): boolean {
   try {
     return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
   } catch {
     return false;
   }
@@ -73,4 +89,31 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
   return out.sort(
     (a, b) => a.agent.localeCompare(b.agent) || a.id.localeCompare(b.id),
   );
+}
+
+/**
+ * Discover the per-agent `evals.config.ts` (from {@link defineEvalConfig}) at
+ * `<rootDir>/config/agents/<agent>/evals/evals.config.ts`. Config is per-agent:
+ * each agent's config applies only to that agent's evals. Agents without a
+ * config file are omitted. Returns a stable, sorted list.
+ */
+export function discoverEvalConfigs(rootDir: string): DiscoveredEvalConfig[] {
+  const agentsDir = path.join(rootDir, "config", "agents");
+  const out: DiscoveredEvalConfig[] = [];
+
+  let agents: string[];
+  try {
+    agents = readdirSync(agentsDir).filter((n) =>
+      isDir(path.join(agentsDir, n)),
+    );
+  } catch {
+    return out;
+  }
+
+  for (const agent of agents) {
+    const file = path.join(agentsDir, agent, "evals", "evals.config.ts");
+    if (isFile(file)) out.push({ file, agent });
+  }
+
+  return out.sort((a, b) => a.agent.localeCompare(b.agent));
 }

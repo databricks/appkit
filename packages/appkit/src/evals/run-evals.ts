@@ -2,13 +2,17 @@ import { pathToFileURL } from "node:url";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { MlflowClient } from "../connectors/mlflow";
 import { type DatasetRow, readEvalDataset } from "./dataset";
-import { discoverEvalFiles } from "./discover";
+import {
+  type DiscoveredEval,
+  discoverEvalConfigs,
+  discoverEvalFiles,
+} from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge } from "./judge";
 import { type ReportOutcome, reportToMlflow } from "./mlflow-report";
 import { createEvalRun, type FinishOutcome, finishEvalRun } from "./mlflow-run";
 import { runEval } from "./run-eval";
-import type { EvalDefinition, EvalResult } from "./types";
+import type { EvalConfig, EvalDefinition, EvalResult } from "./types";
 
 export interface RunEvalsOptions {
   /** Project root containing `config/agents/`. Defaults to `process.cwd()`. */
@@ -17,6 +21,11 @@ export interface RunEvalsOptions {
   baseUrl: string;
   /** Substring filter on `<agent>/<id>` (or an exact agent id). */
   filter?: string;
+  /**
+   * Only run evals whose `tags` intersect this list. Empty/undefined runs all.
+   * Tags live on the eval def, so filtering happens after each file is loaded.
+   */
+  tags?: string[];
   /** Soft assertion failures also fail the eval. */
   strict?: boolean;
   /** Extra request headers for the driver (e.g. auth for a deployed app). */
@@ -44,8 +53,14 @@ export interface RunEvalsOptions {
   /**
    * Max evals/dataset rows to drive concurrently. Defaults to `1` (serial).
    * Values below 1 are clamped to 1. Output order is preserved regardless.
+   * Wins over an agent's `evals.config.ts` `maxConcurrency`.
    */
   maxConcurrency?: number;
+  /**
+   * Default per-eval timeout (ms). A per-eval `def.timeoutMs` overrides it.
+   * Wins over an agent's `evals.config.ts` `timeoutMs`.
+   */
+  timeoutMs?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
   onEvent?: (event: EvalProgress) => void;
 }
@@ -63,12 +78,11 @@ export interface EvalRunSummary {
 }
 
 /**
- * Load a `*.eval.ts` file and return its default-exported {@link EvalDefinition}.
- * Uses tsx's programmatic loader so TypeScript eval files run without a build
- * step. The specifier is indirected so the type checker doesn't try to resolve
- * tsx's internal entry.
+ * Import a TypeScript file with tsx's programmatic loader so eval files run
+ * without a build step. The specifier is indirected so the type checker doesn't
+ * try to resolve tsx's internal entry.
  */
-async function loadEval(file: string): Promise<EvalDefinition> {
+async function tsImportFile(file: string): Promise<unknown> {
   const tsxApi = "tsx/esm/api";
   let tsImport: (specifier: string, parentURL: string) => Promise<unknown>;
   try {
@@ -80,13 +94,50 @@ async function loadEval(file: string): Promise<EvalDefinition> {
       "Running .eval.ts files requires `tsx`. Install it as a dev dependency (`pnpm add -D tsx`).",
     );
   }
+  return tsImport(pathToFileURL(file).href, import.meta.url);
+}
 
-  const mod = await tsImport(pathToFileURL(file).href, import.meta.url);
+/**
+ * Load a `*.eval.ts` file and return its default-exported {@link EvalDefinition}.
+ */
+async function loadEval(file: string): Promise<EvalDefinition> {
+  const mod = await tsImportFile(file);
   const def = resolveEvalDefault(mod);
   if (!def) {
     throw new Error(`${file}: must default-export defineEval({ test })`);
   }
   return def;
+}
+
+/**
+ * Load an `evals.config.ts` file and return its default-exported
+ * {@link EvalConfig}. A malformed/missing default surfaces as `undefined` so a
+ * bad config never aborts a whole run.
+ */
+async function loadEvalConfig(file: string): Promise<EvalConfig | undefined> {
+  const mod = await tsImportFile(file);
+  return resolveConfigDefault(mod);
+}
+
+/**
+ * Unwrap the config default export across module-interop shapes (see
+ * {@link resolveEvalDefault}). A config has no `.test`, so the first plain
+ * object reached through the `default` chain is taken as the config.
+ */
+export function resolveConfigDefault(mod: unknown): EvalConfig | undefined {
+  const seen = new Set<unknown>();
+  let candidate: unknown = mod;
+  for (let i = 0; i < 4 && candidate && !seen.has(candidate); i++) {
+    const next = (candidate as { default?: unknown }).default;
+    if (next === undefined) {
+      return typeof candidate === "object"
+        ? (candidate as EvalConfig)
+        : undefined;
+    }
+    seen.add(candidate);
+    candidate = next;
+  }
+  return undefined;
 }
 
 /**
@@ -136,6 +187,19 @@ export async function runBounded<T, R>(
   return results;
 }
 
+/**
+ * Whether an eval's `tags` satisfy a `--tag` filter: `true` when the filter is
+ * empty/undefined (no filtering), otherwise only when the eval shares at least
+ * one tag with it. An eval with no tags never matches a non-empty filter.
+ */
+export function matchesTags(
+  defTags: string[] | undefined,
+  filterTags: string[] | undefined,
+): boolean {
+  if (!filterTags || filterTags.length === 0) return true;
+  return defTags?.some((t) => filterTags.includes(t)) ?? false;
+}
+
 /** One unit of work: a single {@link runEval} call bound to its output slot. */
 interface WorkItem {
   /** File index (used for progress `index`, matches serial behavior). */
@@ -146,6 +210,11 @@ interface WorkItem {
   /** Parent dir agent, used when `def.agent` is unset. */
   dirAgent: string;
   row: DatasetRow | undefined;
+  /**
+   * Runner-level default timeout (ms) for this item, resolved from CLI options
+   * then the agent's `evals.config.ts`. `def.timeoutMs` still overrides it.
+   */
+  timeoutMs?: number;
   /** Set when the file failed to load or the dataset failed to read. */
   error?: string;
 }
@@ -170,7 +239,59 @@ export async function runEvalsInDir(
   }
 
   const emit = options.onEvent ?? (() => {});
-  const total = discovered.length;
+
+  // Load each agent's `evals.config.ts` (best-effort, per-agent): its settings
+  // apply only to that agent's evals. A malformed/missing config never aborts
+  // the run — the agent just falls back to CLI options and built-in defaults.
+  const configs = new Map<string, EvalConfig>();
+  for (const c of discoverEvalConfigs(root)) {
+    try {
+      const cfg = await loadEvalConfig(c.file);
+      if (cfg) configs.set(c.agent, cfg);
+    } catch {
+      // Ignore: fall back to CLI options / defaults for this agent.
+    }
+  }
+
+  // Load each eval def and apply the `--tag` filter up front. Tags live on the
+  // def, so a tag miss removes the eval entirely (like the substring filter
+  // excludes files) rather than surfacing as a result. Load failures are kept
+  // so a broken file still reports as a non-passing result.
+  const loaded: Array<{
+    d: DiscoveredEval;
+    def: EvalDefinition;
+    loadError?: string;
+  }> = [];
+  for (const d of discovered) {
+    let def: EvalDefinition;
+    try {
+      def = await loadEval(d.file);
+    } catch (err) {
+      loaded.push({
+        d,
+        // No def loaded; placeholder def is never run (error short-circuits).
+        def: { test: () => {} },
+        loadError: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (!matchesTags(def.tags, options.tags)) continue;
+    loaded.push({ d, def });
+  }
+
+  // `evals.config.ts` `maxConcurrency` governs the single shared work pool, so
+  // it can't be applied per-agent without splitting the pool. CLI wins; else
+  // the highest value any agent's config requests (the pool ceiling); else 1.
+  const configMaxConcurrency = [...configs.values()]
+    .map((c) => c.maxConcurrency)
+    .filter((n): n is number => typeof n === "number")
+    .reduce<number | undefined>(
+      (max, n) => (max === undefined ? n : Math.max(max, n)),
+      undefined,
+    );
+  const maxConcurrency = options.maxConcurrency ?? configMaxConcurrency ?? 1;
+
+  const total = loaded.length;
   emit({ type: "discovered", total });
 
   if (options.judge) {
@@ -196,29 +317,29 @@ export async function runEvalsInDir(
     emit({ type: "run-created", runId });
   }
 
-  // Expand discovered files into a flat, ordered work list SERIALLY: loading
-  // an eval and reading its dataset are cheap next to the agent turns, and
-  // doing them in order preserves both output ordering and error handling
-  // (a load/dataset failure becomes a non-passing result in its own slot).
-  // `total` counts eval files, not dataset rows: per-row detail is carried in
-  // the result id (`[row i/n]`).
+  // Expand the loaded evals into a flat, ordered work list SERIALLY: reading a
+  // dataset is cheap next to the agent turns, and doing it in order preserves
+  // both output ordering and error handling (a dataset failure becomes a
+  // non-passing result in its own slot). `total` counts eval files, not dataset
+  // rows: per-row detail is carried in the result id (`[row i/n]`).
   const items: WorkItem[] = [];
-  for (let index = 0; index < discovered.length; index++) {
-    const d = discovered[index];
+  for (let index = 0; index < loaded.length; index++) {
+    const { d, def, loadError } = loaded[index];
     const id = `${d.agent}/${d.id}`;
 
-    let def: EvalDefinition | undefined;
-    try {
-      def = await loadEval(d.file);
-    } catch (err) {
+    // Runner default timeout for this agent: CLI wins over its config value;
+    // a per-eval `def.timeoutMs` overrides both (applied inside runEval).
+    const timeoutMs = options.timeoutMs ?? configs.get(d.agent)?.timeoutMs;
+
+    if (loadError) {
       items.push({
         index,
         rowId: id,
-        // No def loaded; placeholder def is never run (error short-circuits).
-        def: { test: () => {} },
+        def,
         dirAgent: d.agent,
         row: undefined,
-        error: err instanceof Error ? err.message : String(err),
+        timeoutMs,
+        error: loadError,
       });
       continue;
     }
@@ -256,6 +377,7 @@ export async function runEvalsInDir(
         def,
         dirAgent: d.agent,
         row: rows[r],
+        timeoutMs,
         error: datasetError,
       });
     }
@@ -267,7 +389,7 @@ export async function runEvalsInDir(
   // interleave when maxConcurrency > 1.
   const results = await runBounded(
     items,
-    options.maxConcurrency ?? 1,
+    maxConcurrency,
     async (item): Promise<EvalResult> => {
       emit({ type: "start", id: item.rowId, index: item.index, total });
 
@@ -295,6 +417,7 @@ export async function runEvalsInDir(
           driver,
           strict: options.strict,
           row: item.row,
+          timeoutMs: item.timeoutMs,
         });
       }
 

@@ -268,4 +268,63 @@ describe("runEval", () => {
     });
     expect(result.passed).toBe(true);
   });
+
+  test("def.timeoutMs turns a hanging test into a non-passing timeout result", async () => {
+    const def = defineEval({
+      timeoutMs: 20,
+      async test() {
+        // Never resolves; only the timeout can settle the eval.
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, { id: "hang", driver: fakeDriver({}) });
+    expect(result.passed).toBe(false);
+    expect(result.error).toBe("eval timed out after 20ms");
+  });
+
+  test("a fast eval passes well under the same timeout", async () => {
+    const def = defineEval({
+      timeoutMs: 20,
+      async test(t) {
+        await t.send("hi");
+        t.succeeded();
+      },
+    });
+    const result = await runEval(def, {
+      id: "fast",
+      driver: fakeDriver({ succeeded: true }),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("RunEvalOptions.timeoutMs applies when the def has none", async () => {
+    const def = defineEval({
+      async test() {
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, {
+      id: "runner-timeout",
+      driver: fakeDriver({}),
+      timeoutMs: 20,
+    });
+    expect(result.passed).toBe(false);
+    expect(result.error).toBe("eval timed out after 20ms");
+  });
+
+  test("def.timeoutMs overrides the runner-level default", async () => {
+    const def = defineEval({
+      timeoutMs: 15,
+      async test() {
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, {
+      id: "per-eval-wins",
+      driver: fakeDriver({}),
+      timeoutMs: 5000,
+    });
+    expect(result.error).toBe("eval timed out after 15ms");
+  });
 });
