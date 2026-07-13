@@ -660,6 +660,244 @@ appkit.agents.reload();             // re-scan the directory
 appkit.agents.getThreads(userId);   // list user's threads
 ```
 
+## Evaluating agents
+
+AppKit ships an eve-style eval framework for the agents you build here. You author evals in TypeScript with `defineEval`, drive the agent by sending it messages, and assert on its reply and tool usage with deterministic matchers or LLM judges. Evals run against a **running app** over HTTP (`--url`), and — with Databricks creds and an experiment — report to MLflow as native "Evaluation runs" with per-assertion and per-judge feedback attached to each turn's trace. The eval API is part of the beta surface: import it from `@databricks/appkit/beta`.
+
+Evals live beside each agent: `config/agents/<agent-id>/evals/*.eval.ts`. Each file default-exports one `defineEval({ test })`. The agent under test defaults to the parent `<agent-id>` directory; set `agent:` to target a different one.
+
+### A first eval
+
+```ts
+// config/agents/query/evals/smoke.eval.ts
+import { defineEval } from "@databricks/appkit/beta";
+
+export default defineEval({
+  description: "Query agent responds to a greeting",
+  async test(t) {
+    await t.send("Hi there!");
+    t.succeeded(); // gate: the turn completed without an agent/stream error
+  },
+});
+```
+
+Start the app, then run the evals against it:
+
+```bash
+# the app must be running and reachable at --url
+appkit agent eval --url http://localhost:3000
+
+# scope to one agent/eval by substring, and point at a project root
+appkit agent eval query --root apps/dev-playground --url http://localhost:3000
+```
+
+The positional `[filter]` matches evals whose `<agent>/<id>` contains the substring (or an exact agent id). The command discovers every `*.eval.ts` under `config/agents/*/evals/`, drives each against the running app, and exits non-zero if any gate fails.
+
+### Assertions
+
+Every assertion returns a chainable handle. Assertions are **gates by default** — a failure fails the eval (non-zero exit). Chain `.soft()` to demote to a tracked-only metric, `.gate()` to promote a soft assertion back, or `.atLeast(n)` to set the pass threshold on a scored assertion.
+
+| Assertion | Passes when |
+|---|---|
+| `t.succeeded()` | The last turn completed without an agent/stream error. |
+| `t.calledTool(name)` | The agent called `name` during the run. |
+| `t.calledToolWith(name, expected)` | `name` was called with arguments that deep-contain `expected` (every key in `expected` matches recursively; extra args are ignored). |
+| `t.check(value, matcher)` | `value` satisfies the matcher — `includes(substring)`, `equals(expected)`, or `matches(pattern)`. |
+
+```ts
+import { defineEval, includes } from "@databricks/appkit/beta";
+
+export default defineEval({
+  description: "Helper agent answers a math question",
+  agent: "helper",
+  async test(t) {
+    await t.send("What is 2 + 2?");
+    t.succeeded();                          // gate
+    t.check(t.reply, includes("4")).soft(); // tracked metric, won't fail the gate
+  },
+});
+```
+
+```ts
+// deep-partial tool-arg check
+await t.send("What's the weather in Brooklyn?");
+t.calledTool("get_weather");
+t.calledToolWith("get_weather", { city: "Brooklyn" });
+```
+
+Call `t.skip("reason")` to skip an eval, and read `t.reply`, `t.toolCalls`, and `t.sessionId` to inspect the last turn.
+
+### LLM-as-judge
+
+`t.judge.*` scores the last reply with an LLM judge (via `autoevals` pointed at a Databricks serving endpoint). Each judge returns a scored assertion (0..1) that **gates by default** — a miss fails the eval. Chain `.atLeast(n)` to set the pass threshold, or `.soft()` to track it only. Judges require a judge model: pass `--judge-model <endpoint>` (or set `APPKIT_JUDGE_MODEL`) plus Databricks auth; without one, `t.judge.*` throws with a clear message.
+
+```ts
+async test(t) {
+  await t.send("What's the weather in Brooklyn?");
+  t.succeeded();
+
+  // closedQA needs no ground truth — it judges the reply against a question.
+  (await t.judge.closedQA(
+    "Does the response describe weather conditions for Brooklyn?",
+  )).atLeast(0.5);
+}
+```
+
+- `t.judge.factuality(expected)` — score the reply against an expected reference answer.
+- `t.judge.closedQA(criteria)` — score whether the reply answers the question, per `criteria`.
+- `t.judge.custom(spec)` — a prompt-template judge (`{ name, promptTemplate, choiceScores }`), the TS analog of MLflow's `@scorer`.
+
+Guard judge calls with `isJudgeConfigured()` when an eval should still exercise the drive path without a judge model configured:
+
+```ts
+import { defineEval, isJudgeConfigured } from "@databricks/appkit/beta";
+// ...
+if (isJudgeConfigured()) {
+  (await t.judge.closedQA(guideline)).atLeast(0.5);
+}
+```
+
+### Conversations
+
+Each `t.send` is one user turn. How you sequence them controls the thread:
+
+```ts
+// One-shot: a single turn.
+await t.send("Summarize Q3 revenue.");
+t.succeeded();
+
+// Multi-turn: consecutive sends share one thread, so the agent sees history.
+await t.send("Show me the orders table.");
+await t.send("Now filter it to last week.");
+t.succeeded();
+
+// t.reset() drops the conversation: the next send opens a fresh thread with
+// no history. Use it to run several independent one-shot checks in one test.
+await t.send("What's 2 + 2?");
+t.check(t.reply, includes("4"));
+t.reset();
+await t.send("What's the capital of France?");
+t.check(t.reply, includes("Paris"));
+```
+
+### Datasets
+
+Add `dataset: { table }` to sweep a Databricks **managed evaluation dataset** — a Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns. The eval runs once per row; the runner binds each row's `inputs` to `t.input` and `expectations` to `t.expected`. Reading the dataset requires a workspace client and warehouse (`--warehouse` + auth).
+
+```ts
+import { defineEval, isJudgeConfigured, userTurns } from "@databricks/appkit/beta";
+
+export default defineEval({
+  description: "Query agent satisfies each dataset row's guidelines",
+  dataset: { table: "main.mario.appkit_eval_dataset" }, // optional `limit?`
+  async test(t) {
+    // Replay every user turn in the row against one thread, so the agent sees
+    // the accumulating conversation. A single-user-turn row sends once.
+    for (const turn of userTurns(t.input)) {
+      await t.send(turn);
+    }
+    t.succeeded();
+
+    if (isJudgeConfigured()) {
+      for (const guideline of guidelines(t.expected)) {
+        (await t.judge.closedQA(guideline)).atLeast(0.5);
+      }
+    }
+  },
+});
+```
+
+The row shapes match the MLflow managed-dataset UI:
+
+```
+inputs        {"messages":[{"role":"user","content":"..."}]}
+expectations  {"guidelines":{"value":["...","..."]}}   (optional)
+```
+
+`userTurns(t.input)` extracts every `role: "user"` message content in order from the `{messages:[...]}` input — a row can carry a full multi-turn conversation, and replaying each user turn against one thread lets the agent build up history (interleaved assistant/system turns are ignored; the agent generates its own). Read `expectations.guidelines.value` yourself; the UI wraps the array as `{value: [...]}`:
+
+```ts
+function guidelines(expected: Record<string, unknown> | undefined): string[] {
+  const g = (expected?.guidelines as { value?: unknown } | undefined)?.value;
+  return Array.isArray(g) ? g.map(String) : [];
+}
+```
+
+Run a dataset eval:
+
+```bash
+appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000 \
+  --profile <profile> --warehouse <warehouse-id> --judge-model <endpoint>
+```
+
+### Running evals & CI
+
+`appkit agent eval [filter]` — run agent evals (`config/agents/<id>/evals/*.eval.ts`) against a running app.
+
+| Flag | Description |
+|---|---|
+| `[filter]` | Only run evals whose `<agent>/<id>` contains this substring (or an exact agent id) |
+| `--url <url>` | Base URL of the running app (default `http://localhost:3000`) |
+| `--strict` | Fail on soft-assertion misses too |
+| `--root <dir>` | Project root containing `config/agents/` (default: cwd) |
+| `--header <header...>` | Extra request header as `'Key: value'` (repeatable) |
+| `--tag <tag...>` | Only run evals tagged with one of these tags (repeatable) |
+| `--profile <name>` | Databricks CLI profile to authenticate with via OAuth (default: `DATABRICKS_CONFIG_PROFILE`) |
+| `--databricks-host <host>` | Databricks host for writing MLflow assessments (default: `DATABRICKS_HOST`) |
+| `--databricks-token <token>` | Databricks token for writing MLflow assessments (default: `DATABRICKS_TOKEN`) |
+| `--experiment <id>` | MLflow experiment id for the evaluation run (default: `MLFLOW_EXPERIMENT_ID`) |
+| `--warehouse <id>` | SQL warehouse id for reading managed evaluation datasets (default: `DATABRICKS_WAREHOUSE_ID`) |
+| `--judge-model <endpoint>` | Databricks serving endpoint to use as the LLM judge for `t.judge.*` (default: `APPKIT_JUDGE_MODEL`) |
+| `--concurrency <n>` | Max evals/dataset rows to drive concurrently (default: 1, serial) |
+| `--timeout <ms>` | Default per-eval timeout in ms (a per-eval `timeoutMs` overrides it) |
+| `--retries <n>` | Re-run an eval up to N times when it fails on an infra error (turn/timeout); assertion failures are not retried |
+| `--min-pass-rate <rate>` | Gate on aggregate pass rate (0..1) instead of requiring every eval to pass; exit 1 when below |
+| `--reporter <format>` | Report format: `text` (live console), `json` (dashboards), or `junit` (CI test reporters) |
+| `--output <file>` | Write the json/junit report to this file instead of stdout (ignored for text) |
+
+Notes:
+
+- **Auth is OAuth-first.** `--profile <name>` mints an OAuth token from your Databricks CLI profile — no PAT needed. An explicit `--databricks-host`/`--databricks-token` (or the `DATABRICKS_*` env vars) wins over the profile.
+- **`--retries` only absorbs infra flakiness.** A retry fires only when an eval throws or times out (`result.error` set); a wrong reply is real signal and is never retried. Each attempt gets a fresh driver.
+- **Gating.** By default the run exits non-zero if any eval fails. `--min-pass-rate 0.9` switches to threshold mode: it exits non-zero only when the aggregate pass rate drops below the threshold. `--strict` additionally treats soft-assertion misses as failures.
+- **CI reports.** `--reporter junit --output results.xml` writes a JUnit file for CI test reporters; `--reporter json` emits machine-readable results. In machine reporters, human-facing lines go to stderr so stdout stays clean for the report.
+
+```bash
+# CI: gate on 90% pass rate, emit JUnit, authenticate + report to MLflow
+appkit agent eval --url "$APP_URL" \
+  --profile ci \
+  --experiment "$MLFLOW_EXPERIMENT_ID" \
+  --concurrency 4 --retries 1 \
+  --min-pass-rate 0.9 \
+  --reporter junit --output eval-results.xml
+```
+
+### Per-directory config
+
+Drop an `evals.config.ts` beside an agent's evals to set defaults for that agent's runs:
+
+```ts
+// config/agents/query/evals/evals.config.ts
+import { defineEvalConfig } from "@databricks/appkit/beta";
+
+export default defineEvalConfig({
+  maxConcurrency: 4,   // run up to 4 evals/rows concurrently
+  timeoutMs: 30_000,   // default per-eval timeout
+});
+```
+
+Precedence: a **CLI flag** wins over the **`evals.config.ts`** value, which wins over the **built-in default** (concurrency `1`, no timeout). A per-eval `def.timeoutMs` overrides both for that eval.
+
+### MLflow reporting
+
+When `--experiment <id>` (or `MLFLOW_EXPERIMENT_ID`) is set together with Databricks auth, the runner creates a native MLflow **Evaluation run** up front. As each eval runs against the app, its turn trace is linked to the run, and every assertion and judge score is written back as feedback on that trace:
+
+- Each deterministic assertion becomes a `CODE`-sourced Feedback with a boolean value.
+- Each judge assertion becomes an `LLM_JUDGE`-sourced Feedback with its numeric 0..1 score and rationale.
+- An overall `appkit_eval` pass/fail Feedback is attached per eval, and aggregate metrics are logged when the run finishes.
+
+Skip `--experiment` (and `MLFLOW_EXPERIMENT_ID`) to run evals purely locally with no MLflow side effects — the CLI prints a reminder that the evaluation run was skipped.
+
 ## Frontmatter schema
 
 | Key | Type | Notes |
