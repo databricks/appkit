@@ -22,6 +22,14 @@ class SkipSignal extends Error {
   }
 }
 
+/** Rejects the test race when a per-eval timeout elapses. */
+class TimeoutSignal extends Error {
+  constructor(ms: number) {
+    super(`eval timed out after ${ms}ms`);
+    this.name = "TimeoutSignal";
+  }
+}
+
 /**
  * Deep partial match: every key in `expected` is present in `actual` and equal,
  * recursing into nested plain objects so extra actual keys are ignored.
@@ -49,6 +57,11 @@ export interface RunEvalOptions {
   strict?: boolean;
   /** Dataset row bound to `t.input`/`t.expected` for dataset-driven evals. */
   row?: DatasetRow;
+  /**
+   * Runner-level default per-eval timeout (ms). `def.timeoutMs` wins over this;
+   * when both are unset the eval runs unbounded (current behavior).
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -208,8 +221,26 @@ export async function runEval(
     },
   };
 
+  // `def.timeoutMs` (per-eval) wins over the runner default; when both are
+  // unset the eval runs unbounded (undefined = no timeout).
+  const timeoutMs = def.timeoutMs ?? options.timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
-    await def.test(t);
+    if (timeoutMs === undefined) {
+      await def.test(t);
+    } else {
+      // Race the test against a timeout; on elapse the sentinel rejects and we
+      // convert it to a non-passing result. The timer is cleared in `finally`
+      // so it can't keep the process alive after the test settles.
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new TimeoutSignal(timeoutMs)),
+          timeoutMs,
+        );
+      });
+      await Promise.race([Promise.resolve(def.test(t)), timeout]);
+    }
   } catch (err) {
     if (err instanceof SkipSignal) {
       return {
@@ -229,6 +260,8 @@ export async function runEval(
       error: err instanceof Error ? err.message : String(err),
       traceId: lastTraceId,
     };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const passed = assertions.every(

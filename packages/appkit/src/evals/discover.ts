@@ -1,4 +1,4 @@
-import { type Dirent, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { agentDirNames } from "../core/agent/agent-dirs";
@@ -11,6 +11,14 @@ export interface DiscoveredEval {
   /** Id relative to the agent's evals dir, without `.eval.ts` (e.g. `weather/basic`). */
   id: string;
   /** The agent id (the `server/agents/<agent>` directory name). */
+  agent: string;
+}
+
+/** A per-agent `evals.config.ts` found under `server/agents/<agent>/evals/`. */
+export interface DiscoveredEvalConfig {
+  /** Absolute path to the `evals.config.ts` file. */
+  file: string;
+  /** The agent id whose evals this config applies to. */
   agent: string;
 }
 
@@ -57,4 +65,29 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
   return out.sort(
     (a, b) => a.agent.localeCompare(b.agent) || a.id.localeCompare(b.id),
   );
+}
+
+/**
+ * Discover the per-agent `evals.config.ts` (from {@link defineEvalConfig}) at
+ * `<rootDir>/server/agents/<agent>/evals/evals.config.ts`. Config is per-agent:
+ * each agent's config applies only to that agent's evals. Agents without a
+ * config file are omitted. Returns a stable, sorted list.
+ */
+export function discoverEvalConfigs(rootDir: string): DiscoveredEvalConfig[] {
+  const agentsDir = path.join(rootDir, CODE_AGENTS_SOURCE_DIR);
+  const out: DiscoveredEvalConfig[] = [];
+
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(agentsDir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+
+  for (const agent of agentDirNames(entries)) {
+    const file = path.join(agentsDir, agent, "evals", "evals.config.ts");
+    if (existsSync(file)) out.push({ file, agent });
+  }
+
+  return out.sort((a, b) => a.agent.localeCompare(b.agent));
 }
