@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { discoverEvalConfigs, discoverEvalFiles } from "../discover";
+import {
+  discoverEvalConfigs,
+  discoverEvalFiles,
+  findRootEvalConfig,
+} from "../discover";
 
 let root: string;
 
@@ -59,5 +63,17 @@ describe("discoverEvalConfigs", () => {
 
   test("returns empty when there is no server/agents dir", () => {
     expect(discoverEvalConfigs(root)).toEqual([]);
+  });
+});
+
+describe("findRootEvalConfig", () => {
+  test("finds a root evals.config.ts", () => {
+    write("evals.config.ts");
+    expect(findRootEvalConfig(root)).toBe(path.join(root, "evals.config.ts"));
+  });
+
+  test("returns undefined when absent (and ignores per-agent configs)", () => {
+    write("config/agents/support/evals/evals.config.ts");
+    expect(findRootEvalConfig(root)).toBeUndefined();
   });
 });

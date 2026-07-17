@@ -7,6 +7,7 @@ import {
   type DiscoveredEval,
   discoverEvalConfigs,
   discoverEvalFiles,
+  findRootEvalConfig,
 } from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge, teardownJudge } from "./judge";
@@ -134,6 +135,20 @@ async function loadEval(file: string): Promise<EvalDefinition> {
 async function loadEvalConfig(file: string): Promise<EvalConfig | undefined> {
   const mod = await tsImportFile(file);
   return resolveConfigDefault(mod);
+}
+
+/**
+ * Load the root `evals.config.ts` under `rootDir` (the project root), or return
+ * `undefined` when there is none. This is the run-wide config carrying
+ * `baseUrl`/`webServer`; the CLI reads it to resolve options and manage the
+ * app-under-test lifecycle before calling {@link runEvalsInDir}.
+ */
+export async function loadRootEvalConfig(
+  rootDir: string,
+): Promise<EvalConfig | undefined> {
+  const file = findRootEvalConfig(rootDir);
+  if (!file) return undefined;
+  return loadEvalConfig(file);
 }
 
 /**
