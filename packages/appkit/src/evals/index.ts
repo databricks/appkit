@@ -19,6 +19,7 @@ export {
   type DiscoveredEvalConfig,
   discoverEvalConfigs,
   discoverEvalFiles,
+  findRootEvalConfig,
 } from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";
 export {
@@ -49,6 +50,7 @@ export { type RunEvalOptions, runEval } from "./run-eval";
 export {
   type EvalProgress,
   type EvalRunSummary,
+  loadRootEvalConfig,
   type RunEvalsOptions,
   runEvalsInDir,
   runWithRetries,
@@ -61,6 +63,7 @@ export type {
   EvalDefinition,
   EvalDriver,
   EvalResult,
+  EvalWebServer,
   Matcher,
   MatchResult,
   Severity,

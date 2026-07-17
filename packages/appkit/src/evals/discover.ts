@@ -77,6 +77,17 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
 }
 
 /**
+ * Path to the root `evals.config.ts` (from {@link defineEvalConfig}) at
+ * `<rootDir>/evals.config.ts`, or `undefined` when absent. The root config
+ * holds run-wide settings (`baseUrl`, `webServer`); it's distinct from the
+ * per-agent configs found by {@link discoverEvalConfigs}.
+ */
+export function findRootEvalConfig(rootDir: string): string | undefined {
+  const file = path.join(rootDir, "evals.config.ts");
+  return isFile(file) ? file : undefined;
+}
+
+/**
  * Discover the per-agent `evals.config.ts` (from {@link defineEvalConfig}) at
  * `<rootDir>/server/agents/<agent>/evals/evals.config.ts`. Config is per-agent:
  * each agent's config applies only to that agent's evals. Agents without a
