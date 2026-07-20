@@ -391,6 +391,72 @@ describe("AppKit", () => {
     });
   });
 
+  describe("devOnly plugins", () => {
+    // A plugin whose manifest opts into dev-only registration.
+    class DevOnlyPlugin extends NormalTestPlugin {
+      static manifest = {
+        ...createTestManifest("devOnly"),
+        devOnly: true,
+      };
+      name = "devOnly";
+    }
+
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("registers devOnly plugin when NODE_ENV is development", async () => {
+      process.env.NODE_ENV = "development";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      expect(instance.devOnly).toBeDefined();
+      expect(instance.devOnly.setupCalled).toBe(true);
+    });
+
+    test("skips devOnly plugin when NODE_ENV is production", async () => {
+      process.env.NODE_ENV = "production";
+
+      const instance = (await createApp({
+        plugins: [
+          { plugin: DevOnlyPlugin, config: {}, name: "devOnly" },
+          { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
+        ],
+      })) as any;
+
+      // Dev-only plugin is absent; other plugins register normally.
+      expect(Object.keys(instance)).not.toContain("devOnly");
+      expect(instance.normalTest).toBeDefined();
+      expect(instance.normalTest.setupCalled).toBe(true);
+    });
+
+    test("skips devOnly plugin when NODE_ENV is unset", async () => {
+      process.env.NODE_ENV = undefined;
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      expect(Object.keys(instance)).not.toContain("devOnly");
+    });
+
+    test("skips devOnly plugin when NODE_ENV is test", async () => {
+      process.env.NODE_ENV = "test";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      // Only NODE_ENV === "development" registers a devOnly plugin; anything
+      // else (including "test") fails closed.
+      expect(Object.keys(instance)).not.toContain("devOnly");
+    });
+  });
+
   describe("preparePlugins", () => {
     test("should transform plugin data array to plugin map", () => {
       const pluginData = [

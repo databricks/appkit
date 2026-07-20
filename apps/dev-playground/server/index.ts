@@ -344,8 +344,7 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
-    // Dev-only recorder for the <Variants> UI picker.
-    ...(process.env.NODE_ENV === "development" ? [uiVariants()] : []),
+    uiVariants(),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),

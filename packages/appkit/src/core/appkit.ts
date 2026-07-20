@@ -191,7 +191,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
 
-    const rawPlugins = config.plugins as T;
+    const rawPlugins = AppKit.filterDevOnlyPlugins(config.plugins as T);
 
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();
@@ -249,6 +249,35 @@ export class AppKit<TPlugins extends InputPluginMap> {
     });
     reporter.start();
     reporter.sendStartup().catch(() => {});
+  }
+
+  /**
+   * Drops plugins whose manifest declares `devOnly: true` unless
+   * `NODE_ENV === "development"`. Runs before resource collection so a skipped
+   * plugin is never constructed, never injects routes, and has its resource
+   * requirements ignored — the framework, not the app author, enforces that
+   * dev-only tooling can never run in a deployed app.
+   *
+   * This is the primary guard; plugins that expose a mutating dev endpoint
+   * should still keep an in-handler `NODE_ENV` check as fail-safe defense
+   * against being mounted through a path that bypasses this filter.
+   */
+  private static filterDevOnlyPlugins<
+    T extends PluginData<PluginConstructor, unknown, string>[],
+  >(plugins: T): T {
+    if (!plugins || process.env.NODE_ENV === "development") return plugins;
+
+    return plugins.filter((pluginData) => {
+      const isDevOnly = pluginData?.plugin?.manifest?.devOnly === true;
+      if (isDevOnly) {
+        logger.debug(
+          "Skipping dev-only plugin %s (NODE_ENV=%s)",
+          pluginData?.name ?? "unknown",
+          process.env.NODE_ENV ?? "<unset>",
+        );
+      }
+      return !isDevOnly;
+    }) as T;
   }
 
   private static preparePlugins(

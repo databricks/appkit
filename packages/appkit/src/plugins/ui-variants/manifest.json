@@ -4,6 +4,7 @@
   "displayName": "UI Variants Plugin",
   "description": "Dev-only recorder for the <Variants> UI picker: records the developer's chosen variant so a coding agent can finalize the component source",
   "hidden": true,
+  "devOnly": true,
   "resources": {
     "required": [],
     "optional": []
