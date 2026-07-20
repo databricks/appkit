@@ -10,26 +10,16 @@ import type { MetricRegistration } from "../types";
 import { laneFromExecutor, METRIC_CONFIG_FILE, QUERIES_DIR } from "./constants";
 import type { RegistryCacheSignature } from "./types";
 
-const logger = createLogger("analytics:metric");
+const logger = createLogger("analytics:metric-views");
 
 /**
  * Read and validate `config/queries/metric-views.json` into a metric registry.
  *
  * Async and stateless — registration is a pure config parse with no warehouse
- * round-trip, no `DESCRIBE`, and no build-time metadata bundle. The single
- * `metricViews` map makes keys unique by construction, so there is no
- * cross-lane duplicate-key check. Async I/O (rather than `readFileSync`) keeps
- * the event loop free: metric views are already heavier than a plain `.sql`
- * query on the warehouse side, so the SDK layer must not add a blocking read
- * on top. Caching + mtime-revalidation is layered on top by
- * {@link getMetricRegistry} — this function always hits disk.
+ * round-trip, no `DESCRIBE`, and no build-time metadata bundle.
  *
- * Returns an empty registry when the file is absent: the metric-view path is
- * additive and dormant until an app opts in by adding the config. A malformed
- * file (unreadable, invalid JSON, or schema violation) throws — the caller
- * surfaces a 503 rather than masking a broken deployment as a 404 for every
- * key. The failure is NOT cached (see {@link getMetricRegistry}), so fixing the
- * file heals on the next request.
+ * Absent file -> empty registry.
+ * Malformed file -> 503.
  */
 export async function loadMetricRegistry(
   queriesDir: string = QUERIES_DIR,
@@ -66,9 +56,9 @@ export async function loadMetricRegistry(
   // Null-prototype map so a metric key that collides with an inherited
   // `Object.prototype` member (`__proto__`, `constructor`, `toString`, …)
   // cannot resolve to a truthy non-registration at the `registry[key]` read
-  // site and slip past the unknown-key 404. Keys are still grammar-gated by
-  // `metricKeySchema` (identifier shape), but the null prototype removes the
-  // whole class of inherited-property lookups as a boundary.
+  // site and slip past the unknown-key 404.
+  // Keys are still grammar-gated by `metricKeySchema` (identifier shape),
+  // but the null prototype removes the whole class of inherited-property lookups as a boundary.
   const registry: Record<string, MetricRegistration> = Object.create(null);
   for (const [key, entry] of Object.entries(result.data.metricViews ?? {})) {
     registry[key] = {
@@ -87,12 +77,6 @@ export async function loadMetricRegistry(
 
 /**
  * Module-level registry cache, keyed by the resolved queries directory.
- *
- * Keyed by DIR (not by plugin instance) because the registry is a pure
- * function of the config file at that path — warehouse-independent, and two
- * `AnalyticsPlugin` instances pointed at the same `config/queries/` MUST see
- * the same registry. Instance state would parse the identical file twice and
- * risk divergence; a dir-keyed module cache shares one parse.
  */
 const metricRegistryCache = new Map<
   string,
@@ -164,8 +148,7 @@ export async function getMetricRegistry(
       // Any other stat error (EACCES / EIO / ELOOP / …) is deliberately fatal
       // for THIS request → the route surfaces a 503, consistent with the
       // malformed-config → 503 path. It is not latched: with the self-heal
-      // design a transient error clears on the next request, which is strictly
-      // better than the old memo that could latch-and-serve-stale.
+      // design a transient error clears on the next request.
       throw err;
     }
   }
@@ -184,8 +167,7 @@ export async function getMetricRegistry(
     return cached.registry;
   }
 
-  // Cold or stale: re-read + re-parse. Cache ONLY on success so a malformed
-  // file never latches — the next request re-attempts and heals.
+  // Cold or stale: re-read + re-parse. Cache ONLY on success.
   const registry = await loadMetricRegistry(queriesDir);
   metricRegistryCache.set(queriesDir, { signature, registry });
   return registry;
