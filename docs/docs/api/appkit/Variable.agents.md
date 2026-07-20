@@ -1,7 +1,7 @@
 # Variable: agents
 
 ```ts
-const agents: ToPlugin<typeof AgentsPlugin, AgentsPluginConfig, string>;
+const agents: ToPlugin<typeof AgentsPlugin, AgentsPluginConfig, "agents">;
 ```
 
 Plugin factory for the agents plugin. Reads `config/agents/*.md` by default,

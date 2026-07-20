@@ -104,7 +104,7 @@ describe("scaffold", () => {
       expect(pluginTs).toContain("class MyPlugin");
       expect(pluginTs).toContain("export const myPlugin = toPlugin(MyPlugin)");
       expect(pluginTs).toContain('import manifest from "./manifest.json"');
-      expect(pluginTs).toContain("manifest as PluginManifest");
+      expect(pluginTs).toContain('defineManifest<"my-plugin">(manifest)');
     });
 
     it("generates index.ts with correct exports", () => {

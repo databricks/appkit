@@ -23,7 +23,7 @@ import {
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { createWorkspaceClient } from "../../workspace-client";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
@@ -66,7 +66,7 @@ const OBO_POOL_DEFAULTS = {
  */
 export class LakebasePlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest<"lakebase">;
+  static manifest = defineManifest<"lakebase">(manifest);
 
   declare protected config: ILakebaseConfig;
   private pool: RoutingPool | null = null;

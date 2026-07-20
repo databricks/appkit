@@ -12,7 +12,7 @@ import { AppKitError, ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
@@ -66,7 +66,7 @@ export class ServerPlugin extends Plugin {
   private static readonly SERVER_CLOSE_TIMEOUT_MS = 2_000;
 
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest<"server">;
+  static manifest = defineManifest<"server">(manifest);
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
