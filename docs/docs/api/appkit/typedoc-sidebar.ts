@@ -58,6 +58,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.FileChoiceSink",
+          label: "FileChoiceSink"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.InitializationError",
           label: "InitializationError"
         },
@@ -141,6 +146,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.CacheConfig",
           label: "CacheConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ChoiceSink",
+          label: "ChoiceSink"
         },
         {
           type: "doc",
@@ -334,6 +344,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.UiChoiceRecord",
+          label: "UiChoiceRecord"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
         }
@@ -468,6 +483,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.uiVariants",
+          label: "uiVariants"
         },
         {
           type: "doc",

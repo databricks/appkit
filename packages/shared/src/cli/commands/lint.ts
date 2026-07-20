@@ -38,6 +38,16 @@ const rules: Rule[] = [
     message:
       "parseFloat can return NaN. Validate input or use toNumber() helper from shared/types.ts.",
   },
+  {
+    // <Variants> is the dev-only variant picker from @databricks/appkit-ui,
+    // meant to drive the local edit loop. Finalize the chosen variant before
+    // deploying so the picker chrome never reaches production.
+    id: "no-variants-in-prod",
+    pattern: "<Variants $$$P>$$$C</Variants>",
+    message:
+      "<Variants> is a development-only variant picker and must not be shipped. Finalize the chosen <Variant> before deploying.",
+    includeTests: false,
+  },
 ];
 
 function isTestFile(filePath: string): boolean {

@@ -83,6 +83,13 @@ export type {
   ServingEndpointRegistry,
   ServingFactory,
 } from "./plugins/serving/types";
+// Hand-exported: the hyphenated `ui-variants` folder can't be an auto-export.
+export {
+  type ChoiceSink,
+  FileChoiceSink,
+  type UiChoiceRecord,
+  uiVariants,
+} from "./plugins/ui-variants";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
