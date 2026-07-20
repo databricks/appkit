@@ -29,26 +29,6 @@ export const METRIC_CONFIG_FILE = "metric-views.json";
 export const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
 
 /**
- * The exact twelve filter operators allowed at v1. The runtime tuple is the
- * server-side source of truth; the client-side type union
- * `MetricFilterOperatorName` mirrors these names statically.
- */
-export const METRIC_FILTER_OPERATORS = [
-  "equals",
-  "notEquals",
-  "in",
-  "notIn",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "contains",
-  "notContains",
-  "set",
-  "notSet",
-] as const satisfies readonly MetricFilterOperatorName[];
-
-/**
  * Maximum AND/OR nesting depth. The PRD documents 8 as a sensible cap —
  * enough for any real BI filter UI, low enough that a hostile or malformed
  * payload cannot stack-overflow the recursive validator or translator.
@@ -80,18 +60,6 @@ export const METRIC_LIMIT_MAX = 100_000;
  */
 export const METRIC_FILTER_GROUP_MAX = 100;
 
-/** Operators that require exactly one value. */
-export const SINGLE_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
-  "equals",
-  "notEquals",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "contains",
-  "notContains",
-]);
-
 /** Operators that require at least one value. */
 export const LIST_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
   "in",
@@ -110,6 +78,17 @@ export const STRING_OPERATORS = new Set<MetricFilterOperatorName>([
   "notContains",
 ]);
 
+/** Operators that require exactly one value. */
+export const SINGLE_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
+  "equals",
+  "notEquals",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  ...STRING_OPERATORS,
+]);
+
 /**
  * Map an entry's declared `executor` to the internal execution lane:
  *   - `"user"`                → `"obo"` (per-user cache, on-behalf-of)
@@ -120,3 +99,14 @@ export function laneFromExecutor(
 ): MetricLane {
   return executor === "user" ? "obo" : "sp";
 }
+
+/**
+ * The exact twelve filter operators allowed at v1. The runtime tuple is the
+ * server-side source of truth; the client-side type union
+ * `MetricFilterOperatorName` mirrors these names statically.
+ */
+export const METRIC_FILTER_OPERATORS = [
+  ...SINGLE_VALUE_OPERATORS,
+  ...LIST_VALUE_OPERATORS,
+  ...NULL_OPERATORS,
+] as const satisfies readonly MetricFilterOperatorName[];
