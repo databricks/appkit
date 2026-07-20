@@ -885,7 +885,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName } = parsed.data;
+    const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -939,7 +939,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId);
+    return this._streamAgent(req, res, registered, thread, userId, mlflowRunId);
   }
 
   /**
@@ -1066,6 +1066,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    mlflowRunId?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1130,9 +1131,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           async (span) => {
             // Link this turn's trace to an eval run when the eval runner
             // supplied one, so the trace shows under the MLflow evaluation run.
-            const evalRunId = (req.body as { mlflowRunId?: string })
-              ?.mlflowRunId;
-            if (evalRunId) linkTraceToRun(evalRunId);
+            if (mlflowRunId) linkTraceToRun(mlflowRunId);
 
             const pluginNames = this.context
               ? this.context

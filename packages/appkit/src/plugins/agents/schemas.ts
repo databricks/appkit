@@ -36,9 +36,10 @@ export const chatRequestSchema = z.object({
   agent: z.string().optional(),
   /**
    * MLflow run id to link this turn's trace to (via `mlflow.sourceRun`), set by
-   * the eval runner so each case's trace shows under the evaluation run.
+   * the eval runner so each case's trace shows under the evaluation run. Capped
+   * to a run-id-shaped length since it reaches trace metadata and logs.
    */
-  mlflowRunId: z.string().optional(),
+  mlflowRunId: z.string().max(64).optional(),
 });
 
 const messageItemSchema = z.object({

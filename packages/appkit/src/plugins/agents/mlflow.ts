@@ -124,14 +124,18 @@ export function traceTool<T>(
 }
 
 /**
- * The MLflow trace id for the active turn, when tracing is enabled. Read inside
- * an agent span so eval runs can correlate the turn to its trace and attach
- * assessments. Returns undefined when tracing is off.
+ * The MLflow trace id for the active turn, when tracing is enabled. Must be
+ * read inside an agent span so eval runs can correlate the turn to its trace
+ * and attach assessments. Returns undefined when tracing is off.
+ *
+ * Reads the context-active span rather than `getLastActiveTraceId()`: the
+ * latter is only populated when a root span *ends* (on export), so mid-turn it
+ * returns the previous turn's id — or, under concurrent turns, another turn's.
  */
 export function currentTraceId(): string | undefined {
   if (!enabled || !mlflow) return undefined;
   try {
-    return mlflow.getLastActiveTraceId();
+    return mlflow.getCurrentActiveSpan()?.traceId;
   } catch {
     return undefined;
   }
