@@ -103,11 +103,134 @@ The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 
 - `POST /api/analytics/query/:query_key`
 - `GET /api/analytics/arrow-result/:jobId`
+- `POST /api/analytics/metric/:key` — measure a Unity Catalog Metric View (see [Metric views](#metric-views))
 
 ## Format options
 
 - `format: "JSON"` (default) returns JSON rows
 - `format: "ARROW"` returns an Arrow "statement_id" payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
+
+## Metric views
+
+`POST /api/analytics/metric/:key` measures a [Unity Catalog Metric View](https://docs.databricks.com/en/metric-views/index.html) that you declared in `config/queries/metric-views.json`. Instead of writing SQL, the caller sends a structured request — which measures to aggregate, which dimensions to group by, and an optional filter — and the plugin builds and runs the `SELECT MEASURE(...) ... GROUP BY ALL` for you against the view.
+
+The route is **dormant until `metric-views.json` exists**: with no config file, every metric key returns `404`. Declaring the file (and generating types) is covered in [Metric-view types](../development/type-generation.md#metric-view-types); this section documents the runtime endpoint that config activates.
+
+### Request body
+
+```
+POST /api/analytics/metric/:key
+Content-Type: application/json
+
+{
+  "measures": ["arr", "revenue"],
+  "dimensions": ["region", "order_date"],
+  "timeGrain": "month",
+  "timeDimension": "order_date",
+  "filter": { "member": "region", "operator": "in", "values": ["EMEA", "APAC"] },
+  "limit": 100
+}
+```
+
+`:key` is a metric key from `metric-views.json`. The body fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `measures` | `string[]` | yes | Measures to aggregate. At least 1, at most 50. Each becomes `MEASURE(<name>) AS <name>`. |
+| `dimensions` | `string[]` | no | Dimensions to group by (max 20). Selected verbatim and grouped via `GROUP BY ALL`. |
+| `filter` | object | no | Structured predicate tree translated into a parameterized `WHERE` clause (see [Filters](#filters)). |
+| `timeGrain` | `string` | no | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`. |
+| `timeDimension` | `string` | no | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
+| `limit` | `number` | no | Positive integer row cap (max 100000). |
+| `format` | `string` | no | Only `JSON_ARRAY` is supported at v1. (Arrow streaming is not yet wired on this route.) |
+
+Measures and dimensions must be unique across both lists — a name cannot repeat, nor appear as both a measure and a dimension.
+
+### How the request becomes SQL
+
+Given a view registered as `catalog.schema.revenue_metrics`, the request above produces (measures and dimensions are sorted for a deterministic SELECT list):
+
+```sql
+SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`,
+       date_trunc('month', `order_date`) AS `order_date`, `region`
+FROM `catalog`.`schema`.`revenue_metrics`
+WHERE `region` IN (:f_0, :f_1)
+GROUP BY ALL
+LIMIT 100
+```
+
+The metric view's FQN and every measure/dimension identifier are backtick-quoted; filter values are bound as parameters (`:f_0`, `:f_1`, …), never interpolated into the SQL string.
+
+### Filters
+
+`filter` is a recursive tree. A leaf is a single predicate:
+
+```json
+{ "member": "region", "operator": "equals", "values": ["EMEA"] }
+```
+
+Predicates combine with `and` / `or` groups, which can nest:
+
+```json
+{
+  "and": [
+    { "member": "region", "operator": "in", "values": ["EMEA", "APAC"] },
+    {
+      "or": [
+        { "member": "segment", "operator": "equals", "values": ["Enterprise"] },
+        { "member": "deal_size", "operator": "gt", "values": [50000] }
+      ]
+    }
+  ]
+}
+```
+
+The v1 operator vocabulary:
+
+| Operator | SQL | Values |
+|----------|-----|--------|
+| `equals` | `=` | exactly one |
+| `notEquals` | `<>` | exactly one |
+| `in` | `IN (…)` | one or more |
+| `notIn` | `NOT IN (…)` | one or more |
+| `gt` / `gte` / `lt` / `lte` | `>` / `>=` / `<` / `<=` | exactly one |
+| `contains` | `LIKE '%value%'` | exactly one string |
+| `notContains` | `NOT LIKE '%value%'` | exactly one string |
+| `set` | `IS NOT NULL` | none |
+| `notSet` | `IS NULL` | none |
+
+Filters are bounded to keep hostile input from exhausting the server: nesting depth ≤ 8, ≤ 100 children per `and` / `or` group, and ≤ 1000 values per predicate. A request that exceeds a cap is rejected with `400`.
+
+### Executors (cache scope)
+
+Each entry in `metric-views.json` names the executor the query runs as, which also sets the cache scope. This is fixed by config, not the request:
+
+| `executor` | Runs as | Cache |
+|------------|---------|-------|
+| `app_service_principal` (default) | The app service principal | Shared across all users |
+| `user` | The requesting user (on-behalf-of) | Per user |
+
+This mirrors the `<key>.sql` vs `<key>.obo.sql` distinction for [file-based queries](#execution-context).
+
+### Response
+
+The response is the same SSE stream as `POST /api/analytics/query/:query_key`. If the SQL warehouse is cold it first emits `warehouse_status` events (see [Warehouse readiness](#warehouse-readiness)), then a single `result` event with the rows as objects:
+
+```json
+{ "type": "result", "data": [{ "region": "EMEA", "order_date": "2025-01-01", "arr": 1200000, "revenue": 340000 }] }
+```
+
+On failure it emits an `error` event instead.
+
+### Errors and behavior
+
+| Status | Body | When |
+|--------|------|------|
+| `404` | `{ "error": "Metric not found" }` | `:key` is not declared in `metric-views.json` (also the response for every key when the file is absent). |
+| `400` | `{ "error": "Invalid metric request body (fields: …)", "code": … }` | The request body fails validation. The message names only the offending field paths, never the submitted values. |
+| `503` | `{ "error": "Metric registry not available", "code": "METRIC_REGISTRY_LOAD_FAILED" }` | `metric-views.json` is present but malformed or unreadable. |
+
+Editing `metric-views.json` is picked up on the next request — no server restart is needed. A previously malformed file that you fix likewise starts working on the next request.
 
 ## Frontend usage
 
