@@ -151,13 +151,3 @@ export function linkTraceToRun(runId: string): void {
     logger.warn("Failed to link trace to run %s: %O", runId, err);
   }
 }
-
-/** Flush buffered traces (e.g. on shutdown). No-op when tracing is disabled. */
-export async function flushAgentTraces(): Promise<void> {
-  if (!enabled || !mlflow) return;
-  try {
-    await mlflow.flushTraces();
-  } catch (err) {
-    logger.warn("MLflow trace flush failed: %O", err);
-  }
-}
