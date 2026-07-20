@@ -12,19 +12,6 @@ Base URL of the running app to drive, e.g. `http://localhost:3000`.
 
 ***
 
-### concurrency?
-
-```ts
-optional concurrency: number;
-```
-
-Max evals to drive concurrently. Each eval opens one stream to the app as
-the same user, so keep this at or below the app's
-`maxConcurrentStreamsPerUser` (default 5) or the surplus streams hit the
-429 guard. Defaults to 4; clamped to `[1, total]`.
-
-***
-
 ### filter?
 
 ```ts
@@ -75,6 +62,18 @@ model: string;
 ```ts
 token: string;
 ```
+
+***
+
+### maxConcurrency?
+
+```ts
+optional maxConcurrency: number;
+```
+
+Max evals/dataset rows to drive concurrently. Defaults to `1` (serial).
+Values below 1 are clamped to 1. Output order is preserved regardless.
+Wins over an agent's `evals.config.ts` `maxConcurrency`.
 
 ***
 
@@ -151,13 +150,26 @@ Progress callback, invoked as evals are discovered, started, and finished.
 
 ***
 
+### retries?
+
+```ts
+optional retries: number;
+```
+
+Re-run an eval up to this many extra times when it fails on an
+infrastructure error (a thrown error or timeout — `result.error` set), to
+absorb transient turn/stream flakiness. Assertion failures are NEVER
+retried (a wrong reply is real signal, not flake). Defaults to `0`.
+
+***
+
 ### rootDir?
 
 ```ts
 optional rootDir: string;
 ```
 
-Project root containing `server/agents/`. Defaults to `process.cwd()`.
+Project root containing `config/agents/`. Defaults to `process.cwd()`.
 
 ***
 
@@ -171,10 +183,43 @@ Soft assertion failures also fail the eval.
 
 ***
 
+### tags?
+
+```ts
+optional tags: string[];
+```
+
+Only run evals whose `tags` intersect this list. Empty/undefined runs all.
+Tags live on the eval def, so filtering happens after each file is loaded.
+
+***
+
 ### timeoutMs?
 
 ```ts
 optional timeoutMs: number;
 ```
 
-Per-turn wall-clock timeout (ms) before a turn is failed. Defaults to 120s.
+Default per-eval timeout (ms). A per-eval `def.timeoutMs` overrides it.
+Wins over an agent's `evals.config.ts` `timeoutMs`.
+
+***
+
+### warehouseId?
+
+```ts
+optional warehouseId: string;
+```
+
+SQL warehouse id used to read managed evaluation datasets.
+
+***
+
+### workspaceClient?
+
+```ts
+optional workspaceClient: WorkspaceClient;
+```
+
+Workspace client used to read managed evaluation datasets (for evals that
+declare `dataset`). Required alongside [warehouseId](#warehouseid) for those evals.

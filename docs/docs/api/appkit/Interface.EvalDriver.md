@@ -5,6 +5,21 @@ app's agents endpoint; future drivers (in-process) implement the same shape.
 
 ## Methods
 
+### reset()?
+
+```ts
+optional reset(): void;
+```
+
+Drop the current conversation so the next `send` starts a fresh thread.
+Optional: drivers without a session concept omit it.
+
+#### Returns
+
+`void`
+
+***
+
 ### send()
 
 ```ts

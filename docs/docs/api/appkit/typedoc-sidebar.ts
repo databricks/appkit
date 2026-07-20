@@ -48,11 +48,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Class.DatabaseValidationError",
-          label: "DatabaseValidationError"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Class.DatabricksAdapter",
           label: "DatabricksAdapter"
         },
@@ -90,11 +85,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Class.ServerError",
           label: "ServerError"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Class.SupervisorApiAdapter",
-          label: "SupervisorApiAdapter"
         },
         {
           type: "doc",
@@ -184,23 +174,23 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.DatabaseRegistry",
-          label: "DatabaseRegistry"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.DatabaseValidationIssue",
-          label: "DatabaseValidationIssue"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.DatabricksAuth",
           label: "DatabricksAuth"
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatasetRow",
+          label: "DatasetRow"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.DiscoveredEval",
           label: "DiscoveredEval"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DiscoveredEvalConfig",
+          label: "DiscoveredEvalConfig"
         },
         {
           type: "doc",
@@ -214,8 +204,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.EntityMutationHooks",
-          label: "EntityMutationHooks"
+          id: "api/appkit/Interface.EvalConfig",
+          label: "EvalConfig"
         },
         {
           type: "doc",
@@ -244,6 +234,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.EvalWebServer",
+          label: "EvalWebServer"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.FilePolicyUser",
           label: "FilePolicyUser"
         },
@@ -264,43 +259,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.GenerationParams",
-          label: "GenerationParams"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookApp",
-          label: "HookApp"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookContext",
-          label: "HookContext"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HostedSupervisorTool",
-          label: "HostedSupervisorTool"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.HttpDriverOptions",
           label: "HttpDriverOptions"
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.IAiSearchConfig",
-          label: "IAiSearchConfig"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.IJobsConfig",
           label: "IJobsConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.IndexConfig",
-          label: "IndexConfig"
         },
         {
           type: "doc",
@@ -384,8 +349,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.ReadSerializerContext",
-          label: "ReadSerializerContext"
+          id: "api/appkit/Interface.ReadEvalDatasetOptions",
+          label: "ReadEvalDatasetOptions"
         },
         {
           type: "doc",
@@ -406,11 +371,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RequestedResource",
           label: "RequestedResource"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.RerankerConfig",
-          label: "RerankerConfig"
         },
         {
           type: "doc",
@@ -449,26 +409,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.Schema",
-          label: "Schema"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.SearchRequest",
-          label: "SearchRequest"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.SearchResponse",
-          label: "SearchResponse"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.SearchResult",
-          label: "SearchResult"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.ServingEndpointEntry",
           label: "ServingEndpointEntry"
         },
@@ -481,16 +421,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.StreamExecutionSettings",
           label: "StreamExecutionSettings"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.SupervisorApiAdapterOptions",
-          label: "SupervisorApiAdapterOptions"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.SupervisorExtension",
-          label: "SupervisorExtension"
         },
         {
           type: "doc",
@@ -546,21 +476,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.WorkspaceClient",
-          label: "WorkspaceClient"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.WorkspaceClientLike",
-          label: "WorkspaceClientLike"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.WorkspaceClientOptions",
-          label: "WorkspaceClientOptions"
         }
       ]
     },
@@ -600,31 +515,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiConfig",
-          label: "DatabaseApiConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiWriteOperation",
-          label: "DatabaseApiWriteOperation"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiWritesConfig",
-          label: "DatabaseApiWritesConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseExports",
-          label: "DatabaseExports"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.EntityHooks",
-          label: "EntityHooks"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.EvalProgress",
           label: "EvalProgress"
         },
@@ -655,8 +545,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.IDatabaseConfig",
-          label: "IDatabaseConfig"
+          id: "api/appkit/TypeAlias.JobHandle",
+          label: "JobHandle"
         },
         {
           type: "doc",
@@ -680,11 +570,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.ReadSerializer",
-          label: "ReadSerializer"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.ResolvedToolEntry",
           label: "ResolvedToolEntry"
         },
@@ -700,11 +585,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.SearchFilters",
-          label: "SearchFilters"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.ServingFactory",
           label: "ServingFactory"
         },
@@ -715,11 +595,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.SupervisorTool",
-          label: "SupervisorTool"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.ToolRegistry",
           label: "ToolRegistry"
         },
@@ -727,11 +602,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ToPlugin",
           label: "ToPlugin"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.TransactionClient",
-          label: "TransactionClient"
         }
       ]
     },
@@ -746,11 +616,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Variable.aiSearch",
-          label: "aiSearch"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Variable.READ_ACTIONS",
           label: "READ_ACTIONS"
         },
@@ -758,16 +623,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Variable.SUPERVISOR_EXTENSION_KEY",
-          label: "SUPERVISOR_EXTENSION_KEY"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Variable.supervisorTools",
-          label: "supervisorTools"
         },
         {
           type: "doc",
@@ -794,21 +649,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.bigid",
-          label: "bigid"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.bigint",
-          label: "bigint"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.boolean",
-          label: "boolean"
         },
         {
           type: "doc",
@@ -847,28 +687,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.createWorkspaceClient",
-          label: "createWorkspaceClient"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.database",
-          label: "database"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Function.defineEval",
           label: "defineEval"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.defineManifest",
-          label: "defineManifest"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.defineSchema",
-          label: "defineSchema"
+          id: "api/appkit/Function.defineEvalConfig",
+          label: "defineEvalConfig"
         },
         {
           type: "doc",
@@ -877,13 +702,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.discoverEvalFiles",
-          label: "discoverEvalFiles"
+          id: "api/appkit/Function.discoverEvalConfigs",
+          label: "discoverEvalConfigs"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.enumColumn",
-          label: "enumColumn"
+          id: "api/appkit/Function.discoverEvalFiles",
+          label: "discoverEvalFiles"
         },
         {
           type: "doc",
@@ -907,13 +732,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.findServerFile",
-          label: "findServerFile"
+          id: "api/appkit/Function.findRootEvalConfig",
+          label: "findRootEvalConfig"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.fk",
-          label: "fk"
+          id: "api/appkit/Function.findServerFile",
+          label: "findServerFile"
         },
         {
           type: "doc",
@@ -932,13 +757,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.formatSummaryLine",
-          label: "formatSummaryLine"
+          id: "api/appkit/Function.formatResultsJson",
+          label: "formatResultsJson"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.fromSupervisorApi",
-          label: "fromSupervisorApi"
+          id: "api/appkit/Function.formatResultsJUnit",
+          label: "formatResultsJUnit"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatSummaryLine",
+          label: "formatSummaryLine"
         },
         {
           type: "doc",
@@ -987,18 +817,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.id",
-          label: "id"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Function.includes",
           label: "includes"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.integer",
-          label: "integer"
         },
         {
           type: "doc",
@@ -1022,18 +842,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.isSupervisorTool",
-          label: "isSupervisorTool"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Function.isToolkitEntry",
           label: "isToolkitEntry"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.jsonb",
-          label: "jsonb"
         },
         {
           type: "doc",
@@ -1044,6 +854,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.loadAgentsFromDir",
           label: "loadAgentsFromDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadRootEvalConfig",
+          label: "loadRootEvalConfig"
         },
         {
           type: "doc",
@@ -1067,6 +882,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.readEvalDataset",
+          label: "readEvalDataset"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.reportToMlflow",
           label: "reportToMlflow"
         },
@@ -1082,8 +902,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.resolveWorkspaceClient",
+          label: "resolveWorkspaceClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.runAgent",
           label: "runAgent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runBounded",
+          label: "runBounded"
         },
         {
           type: "doc",
@@ -1097,18 +927,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.runWithRetries",
+          label: "runWithRetries"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.summarize",
           label: "summarize"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.text",
-          label: "text"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.timestamp",
-          label: "timestamp"
         },
         {
           type: "doc",
@@ -1122,13 +947,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.uuid",
-          label: "uuid"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.varchar",
-          label: "varchar"
+          id: "api/appkit/Function.userTurns",
+          label: "userTurns"
         }
       ]
     }
