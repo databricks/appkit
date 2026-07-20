@@ -7,6 +7,7 @@ sidebar_position: 3
 Enables SQL query execution against Databricks SQL Warehouses.
 
 **Key features:**
+
 - File-based SQL queries with automatic type generation
 - Parameterized queries with type-safe [SQL helpers](../api/appkit/Variable.sql.md)
 - JSON and Arrow format support
@@ -35,7 +36,6 @@ await createApp({
 
 The execution context is determined by the SQL file name, not by the hook call.
 
-
 ## SQL parameters
 
 Use `:paramName` placeholders and optionally annotate parameter types using SQL comments:
@@ -56,6 +56,7 @@ Annotate with `INT`, or use `sql.number()` (auto-infers `INT` for values in
 at the call site.
 
 **Supported `-- @param` types** (case-insensitive):
+
 - `STRING`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `BINARY`
 - `INT`, `BIGINT`, `TINYINT`, `SMALLINT` — bind via `sql.int()` / `sql.bigint()`
 - `FLOAT`, `DOUBLE` — bind via `sql.float()` / `sql.double()`
@@ -134,15 +135,15 @@ Content-Type: application/json
 
 `:key` is a metric key from `metric-views.json`. The body fields:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `measures` | `string[]` | yes | Measures to aggregate. At least 1, at most 50. Each becomes `MEASURE(<name>) AS <name>`. |
-| `dimensions` | `string[]` | no | Dimensions to group by (max 20). Selected verbatim and grouped via `GROUP BY ALL`. |
-| `filter` | object | no | Structured predicate tree translated into a parameterized `WHERE` clause (see [Filters](#filters)). |
-| `timeGrain` | `string` | no | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`. |
-| `timeDimension` | `string` | no | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
-| `limit` | `number` | no | Positive integer row cap (max 100000). |
-| `format` | `string` | no | Only `JSON_ARRAY` is supported at v1. (Arrow streaming is not yet wired on this route.) |
+| Field           | Type       | Required | Description                                                                                                  |
+| --------------- | ---------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `measures`      | `string[]` | yes      | Measures to aggregate. At least 1, at most 50. Each becomes `MEASURE(<name>) AS <name>`.                     |
+| `dimensions`    | `string[]` | no       | Dimensions to group by (max 20). Selected verbatim and grouped via `GROUP BY ALL`.                           |
+| `filter`        | object     | no       | Structured predicate tree translated into a parameterized `WHERE` clause (see [Filters](#filters)).          |
+| `timeGrain`     | `string`   | no       | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`.      |
+| `timeDimension` | `string`   | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
+| `limit`         | `number`   | no       | Positive integer row cap (max 100000).                                                                       |
+| `format`        | `string`   | no       | Only `JSON_ARRAY` is supported. (Arrow streaming is not yet wired on this route.)                            |
 
 Measures and dimensions must be unique across both lists — a name cannot repeat, nor appear as both a measure and a dimension.
 
@@ -185,19 +186,19 @@ Predicates combine with `and` / `or` groups, which can nest:
 }
 ```
 
-The v1 operator vocabulary:
+The operator vocabulary:
 
-| Operator | SQL | Values |
-|----------|-----|--------|
-| `equals` | `=` | exactly one |
-| `notEquals` | `<>` | exactly one |
-| `in` | `IN (…)` | one or more |
-| `notIn` | `NOT IN (…)` | one or more |
-| `gt` / `gte` / `lt` / `lte` | `>` / `>=` / `<` / `<=` | exactly one |
-| `contains` | `LIKE '%value%'` | exactly one string |
-| `notContains` | `NOT LIKE '%value%'` | exactly one string |
-| `set` | `IS NOT NULL` | none |
-| `notSet` | `IS NULL` | none |
+| Operator                    | SQL                     | Values             |
+| --------------------------- | ----------------------- | ------------------ |
+| `equals`                    | `=`                     | exactly one        |
+| `notEquals`                 | `<>`                    | exactly one        |
+| `in`                        | `IN (…)`                | one or more        |
+| `notIn`                     | `NOT IN (…)`            | one or more        |
+| `gt` / `gte` / `lt` / `lte` | `>` / `>=` / `<` / `<=` | exactly one        |
+| `contains`                  | `LIKE '%value%'`        | exactly one string |
+| `notContains`               | `NOT LIKE '%value%'`    | exactly one string |
+| `set`                       | `IS NOT NULL`           | none               |
+| `notSet`                    | `IS NULL`               | none               |
 
 Filters are bounded to keep hostile input from exhausting the server: nesting depth ≤ 8, ≤ 100 children per `and` / `or` group, and ≤ 1000 values per predicate. A request that exceeds a cap is rejected with `400`.
 
@@ -205,10 +206,10 @@ Filters are bounded to keep hostile input from exhausting the server: nesting de
 
 Each entry in `metric-views.json` names the executor the query runs as, which also sets the cache scope. This is fixed by config, not the request:
 
-| `executor` | Runs as | Cache |
-|------------|---------|-------|
-| `app_service_principal` (default) | The app service principal | Shared across all users |
-| `user` | The requesting user (on-behalf-of) | Per user |
+| `executor`                        | Runs as                            | Cache                   |
+| --------------------------------- | ---------------------------------- | ----------------------- |
+| `app_service_principal` (default) | The app service principal          | Shared across all users |
+| `user`                            | The requesting user (on-behalf-of) | Per user                |
 
 This mirrors the `<key>.sql` vs `<key>.obo.sql` distinction for [file-based queries](#execution-context).
 
@@ -217,18 +218,28 @@ This mirrors the `<key>.sql` vs `<key>.obo.sql` distinction for [file-based quer
 The response is the same SSE stream as `POST /api/analytics/query/:query_key`. If the SQL warehouse is cold it first emits `warehouse_status` events (see [Warehouse readiness](#warehouse-readiness)), then a single `result` event with the rows as objects:
 
 ```json
-{ "type": "result", "data": [{ "region": "EMEA", "order_date": "2025-01-01", "arr": 1200000, "revenue": 340000 }] }
+{
+  "type": "result",
+  "data": [
+    {
+      "region": "EMEA",
+      "order_date": "2025-01-01",
+      "arr": 1200000,
+      "revenue": 340000
+    }
+  ]
+}
 ```
 
 On failure it emits an `error` event instead.
 
 ### Errors and behavior
 
-| Status | Body | When |
-|--------|------|------|
-| `404` | `{ "error": "Metric not found" }` | `:key` is not declared in `metric-views.json` (also the response for every key when the file is absent). |
-| `400` | `{ "error": "Invalid metric request body (fields: …)", "code": … }` | The request body fails validation. The message names only the offending field paths, never the submitted values. |
-| `503` | `{ "error": "Metric registry not available", "code": "METRIC_REGISTRY_LOAD_FAILED" }` | `metric-views.json` is present but malformed or unreadable. |
+| Status | Body                                                                                  | When                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `404`  | `{ "error": "Metric not found" }`                                                     | `:key` is not declared in `metric-views.json` (also the response for every key when the file is absent).         |
+| `400`  | `{ "error": "Invalid metric request body (fields: …)", "code": … }`                   | The request body fails validation. The message names only the offending field paths, never the submitted values. |
+| `503`  | `{ "error": "Metric registry not available", "code": "METRIC_REGISTRY_LOAD_FAILED" }` | `metric-views.json` is present but malformed or unreadable.                                                      |
 
 Editing `metric-views.json` is picked up on the next request — no server restart is needed. A previously malformed file that you fix likewise starts working on the next request.
 
@@ -241,15 +252,19 @@ React hook that subscribes to an analytics query over SSE and returns its latest
 ```ts
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
 
-const { data, loading, error } = useAnalyticsQuery(queryKey, parameters, options);
+const { data, loading, error } = useAnalyticsQuery(
+  queryKey,
+  parameters,
+  options,
+);
 ```
 
 **Return type:**
 
 ```ts
 {
-  data: T | null;      // query result (typed array for JSON, TypedArrowTable for ARROW)
-  loading: boolean;    // true while the query is executing
+  data: T | null; // query result (typed array for JSON, TypedArrowTable for ARROW)
+  loading: boolean; // true while the query is executing
   error: string | null; // error message, or null on success
   warehouseStatus: WarehouseStatus | null; // see "Warehouse readiness" below
 }
@@ -257,11 +272,11 @@ const { data, loading, error } = useAnalyticsQuery(queryKey, parameters, options
 
 **Options:**
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `format` | `"JSON" \| "ARROW"` | `"JSON"` | Response format |
-| `maxParametersSize` | `number` | `102400` | Max serialized parameters size in bytes |
-| `autoStart` | `boolean` | `true` | Start query on mount |
+| Option              | Type                | Default  | Description                             |
+| ------------------- | ------------------- | -------- | --------------------------------------- |
+| `format`            | `"JSON" \| "ARROW"` | `"JSON"` | Response format                         |
+| `maxParametersSize` | `number`            | `102400` | Max serialized parameters size in bytes |
+| `autoStart`         | `boolean`           | `true`   | Start query on mount                    |
 
 ### Warehouse readiness
 
@@ -277,8 +292,10 @@ This means a cold start no longer freezes the UI on a stalled spinner. Render th
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
 
 function SpendTable() {
-  const { data, loading, error, warehouseStatus } =
-    useAnalyticsQuery("spend_summary", params);
+  const { data, loading, error, warehouseStatus } = useAnalyticsQuery(
+    "spend_summary",
+    params,
+  );
 
   if (warehouseStatus && warehouseStatus.state !== "RUNNING") {
     return <div>Warehouse is {warehouseStatus.state.toLowerCase()}…</div>;
@@ -320,10 +337,7 @@ export function AppShell({ children }) {
 If you already render your own `<Toaster />` for unrelated app toasts, drop the indicator and call `useResourceStatusToaster()` instead so resource-status toasts share that single Toaster:
 
 ```tsx
-import {
-  useResourceStatusToaster,
-  Toaster,
-} from "@databricks/appkit-ui/react";
+import { useResourceStatusToaster, Toaster } from "@databricks/appkit-ui/react";
 
 function App() {
   useResourceStatusToaster();
@@ -342,7 +356,8 @@ For a fully custom toast body, pass `render` (rendered through `toast.custom`):
 <ResourceStatusIndicator
   render={(agg) => (
     <div className="rounded-lg border bg-background p-3 shadow">
-      {agg.worst?.kind} {agg.worst?.state.toLowerCase()} ({agg.activeCount} waiting)
+      {agg.worst?.kind} {agg.worst?.state.toLowerCase()} ({agg.activeCount}{" "}
+      waiting)
     </div>
   )}
 />
@@ -355,8 +370,7 @@ To override copy for a specific kind without rewriting the whole UI, pass `rende
   renderers={{
     warehouse: {
       title: () => "Spinning up your data",
-      description: (_s, agg) =>
-        `${agg.affectedLabels.length} chart(s) waiting`,
+      description: (_s, agg) => `${agg.affectedLabels.length} chart(s) waiting`,
     },
   }}
 />
@@ -386,11 +400,9 @@ import { useEffect, useId } from "react";
 
 function useLakebaseReadiness() {
   const id = useId();
-  const { publish, unpublish } = useResourceStatusPublisher(
-    id,
-    "lakebase",
-    { kindHint: "lakebase" },
-  );
+  const { publish, unpublish } = useResourceStatusPublisher(id, "lakebase", {
+    kindHint: "lakebase",
+  });
 
   useEffect(() => {
     publish({
@@ -406,10 +418,10 @@ function useLakebaseReadiness() {
 
 **Server config (in `analytics({...})`):**
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `warehouseStartupTimeoutMs` | `number` | `300000` (5 min) | Maximum time to wait for the warehouse to reach `RUNNING` before failing the request |
-| `autoStartWarehouse` | `boolean` | `true` | When `true`, a `STOPPED` warehouse is auto-started on the first request. Set to `false` for cost-controlled deployments where billable warehouse starts must not be triggered by user requests; in that case `STOPPED` surfaces as a `ConfigurationError` |
+| Option                      | Type      | Default          | Description                                                                                                                                                                                                                                               |
+| --------------------------- | --------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `warehouseStartupTimeoutMs` | `number`  | `300000` (5 min) | Maximum time to wait for the warehouse to reach `RUNNING` before failing the request                                                                                                                                                                      |
+| `autoStartWarehouse`        | `boolean` | `true`           | When `true`, a `STOPPED` warehouse is auto-started on the first request. Set to `false` for cost-controlled deployments where billable warehouse starts must not be triggered by user requests; in that case `STOPPED` surfaces as a `ConfigurationError` |
 
 **Example with loading/error/empty handling:**
 
@@ -419,21 +431,27 @@ import { sql } from "@databricks/appkit-ui/js";
 import { Skeleton } from "@databricks/appkit-ui";
 
 function SpendTable() {
-  const params = useMemo(() => ({
-    startDate: sql.date("2025-01-01"),
-    endDate: sql.date("2025-12-31"),
-  }), []);
+  const params = useMemo(
+    () => ({
+      startDate: sql.date("2025-01-01"),
+      endDate: sql.date("2025-12-31"),
+    }),
+    [],
+  );
 
   const { data, loading, error } = useAnalyticsQuery("spend_summary", params);
 
   if (loading) return <Skeleton className="h-32 w-full" />;
   if (error) return <div className="text-destructive">{error}</div>;
-  if (!data?.length) return <div className="text-muted-foreground">No results</div>;
+  if (!data?.length)
+    return <div className="text-muted-foreground">No results</div>;
 
   return (
     <ul>
       {data.map((row) => (
-        <li key={row.id}>{row.name}: ${row.cost_usd}</li>
+        <li key={row.id}>
+          {row.name}: ${row.cost_usd}
+        </li>
       ))}
     </ul>
   );
