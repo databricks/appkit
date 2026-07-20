@@ -7,8 +7,8 @@ coding agent shares the app's filesystem; an environment without a shared
 filesystem can supply its own implementation (e.g. a table-backed store).
 
 Implementations must be **keyed and latest-wins**: at most one record per
-`id`, and recording an existing `id` replaces it rather than appending, so
-the store always reflects the current choice for each block.
+`blockId`, and recording an existing `blockId` replaces it rather than
+appending, so the store always reflects the current choice for each block.
 
 ## Methods
 
@@ -18,7 +18,7 @@ the store always reflects the current choice for each block.
 record(record: UiChoiceRecord): Promise<void>;
 ```
 
-Record (upsert) a choice, keyed by `record.id`.
+Record (upsert) a choice, keyed by `record.blockId`.
 
 #### Parameters
 

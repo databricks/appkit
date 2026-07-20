@@ -38,7 +38,7 @@ new FileChoiceSink(relativePath: string): FileChoiceSink;
 record(record: UiChoiceRecord): Promise<void>;
 ```
 
-Record (upsert) a choice, keyed by `record.id`.
+Record (upsert) a choice, keyed by `record.blockId`.
 
 #### Parameters
 
