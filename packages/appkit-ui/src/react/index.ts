@@ -7,4 +7,4 @@ export * from "./portal-container-context";
 export * from "./resource-status-indicator";
 export * from "./table";
 export * from "./ui";
-export * from "./variants";
+export * from "./ui-variants";
