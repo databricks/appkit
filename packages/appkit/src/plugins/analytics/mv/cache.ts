@@ -9,9 +9,7 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
   const sortedDimensions = [...(input.dimensions ?? [])].sort();
   const filterFingerprint =
     input.filter !== undefined ? canonicalizeFilter(input.filter) : "_";
-  // `timeDimension` only changes the SQL when `timeGrain` is set (see
-  // renderDimensionClause); keying on it otherwise would fork the cache on a
-  // no-op field.
+  // `timeDimension` only changes the SQL when `timeGrain` is set (see renderDimensionClause)
   const timeDimensionPart =
     input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
   return [

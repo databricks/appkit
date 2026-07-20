@@ -14,36 +14,25 @@ export const METRIC_CONFIG_FILE = "metric-views.json";
  * Measure, dimension, and filter-member names are **column identifiers**: they
  * are validated by the shared {@link isValidColumnName} (rejects only control
  * characters / newlines) and backtick-quoted via {@link quoteIdentifier} at
- * every interpolation point. Quoting — not a narrow ASCII allowlist — is the
- * injection boundary, so the runtime accepts the full delimited-identifier
- * grammar the type-generator emits from DESCRIBE (hyphens, dots, non-ASCII).
- * There is deliberately NO name allowlist: a well-formed-but-unknown column
- * falls through to the warehouse and surfaces as a sanitized canonical error.
+ * every interpolation point.
  *
  * Time-grain token shape. Unlike the column identifiers above, the grain is
- * interpolated as a single-quoted `date_trunc` unit LITERAL (NOT a bind param,
- * NOT a delimited identifier) in {@link renderDimensionClause}, so it keeps a
- * narrow keyword-shaped gate — that pattern is what keeps a hostile token out
+ * interpolated as a single-quoted `date_trunc` unit LITERAL in {@link renderDimensionClause},
+ * so it keeps a narrow keyword-shaped gate — that pattern is what keeps a hostile token out
  * of the quoted-literal position.
  */
 export const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
 
 /**
- * Maximum AND/OR nesting depth. The PRD documents 8 as a sensible cap —
- * enough for any real BI filter UI, low enough that a hostile or malformed
- * payload cannot stack-overflow the recursive validator or translator.
- *
  * The depth count is the number of nested `{ and }` / `{ or }` wrappers
- * encountered while descending — leaf predicates do not count toward depth.
+ * encountered while descending; leaf predicates do not count toward depth.
+ * Prevents stack-overflowing the recursive validator or translator.
  */
 export const METRIC_FILTER_MAX_DEPTH = 8;
 
 /**
- * Cardinality caps on user-controlled arrays. Closes the recurring
- * `unbounded-request-parameters` finding: a hostile caller could otherwise
- * send `values: [...10M items...]` and exhaust the validator + the named
- * bind-var binding step. The limits below are deliberately generous — higher
- * than any real BI UI would emit — so legitimate traffic never trips them.
+ * Cardinality caps on user-controlled arrays.
+ * Prevents stack-overflowing the recursive validator or translator.
  */
 export const METRIC_MEASURES_MAX = 50;
 export const METRIC_DIMENSIONS_MAX = 20;
@@ -51,12 +40,8 @@ export const METRIC_FILTER_VALUES_MAX = 1000;
 export const METRIC_LIMIT_MAX = 100_000;
 
 /**
- * Maximum number of children per AND/OR group node. Without this cap a single
- * flat group like `{ and: [...10M empty objects...] }` would push tens of
- * millions of frames onto the iterative pre-check's stack — OOM before
- * validation even gets to Zod. The Zod schema enforces the same cap so the
- * rejection point is consistent regardless of which validator catches it
- * first.
+ * Maximum number of children per AND/OR group node.
+ * Prevents stack-overflowing the recursive validator or translator.
  */
 export const METRIC_FILTER_GROUP_MAX = 100;
 
