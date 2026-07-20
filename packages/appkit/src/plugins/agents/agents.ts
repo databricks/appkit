@@ -1118,9 +1118,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           outboundEvents.push(evt);
         }
 
-        // Root MLflow span for the turn (AGENT). Tool calls dispatched while
-        // the adapter streams nest under it via the SDK's active context.
-        // No-op passthrough unless an MLflow experiment is bound.
+        // Root MLflow span for the turn; tool-call spans nest under it.
         await traceAgent(
           registered.name ?? "agent",
           {
@@ -1471,8 +1469,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       }
     }
 
-    // MLflow TOOL span — nests under the turn's AGENT span. Wraps the
-    // execution only (not the approval wait above, which is human latency).
+    // Traced from here so the span covers execution only, not the approval
+    // wait above (which is human latency).
     const toolResult = await traceTool(name, args, async () => {
       let result: unknown;
       if (entry.source === "toolkit") {
@@ -1534,7 +1532,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         );
       }
 
-      // Auto-captured as the TOOL span's outputs by `traceTool`.
       return result;
     });
 
