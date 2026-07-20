@@ -127,9 +127,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
   /**
    * Directory the metric-view registry is read from (holds
-   * `metric-views.json`). Defaults to `config/queries/` under the process cwd
-   * — the same directory the `.sql` query path uses. Overridable ONLY via
-   * `config.queriesDir` for tests (see {@link IAnalyticsConfig.queriesDir}).
+   * `metric-views.json`).
+   * @default `config/queries/` (under the process cwd)
    */
   private readonly _queriesDir: string;
 
@@ -155,10 +154,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       },
     });
 
-    // Metric-view route. Registered parallel to `/query`; measures a
-    // registered UC Metric View over the same SSE envelope. Dormant until
-    // `config/queries/metric-views.json` exists (no config → empty registry →
-    // 404, nothing executes).
+    // Metric-view route. Registered parallel to `/query`
+    // measures a registered UC Metric View over the same SSE envelope.
     this.route(router, {
       name: "metric",
       method: "post",
@@ -169,9 +166,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     });
 
     // Column-names fallback for very wide Arrow schemas whose names don't fit
-    // in the `X-Appkit-Arrow-Columns` response header (see
-    // `_setArrowColumnsHeader`). The client hits this with the statement id
-    // from `X-Appkit-Arrow-Columns-Ref`.
+    // in the `X-Appkit-Arrow-Columns` response header.
+    // The client hits this with the statement id from `X-Appkit-Arrow-Columns-Ref`.
     this.route(router, {
       name: "arrow-columns",
       method: "get",
@@ -470,8 +466,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * Lane dispatch is driven by the registration: an SP-lane metric runs as the
    * app service principal (shared cache); an OBO-lane metric runs
    * on-behalf-of the requesting user via `asUser(req)` (per-user cache keyed by
-   * a hash of the user identity). The executor + key are computed inside a
-   * try so a missing/whitespace OBO identity lands on the canonical 401 path.
+   * a hash of the user identity).
    */
   async _handleMetricRoute(
     req: express.Request,
@@ -492,12 +487,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // Resolve the registry from disk (cached + mtime-revalidated by
-    // `getMetricRegistry`, so the steady-state cost is one `stat`). A malformed
-    // config throws → 503, distinguishing a broken deployment from an unknown
-    // key (404). The failure is NOT latched: `getMetricRegistry` only caches on
-    // a successful parse, so fixing `metric-views.json` heals on the next
-    // request. Full reason → telemetry only.
+    // Resolve the registry from disk (cached + mtime-revalidated by `getMetricRegistry`).
     let registry: Record<string, MetricRegistration>;
     try {
       registry = await getMetricRegistry(this._queriesDir);
@@ -514,27 +504,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // Own-property lookup: never resolve `key` to an inherited
-    // `Object.prototype` member (`__proto__`, `constructor`, `toString`, …).
-    // `getMetricRegistry` returns a null-prototype map, but gate the read here
-    // too as defense-in-depth — an inherited hit would otherwise bypass the 404
-    // below and flow a non-registration value into execution.
+    // Own-property lookup: never resolve `key` to an inherited `Object.prototype` member.
     const registration = Object.hasOwn(registry, key)
       ? registry[key]
       : undefined;
     if (!registration) {
-      // Don't echo the user-supplied `key` back in the public response —
-      // confirming "metric X is not registered" lets a probe enumerate keys by
-      // elimination. The 404 status stays (useful for tooling); the body is
-      // generic and detail goes to telemetry only.
+      // Don't echo the user-supplied `key` back in the public response.
       event?.setContext("analytics", { unknown_metric_key: key });
       res.status(404).json({ error: "Metric not found" });
       return;
     }
 
-    // Validate the body on the canonical error path. `validateMetricRequest`
-    // throws a `ValidationError` (400) whose message names only field paths,
-    // never raw values.
+    // Validate the body on the canonical error path.
+    // `validateMetricRequest` throws a `ValidationError` (400) whose message names only field paths, never raw values.
     let request: ReturnType<typeof validateMetricRequest>;
     try {
       request = validateMetricRequest(req.body ?? {});
@@ -561,10 +543,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // `executor` in metric-views.json), NOT a URL segment or `.obo.sql`
     // filename: an OBO-lane metric runs on-behalf-of the requesting user
     // (per-user cache via `asUser(req)`), an SP-lane metric as the app service
-    // principal (shared cache). Compute the executor + key INSIDE a try (as
-    // `_handleQueryRoute` does) so `asUser(req)`/`resolveUserId(req)` and
-    // `deriveMetricExecutorKey`'s missing-identity throw land on the canonical
-    // 401 envelope instead of surfacing as an uncaught 500 out of the stream.
+    // principal (shared cache).
     let executor: AnalyticsPlugin;
     let executorKey: string;
     try {
@@ -585,11 +564,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // Cache key. Composed over the canonicalized args (sorted measures/
     // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
     // the `executorKey` — `"sp"` shares the cache across all users, a per-user
-    // identity hash isolates OBO callers. Delivery is JSON-only in v1 (the
-    // route always routes through `_executeJsonArrayPath`), so the key salts on
-    // a stable "JSON_ARRAY" constant rather than `request.format`: two calls
-    // that deliver identically must not fork the cache on an unused format
-    // field.
+    // identity hash isolates OBO callers.
     const cacheConfig = {
       ...queryDefaults.cache,
       cacheKey: composeMetricCacheKey({
