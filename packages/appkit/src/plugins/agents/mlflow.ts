@@ -1,4 +1,3 @@
-import type { LiveSpan } from "mlflow-tracing";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("agents");
@@ -62,28 +61,66 @@ export async function initAgentTracing(): Promise<void> {
   }
 }
 
-export type AgentSpanType = "AGENT" | "TOOL";
+/**
+ * Records a span's outputs. Callers get one from `traceAgent`/`traceTool`;
+ * it's a no-op when tracing is disabled, so call sites never branch on it.
+ */
+export interface SpanRecorder {
+  setOutputs(outputs: unknown): void;
+}
+
+const noopRecorder: SpanRecorder = { setOutputs() {} };
 
 /**
- * Run `fn` inside an MLflow span when tracing is enabled, otherwise just run it
- * (zero overhead). Spans auto-nest via the SDK's active context, so a TOOL span
- * opened inside an AGENT span's callback becomes its child. The callback gets
- * the span (or `undefined` when disabled) to record outputs.
+ * Run `fn` inside an MLflow span of `spanType` when tracing is enabled,
+ * otherwise just run it (zero overhead). Spans auto-nest via the SDK's active
+ * context, so a TOOL span opened inside an AGENT span's callback becomes its
+ * child. The callback's resolved value is recorded as the span's outputs unless
+ * it called `setOutputs` first; return `undefined` (or set outputs explicitly)
+ * when the return value isn't the output you want traced.
  */
-export async function withAgentSpan<T>(
-  options: { name: string; type: AgentSpanType; inputs?: unknown },
-  fn: (span?: LiveSpan) => Promise<T>,
+async function trace<T>(
+  spanType: "AGENT" | "TOOL",
+  name: string,
+  inputs: unknown,
+  fn: (span: SpanRecorder) => Promise<T>,
 ): Promise<T> {
-  if (!enabled || !mlflow) return fn();
-  const spanType =
-    options.type === "AGENT" ? mlflow.SpanType.AGENT : mlflow.SpanType.TOOL;
+  if (!enabled || !mlflow) return fn(noopRecorder);
+  const type =
+    spanType === "AGENT" ? mlflow.SpanType.AGENT : mlflow.SpanType.TOOL;
   return await mlflow.withSpan<T>(
-    (span) => {
-      if (options.inputs !== undefined) span.setInputs(options.inputs);
-      return fn(span);
+    async (span) => {
+      if (inputs !== undefined) span.setInputs(inputs);
+      let outputsSet = false;
+      const result = await fn({
+        setOutputs(outputs) {
+          outputsSet = true;
+          span.setOutputs(outputs);
+        },
+      });
+      if (!outputsSet && result !== undefined) span.setOutputs(result);
+      return result;
     },
-    { name: options.name, spanType },
+    { name, spanType: type },
   );
+}
+
+/** Trace a turn's root AGENT span. See {@link trace}. */
+export function traceAgent<T>(
+  name: string,
+  inputs: unknown,
+  fn: (span: SpanRecorder) => Promise<T>,
+): Promise<T> {
+  return trace("AGENT", name, inputs, fn);
+}
+
+/** Trace a TOOL span, nested under the active AGENT span. See {@link trace}. */
+export function traceTool<T>(
+  name: string,
+  inputs: unknown,
+  fn: (span: SpanRecorder) => Promise<T>,
+): Promise<T> {
+  return trace("TOOL", name, inputs, fn);
 }
 
 /**

@@ -59,7 +59,8 @@ import {
   currentTraceId,
   initAgentTracing,
   linkTraceToRun,
-  withAgentSpan,
+  traceAgent,
+  traceTool,
 } from "./mlflow";
 import {
   approvalRequestSchema,
@@ -1120,16 +1121,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // Root MLflow span for the turn (AGENT). Tool calls dispatched while
         // the adapter streams nest under it via the SDK's active context.
         // No-op passthrough unless an MLflow experiment is bound.
-        await withAgentSpan(
+        await traceAgent(
+          registered.name ?? "agent",
           {
-            name: registered.name ?? "agent",
-            type: "AGENT",
-            inputs: {
-              messages: thread.messages.map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-            },
+            messages: thread.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
           },
           async (span) => {
             // Link this turn's trace to an eval run when the eval runner
@@ -1187,7 +1185,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             });
 
             if (fullContent) {
-              span?.setOutputs({ role: "assistant", content: fullContent });
+              span.setOutputs({ role: "assistant", content: fullContent });
               await this.threadStore.addMessage(thread.id, userId, {
                 id: randomUUID(),
                 role: "assistant",
@@ -1475,82 +1473,70 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     // MLflow TOOL span — nests under the turn's AGENT span. Wraps the
     // execution only (not the approval wait above, which is human latency).
-    const toolResult = await withAgentSpan(
-      { name, type: "TOOL", inputs: args },
-      async (span) => {
-        let result: unknown;
-        if (entry.source === "toolkit") {
-          if (!this.context) {
-            throw new Error(
-              "Plugin tool execution requires PluginContext; this should never happen through createApp",
-            );
-          }
-          result = await this.context.executeTool(
-            runState.req,
-            entry.pluginName,
-            entry.localName,
-            args,
-            runState.signal,
-            runState.limits.toolCallTimeoutMs,
-          );
-        } else if (entry.source === "function") {
-          // Function tools declare their parameters as a JSON-object schema,
-          // so adapters always serialize `args` as an object. A non-object
-          // value here means the upstream model emitted malformed tool-call
-          // JSON; surface a clear error rather than silently passing through
-          // a wrong-shape value the tool will then choke on.
-          if (
-            typeof args !== "object" ||
-            args === null ||
-            Array.isArray(args)
-          ) {
-            throw new Error(
-              `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
-            );
-          }
-          result = await entry.functionTool.execute(
-            args as Record<string, unknown>,
-          );
-        } else if (entry.source === "mcp") {
-          if (!this.mcpClient) throw new Error("MCP client not connected");
-          const oboToken = runState.req.headers["x-forwarded-access-token"];
-          const mcpAuth =
-            typeof oboToken === "string"
-              ? { Authorization: `Bearer ${oboToken}` }
-              : undefined;
-          result = await this.mcpClient.callTool(
-            entry.mcpToolName,
-            args,
-            mcpAuth,
-          );
-        } else if (entry.source === "subagent") {
-          const childAgent = this.agents.get(entry.agentName);
-          if (!childAgent)
-            throw new Error(`Sub-agent not found: ${entry.agentName}`);
-          result = await this.runSubAgent(
-            runState,
-            childAgent,
-            args,
-            depth + 1,
-          );
-        } else if (entry.source === "hosted-supervisor") {
-          // Defense-in-depth: should never fire. Hosted-supervisor entries are
-          // routed via `AgentInput.extensions` and the SA endpoint executes
-          // them server-side; their `def` is filtered out of the adapter's
-          // `tools` array, so the model never sees a callable schema for them.
-          // If we reach here, the agent is paired with a non-SA adapter that
-          // somehow surfaced the placeholder def to the model — surface a
-          // clear error rather than crash later in `normalizeToolResult`.
+    const toolResult = await traceTool(name, args, async () => {
+      let result: unknown;
+      if (entry.source === "toolkit") {
+        if (!this.context) {
           throw new Error(
-            `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-              "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
+            "Plugin tool execution requires PluginContext; this should never happen through createApp",
           );
         }
+        result = await this.context.executeTool(
+          runState.req,
+          entry.pluginName,
+          entry.localName,
+          args,
+          runState.signal,
+          runState.limits.toolCallTimeoutMs,
+        );
+      } else if (entry.source === "function") {
+        // Function tools declare their parameters as a JSON-object schema,
+        // so adapters always serialize `args` as an object. A non-object
+        // value here means the upstream model emitted malformed tool-call
+        // JSON; surface a clear error rather than silently passing through
+        // a wrong-shape value the tool will then choke on.
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
+          throw new Error(
+            `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+          );
+        }
+        result = await entry.functionTool.execute(
+          args as Record<string, unknown>,
+        );
+      } else if (entry.source === "mcp") {
+        if (!this.mcpClient) throw new Error("MCP client not connected");
+        const oboToken = runState.req.headers["x-forwarded-access-token"];
+        const mcpAuth =
+          typeof oboToken === "string"
+            ? { Authorization: `Bearer ${oboToken}` }
+            : undefined;
+        result = await this.mcpClient.callTool(
+          entry.mcpToolName,
+          args,
+          mcpAuth,
+        );
+      } else if (entry.source === "subagent") {
+        const childAgent = this.agents.get(entry.agentName);
+        if (!childAgent)
+          throw new Error(`Sub-agent not found: ${entry.agentName}`);
+        result = await this.runSubAgent(runState, childAgent, args, depth + 1);
+      } else if (entry.source === "hosted-supervisor") {
+        // Defense-in-depth: should never fire. Hosted-supervisor entries are
+        // routed via `AgentInput.extensions` and the SA endpoint executes
+        // them server-side; their `def` is filtered out of the adapter's
+        // `tools` array, so the model never sees a callable schema for them.
+        // If we reach here, the agent is paired with a non-SA adapter that
+        // somehow surfaced the placeholder def to the model — surface a
+        // clear error rather than crash later in `normalizeToolResult`.
+        throw new Error(
+          `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+            "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
+        );
+      }
 
-        span?.setOutputs(result);
-        return result;
-      },
-    );
+      // Auto-captured as the TOOL span's outputs by `traceTool`.
+      return result;
+    });
 
     return normalizeToolResult(toolResult);
   }
