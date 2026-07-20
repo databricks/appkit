@@ -143,7 +143,7 @@ Content-Type: application/json
 | `timeGrain`     | `string`   | no       | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`.      |
 | `timeDimension` | `string`   | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
 | `limit`         | `number`   | no       | Positive integer row cap (max 100000).                                                                       |
-| `format`        | `string`   | no       | Only `JSON_ARRAY` is supported. (Arrow streaming is not yet wired on this route.)                            |
+| `format`        | `string`   | no       | `JSON_ARRAY` (default). `JSON` is accepted as a deprecated alias for it; Arrow formats (`ARROW`, `ARROW_STREAM`) are rejected on this route. |
 
 Measures and dimensions must be unique across both lists — a name cannot repeat, nor appear as both a measure and a dimension.
 
@@ -195,10 +195,14 @@ The operator vocabulary:
 | `in`                        | `IN (…)`                | one or more        |
 | `notIn`                     | `NOT IN (…)`            | one or more        |
 | `gt` / `gte` / `lt` / `lte` | `>` / `>=` / `<` / `<=` | exactly one        |
-| `contains`                  | `LIKE '%value%'`        | exactly one string |
-| `notContains`               | `NOT LIKE '%value%'`    | exactly one string |
+| `contains`                  | `LIKE :param`           | exactly one string |
+| `notContains`               | `NOT LIKE :param`       | exactly one string |
 | `set`                       | `IS NOT NULL`           | none               |
 | `notSet`                    | `IS NULL`               | none               |
+
+For `contains` / `notContains`, the `%…%` wildcards are applied to the *bound parameter value* (`%value%`), not written into the SQL text — so the value is never interpolated, consistent with every other operator.
+
+An empty `or` group (`{ "or": [] }`) is rejected with `400`; an empty `and` group (`{ "and": [] }`) is accepted and contributes no `WHERE` clause (a no-op). Keep this in mind when building filter trees programmatically.
 
 Filters are bounded to keep hostile input from exhausting the server: nesting depth ≤ 8, ≤ 100 children per `and` / `or` group, and ≤ 1000 values per predicate. A request that exceeds a cap is rejected with `400`.
 
