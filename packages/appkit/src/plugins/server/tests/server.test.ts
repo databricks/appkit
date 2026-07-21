@@ -1,13 +1,5 @@
 import type { BasePlugin } from "shared";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  type MockInstance,
-  test,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { PluginContext } from "../../../core/plugin-context";
 
 // Use vi.hoisted for mocks that need to be available before module loading
@@ -95,10 +87,6 @@ vi.mock("express", () => {
 // Mock dependencies before imports
 vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
-    getInstance: vi.fn().mockReturnValue({
-      shutdown: vi.fn().mockResolvedValue(undefined),
-      disownSignalHandlers: vi.fn(),
-    }),
     getProvider: vi.fn().mockReturnValue({
       getTracer: vi.fn().mockReturnValue({ startActiveSpan: vi.fn() }),
       getMeter: vi.fn().mockReturnValue({
@@ -201,8 +189,6 @@ vi.mock("../client-config-sanitizer", () => ({
 
 import fs from "node:fs";
 import express from "express";
-import { CacheManager } from "../../../cache";
-import { TelemetryManager } from "../../../telemetry";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
@@ -711,337 +697,107 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("_gracefulShutdown", () => {
-    let exitSpy: MockInstance<typeof process.exit>;
-
+  describe("shutdown hooks", () => {
     beforeEach(() => {
       mockLoggerError.mockClear();
-      exitSpy = vi
-        .spyOn(process, "exit")
-        .mockImplementation(((_code?: number) => undefined) as any);
     });
 
     afterEach(() => {
-      exitSpy.mockRestore();
       vi.useRealTimers();
     });
 
-    test("aborts plugin operations (with error isolation) and closes server", async () => {
-      vi.useFakeTimers();
-
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          ok: {
-            name: "ok",
-            abortActiveOperations: vi.fn(),
-          },
-          bad: {
-            name: "bad",
-            abortActiveOperations: vi.fn(() => {
-              throw new Error("boom");
-            }),
-          },
-        }),
-      } as any);
-
-      // pretend started
-      (plugin as any).server = mockHttpServer;
-
-      await (plugin as any)._gracefulShutdown();
-      vi.runAllTimers();
-
-      expect(mockLoggerError).toHaveBeenCalled();
-      expect(mockHttpServer.close).toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("calls plugin shutdown() hooks concurrently during graceful shutdown", async () => {
-      const shutdownA = vi.fn().mockResolvedValue(undefined);
-      const shutdownB = vi.fn().mockResolvedValue(undefined);
-      const noHooks = { name: "no-hooks" };
-
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          a: { name: "a", shutdown: shutdownA },
-          b: { name: "b", shutdown: shutdownB },
-          "no-hooks": noHooks,
-        }),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-
-      await (plugin as any)._gracefulShutdown();
-
-      expect(shutdownA).toHaveBeenCalledTimes(1);
-      expect(shutdownB).toHaveBeenCalledTimes(1);
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("a failing plugin shutdown() is logged and does not abort shutdown", async () => {
-      const failing = vi.fn().mockRejectedValue(new Error("drain failed"));
-      const healthy = vi.fn().mockResolvedValue(undefined);
-
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          failing: { name: "failing", shutdown: failing },
-          healthy: { name: "healthy", shutdown: healthy },
-        }),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-
-      await (plugin as any)._gracefulShutdown();
-
-      expect(failing).toHaveBeenCalledTimes(1);
-      expect(healthy).toHaveBeenCalledTimes(1);
-      expect(
-        mockLoggerError.mock.calls.some((c) =>
-          String(c[0]).includes("Error shutting down plugin"),
-        ),
-      ).toBe(true);
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("a hanging plugin shutdown() does not block past its timeout", async () => {
-      vi.useFakeTimers();
-
-      const hanging = vi.fn(() => new Promise<void>(() => {}));
-      const fast = vi.fn().mockResolvedValue(undefined);
-
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          hanging: { name: "hanging", shutdown: hanging },
-          fast: { name: "fast", shutdown: fast },
-        }),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-
-      const done = (plugin as any)._gracefulShutdown();
-      await vi.advanceTimersByTimeAsync(10_000);
-      await done;
-
-      expect(hanging).toHaveBeenCalledTimes(1);
-      expect(fast).toHaveBeenCalledTimes(1);
-      expect(
-        mockLoggerError.mock.calls.some(
-          (c) =>
-            String(c[0]).includes("Error shutting down plugin") &&
-            c[1] === "hanging" &&
-            String(c[2]).includes("timed out"),
-        ),
-      ).toBe(true);
-      // graceful path completed before the 15s force-exit timer
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("emits the 'shutdown' lifecycle event", async () => {
-      const ctx = createContextWithPlugins({});
-      const hook = vi.fn();
-      ctx.onLifecycle("shutdown", hook);
-
-      const plugin = new ServerPlugin({ context: ctx } as any);
-      (plugin as any).server = mockHttpServer;
-
-      await (plugin as any)._gracefulShutdown();
-
-      expect(hook).toHaveBeenCalledTimes(1);
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("closes idle and remaining connections so close() can complete", async () => {
+    test("abortActiveOperations() stops accepting connections and initiates close", () => {
       const plugin = new ServerPlugin({
         context: createContextWithPlugins({}),
       } as any);
       (plugin as any).server = mockHttpServer;
 
-      await (plugin as any)._gracefulShutdown();
+      plugin.abortActiveOperations();
 
+      // Idle keep-alive sockets are dropped and close() is initiated so a
+      // connected browser cannot pin the server open.
       expect(mockHttpServer.closeIdleConnections).toHaveBeenCalledTimes(1);
-      expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
       expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      // The full socket teardown is deferred to the lifecycle hook.
+      expect(mockHttpServer.closeAllConnections).not.toHaveBeenCalled();
     });
 
-    test("is not re-entrant — a second signal is a no-op", async () => {
-      const shutdownHook = vi.fn().mockResolvedValue(undefined);
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          a: { name: "a", shutdown: shutdownHook },
-        }),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-
-      await Promise.all([
-        (plugin as any)._gracefulShutdown(),
-        (plugin as any)._gracefulShutdown(),
-      ]);
-      await (plugin as any)._gracefulShutdown();
-
-      expect(shutdownHook).toHaveBeenCalledTimes(1);
-      expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
-    });
-
-    test("exits 0 without a server instance", async () => {
+    test("abortActiveOperations() is a no-op on sockets when no server started", () => {
       const plugin = new ServerPlugin({
         context: createContextWithPlugins({}),
       } as any);
 
-      await (plugin as any)._gracefulShutdown();
-
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(() => plugin.abortActiveOperations()).not.toThrow();
       expect(mockHttpServer.close).not.toHaveBeenCalled();
     });
 
-    test("a hanging telemetry flush cannot hang shutdown — the flush timeout still exits 0", async () => {
-      vi.useFakeTimers();
-
-      const hangingFlush = vi.fn(() => new Promise<never>(() => {}));
-      vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
-        shutdown: hangingFlush,
-        disownSignalHandlers: vi.fn(),
+    test("shutdown() drains the dev servers", async () => {
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
       } as any);
+      const viteClose = vi.fn().mockResolvedValue(undefined);
+      const tunnelCleanup = vi.fn();
+      (plugin as any).viteDevServer = { close: viteClose };
+      (plugin as any).remoteTunnelController = { cleanup: tunnelCleanup };
 
+      await plugin.shutdown();
+
+      expect(viteClose).toHaveBeenCalledTimes(1);
+      expect(tunnelCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    test("closeRemainingConnections() force-closes sockets and awaits the close", async () => {
       const plugin = new ServerPlugin({
         context: createContextWithPlugins({}),
       } as any);
       (plugin as any).server = mockHttpServer;
 
-      const done = (plugin as any)._gracefulShutdown();
-      // The per-phase budget (2s) is what unblocks the flush — well before
-      // the 15s force-exit timer.
+      // abort initiates the close and captures the serverClosed promise
+      plugin.abortActiveOperations();
+      await (plugin as any).closeRemainingConnections();
+
+      expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
+      expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
+    });
+
+    test("closeRemainingConnections() does not hang if close() never completes", async () => {
+      vi.useFakeTimers();
+      // A server whose close callback never fires.
+      const stuckServer = {
+        ...mockHttpServer,
+        close: vi.fn(),
+        closeIdleConnections: vi.fn(),
+        closeAllConnections: vi.fn(),
+      };
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      (plugin as any).server = stuckServer;
+
+      plugin.abortActiveOperations();
+      const done = (plugin as any).closeRemainingConnections();
+      // Bounded by SERVER_CLOSE_TIMEOUT_MS (2s) even though close never fires.
       await vi.advanceTimersByTimeAsync(2_000);
       await done;
 
-      expect(hangingFlush).toHaveBeenCalledTimes(1);
-      expect(
-        mockLoggerError.mock.calls.some(
-          (c) =>
-            String(c[0]).includes("Error flushing telemetry") &&
-            String(c[1]).includes("timed out"),
-        ),
-      ).toBe(true);
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(stuckServer.closeAllConnections).toHaveBeenCalledTimes(1);
     });
 
-    test("runs phases in order: abort → closeIdle → plugin hooks → lifecycle emit → closeAll → cache close + flush (concurrent) → exit", async () => {
-      const order: string[] = [];
-
-      const ctx = createContextWithPlugins({
-        a: {
-          name: "a",
-          abortActiveOperations: vi.fn(() => {
-            order.push("abort");
-          }),
-          shutdown: vi.fn(async () => {
-            order.push("plugin-shutdown");
-          }),
-        },
-      });
-      ctx.onLifecycle("shutdown", () => {
-        order.push("lifecycle");
-      });
-
-      mockHttpServer.closeIdleConnections.mockImplementationOnce(() => {
-        order.push("closeIdle");
-      });
-      mockHttpServer.closeAllConnections.mockImplementationOnce(() => {
-        order.push("closeAll");
-      });
-      vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
-        shutdown: vi.fn(async () => {
-          order.push("flush");
-        }),
-        disownSignalHandlers: vi.fn(),
-      } as any);
-      exitSpy.mockImplementationOnce(((_code?: number) => {
-        order.push("exit");
-      }) as any);
-
+    test("start() registers closeRemainingConnections on the 'shutdown' lifecycle event", async () => {
+      const ctx = createContextWithPlugins({});
+      const onLifecycleSpy = vi.spyOn(ctx, "onLifecycle");
       const plugin = new ServerPlugin({ context: ctx } as any);
-      (plugin as any).server = mockHttpServer;
-      // Set after construction: the Plugin constructor itself consumes one
-      // getInstanceSync() call when binding the cache eagerly.
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
-        close: vi.fn(async () => {
-          order.push("cache-close");
-        }),
-      } as any);
 
-      await (plugin as any)._gracefulShutdown();
+      await plugin.start();
 
-      expect(order.slice(0, 5)).toEqual([
-        "abort",
-        "closeIdle",
-        "plugin-shutdown",
-        "lifecycle",
-        "closeAll",
-      ]);
-      // The cache close and the telemetry flush run concurrently, so only
-      // assert that both happen after closeAll and before exit — their
-      // relative order is unspecified.
-      expect(order.slice(5, 7).sort()).toEqual(["cache-close", "flush"]);
-      expect(order[7]).toBe("exit");
-      expect(order).toHaveLength(8);
-    });
-
-    test("a hanging cache close cannot hang shutdown — the close timeout still exits 0", async () => {
-      vi.useFakeTimers();
-
-      const hangingClose = vi.fn(() => new Promise<never>(() => {}));
-
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({}),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-      // Set after construction: the Plugin constructor itself consumes one
-      // getInstanceSync() call when binding the cache eagerly.
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
-        close: hangingClose,
-      } as any);
-
-      const done = (plugin as any)._gracefulShutdown();
-      // The per-phase budget (2s) is what unblocks the close — well before
-      // the 15s force-exit timer.
-      await vi.advanceTimersByTimeAsync(2_000);
-      await done;
-
-      expect(hangingClose).toHaveBeenCalledTimes(1);
-      expect(
-        mockLoggerError.mock.calls.some(
-          (c) =>
-            String(c[0]).includes("Error closing cache storage") &&
-            String(c[1]).includes("timed out"),
-        ),
-      ).toBe(true);
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("a plugin shutdown() that rejects after its timeout already won does not crash", async () => {
-      vi.useFakeTimers();
-
-      let rejectLate: ((err: Error) => void) | undefined;
-      const lateRejecting = vi.fn(
-        () =>
-          new Promise<void>((_, reject) => {
-            rejectLate = reject;
-          }),
+      expect(onLifecycleSpy).toHaveBeenCalledWith(
+        "shutdown",
+        expect.any(Function),
       );
 
-      const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          late: { name: "late", shutdown: lateRejecting },
-        }),
-      } as any);
-      (plugin as any).server = mockHttpServer;
-
-      const done = (plugin as any)._gracefulShutdown();
-      await vi.advanceTimersByTimeAsync(10_000);
-      await done;
-
-      // The hook loses the race, then rejects afterwards — must be
-      // swallowed by the pre-attached no-op handler, not crash the process.
-      rejectLate?.(new Error("late rejection"));
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      // Emitting the event drives the socket teardown end-to-end.
+      await ctx.emitLifecycle("shutdown");
+      expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
     });
   });
 });

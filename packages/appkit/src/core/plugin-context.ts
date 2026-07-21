@@ -30,11 +30,12 @@ type ToolProviderPlugin = BasePlugin &
  * - `"setup:complete"` — emitted by AppKit core after every plugin's
  *   `setup()` has finished.
  * - `"server:ready"` — emitted when the HTTP server is listening.
- * - `"shutdown"` — emitted by the server plugin during graceful shutdown,
- *   AFTER all plugin `shutdown()` hooks have completed and BEFORE remaining
- *   connections are force-closed. The emit is bounded by a short timeout
- *   (see the server plugin's shutdown budget), so subscribers must not
- *   start long-running async work — finish quickly or be cut off.
+ * - `"shutdown"` — emitted by the core lifecycle manager during graceful
+ *   shutdown, AFTER all plugin `shutdown()` hooks have completed. The emit is
+ *   bounded by a short timeout (see the lifecycle manager's shutdown budget),
+ *   so subscribers must not start long-running async work — finish quickly or
+ *   be cut off. (The server plugin subscribes here to force-close its
+ *   remaining sockets once peers have drained.)
  */
 type LifecycleEvent = "setup:complete" | "server:ready" | "shutdown";
 
@@ -253,8 +254,8 @@ export class PluginContext {
    * Errors in individual callbacks are logged but do not prevent
    * other callbacks from running.
    *
-   * @internal Called by AppKit core (`setup:complete`) and the server
-   * plugin (`shutdown`, during graceful shutdown).
+   * @internal Called by AppKit core: `setup:complete` after plugin setup,
+   * and `shutdown` by the lifecycle manager during graceful shutdown.
    */
   async emitLifecycle(event: LifecycleEvent): Promise<void> {
     const hooks = this.lifecycleHooks.get(event);

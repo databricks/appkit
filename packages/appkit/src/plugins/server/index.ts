@@ -4,14 +4,13 @@ import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
-import type { BasePlugin, PluginClientConfigs, PluginPhase } from "shared";
-import { CacheManager } from "../../cache";
+import type { PluginClientConfigs, PluginPhase } from "shared";
 import { ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { instrumentations, TelemetryManager } from "../../telemetry";
+import { instrumentations } from "../../telemetry";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
@@ -56,34 +55,12 @@ export class ServerPlugin extends Plugin {
   };
 
   /**
-   * Overall graceful-shutdown budget before the process is force-exited.
-   *
-   * Budget arithmetic: plugin `shutdown()` hooks run concurrently and are
-   * bounded by {@link PLUGIN_SHUTDOWN_TIMEOUT_MS} (10s); the lifecycle emit
-   * is bounded by {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s); the cache storage
-   * close and the telemetry flush run concurrently, each bounded by
-   * {@link PHASE_SHUTDOWN_TIMEOUT_MS} (2s). Worst case is
-   * 10s + 2s + max(2s, 2s) = 14s, leaving ~1s of margin for the remaining
-   * steps (aborts, socket teardown) before this timer force-exits.
-   *
-   * The `server.close()` await (after `closeAllConnections()`) is unbounded
-   * by design: `closeAllConnections()` runs immediately before it, so it is
-   * expected to resolve promptly, and the force-exit timer is the backstop
-   * if it does not.
+   * Budget for awaiting `server.close()` during shutdown. Bounded because
+   * `closeAllConnections()` runs immediately before the await, so the close
+   * is expected to resolve promptly; the core lifecycle manager's overall
+   * force-exit timer is the ultimate backstop if it does not.
    */
-  private static readonly SHUTDOWN_TIMEOUT_MS = 15_000;
-  /**
-   * Per-plugin budget for `shutdown()` hooks. Sized to cover the longest
-   * built-in drain (the files plugin waits up to 10s for in-flight writes).
-   */
-  private static readonly PLUGIN_SHUTDOWN_TIMEOUT_MS = 10_000;
-  /**
-   * Budget for each non-plugin shutdown phase (the `"shutdown"` lifecycle
-   * emit, the cache storage close, and the telemetry flush). Keeps the
-   * worst-case total under {@link SHUTDOWN_TIMEOUT_MS} — see the arithmetic
-   * there.
-   */
-  private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
+  private static readonly SERVER_CLOSE_TIMEOUT_MS = 2_000;
 
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"server">;
@@ -97,17 +74,11 @@ export class ServerPlugin extends Plugin {
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
   /**
-   * Guards against re-entrant shutdown (e.g. SIGTERM followed by SIGINT).
-   * The flag set in `_gracefulShutdown` must remain synchronous and first —
-   * any `await` before it would open a window for a second signal to
-   * re-enter the sequence.
+   * Resolves when `server.close()` completes. Created in
+   * {@link abortActiveOperations} (which initiates the close) and awaited in
+   * {@link closeRemainingConnections} after other plugins have drained.
    */
-  private isShuttingDown = false;
-  /**
-   * Name of the shutdown phase currently in flight, so the force-exit log
-   * can say where shutdown got stuck without extra bookkeeping.
-   */
-  private shutdownPhase = "not started";
+  private serverClosed?: Promise<void>;
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -203,13 +174,15 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    // With a server present, this plugin owns the telemetry flush: it is
-    // awaited inside _gracefulShutdown() after plugin hooks have run.
-    // Remove the TelemetryManager's standalone signal handlers so they
-    // cannot start the flush early (see TelemetryManager.disownSignalHandlers).
-    TelemetryManager.getInstance().disownSignalHandlers();
-    process.once("SIGTERM", () => this._gracefulShutdown());
-    process.once("SIGINT", () => this._gracefulShutdown());
+    // Graceful shutdown is orchestrated by the core LifecycleManager, which
+    // owns the process signal handlers. This plugin only contributes its
+    // HTTP concerns: it aborts/initiates the socket close in
+    // abortActiveOperations(), drains dev servers in shutdown(), and force-
+    // closes remaining sockets in the "shutdown" lifecycle hook below (which
+    // fires after every plugin's shutdown() has run).
+    this.context?.onLifecycle("shutdown", () =>
+      this.closeRemainingConnections(),
+    );
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
@@ -446,207 +419,71 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private async _gracefulShutdown() {
-    // Must stay synchronous and first: any await before the flag is set
-    // would let a second signal re-enter the shutdown sequence.
-    if (this.isShuttingDown) return;
-    this.isShuttingDown = true;
-
-    logger.info("Starting graceful shutdown...");
-
-    // Force exit once the overall budget is spent. Exit 0 is deliberate:
-    // a force-timeout still happens on a routine deploy (deliberate
-    // shutdown, not a crash), and orchestrators record nonzero exits on
-    // deploys as crashes. The error log below is the stuck-shutdown
-    // signal instead of the exit code.
-    const forceExitTimer = setTimeout(() => {
-      logger.error(
-        "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
-        ServerPlugin.SHUTDOWN_TIMEOUT_MS,
-        this.shutdownPhase,
-      );
-      process.exit(0);
-    }, ServerPlugin.SHUTDOWN_TIMEOUT_MS);
-    forceExitTimer.unref();
-
-    try {
-      this.shutdownPhase = "dev servers and tunnel cleanup";
-      if (this.viteDevServer) {
-        await this.viteDevServer.close();
-      }
-
-      if (this.remoteTunnelController) {
-        this.remoteTunnelController.cleanup();
-      }
-
-      TelemetryReporter.getInstance()?.stop();
-
-      const plugins = this.context
-        ? Array.from(this.context.getPlugins().values())
-        : [];
-
-      // 1. abort active operations from plugins (in-flight executions,
-      //    SSE streams). Cancellation only — resource teardown (e.g. the
-      //    lakebase pools) belongs in plugin shutdown() hooks so other
-      //    plugins can still drain state through them.
-      this.shutdownPhase = "aborting active operations";
-      for (const plugin of plugins) {
-        if (plugin.abortActiveOperations) {
-          try {
-            plugin.abortActiveOperations();
-          } catch (err) {
-            logger.error(
-              "Error aborting operations for plugin %s: %O",
-              plugin.name,
-              err,
-            );
-          }
-        }
-      }
-
-      // 2. stop accepting new connections and drop idle keep-alive sockets.
-      //    Without this, any connected browser pins `server.close()` open
-      //    until the force-exit timeout fires.
-      let serverClosed: Promise<void> | undefined;
-      if (this.server) {
-        const server = this.server;
-        serverClosed = new Promise((resolve) => {
-          server.close(() => resolve());
-        });
-        server.closeIdleConnections();
-      }
-
-      // 3. run every plugin's shutdown() hook concurrently, each bounded
-      //    by a per-plugin timeout so one hung plugin cannot stall exit.
-      this.shutdownPhase = "plugin shutdown() hooks";
-      await Promise.all(
-        plugins
-          .filter((plugin) => typeof plugin.shutdown === "function")
-          .map((plugin) => this.runPluginShutdown(plugin)),
-      );
-
-      // 4. notify lifecycle subscribers, bounded so a slow subscriber
-      //    cannot eat the remaining budget.
-      this.shutdownPhase = "shutdown lifecycle emit";
-      try {
-        await this.raceWithTimeout(
-          this.context?.emitLifecycle("shutdown"),
-          ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
-          "shutdown lifecycle emit",
-        );
-      } catch (err) {
-        logger.error("Error emitting shutdown lifecycle event: %O", err);
-      }
-
-      // 5. force-close whatever sockets remain (aborted SSE responses,
-      //    keep-alive connections) so `server.close()` can complete.
-      this.shutdownPhase = "closing remaining connections";
-      if (this.server) {
-        this.server.closeAllConnections();
-      }
-      if (serverClosed) {
-        await serverClosed;
-        logger.debug("Server closed gracefully");
-      }
-
-      // 6. close the cache manager's storage (drains the persistent
-      //    Lakebase pool; no-op for in-memory storage) and flush telemetry.
-      //    Runs after the lifecycle emit so subscribers can still read the
-      //    cache. The two are independent (the flush never touches the
-      //    cache), so they run concurrently — each bounded so a stuck pool
-      //    drain or stalled OTLP export cannot eat the remaining budget.
-      //    The flush runs inside the orchestrated shutdown instead of
-      //    racing a standalone TelemetryManager signal handler against
-      //    process.exit (see disownSignalHandlers in start()).
-      this.shutdownPhase = "cache storage close + telemetry flush";
-      const closeCacheStorage = async () => {
-        let cache: CacheManager;
-        try {
-          cache = CacheManager.getInstanceSync();
-        } catch {
-          // Cache was never initialized — nothing to close.
-          return;
-        }
-        try {
-          await this.raceWithTimeout(
-            cache.close(),
-            ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
-            "cache storage close",
-          );
-        } catch (err) {
-          logger.error("Error closing cache storage during shutdown: %O", err);
-        }
-      };
-      const flushTelemetry = async () => {
-        try {
-          await this.raceWithTimeout(
-            TelemetryManager.getInstance().shutdown(),
-            ServerPlugin.PHASE_SHUTDOWN_TIMEOUT_MS,
-            "telemetry flush",
-          );
-        } catch (err) {
-          logger.error("Error flushing telemetry during shutdown: %O", err);
-        }
-      };
-      await Promise.all([closeCacheStorage(), flushTelemetry()]);
-    } catch (err) {
-      logger.error("Error during graceful shutdown: %O", err);
-      clearTimeout(forceExitTimer);
-      process.exit(1);
-      return;
-    }
-
-    clearTimeout(forceExitTimer);
-    logger.info("Graceful shutdown complete");
-    process.exit(0);
-  }
-
   /**
-   * Race `work` against a timeout. Rejects with a labeled error when the
-   * timeout wins. A no-op rejection handler is attached to the work promise
-   * before racing so a branch that rejects after the timeout already won
-   * does not surface as an unhandledRejection.
+   * Cancel in-flight work and begin closing the HTTP server.
+   *
+   * Runs in the first phase of the core LifecycleManager's graceful shutdown,
+   * before any plugin `shutdown()` hook. In addition to the base behavior
+   * (aborting SSE streams), it stops the server accepting new connections and
+   * drops idle keep-alive sockets — without `closeIdleConnections()`, a
+   * connected browser would pin `server.close()` open until the force-exit
+   * timer fires. The close is only *initiated* here; the returned promise is
+   * awaited later in {@link closeRemainingConnections} so peer plugins can
+   * still drain in-flight requests through the server first.
    */
-  private async raceWithTimeout<T>(
-    work: Promise<T> | T,
-    timeoutMs: number,
-    label: string,
-  ): Promise<T> {
-    const promise = Promise.resolve(work);
-    promise.catch(() => {});
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
-            timeoutMs,
-          );
-          timer.unref();
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
+  abortActiveOperations(): void {
+    super.abortActiveOperations();
+
+    if (this.server) {
+      const server = this.server;
+      this.serverClosed = new Promise((resolve) => {
+        server.close(() => resolve());
+      });
+      server.closeIdleConnections();
     }
   }
 
   /**
-   * Run a single plugin's `shutdown()` hook bounded by
-   * {@link ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS}. Errors and timeouts
-   * are logged but never thrown so one misbehaving plugin cannot block
-   * the rest of the shutdown sequence.
+   * Drain the dev-only servers as this plugin's `shutdown()` hook.
+   *
+   * Runs concurrently with the other plugins' hooks during graceful shutdown.
+   * These are no-ops in production (neither is created), so this hook is
+   * effectively dev-only.
    */
-  private async runPluginShutdown(plugin: BasePlugin): Promise<void> {
-    try {
-      await this.raceWithTimeout(
-        plugin.shutdown?.(),
-        ServerPlugin.PLUGIN_SHUTDOWN_TIMEOUT_MS,
-        "shutdown()",
-      );
-    } catch (err) {
-      logger.error("Error shutting down plugin %s: %O", plugin.name, err);
+  async shutdown(): Promise<void> {
+    if (this.viteDevServer) {
+      await this.viteDevServer.close();
     }
+    if (this.remoteTunnelController) {
+      this.remoteTunnelController.cleanup();
+    }
+  }
+
+  /**
+   * Force-close whatever sockets remain and await the server close.
+   *
+   * Registered on the `"shutdown"` lifecycle event in {@link start}, so it
+   * fires after every plugin's `shutdown()` hook has run — meaning any
+   * in-flight request a peer plugin was draining has already completed.
+   * `closeAllConnections()` destroys the leftover sockets (aborted SSE
+   * responses, keep-alive connections) synchronously so the pending
+   * `server.close()` can complete; the await is bounded because the close is
+   * expected to resolve promptly once the sockets are gone.
+   */
+  private async closeRemainingConnections(): Promise<void> {
+    if (this.server) {
+      this.server.closeAllConnections();
+    }
+    if (!this.serverClosed) return;
+
+    await Promise.race([
+      this.serverClosed,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ServerPlugin.SERVER_CLOSE_TIMEOUT_MS);
+        timer.unref();
+      }),
+    ]);
+    logger.debug("Server closed gracefully");
   }
 
   /**
