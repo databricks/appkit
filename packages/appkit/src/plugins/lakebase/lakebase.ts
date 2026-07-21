@@ -177,9 +177,10 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   /**
    * Gracefully drains and closes all connection pools (SP + OBO).
    *
-   * Runs as the plugin's `shutdown()` hook (phase 3 of the server's graceful
-   * shutdown), NOT in `abortActiveOperations()` (phase 1): other plugins'
-   * `shutdown()` hooks may still need database connections to drain state,
+   * Runs as the plugin's `shutdown()` hook (phase 3 of the core lifecycle
+   * manager's graceful shutdown), NOT in `abortActiveOperations()` (phase 2):
+   * other plugins' `shutdown()` hooks may still need database connections to
+   * drain state,
    * so the pools must outlive the abort phase. `pg.Pool#end()` waits for
    * checked-out clients to be released, so hooks running concurrently with
    * this one can still finish their in-flight queries. Errors are caught

@@ -109,6 +109,11 @@ export class LifecycleManager {
       );
       process.exit(0);
     }, LifecycleManager.SHUTDOWN_TIMEOUT_MS);
+    // unref so this backstop timer never by itself keeps the process alive.
+    // Any real pending teardown (OTEL export timer, DB pool sockets, the
+    // still-open HTTP listener) is a ref'd handle that holds the loop open
+    // until this fires; if nothing is ref'd, there is nothing left to tear
+    // down and exiting early is correct.
     forceExitTimer.unref();
 
     try {

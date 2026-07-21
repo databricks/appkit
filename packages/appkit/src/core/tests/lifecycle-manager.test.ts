@@ -49,6 +49,7 @@ vi.mock("../../logging/logger", () => ({
 }));
 
 import { CacheManager } from "../../cache";
+import { TelemetryReporter } from "../../internal-telemetry";
 import { TelemetryManager } from "../../telemetry";
 import { LifecycleManager } from "../lifecycle-manager";
 import { PluginContext } from "../plugin-context";
@@ -79,8 +80,19 @@ describe("LifecycleManager", () => {
 
   describe("shutdown", () => {
     test("runs plugin shutdown() hooks concurrently and exits 0", async () => {
-      const shutdownA = vi.fn().mockResolvedValue(undefined);
-      const shutdownB = vi.fn().mockResolvedValue(undefined);
+      // Prove concurrency, not just "both called": hook B only resolves after
+      // hook A has started. If the manager awaited hooks serially (A fully
+      // before B), B would never observe A as started and this would hang.
+      let aStarted: (() => void) | undefined;
+      const aStartedGate = new Promise<void>((resolve) => {
+        aStarted = resolve;
+      });
+      const shutdownA = vi.fn(async () => {
+        aStarted?.();
+      });
+      const shutdownB = vi.fn(async () => {
+        await aStartedGate;
+      });
       const ctx = contextWithPlugins({
         a: { name: "a", shutdown: shutdownA },
         b: { name: "b", shutdown: shutdownB },
@@ -91,6 +103,29 @@ describe("LifecycleManager", () => {
 
       expect(shutdownA).toHaveBeenCalledTimes(1);
       expect(shutdownB).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    test("stops the internal-telemetry reporter before aborting", async () => {
+      const stop = vi.fn();
+      const order: string[] = [];
+      stop.mockImplementation(() => order.push("reporter-stop"));
+      vi.mocked(TelemetryReporter.getInstance).mockReturnValueOnce({
+        stop,
+      } as any);
+      const ctx = contextWithPlugins({
+        a: {
+          name: "a",
+          abortActiveOperations: vi.fn(() => {
+            order.push("abort");
+          }),
+        },
+      });
+
+      await new LifecycleManager(ctx).shutdown();
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["reporter-stop", "abort"]);
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 

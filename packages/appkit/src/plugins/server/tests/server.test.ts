@@ -87,6 +87,9 @@ vi.mock("express", () => {
 // Mock dependencies before imports
 vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
+    getInstance: vi.fn().mockReturnValue({
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    }),
     getProvider: vi.fn().mockReturnValue({
       getTracer: vi.fn().mockReturnValue({ startActiveSpan: vi.fn() }),
       getMeter: vi.fn().mockReturnValue({
@@ -189,6 +192,7 @@ vi.mock("../client-config-sanitizer", () => ({
 
 import fs from "node:fs";
 import express from "express";
+import { LifecycleManager } from "../../../core/lifecycle-manager";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
@@ -798,6 +802,47 @@ describe("ServerPlugin", () => {
       // Emitting the event drives the socket teardown end-to-end.
       await ctx.emitLifecycle("shutdown");
       expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
+    });
+
+    test("real LifecycleManager drives the ServerPlugin's socket teardown in order", async () => {
+      // End-to-end across the contract seam: a real LifecycleManager driving a
+      // real ServerPlugin + real PluginContext, with a peer plugin whose
+      // shutdown() hook must land BETWEEN the server's closeIdle (abort phase)
+      // and closeAll (lifecycle-emit phase). Mocking only one side would let a
+      // dropped registration or phase reorder pass — this catches it.
+      const order: string[] = [];
+      mockHttpServer.closeIdleConnections.mockImplementationOnce(() => {
+        order.push("closeIdle");
+      });
+      mockHttpServer.closeAllConnections.mockImplementationOnce(() => {
+        order.push("closeAll");
+      });
+
+      const ctx = new PluginContext();
+      const server = new ServerPlugin({ context: ctx } as any);
+      ctx.registerPlugin("server", server as unknown as BasePlugin);
+      ctx.registerPlugin("peer", {
+        name: "peer",
+        shutdown: vi.fn(async () => {
+          order.push("peer-shutdown");
+        }),
+      } as unknown as BasePlugin);
+
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+        _code?: number,
+      ) => {
+        order.push("exit");
+        return undefined;
+      }) as any);
+
+      await server.start();
+      await new LifecycleManager(ctx).shutdown();
+
+      // closeIdle fires in the abort phase, the peer drains next, closeAll only
+      // fires in the later lifecycle-emit phase, then the process exits 0.
+      expect(order).toEqual(["closeIdle", "peer-shutdown", "closeAll", "exit"]);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      exitSpy.mockRestore();
     });
   });
 });
