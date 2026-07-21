@@ -41,9 +41,11 @@ export class AppManager {
   }
 
   /**
-   * Whether `req` is a dev-tunnel (`?dev`) request.
+   * Whether `req` is a dev-tunnel (`?dev`) request. Internal `?dev` predicate
+   * shared by {@link createFsAdapter} (tunnel-vs-`fs` branch) and
+   * {@link isNotFoundError} (dev's message-match not-found classification).
    */
-  isDevRequest(req?: RequestLike): boolean {
+  private isDevRequest(req?: RequestLike): boolean {
     return req?.query?.dev !== undefined;
   }
 

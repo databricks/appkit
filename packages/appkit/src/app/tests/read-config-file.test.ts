@@ -36,19 +36,6 @@ describe("AppManager.readConfigFile", () => {
     });
   });
 
-  describe("isDevRequest predicate", () => {
-    test("returns true when ?dev is present", () => {
-      expect(appManager.isDevRequest({ query: { dev: "" }, headers: {} })).toBe(
-        true,
-      );
-    });
-
-    test("returns false without ?dev and for undefined req", () => {
-      expect(appManager.isDevRequest({ query: {}, headers: {} })).toBe(false);
-      expect(appManager.isDevRequest()).toBe(false);
-    });
-  });
-
   describe("production mode (direct fs)", () => {
     test("returns file contents for an existing file", async () => {
       await fs.writeFile(
