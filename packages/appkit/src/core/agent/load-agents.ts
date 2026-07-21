@@ -348,13 +348,28 @@ export function parseFrontmatter(
   return { data: data as Frontmatter, content: match[2].trim() };
 }
 
-/** Expected wire type of each {@link GenerationParams} key, for loud warnings. */
-const GENERATION_PARAM_TYPES: Record<keyof GenerationParams, string> = {
-  temperature: "number",
-  top_p: "number",
-  frequency_penalty: "number",
-  presence_penalty: "number",
-  stop: "string or string[]",
+const isNumber = (v: unknown): v is number => typeof v === "number";
+
+/**
+ * Per-key validators for {@link GenerationParams} frontmatter. Keyed by wire
+ * name and typed as `Record<keyof GenerationParams, ...>`, so a new param on
+ * the interface is a compile error until it gets an entry here — parsing,
+ * unknown-key detection, and warnings all derive from this one table.
+ */
+const GENERATION_PARAM_SPECS: Record<
+  keyof GenerationParams,
+  { label: string; valid: (v: unknown) => boolean }
+> = {
+  temperature: { label: "number", valid: isNumber },
+  top_p: { label: "number", valid: isNumber },
+  frequency_penalty: { label: "number", valid: isNumber },
+  presence_penalty: { label: "number", valid: isNumber },
+  stop: {
+    label: "string or string[]",
+    valid: (v) =>
+      typeof v === "string" ||
+      (Array.isArray(v) && v.every((s) => typeof s === "string")),
+  },
 };
 
 /**
@@ -373,55 +388,31 @@ function parseGenerationParams(
     return undefined;
   }
   const raw = value as Record<string, unknown>;
-  const out: GenerationParams = {};
+  const out: Record<string, unknown> = {};
   const where = sourcePath ?? "<inline>";
-  const warnBadType = (key: keyof GenerationParams) =>
-    logger.warn(
-      "Ignoring generationParams.%s in %s: expected %s, got %s",
-      key,
-      where,
-      GENERATION_PARAM_TYPES[key],
-      typeof raw[key],
-    );
 
-  if (raw.temperature !== undefined) {
-    if (typeof raw.temperature === "number") out.temperature = raw.temperature;
-    else warnBadType("temperature");
-  }
-  if (raw.top_p !== undefined) {
-    if (typeof raw.top_p === "number") out.top_p = raw.top_p;
-    else warnBadType("top_p");
-  }
-  if (raw.frequency_penalty !== undefined) {
-    if (typeof raw.frequency_penalty === "number")
-      out.frequency_penalty = raw.frequency_penalty;
-    else warnBadType("frequency_penalty");
-  }
-  if (raw.presence_penalty !== undefined) {
-    if (typeof raw.presence_penalty === "number")
-      out.presence_penalty = raw.presence_penalty;
-    else warnBadType("presence_penalty");
-  }
-  if (raw.stop !== undefined) {
-    if (
-      typeof raw.stop === "string" ||
-      (Array.isArray(raw.stop) && raw.stop.every((s) => typeof s === "string"))
-    ) {
-      out.stop = raw.stop as string | string[];
-    } else warnBadType("stop");
-  }
-
-  for (const key of Object.keys(raw)) {
-    if (!(key in GENERATION_PARAM_TYPES)) {
+  for (const [key, v] of Object.entries(raw)) {
+    const spec = GENERATION_PARAM_SPECS[key as keyof GenerationParams];
+    if (!spec) {
       logger.warn(
         "Ignoring unknown generationParams key '%s' in %s",
         key,
         where,
       );
+    } else if (spec.valid(v)) {
+      out[key] = v;
+    } else {
+      logger.warn(
+        "Ignoring generationParams.%s in %s: expected %s, got %s",
+        key,
+        where,
+        spec.label,
+        typeof v,
+      );
     }
   }
 
-  return Object.keys(out).length > 0 ? out : undefined;
+  return Object.keys(out).length > 0 ? (out as GenerationParams) : undefined;
 }
 
 function buildDefinition(
