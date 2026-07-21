@@ -1191,7 +1191,10 @@ describe("metric — filter translator", () => {
       expect(where).toContain(" AND ");
     });
 
-    test("empty `and: []` group emits no WHERE clause", () => {
+    test("empty `and: []` group emits no WHERE clause (defense in depth past the validator)", () => {
+      // The validator rejects `and: []` (see cardinality tests), but if a
+      // bypass ever reaches the renderer, an empty conjunction must drop to no
+      // constraint — never emit a malformed WHERE.
       const { statement, parameters } = buildMetricSql(registration, {
         measures: ["arr"],
         filter: { and: [] },
@@ -1477,13 +1480,17 @@ describe("metric — filter translator", () => {
       ).toThrowError(/fields:.*filter\.or/);
     });
 
-    test("accepts empty `and` group (no constraint contributed)", () => {
+    test("rejects empty `and` group (renders to no WHERE, would split the cache)", () => {
+      // An empty `and` contributes no constraint and renders to no WHERE
+      // clause — identical SQL to omitting `filter` — but canonicalizes to a
+      // distinct cache key (`and()` vs `_`). Reject it so request shape and
+      // cache key stay one-to-one.
       expect(() =>
         validateMetricRequest({
           measures: ["arr"],
           filter: { and: [] },
         }),
-      ).not.toThrow();
+      ).toThrowError(/fields:.*filter\.and/);
     });
 
     test("rejects an unknown operator at depth (nested filter)", () => {
