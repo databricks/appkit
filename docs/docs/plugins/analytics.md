@@ -202,7 +202,7 @@ The operator vocabulary:
 
 For `contains` / `notContains`, the `%…%` wildcards are applied to the *bound parameter value* (`%value%`), not written into the SQL text — so the value is never interpolated, consistent with every other operator.
 
-An empty `or` group (`{ "or": [] }`) is rejected with `400`; an empty `and` group (`{ "and": [] }`) is accepted and contributes no `WHERE` clause (a no-op). Keep this in mind when building filter trees programmatically.
+Empty groups of either kind (`{ "or": [] }`, `{ "and": [] }`) are rejected with `400` — every `and` / `or` group must contain at least one predicate. To send no filter, omit the `filter` field entirely rather than passing an empty group.
 
 Filters are bounded to keep hostile input from exhausting the server: nesting depth ≤ 8, ≤ 100 children per `and` / `or` group, and ≤ 1000 values per predicate. A request that exceeds a cap is rejected with `400`.
 

@@ -225,11 +225,17 @@ function validateFilterTree(
       return;
     }
 
-    if (groupKey === "or" && children.length === 0) {
+    if (children.length === 0) {
+      // Reject empty groups of either kind. An empty `or` is vacuously false;
+      // an empty `and` contributes no constraint and renders to no WHERE
+      // clause — identical SQL to omitting `filter` entirely, but it would
+      // canonicalize to a distinct cache key (`and()` vs `_`), needlessly
+      // splitting the cache across semantically identical requests. Requiring
+      // at least one child keeps request shape ↔ cache key one-to-one.
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: [...path, "or"],
-        message: "filter 'or' group must contain at least one predicate",
+        path: [...path, groupKey],
+        message: `filter '${groupKey}' group must contain at least one predicate`,
       });
       return;
     }
