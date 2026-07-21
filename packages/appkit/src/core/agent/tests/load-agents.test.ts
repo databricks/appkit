@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
@@ -102,6 +102,62 @@ describe("loadAgentFromFile", () => {
     const def = await loadAgentFromFile(p, {});
     expect(def.name).toBe("router");
     expect(def.instructions).toBe("Route traffic.");
+  });
+
+  describe("generationParams", () => {
+    test("picks known keys with the expected wire types", async () => {
+      const p = writeRoot(
+        "gen.md",
+        "---\nendpoint: e\ngenerationParams:\n  temperature: 0.5\n  top_p: 0.9\n  stop: STOP\n  frequency_penalty: 0.1\n  presence_penalty: 0.2\n---\nBody.",
+      );
+      const def = await loadAgentFromFile(p, {});
+      expect(def.generationParams).toEqual({
+        temperature: 0.5,
+        top_p: 0.9,
+        stop: "STOP",
+        frequency_penalty: 0.1,
+        presence_penalty: 0.2,
+      });
+    });
+
+    test("accepts stop as a string array", async () => {
+      const p = writeRoot(
+        "gen.md",
+        "---\nendpoint: e\ngenerationParams:\n  stop:\n    - END\n    - STOP\n---\nBody.",
+      );
+      const def = await loadAgentFromFile(p, {});
+      expect(def.generationParams).toEqual({ stop: ["END", "STOP"] });
+    });
+
+    test("drops a wrong-typed key and warns instead of silently ignoring", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const p = writeRoot(
+        "gen.md",
+        '---\nendpoint: e\ngenerationParams:\n  temperature: "0.5"\n---\nBody.',
+      );
+      const def = await loadAgentFromFile(p, {});
+      expect(def.generationParams).toBeUndefined();
+      const msg = warn.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(msg).toContain("generationParams.temperature");
+      expect(msg).toContain("expected number");
+      expect(msg).toContain("got string");
+      expect(msg).toContain("gen.md");
+      warn.mockRestore();
+    });
+
+    test("warns on an unknown key (e.g. hyphenated top-p) and keeps valid ones", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const p = writeRoot(
+        "gen.md",
+        "---\nendpoint: e\ngenerationParams:\n  top-p: 0.9\n  temperature: 0.3\n---\nBody.",
+      );
+      const def = await loadAgentFromFile(p, {});
+      expect(def.generationParams).toEqual({ temperature: 0.3 });
+      const msg = warn.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(msg).toContain("unknown generationParams key 'top-p'");
+      expect(msg).toContain("gen.md");
+      warn.mockRestore();
+    });
   });
 });
 

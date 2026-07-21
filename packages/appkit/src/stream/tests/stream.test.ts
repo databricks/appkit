@@ -3,14 +3,27 @@ import { StreamManager } from "../index";
 
 function createMockResponse(headers: Record<string, string> = {}) {
   const events: string[] = [];
+  const closeHandlers: (() => void)[] = [];
   const mockRes = {
     setHeader: vi.fn(),
     flushHeaders: vi.fn(),
     write: vi.fn((data: string) => {
       events.push(data);
     }),
-    end: vi.fn(),
-    on: vi.fn(),
+    // mirror Node's lifecycle: end() marks the response as ended and the
+    // 'close' event fires asynchronously afterwards
+    end: vi.fn(() => {
+      if (mockRes.writableEnded) return;
+      mockRes.writableEnded = true;
+      queueMicrotask(() => {
+        for (const handler of closeHandlers) {
+          handler();
+        }
+      });
+    }),
+    on: vi.fn((event: string, handler: () => void) => {
+      if (event === "close") closeHandlers.push(handler);
+    }),
     writableEnded: false,
     req: {
       headers: headers,
@@ -880,6 +893,81 @@ describe("StreamManager", () => {
       expect(events2.some((e) => e.includes("STREAM_FORBIDDEN"))).toBe(true);
     });
 
+    test("replays nothing when last-event-id is the newest buffered event", async () => {
+      const streamId = "replay-newest-123";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+
+      async function* generator1() {
+        yield { type: "message", data: "event1" };
+        yield { type: "message", data: "event2" };
+        yield { type: "message", data: "event3" };
+      }
+
+      await streamManager.stream(mockRes1 as any, generator1, { streamId });
+
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+      const newestEventId = eventIds[eventIds.length - 1];
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": newestEventId,
+      });
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(mockRes2 as any, generator2, { streamId });
+
+      // the client is already caught up: zero replayed events and no
+      // buffer-overflow warning
+      expect(events2.filter((e) => e.startsWith("data: ")).length).toBe(0);
+      expect(events2.some((e) => e.includes("BUFFER_OVERFLOW_RESTART"))).toBe(
+        false,
+      );
+      expect(mockRes2.end).toHaveBeenCalled();
+    });
+
+    test("sends a buffer overflow warning when last-event-id was evicted from the ring", async () => {
+      const streamId = "replay-evicted-456";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+
+      async function* generator1() {
+        for (let i = 0; i < 5; i++) {
+          yield { type: "message", count: i };
+        }
+      }
+
+      await streamManager.stream(mockRes1 as any, generator1, {
+        streamId,
+        bufferSize: 2,
+      });
+
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+      expect(eventIds.length).toBe(5);
+
+      // the first event id has been pushed out of the size-2 ring buffer
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": eventIds[0],
+      });
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(mockRes2 as any, generator2, { streamId });
+
+      expect(events2.some((e) => e.includes("BUFFER_OVERFLOW_RESTART"))).toBe(
+        true,
+      );
+      expect(events2.some((e) => e.includes("should-not-run"))).toBe(false);
+    });
+
     test("should replay successfully when within buffer capacity", async () => {
       const streamId = "no-overflow-test-456";
 
@@ -919,6 +1007,257 @@ describe("StreamManager", () => {
         events2.filter((e) => e.startsWith("data: ")).length,
       ).toBeGreaterThan(0);
       expect(events2.some((e) => e.includes("should-not-appear"))).toBe(false);
+    });
+  });
+
+  describe("registry cleanup after stream termination", () => {
+    // default bufferTTL from streamDefaults
+    const BUFFER_TTL = 10 * 60 * 1000;
+
+    function getRegistry(manager: StreamManager) {
+      return (manager as any).streamRegistry as {
+        has(streamId: string): boolean;
+      };
+    }
+
+    function captureCloseHandler(mockRes: { on: ReturnType<typeof vi.fn> }) {
+      const handlers: (() => void)[] = [];
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") handlers.push(handler);
+      });
+      return () => {
+        for (const handler of handlers) {
+          handler();
+        }
+      };
+    }
+
+    test("removes a completed stream from the registry after buffer TTL once the client disconnects", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-completed-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "message", data: "result" };
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      // server ended the response; the close event fires asynchronously
+      fireClose();
+
+      // buffer is retained for reconnect replay during the TTL window
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL - 1);
+      expect(registry.has(streamId)).toBe(true);
+
+      // once the TTL elapses, the stream is removed from the registry
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("removes an errored stream from the registry after buffer TTL once the client disconnects", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-errored-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "start" };
+        throw new Error("Boom");
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      fireClose();
+
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL - 1);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("removes an errored stream even when the client disconnected before the error", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-errored-disconnected-123";
+      const { mockRes } = createMockResponse();
+      const fireClose = captureCloseHandler(mockRes);
+
+      async function* generator() {
+        yield { type: "start" };
+        // simulate client going away mid-stream
+        fireClose();
+        throw new Error("Boom");
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("keeps the buffer available for reconnect replay within the TTL window", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-replay-123";
+
+      const { mockRes: mockRes1, events: events1 } = createMockResponse();
+      const fireClose1 = captureCloseHandler(mockRes1);
+
+      async function* generator1() {
+        yield { type: "message", data: "event1" };
+        yield { type: "message", data: "event2" };
+      }
+
+      await streamManager.stream(mockRes1 as any, generator1, { streamId });
+      fireClose1();
+
+      // reconnect halfway through the TTL window
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      const eventIds = events1
+        .filter((e) => e.startsWith("id: "))
+        .map((e) => e.replace("id: ", "").replace("\n", ""));
+
+      const { mockRes: mockRes2, events: events2 } = createMockResponse({
+        "last-event-id": eventIds[0],
+      });
+      const fireClose2 = captureCloseHandler(mockRes2);
+
+      async function* generator2() {
+        yield { type: "should-not-run" };
+      }
+
+      await streamManager.stream(mockRes2 as any, generator2, { streamId });
+
+      // missed events are replayed from the buffer
+      const replayedData = events2
+        .filter((e) => e.startsWith("data: "))
+        .map((e) => e.replace("data: ", "").replace("\n\n", ""));
+      expect(replayedData.length).toBe(1);
+      expect(replayedData[0]).toContain("event2");
+
+      fireClose2();
+
+      // the timer from the first disconnect fires now but must no-op since
+      // the reconnect refreshed the stream's last access
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+      expect(registry.has(streamId)).toBe(true);
+
+      // a full TTL after the second disconnect, the stream is removed
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL / 2);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("does not remove an active stream while a client is still connected", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-active-connected-123";
+      const { mockRes } = createMockResponse();
+
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      async function* generator() {
+        yield { type: "start" };
+        await gate;
+        yield { type: "end" };
+      }
+
+      const streamPromise = streamManager.stream(mockRes as any, generator, {
+        streamId,
+      });
+
+      // let the generator yield its first event and park on the gate
+      await vi.advanceTimersByTimeAsync(0);
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      // an active stream with a connected client is never removed,
+      // no matter how much time passes
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL * 2);
+      expect(registry.has(streamId)).toBe(true);
+
+      release();
+      await streamPromise;
+      vi.useRealTimers();
+    });
+
+    test("removes a completed stream after TTL even if the transport never emits close", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-no-close-123";
+      const { mockRes } = createMockResponse();
+
+      // simulate a transport that never emits the 'close' event
+      mockRes.on.mockImplementation(() => {});
+      mockRes.end.mockImplementation(() => {
+        mockRes.writableEnded = true;
+      });
+
+      async function* generator() {
+        yield { type: "message", data: "result" };
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      // cleanup must not hinge on the transport emitting 'close'
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    test("removes the entry after buffer TTL when end() fires the close event", async () => {
+      vi.useFakeTimers();
+      const streamId = "cleanup-end-close-123";
+      const { mockRes } = createMockResponse();
+
+      async function* generator() {
+        yield { type: "message", data: "result" };
+      }
+
+      await streamManager.stream(mockRes as any, generator, { streamId });
+
+      // the generator completed with the client attached, so the server
+      // ended the response; the mock fires 'close' asynchronously
+      expect(mockRes.end).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const registry = getRegistry(streamManager);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(BUFFER_TTL - 1);
+      expect(registry.has(streamId)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registry.has(streamId)).toBe(false);
+
+      vi.useRealTimers();
     });
   });
 

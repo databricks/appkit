@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { AgentAdapter } from "shared";
+import type { GenerationParams } from "../../agents/databricks";
 import type {
   AgentDefinition,
   AgentTool,
@@ -75,6 +76,12 @@ interface Frontmatter {
   agents?: string[];
   maxSteps?: number;
   maxTokens?: number;
+  /**
+   * Optional OpenAI-compatible generation params forwarded to the serving
+   * request body (`temperature`, `top_p`, `stop`, `frequency_penalty`,
+   * `presence_penalty`). Parsed defensively in {@link buildDefinition}.
+   */
+  generationParams?: Record<string, unknown>;
   default?: boolean;
   baseSystemPrompt?: false | string;
   ephemeral?: boolean;
@@ -120,6 +127,7 @@ const ALLOWED_KEYS = new Set([
   "agents",
   "maxSteps",
   "maxTokens",
+  "generationParams",
   "default",
   "baseSystemPrompt",
   "ephemeral",
@@ -340,6 +348,73 @@ export function parseFrontmatter(
   return { data: data as Frontmatter, content: match[2].trim() };
 }
 
+const isNumber = (v: unknown): v is number => typeof v === "number";
+
+/**
+ * Per-key validators for {@link GenerationParams} frontmatter. Keyed by wire
+ * name and typed as `Record<keyof GenerationParams, ...>`, so a new param on
+ * the interface is a compile error until it gets an entry here — parsing,
+ * unknown-key detection, and warnings all derive from this one table.
+ */
+const GENERATION_PARAM_SPECS: Record<
+  keyof GenerationParams,
+  { label: string; valid: (v: unknown) => boolean }
+> = {
+  temperature: { label: "number", valid: isNumber },
+  top_p: { label: "number", valid: isNumber },
+  frequency_penalty: { label: "number", valid: isNumber },
+  presence_penalty: { label: "number", valid: isNumber },
+  stop: {
+    label: "string or string[]",
+    valid: (v) =>
+      typeof v === "string" ||
+      (Array.isArray(v) && v.every((s) => typeof s === "string")),
+  },
+};
+
+/**
+ * Defensively maps a frontmatter `generationParams` map to {@link GenerationParams}.
+ * Picks only known keys with the expected wire types. A key present with the
+ * wrong type (e.g. `temperature: "0.5"`) or an unknown key (e.g. `top-p`) is
+ * dropped and logged at warn level, so a silently-ignored param is visible
+ * rather than mistaken for "applied". Returns `undefined` when no valid key is
+ * present.
+ */
+function parseGenerationParams(
+  value: unknown,
+  sourcePath?: string,
+): GenerationParams | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const where = sourcePath ?? "<inline>";
+
+  for (const [key, v] of Object.entries(raw)) {
+    const spec = GENERATION_PARAM_SPECS[key as keyof GenerationParams];
+    if (!spec) {
+      logger.warn(
+        "Ignoring unknown generationParams key '%s' in %s",
+        key,
+        where,
+      );
+    } else if (spec.valid(v)) {
+      out[key] = v;
+    } else {
+      logger.warn(
+        "Ignoring generationParams.%s in %s: expected %s, got %s",
+        key,
+        where,
+        spec.label,
+        typeof v,
+      );
+    }
+  }
+
+  return Object.keys(out).length > 0 ? (out as GenerationParams) : undefined;
+}
+
 function buildDefinition(
   name: string,
   raw: string,
@@ -364,6 +439,7 @@ function buildDefinition(
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     maxSteps: typeof fm.maxSteps === "number" ? fm.maxSteps : undefined,
     maxTokens: typeof fm.maxTokens === "number" ? fm.maxTokens : undefined,
+    generationParams: parseGenerationParams(fm.generationParams, filePath),
     baseSystemPrompt,
     ephemeral: typeof fm.ephemeral === "boolean" ? fm.ephemeral : undefined,
   };

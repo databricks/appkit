@@ -18,7 +18,11 @@ export type {
   ToolAnnotations,
   ToolProvider,
 } from "shared";
-export { DatabricksAdapter, parseTextToolCalls } from "./agents/databricks";
+export {
+  DatabricksAdapter,
+  type GenerationParams,
+  parseTextToolCalls,
+} from "./agents/databricks";
 
 // Agent runtime
 export { createAgent } from "./core/agent/create-agent";

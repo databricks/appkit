@@ -8,6 +8,7 @@ import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
+import { clearGraceTimer, clearRemovalTimer } from "./timers";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
 
@@ -122,7 +123,11 @@ export class StreamManager {
     }
 
     // a reconnecting client cancels the pending disconnect-grace abort
-    this._clearGraceTimer(streamEntry);
+    clearGraceTimer(streamEntry);
+
+    // a reconnect cancels any pending registry removal so the entry isn't
+    // pulled out from under the newly attached client
+    clearRemovalTimer(streamEntry);
 
     // add client to stream entry
     streamEntry.clients.add(res);
@@ -155,13 +160,7 @@ export class StreamManager {
       }
 
       // cleanup if stream is completed and no clients are connected
-      if (streamEntry.isCompleted && streamEntry.clients.size === 0) {
-        setTimeout(() => {
-          if (streamEntry.clients.size === 0) {
-            this.streamRegistry.remove(streamEntry.streamId);
-          }
-        }, this.bufferTTL);
-      }
+      this._scheduleRemovalAfterTTL(streamEntry);
     });
 
     // if stream is completed, close connection
@@ -170,6 +169,11 @@ export class StreamManager {
       // cleanup operation
       this.activeOperations.delete(streamOperation);
       clearInterval(heartbeat);
+      // we deliberately ended this client, so drop it from the entry and
+      // schedule removal now instead of relying on the transport's `close`
+      // event (the close handler's later delete is a safe no-op)
+      streamEntry.clients.delete(res);
+      this._scheduleRemovalAfterTTL(streamEntry);
     }
   }
   private async _createNewStream(
@@ -239,6 +243,11 @@ export class StreamManager {
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
         this._scheduleGraceAbort(streamEntry);
       }
+
+      // if the stream already finished (completed or errored), schedule
+      // registry removal once the buffer TTL elapses so completed streams
+      // don't accumulate in the registry forever
+      this._scheduleRemovalAfterTTL(streamEntry);
     });
 
     await this._processGeneratorInBackground(streamEntry);
@@ -287,16 +296,7 @@ export class StreamManager {
           streamEntry.lastAccess = Date.now();
         }
 
-        streamEntry.isCompleted = true;
-
-        // no late grace abort should fire on a completed stream
-        this._clearGraceTimer(streamEntry);
-
-        // close all clients
-        this._closeAllClients(streamEntry);
-
-        // cleanup if no clients are connected
-        this._cleanupStream(streamEntry);
+        this._finalizeStream(streamEntry);
       } catch (error) {
         // Two distinct messages: a *raw* one for server-side logs (full
         // detail, statement fragments, correlation IDs) and a *client*
@@ -319,10 +319,7 @@ export class StreamManager {
         // client cancellation is a normal control-flow signal, not a failure
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
-          streamEntry.isCompleted = true;
-          this._clearGraceTimer(streamEntry);
-          this._closeAllClients(streamEntry);
-          this._cleanupStream(streamEntry);
+          this._finalizeStream(streamEntry);
           return;
         }
 
@@ -356,8 +353,10 @@ export class StreamManager {
           true,
           upstreamCode,
         );
-        streamEntry.isCompleted = true;
-        this._clearGraceTimer(streamEntry);
+        // the broadcast above already ended the connected clients; finalize
+        // still detaches them so removal is scheduled without waiting on a
+        // transport `close` event
+        this._finalizeStream(streamEntry);
       }
     });
   }
@@ -428,19 +427,31 @@ export class StreamManager {
     }
   }
 
-  // close all connected clients
+  private _finalizeStream(streamEntry: StreamEntry): void {
+    streamEntry.isCompleted = true;
+    clearGraceTimer(streamEntry);
+    this._closeAllClients(streamEntry);
+    this._scheduleRemovalAfterTTL(streamEntry);
+  }
+
+  // close all connected clients and remove them from the stream entry.
+  // We are deliberately terminating these connections, so cleanup must not
+  // depend on the transport emitting a `close` event for each client (it may
+  // never fire). The close handlers' later `clients.delete(...)` calls remain
+  // safe no-ops.
   private _closeAllClients(streamEntry: StreamEntry): void {
     for (const client of streamEntry.clients) {
       if (!client.writableEnded) {
         client.end();
       }
     }
+    streamEntry.clients.clear();
   }
 
   // abort the generator after the grace window unless a client reconnects first
   private _scheduleGraceAbort(streamEntry: StreamEntry): void {
     // clear any existing timer to avoid stacking
-    this._clearGraceTimer(streamEntry);
+    clearGraceTimer(streamEntry);
 
     const timer = setTimeout(() => {
       streamEntry.disconnectGraceTimer = undefined;
@@ -456,23 +467,39 @@ export class StreamManager {
     streamEntry.disconnectGraceTimer = timer;
   }
 
-  // clear a pending disconnect-grace timer, if any
-  private _clearGraceTimer(streamEntry: StreamEntry): void {
-    if (streamEntry.disconnectGraceTimer) {
-      clearTimeout(streamEntry.disconnectGraceTimer);
-      streamEntry.disconnectGraceTimer = undefined;
+  // schedule registry removal once a finished (completed or errored) stream
+  // has no connected clients. The event buffer stays available for
+  // reconnect replay for `bufferTTL` after the last client disconnects;
+  // after that the stream entry is removed from the registry so it can be
+  // garbage collected.
+  private _scheduleRemovalAfterTTL(streamEntry: StreamEntry): void {
+    if (!streamEntry.isCompleted || streamEntry.clients.size > 0) {
+      return;
     }
-  }
 
-  // cleanup stream if no clients are connected
-  private _cleanupStream(streamEntry: StreamEntry): void {
-    if (streamEntry.clients.size === 0) {
-      setTimeout(() => {
-        if (streamEntry.clients.size === 0) {
-          this.streamRegistry.remove(streamEntry.streamId);
-        }
-      }, this.bufferTTL);
-    }
+    // at most one removal timer per stream: rescheduling replaces any
+    // pending timer instead of stacking a new one (each pending timer pins
+    // the entry's buffer/generator/trace context for the full TTL)
+    clearRemovalTimer(streamEntry);
+
+    // mark the moment the stream became idle so a reconnect during the TTL
+    // window (which refreshes lastAccess) makes the pending timer a no-op
+    streamEntry.lastAccess = Date.now();
+
+    streamEntry.removalTimer = setTimeout(() => {
+      streamEntry.removalTimer = undefined;
+      // safety net: no-op if a client reconnected during the TTL window;
+      // a fresh removal is scheduled when that client disconnects
+      if (
+        streamEntry.clients.size === 0 &&
+        Date.now() - streamEntry.lastAccess >= this.bufferTTL
+      ) {
+        this.streamRegistry.remove(streamEntry.streamId);
+      }
+    }, this.bufferTTL);
+
+    // don't keep the process alive just to clean up finished streams
+    streamEntry.removalTimer.unref?.();
   }
 
   private _categorizeError(error: unknown): SSEErrorCode {

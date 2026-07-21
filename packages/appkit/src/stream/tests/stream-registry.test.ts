@@ -209,26 +209,25 @@ describe("StreamRegistry", () => {
       expect(registry.has("stream-4")).toBe(true);
     });
 
-    test("should exclude the stream being added from eviction", () => {
-      // This tests the excludeStreamId parameter: if a stream with the same
-      // ID as the one being added already exists and is the oldest, it should
-      // still be excluded from eviction. In practice, the new stream won't be
-      // in the registry yet when eviction runs, so excludeStreamId prevents
-      // misidentification.
+    test("should not evict when re-adding an existing key at capacity", () => {
+      // Re-adding an existing streamId updates the Map entry in place and
+      // doesn't grow the registry, so no other stream should be evicted for
+      // a net-zero insert.
       registry.add(createMockStreamEntry("stream-1", { lastAccess: 100 }));
       registry.add(createMockStreamEntry("stream-2", { lastAccess: 200 }));
       registry.add(createMockStreamEntry("stream-3", { lastAccess: 300 }));
 
-      // Add stream with id "stream-1" again; eviction should skip "stream-1"
-      // even though stream-1 has the oldest lastAccess, because it's the
-      // excludeStreamId. stream-2 should be evicted instead.
+      // Add stream with id "stream-1" again at capacity; it replaces the
+      // existing entry without triggering eviction.
       registry.add(createMockStreamEntry("stream-1", { lastAccess: 400 }));
 
-      // stream-1 is updated (RingBuffer updates existing keys in place)
+      // stream-1 is updated (Map.set replaces the existing key in place)
       expect(registry.has("stream-1")).toBe(true);
-      // stream-2 should have been evicted as it was the oldest non-excluded
-      expect(registry.has("stream-2")).toBe(false);
+      expect(registry.get("stream-1")?.lastAccess).toBe(400);
+      // no stream should have been evicted
+      expect(registry.has("stream-2")).toBe(true);
       expect(registry.has("stream-3")).toBe(true);
+      expect(registry.size()).toBe(3);
     });
 
     test("should abort the evicted stream's AbortController", () => {
@@ -247,7 +246,7 @@ describe("StreamRegistry", () => {
       expect(abortController1.signal.aborted).toBe(true);
     });
 
-    test("should abort with 'Stream evicted' reason", () => {
+    test("should abort with a 'Stream evicted' AbortError reason", () => {
       const abortController1 = new AbortController();
       registry.add(
         createMockStreamEntry("stream-1", {
@@ -260,7 +259,94 @@ describe("StreamRegistry", () => {
 
       registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
 
-      expect(abortController1.signal.reason).toBe("Stream evicted");
+      const reason = abortController1.signal.reason;
+      expect(reason).toBeInstanceOf(DOMException);
+      expect(reason.name).toBe("AbortError");
+      expect(reason.message).toBe("Stream evicted");
+    });
+
+    test("should prefer evicting a completed stream over an older live stream", () => {
+      const liveAbortController = new AbortController();
+
+      // the live stream is the LRU candidate, but a completed stream
+      // (waiting out its buffer TTL) exists and must be evicted first
+      registry.add(
+        createMockStreamEntry("live-old", {
+          lastAccess: 100,
+          abortController: liveAbortController,
+        }),
+      );
+      registry.add(
+        createMockStreamEntry("completed-recent", {
+          lastAccess: 300,
+          isCompleted: true,
+        }),
+      );
+      registry.add(createMockStreamEntry("live-recent", { lastAccess: 200 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed-recent")).toBe(false);
+      expect(registry.has("live-old")).toBe(true);
+      expect(registry.has("live-recent")).toBe(true);
+      expect(registry.has("stream-4")).toBe(true);
+      expect(liveAbortController.signal.aborted).toBe(false);
+    });
+
+    test("should evict the oldest completed stream when several are completed", () => {
+      registry.add(
+        createMockStreamEntry("completed-old", {
+          lastAccess: 200,
+          isCompleted: true,
+        }),
+      );
+      registry.add(
+        createMockStreamEntry("completed-recent", {
+          lastAccess: 300,
+          isCompleted: true,
+        }),
+      );
+      registry.add(createMockStreamEntry("live", { lastAccess: 100 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed-old")).toBe(false);
+      expect(registry.has("completed-recent")).toBe(true);
+      expect(registry.has("live")).toBe(true);
+    });
+
+    test("should fall back to LRU eviction when no stream is completed", () => {
+      registry.add(createMockStreamEntry("stream-1", { lastAccess: 300 }));
+      registry.add(createMockStreamEntry("stream-2", { lastAccess: 100 }));
+      registry.add(createMockStreamEntry("stream-3", { lastAccess: 200 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("stream-2")).toBe(false);
+      expect(registry.has("stream-1")).toBe(true);
+      expect(registry.has("stream-3")).toBe(true);
+      expect(registry.has("stream-4")).toBe(true);
+    });
+
+    test("should clear a pending removal timer on the evicted completed stream", () => {
+      vi.useFakeTimers();
+      const removalTimer = setTimeout(() => {}, 60_000);
+
+      registry.add(
+        createMockStreamEntry("completed", {
+          lastAccess: 100,
+          isCompleted: true,
+          removalTimer,
+        }),
+      );
+      registry.add(createMockStreamEntry("stream-2", { lastAccess: 200 }));
+      registry.add(createMockStreamEntry("stream-3", { lastAccess: 300 }));
+
+      registry.add(createMockStreamEntry("stream-4", { lastAccess: 400 }));
+
+      expect(registry.has("completed")).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.useRealTimers();
     });
   });
 
@@ -519,7 +605,7 @@ describe("StreamRegistry", () => {
       registry.add(entry1);
       registry.add(entry2);
 
-      // The RingBuffer updates in place for same key
+      // The Map updates in place for same key
       expect(registry.size()).toBe(1);
       const retrieved = registry.get("stream-1");
       expect(retrieved?.lastAccess).toBe(200);
