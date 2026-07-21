@@ -1,6 +1,10 @@
 import type { AgentEvent, AgentToolDefinition, Message } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { DatabricksAdapter, parseTextToolCalls } from "../databricks";
+import {
+  DatabricksAdapter,
+  type GenerationParams,
+  parseTextToolCalls,
+} from "../databricks";
 
 const mockAuthenticate = vi
   .fn()
@@ -93,6 +97,7 @@ function createAdapter(overrides?: {
   authenticate?: () => Promise<Record<string, string>>;
   maxSteps?: number;
   maxTokens?: number;
+  generationParams?: GenerationParams;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
   maxToolArgumentsChars?: number;
@@ -564,6 +569,56 @@ describe("DatabricksAdapter", () => {
       role: "user",
       content: "Hello",
     });
+  });
+
+  test("forwards set generation params to the request body", async () => {
+    globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+
+    const adapter = createAdapter({
+      generationParams: {
+        temperature: 0.2,
+        top_p: 0.9,
+        stop: ["END"],
+        frequency_penalty: 0.5,
+        presence_penalty: 0.1,
+      },
+    });
+
+    for await (const _ of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [, init] = (globalThis.fetch as any).mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.temperature).toBe(0.2);
+    expect(body.top_p).toBe(0.9);
+    expect(body.stop).toEqual(["END"]);
+    expect(body.frequency_penalty).toBe(0.5);
+    expect(body.presence_penalty).toBe(0.1);
+  });
+
+  test("omits generation param keys that are not set", async () => {
+    globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+
+    const adapter = createAdapter({ generationParams: { temperature: 0.7 } });
+
+    for await (const _ of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [, init] = (globalThis.fetch as any).mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.temperature).toBe(0.7);
+    expect(body).not.toHaveProperty("top_p");
+    expect(body).not.toHaveProperty("stop");
+    expect(body).not.toHaveProperty("frequency_penalty");
+    expect(body).not.toHaveProperty("presence_penalty");
   });
 
   test("forwards tool thread fields from input messages to the request body", async () => {

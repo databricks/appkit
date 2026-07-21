@@ -5,6 +5,7 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
+import type { GenerationParams } from "../../agents/databricks";
 import type { McpHostPolicyConfig } from "../../connectors/mcp";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
@@ -163,6 +164,14 @@ export interface AgentDefinition {
   maxSteps?: number;
   maxTokens?: number;
   /**
+   * Optional generation parameters (`temperature`, `top_p`, `stop`,
+   * `frequency_penalty`, `presence_penalty`) forwarded to the OpenAI-compatible
+   * serving request body. Only set keys are sent. Applied only when AppKit
+   * builds the adapter itself (string or omitted `model`); when you pass a
+   * pre-built `AgentAdapter`, configure generation params on it directly.
+   */
+  generationParams?: GenerationParams;
+  /**
    * When true, the thread used for a chat request against this agent is
    * deleted from `ThreadStore` after the stream completes (success or
    * failure). Use for stateless one-shot agents — e.g. autocomplete, where
@@ -309,6 +318,8 @@ export interface RegisteredAgent {
   baseSystemPrompt?: BaseSystemPromptOption;
   maxSteps?: number;
   maxTokens?: number;
+  /** Mirrors `AgentDefinition.generationParams`. */
+  generationParams?: GenerationParams;
   /** Mirrors `AgentDefinition.ephemeral` — skip thread persistence. */
   ephemeral?: boolean;
 }
