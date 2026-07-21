@@ -8,13 +8,8 @@ import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
-import {
-  clearGraceTimer,
-  clearRemovalTimer,
-  SSEErrorCode,
-  type StreamEntry,
-  type StreamOperation,
-} from "./types";
+import { clearGraceTimer, clearRemovalTimer } from "./timers";
+import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
 
 const logger = createLogger("stream");
@@ -301,16 +296,7 @@ export class StreamManager {
           streamEntry.lastAccess = Date.now();
         }
 
-        streamEntry.isCompleted = true;
-
-        // no late grace abort should fire on a completed stream
-        clearGraceTimer(streamEntry);
-
-        // close all clients (this also drops them from the entry, so the
-        // removal below is scheduled regardless of whether the transport
-        // ever emits `close`)
-        this._closeAllClients(streamEntry);
-        this._scheduleRemovalAfterTTL(streamEntry);
+        this._finalizeStream(streamEntry);
       } catch (error) {
         // Two distinct messages: a *raw* one for server-side logs (full
         // detail, statement fragments, correlation IDs) and a *client*
@@ -333,10 +319,7 @@ export class StreamManager {
         // client cancellation is a normal control-flow signal, not a failure
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
-          streamEntry.isCompleted = true;
-          clearGraceTimer(streamEntry);
-          this._closeAllClients(streamEntry);
-          this._scheduleRemovalAfterTTL(streamEntry);
+          this._finalizeStream(streamEntry);
           return;
         }
 
@@ -370,14 +353,10 @@ export class StreamManager {
           true,
           upstreamCode,
         );
-        streamEntry.isCompleted = true;
-        clearGraceTimer(streamEntry);
-
-        // the broadcast above already ended the connected clients; drop them
-        // from the entry so removal is scheduled regardless of whether the
-        // transport ever emits `close`
-        this._closeAllClients(streamEntry);
-        this._scheduleRemovalAfterTTL(streamEntry);
+        // the broadcast above already ended the connected clients; finalize
+        // still detaches them so removal is scheduled without waiting on a
+        // transport `close` event
+        this._finalizeStream(streamEntry);
       }
     });
   }
@@ -448,6 +427,13 @@ export class StreamManager {
     }
   }
 
+  private _finalizeStream(streamEntry: StreamEntry): void {
+    streamEntry.isCompleted = true;
+    clearGraceTimer(streamEntry);
+    this._closeAllClients(streamEntry);
+    this._scheduleRemovalAfterTTL(streamEntry);
+  }
+
   // close all connected clients and remove them from the stream entry.
   // We are deliberately terminating these connections, so cleanup must not
   // depend on the transport emitting a `close` event for each client (it may
@@ -494,9 +480,7 @@ export class StreamManager {
     // at most one removal timer per stream: rescheduling replaces any
     // pending timer instead of stacking a new one (each pending timer pins
     // the entry's buffer/generator/trace context for the full TTL)
-    if (streamEntry.removalTimer) {
-      clearTimeout(streamEntry.removalTimer);
-    }
+    clearRemovalTimer(streamEntry);
 
     // mark the moment the stream became idle so a reconnect during the TTL
     // window (which refreshes lastAccess) makes the pending timer a no-op

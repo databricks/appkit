@@ -1,9 +1,5 @@
-import {
-  clearGraceTimer,
-  clearRemovalTimer,
-  SSEErrorCode,
-  type StreamEntry,
-} from "./types";
+import { clearGraceTimer, clearRemovalTimer } from "./timers";
+import { SSEErrorCode, type StreamEntry } from "./types";
 
 export class StreamRegistry {
   // keyed storage with explicit, policy-driven eviction. A ring buffer is
