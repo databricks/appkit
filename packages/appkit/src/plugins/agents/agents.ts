@@ -4,7 +4,6 @@ import type express from "express";
 import pc from "picocolors";
 import type {
   AgentAdapter,
-  AgentEvent,
   AgentRunContext,
   AgentToolDefinition,
   IAppRouter,
@@ -17,7 +16,6 @@ import type {
   ToolProvider,
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
-import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";

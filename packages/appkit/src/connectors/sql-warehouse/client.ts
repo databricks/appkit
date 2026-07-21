@@ -12,7 +12,10 @@ import {
   ValidationError,
 } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
+import {
+  ArrowStreamProcessor,
+  type RefreshChunkLink,
+} from "../../stream/arrow-stream-processor";
 import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
@@ -22,11 +25,48 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
 import { WarehousePollBackoff } from "./warehouse-poll-backoff";
 import { WarehouseStatusEmitter } from "./warehouse-status-emitter";
 
 const logger = createLogger("connectors:sql-warehouse");
+
+/**
+ * Real column names from a statement's result manifest (positional
+ * `column_N` fallback for any blank ones). Databricks encodes ARROW_STREAM
+ * schemas positionally (`col_0`, …); these names let consumers relabel an
+ * Arrow result to match the JSON path. Returns `undefined` when the manifest
+ * carries no columns.
+ */
+function arrowColumnNames(
+  response: sql.StatementResponse,
+): string[] | undefined {
+  const cols = response.manifest?.schema?.columns;
+  if (!cols || cols.length === 0) return undefined;
+  return cols.map((c, i) =>
+    c.name && c.name.length > 0 ? c.name : `column_${i}`,
+  );
+}
+
+/**
+ * Maximum size for inline Arrow IPC attachments (25 MiB decoded — the
+ * Databricks Statement Execution API hard cap on INLINE responses).
+ *
+ * The analytics route streams the decoded attachment straight back on the
+ * query response body; this cap bounds the single in-memory copy. Larger
+ * results fall through to `disposition: "EXTERNAL_LINKS"`, which streams
+ * chunk-by-chunk and is not bound by this limit.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Safety cap on how many additional EXTERNAL_LINKS chunks
+ * {@link SQLWarehouseConnector._resolveAllExternalLinks} will follow when the
+ * manifest omits `total_chunk_count`. High enough to cover any real result;
+ * only bounds a misbehaving warehouse with a cyclic `next_chunk_index`.
+ */
+const MAX_EXTERNAL_CHUNK_FOLLOWS = 10_000;
 
 interface SQLWarehouseConfig {
   timeout?: number;
@@ -154,8 +194,6 @@ export class SQLWarehouseConnector {
     if (!this._arrowProcessor) {
       this._arrowProcessor = new ArrowStreamProcessor({
         timeout: this.config.timeout || executeStatementDefaults.timeout,
-        maxConcurrentDownloads:
-          ArrowStreamProcessor.DEFAULT_MAX_CONCURRENT_DOWNLOADS,
         retries: ArrowStreamProcessor.DEFAULT_RETRIES,
       });
     }
@@ -274,10 +312,17 @@ export class SQLWarehouseConnector {
               );
               break;
             case "SUCCEEDED":
-              result = this._transformDataArray(response);
+              result = await this._transformDataArray(
+                response,
+                workspaceClient,
+                signal,
+              );
               break;
             case "FAILED":
-              throw ExecutionError.statementFailed(status.error?.message);
+              throw ExecutionError.statementFailed(
+                status.error?.message,
+                status.error?.error_code,
+              );
             case "CANCELED":
               throw ExecutionError.canceled();
             case "CLOSED":
@@ -324,15 +369,7 @@ export class SQLWarehouseConnector {
             );
           }
 
-          if (error instanceof Error && error.name === "AbortError") {
-            throw error;
-          }
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
+          this._rethrowStatementError(error);
         } finally {
           // remove abort handler
           if (abortHandler && signal) {
@@ -791,9 +828,16 @@ export class SQLWarehouseConnector {
                   "poll.duration_ms": elapsedTime,
                 });
                 span.setStatus({ code: SpanStatusCode.OK });
-                return this._transformDataArray(response);
+                return this._transformDataArray(
+                  response,
+                  workspaceClient,
+                  signal,
+                );
               case "FAILED":
-                throw ExecutionError.statementFailed(status.error?.message);
+                throw ExecutionError.statementFailed(
+                  status.error?.message,
+                  status.error?.error_code,
+                );
               case "CANCELED":
                 throw ExecutionError.canceled();
               case "CLOSED":
@@ -816,15 +860,7 @@ export class SQLWarehouseConnector {
           });
 
           // error logging is handled by executeStatement's catch block (gated on isAborted)
-          if (error instanceof Error && error.name === "AbortError") {
-            throw error;
-          }
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
+          this._rethrowStatementError(error);
         } finally {
           span.end();
         }
@@ -833,9 +869,57 @@ export class SQLWarehouseConnector {
     );
   }
 
-  private _transformDataArray(response: sql.StatementResponse) {
+  private async _transformDataArray(
+    response: sql.StatementResponse,
+    workspaceClient: WorkspaceClient,
+    signal?: AbortSignal,
+  ) {
     if (response.manifest?.format === "ARROW_STREAM") {
-      return this.updateWithArrowStatus(response);
+      const result = response.result as
+        | (sql.ResultData & { attachment?: string })
+        | undefined;
+
+      // Inline Arrow: pass the base64 IPC attachment through unmodified so
+      // the analytics route can stream it to the client, where the existing
+      // ArrowClient infrastructure decodes it into a Table. Validate size
+      // here to fail fast on runaway payloads.
+      if (result?.attachment) {
+        return this._validateArrowAttachment(response, result.attachment);
+      }
+
+      // External links: data fetched separately via statement_id. An empty
+      // array is a zero-row result (some warehouses emit `external_links: []`
+      // rather than omitting it) — it must NOT go down the streaming path
+      // (`streamChunks([])` rejects), so fall through to synthesize an empty
+      // Arrow table below.
+      if (result?.external_links && result.external_links.length > 0) {
+        return this.updateWithArrowStatus(response, workspaceClient, signal);
+      }
+
+      // Empty result with a known schema: synthesize a zero-row Arrow IPC
+      // attachment so the client always receives an Arrow Table for
+      // ARROW_STREAM, regardless of whether the warehouse returned data.
+      // Note: an empty array (`data_array: []`) is truthy, so length-check
+      // explicitly — otherwise zero-row responses fall through to the JSON
+      // row transform below and return `[]` JSON rows instead of an Arrow
+      // table.
+      const hasNoRows =
+        !result?.data_array ||
+        (Array.isArray(result.data_array) && result.data_array.length === 0);
+      if (hasNoRows && response.manifest?.schema?.columns) {
+        const synthesized = buildEmptyArrowIPCBase64(
+          response.manifest.schema.columns,
+        );
+        return {
+          ...response,
+          result: { ...(result ?? {}), attachment: synthesized },
+        };
+      }
+
+      // Inline data_array under ARROW_STREAM (rare): fall through to the
+      // row transform below. The hook will receive `type: "result"` rows;
+      // callers asking for ARROW_STREAM should not hit this path with
+      // current Databricks warehouses.
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
@@ -881,97 +965,234 @@ export class SQLWarehouseConnector {
     };
   }
 
-  private updateWithArrowStatus(response: sql.StatementResponse): {
-    result: { statement_id: string; status: sql.StatementStatus };
-  } {
+  /**
+   * Validate a base64 Arrow IPC attachment (INLINE ARROW_STREAM) and attach
+   * the real column names from the result manifest.
+   *
+   * Databricks warehouses encode the Arrow schema positionally (`col_0`, …);
+   * the real, aliased names live only in `manifest.schema.columns`. Rather
+   * than decode/re-encode the payload server-side, we carry the names on the
+   * result (`columnNames`) so the route can hand them to the client in a
+   * response header and the client relabels the decoded Table — the one
+   * mechanism used for both INLINE and EXTERNAL_LINKS.
+   */
+  private _validateArrowAttachment(
+    response: sql.StatementResponse,
+    attachment: string,
+  ) {
+    // Cap the size to protect against unbounded inline payloads from
+    // misbehaving warehouses. `MAX_INLINE_ATTACHMENT_BYTES` tracks the API's
+    // ~25 MiB inline hard cap and bounds memory if a server returns a runaway
+    // response.
+    //
+    // Strip whitespace (rare but legal in base64) and account for trailing
+    // `=` padding so the byte count is exact rather than an upper bound.
+    const stripped = attachment.replace(/\s+/g, "");
+    const padding = stripped.endsWith("==")
+      ? 2
+      : stripped.endsWith("=")
+        ? 1
+        : 0;
+    const decodedSize = Math.floor((stripped.length * 3) / 4) - padding;
+    if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
+      throw ExecutionError.statementFailed(
+        `Inline Arrow attachment exceeds maximum size (${decodedSize} > ${MAX_INLINE_ATTACHMENT_BYTES} bytes)`,
+      );
+    }
+
+    const columnNames = arrowColumnNames(response);
+    if (columnNames) {
+      return {
+        ...response,
+        result: {
+          ...(response.result as sql.ResultData & {
+            attachment?: string;
+            columnNames?: string[];
+          }),
+          // `statement_id` is a top-level field, not on `ResultData` — carry it
+          // onto the result (as the EXTERNAL_LINKS path does) so the route can
+          // advertise it in `X-Appkit-Arrow-Columns-Ref` for wide inline schemas.
+          statement_id: response.statement_id,
+          columnNames,
+        },
+      };
+    }
+
+    return response;
+  }
+
+  private async updateWithArrowStatus(
+    response: sql.StatementResponse,
+    workspaceClient: WorkspaceClient,
+    signal?: AbortSignal,
+  ): Promise<{
+    result: {
+      statement_id: string;
+      status: sql.StatementStatus;
+      columnNames?: string[];
+      external_links?: sql.ExternalLink[];
+      refreshChunkLink?: RefreshChunkLink;
+    };
+  }> {
+    const statementId = response.statement_id as string;
     return {
       result: {
-        statement_id: response.statement_id as string,
+        statement_id: statementId,
         status: {
           state: response.status?.state,
           error: response.status?.error,
         } as sql.StatementStatus,
+        columnNames: arrowColumnNames(response),
+        // Resolve the pre-signed links for EVERY chunk in the caller's own
+        // execution context. Streaming these directly (see
+        // {@link streamExternalLinks}) avoids a second `getStatement` under
+        // the ambient service-principal context — which would fail for
+        // `.obo.sql` (user-owned) statements.
+        external_links: await this._resolveAllExternalLinks(
+          workspaceClient,
+          statementId,
+          response,
+          signal,
+        ),
+        // Bound to this caller's identity so the streamer can re-mint an
+        // expired chunk link mid-download (links live <= 15 min; a large/slow
+        // result can outlast the earliest ones).
+        refreshChunkLink: this._makeChunkLinkRefresher(
+          workspaceClient,
+          statementId,
+        ),
       },
     };
   }
 
-  async getArrowData(
+  /**
+   * Resolve pre-signed links for EVERY chunk of an EXTERNAL_LINKS result.
+   *
+   * The execute/getStatement response carries only the first chunk's links
+   * (each link, except the last, exposes `next_chunk_index`); the remaining
+   * chunks are fetched with `getStatementResultChunkN`. Runs in the caller's
+   * identity context (user creds for `.obo.sql`), so there is no cross-identity
+   * fetch. Only the tiny link metadata is resolved eagerly — the bytes still
+   * stream one chunk at a time downstream. Without this a multi-chunk result
+   * would be silently truncated to its first chunk.
+   */
+  private async _resolveAllExternalLinks(
+    workspaceClient: WorkspaceClient,
+    statementId: string,
+    response: sql.StatementResponse,
+    signal?: AbortSignal,
+  ): Promise<sql.ExternalLink[] | undefined> {
+    const first = response.result?.external_links;
+    if (!first || first.length === 0) return first;
+
+    const links: sql.ExternalLink[] = [...first];
+    // Bound the follow loop so a warehouse returning a cyclic/never-ending
+    // `next_chunk_index` can't spin forever. The manifest's chunk count is the
+    // natural bound; fall back to a generous safety cap if it's absent (real
+    // results still terminate earlier when `next_chunk_index` becomes null) so
+    // a missing count doesn't silently truncate a genuine multi-chunk result.
+    const maxFetches =
+      response.manifest?.total_chunk_count ?? MAX_EXTERNAL_CHUNK_FOLLOWS;
+    let next = this._nextChunkIndex(first);
+    for (let fetches = 0; next != null && fetches < maxFetches; fetches++) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      const chunk =
+        await workspaceClient.statementExecution.getStatementResultChunkN(
+          { statement_id: statementId, chunk_index: next },
+          this._createContext(signal),
+        );
+      const chunkLinks = chunk.external_links ?? [];
+      if (chunkLinks.length === 0) break;
+      links.push(...chunkLinks);
+      next = this._nextChunkIndex(chunkLinks);
+    }
+    return links;
+  }
+
+  /** The `next_chunk_index` advertised by a chunk's links, if any. */
+  private _nextChunkIndex(links: sql.ExternalLink[]): number | undefined {
+    for (const link of links) {
+      if (link.next_chunk_index != null) return link.next_chunk_index;
+    }
+    return undefined;
+  }
+
+  /**
+   * A closure that re-mints a single chunk's pre-signed link via
+   * `getStatementResultChunkN`, bound to the caller's workspace client +
+   * statement id. Created here (in the caller's identity context) so the
+   * streamer — which runs outside that context — can refresh an expired link
+   * for `.obo.sql` statements without a cross-identity `getStatement`.
+   */
+  private _makeChunkLinkRefresher(
+    workspaceClient: WorkspaceClient,
+    statementId: string,
+  ): RefreshChunkLink {
+    return async (chunkIndex, signal) => {
+      const chunk =
+        await workspaceClient.statementExecution.getStatementResultChunkN(
+          { statement_id: statementId, chunk_index: chunkIndex },
+          this._createContext(signal),
+        );
+      return chunk.external_links?.find((l) => l.chunk_index === chunkIndex);
+    };
+  }
+
+  /**
+   * Stream already-resolved EXTERNAL_LINKS chunks as raw Arrow IPC bytes, one
+   * chunk in memory at a time. Takes the `external_links` the caller already
+   * has from `executeStatement` (see {@link updateWithArrowStatus}), so there
+   * is no extra `getStatement` round-trip and no execution-context mismatch —
+   * the pre-signed URLs need no auth to download.
+   */
+  streamExternalLinks(
+    chunks: sql.ExternalLink[],
+    signal?: AbortSignal,
+    refresh?: RefreshChunkLink,
+  ): AsyncGenerator<Uint8Array, void, unknown> {
+    return this.arrowProcessor.streamChunks(chunks, signal, refresh);
+  }
+
+  /**
+   * Fetch just the real column names for a completed statement from its result
+   * manifest — no result data. Backs the `/columns/:statementId` fallback the
+   * client uses when a very wide schema's names exceed the response-header
+   * size limit. Stateless: re-derives from the warehouse, no server cache.
+   */
+  async getColumnNames(
     workspaceClient: WorkspaceClient,
     jobId: string,
     signal?: AbortSignal,
-  ): Promise<ReturnType<typeof this.arrowProcessor.processChunks>> {
-    const startTime = Date.now();
+  ): Promise<string[] | undefined> {
+    const response = await workspaceClient.statementExecution.getStatement(
+      { statement_id: jobId },
+      this._createContext(signal),
+    );
+    return arrowColumnNames(response);
+  }
 
-    return this.telemetry.startActiveSpan(
-      "arrow.getData",
-      {
-        kind: SpanKind.CLIENT,
-        attributes: {
-          "db.system": "databricks",
-          "arrow.job_id": jobId,
-        },
-      },
-      async (span: Span) => {
-        try {
-          const response =
-            await workspaceClient.statementExecution.getStatement(
-              { statement_id: jobId },
-              this._createContext(signal),
-            );
-
-          const chunks = response.result?.external_links;
-          const schema = response.manifest?.schema;
-
-          if (!chunks || !schema) {
-            throw ExecutionError.missingData("chunks or schema");
-          }
-
-          span.setAttribute("arrow.chunk_count", chunks.length);
-
-          const result = await this.arrowProcessor.processChunks(
-            chunks,
-            schema,
-            signal,
-          );
-
-          span.setAttribute("arrow.data_size_bytes", result.data.length);
-          span.setStatus({ code: SpanStatusCode.OK });
-
-          const duration = Date.now() - startTime;
-          this.telemetryMetrics.queryDuration.record(duration, {
-            operation: "arrow.getData",
-            status: "success",
-          });
-
-          logger.event()?.setContext("sql-warehouse", {
-            arrow_data_size_bytes: result.data.length,
-            arrow_job_id: jobId,
-          });
-
-          return result;
-        } catch (error) {
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : "Unknown error",
-          });
-          span.recordException(error as Error);
-
-          const duration = Date.now() - startTime;
-          this.telemetryMetrics.queryDuration.record(duration, {
-            operation: "arrow.getData",
-            status: "error",
-          });
-
-          logger.error("Failed Arrow job: %s %O", jobId, error);
-
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-      },
+  /**
+   * Normalize an error caught during statement execution/polling and rethrow.
+   * Abort and already-structured `AppKitError`s pass through untouched;
+   * anything else is wrapped as an `ExecutionError`, preserving the SDK's
+   * structured `ApiError.errorCode` (e.g. "INVALID_PARAMETER_VALUE",
+   * "BAD_REQUEST") so callers can branch on a stable identifier rather than
+   * substring-matching the message.
+   */
+  private _rethrowStatementError(error: unknown): never {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof AppKitError) {
+      throw error;
+    }
+    const sdkErrorCode =
+      error && typeof error === "object" && "errorCode" in error
+        ? (error as { errorCode?: unknown }).errorCode
+        : undefined;
+    throw ExecutionError.statementFailed(
+      error instanceof Error ? error.message : String(error),
+      typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
     );
   }
 

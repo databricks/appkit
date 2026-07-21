@@ -3,6 +3,11 @@ import { defineConfig } from "tsdown";
 export default defineConfig([
   {
     publint: true,
+    attw: {
+      profile: "esm-only",
+      level: "error",
+      excludeEntrypoints: ["./type-generator"],
+    },
     name: "@databricks/appkit",
     entry: ["src/index.ts", "src/beta.ts"],
     outDir: "dist",

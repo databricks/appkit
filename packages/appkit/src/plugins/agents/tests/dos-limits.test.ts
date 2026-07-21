@@ -308,7 +308,7 @@ describe("runSubAgent — depth guard", () => {
    * so we can drive `runSubAgent` directly against the depth guard.
    */
   function makeRunState(
-    plugin: AgentsPlugin,
+    _plugin: AgentsPlugin,
     overrides: Partial<{
       maxToolCalls: number;
       maxSubAgentDepth: number;

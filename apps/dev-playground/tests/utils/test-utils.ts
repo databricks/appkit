@@ -1,4 +1,5 @@
 import type { Page, Request } from "@playwright/test";
+import { tableFromJSON, tableToIPC } from "apache-arrow";
 import {
   mockAnalyticsData,
   mockReconnectMessages,
@@ -27,65 +28,90 @@ function getSSEHeaders() {
   };
 }
 
+/** Maps a query URL to its mock rows (matched by query-key substring). */
+const ANALYTICS_MOCK: Array<readonly [string, readonly unknown[]]> = [
+  ["spend_summary", mockAnalyticsData.spendSummary],
+  ["apps_list", mockAnalyticsData.appsList],
+  ["untagged_apps", mockAnalyticsData.untaggedApps],
+  ["spend_data", mockAnalyticsData.spendData],
+  ["top_contributors", mockAnalyticsData.topContributors],
+  ["app_activity_heatmap", mockAnalyticsData.appActivityHeatmap],
+  ["sql_helpers_test", mockAnalyticsData.sqlHelpersTest],
+];
+
+function resolveAnalyticsMock(url: string): readonly unknown[] {
+  return ANALYTICS_MOCK.find(([key]) => url.includes(key))?.[1] ?? [];
+}
+
+/**
+ * Build raw Arrow IPC stream bytes from mock rows — the format `fetchArrowDirect`
+ * expects for `format: "ARROW_STREAM"` (raw bytes on the response body, not SSE).
+ *
+ * Mirrors a real Databricks warehouse: the Arrow schema is encoded
+ * *positionally* (`col_0`, `col_1`, …) and the real names are returned
+ * separately for the `X-Appkit-Arrow-Columns` header, so the client's relabel
+ * path (positional schema → real names) is exercised end-to-end — that path
+ * was the live bug and is otherwise only unit-tested.
+ *
+ * Array/object cells are stringified so Arrow can infer a primitive column
+ * type, matching how the warehouse serializes complex types; chart-relevant
+ * columns (names, numbers) are unaffected.
+ */
+function toArrowIPC(rows: readonly unknown[]): {
+  body: Buffer;
+  columnNames: string[];
+} {
+  const columnNames = Object.keys(rows[0] as Record<string, unknown>);
+  const positional = rows.map((row) => {
+    const values = Object.values(row as Record<string, unknown>);
+    return Object.fromEntries(
+      values.map((v, i) => [
+        `col_${i}`,
+        v !== null && typeof v === "object" ? JSON.stringify(v) : v,
+      ]),
+    );
+  });
+  return {
+    body: Buffer.from(tableToIPC(tableFromJSON(positional), "stream")),
+    columnNames,
+  };
+}
+
 export async function setupMockAPI(page: Page) {
   await page.route("**/api/analytics/query/**", async (route) => {
-    const url = route.request().url();
+    const data = resolveAnalyticsMock(route.request().url());
 
-    if (url.includes("spend_summary")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.spendSummary),
-      });
+    // ARROW_STREAM requests read raw Arrow IPC bytes off the response body
+    // (see fetchArrowDirect); everything else consumes the SSE/JSON result.
+    let requestFormat: string | undefined;
+    try {
+      requestFormat = route.request().postDataJSON()?.format;
+    } catch {
+      // Non-JSON body (e.g. a GET) — treat as the SSE/JSON path.
     }
-    if (url.includes("apps_list")) {
+
+    if (requestFormat === "ARROW_STREAM" && data.length > 0) {
+      const { body, columnNames } = toArrowIPC(data);
       return route.fulfill({
         status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.appsList),
-      });
-    }
-    if (url.includes("untagged_apps")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.untaggedApps),
-      });
-    }
-    if (url.includes("spend_data")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.spendData),
-      });
-    }
-    if (url.includes("top_contributors")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.topContributors),
-      });
-    }
-    if (url.includes("app_activity_heatmap")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.appActivityHeatmap),
-      });
-    }
-    if (url.includes("sql_helpers_test")) {
-      return route.fulfill({
-        status: 200,
-        headers: getSSEHeaders(),
-        body: createSSEResponse(mockAnalyticsData.sqlHelpersTest),
+        headers: {
+          "Content-Type": "application/vnd.apache.arrow.stream",
+          "Cache-Control": "no-store",
+          // Real warehouses encode the schema positionally (col_N) and send
+          // the aliased names in this header; the client relabels the decoded
+          // Table. Mirror that so the relabel path is covered.
+          "X-Appkit-Arrow-Columns": encodeURIComponent(
+            JSON.stringify(columnNames),
+          ),
+        },
+        body,
       });
     }
 
-    // Default empty response for unknown queries
     return route.fulfill({
       status: 200,
       headers: getSSEHeaders(),
-      body: createSSEResponse([]),
+      body: createSSEResponse(data),
     });
   });
 

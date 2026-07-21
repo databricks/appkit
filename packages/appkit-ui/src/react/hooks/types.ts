@@ -47,7 +47,7 @@ export interface TypedArrowTable<
 export interface UseAnalyticsQueryOptions<
   F extends AnalyticsFormat = "JSON_ARRAY",
 > {
-  /** Response format - "JSON_ARRAY" returns typed arrays, "ARROW_STREAM" returns TypedArrowTable */
+  /** Response format - "JSON_ARRAY" (default) returns typed arrays, "ARROW_STREAM" uses Arrow (inline or external links) */
   format?: F;
 
   /** Maximum size of serialized parameters in bytes */
@@ -92,8 +92,16 @@ export interface UseAnalyticsQueryResult<T> {
   data: T | null;
   /** Loading state of the query */
   loading: boolean;
-  /** Error state of the query */
+  /** Error state of the query — sanitized human-readable message */
   error: string | null;
+  /**
+   * Structured upstream error code when the server attaches one to the
+   * error payload (e.g. `RESULT_TOO_LARGE_FOR_JSON_FALLBACK`,
+   * `ARROW_DELIVERY_UNSUPPORTED`, `NOT_IMPLEMENTED`). Prefer branching UI
+   * on this stable identifier rather than substring-matching `error`,
+   * which is a free-form sanitized message.
+   */
+  errorCode: string | null;
   /**
    * Latest warehouse status emitted by the server while waiting for the SQL
    * warehouse to reach RUNNING. `null` until the first status event arrives;

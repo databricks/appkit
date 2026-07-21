@@ -1,6 +1,10 @@
 export const streamDefaults = {
   bufferSize: 100,
-  maxEventSize: 1024 * 1024, // 1MB
+  // 1 MiB. SSE carries only short JSON control messages — JSON_ARRAY result
+  // rows (already row-size-bounded by the warehouse) plus warehouse-readiness
+  // and error events. ARROW_STREAM never uses SSE: the raw Arrow IPC bytes
+  // stream back on the query response body (`_handleArrowStreamQuery`).
+  maxEventSize: 1 * 1024 * 1024,
   bufferTTL: 10 * 60 * 1000, // 10 minutes
   cleanupInterval: 5 * 60 * 1000, // 5 minutes
   maxPersistentBuffers: 10000, // 10000 buffers
