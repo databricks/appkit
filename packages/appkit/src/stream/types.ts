@@ -57,6 +57,11 @@ export interface StreamEntry {
   traceContext: Context;
   // pending grace-window abort, set while the last client is disconnected
   disconnectGraceTimer?: NodeJS.Timeout;
+  /**
+   * Pending registry-removal timer. At most one removal timer exists per
+   * stream; scheduling a new one clears any previous timer first.
+   */
+  removalTimer?: NodeJS.Timeout;
 }
 
 export interface StreamOperation {
