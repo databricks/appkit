@@ -288,8 +288,6 @@ export class PluginContext {
       if (typeof app[method] === "function") {
         (app[method] as (...a: unknown[]) => void)(
           route.path,
-          // Forward sync throws and async rejections to the Express error
-          // middleware — Express 4 does not do this on its own.
           ...route.handlers.map(forwardAsyncErrors),
         );
       }
@@ -302,8 +300,6 @@ export class PluginContext {
   ): void {
     if (!this.routeTarget) return;
     this.routeTarget.addExtension((app) => {
-      // forwardAsyncErrors leaves 4-arg error middleware untouched, so error
-      // handlers passed through addMiddleware keep their Express semantics.
       app.use(path, ...handlers.map(forwardAsyncErrors));
     });
   }

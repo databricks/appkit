@@ -525,7 +525,7 @@ function hasHttpStatusCode(
   error: unknown,
 ): error is Error & { statusCode: number } {
   if (!(error instanceof Error) || !("statusCode" in error)) return false;
-  const statusCode = (error as Record<string, unknown>).statusCode;
+  const statusCode = error.statusCode;
   return (
     typeof statusCode === "number" &&
     Number.isInteger(statusCode) &&
@@ -584,16 +584,10 @@ export function errorHandlerMiddleware(
   }
 
   const isDev = process.env.NODE_ENV !== "production";
-
-  if (httpError) {
-    res.status(statusCode).json({
-      error: isDev || isClientError ? httpError.message : "Server error",
-    });
-    return;
-  }
+  const message = err instanceof Error ? err.message : "Server error";
 
   res.status(statusCode).json({
-    error: isDev && err instanceof Error ? err.message : "Server error",
+    error: isDev || isClientError ? message : "Server error",
   });
 }
 

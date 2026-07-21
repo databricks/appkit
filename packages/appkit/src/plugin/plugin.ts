@@ -667,8 +667,6 @@ export abstract class Plugin<
   ): void {
     const { name, method, path, handler } = config;
 
-    // Sync throws and async rejections are forwarded to the Express error
-    // middleware via next(err) — Express 4 does not do this on its own.
     router[method](path, forwardAsyncErrors(handler));
 
     const fullPath = `/api/${this.name}${path}`;
