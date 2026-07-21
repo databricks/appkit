@@ -28,6 +28,16 @@ Mirrors `AgentDefinition.ephemeral` — skip thread persistence.
 
 ***
 
+### generationParams?
+
+```ts
+optional generationParams: GenerationParams;
+```
+
+Mirrors `AgentDefinition.generationParams`.
+
+***
+
 ### instructions
 
 ```ts

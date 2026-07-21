@@ -184,6 +184,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.GenerationParams",
+          label: "GenerationParams"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.IJobsConfig",
           label: "IJobsConfig"
         },
