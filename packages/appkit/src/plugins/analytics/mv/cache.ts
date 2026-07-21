@@ -17,8 +17,14 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
     input.metricKey,
     input.source,
     input.format,
-    sortedMeasures.join(","),
-    sortedDimensions.join(","),
+    // JSON-encode (not raw `.join(",")`): a comma is a legal identifier
+    // character (`isValidColumnName` rejects only control chars / newlines), so
+    // joining on `,` would collapse `["a,b"]` and `["a","b"]` to the same key
+    // element despite rendering different SQL. JSON quoting keeps the key
+    // one-to-one with the generated SQL — the same encoding `canonicalizeFilter`
+    // uses for predicate members below.
+    JSON.stringify(sortedMeasures),
+    JSON.stringify(sortedDimensions),
     input.timeGrain ?? "_",
     timeDimensionPart,
     filterFingerprint,
