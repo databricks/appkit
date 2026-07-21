@@ -1982,6 +1982,23 @@ describe("composeMetricCacheKey", () => {
     expect(a).not.toEqual(b);
   });
 
+  // A comma is a legal identifier character (`isValidColumnName` rejects only
+  // control chars / newlines), so a raw `.join(",")` would collapse a single
+  // comma-containing name and a two-name list to the same key element while the
+  // generated SQL differs — serving wrong cached rows. JSON encoding keeps the
+  // key one-to-one with the SQL.
+  test("measures with a comma in a name do NOT collide with a two-measure list", () => {
+    const a = composeMetricCacheKey({ ...base, measures: ["a,b"] });
+    const b = composeMetricCacheKey({ ...base, measures: ["a", "b"] });
+    expect(a).not.toEqual(b);
+  });
+
+  test("dimensions with a comma in a name do NOT collide with a two-dimension list", () => {
+    const a = composeMetricCacheKey({ ...base, dimensions: ["a,b"] });
+    const b = composeMetricCacheKey({ ...base, dimensions: ["a", "b"] });
+    expect(a).not.toEqual(b);
+  });
+
   test("different timeGrain → different keys", () => {
     const a = composeMetricCacheKey({
       ...base,
