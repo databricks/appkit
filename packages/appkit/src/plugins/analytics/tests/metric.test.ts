@@ -1303,15 +1303,15 @@ describe("metric — filter translator", () => {
       expect(where).toContain(" AND ");
     });
 
-    test("empty `and: []` group emits no WHERE clause (defense in depth past the validator)", () => {
+    test("empty `and: []` renders 1 = 1 (defense in depth past the validator)", () => {
       // The validator rejects `and: []` (see cardinality tests), but if a
-      // bypass ever reaches the renderer, an empty conjunction must drop to no
-      // constraint — never emit a malformed WHERE.
-      const { statement, parameters } = buildMetricSql(registration, {
-        measures: ["arr"],
-        filter: { and: [] },
-      });
-      expect(statement).not.toContain("WHERE");
+      // bypass ever reaches the renderer, an empty conjunction must render the
+      // AND identity element (vacuous-true) so it is correct in any position —
+      // returning `null` (dropped) would only be right at the top level, not
+      // nested inside an OR (see the OR-of-empty-AND test below). No bind
+      // parameters are emitted for the tautology.
+      const { where, parameters } = render({ and: [] });
+      expect(where).toBe("1 = 1");
       expect(parameters).toEqual({});
     });
 
@@ -1321,6 +1321,21 @@ describe("metric — filter translator", () => {
       // false — never drop the predicate (which would mean "match everything").
       const { where } = render({ or: [] });
       expect(where).toBe("1 = 0");
+    });
+
+    test("empty `and` nested in `or` stays vacuous-true (does not under-return)", () => {
+      // `TRUE OR P` is all rows. If empty-AND returned `null` (dropped by the
+      // parent OR), this would collapse to just `P` and under-return. The
+      // identity element `1 = 1` keeps the disjunction matching everything.
+      // `sortFilterChildren` orders the predicate before the empty-`and` group,
+      // so the tautology lands on the right; the disjunction still matches all rows.
+      const { where } = render({
+        or: [
+          { and: [] },
+          { member: "region", operator: "equals", values: ["EMEA"] },
+        ],
+      });
+      expect(where).toBe("(`region` = :f_0 OR 1 = 1)");
     });
   });
 

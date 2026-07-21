@@ -118,10 +118,15 @@ function renderFilter(
     )[groupKey];
 
     if (!Array.isArray(children) || children.length === 0) {
-      if (groupKey === "or") {
-        return "1 = 0";
-      }
-      return null;
+      // Empty group → the Boolean identity element for the operator, so the
+      // result is correct in ANY position (including nested inside the other
+      // operator). An empty OR is vacuously false (`1 = 0`); an empty AND is
+      // vacuously true (`1 = 1`). Returning `null` for empty-AND (dropped by the
+      // parent) would only be correct at the top level — nested in an OR it
+      // would silently vanish and turn `TRUE OR P` into `P`, under-returning
+      // rows. (The validator rejects empty groups outright; this is the
+      // defense-in-depth fallback and must be semantically correct too.)
+      return groupKey === "or" ? "1 = 0" : "1 = 1";
     }
 
     const sortedChildren = sortFilterChildren(children);
