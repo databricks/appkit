@@ -1315,51 +1315,66 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     let fullContent = "";
     try {
-      const pluginNames = this.context
-        ? this.context
-            .getPluginNames()
-            .filter((n) => n !== this.name && n !== "server")
-        : [];
-      const fullPrompt = composePromptForAgent(
-        registered,
-        this.config.baseSystemPrompt,
+      // Root MLflow span for the turn; tool-call spans nest under it. Mirrors
+      // the streaming path so the invoke surface produces the same trace shape
+      // instead of orphan root TOOL spans.
+      await traceAgent(
+        registered.name ?? "agent",
         {
-          agentName: registered.name,
-          pluginNames,
-          toolNames: tools.map((t) => t.name),
+          messages: thread.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+        async (span) => {
+          const pluginNames = this.context
+            ? this.context
+                .getPluginNames()
+                .filter((n) => n !== this.name && n !== "server")
+            : [];
+          const fullPrompt = composePromptForAgent(
+            registered,
+            this.config.baseSystemPrompt,
+            {
+              agentName: registered.name,
+              pluginNames,
+              toolNames: tools.map((t) => t.name),
+            },
+          );
+
+          const messagesWithSystem: Message[] = [
+            {
+              id: "system",
+              role: "system",
+              content: fullPrompt,
+              createdAt: new Date(),
+            },
+            ...thread.messages,
+          ];
+
+          const stream = registered.adapter.run(
+            {
+              messages: messagesWithSystem,
+              tools,
+              threadId: thread.id,
+              signal,
+            },
+            { executeTool, signal },
+          );
+
+          fullContent = await consumeAdapterStream(stream, { signal });
+
+          if (fullContent) {
+            span.setOutputs({ role: "assistant", content: fullContent });
+            await this.threadStore.addMessage(thread.id, userId, {
+              id: randomUUID(),
+              role: "assistant",
+              content: fullContent,
+              createdAt: new Date(),
+            });
+          }
         },
       );
-
-      const messagesWithSystem: Message[] = [
-        {
-          id: "system",
-          role: "system",
-          content: fullPrompt,
-          createdAt: new Date(),
-        },
-        ...thread.messages,
-      ];
-
-      const stream = registered.adapter.run(
-        {
-          messages: messagesWithSystem,
-          tools,
-          threadId: thread.id,
-          signal,
-        },
-        { executeTool, signal },
-      );
-
-      fullContent = await consumeAdapterStream(stream, { signal });
-
-      if (fullContent) {
-        await this.threadStore.addMessage(thread.id, userId, {
-          id: randomUUID(),
-          role: "assistant",
-          content: fullContent,
-          createdAt: new Date(),
-        });
-      }
     } catch (error) {
       if (signal.aborted) {
         res.status(499).json({ error: "Request aborted" });

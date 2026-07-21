@@ -19,7 +19,6 @@ function stubSdk(overrides: Record<string, unknown> = {}) {
     // root span that *ended*, i.e. a previous/other turn.
     getLastActiveTraceId: vi.fn(() => "tr-STALE"),
     updateCurrentTrace: vi.fn(),
-    flushTraces: vi.fn(),
     ...overrides,
   };
   vi.doMock("mlflow-tracing", () => sdk);
