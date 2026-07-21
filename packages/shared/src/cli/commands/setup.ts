@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { installSkills } from "./skills/install-skills";
 
 const PACKAGES = [
   { name: "@databricks/appkit", description: "Backend SDK" },
@@ -158,6 +159,28 @@ function runSetup(options: { write?: boolean }) {
     fs.writeFileSync(claudePath, finalContent);
     console.log(`\n✓ ${action} CLAUDE.md`);
     console.log(`  Path: ${claudePath}`);
+
+    // Install AppKit skills as slash commands in .claude/commands/. Best-effort:
+    // never fail `setup --write` just because skills couldn't be linked.
+    try {
+      const result = installSkills();
+      const applied = result.installed.filter((s) => s.action !== "skipped");
+      if (applied.length > 0) {
+        console.log(
+          `\n✓ Installed ${applied.length} skill(s) as slash commands`,
+        );
+        for (const s of applied) {
+          console.log(`  /${s.name}`);
+        }
+        console.log(`  Path: ${result.commandsDir}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`\n(Skipped installing skills: ${msg})`);
+      console.log(
+        "  Run `npx appkit skills install` once packages are present.",
+      );
+    }
   } else {
     console.log("\nTo create/update CLAUDE.md, run:");
     console.log("  npx appkit setup --write\n");

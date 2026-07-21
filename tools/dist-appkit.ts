@@ -72,6 +72,11 @@ if (fs.existsSync("bin")) {
   fs.cpSync("bin", "tmp/bin", { recursive: true });
 }
 
+// Copy shipped skills (slash commands installed via `appkit skills install`)
+if (fs.existsSync("skills")) {
+  fs.cpSync("skills", "tmp/skills", { recursive: true });
+}
+
 // Copy bin and scripts from shared package
 if (fs.existsSync(sharedBin)) {
   fs.mkdirSync("tmp/bin", { recursive: true });

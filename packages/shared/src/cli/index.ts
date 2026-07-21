@@ -10,6 +10,7 @@ import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
 import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
+import { skillsCommand } from "./commands/skills/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, "../../package.json");
@@ -28,5 +29,6 @@ cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
 cmd.addCommand(codemodCommand);
+cmd.addCommand(skillsCommand);
 
 await cmd.parseAsync();
