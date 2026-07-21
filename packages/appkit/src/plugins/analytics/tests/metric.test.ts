@@ -1,11 +1,4 @@
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -16,16 +9,14 @@ import {
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AppManager, type DevFileReader } from "../../../app";
+import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { AnalyticsPlugin } from "../analytics";
 import {
-  __resetMetricRegistryCache,
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
-  getMetricRegistry,
   loadMetricRegistry,
   validateMetricRequest,
 } from "../metric";
@@ -72,8 +63,8 @@ vi.mock("../../../cache", () => ({
 
 // Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
 // test. Using real files (pointing the plugin's `AppManager` at the dir, see
-// `pluginForDir`) exercises the actual stat → read → cache path in
-// `getMetricRegistry` rather than poking private plugin state.
+// `pluginForDir`) exercises the actual read → parse path in
+// `loadMetricRegistry` rather than poking private plugin state.
 const tempRegistryDirs: string[] = [];
 
 /**
@@ -155,7 +146,6 @@ describe("analytics metric route (Phase 1)", () => {
 
   afterEach(() => {
     serviceContextMock?.restore();
-    __resetMetricRegistryCache();
     while (tempRegistryDirs.length > 0) {
       const dir = tempRegistryDirs.pop();
       if (dir) rmSync(dir, { recursive: true, force: true });
@@ -716,8 +706,8 @@ describe("analytics metric route (Phase 1)", () => {
       );
       expect(res1.status).toHaveBeenCalledWith(503);
 
-      // Fix the file. mtime changes, so the next request re-parses and serves
-      // it — no server restart, no latched 503.
+      // Fix the file. Each request re-reads + re-parses the config, so the
+      // next request serves it — no server restart, no latched 503.
       writeRegistry(dir, {
         revenue: {
           key: "revenue",
@@ -768,8 +758,8 @@ describe("analytics metric route (Phase 1)", () => {
       );
       expect(res1.status).toHaveBeenCalledWith(404);
 
-      // Add `orders` to the config. The mtime bump invalidates the cache, so
-      // the next request sees it without a restart.
+      // Add `orders` to the config. Each request re-reads the config, so the
+      // next request sees it without a restart.
       writeRegistry(dir, {
         revenue: {
           key: "revenue",
@@ -815,11 +805,10 @@ describe("analytics metric route (Phase 1)", () => {
 });
 
 // ── loadMetricRegistry: config parse against the landed metricSourceSchema.
-// The loaders now read the config file THROUGH an `AppManager` (Phase 2), so
-// each test points an `AppManager` at its temp dir instead of passing a bare
-// directory string. The module cache is still keyed by `app.queriesDir`, so the
-// mtime/ctime/size revalidation and `__resetMetricRegistryCache` behavior are
-// unchanged.
+// The loader reads the config file THROUGH an `AppManager` (Phase 2), so each
+// test points an `AppManager` at its temp dir instead of passing a bare
+// directory string. The loader is stateless — it reads + parses on every call
+// (no memoization), so there is no cache to reset between tests.
 describe("loadMetricRegistry", () => {
   let dir: string;
   let app: AppManager;
@@ -830,7 +819,6 @@ describe("loadMetricRegistry", () => {
   });
 
   afterEach(() => {
-    __resetMetricRegistryCache();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -947,158 +935,6 @@ describe("loadMetricRegistry", () => {
       JSON.stringify({ metricViews }),
     );
     await expect(loadMetricRegistry(app)).resolves.toBeDefined();
-  });
-
-  test("re-reads only after the file changes (mtime-validated cache)", async () => {
-    // getMetricRegistry caches by dir and revalidates via stat; a second call
-    // with no change returns the same object, and a rewrite is picked up.
-    writeFileSync(
-      path.join(dir, "metric-views.json"),
-      JSON.stringify({
-        metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
-      }),
-    );
-    const first = await getMetricRegistry(app);
-    const second = await getMetricRegistry(app);
-    expect(second).toBe(first); // same cached object, no re-parse
-
-    writeFileSync(
-      path.join(dir, "metric-views.json"),
-      JSON.stringify({
-        metricViews: {
-          revenue: { source: "cat.sch.revenue_metrics" },
-          orders: { source: "cat.sch.order_metrics" },
-        },
-      }),
-    );
-    const third = await getMetricRegistry(app);
-    expect(third).not.toBe(first);
-    expect(Object.keys(third).sort()).toEqual(["orders", "revenue"]);
-  });
-
-  test("picks up a SAME-SIZE edit (ctime invalidation, not just size)", async () => {
-    // The failure mode size+mtime alone would miss: rewrite the config to the
-    // EXACT same byte length (repoint `source` to an equal-length FQN). `size`
-    // is unchanged and a coarse-mtime FS might not advance `mtimeMs`, but
-    // `ctimeMs` bumps on any write — so the new source must be served.
-    const p = path.join(dir, "metric-views.json");
-    writeFileSync(
-      p,
-      JSON.stringify({
-        metricViews: { revenue: { source: "cat.sch.rev_aaa" } },
-      }),
-    );
-    const before = await getMetricRegistry(app);
-    expect(before.revenue?.source).toBe("cat.sch.rev_aaa");
-
-    // Same-length replacement: "rev_aaa" → "rev_bbb" keeps the file byte-count
-    // identical, so `size` cannot disambiguate.
-    const sizeBefore = statSync(p).size;
-    writeFileSync(
-      p,
-      JSON.stringify({
-        metricViews: { revenue: { source: "cat.sch.rev_bbb" } },
-      }),
-    );
-    expect(statSync(p).size).toBe(sizeBefore); // same size, as designed
-
-    const after = await getMetricRegistry(app);
-    expect(after.revenue?.source).toBe("cat.sch.rev_bbb");
-  });
-
-  test("__resetMetricRegistryCache forces a cold re-read", async () => {
-    writeFileSync(
-      path.join(dir, "metric-views.json"),
-      JSON.stringify({
-        metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
-      }),
-    );
-    const first = await getMetricRegistry(app);
-    __resetMetricRegistryCache();
-    const second = await getMetricRegistry(app);
-    // Cleared cache → fresh parse → a new object (not the memoized instance).
-    expect(second).not.toBe(first);
-    expect(Object.keys(second)).toEqual(["revenue"]);
-  });
-
-  // ── Phase 2: dev-tunnel branch. A `?dev` request must NOT stat and must NOT
-  // cache — it re-reads through the (stubbed) dev tunnel every call so the
-  // developer's local edits are reflected immediately, mirroring the `.sql`
-  // tunnel path.
-  describe("dev-remote branch (uncached, re-read every request)", () => {
-    // Minimal DevFileReader stub: serves the CURRENT on-disk temp file over the
-    // "tunnel". Reading real bytes keeps the not-found / parse semantics honest
-    // while letting us assert the dev branch bypasses the stat cache.
-    function makeDevReader(): DevFileReader {
-      return {
-        readFile: async (relativePath: string) =>
-          readFileSync(path.join(dir, path.basename(relativePath)), "utf8"),
-        readdir: async () => readdirSync(dir),
-      };
-    }
-
-    test("dev request reflects edits on the next call without an mtime/ctime change (no cache)", async () => {
-      const devReq = { query: { dev: "1" }, headers: {} };
-      const devReader = makeDevReader();
-      const p = path.join(dir, "metric-views.json");
-
-      writeFileSync(
-        p,
-        JSON.stringify({
-          metricViews: { revenue: { source: "cat.sch.rev_aaa" } },
-        }),
-      );
-      const first = await getMetricRegistry(app, devReq, devReader);
-      expect(first.revenue?.source).toBe("cat.sch.rev_aaa");
-
-      // Same-length repoint: `size` is identical. If the dev branch consulted
-      // the stat cache, this edit could be missed; because it re-reads every
-      // request, the NEW contents must be served.
-      const sizeBefore = statSync(p).size;
-      writeFileSync(
-        p,
-        JSON.stringify({
-          metricViews: { revenue: { source: "cat.sch.rev_bbb" } },
-        }),
-      );
-      expect(statSync(p).size).toBe(sizeBefore);
-
-      const second = await getMetricRegistry(app, devReq, devReader);
-      expect(second.revenue?.source).toBe("cat.sch.rev_bbb");
-      // A fresh parse each time → never the same object instance.
-      expect(second).not.toBe(first);
-    });
-
-    test("back-to-back dev reads of an UNCHANGED file still return fresh objects (no memo)", async () => {
-      // Contrast with the prod path, where two reads of an unchanged file
-      // return the SAME cached instance (see the mtime-cache test above). In
-      // dev there is no cache, so even with the file untouched each call
-      // re-reads + re-parses and hands back a distinct object.
-      const devReq = { query: { dev: "1" }, headers: {} };
-      const devReader = makeDevReader();
-      writeFileSync(
-        path.join(dir, "metric-views.json"),
-        JSON.stringify({
-          metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
-        }),
-      );
-
-      const first = await getMetricRegistry(app, devReq, devReader);
-      const second = await getMetricRegistry(app, devReq, devReader);
-      // Uncached → distinct instances even though nothing changed.
-      expect(second).not.toBe(first);
-      expect(second).toEqual(first);
-
-      // And the dev reads left NO entry in the module cache: a following prod
-      // read is therefore cold (parses fresh) and only its SECOND call hits
-      // the cache — the classic prod signature. If a dev read had populated
-      // the cache, prodFirst would already be that cached object.
-      const prodFirst = await getMetricRegistry(app);
-      expect(prodFirst).not.toBe(first);
-      expect(prodFirst).not.toBe(second);
-      const prodSecond = await getMetricRegistry(app);
-      expect(prodSecond).toBe(prodFirst);
-    });
   });
 });
 

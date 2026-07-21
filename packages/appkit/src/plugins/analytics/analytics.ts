@@ -33,7 +33,7 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
-  getMetricRegistry,
+  loadMetricRegistry,
   validateMetricRequest,
 } from "./metric";
 import { QueryProcessor } from "./query";
@@ -478,14 +478,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // Resolve the registry from disk (cached + mtime-revalidated by `getMetricRegistry`).
-    // Reads through the plugin's shared `this.app` (the base `Plugin`'s
-    // `AppManager`, rooted at `config/queries/` under the process cwd), so this
-    // is dev-tunnel aware and shares the module-level mtime cache keyed by
-    // `app.queriesDir`.
+    // Resolve the registry from disk: read + parse `metric-views.json` once per
+    // request (no memoization). Reads through the plugin's shared `this.app`
+    // (the base `Plugin`'s `AppManager`, rooted at `config/queries/` under the
+    // process cwd), so this is dev-tunnel aware and inherits the traversal
+    // guard — same as the sibling `.sql` query path.
     let registry: Record<string, MetricRegistration>;
     try {
-      registry = await getMetricRegistry(this.app, req, this.devFileReader);
+      registry = await loadMetricRegistry(this.app, req, this.devFileReader);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn(req, "Failed to load metric registry: %s", reason);
