@@ -1,4 +1,11 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -9,6 +16,7 @@ import {
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { AppManager, type DevFileReader } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { AnalyticsPlugin } from "../analytics";
@@ -63,16 +71,33 @@ vi.mock("../../../cache", () => ({
 }));
 
 // Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
-// test. Using real files (via the test-only `queriesDir` config) exercises the
-// actual stat → read → cache path in `getMetricRegistry` rather than poking
-// private plugin state.
+// test. Using real files (pointing the plugin's `AppManager` at the dir, see
+// `pluginForDir`) exercises the actual stat → read → cache path in
+// `getMetricRegistry` rather than poking private plugin state.
 const tempRegistryDirs: string[] = [];
 
 /**
+ * Construct an `AnalyticsPlugin` whose metric-registry gateway is pointed at
+ * `dir`.
+ *
+ * The plugin reads the registry through the base `Plugin`'s shared `this.app`
+ * (an `AppManager` rooted at `config/queries/` under the cwd). There is no
+ * config field to relocate that directory, so a test points the plugin at a
+ * fixture dir by overriding the `AppManager` with one constructed over `dir`.
+ * `app` is `protected` on the base `Plugin`, hence the deliberate test-only
+ * cast — the single seam every route-handler test threads through.
+ */
+function pluginForDir(config: IAnalyticsConfig, dir: string): AnalyticsPlugin {
+  const plugin = new AnalyticsPlugin(config);
+  (plugin as any).app = new AppManager(dir);
+  return plugin;
+}
+
+/**
  * Write a `metric-views.json` into a fresh temp dir and return the dir, for use
- * as `new AnalyticsPlugin({ ...config, queriesDir })`. Accepts the internal
- * `MetricRegistration` shape (matching the old `setRegistry` helper) and maps
- * each entry's `lane` back to the config's `executor` field.
+ * with `pluginForDir(config, dir)`. Accepts the internal `MetricRegistration`
+ * shape (matching the old `setRegistry` helper) and maps each entry's `lane`
+ * back to the config's `executor` field.
  */
 function registryDir(registry: Record<string, MetricRegistration>): string {
   const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
@@ -447,16 +472,16 @@ describe("analytics metric route (Phase 1)", () => {
   // byte-identical to the /query route's JSON SSE path.
   describe("_handleMetricRoute SSE envelope", () => {
     test("streams warehouse_status then a result message with aliased rows", async () => {
-      const plugin = new AnalyticsPlugin({
-        ...config,
-        queriesDir: registryDir({
+      const plugin = pluginForDir(
+        config,
+        registryDir({
           revenue: {
             key: "revenue",
             source: "cat.sch.revenue_metrics",
             lane: "sp",
           },
         }),
-      });
+      );
       const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn().mockResolvedValue({
@@ -494,16 +519,16 @@ describe("analytics metric route (Phase 1)", () => {
     });
 
     test("emits warehouse_status before result for a STARTING warehouse", async () => {
-      const plugin = new AnalyticsPlugin({
-        ...config,
-        queriesDir: registryDir({
+      const plugin = pluginForDir(
+        config,
+        registryDir({
           revenue: {
             key: "revenue",
             source: "cat.sch.revenue_metrics",
             lane: "sp",
           },
         }),
-      });
+      );
       const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn().mockResolvedValue({
@@ -547,16 +572,16 @@ describe("analytics metric route (Phase 1)", () => {
     });
 
     test("returns 400 when the body fails structural validation", async () => {
-      const plugin = new AnalyticsPlugin({
-        ...config,
-        queriesDir: registryDir({
+      const plugin = pluginForDir(
+        config,
+        registryDir({
           revenue: {
             key: "revenue",
             source: "cat.sch.revenue_metrics",
             lane: "sp",
           },
         }),
-      });
+      );
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -576,16 +601,16 @@ describe("analytics metric route (Phase 1)", () => {
   // ── 503-vs-404 latching + dormancy.
   describe("registry latching and dormancy", () => {
     test("unknown key against a valid registry → 404 (generic body)", async () => {
-      const plugin = new AnalyticsPlugin({
-        ...config,
-        queriesDir: registryDir({
+      const plugin = pluginForDir(
+        config,
+        registryDir({
           revenue: {
             key: "revenue",
             source: "cat.sch.revenue_metrics",
             lane: "sp",
           },
         }),
-      });
+      );
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -605,16 +630,16 @@ describe("analytics metric route (Phase 1)", () => {
     test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
       "inherited Object.prototype key %j → 404, no execution (own-property lookup)",
       async (dangerousKey) => {
-        const plugin = new AnalyticsPlugin({
-          ...config,
-          queriesDir: registryDir({
+        const plugin = pluginForDir(
+          config,
+          registryDir({
             revenue: {
               key: "revenue",
               source: "cat.sch.revenue_metrics",
               lane: "sp",
             },
           }),
-        });
+        );
         const { router, getHandler } = createMockRouter();
         // A real (own) entry so the registry is populated but does NOT contain
         // the dangerous key. Without the own-property guard, `registry[key]`
@@ -647,7 +672,7 @@ describe("analytics metric route (Phase 1)", () => {
       // A real malformed config on disk (invalid JSON) → the loader throws →
       // the route surfaces a 503, exercising the actual load path.
       writeRegistry(dir, "{ not valid json");
-      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
+      const plugin = pluginForDir(config, dir);
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -671,7 +696,7 @@ describe("analytics metric route (Phase 1)", () => {
       const dir = mkdtempSync(path.join(tmpdir(), "mv-route-"));
       tempRegistryDirs.push(dir);
       writeRegistry(dir, "{ not valid json");
-      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
+      const plugin = pluginForDir(config, dir);
       const { router, getHandler } = createMockRouter();
       const executeMock = vi
         .fn()
@@ -723,7 +748,7 @@ describe("analytics metric route (Phase 1)", () => {
           lane: "sp",
         },
       });
-      const plugin = new AnalyticsPlugin({ ...config, queriesDir: dir });
+      const plugin = pluginForDir(config, dir);
       const { router, getHandler } = createMockRouter();
       const executeMock = vi
         .fn()
@@ -790,11 +815,18 @@ describe("analytics metric route (Phase 1)", () => {
 });
 
 // ── loadMetricRegistry: config parse against the landed metricSourceSchema.
+// The loaders now read the config file THROUGH an `AppManager` (Phase 2), so
+// each test points an `AppManager` at its temp dir instead of passing a bare
+// directory string. The module cache is still keyed by `app.queriesDir`, so the
+// mtime/ctime/size revalidation and `__resetMetricRegistryCache` behavior are
+// unchanged.
 describe("loadMetricRegistry", () => {
   let dir: string;
+  let app: AppManager;
 
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), "mv-registry-"));
+    app = new AppManager(dir);
   });
 
   afterEach(() => {
@@ -803,7 +835,7 @@ describe("loadMetricRegistry", () => {
   });
 
   test("absent metric-views.json → empty registry (dormancy)", async () => {
-    expect(await loadMetricRegistry(dir)).toEqual({});
+    expect(await loadMetricRegistry(app)).toEqual({});
   });
 
   test("derives lane from executor (default sp, user → obo)", async () => {
@@ -817,7 +849,7 @@ describe("loadMetricRegistry", () => {
       }),
     );
 
-    const registry = await loadMetricRegistry(dir);
+    const registry = await loadMetricRegistry(app);
     expect(registry.revenue).toEqual({
       key: "revenue",
       source: "cat.sch.revenue_metrics",
@@ -838,7 +870,7 @@ describe("loadMetricRegistry", () => {
       }),
     );
 
-    const registry = await loadMetricRegistry(dir);
+    const registry = await loadMetricRegistry(app);
     expect(Object.getPrototypeOf(registry)).toBeNull();
     // A key that would resolve to a truthy inherited member on a plain object
     // resolves to undefined here.
@@ -849,13 +881,13 @@ describe("loadMetricRegistry", () => {
   test("absent file yields a null-prototype (dormant) registry too", async () => {
     // The ENOENT dormancy path must also be prototype-free — a metric key
     // colliding with an inherited member can't 200 against an empty registry.
-    const registry = await loadMetricRegistry(dir);
+    const registry = await loadMetricRegistry(app);
     expect(Object.getPrototypeOf(registry)).toBeNull();
   });
 
   test("malformed JSON throws", async () => {
     writeFileSync(path.join(dir, "metric-views.json"), "{ not json");
-    await expect(loadMetricRegistry(dir)).rejects.toThrow(/Failed to parse/);
+    await expect(loadMetricRegistry(app)).rejects.toThrow(/Failed to parse/);
   });
 
   test("schema-invalid config throws", async () => {
@@ -865,7 +897,7 @@ describe("loadMetricRegistry", () => {
         metricViews: { revenue: { source: "not-a-three-part-fqn" } },
       }),
     );
-    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+    await expect(loadMetricRegistry(app)).rejects.toThrow(
       /Invalid metric-views.json/,
     );
   });
@@ -882,7 +914,7 @@ describe("loadMetricRegistry", () => {
       path.join(dir, "metric-views.json"),
       JSON.stringify({ metricViews }),
     );
-    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+    await expect(loadMetricRegistry(app)).rejects.toThrow(
       /Invalid metric-views.json/,
     );
   });
@@ -898,7 +930,7 @@ describe("loadMetricRegistry", () => {
         metricViews: { revenue: { source: `cat.sch.${longSegment}` } },
       }),
     );
-    await expect(loadMetricRegistry(dir)).rejects.toThrow(
+    await expect(loadMetricRegistry(app)).rejects.toThrow(
       /Invalid metric-views.json/,
     );
   });
@@ -914,7 +946,7 @@ describe("loadMetricRegistry", () => {
       path.join(dir, "metric-views.json"),
       JSON.stringify({ metricViews }),
     );
-    await expect(loadMetricRegistry(dir)).resolves.toBeDefined();
+    await expect(loadMetricRegistry(app)).resolves.toBeDefined();
   });
 
   test("re-reads only after the file changes (mtime-validated cache)", async () => {
@@ -926,8 +958,8 @@ describe("loadMetricRegistry", () => {
         metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
       }),
     );
-    const first = await getMetricRegistry(dir);
-    const second = await getMetricRegistry(dir);
+    const first = await getMetricRegistry(app);
+    const second = await getMetricRegistry(app);
     expect(second).toBe(first); // same cached object, no re-parse
 
     writeFileSync(
@@ -939,7 +971,7 @@ describe("loadMetricRegistry", () => {
         },
       }),
     );
-    const third = await getMetricRegistry(dir);
+    const third = await getMetricRegistry(app);
     expect(third).not.toBe(first);
     expect(Object.keys(third).sort()).toEqual(["orders", "revenue"]);
   });
@@ -956,7 +988,7 @@ describe("loadMetricRegistry", () => {
         metricViews: { revenue: { source: "cat.sch.rev_aaa" } },
       }),
     );
-    const before = await getMetricRegistry(dir);
+    const before = await getMetricRegistry(app);
     expect(before.revenue?.source).toBe("cat.sch.rev_aaa");
 
     // Same-length replacement: "rev_aaa" → "rev_bbb" keeps the file byte-count
@@ -970,7 +1002,7 @@ describe("loadMetricRegistry", () => {
     );
     expect(statSync(p).size).toBe(sizeBefore); // same size, as designed
 
-    const after = await getMetricRegistry(dir);
+    const after = await getMetricRegistry(app);
     expect(after.revenue?.source).toBe("cat.sch.rev_bbb");
   });
 
@@ -981,12 +1013,92 @@ describe("loadMetricRegistry", () => {
         metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
       }),
     );
-    const first = await getMetricRegistry(dir);
+    const first = await getMetricRegistry(app);
     __resetMetricRegistryCache();
-    const second = await getMetricRegistry(dir);
+    const second = await getMetricRegistry(app);
     // Cleared cache → fresh parse → a new object (not the memoized instance).
     expect(second).not.toBe(first);
     expect(Object.keys(second)).toEqual(["revenue"]);
+  });
+
+  // ── Phase 2: dev-tunnel branch. A `?dev` request must NOT stat and must NOT
+  // cache — it re-reads through the (stubbed) dev tunnel every call so the
+  // developer's local edits are reflected immediately, mirroring the `.sql`
+  // tunnel path.
+  describe("dev-remote branch (uncached, re-read every request)", () => {
+    // Minimal DevFileReader stub: serves the CURRENT on-disk temp file over the
+    // "tunnel". Reading real bytes keeps the not-found / parse semantics honest
+    // while letting us assert the dev branch bypasses the stat cache.
+    function makeDevReader(): DevFileReader {
+      return {
+        readFile: async (relativePath: string) =>
+          readFileSync(path.join(dir, path.basename(relativePath)), "utf8"),
+        readdir: async () => readdirSync(dir),
+      };
+    }
+
+    test("dev request reflects edits on the next call without an mtime/ctime change (no cache)", async () => {
+      const devReq = { query: { dev: "1" }, headers: {} };
+      const devReader = makeDevReader();
+      const p = path.join(dir, "metric-views.json");
+
+      writeFileSync(
+        p,
+        JSON.stringify({
+          metricViews: { revenue: { source: "cat.sch.rev_aaa" } },
+        }),
+      );
+      const first = await getMetricRegistry(app, devReq, devReader);
+      expect(first.revenue?.source).toBe("cat.sch.rev_aaa");
+
+      // Same-length repoint: `size` is identical. If the dev branch consulted
+      // the stat cache, this edit could be missed; because it re-reads every
+      // request, the NEW contents must be served.
+      const sizeBefore = statSync(p).size;
+      writeFileSync(
+        p,
+        JSON.stringify({
+          metricViews: { revenue: { source: "cat.sch.rev_bbb" } },
+        }),
+      );
+      expect(statSync(p).size).toBe(sizeBefore);
+
+      const second = await getMetricRegistry(app, devReq, devReader);
+      expect(second.revenue?.source).toBe("cat.sch.rev_bbb");
+      // A fresh parse each time → never the same object instance.
+      expect(second).not.toBe(first);
+    });
+
+    test("back-to-back dev reads of an UNCHANGED file still return fresh objects (no memo)", async () => {
+      // Contrast with the prod path, where two reads of an unchanged file
+      // return the SAME cached instance (see the mtime-cache test above). In
+      // dev there is no cache, so even with the file untouched each call
+      // re-reads + re-parses and hands back a distinct object.
+      const devReq = { query: { dev: "1" }, headers: {} };
+      const devReader = makeDevReader();
+      writeFileSync(
+        path.join(dir, "metric-views.json"),
+        JSON.stringify({
+          metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
+        }),
+      );
+
+      const first = await getMetricRegistry(app, devReq, devReader);
+      const second = await getMetricRegistry(app, devReq, devReader);
+      // Uncached → distinct instances even though nothing changed.
+      expect(second).not.toBe(first);
+      expect(second).toEqual(first);
+
+      // And the dev reads left NO entry in the module cache: a following prod
+      // read is therefore cold (parses fresh) and only its SECOND call hits
+      // the cache — the classic prod signature. If a dev read had populated
+      // the cache, prodFirst would already be that cached object.
+      const prodFirst = await getMetricRegistry(app);
+      expect(prodFirst).not.toBe(first);
+      expect(prodFirst).not.toBe(second);
+      const prodSecond = await getMetricRegistry(app);
+      expect(prodSecond).toBe(prodFirst);
+    });
   });
 });
 
@@ -1714,16 +1826,16 @@ describe("metric — filter translator", () => {
     });
 
     test("a well-formed-but-unknown measure reaches the warehouse and surfaces a sanitized error envelope", async () => {
-      const plugin = new AnalyticsPlugin({
-        ...config,
-        queriesDir: registryDir({
+      const plugin = pluginForDir(
+        config,
+        registryDir({
           revenue: {
             key: "revenue",
             source: "cat.sch.revenue_metrics",
             lane: "sp",
           },
         }),
-      });
+      );
       const { router, getHandler } = createMockRouter();
 
       // The warehouse rejects the unknown column. The raw text carries the
@@ -2096,16 +2208,16 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO-lane registration routes through asUser(req)", async () => {
-    const plugin = new AnalyticsPlugin({
-      ...config,
-      queriesDir: registryDir({
+    const plugin = pluginForDir(
+      config,
+      registryDir({
         revenue: {
           key: "revenue",
           source: "cat.sch.revenue_metrics",
           lane: "obo",
         },
       }),
-    });
+    );
     const { router, getHandler } = createMockRouter();
 
     const asUserSpy = vi.spyOn(plugin, "asUser");
@@ -2136,16 +2248,16 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("SP-lane registration uses the default executor (asUser not called)", async () => {
-    const plugin = new AnalyticsPlugin({
-      ...config,
-      queriesDir: registryDir({
+    const plugin = pluginForDir(
+      config,
+      registryDir({
         revenue: {
           key: "revenue",
           source: "cat.sch.revenue_metrics",
           lane: "sp",
         },
       }),
-    });
+    );
     const { router, getHandler } = createMockRouter();
 
     const asUserSpy = vi.spyOn(plugin, "asUser");
@@ -2175,16 +2287,16 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO metric with no user identity → canonical 401, no SQL executed", async () => {
-    const plugin = new AnalyticsPlugin({
-      ...config,
-      queriesDir: registryDir({
+    const plugin = pluginForDir(
+      config,
+      registryDir({
         revenue: {
           key: "revenue",
           source: "cat.sch.revenue_metrics",
           lane: "obo",
         },
       }),
-    });
+    );
     const { router, getHandler } = createMockRouter();
 
     const executeMock = vi.fn();
@@ -2212,16 +2324,16 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 
   test("OBO metric with whitespace-only user identity → canonical 401", async () => {
-    const plugin = new AnalyticsPlugin({
-      ...config,
-      queriesDir: registryDir({
+    const plugin = pluginForDir(
+      config,
+      registryDir({
         revenue: {
           key: "revenue",
           source: "cat.sch.revenue_metrics",
           lane: "obo",
         },
       }),
-    });
+    );
     const { router, getHandler } = createMockRouter();
 
     const executeMock = vi.fn();

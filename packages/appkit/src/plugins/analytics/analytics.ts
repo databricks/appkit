@@ -32,7 +32,6 @@ import manifest from "./manifest.json";
 import {
   buildMetricSql,
   composeMetricCacheKey,
-  QUERIES_DIR as DEFAULT_QUERIES_DIR,
   deriveMetricExecutorKey,
   getMetricRegistry,
   validateMetricRequest,
@@ -125,18 +124,10 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    */
   private _arrowCapability = new Map<string, ArrowCapability>();
 
-  /**
-   * Directory the metric-view registry is read from (holds
-   * `metric-views.json`).
-   * @default `config/queries/` (under the process cwd)
-   */
-  private readonly _queriesDir: string;
-
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
     this.queryProcessor = new QueryProcessor();
-    this._queriesDir = config.queriesDir ?? DEFAULT_QUERIES_DIR;
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
@@ -488,9 +479,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }
 
     // Resolve the registry from disk (cached + mtime-revalidated by `getMetricRegistry`).
+    // Reads through the plugin's shared `this.app` (the base `Plugin`'s
+    // `AppManager`, rooted at `config/queries/` under the process cwd), so this
+    // is dev-tunnel aware and shares the module-level mtime cache keyed by
+    // `app.queriesDir`.
     let registry: Record<string, MetricRegistration>;
     try {
-      registry = await getMetricRegistry(this._queriesDir);
+      registry = await getMetricRegistry(this.app, req, this.devFileReader);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn(req, "Failed to load metric registry: %s", reason);

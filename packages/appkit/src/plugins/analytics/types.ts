@@ -23,17 +23,6 @@ export interface IAnalyticsConfig extends BasePluginConfig {
    * byte arrives the stream is not time-bounded.
    */
   arrowFirstByteTimeoutMs?: number;
-  /**
-   * Directory to read the metric-view registry (`metric-views.json`) from.
-   *
-   * @internal FOR TESTS ONLY. Production always reads the fixed
-   * `config/queries/` path (the default), the same directory the `.sql` query
-   * path uses — do NOT set this to relocate config in a real app. It exists so
-   * tests can point the loader at a temp directory and exercise the real
-   * stat → read → cache path against a real file, rather than poking private
-   * plugin state or stubbing the loader.
-   */
-  queriesDir?: string;
 }
 
 /**
