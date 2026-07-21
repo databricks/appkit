@@ -30,38 +30,18 @@ interface FileSystemAdapter {
 export class AppManager {
   private readonly _queriesDir: string;
 
-  /**
-   * @param queriesDir - Absolute path to the `config/queries` directory this
-   *   manager reads from. Defaults to `<cwd>/config/queries`.
-   *
-   * @internal The override exists FOR TESTS ONLY, so a spec can point
-   * AppManager at a temp directory instead of `process.cwd()`. Production and
-   * every runtime call site use `new AppManager()` with no argument; nothing
-   * passes this path outside tests.
-   */
   constructor(
     queriesDir: string = path.resolve(process.cwd(), "config/queries"),
   ) {
     this._queriesDir = queriesDir;
   }
 
-  /**
-   * Absolute path to the `config/queries` directory this manager reads from.
-   *
-   * Read-only accessor over the private field so a caller (e.g. the metric
-   * registry) can `fs.stat` the directory or build a cache key from it without
-   * reaching into internals or re-deriving `process.cwd()/config/queries`.
-   */
   get queriesDir(): string {
     return this._queriesDir;
   }
 
   /**
    * Whether `req` is a dev-tunnel (`?dev`) request.
-   *
-   * Public so a caller can pick its dev-vs-production branch with the exact
-   * sniff {@link createFsAdapter} uses, instead of duplicating
-   * `req?.query?.dev !== undefined`.
    */
   isDevRequest(req?: RequestLike): boolean {
     return req?.query?.dev !== undefined;
@@ -196,27 +176,10 @@ export class AppManager {
   /**
    * Read a single config file from the queries directory, dev-tunnel-aware.
    *
-   * A narrow, domain-agnostic seam: it knows nothing about JSON, Zod, or metric
-   * views and returns the raw file contents as a string. Uses the same
-   * dev-vs-production detection as {@link getAppQuery} ({@link isDevRequest} →
-   * dev tunnel via `devFileReader`; else direct `fs`) and applies the same
-   * {@link validatePath} traversal guard.
-   *
-   * The not-found-vs-error distinction is load-bearing for callers that treat
-   * "absent" as dormant (return `null`) but any other failure as fatal (503):
-   *
-   *  - Returns `null` for a genuine not-found — `ENOENT` in production; the dev
-   *    tunnel's not-found signal in dev (best-effort message match, since the
-   *    tunnel surfaces a plain `Error` with no `errno` code).
-   *  - Returns `null` for a rejected path-traversal attempt (never reads).
-   *  - **Throws on any other error** (EACCES / EIO / tunnel / parse-of-listing /
-   *    …). These are deliberately NOT swallowed to `null`.
-   *
    * @param fileName - File name (or relative path) within the queries directory.
    * @param req - Optional request object to detect dev mode.
    * @param devFileReader - Optional DevFileReader to read via the WebSocket tunnel.
-   * @returns The raw file contents, or `null` when the file is absent / the path
-   *   is rejected.
+   * @returns The raw file contents, or `null` when the file is absent / the path is rejected.
    */
   async readConfigFile(
     fileName: string,
@@ -243,15 +206,6 @@ export class AppManager {
     }
   }
 
-  /**
-   * Classify a read failure as a genuine not-found (→ `null`) vs. any other
-   * error (→ rethrow).
-   *
-   * Production reads reject with a Node `ErrnoException` whose `code` is
-   * `"ENOENT"`. The dev tunnel surfaces a plain `Error` with no `errno` code,
-   * so in dev we fall back to a best-effort message match on the not-found
-   * signal — acceptable per the config-read contract.
-   */
   private isNotFoundError(error: unknown, req?: RequestLike): boolean {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
       return true;
