@@ -94,13 +94,9 @@ function isValidMetricKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 }
 
-// `isValidFqn` (the three-part UC FQN predicate) now lives in the shared
-// zod-free leaf alongside `UC_FQN_PATTERN` and `quoteFqnForSql`, so the
-// type-generator and the analytics runtime share one grammar + one escaper.
-// `resolveMetricConfig` below intentionally does NOT call it — it re-derives
-// the same checks inline so it can emit specific, staged error messages
-// (arity, per-segment charset, per-segment length) rather than a single
-// boolean.
+// `resolveMetricConfig` re-derives the three-part UC FQN checks inline (rather
+// than calling a shared predicate) so it can emit specific, staged error
+// messages: arity, per-segment charset, per-segment length.
 
 /**
  * Field allowlists enforced by {@link resolveMetricConfig}.

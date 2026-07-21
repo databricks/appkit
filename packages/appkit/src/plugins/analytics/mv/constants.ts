@@ -1,13 +1,5 @@
-import path from "node:path";
 import type { MetricFilterOperatorName, MetricLane } from "../types";
 
-/**
- * Default queries directory. Mirrors `AppManager`'s
- * `path.resolve(process.cwd(), "config/queries")` so dev mode and production
- * share a single source of truth for where metric config lives. Exported so
- * `AnalyticsPlugin` can default `config.queriesDir` to the same path.
- */
-export const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
 export const METRIC_CONFIG_FILE = "metric-views.json";
 
 /**

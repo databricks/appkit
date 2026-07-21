@@ -1,5 +1,4 @@
 export { composeMetricCacheKey, deriveMetricExecutorKey } from "./cache";
-export { QUERIES_DIR } from "./constants";
 export { buildMetricSql } from "./formatters";
 export {
   __resetMetricRegistryCache,
