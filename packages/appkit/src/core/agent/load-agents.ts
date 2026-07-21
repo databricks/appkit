@@ -348,29 +348,79 @@ export function parseFrontmatter(
   return { data: data as Frontmatter, content: match[2].trim() };
 }
 
+/** Expected wire type of each {@link GenerationParams} key, for loud warnings. */
+const GENERATION_PARAM_TYPES: Record<keyof GenerationParams, string> = {
+  temperature: "number",
+  top_p: "number",
+  frequency_penalty: "number",
+  presence_penalty: "number",
+  stop: "string or string[]",
+};
+
 /**
  * Defensively maps a frontmatter `generationParams` map to {@link GenerationParams}.
- * Picks only known keys with the expected wire types; ignores everything else.
- * Returns `undefined` when no valid key is present.
+ * Picks only known keys with the expected wire types. A key present with the
+ * wrong type (e.g. `temperature: "0.5"`) or an unknown key (e.g. `top-p`) is
+ * dropped and logged at warn level, so a silently-ignored param is visible
+ * rather than mistaken for "applied". Returns `undefined` when no valid key is
+ * present.
  */
-function parseGenerationParams(value: unknown): GenerationParams | undefined {
+function parseGenerationParams(
+  value: unknown,
+  sourcePath?: string,
+): GenerationParams | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
   const raw = value as Record<string, unknown>;
   const out: GenerationParams = {};
-  if (typeof raw.temperature === "number") out.temperature = raw.temperature;
-  if (typeof raw.top_p === "number") out.top_p = raw.top_p;
-  if (typeof raw.frequency_penalty === "number")
-    out.frequency_penalty = raw.frequency_penalty;
-  if (typeof raw.presence_penalty === "number")
-    out.presence_penalty = raw.presence_penalty;
-  if (
-    typeof raw.stop === "string" ||
-    (Array.isArray(raw.stop) && raw.stop.every((s) => typeof s === "string"))
-  ) {
-    out.stop = raw.stop as string | string[];
+  const where = sourcePath ?? "<inline>";
+  const warnBadType = (key: keyof GenerationParams) =>
+    logger.warn(
+      "Ignoring generationParams.%s in %s: expected %s, got %s",
+      key,
+      where,
+      GENERATION_PARAM_TYPES[key],
+      typeof raw[key],
+    );
+
+  if (raw.temperature !== undefined) {
+    if (typeof raw.temperature === "number") out.temperature = raw.temperature;
+    else warnBadType("temperature");
   }
+  if (raw.top_p !== undefined) {
+    if (typeof raw.top_p === "number") out.top_p = raw.top_p;
+    else warnBadType("top_p");
+  }
+  if (raw.frequency_penalty !== undefined) {
+    if (typeof raw.frequency_penalty === "number")
+      out.frequency_penalty = raw.frequency_penalty;
+    else warnBadType("frequency_penalty");
+  }
+  if (raw.presence_penalty !== undefined) {
+    if (typeof raw.presence_penalty === "number")
+      out.presence_penalty = raw.presence_penalty;
+    else warnBadType("presence_penalty");
+  }
+  if (raw.stop !== undefined) {
+    if (
+      typeof raw.stop === "string" ||
+      (Array.isArray(raw.stop) && raw.stop.every((s) => typeof s === "string"))
+    ) {
+      out.stop = raw.stop as string | string[];
+    } else warnBadType("stop");
+  }
+
+  for (const key of Object.keys(raw)) {
+    if (!(key in GENERATION_PARAM_TYPES)) {
+      logger.warn(
+        "Ignoring unknown generationParams key '%s' in %s",
+        key,
+        where,
+      );
+    }
+  }
+
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -398,7 +448,7 @@ function buildDefinition(
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     maxSteps: typeof fm.maxSteps === "number" ? fm.maxSteps : undefined,
     maxTokens: typeof fm.maxTokens === "number" ? fm.maxTokens : undefined,
-    generationParams: parseGenerationParams(fm.generationParams),
+    generationParams: parseGenerationParams(fm.generationParams, filePath),
     baseSystemPrompt,
     ephemeral: typeof fm.ephemeral === "boolean" ? fm.ephemeral : undefined,
   };
