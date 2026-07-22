@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
-import { ServerError } from "../../errors";
+import { AppKitError, ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -54,6 +54,14 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
+  /**
+   * Budget for awaiting `server.close()` during shutdown. Bounded because
+   * `closeAllConnections()` runs immediately before the await, so the close
+   * is expected to resolve promptly; the core lifecycle manager's overall
+   * force-exit timer is the ultimate backstop if it does not.
+   */
+  private static readonly SERVER_CLOSE_TIMEOUT_MS = 2_000;
+
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"server">;
   private serverApplication: express.Application;
@@ -65,6 +73,12 @@ export class ServerPlugin extends Plugin {
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
+  /**
+   * Resolves when `server.close()` completes. Created in
+   * {@link abortActiveOperations} (which initiates the close) and awaited in
+   * {@link closeRemainingConnections} after other plugins have drained.
+   */
+  private serverClosed?: Promise<void>;
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -147,6 +161,12 @@ export class ServerPlugin extends Plugin {
 
     await this.setupFrontend(endpoints, pluginConfigs);
 
+    // Terminal error handler — registered after all routes, extensions, and
+    // frontend middleware so that errors forwarded via next(err) from any of
+    // them (e.g. async handler rejections forwarded by Plugin.route()) are
+    // turned into JSON error responses instead of hanging the request.
+    this.serverApplication.use(errorHandlerMiddleware);
+
     const listenPort = await this.resolveListenPort();
 
     const server = this.serverApplication.listen(
@@ -160,8 +180,15 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    process.on("SIGTERM", () => this._gracefulShutdown());
-    process.on("SIGINT", () => this._gracefulShutdown());
+    // Graceful shutdown is orchestrated by the core LifecycleManager, which
+    // owns the process signal handlers. This plugin only contributes its
+    // HTTP concerns: it aborts/initiates the socket close in
+    // abortActiveOperations(), drains dev servers in shutdown(), and force-
+    // closes remaining sockets in the "shutdown" lifecycle hook below (which
+    // fires after every plugin's shutdown() has run).
+    this.context?.onLifecycle("shutdown", () =>
+      this.closeRemainingConnections(),
+    );
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
@@ -191,6 +218,11 @@ export class ServerPlugin extends Plugin {
    *
    * Call this inside the `onPluginsReady` callback of `createApp` to register
    * custom Express routes or middleware before the server starts listening.
+   *
+   * Note: async handlers registered directly on the app must handle their own
+   * rejections — Express 4 does not forward rejected promises to the error
+   * middleware. Errors passed explicitly to `next(err)` are formatted by the
+   * terminal error middleware.
    *
    * @param fn - A function that receives the express application.
    * @returns The server plugin instance for chaining.
@@ -398,52 +430,71 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private async _gracefulShutdown() {
-    logger.info("Starting graceful shutdown...");
+  /**
+   * Cancel in-flight work and begin closing the HTTP server.
+   *
+   * Runs in the first phase of the core LifecycleManager's graceful shutdown,
+   * before any plugin `shutdown()` hook. In addition to the base behavior
+   * (aborting SSE streams), it stops the server accepting new connections and
+   * drops idle keep-alive sockets — without `closeIdleConnections()`, a
+   * connected browser would pin `server.close()` open until the force-exit
+   * timer fires. The close is only *initiated* here; the returned promise is
+   * awaited later in {@link closeRemainingConnections} so peer plugins can
+   * still drain in-flight requests through the server first.
+   */
+  abortActiveOperations(): void {
+    super.abortActiveOperations();
 
+    if (this.server) {
+      const server = this.server;
+      this.serverClosed = new Promise((resolve) => {
+        server.close(() => resolve());
+      });
+      server.closeIdleConnections();
+    }
+  }
+
+  /**
+   * Drain the dev-only servers as this plugin's `shutdown()` hook.
+   *
+   * Runs concurrently with the other plugins' hooks during graceful shutdown.
+   * These are no-ops in production (neither is created), so this hook is
+   * effectively dev-only.
+   */
+  async shutdown(): Promise<void> {
     if (this.viteDevServer) {
       await this.viteDevServer.close();
     }
-
     if (this.remoteTunnelController) {
       this.remoteTunnelController.cleanup();
     }
+  }
 
-    TelemetryReporter.getInstance()?.stop();
-
-    // 1. abort active operations from plugins
-    const shutdownPlugins = this.context?.getPlugins();
-    if (shutdownPlugins) {
-      for (const plugin of shutdownPlugins.values()) {
-        if (plugin.abortActiveOperations) {
-          try {
-            plugin.abortActiveOperations();
-          } catch (err) {
-            logger.error(
-              "Error aborting operations for plugin %s: %O",
-              plugin.name,
-              err,
-            );
-          }
-        }
-      }
-    }
-
-    // 2. close the server
+  /**
+   * Force-close whatever sockets remain and await the server close.
+   *
+   * Registered on the `"shutdown"` lifecycle event in {@link start}, so it
+   * fires after every plugin's `shutdown()` hook has run — meaning any
+   * in-flight request a peer plugin was draining has already completed.
+   * `closeAllConnections()` destroys the leftover sockets (aborted SSE
+   * responses, keep-alive connections) synchronously so the pending
+   * `server.close()` can complete; the await is bounded because the close is
+   * expected to resolve promptly once the sockets are gone.
+   */
+  private async closeRemainingConnections(): Promise<void> {
     if (this.server) {
-      this.server.close(() => {
-        logger.debug("Server closed gracefully");
-        process.exit(0);
-      });
-
-      // 3. timeout to force shutdown after 15 seconds
-      setTimeout(() => {
-        logger.debug("Force shutdown after timeout");
-        process.exit(1);
-      }, 15000);
-    } else {
-      process.exit(0);
+      this.server.closeAllConnections();
     }
+    if (!this.serverClosed) return;
+
+    await Promise.race([
+      this.serverClosed,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ServerPlugin.SERVER_CLOSE_TIMEOUT_MS);
+        timer.unref();
+      }),
+    ]);
+    logger.debug("Server closed gracefully");
   }
 
   /**
@@ -503,6 +554,83 @@ export function requestMetricsMiddleware(
     );
   });
   next();
+}
+
+/**
+ * Narrow an unknown thrown value to an Error that carries a numeric
+ * `statusCode` property in the HTTP error range (e.g. `ApiError` from
+ * `@databricks/sdk-experimental`).
+ */
+function hasHttpStatusCode(
+  error: unknown,
+): error is Error & { statusCode: number } {
+  if (!(error instanceof Error) || !("statusCode" in error)) return false;
+  const statusCode = error.statusCode;
+  return (
+    typeof statusCode === "number" &&
+    Number.isInteger(statusCode) &&
+    statusCode >= 400 &&
+    statusCode <= 599
+  );
+}
+
+/**
+ * Terminal Express error-handling middleware.
+ *
+ * Converts errors forwarded via `next(err)` (including async handler
+ * rejections forwarded by `Plugin.route()`) into JSON error responses,
+ * following the same status/message conventions as `Plugin.execute()`:
+ * - errors carrying an HTTP `statusCode` (including `AppKitError`) → that
+ *   status; 5xx messages are masked in production to avoid leaking internals
+ * - anything else → 500 with a generic message in production
+ *
+ * 4xx errors are expected client errors (e.g. missing auth headers) and are
+ * logged at `warn` with just the message; 5xx/unknown errors are logged at
+ * `error` with the full error.
+ *
+ * @internal Exported for unit tests.
+ */
+export function errorHandlerMiddleware(
+  err: unknown,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const httpError =
+    err instanceof AppKitError || hasHttpStatusCode(err) ? err : null;
+  const statusCode = httpError ? httpError.statusCode : 500;
+  const isClientError = statusCode < 500;
+
+  if (isClientError) {
+    logger.warn(
+      "Request failed for %s %s with status %d: %s",
+      req.method,
+      req.originalUrl,
+      statusCode,
+      err instanceof Error ? err.message : String(err),
+    );
+  } else {
+    logger.error(
+      "Unhandled error for %s %s: %O",
+      req.method,
+      req.originalUrl,
+      // toJSON() redacts sensitive context fields; %O on a raw AppKitError
+      // would enumerate them unredacted.
+      err instanceof AppKitError ? err.toJSON() : err,
+    );
+  }
+
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  const isDev = process.env.NODE_ENV !== "production";
+  const message = err instanceof Error ? err.message : "Server error";
+
+  res.status(statusCode).json({
+    error: isDev || isClientError ? message : "Server error",
+  });
 }
 
 /**

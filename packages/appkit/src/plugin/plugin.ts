@@ -25,6 +25,7 @@ import {
   TelemetryManager,
 } from "../telemetry";
 import { deepMerge } from "../utils";
+import { forwardAsyncErrors } from "../utils/safe-handler";
 import { DevFileReader } from "./dev-reader";
 import type { ExecutionResult } from "./execution-result";
 import { CacheInterceptor } from "./interceptors/cache";
@@ -666,7 +667,7 @@ export abstract class Plugin<
   ): void {
     const { name, method, path, handler } = config;
 
-    router[method](path, handler);
+    router[method](path, forwardAsyncErrors(handler));
 
     const fullPath = `/api/${this.name}${path}`;
     this.registerEndpoint(name, fullPath);

@@ -2,7 +2,7 @@ import { ValidationError } from "../errors";
 import type { BufferedEvent } from "./types";
 
 // generic ring buffer implementation
-export class RingBuffer<T> {
+class RingBuffer<T> {
   public buffer: (T | null)[];
   public capacity: number;
   private writeIndex: number;

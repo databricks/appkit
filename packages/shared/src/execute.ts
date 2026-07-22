@@ -1,14 +1,12 @@
 import type { CacheConfig } from "./cache";
 
-/** SSE stream configuration for `executeStream()`. Controls buffer sizes, heartbeat interval, and cleanup behavior. */
+/** SSE stream configuration for `executeStream()`. Controls buffer sizes, buffer retention, and heartbeat interval. */
 export interface StreamConfig {
   userSignal?: AbortSignal;
   streamId?: string;
   bufferSize?: number;
   maxEventSize?: number;
   bufferTTL?: number;
-  cleanupInterval?: number;
-  maxPersistentBuffers?: number;
   heartbeatInterval?: number;
   maxActiveStreams?: number;
   // ms to keep a generator alive after the last client disconnects, so a

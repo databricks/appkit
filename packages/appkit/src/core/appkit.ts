@@ -20,6 +20,7 @@ import { isPlainObject } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import { LifecycleManager } from "./lifecycle-manager";
 import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
@@ -235,6 +236,12 @@ export class AppKit<TPlugins extends InputPluginMap> {
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
       await (serverPlugin as any).start();
     }
+
+    // Core owns graceful shutdown: install the signal handlers once every
+    // plugin has started. Applies uniformly whether or not a server plugin
+    // is present — server-less apps still get their telemetry flushed and
+    // plugin shutdown() hooks run.
+    new LifecycleManager(instance.#context).installSignalHandlers();
 
     return handle;
   }

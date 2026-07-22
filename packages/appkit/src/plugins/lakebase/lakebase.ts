@@ -176,15 +176,24 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
 
   /**
    * Gracefully drains and closes all connection pools (SP + OBO).
-   * Called automatically by AppKit during shutdown.
+   *
+   * Runs as the plugin's `shutdown()` hook (phase 3 of the core lifecycle
+   * manager's graceful shutdown), NOT in `abortActiveOperations()` (phase 2):
+   * other plugins' `shutdown()` hooks may still need database connections to
+   * drain state,
+   * so the pools must outlive the abort phase. `pg.Pool#end()` waits for
+   * checked-out clients to be released, so hooks running concurrently with
+   * this one can still finish their in-flight queries. Errors are caught
+   * and logged; this hook never throws.
    */
-  abortActiveOperations(): void {
-    super.abortActiveOperations();
+  async shutdown(): Promise<void> {
     if (this.pool) {
       logger.info("Closing Lakebase SP pool");
-      this.pool.end().catch((err) => {
+      try {
+        await this.pool.end();
+      } catch (err) {
         logger.error("Error closing Lakebase SP pool: %O", err);
-      });
+      }
       this.pool = null;
     }
     if (this.oboPoolManager) {
@@ -192,9 +201,11 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
         "Closing all Lakebase OBO pools (%d)",
         this.oboPoolManager.size,
       );
-      this.oboPoolManager.closeAll().catch((err) => {
+      try {
+        await this.oboPoolManager.closeAll();
+      } catch (err) {
         logger.error("Error closing Lakebase OBO pools: %O", err);
-      });
+      }
       this.oboPoolManager = null;
     }
   }
