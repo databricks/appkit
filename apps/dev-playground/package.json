@@ -4,7 +4,7 @@
   "main": "build/index.js",
   "scripts": {
     "start": "node build/index.mjs",
-    "start:local": "NODE_ENV=production node --env-file=./server/.env build/index.mjs",
+    "start:local": "NODE_ENV=production node --env-file=.env build/index.mjs",
     "dev": "NODE_ENV=development tsx watch server/index.ts",
     "dev:inspect": "NODE_ENV=development tsx --inspect --tsconfig ./tsconfig.json ./server",
     "build": "npm run build:app",
