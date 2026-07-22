@@ -304,7 +304,7 @@ export class ResourceRegistry {
    * const result = registry.validate();
    *
    * if (!result.valid) {
-   *   console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
+   *   console.error(ResourceRegistry.formatMissingResources(result.missing));
    * }
    * ```
    */
@@ -392,7 +392,7 @@ export class ResourceRegistry {
               type: r.type,
               alias: r.alias,
               plugin: r.plugin,
-              envVars: Object.values(r.fields).map((f) => f.env),
+              envVars: ResourceRegistry.unsetEnvVars(r),
             })),
           },
         });
@@ -410,12 +410,6 @@ export class ResourceRegistry {
     return validation;
   }
 
-  /**
-   * Formats missing resources into a human-readable error message.
-   *
-   * @param missing - Array of missing resource entries
-   * @returns Formatted error message string
-   */
   /**
    * Env var names for an entry's fields that are actually unset (undefined or
    * empty), skipping fields that declare no env var (e.g. discovery-only
@@ -435,6 +429,12 @@ export class ResourceRegistry {
     return unset;
   }
 
+  /**
+   * Formats missing resources into a human-readable error message.
+   *
+   * @param missing - Array of missing resource entries
+   * @returns Formatted error message string
+   */
   public static formatMissingResources(missing: ResourceEntry[]): string {
     if (missing.length === 0) {
       return "No missing resources";
