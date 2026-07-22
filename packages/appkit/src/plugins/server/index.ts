@@ -574,7 +574,9 @@ export function errorHandlerMiddleware(
       "Unhandled error for %s %s: %O",
       req.method,
       req.originalUrl,
-      err,
+      // toJSON() redacts sensitive context fields; %O on a raw AppKitError
+      // would enumerate them unredacted.
+      err instanceof AppKitError ? err.toJSON() : err,
     );
   }
 
