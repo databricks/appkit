@@ -24,11 +24,11 @@ stored, "I read it next turn", or whether you decided to ask).
 - **`<Variants>` / `<Variant>`** — `@databricks/appkit-ui/react`. A dev-time
   wrapper that renders one candidate at a time with a hover-revealed switcher
   (prev/next, an index pill + label) and a **Confirm** tick.
-- **`uiVariants()` plugin** — `@databricks/appkit`. A dev-only recorder. Confirm
-  POSTs `{ blockId, chosenIndex, label }` to `POST /api/ui-variants/confirm`; the
-  plugin **upserts** the choice into a JSONL file keyed by `blockId`. **Register it
-  conditionally** so it never mounts in production:
-  `...(process.env.NODE_ENV === "development" ? [uiVariants()] : [])`.
+- **`uiVariants()` plugin** — `@databricks/appkit`. Records the confirmed
+  choice: Confirm POSTs `{ blockId, chosenIndex, label }` to
+  `POST /api/ui-variants/confirm`, upserted into a JSONL file keyed by `blockId`.
+  Just add `uiVariants()` to the plugin list — it's dev-only and drops out of
+  production on its own.
 - **Choices file** — `node_modules/.databricks/appkit/.appkit-ui-choices.jsonl`,
   gitignored. A **keyed store: one line per `<Variants>` blockId** (not an append
   log) — re-confirming a variant replaces that block's line, so the file always
@@ -99,18 +99,10 @@ import { Variants, Variant } from "@databricks/appkit-ui/react";
 
 ## 3. Ensure the recorder is running
 
-- Confirm the dev-only `uiVariants()` plugin is registered. **Register it
-  conditionally so it never mounts in production:**
+- Make sure `uiVariants()` is in the app's plugin list; if not, add it:
   ```ts
-  createApp({
-    plugins: [
-      server(),
-      ...(process.env.NODE_ENV === "development" ? [uiVariants()] : []),
-      // …other plugins
-    ],
-  });
+  createApp({ plugins: [server(), uiVariants() /* , … */] });
   ```
-  If it's missing, add it and tell the developer it's dev-only.
 - Confirm the dev server is running so the browser can POST the choice.
 
 ## 4. Hand off to the developer
