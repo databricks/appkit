@@ -29,15 +29,30 @@ interface FileSystemAdapter {
 
 export class AppManager {
   private readonly _queriesDir: string;
+  private readonly _metricViewsDir: string;
 
   constructor(
     queriesDir: string = path.resolve(process.cwd(), "config/queries"),
+    // Metric-view declarations live in a sibling `config/metric-views/`
+    // directory (next to `config/queries/` and `config/agents/`), NOT inside
+    // the queries folder. Default it as a sibling of `queriesDir` so a
+    // single-arg `new AppManager(dir)` (and every test that overrides only the
+    // queries dir) still resolves the metric-views dir consistently.
+    metricViewsDir: string = path.resolve(
+      path.dirname(queriesDir),
+      "metric-views",
+    ),
   ) {
     this._queriesDir = queriesDir;
+    this._metricViewsDir = metricViewsDir;
   }
 
   get queriesDir(): string {
     return this._queriesDir;
+  }
+
+  get metricViewsDir(): string {
+    return this._metricViewsDir;
   }
 
   /**
@@ -50,15 +65,19 @@ export class AppManager {
   }
 
   /**
-   * Validates that a file path is within the queries directory
+   * Validates that a file path is within the given base directory. The
+   * `baseDir` is passed explicitly (rather than pinned to `queriesDir`) so the
+   * same traversal guard protects reads from any config directory —
+   * `config/queries/` for `.sql` files and `config/metric-views/` for the
+   * metric-view definitions.
    */
-  private validatePath(fileName: string): string | null {
-    const queryFilePath = path.join(this.queriesDir, fileName);
-    const resolvedPath = path.resolve(queryFilePath);
-    const resolvedQueriesDir = path.resolve(this.queriesDir);
+  private validatePath(fileName: string, baseDir: string): string | null {
+    const filePath = path.join(baseDir, fileName);
+    const resolvedPath = path.resolve(filePath);
+    const resolvedBaseDir = path.resolve(baseDir);
 
-    if (!resolvedPath.startsWith(resolvedQueriesDir)) {
-      logger.error("Invalid query path: path traversal detected");
+    if (!resolvedPath.startsWith(resolvedBaseDir)) {
+      logger.error("Invalid config path: path traversal detected");
       return null;
     }
 
@@ -160,7 +179,7 @@ export class AppManager {
     }
 
     // Validate and resolve the file path
-    const resolvedPath = this.validatePath(queryFileName);
+    const resolvedPath = this.validatePath(queryFileName, this._queriesDir);
     if (!resolvedPath) {
       return null;
     }
@@ -176,20 +195,24 @@ export class AppManager {
   }
 
   /**
-   * Read a single config file from the queries directory, dev-tunnel-aware.
+   * Read a single config file from a given base directory, dev-tunnel-aware.
+   * Shared core behind {@link readConfigFile} (queries dir) and
+   * {@link readMetricViewsConfig} (metric-views dir).
    *
-   * @param fileName - File name (or relative path) within the queries directory.
+   * @param baseDir - The config directory the file must resolve within.
+   * @param fileName - File name (or relative path) within `baseDir`.
    * @param req - Optional request object to detect dev mode.
    * @param devFileReader - Optional DevFileReader to read via the WebSocket tunnel.
    * @returns The raw file contents, or `null` when the file is absent / the path is rejected.
    */
-  async readConfigFile(
+  private async readFileFromDir(
+    baseDir: string,
     fileName: string,
     req?: RequestLike,
     devFileReader?: DevFileReader,
   ): Promise<string | null> {
-    // Traversal guard: refuse to read outside the queries directory.
-    const resolvedPath = this.validatePath(fileName);
+    // Traversal guard: refuse to read outside the base directory.
+    const resolvedPath = this.validatePath(fileName, baseDir);
     if (!resolvedPath) {
       return null;
     }
@@ -206,6 +229,45 @@ export class AppManager {
       // caller can distinguish it from a dormant (absent) config.
       throw error;
     }
+  }
+
+  /**
+   * Read a single config file from the queries directory, dev-tunnel-aware.
+   *
+   * @param fileName - File name (or relative path) within the queries directory.
+   * @param req - Optional request object to detect dev mode.
+   * @param devFileReader - Optional DevFileReader to read via the WebSocket tunnel.
+   * @returns The raw file contents, or `null` when the file is absent / the path is rejected.
+   */
+  async readConfigFile(
+    fileName: string,
+    req?: RequestLike,
+    devFileReader?: DevFileReader,
+  ): Promise<string | null> {
+    return this.readFileFromDir(this._queriesDir, fileName, req, devFileReader);
+  }
+
+  /**
+   * Read a single config file from the metric-views directory
+   * (`config/metric-views/`), dev-tunnel-aware. Same absent-file/traversal
+   * semantics as {@link readConfigFile}, but rooted at {@link metricViewsDir}.
+   *
+   * @param fileName - File name (or relative path) within the metric-views directory.
+   * @param req - Optional request object to detect dev mode.
+   * @param devFileReader - Optional DevFileReader to read via the WebSocket tunnel.
+   * @returns The raw file contents, or `null` when the file is absent / the path is rejected.
+   */
+  async readMetricViewsConfig(
+    fileName: string,
+    req?: RequestLike,
+    devFileReader?: DevFileReader,
+  ): Promise<string | null> {
+    return this.readFileFromDir(
+      this._metricViewsDir,
+      fileName,
+      req,
+      devFileReader,
+    );
   }
 
   private isNotFoundError(error: unknown, req?: RequestLike): boolean {

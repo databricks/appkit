@@ -18,7 +18,7 @@ import type {
   ResolvedMetricEntry,
 } from "./types";
 
-const MV_CONFIG_FILE = "metric-views.json";
+const MV_CONFIG_FILE = "definitions.json";
 
 /**
  * Safety cap on declared metric views — a typo / DoS guard, NOT a Unity Catalog
@@ -44,18 +44,19 @@ function compareKeys(a: string, b: string): number {
 }
 
 /**
- * Read {@link MV_CONFIG_FILE} from a queries folder.
+ * Read {@link MV_CONFIG_FILE} from a metric-views folder
+ * (`config/metric-views/`).
  *
  * Returns `null` if the file does not exist (the metric-view path is
- * additive — apps without metric-views.json must not be penalized). There is
- * deliberately no fallback to the legacy `metric.json` filename.
+ * additive — apps without definitions.json must not be penalized). There is
+ * deliberately no fallback to a legacy filename.
  *
  * Throws on JSON parse errors so misconfiguration surfaces loudly.
  */
 export async function readMetricConfig(
-  queryFolder: string,
+  metricViewsFolder: string,
 ): Promise<MetricSourceConfig | null> {
-  const metricPath = path.join(queryFolder, MV_CONFIG_FILE);
+  const metricPath = path.join(metricViewsFolder, MV_CONFIG_FILE);
   let raw: string;
   try {
     raw = await fs.readFile(metricPath, "utf8");
@@ -71,13 +72,13 @@ export async function readMetricConfig(
     parsed = JSON.parse(raw);
   } catch (err) {
     throw new Error(
-      `Failed to parse metric-views.json at ${metricPath}: ${(err as Error).message}`,
+      `Failed to parse definitions.json at ${metricPath}: ${(err as Error).message}`,
     );
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(
-      `Invalid metric-views.json at ${metricPath}: expected an object with a 'metricViews' map.`,
+      `Invalid definitions.json at ${metricPath}: expected an object with a 'metricViews' map.`,
     );
   }
 
@@ -113,7 +114,7 @@ export function resolveMetricConfig(
   for (const field of Object.keys(config)) {
     if (!ALLOWED_TOP_LEVEL_FIELDS.has(field)) {
       throw new Error(
-        `Invalid top-level field "${field}" in metric-views.json: only '$schema' and 'metricViews' are allowed.`,
+        `Invalid top-level field "${field}" in definitions.json: only '$schema' and 'metricViews' are allowed.`,
       );
     }
   }
@@ -129,7 +130,7 @@ export function resolveMetricConfig(
     Array.isArray(metricViews)
   ) {
     throw new Error(
-      `Invalid 'metricViews' in metric-views.json: expected an object map of metric entries.`,
+      `Invalid 'metricViews' in definitions.json: expected an object map of metric entries.`,
     );
   }
 
@@ -137,7 +138,7 @@ export function resolveMetricConfig(
   const sortedKeys = Object.keys(metricViews).sort(compareKeys);
   if (sortedKeys.length > MAX_METRIC_VIEWS) {
     throw new Error(
-      `Invalid 'metricViews' in metric-views.json: ${sortedKeys.length} metric views exceed the maximum of ${MAX_METRIC_VIEWS}.`,
+      `Invalid 'metricViews' in definitions.json: ${sortedKeys.length} metric views exceed the maximum of ${MAX_METRIC_VIEWS}.`,
     );
   }
   for (const key of sortedKeys) {

@@ -34,17 +34,38 @@ describe("AppManager.readConfigFile", () => {
         path.resolve(process.cwd(), "config/queries"),
       );
     });
+
+    test("metricViewsDir getter exposes the overridden directory", () => {
+      const mvDir = path.join(tmpDir, "metric-views");
+      const manager = new AppManager(tmpDir, mvDir);
+      expect(manager.metricViewsDir).toBe(mvDir);
+    });
+
+    test("metricViewsDir defaults to a sibling of queriesDir", () => {
+      // Single-arg construction: metric-views sits next to the queries dir.
+      const manager = new AppManager(tmpDir);
+      expect(manager.metricViewsDir).toBe(
+        path.resolve(path.dirname(tmpDir), "metric-views"),
+      );
+    });
+
+    test("metricViewsDir defaults to <cwd>/config/metric-views with no override", () => {
+      const defaultManager = new AppManager();
+      expect(defaultManager.metricViewsDir).toBe(
+        path.resolve(process.cwd(), "config/metric-views"),
+      );
+    });
   });
 
   describe("production mode (direct fs)", () => {
     test("returns file contents for an existing file", async () => {
       await fs.writeFile(
-        path.join(tmpDir, "metric-views.json"),
+        path.join(tmpDir, "sample-config.json"),
         '{"hello":"world"}',
         "utf8",
       );
 
-      const result = await appManager.readConfigFile("metric-views.json");
+      const result = await appManager.readConfigFile("sample-config.json");
       expect(result).toBe('{"hello":"world"}');
     });
 
@@ -68,13 +89,13 @@ describe("AppManager.readConfigFile", () => {
       vi.spyOn(fs, "readFile").mockRejectedValueOnce(err);
 
       await expect(
-        appManager.readConfigFile("metric-views.json"),
+        appManager.readConfigFile("sample-config.json"),
       ).rejects.toThrow("permission denied");
     });
 
     test("reads via direct fs (not the dev reader) without ?dev", async () => {
       await fs.writeFile(
-        path.join(tmpDir, "metric-views.json"),
+        path.join(tmpDir, "sample-config.json"),
         "prod-contents",
         "utf8",
       );
@@ -84,7 +105,7 @@ describe("AppManager.readConfigFile", () => {
       };
 
       const result = await appManager.readConfigFile(
-        "metric-views.json",
+        "sample-config.json",
         { query: {}, headers: {} },
         devFileReader,
       );
@@ -114,14 +135,14 @@ describe("AppManager.readConfigFile", () => {
       };
 
       const result = await appManager.readConfigFile(
-        "metric-views.json",
+        "sample-config.json",
         devReq,
         devFileReader,
       );
 
       expect(result).toBe("dev-contents");
       expect(devFileReader.readFile).toHaveBeenCalledWith(
-        expect.stringContaining("metric-views.json"),
+        expect.stringContaining("sample-config.json"),
         devReq,
       );
     });
@@ -135,7 +156,7 @@ describe("AppManager.readConfigFile", () => {
       };
 
       const result = await appManager.readConfigFile(
-        "metric-views.json",
+        "sample-config.json",
         devReq,
         devFileReader,
       );
@@ -150,8 +171,81 @@ describe("AppManager.readConfigFile", () => {
       };
 
       await expect(
-        appManager.readConfigFile("metric-views.json", devReq, devFileReader),
+        appManager.readConfigFile("sample-config.json", devReq, devFileReader),
       ).rejects.toThrow("tunnel disconnected");
+    });
+  });
+
+  describe("readMetricViewsConfig (metric-views dir)", () => {
+    let mvDir: string;
+    let manager: AppManager;
+
+    beforeEach(async () => {
+      // Give the metric-views dir its own explicit path so it is independent of
+      // the queries dir under test above.
+      mvDir = await fs.mkdtemp(path.join(os.tmpdir(), "appmgr-mv-"));
+      manager = new AppManager(tmpDir, mvDir);
+    });
+
+    afterEach(async () => {
+      await fs.rm(mvDir, { recursive: true, force: true });
+    });
+
+    test("reads definitions.json from the metric-views dir", async () => {
+      await fs.writeFile(
+        path.join(mvDir, "definitions.json"),
+        '{"metricViews":{}}',
+        "utf8",
+      );
+
+      const result = await manager.readMetricViewsConfig("definitions.json");
+      expect(result).toBe('{"metricViews":{}}');
+    });
+
+    test("does NOT read the file from the queries dir", async () => {
+      // A definitions.json in the queries dir must not resolve — the reader is
+      // rooted at the metric-views dir only.
+      await fs.writeFile(
+        path.join(tmpDir, "definitions.json"),
+        '{"metricViews":{"stray":{}}}',
+        "utf8",
+      );
+
+      const result = await manager.readMetricViewsConfig("definitions.json");
+      expect(result).toBeNull();
+    });
+
+    test("returns null for a genuine not-found (ENOENT)", async () => {
+      const result = await manager.readMetricViewsConfig("definitions.json");
+      expect(result).toBeNull();
+    });
+
+    test("returns null and does not read outside the metric-views dir", async () => {
+      const readSpy = vi.spyOn(fs, "readFile");
+      const result = await manager.readMetricViewsConfig("../../etc/passwd");
+
+      expect(result).toBeNull();
+      expect(readSpy).not.toHaveBeenCalled();
+    });
+
+    test("reads via devFileReader in dev mode", async () => {
+      const devReq = { query: { dev: "true" }, headers: {} };
+      const devFileReader: DevFileReader = {
+        readdir: vi.fn(),
+        readFile: vi.fn().mockResolvedValue("dev-mv-contents"),
+      };
+
+      const result = await manager.readMetricViewsConfig(
+        "definitions.json",
+        devReq,
+        devFileReader,
+      );
+
+      expect(result).toBe("dev-mv-contents");
+      expect(devFileReader.readFile).toHaveBeenCalledWith(
+        expect.stringContaining("definitions.json"),
+        devReq,
+      );
     });
   });
 });

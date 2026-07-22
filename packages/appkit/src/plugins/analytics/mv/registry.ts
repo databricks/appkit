@@ -1,8 +1,9 @@
 import path from "node:path";
 // Canonical metric-source schema — the single source of truth for
-// `metric-views.json`. Imported from the shared source directly (matching the
-// type-generator's runtime, which pulls the zod-free `metric-fqn.ts` from the
-// same tree) so the runtime and the generated JSON schema validate identically.
+// `config/metric-views/definitions.json`. Imported from the shared source
+// directly (matching the type-generator's runtime, which pulls the zod-free
+// `metric-fqn.ts` from the same tree) so the runtime and the generated JSON
+// schema validate identically.
 import { metricSourceSchema } from "../../../../../shared/src/schemas/metric-source";
 import type { AppManager, DevFileReader, RequestLike } from "../../../app";
 import { createLogger } from "../../../logging/logger";
@@ -12,18 +13,18 @@ import { laneFromExecutor, METRIC_CONFIG_FILE } from "./constants";
 const logger = createLogger("analytics:metric-views");
 
 /**
- * Read and validate `config/queries/metric-views.json` into a metric registry.
+ * Read and validate `config/metric-views/definitions.json` into a metric registry.
  *
  * Async and stateless — registration is a pure config parse with no warehouse
  * round-trip, no `DESCRIBE`, and no build-time metadata bundle.
  *
- * The file is read **through {@link AppManager.readConfigFile}** rather than
- * `node:fs` directly, so this path is dev-tunnel-aware (a `?dev` request reads
- * the developer's local file over the WebSocket tunnel) and inherits the
+ * The file is read **through {@link AppManager.readMetricViewsConfig}** rather
+ * than `node:fs` directly, so this path is dev-tunnel-aware (a `?dev` request
+ * reads the developer's local file over the WebSocket tunnel) and inherits the
  * traversal guard. In production that's a plain `fs.readFile` under the hood,
  * so the semantics below are unchanged.
  *
- * Absent file -> empty registry (`null` from `readConfigFile`).
+ * Absent file -> empty registry (`null` from `readMetricViewsConfig`).
  * Malformed file -> 503 (throws).
  *
  * @param app - The {@link AppManager} that resolves + reads the config file.
@@ -35,9 +36,13 @@ export async function loadMetricRegistry(
   req?: RequestLike,
   devFileReader?: DevFileReader,
 ): Promise<Record<string, MetricRegistration>> {
-  const metricPath = path.join(app.queriesDir, METRIC_CONFIG_FILE);
+  const metricPath = path.join(app.metricViewsDir, METRIC_CONFIG_FILE);
 
-  const raw = await app.readConfigFile(METRIC_CONFIG_FILE, req, devFileReader);
+  const raw = await app.readMetricViewsConfig(
+    METRIC_CONFIG_FILE,
+    req,
+    devFileReader,
+  );
   if (raw === null) {
     // Absent file (ENOENT in prod / dev-tunnel not-found) or a rejected
     // traversal path → dormant. Same as the old ENOENT branch.
@@ -49,7 +54,7 @@ export async function loadMetricRegistry(
     parsed = JSON.parse(raw);
   } catch (err) {
     throw new Error(
-      `Failed to parse metric-views.json at ${metricPath}: ${(err as Error).message}`,
+      `Failed to parse definitions.json at ${metricPath}: ${(err as Error).message}`,
     );
   }
 
@@ -58,7 +63,7 @@ export async function loadMetricRegistry(
     const issues = result.error.issues
       .map((i) => `${i.path.join(".")}: ${i.message}`)
       .join("; ");
-    throw new Error(`Invalid metric-views.json at ${metricPath}: ${issues}`);
+    throw new Error(`Invalid definitions.json at ${metricPath}: ${issues}`);
   }
 
   // Null-prototype map so a metric key that collides with an inherited
