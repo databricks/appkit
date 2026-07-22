@@ -119,7 +119,7 @@ export interface AnalyticsQueryResponse {
 
 /**
  * Execution lane for a registered metric view, derived from the entry's
- * `executor` in `metric-views.json`:
+ * `executor` in `definitions.json`:
  *   - `"sp"`  ← `executor: "app_service_principal"` — queried as the app
  *     service principal (cache shared across all users).
  *   - `"obo"` ← `executor: "user"` — queried on-behalf-of the requesting
@@ -128,7 +128,7 @@ export interface AnalyticsQueryResponse {
 export type MetricLane = "sp" | "obo";
 
 /**
- * A single registered metric view, loaded from `config/queries/metric-views.json`.
+ * A single registered metric view, loaded from `config/metric-views/definitions.json`.
  *
  * The registration carries only what the runtime needs to build and dispatch
  * SQL: the metric `key`, the three-part UC FQN `source`, and the `lane`. There

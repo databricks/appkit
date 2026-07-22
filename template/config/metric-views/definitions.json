@@ -1,0 +1,6 @@
+{{if .plugins.analytics -}}
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
+  "metricViews": {}
+}
+{{- end}}

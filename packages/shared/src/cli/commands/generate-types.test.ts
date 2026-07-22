@@ -108,10 +108,13 @@ describe("generate-types foreground spawn orchestration", () => {
     vi.clearAllMocks();
     acquireSpawnLock.mockReturnValue(true);
 
-    // A real temp project root with a config/queries folder so the analytics
-    // generate path runs.
+    // A real temp project root with config/queries and config/metric-views
+    // folders so the analytics + metric generate paths run.
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gentypes-"));
     fs.mkdirSync(path.join(tmpRoot, "config", "queries"), { recursive: true });
+    fs.mkdirSync(path.join(tmpRoot, "config", "metric-views"), {
+      recursive: true,
+    });
     process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
 
     consoleLog = vi.spyOn(console, "log").mockImplementation(() => {}) as Mock;
@@ -231,13 +234,13 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(acquireSpawnLock).not.toHaveBeenCalled();
   });
 
-  test("reports the metric artifact when config/queries/metric-views.json exists", async () => {
+  test("reports the metric artifact when config/metric-views/definitions.json exists", async () => {
     // The metric path is additive: generateFromEntryPoint emits metric-views.d.ts
     // as a sibling of the query out file whenever the config is present. The CLI
     // announces it off the same dormancy signal.
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
     fs.writeFileSync(
-      path.join(tmpRoot, "config", "queries", "metric-views.json"),
+      path.join(tmpRoot, "config", "metric-views", "definitions.json"),
       JSON.stringify({ metricViews: { revenue: { source: "c.s.revenue" } } }),
     );
 
@@ -250,7 +253,7 @@ describe("generate-types foreground spawn orchestration", () => {
     );
   });
 
-  test("omits the metric artifact line when metric-views.json is absent (dormant)", async () => {
+  test("omits the metric artifact line when definitions.json is absent (dormant)", async () => {
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
 
     await runCli([tmpRoot, outFile, "wh-123"]);

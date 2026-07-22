@@ -69,23 +69,25 @@ const tempRegistryDirs: string[] = [];
 
 /**
  * Construct an `AnalyticsPlugin` whose metric-registry gateway is pointed at
- * `dir`.
+ * `dir` (treated as the metric-views config directory).
  *
  * The plugin reads the registry through the base `Plugin`'s shared `this.app`
- * (an `AppManager` rooted at `config/queries/` under the cwd). There is no
- * config field to relocate that directory, so a test points the plugin at a
- * fixture dir by overriding the `AppManager` with one constructed over `dir`.
- * `app` is `protected` on the base `Plugin`, hence the deliberate test-only
- * cast — the single seam every route-handler test threads through.
+ * (an `AppManager`; the metric path reads from its `metricViewsDir`,
+ * `config/metric-views/` under the cwd). There is no config field to relocate
+ * that directory, so a test points the plugin at a fixture dir by overriding
+ * the `AppManager` with one whose metric-views dir IS `dir` (the first arg — a
+ * sibling queries dir — is unused by the metric path). `app` is `protected` on
+ * the base `Plugin`, hence the deliberate test-only cast — the single seam
+ * every route-handler test threads through.
  */
 function pluginForDir(config: IAnalyticsConfig, dir: string): AnalyticsPlugin {
   const plugin = new AnalyticsPlugin(config);
-  (plugin as any).app = new AppManager(dir);
+  (plugin as any).app = new AppManager(path.join(dir, "queries"), dir);
   return plugin;
 }
 
 /**
- * Write a `metric-views.json` into a fresh temp dir and return the dir, for use
+ * Write a `definitions.json` into a fresh temp dir and return the dir, for use
  * with `pluginForDir(config, dir)`. Accepts the internal `MetricRegistration`
  * shape (matching the old `setRegistry` helper) and maps each entry's `lane`
  * back to the config's `executor` field.
@@ -101,14 +103,14 @@ function registryDir(registry: Record<string, MetricRegistration>): string {
     };
   }
   writeFileSync(
-    path.join(dir, "metric-views.json"),
+    path.join(dir, "definitions.json"),
     JSON.stringify({ metricViews }),
   );
   return dir;
 }
 
 /**
- * Overwrite the `metric-views.json` in an existing temp dir (for hot-reload /
+ * Overwrite the `definitions.json` in an existing temp dir (for hot-reload /
  * self-heal tests). `raw` lets a test write deliberately malformed content.
  */
 function writeRegistry(
@@ -129,7 +131,7 @@ function writeRegistry(
             ]),
           ),
         });
-  writeFileSync(path.join(dir, "metric-views.json"), body);
+  writeFileSync(path.join(dir, "definitions.json"), body);
 }
 
 describe("analytics metric route (Phase 1)", () => {
@@ -780,14 +782,14 @@ describe("analytics metric route (Phase 1)", () => {
       expect(executeMock).toHaveBeenCalled();
     });
 
-    test("no metric-views.json present → registry empty, unknown key 404, nothing executes", async () => {
+    test("no definitions.json present → registry empty, unknown key 404, nothing executes", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn();
       (plugin as any).SQLClient.executeStatement = executeMock;
-      // Registry lazily loads from cwd; no config/queries/metric-views.json in
-      // the test cwd → empty registry (dormant).
+      // Registry lazily loads from cwd; no config/metric-views/definitions.json
+      // in the test cwd → empty registry (dormant).
       plugin.injectRoutes(router);
       const handler = getHandler("POST", "/metric/:key");
       const mockReq = createMockRequest({
@@ -814,21 +816,23 @@ describe("loadMetricRegistry", () => {
   let app: AppManager;
 
   beforeEach(() => {
+    // `dir` is the metric-views config dir; the loader reads its
+    // `definitions.json`. The queries dir (first arg) is unused by this path.
     dir = mkdtempSync(path.join(tmpdir(), "mv-registry-"));
-    app = new AppManager(dir);
+    app = new AppManager(path.join(dir, "queries"), dir);
   });
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("absent metric-views.json → empty registry (dormancy)", async () => {
+  test("absent definitions.json → empty registry (dormancy)", async () => {
     expect(await loadMetricRegistry(app)).toEqual({});
   });
 
   test("derives lane from executor (default sp, user → obo)", async () => {
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({
         metricViews: {
           revenue: { source: "cat.sch.revenue_metrics" },
@@ -852,7 +856,7 @@ describe("loadMetricRegistry", () => {
 
   test("registry has a null prototype (no inherited-property lookups)", async () => {
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "cat.sch.revenue_metrics" } },
       }),
@@ -874,19 +878,19 @@ describe("loadMetricRegistry", () => {
   });
 
   test("malformed JSON throws", async () => {
-    writeFileSync(path.join(dir, "metric-views.json"), "{ not json");
+    writeFileSync(path.join(dir, "definitions.json"), "{ not json");
     await expect(loadMetricRegistry(app)).rejects.toThrow(/Failed to parse/);
   });
 
   test("schema-invalid config throws", async () => {
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "not-a-three-part-fqn" } },
       }),
     );
     await expect(loadMetricRegistry(app)).rejects.toThrow(
-      /Invalid metric-views.json/,
+      /Invalid definitions.json/,
     );
   });
 
@@ -899,11 +903,11 @@ describe("loadMetricRegistry", () => {
       metricViews[`m_${i}`] = { source: `cat.sch.view_${i}` };
     }
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({ metricViews }),
     );
     await expect(loadMetricRegistry(app)).rejects.toThrow(
-      /Invalid metric-views.json/,
+      /Invalid definitions.json/,
     );
   });
 
@@ -913,13 +917,13 @@ describe("loadMetricRegistry", () => {
     // typegen resolver.
     const longSegment = "a".repeat(256);
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: `cat.sch.${longSegment}` } },
       }),
     );
     await expect(loadMetricRegistry(app)).rejects.toThrow(
-      /Invalid metric-views.json/,
+      /Invalid definitions.json/,
     );
   });
 
@@ -931,7 +935,7 @@ describe("loadMetricRegistry", () => {
     // One entry with a segment at exactly the 255 limit — must pass.
     metricViews.m_0 = { source: `cat.sch.${"a".repeat(255)}` };
     writeFileSync(
-      path.join(dir, "metric-views.json"),
+      path.join(dir, "definitions.json"),
       JSON.stringify({ metricViews }),
     );
     await expect(loadMetricRegistry(app)).resolves.toBeDefined();
@@ -2055,7 +2059,7 @@ describe("deriveMetricExecutorKey", () => {
 });
 
 // ── Phase 3: lane dispatch at the handler level. The lane comes from the
-// registration (the entry's `executor` in metric-views.json), NOT the URL:
+// registration (the entry's `executor` in definitions.json), NOT the URL:
 // OBO-lane routes through `asUser(req)`, SP-lane through the default executor.
 // A missing/whitespace OBO identity must land on the canonical 401 envelope,
 // never an out-of-envelope 500.

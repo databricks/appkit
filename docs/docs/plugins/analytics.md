@@ -113,9 +113,9 @@ The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 
 ## Metric views
 
-`POST /api/analytics/metric/:key` measures a [Unity Catalog Metric View](https://docs.databricks.com/en/metric-views/index.html) that you declared in `config/queries/metric-views.json`. Instead of writing SQL, the caller sends a structured request — which measures to aggregate, which dimensions to group by, and an optional filter — and the plugin builds and runs the `SELECT MEASURE(...) ... GROUP BY ALL` for you against the view.
+`POST /api/analytics/metric/:key` measures a [Unity Catalog Metric View](https://docs.databricks.com/en/metric-views/index.html) that you declared in `config/metric-views/definitions.json`. Instead of writing SQL, the caller sends a structured request — which measures to aggregate, which dimensions to group by, and an optional filter — and the plugin builds and runs the `SELECT MEASURE(...) ... GROUP BY ALL` for you against the view.
 
-The route is **dormant until `metric-views.json` exists**: with no config file, every metric key returns `404`. Declaring the file (and generating types) is covered in [Metric-view types](../development/type-generation.md#metric-view-types); this section documents the runtime endpoint that config activates.
+The route is **dormant until `config/metric-views/definitions.json` exists**: with no config file, every metric key returns `404`. Declaring the file (and generating types) is covered in [Metric-view types](../development/type-generation.md#metric-view-types); this section documents the runtime endpoint that config activates.
 
 ### Request body
 
@@ -133,7 +133,7 @@ Content-Type: application/json
 }
 ```
 
-`:key` is a metric key from `metric-views.json`. The body fields:
+`:key` is a metric key from `definitions.json`. The body fields:
 
 | Field           | Type       | Required | Description                                                                                                  |
 | --------------- | ---------- | -------- | ------------------------------------------------------------------------------------------------------------ |
@@ -208,7 +208,7 @@ Filters are bounded to keep hostile input from exhausting the server: nesting de
 
 ### Executors (cache scope)
 
-Each entry in `metric-views.json` names the executor the query runs as, which also sets the cache scope. This is fixed by config, not the request:
+Each entry in `definitions.json` names the executor the query runs as, which also sets the cache scope. This is fixed by config, not the request:
 
 | `executor`                        | Runs as                            | Cache                   |
 | --------------------------------- | ---------------------------------- | ----------------------- |
@@ -241,11 +241,11 @@ On failure it emits an `error` event instead.
 
 | Status | Body                                                                                  | When                                                                                                             |
 | ------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `404`  | `{ "error": "Metric not found" }`                                                     | `:key` is not declared in `metric-views.json` (also the response for every key when the file is absent).         |
+| `404`  | `{ "error": "Metric not found" }`                                                     | `:key` is not declared in `definitions.json` (also the response for every key when the file is absent).          |
 | `400`  | `{ "error": "Invalid metric request body (fields: …)", "code": … }`                   | The request body fails validation. The message names only the offending field paths, never the submitted values. |
-| `503`  | `{ "error": "Metric registry not available", "code": "METRIC_REGISTRY_LOAD_FAILED" }` | `metric-views.json` is present but malformed or unreadable.                                                      |
+| `503`  | `{ "error": "Metric registry not available", "code": "METRIC_REGISTRY_LOAD_FAILED" }` | `definitions.json` is present but malformed or unreadable.                                                       |
 
-Editing `metric-views.json` is picked up on the next request — no server restart is needed. A previously malformed file that you fix likewise starts working on the next request.
+Editing `definitions.json` is picked up on the next request — no server restart is needed. A previously malformed file that you fix likewise starts working on the next request.
 
 ## Frontend usage
 

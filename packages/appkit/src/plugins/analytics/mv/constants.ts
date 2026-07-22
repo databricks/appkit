@@ -1,6 +1,6 @@
 import type { MetricFilterOperatorName, MetricLane } from "../types";
 
-export const METRIC_CONFIG_FILE = "metric-views.json";
+export const METRIC_CONFIG_FILE = "definitions.json";
 
 /**
  * Measure, dimension, and filter-member names are **column identifiers**: they

@@ -269,9 +269,15 @@ async function probeWarehouseState(
  *   only when the warehouse is already RUNNING, otherwise emits permissive
  *   degraded types immediately. `"blocking"` waits for / starts the warehouse
  *   first, failing the build only for a deleted/deleting one.
+ * @param options.metricViewsFolder - folder that holds `definitions.json`
+ *   (`<root>/config/metric-views`). Optional and independent of `queryFolder`:
+ *   metric-view types generate whenever this folder holds a config, even if the
+ *   app has no `config/queries`. When omitted it defaults to a sibling
+ *   `metric-views` directory of `queryFolder` (so query-only callers keep
+ *   working); when neither is given, the metric path is skipped.
  * @param options.mvOutFile - optional output file for the MetricRegistry
  *   augmentation. Defaults to a sibling `metric-views.d.ts` file under the same
- *   directory as `outFile`. Skipped entirely if `metric-views.json` is absent.
+ *   directory as `outFile`. Skipped entirely if `definitions.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics} (tests inject a mock; production lazily builds a
  *   default WorkspaceClient-backed one). An injected fetcher always runs: it
@@ -281,6 +287,7 @@ async function probeWarehouseState(
 export async function generateFromEntryPoint(options: {
   outFile: string;
   queryFolder?: string;
+  metricViewsFolder?: string;
   warehouseId: string;
   noCache?: boolean;
   mode?: PreflightMode;
@@ -296,6 +303,15 @@ export async function generateFromEntryPoint(options: {
     mvOutFile,
     metricFetcher,
   } = options;
+
+  // Metric config lives in `config/metric-views/`, a sibling of the queries
+  // folder. Prefer the explicit option; otherwise derive the sibling of
+  // `queryFolder` so callers that pass only `queryFolder` keep emitting metric
+  // types. Undefined when neither is given → the metric path stays dormant.
+  const metricViewsFolder =
+    options.metricViewsFolder ??
+    (queryFolder ? path.resolve(queryFolder, "..", "metric-views") : undefined);
+
   const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
@@ -318,15 +334,18 @@ export async function generateFromEntryPoint(options: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
-  // Metric-view types: only emit when metric-views.json exists.
-  if (queryFolder) {
+  // Metric-view types: emit whenever a metric-views folder is resolved (gated
+  // on the metric config's own dir, NOT the queries folder — an app can declare
+  // metric views without any `.sql` queries). `syncMetricViewsTypes` still
+  // returns `noConfig` when the folder holds no `definitions.json`.
+  if (metricViewsFolder) {
     const mvFile =
       mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
 
     let mvResult: SyncMetricViewsTypesResult;
     try {
       mvResult = await syncMetricViewsTypes({
-        queryFolder,
+        metricViewsFolder,
         warehouseId,
         metricOutFile: mvFile,
         cache: !noCache,
@@ -334,11 +353,11 @@ export async function generateFromEntryPoint(options: {
         mode,
       });
     } catch (configError) {
-      // syncMetricViewsTypes only throws for a malformed metric-views.json — re-throw as a message-only TypegenFatalError.
+      // syncMetricViewsTypes only throws for a malformed definitions.json — re-throw as a message-only TypegenFatalError.
       throw new TypegenFatalError(
         [
           {
-            name: "metric-views.json",
+            name: "config/metric-views/definitions.json",
             message: getErrorDiagnostic(configError),
           },
         ],
@@ -347,7 +366,7 @@ export async function generateFromEntryPoint(options: {
     }
 
     // Deleted/deleting-warehouse fatal preflight (blocking mode only);
-    // empty (no-op) when metric-views.json is absent or in non-blocking mode.
+    // empty (no-op) when definitions.json is absent or in non-blocking mode.
     for (const fe of mvResult.fatalErrors) {
       fatalErrors.push(fe);
     }
@@ -388,8 +407,8 @@ export interface SyncMetricViewsTypesResult {
   schemas: MetricSchema[];
   failures: MetricSyncFailure[];
   /**
-   * `true` when no `metric-views.json` was found in the query folder, so nothing
-   * was synced.
+   * `true` when no `definitions.json` was found in the metric-views folder, so
+   * nothing was synced.
    */
   noConfig: boolean;
   /**
@@ -409,7 +428,7 @@ export interface SyncMetricViewsTypesResult {
  * `"describe-now"` mode for a focused, always-converge metric refresh.
  *
  *
- * @param options.queryFolder - folder that holds `metric-views.json` (`<root>/config/queries`).
+ * @param options.metricViewsFolder - folder that holds `definitions.json` (`<root>/config/metric-views`).
  * @param options.warehouseId - SQL warehouse used for `DESCRIBE TABLE EXTENDED`.
  * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching).
@@ -417,7 +436,7 @@ export interface SyncMetricViewsTypesResult {
  * @param options.mode - preflight/gate policy, default `"describe-now"`.
  */
 export async function syncMetricViewsTypes(options: {
-  queryFolder: string;
+  metricViewsFolder: string;
   warehouseId: string;
   metricOutFile: string;
   cache?: boolean;
@@ -425,7 +444,7 @@ export async function syncMetricViewsTypes(options: {
   mode?: "describe-now" | "non-blocking" | "blocking";
 }): Promise<SyncMetricViewsTypesResult> {
   const {
-    queryFolder,
+    metricViewsFolder,
     warehouseId,
     metricOutFile,
     cache: cacheEnabled,
@@ -436,9 +455,9 @@ export async function syncMetricViewsTypes(options: {
   // Only `cache === false` disables caching; `undefined`/`true` keep it on.
   const noCache = cacheEnabled === false;
 
-  const mvConfig = await readMetricConfig(queryFolder);
+  const mvConfig = await readMetricConfig(metricViewsFolder);
   if (!mvConfig) {
-    // No metric-views.json — additive path stays dormant. The CLI turns this
+    // No definitions.json — additive path stays dormant. The CLI turns this
     // into a friendly "nothing to sync" message and exits 0;
     // generateFromEntryPoint simply ignores `noConfig`.
     return { schemas: [], failures: [], fatalErrors: [], noConfig: true };
@@ -572,7 +591,7 @@ export async function syncMetricViewsTypes(options: {
       fetcher,
     ));
 
-    // Surface DESCRIBE failures loudly: a misconfigured metric-views.json would
+    // Surface DESCRIBE failures loudly: a misconfigured definitions.json would
     // otherwise silently ship an empty entry that the runtime fail-closed gate
     // 503s in production. syncMetrics is log-free; this caller is the single
     // owner of failure logging.

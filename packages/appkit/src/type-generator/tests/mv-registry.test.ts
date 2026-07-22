@@ -80,7 +80,7 @@ describe("readMetricConfig", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  test("returns null when metric-views.json is absent", async () => {
+  test("returns null when definitions.json is absent", async () => {
     expect(await readMetricConfig(tmpDir)).toBeNull();
   });
 
@@ -94,9 +94,9 @@ describe("readMetricConfig", () => {
     expect(await readMetricConfig(tmpDir)).toBeNull();
   });
 
-  test("parses a valid metric-views.json", async () => {
+  test("parses a valid definitions.json", async () => {
     await fs.writeFile(
-      path.join(tmpDir, "metric-views.json"),
+      path.join(tmpDir, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "demo.public.revenue" } },
       }),
@@ -106,9 +106,9 @@ describe("readMetricConfig", () => {
   });
 
   test("throws on malformed JSON", async () => {
-    await fs.writeFile(path.join(tmpDir, "metric-views.json"), "{not json");
+    await fs.writeFile(path.join(tmpDir, "definitions.json"), "{not json");
     await expect(readMetricConfig(tmpDir)).rejects.toThrowError(
-      /parse metric-views\.json/,
+      /parse definitions\.json/,
     );
   });
 });

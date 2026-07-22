@@ -478,11 +478,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // Resolve the registry from disk: read + parse `metric-views.json` once per
+    // Resolve the registry from disk: read + parse `definitions.json` once per
     // request (no memoization). Reads through the plugin's shared `this.app`
-    // (the base `Plugin`'s `AppManager`, rooted at `config/queries/` under the
-    // process cwd), so this is dev-tunnel aware and inherits the traversal
-    // guard — same as the sibling `.sql` query path.
+    // (the base `Plugin`'s `AppManager`) from `config/metric-views/` under the
+    // process cwd, so this is dev-tunnel aware and inherits the traversal
+    // guard — the same mechanism as the sibling `.sql` query path.
     let registry: Record<string, MetricRegistration>;
     try {
       registry = await loadMetricRegistry(this.app, req, this.devFileReader);
@@ -535,7 +535,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }
 
     // Lane dispatch. The lane comes from the registration (the entry's
-    // `executor` in metric-views.json), NOT a URL segment or `.obo.sql`
+    // `executor` in definitions.json), NOT a URL segment or `.obo.sql`
     // filename: an OBO-lane metric runs on-behalf-of the requesting user
     // (per-user cache via `asUser(req)`), an SP-lane metric as the app service
     // principal (shared cache).
