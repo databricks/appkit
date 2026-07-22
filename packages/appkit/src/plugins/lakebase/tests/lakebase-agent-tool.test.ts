@@ -212,6 +212,53 @@ describe("LakebasePlugin — readOnly enforcement", () => {
   });
 });
 
+describe("LakebasePlugin — shutdown", () => {
+  test("closes the SP pool and all OBO pools via shutdown()", async () => {
+    const { createLakebasePool, createLakebasePoolManager } = await import(
+      "../../../connectors/lakebase"
+    );
+    const plugin = makePlugin({});
+    await plugin.setup();
+
+    const spPool = vi.mocked(createLakebasePool).mock.results.at(-1)?.value as {
+      end: ReturnType<typeof vi.fn>;
+    };
+    const oboManager = vi.mocked(createLakebasePoolManager).mock.results.at(-1)
+      ?.value as { closeAll: ReturnType<typeof vi.fn> };
+
+    await plugin.shutdown();
+
+    expect(spPool.end).toHaveBeenCalledTimes(1);
+    expect(oboManager.closeAll).toHaveBeenCalledTimes(1);
+
+    // Idempotent: a second call has nothing left to close.
+    await plugin.shutdown();
+    expect(spPool.end).toHaveBeenCalledTimes(1);
+    expect(oboManager.closeAll).toHaveBeenCalledTimes(1);
+  });
+
+  test("abortActiveOperations() does NOT tear down the pools (teardown is shutdown()'s job)", async () => {
+    const { createLakebasePool, createLakebasePoolManager } = await import(
+      "../../../connectors/lakebase"
+    );
+    const plugin = makePlugin({});
+    await plugin.setup();
+
+    const spPool = vi.mocked(createLakebasePool).mock.results.at(-1)?.value as {
+      end: ReturnType<typeof vi.fn>;
+    };
+    const oboManager = vi.mocked(createLakebasePoolManager).mock.results.at(-1)
+      ?.value as { closeAll: ReturnType<typeof vi.fn> };
+
+    plugin.abortActiveOperations();
+
+    // Other plugins' shutdown() hooks may still need database connections
+    // to drain state — the pools must survive the abort phase.
+    expect(spPool.end).not.toHaveBeenCalled();
+    expect(oboManager.closeAll).not.toHaveBeenCalled();
+  });
+});
+
 describe("LakebasePlugin — destructive mode", () => {
   test("does NOT wrap in read-only transaction when readOnly: false", async () => {
     const queryMock = vi.fn((_text: string, _values?: unknown[]) =>

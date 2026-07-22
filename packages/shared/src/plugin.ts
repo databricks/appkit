@@ -16,7 +16,24 @@ export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 export interface BasePlugin {
   name: string;
 
+  /**
+   * Cancel in-flight work (abort signals, SSE streams). Runs in the first
+   * phase of graceful shutdown, BEFORE any plugin's `shutdown()` hook —
+   * so it must not tear down shared resources (e.g. connection pools)
+   * that other plugins' hooks may still need. Put teardown in `shutdown()`.
+   */
   abortActiveOperations?(): void;
+
+  /**
+   * Optional graceful-shutdown hook.
+   *
+   * Invoked by AppKit's core lifecycle manager during graceful shutdown
+   * (SIGTERM/SIGINT), after `abortActiveOperations()` has run. Use it to
+   * drain in-flight work or release resources. Each plugin's hook is bounded
+   * by a per-plugin timeout and runs concurrently with other plugins' hooks;
+   * errors are logged and never abort the shutdown.
+   */
+  shutdown?(): Promise<void> | void;
 
   setup(): Promise<void>;
 

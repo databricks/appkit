@@ -12,6 +12,8 @@ const {
 } = vi.hoisted(() => {
   const httpServer = {
     close: vi.fn((cb: any) => cb?.()),
+    closeIdleConnections: vi.fn(),
+    closeAllConnections: vi.fn(),
     on: vi.fn(),
     address: vi.fn().mockReturnValue({ port: 8000 }),
   };
@@ -85,6 +87,9 @@ vi.mock("express", () => {
 // Mock dependencies before imports
 vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
+    getInstance: vi.fn().mockReturnValue({
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    }),
     getProvider: vi.fn().mockReturnValue({
       getTracer: vi.fn().mockReturnValue({ startActiveSpan: vi.fn() }),
       getMeter: vi.fn().mockReturnValue({
@@ -107,6 +112,7 @@ vi.mock("../../../cache", () => ({
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
     }),
   },
 }));
@@ -186,6 +192,7 @@ vi.mock("../client-config-sanitizer", () => ({
 
 import fs from "node:fs";
 import express from "express";
+import { LifecycleManager } from "../../../core/lifecycle-manager";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
@@ -694,41 +701,148 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("_gracefulShutdown", () => {
-    test("aborts plugin operations (with error isolation) and closes server", async () => {
-      vi.useFakeTimers();
+  describe("shutdown hooks", () => {
+    beforeEach(() => {
       mockLoggerError.mockClear();
-      const exitSpy = vi
-        .spyOn(process, "exit")
-        .mockImplementation(((_code?: number) => undefined) as any);
+    });
 
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("abortActiveOperations() stops accepting connections and initiates close", () => {
       const plugin = new ServerPlugin({
-        context: createContextWithPlugins({
-          ok: {
-            name: "ok",
-            abortActiveOperations: vi.fn(),
-          },
-          bad: {
-            name: "bad",
-            abortActiveOperations: vi.fn(() => {
-              throw new Error("boom");
-            }),
-          },
-        }),
+        context: createContextWithPlugins({}),
       } as any);
-
-      // pretend started
       (plugin as any).server = mockHttpServer;
 
-      await (plugin as any)._gracefulShutdown();
-      vi.runAllTimers();
+      plugin.abortActiveOperations();
 
-      expect(mockLoggerError).toHaveBeenCalled();
-      expect(mockHttpServer.close).toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalled();
+      // Idle keep-alive sockets are dropped and close() is initiated so a
+      // connected browser cannot pin the server open.
+      expect(mockHttpServer.closeIdleConnections).toHaveBeenCalledTimes(1);
+      expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
+      // The full socket teardown is deferred to the lifecycle hook.
+      expect(mockHttpServer.closeAllConnections).not.toHaveBeenCalled();
+    });
 
+    test("abortActiveOperations() is a no-op on sockets when no server started", () => {
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+
+      expect(() => plugin.abortActiveOperations()).not.toThrow();
+      expect(mockHttpServer.close).not.toHaveBeenCalled();
+    });
+
+    test("shutdown() drains the dev servers", async () => {
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      const viteClose = vi.fn().mockResolvedValue(undefined);
+      const tunnelCleanup = vi.fn();
+      (plugin as any).viteDevServer = { close: viteClose };
+      (plugin as any).remoteTunnelController = { cleanup: tunnelCleanup };
+
+      await plugin.shutdown();
+
+      expect(viteClose).toHaveBeenCalledTimes(1);
+      expect(tunnelCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    test("closeRemainingConnections() force-closes sockets and awaits the close", async () => {
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      (plugin as any).server = mockHttpServer;
+
+      // abort initiates the close and captures the serverClosed promise
+      plugin.abortActiveOperations();
+      await (plugin as any).closeRemainingConnections();
+
+      expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
+      expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
+    });
+
+    test("closeRemainingConnections() does not hang if close() never completes", async () => {
+      vi.useFakeTimers();
+      // A server whose close callback never fires.
+      const stuckServer = {
+        ...mockHttpServer,
+        close: vi.fn(),
+        closeIdleConnections: vi.fn(),
+        closeAllConnections: vi.fn(),
+      };
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+      (plugin as any).server = stuckServer;
+
+      plugin.abortActiveOperations();
+      const done = (plugin as any).closeRemainingConnections();
+      // Bounded by SERVER_CLOSE_TIMEOUT_MS (2s) even though close never fires.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await done;
+
+      expect(stuckServer.closeAllConnections).toHaveBeenCalledTimes(1);
+    });
+
+    test("start() registers closeRemainingConnections on the 'shutdown' lifecycle event", async () => {
+      const ctx = createContextWithPlugins({});
+      const onLifecycleSpy = vi.spyOn(ctx, "onLifecycle");
+      const plugin = new ServerPlugin({ context: ctx } as any);
+
+      await plugin.start();
+
+      expect(onLifecycleSpy).toHaveBeenCalledWith(
+        "shutdown",
+        expect.any(Function),
+      );
+
+      // Emitting the event drives the socket teardown end-to-end.
+      await ctx.emitLifecycle("shutdown");
+      expect(mockHttpServer.closeAllConnections).toHaveBeenCalledTimes(1);
+    });
+
+    test("real LifecycleManager drives the ServerPlugin's socket teardown in order", async () => {
+      // End-to-end across the contract seam: a real LifecycleManager driving a
+      // real ServerPlugin + real PluginContext, with a peer plugin whose
+      // shutdown() hook must land BETWEEN the server's closeIdle (abort phase)
+      // and closeAll (lifecycle-emit phase). Mocking only one side would let a
+      // dropped registration or phase reorder pass — this catches it.
+      const order: string[] = [];
+      mockHttpServer.closeIdleConnections.mockImplementationOnce(() => {
+        order.push("closeIdle");
+      });
+      mockHttpServer.closeAllConnections.mockImplementationOnce(() => {
+        order.push("closeAll");
+      });
+
+      const ctx = new PluginContext();
+      const server = new ServerPlugin({ context: ctx } as any);
+      ctx.registerPlugin("server", server as unknown as BasePlugin);
+      ctx.registerPlugin("peer", {
+        name: "peer",
+        shutdown: vi.fn(async () => {
+          order.push("peer-shutdown");
+        }),
+      } as unknown as BasePlugin);
+
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+        _code?: number,
+      ) => {
+        order.push("exit");
+        return undefined;
+      }) as any);
+
+      await server.start();
+      await new LifecycleManager(ctx).shutdown();
+
+      // closeIdle fires in the abort phase, the peer drains next, closeAll only
+      // fires in the later lifecycle-emit phase, then the process exits 0.
+      expect(order).toEqual(["closeIdle", "peer-shutdown", "closeAll", "exit"]);
+      expect(exitSpy).toHaveBeenCalledWith(0);
       exitSpy.mockRestore();
-      vi.useRealTimers();
     });
   });
 });
