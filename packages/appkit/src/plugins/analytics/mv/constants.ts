@@ -1,6 +1,10 @@
+import { METRIC_CONFIG_FILE } from "../../../../../shared/src/schemas/metric-fqn";
 import type { MetricFilterOperatorName, MetricLane } from "../types";
 
-export const METRIC_CONFIG_FILE = "definitions.json";
+// Re-exported from the shared zod-free module (single source of truth for the
+// `definitions.json` basename) so analytics-local callers keep importing it
+// from this barrel.
+export { METRIC_CONFIG_FILE };
 
 /**
  * Measure, dimension, and filter-member names are **column identifiers**: they

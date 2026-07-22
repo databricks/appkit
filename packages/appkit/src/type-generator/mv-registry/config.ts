@@ -9,6 +9,7 @@ import path from "node:path";
 // shared source directly and drags in no zod.
 import {
   MAX_UC_OBJECT_NAME_LENGTH,
+  METRIC_CONFIG_FILE,
   UC_FQN_PATTERN,
 } from "../../../../shared/src/schemas/metric-fqn";
 import type {
@@ -17,8 +18,6 @@ import type {
   MetricSourceConfig,
   ResolvedMetricEntry,
 } from "./types";
-
-const MV_CONFIG_FILE = "definitions.json";
 
 /**
  * Safety cap on declared metric views — a typo / DoS guard, NOT a Unity Catalog
@@ -44,7 +43,7 @@ function compareKeys(a: string, b: string): number {
 }
 
 /**
- * Read {@link MV_CONFIG_FILE} from a metric-views folder
+ * Read {@link METRIC_CONFIG_FILE} from a metric-views folder
  * (`config/metric-views/`).
  *
  * Returns `null` if the file does not exist (the metric-view path is
@@ -56,7 +55,7 @@ function compareKeys(a: string, b: string): number {
 export async function readMetricConfig(
   metricViewsFolder: string,
 ): Promise<MetricSourceConfig | null> {
-  const metricPath = path.join(metricViewsFolder, MV_CONFIG_FILE);
+  const metricPath = path.join(metricViewsFolder, METRIC_CONFIG_FILE);
   let raw: string;
   try {
     raw = await fs.readFile(metricPath, "utf8");

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { Plugin } from "vite";
+import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
@@ -391,7 +392,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         // a watched tree must not trigger a regenerate).
         const isMetricConfig =
           metricViewsFolder !== undefined &&
-          path.basename(changedFile) === "definitions.json" &&
+          path.basename(changedFile) === METRIC_CONFIG_FILE &&
           path.dirname(path.resolve(changedFile)) ===
             path.resolve(metricViewsFolder);
 

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Command, Option } from "commander";
+import { METRIC_CONFIG_FILE } from "../../schemas/metric-fqn";
 import {
   acquireSpawnLock,
   getSpawnLockPath,
@@ -90,7 +91,7 @@ async function runGenerateTypes(
           console.log(`Generated query types: ${resolvedOutFile}`);
         }
 
-        const metricConfig = path.join(metricViewsFolder, "definitions.json");
+        const metricConfig = path.join(metricViewsFolder, METRIC_CONFIG_FILE);
         if (fs.existsSync(metricConfig)) {
           const typesDir = path.dirname(resolvedOutFile);
           console.log(

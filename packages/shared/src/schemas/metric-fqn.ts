@@ -30,6 +30,16 @@
 export const MAX_UC_OBJECT_NAME_LENGTH = 255;
 
 /**
+ * Basename of the metric-view declarations file, resolved inside a
+ * `config/metric-views/` folder. Single source of truth shared by the analytics
+ * runtime (`plugins/analytics/mv`), the type-generator, its Vite watcher, and
+ * the `generate-types` CLI. It lives in this zod-free module (rather than the
+ * canonical `metric-source.ts` schema) so the type-generator can import it
+ * without pulling zod into its locked dependency graph.
+ */
+export const METRIC_CONFIG_FILE = "definitions.json";
+
+/**
  * Matches a single, non-empty Unity Catalog object name as it may appear in a backtick-quoted (delimited) identifier.
  *
  * @example
