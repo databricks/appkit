@@ -13,6 +13,7 @@ import {
   SearchIcon,
   ServerIcon,
   ShieldIcon,
+  SigmaIcon,
   Wand2Icon,
   ZapIcon,
 } from "lucide-react";
@@ -63,6 +64,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Same dashboard — served over Apache Arrow streaming for zero-copy speed.",
         icon: ZapIcon,
+      },
+      {
+        to: "/metric-views",
+        label: "Metric Views",
+        description:
+          "Measure a governed UC metric view with useMetricView — labels and formats from injected metadata.",
+        icon: SigmaIcon,
       },
       {
         to: "/lakebase",
