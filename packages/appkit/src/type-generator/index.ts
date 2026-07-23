@@ -297,7 +297,7 @@ async function probeWarehouseState(
  *   `metric-views` directory of `queryFolder` (so query-only callers keep
  *   working); when neither is given, the metric path is skipped.
  * @param options.mvOutFile - optional output file for the MetricRegistry
- *   augmentation. Defaults to a sibling `metric-views.d.ts` file under the same
+ *   augmentation. Defaults to a sibling `metric-views.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `definitions.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics} (tests inject a mock; production lazily builds a
@@ -458,7 +458,9 @@ export interface SyncMetricViewsTypesResult {
  *
  * @param options.metricViewsFolder - folder that holds `definitions.json` (`<root>/config/metric-views`).
  * @param options.warehouseId - SQL warehouse used for `DESCRIBE TABLE EXTENDED`.
- * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
+ * @param options.metricOutFile - output path for the MetricRegistry `.ts` (the
+ *   generated source carries both the `declare module` augmentation and the
+ *   runtime `metricViewsMetadata` const).
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching).
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
  * @param options.mode - preflight/gate policy, default `"describe-now"`.
@@ -752,4 +754,4 @@ export type {
 export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
-export const METRIC_TYPES_FILE = "metric-views.d.ts";
+export const METRIC_TYPES_FILE = "metric-views.ts";

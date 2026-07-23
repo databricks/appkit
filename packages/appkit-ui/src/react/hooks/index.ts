@@ -45,6 +45,7 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "./use-chart-data";
+export { useMetricView } from "./use-metric-view";
 export { useIsMobile } from "./use-mobile";
 export { usePluginClientConfig } from "./use-plugin-config";
 export {

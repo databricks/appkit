@@ -35,8 +35,10 @@ interface AppKitTypesPluginOptions {
   /* Path to the output d.ts file (relative to client folder). */
   outFile?: string;
   /**
-   * Path to the metric registry d.ts file (relative to client folder).
-   * Defaults to a sibling of `outFile`, computed by the generator.
+   * Path to the metric registry `.ts` file (relative to client folder).
+   * Defaults to a sibling of `outFile`, computed by the generator. The
+   * generated source carries both the `declare module` augmentation and the
+   * runtime `metricViewsMetadata` const, so it is a real `.ts`, not a `.d.ts`.
    */
   mvOutFile?: string;
   /**

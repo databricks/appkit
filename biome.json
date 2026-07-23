@@ -21,7 +21,9 @@
       "!**/*.gen.css",
       "!**/*.gen.ts",
       "!**/typedoc-sidebar.ts",
-      "!**/template"
+      "!**/template",
+      "!**/metric-views.ts",
+      "!**/metric-views.d.ts"
     ]
   },
   "formatter": {

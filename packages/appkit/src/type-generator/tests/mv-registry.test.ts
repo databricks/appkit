@@ -1623,6 +1623,112 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
   });
 });
 
+// ── PR5 Phase 1: the emitted file is a real `.ts` carrying BOTH the (erasable)
+// `declare module` type augmentation AND a runtime `metricViewsMetadata` value.
+// It must never emit a runtime side-effect import (that would execute the client
+// package entry on the Node server) — only a zero-runtime type-only import.
+describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value", () => {
+  test("emits both the declare-module augmentation and the metricViewsMetadata const", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: {
+        revenue: { source: "appkit_demo.public.revenue_metrics" },
+      },
+    });
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            display_name: "Annual Recurring Revenue",
+            format: "$#,##0.00",
+          },
+          { name: "region", type: "STRING", is_measure: false },
+        ],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+
+    // Type half: the augmentation is still present, unchanged in shape.
+    expect(output).toContain('declare module "@databricks/appkit-ui/react"');
+    expect(output).toContain("interface MetricRegistry");
+    // Value half: a runtime const conforming to MetricViewsMetadata, `as const`.
+    expect(output).toContain("export const metricViewsMetadata = {");
+    expect(output).toContain("} as const;");
+    // The measure/dimension maps carry the SAME per-column fields as the type
+    // block (type/display_name/format), keyed by column name.
+    expect(output).toContain(
+      '"arr": { type: "DECIMAL(38,2)", display_name: "Annual Recurring Revenue", format: "$#,##0.00" }',
+    );
+    expect(output).toContain('"region": { type: "STRING" }');
+  });
+
+  test("uses a zero-runtime type-only import, never a side-effect import", () => {
+    const output = generateMetricTypeDeclarations([]);
+    // A bare `import "..."` in a `.ts` would EXECUTE the client entry on the
+    // Node server — it must never be emitted.
+    expect(output).not.toContain('import "@databricks/appkit-ui/react"');
+    expect(output).toContain(
+      'import type {} from "@databricks/appkit-ui/react"',
+    );
+  });
+
+  test("emits an empty metricViewsMetadata for no registered metrics", () => {
+    const output = generateMetricTypeDeclarations([]);
+    expect(output).toContain("export const metricViewsMetadata = {} as const;");
+    // Empty type augmentation stays too.
+    expect(output).toContain("interface MetricRegistry {}");
+  });
+
+  test("a degraded schema contributes empty measures/dimensions value maps", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: { cold: { source: "appkit_demo.public.cold" } },
+    });
+    // Non-terminal DESCRIBE → degraded schema (empty column arrays).
+    const fetcher =
+      async (): Promise<DatabricksStatementExecutionResponse> => ({
+        statement_id: "stmt-mock",
+        status: { state: "PENDING" },
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+    // Value side of a degraded entry: empty maps, consistent with its
+    // `Record<string, never>` metadata type block.
+    expect(output).toContain(`"cold": {
+    measures: {},
+    dimensions: {},
+  }`);
+  });
+
+  test("escapes quotes/backticks in display_name and description via JSON.stringify", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: { revenue: { source: "appkit_demo.public.revenue" } },
+    });
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            // A double quote AND a backtick — both must survive into a valid
+            // TS string literal in the runtime const.
+            display_name: 'Net "ARR" `growth`',
+            comment: 'Revenue with a " quote',
+          },
+        ],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+
+    // JSON.stringify escapes the embedded double quotes; the backtick rides
+    // through unescaped inside a double-quoted literal (valid TS).
+    expect(output).toContain('display_name: "Net \\"ARR\\" `growth`"');
+    expect(output).toContain('description: "Revenue with a \\" quote"');
+  });
+});
+
 // ── Phase 5: semantic-metadata extraction (display_name + format) ─────────
 describe("extractMetricColumns — Phase 5 semantic metadata", () => {
   test("captures display_name from a measure column", () => {
@@ -1946,12 +2052,12 @@ describe("extractMetricColumns — Phase 5 semantic metadata", () => {
   });
 });
 
-// ── Key-order determinism: the .d.ts emitter sorts metric keys with a
+// ── Key-order determinism: the emitter sorts metric keys with a
 // locale-independent (code-unit) comparator. localeCompare-style collation
 // would interleave mixed-case keys ("ARPU", "churn", "Revenue") and could vary
 // by machine/locale, drifting the emitted augmentation between builds.
 describe("artifact key-order determinism", () => {
-  test("mixed-case keys order code-unit (uppercase before lowercase) in metric-views.d.ts", async () => {
+  test("mixed-case keys order code-unit (uppercase before lowercase) in metric-views.ts", async () => {
     const resolution = resolveMetricConfig({
       metricViews: {
         Revenue: { source: "a.b.r" },
@@ -1973,7 +2079,7 @@ describe("artifact key-order determinism", () => {
       });
     const { schemas } = await syncMetrics(resolution, fetcher);
 
-    // Entry keys in the .d.ts appear as `    "<key>": {` lines (4-space
+    // Entry keys in the augmentation appear as `    "<key>": {` lines (4-space
     // indent — metadata column maps sit deeper and don't match).
     const declarations = generateMetricTypeDeclarations(schemas);
     const dtsKeys = [...declarations.matchAll(/^ {4}"([^"]+)": \{$/gm)].map(

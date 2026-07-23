@@ -359,8 +359,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   // not passed explicitly, so these tests only pass `queryFolder` below.
   const metricViewsFolder = path.join(metricsDir, "metric-views");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
-  // Default: the metric .d.ts is a sibling of `outFile`.
-  const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
+  // Default: the metric .ts is a sibling of `outFile`.
+  const metricFile = path.join(metricsDir, "generated", "metric-views.ts");
 
   const describeResponse: DatabricksStatementExecutionResponse = {
     statement_id: "stmt-mock",
@@ -409,7 +409,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric-views.d.ts when definitions.json exists", async () => {
+  test("writes metric-views.ts when definitions.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -426,9 +426,19 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain('"total_revenue": number');
     expect(declarations).toContain('"region": string');
-    // Semantic metadata (SQL type) rides in the .d.ts type-level `metadata`
+    // Semantic metadata (SQL type) rides in the type-level `metadata`
     // block — the sole carrier now that the JSON bundle is gone.
     expect(declarations).toContain('"DECIMAL(38,2)"');
+    // The generated file is a real `.ts`, so it also carries the runtime
+    // `metricViewsMetadata` const (value twin of the type-level metadata).
+    expect(declarations).toContain("export const metricViewsMetadata");
+    expect(declarations).toContain("as const");
+    // ...and NEVER a runtime side-effect import that would execute the client
+    // package entry on the Node server — only a zero-runtime type-only import.
+    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
+    expect(declarations).toContain(
+      'import type {} from "@databricks/appkit-ui/react"',
+    );
   });
 
   test("emits no metric artifacts and no errors when definitions.json is absent", async () => {
@@ -1156,7 +1166,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
   // derives it from queryFolder when not passed explicitly.
   const metricViewsFolder = path.join(cacheTestDir, "metric-views");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
+  const metricFile = path.join(cacheTestDir, "generated", "metric-views.ts");
 
   const describeResponseFor = (
     measure: string,

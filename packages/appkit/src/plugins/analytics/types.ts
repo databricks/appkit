@@ -1,7 +1,21 @@
-import type { BasePluginConfig } from "shared";
+import type { BasePluginConfig, MetricViewsMetadata } from "shared";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
+  /**
+   * Build-generated per-metric column metadata (`display_name` / `format` /
+   * `type` / `description`), keyed by metric key. The app injects the constant
+   * emitted by the metric-views type generator via
+   * `analytics({ metricViewsMetadata })`.
+   *
+   * The metric route stamps the slice of this scoped to a request's requested
+   * measures/dimensions into the SSE `result` message. It is **response
+   * decoration only**: it never enters the cache key and never changes the SQL.
+   * Absent → the `result` message carries no `metadata` field and the route
+   * behaves exactly as before. Never read from disk / `DESCRIBE` at runtime —
+   * it comes only from this injected value.
+   */
+  metricViewsMetadata?: MetricViewsMetadata;
   /**
    * Maximum time (ms) the analytics route waits for a STOPPED/STARTING SQL
    * warehouse to reach RUNNING before failing the request. Defaults to 5 min.

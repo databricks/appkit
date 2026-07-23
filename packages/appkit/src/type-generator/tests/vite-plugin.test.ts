@@ -387,7 +387,7 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
   test("a custom mvOutFile reaches generateFromEntryPoint", async () => {
     const plugin = appKitTypesPlugin({
-      mvOutFile: "custom/types/metric-views.d.ts",
+      mvOutFile: "custom/types/metric-views.ts",
     });
     getHook<ConfigResolvedHook>(
       plugin,
@@ -400,10 +400,7 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        mvOutFile: path.resolve(
-          process.cwd(),
-          "custom/types/metric-views.d.ts",
-        ),
+        mvOutFile: path.resolve(process.cwd(), "custom/types/metric-views.ts"),
       }),
     );
   });

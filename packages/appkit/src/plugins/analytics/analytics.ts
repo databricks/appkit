@@ -3,6 +3,7 @@ import {
   type AgentToolDefinition,
   type AnalyticsSseMessage,
   type IAppRouter,
+  type MetricColumnMeta,
   makeResultMessage,
   type PluginExecuteConfig,
   type SQLTypeMarker,
@@ -34,6 +35,7 @@ import {
   composeMetricCacheKey,
   deriveMetricExecutorKey,
   loadMetricRegistry,
+  selectMetricMetadata,
   validateMetricRequest,
 } from "./metric";
 import { QueryProcessor } from "./query";
@@ -556,6 +558,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
+    // Per-column metadata slice for the responding metric, scoped to the
+    // requested measures/dimensions. Pure response DECORATION: computed once
+    // from the injected config value, threaded into the `result` message below,
+    // and deliberately NOT part of the cache key or the SQL. Absent config →
+    // `undefined` → the `result` message omits the field (envelope-identical to
+    // `/query`).
+    const metadata = selectMetricMetadata(
+      this.config.metricViewsMetadata,
+      key,
+      request.measures,
+      request.dimensions,
+    );
+
     // Cache key. Composed over the canonicalized args (sorted measures/
     // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
     // the `executorKey` — `"sp"` shares the cache across all users, a per-user
@@ -652,12 +667,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
                 );
               // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
               // an ARROW_STREAM-inline fallback, returning plain rows in a
-              // `result` message — byte-identical envelope to `/query`.
+              // `result` message — byte-identical envelope to `/query`, plus the
+              // metric's per-column `metadata` slice (omitted when absent).
               return await self._executeJsonArrayPath(
                 executor,
                 statement,
                 processedParams,
                 sig,
+                metadata,
               );
             } catch (err) {
               originalError = err;
@@ -707,6 +724,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * {@link deliverJsonResult} (INLINE JSON_ARRAY → on `needs-arrow-inline`,
    * INLINE ARROW_STREAM decoded to rows) and wraps the rows in a `result`
    * message. External links are never used for the JSON fallback.
+   *
+   * `metadata` (metric route only) is the pre-computed per-column slice stamped
+   * into the `result` message; it is pure response decoration (never affects
+   * the SQL or the cache key). `undefined` → the field is omitted, keeping the
+   * envelope byte-identical to a plain `/query` result.
    */
   private async _executeJsonArrayPath(
     executor: AnalyticsPlugin,
@@ -715,6 +737,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     signal?: AbortSignal,
+    metadata?: Record<string, MetricColumnMeta>,
   ): Promise<AnalyticsSseMessage> {
     const result = await deliverJsonResult(
       executor,
@@ -725,6 +748,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     return makeResultMessage(result.data, {
       status: result.status,
       statement_id: result.statement_id,
+      metadata,
     });
   }
 
