@@ -29,6 +29,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { useCallback, useMemo, useRef } from "react";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -38,11 +39,13 @@ import {
 } from "./options";
 import { useChartUITokens, useThemeColors } from "./theme";
 import type {
+  ChartClickDatum,
   ChartColorPalette,
   ChartData,
   ChartType,
   Orientation,
 } from "./types";
+import { mapToDatum } from "./utils";
 
 // ============================================================================
 // ECharts Registration (modular imports for tree-shaking)
@@ -168,6 +171,23 @@ export interface BaseChartProps {
   options?: Record<string, unknown>;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Fired when a data element (bar, slice, point) is clicked. Fire-and-forget:
+   * the return value is ignored (async handlers are fine — the chart never awaits).
+   * The handler receives a normalized {@link ChartClickDatum}.
+   *
+   * Pointer-only: charts render to <canvas>, so this does not fire for keyboard
+   * users. Provide a keyboard-accessible equivalent (e.g. a table row action) for
+   * the same action.
+   */
+  onDataClick?: (datum: ChartClickDatum) => void;
+  /**
+   * Controlled selection by category name. Matching data element(s) render at full
+   * prominence while the rest are dimmed. Drive it from your own state to reflect a
+   * cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis;
+   * other chart types ignore it.
+   */
+  selected?: string | string[];
 }
 
 // ============================================================================
@@ -202,6 +222,8 @@ export function BaseChart({
   max,
   options: customOptions,
   className,
+  onDataClick,
+  selected,
 }: BaseChartProps) {
   // Determine the appropriate color palette based on chart type
   const resolvedPalette = colorPalette ?? getDefaultPalette(chartType);
@@ -329,8 +351,10 @@ export function BaseChart({
       });
     }
 
-    // Merge custom options
-    return customOptions ? { ...opt, ...customOptions } : opt;
+    // Merge custom options, then apply declarative selection emphasis. When
+    // `selected` is undefined/empty, applySelectionEmphasis is a no-op.
+    const merged = customOptions ? { ...opt, ...customOptions } : opt;
+    return applySelectionEmphasis(merged, selected);
   }, [
     normalized,
     colors,
@@ -350,7 +374,22 @@ export function BaseChart({
     min,
     max,
     customOptions,
+    selected,
   ]);
+
+  // Build the ECharts event map only when a click handler is provided. Memoized
+  // on `onDataClick` so the object identity is stable across renders —
+  // echarts-for-react re-subscribes whenever `onEvents` identity changes, so an
+  // unstable object would thrash listeners. When no handler is set, this is
+  // `undefined` and no idle click listener is attached. `onEvents` is an internal
+  // implementation detail and is intentionally not a public prop.
+  const onEvents = useMemo(
+    () =>
+      onDataClick
+        ? { click: (params: unknown) => onDataClick(mapToDatum(params)) }
+        : undefined,
+    [onDataClick],
+  );
 
   if (!option) {
     return (
@@ -370,6 +409,7 @@ export function BaseChart({
       opts={{ renderer: "canvas" }}
       notMerge={false}
       lazyUpdate={true}
+      onEvents={onEvents}
     />
   );
 }

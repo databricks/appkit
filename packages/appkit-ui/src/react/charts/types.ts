@@ -89,6 +89,56 @@ export interface ChartBaseProps {
 
   /** Additional ECharts options to merge */
   options?: Record<string, unknown>;
+
+  /**
+   * Fired when a data element (bar, slice, point) is clicked. Fire-and-forget:
+   * the return value is ignored (async handlers are fine — the chart never awaits).
+   * The handler receives a normalized {@link ChartClickDatum}.
+   *
+   * Pointer-only: charts render to <canvas>, so this does not fire for keyboard
+   * users. Provide a keyboard-accessible equivalent (e.g. a table row action) for
+   * the same action.
+   */
+  onDataClick?: (datum: ChartClickDatum) => void;
+
+  /**
+   * Controlled selection by category name. Matching data element(s) render at full
+   * prominence while the rest are dimmed. Drive it from your own state to reflect a
+   * cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis;
+   * other chart types ignore it.
+   */
+  selected?: string | string[];
+}
+
+// ============================================================================
+// Interaction / Click Events
+// ============================================================================
+
+/**
+ * A normalized description of a clicked chart element.
+ *
+ * This is the public, ECharts-free shape emitted by chart click handlers. It is
+ * the single boundary that keeps ECharts event types out of appkit-ui's public
+ * API — consumers should read the strongly-typed fields below and reach for
+ * {@link ChartClickDatum.raw} only when they knowingly opt into unsupported
+ * internals.
+ *
+ * In the common cross-filter case, {@link ChartClickDatum.name} carries the
+ * dimension value of the clicked element.
+ */
+export interface ChartClickDatum {
+  /** Category label of the clicked element — the dimension value in the common cross-filter case. */
+  name: string;
+  /** The datum's value. */
+  value: number | string | null;
+  /** Series label, when present. */
+  seriesName?: string;
+  /** Index of the datum within its series. */
+  dataIndex: number;
+  /** Which series was clicked. */
+  seriesIndex: number;
+  /** Untouched ECharts event params. Typed `unknown` — cast at your own risk; not part of the supported surface. */
+  raw: unknown;
 }
 
 // ============================================================================

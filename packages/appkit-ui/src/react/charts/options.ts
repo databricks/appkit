@@ -391,3 +391,181 @@ export function buildCartesianOption(
     })),
   };
 }
+
+// ============================================================================
+// Selection Emphasis (declarative cross-filter highlighting)
+// ============================================================================
+
+/**
+ * Opacity applied to data elements that are NOT part of the current selection.
+ * Kept local to the option builder since it only describes selection styling and
+ * is not a themeable UI token.
+ */
+const DIMMED_OPACITY = 0.3;
+
+/** Opacity applied to selected (emphasized) data elements. */
+const SELECTED_OPACITY = 1;
+
+/** Options controlling {@link applySelectionEmphasis}. */
+interface SelectionEmphasisOptions {
+  /** Opacity for dimmed (non-selected) elements. @default 0.3 */
+  dimmedOpacity?: number;
+  /** Opacity for emphasized (selected) elements. @default 1 */
+  selectedOpacity?: number;
+}
+
+/**
+ * Normalizes the `selected` input into a lookup set of category names.
+ * Returns `null` when there is nothing selected (undefined, or an empty
+ * string/array), which callers treat as "no emphasis".
+ */
+function toSelectionSet(
+  selected: string | string[] | undefined,
+): Set<string> | null {
+  if (selected == null) return null;
+  const names = Array.isArray(selected) ? selected : [selected];
+  const set = new Set(names.map((name) => String(name)));
+  return set.size > 0 ? set : null;
+}
+
+/**
+ * Finds the category-axis label array (`xAxis`/`yAxis` with `type: "category"`),
+ * used to map a bar datum's position to its category name. Returns `null` when
+ * no category axis is present (e.g. time-series or value axes).
+ */
+function categoryNamesFromAxes(
+  option: Record<string, unknown>,
+): (string | number)[] | null {
+  for (const axisKey of ["xAxis", "yAxis"] as const) {
+    const axis = option[axisKey];
+    if (axis !== null && typeof axis === "object" && !Array.isArray(axis)) {
+      const a = axis as Record<string, unknown>;
+      if (a.type === "category" && Array.isArray(a.data)) {
+        return a.data as (string | number)[];
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns a copy of a single data item with its `itemStyle.opacity` set.
+ * Object data items (e.g. pie `{ name, value }`) are spread and their existing
+ * `itemStyle` preserved; primitive data items (e.g. raw bar values) are wrapped
+ * into `{ value, itemStyle }` — the equivalent ECharts data-item form. The
+ * per-datum `itemStyle` merges over the series-level `itemStyle` in ECharts, so
+ * styling such as bar `borderRadius` is retained.
+ */
+function withDatumOpacity(datum: unknown, opacity: number): unknown {
+  if (datum !== null && typeof datum === "object" && !Array.isArray(datum)) {
+    const d = datum as Record<string, unknown>;
+    const prev =
+      d.itemStyle !== null &&
+      typeof d.itemStyle === "object" &&
+      !Array.isArray(d.itemStyle)
+        ? (d.itemStyle as Record<string, unknown>)
+        : {};
+    return { ...d, itemStyle: { ...prev, opacity } };
+  }
+  return { value: datum as number | string, itemStyle: { opacity } };
+}
+
+/**
+ * Applies per-datum opacity to a single series based on the selection set.
+ * Only categorical series carry a resolvable category name:
+ * - `pie` — the name is read from each datum's `name` field.
+ * - `bar` — the name is read from the category axis at the datum's index.
+ * All other series types (line, area, scatter, radar, heatmap) are returned
+ * unchanged, as is any series lacking a resolvable category name.
+ */
+function emphasizeSeries(
+  series: unknown,
+  selected: Set<string>,
+  dimmedOpacity: number,
+  selectedOpacity: number,
+  categoryNames: (string | number)[] | null,
+): unknown {
+  if (series === null || typeof series !== "object" || Array.isArray(series)) {
+    return series;
+  }
+  const s = series as Record<string, unknown>;
+  if (!Array.isArray(s.data)) return series;
+
+  let nameAt: (datum: unknown, index: number) => string | undefined;
+  if (s.type === "pie") {
+    nameAt = (datum) =>
+      datum !== null && typeof datum === "object" && "name" in datum
+        ? String((datum as Record<string, unknown>).name)
+        : undefined;
+  } else if (s.type === "bar") {
+    // Bar data items are raw values; the category name lives on the category axis.
+    if (!categoryNames) return series;
+    nameAt = (_datum, index) =>
+      categoryNames[index] !== undefined
+        ? String(categoryNames[index])
+        : undefined;
+  } else {
+    return series;
+  }
+
+  const data = (s.data as unknown[]).map((datum, index) => {
+    const name = nameAt(datum, index);
+    if (name === undefined) return datum;
+    const opacity = selected.has(name) ? selectedOpacity : dimmedOpacity;
+    return withDatumOpacity(datum, opacity);
+  });
+
+  return { ...s, data };
+}
+
+/**
+ * Pure, declarative selection-emphasis transform for a built ECharts `option`.
+ *
+ * Given one or more selected category names, returns a new `option` in which the
+ * matching data element(s) render at full prominence while the rest are dimmed
+ * via `itemStyle.opacity`. It is a **no-op** (returns the input unchanged) when
+ * `selected` is `undefined` or empty.
+ *
+ * This function never touches an ECharts instance or calls `dispatchAction` — it
+ * only shapes the option object, so it can be composed into the option-building
+ * pipeline. It meaningfully affects the categorical chart types (`bar`, `pie`,
+ * `donut`) where a data point maps to a category name; other chart types are
+ * left untouched.
+ *
+ * @typeParam T - The option object type (typically `Record<string, unknown>`).
+ * @param option - The ECharts option produced by one of the `build*Option` helpers.
+ * @param selected - The selected category name(s); `undefined`/empty means no emphasis.
+ * @param opts - Optional opacity overrides. See {@link SelectionEmphasisOptions}.
+ * @returns A new option with emphasis applied, or the original `option` when there is no selection.
+ */
+export function applySelectionEmphasis<T>(
+  option: T,
+  selected: string | string[] | undefined,
+  opts: SelectionEmphasisOptions = {},
+): T {
+  const selectedSet = toSelectionSet(selected);
+  // No selection → identity: no emphasis, no dimming.
+  if (!selectedSet) return option;
+
+  if (option === null || typeof option !== "object" || Array.isArray(option)) {
+    return option;
+  }
+  const opt = option as Record<string, unknown>;
+  if (!Array.isArray(opt.series)) return option;
+
+  const dimmedOpacity = opts.dimmedOpacity ?? DIMMED_OPACITY;
+  const selectedOpacity = opts.selectedOpacity ?? SELECTED_OPACITY;
+  const categoryNames = categoryNamesFromAxes(opt);
+
+  const series = (opt.series as unknown[]).map((s) =>
+    emphasizeSeries(
+      s,
+      selectedSet,
+      dimmedOpacity,
+      selectedOpacity,
+      categoryNames,
+    ),
+  );
+
+  return { ...opt, series } as T;
+}

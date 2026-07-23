@@ -108,6 +108,7 @@ export type {
   BarChartSpecificProps,
   // Base props
   ChartBaseProps,
+  ChartClickDatum,
   ChartColorPalette,
   ChartData,
   ChartType,

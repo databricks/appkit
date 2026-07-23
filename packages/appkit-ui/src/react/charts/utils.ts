@@ -1,3 +1,5 @@
+import type { ChartClickDatum } from "./types";
+
 // ============================================================================
 // Chart Utility Functions
 // ============================================================================
@@ -123,6 +125,56 @@ export function sortNumericAscending(
   }
 
   return { xData: sortedXData, yDataMap: sortedYDataMap };
+}
+
+/**
+ * Maps a raw ECharts click-event `params` object into a public
+ * {@link ChartClickDatum}.
+ *
+ * This is the single boundary that keeps ECharts types out of appkit-ui's
+ * public API: the input is typed `unknown` (echarts-for-react passes the event
+ * payload loosely) and every field is read defensively via a narrowed local
+ * cast rather than by importing an ECharts type such as `CallbackDataParams` or
+ * `ECElementEvent`.
+ *
+ * Field handling:
+ * - `name` → coerced to a string, falling back to `""` when missing.
+ * - `value` → passed through when it is a `number` or `string`; arrays,
+ *   objects, and missing values become `null`.
+ * - `seriesName` → kept when it is a string, otherwise left `undefined`.
+ * - `dataIndex` / `seriesIndex` → kept when numeric, otherwise `-1`.
+ * - `raw` → the entire original `params` object, untouched.
+ *
+ * @param params - The raw ECharts click-event payload (untyped at our boundary).
+ * @returns A normalized, ECharts-free {@link ChartClickDatum}.
+ */
+export function mapToDatum(params: unknown): ChartClickDatum {
+  const p = (
+    params !== null && typeof params === "object" ? params : {}
+  ) as Record<string, unknown>;
+
+  const name = typeof p.name === "string" ? p.name : "";
+
+  const rawValue = p.value;
+  const value =
+    typeof rawValue === "number" || typeof rawValue === "string"
+      ? rawValue
+      : null;
+
+  const seriesName =
+    typeof p.seriesName === "string" ? p.seriesName : undefined;
+
+  const dataIndex = typeof p.dataIndex === "number" ? p.dataIndex : -1;
+  const seriesIndex = typeof p.seriesIndex === "number" ? p.seriesIndex : -1;
+
+  return {
+    name,
+    value,
+    seriesName,
+    dataIndex,
+    seriesIndex,
+    raw: params,
+  };
 }
 
 /**
