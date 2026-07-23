@@ -13,4 +13,5 @@ export * from "./arrow";
 export * from "./config";
 export * from "./constants";
 export * from "./format";
+export * from "./metric-filter";
 export * from "./sse";

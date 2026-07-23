@@ -317,40 +317,17 @@ export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
     : Record<string, unknown>
   : Record<string, unknown>;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Metric filter vocabulary.
-//
-// **Kept in sync with appkit `plugins/analytics/types.ts`** — appkit-ui cannot
-// depend on appkit, so this mirrors the twelve-operator filter grammar by hand.
-// ────────────────────────────────────────────────────────────────────────────
+// The metric-filter vocabulary is pure data (no React), so it lives canonically
+// on the `/js` axis. Re-export it here so the `/react` public surface — and
+// `UseMetricViewOptions.filter` below — is unchanged. The runtime builder
+// `toMetricFilter` is available from `@databricks/appkit-ui/js`.
+export type {
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricPredicate,
+} from "@/js";
 
-/** v1 filter operator vocabulary — exactly twelve names. */
-export type MetricFilterOperatorName =
-  | "equals"
-  | "notEquals"
-  | "in"
-  | "notIn"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "notContains"
-  | "set"
-  | "notSet";
-
-/** A single filter predicate — the leaf node of the recursive {@link MetricFilter} tree. */
-export interface MetricPredicate {
-  member: string;
-  operator: MetricFilterOperatorName;
-  values?: ReadonlyArray<string | number>;
-}
-
-/** Recursive filter expression: a leaf {@link MetricPredicate} or an `and`/`or` group. */
-export type MetricFilter =
-  | MetricPredicate
-  | { and: ReadonlyArray<MetricFilter> }
-  | { or: ReadonlyArray<MetricFilter> };
+import type { MetricFilter } from "@/js";
 
 /** Options for configuring a `useMetricView` query. */
 export interface UseMetricViewOptions<K extends MetricKey = MetricKey> {

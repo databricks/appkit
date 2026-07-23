@@ -1,4 +1,9 @@
-import { formatLabel, formatValue } from "@databricks/appkit-ui/js";
+import {
+  formatLabel,
+  formatValue,
+  type MetricFilter,
+  toMetricFilter,
+} from "@databricks/appkit-ui/js";
 import {
   Badge,
   BarChart,
@@ -10,8 +15,6 @@ import {
   CardTitle,
   DonutChart,
   LineChart,
-  type MetricFilter,
-  type MetricPredicate,
   Select,
   SelectContent,
   SelectItem,
@@ -66,20 +69,22 @@ const ALL = "__all__";
  * *cross*-filter rather than a global filter: the by-region chart keeps every
  * region visible when a region is selected (so you can pick another), while the
  * charts grouped by *other* dimensions narrow to that region.
+ *
+ * The map-to-`MetricFilter` compilation itself is the SDK's `toMetricFilter`
+ * (from `@databricks/appkit-ui/js`) — this wrapper only adds the cross-filter
+ * facet-exclusion, which is app-specific and stays local.
  */
 function buildFilter(
   selection: Selection,
   exclude?: FilterDimension,
 ): MetricFilter | undefined {
-  const predicates: MetricPredicate[] = [];
+  const shorthand: Record<string, string> = {};
   for (const dimension of FILTER_DIMENSIONS) {
     const value = selection[dimension];
     if (dimension === exclude || value === undefined) continue;
-    predicates.push({ member: dimension, operator: "equals", values: [value] });
+    shorthand[dimension] = value;
   }
-  if (predicates.length === 0) return undefined;
-  if (predicates.length === 1) return predicates[0];
-  return { and: predicates };
+  return toMetricFilter(shorthand);
 }
 
 /**
