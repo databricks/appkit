@@ -84,6 +84,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.47.0](https://github.com/databricks/appkit/compare/v0.46.0...v0.47.0) (2026-07-23)
+
+* metric-view runtime ([#474](https://github.com/databricks/appkit/issues/474)) ([1b1a122](https://github.com/databricks/appkit/commit/1b1a122d3e08baf600df982b5f52d4c37d93aa04)), closes [#341](https://github.com/databricks/appkit/issues/341) [#484](https://github.com/databricks/appkit/issues/484) [#487](https://github.com/databricks/appkit/issues/487)
+
+
 ## [0.46.0](https://github.com/databricks/appkit/compare/v0.45.0...v0.46.0) (2026-07-22)
 
 ### appkit
