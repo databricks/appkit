@@ -40,9 +40,11 @@ const rules: Rule[] = [
   },
 ];
 
-function isTestFile(filePath: string): boolean {
+function isTestFile(filePath: string, rootDir: string): boolean {
+  // Relative to scan root: an ancestor `tests` dir must not mark the whole project as tests.
+  const rel = path.relative(rootDir, filePath);
   return (
-    /\.(test|spec)\.(ts|tsx)$/.test(filePath) || filePath.includes("/tests/")
+    /\.(test|spec)\.(ts|tsx)$/.test(rel) || /(^|[/\\])tests[/\\]/.test(rel)
   );
 }
 
@@ -73,11 +75,15 @@ interface Violation {
   code: string;
 }
 
-function lintFile(filePath: string, rules: Rule[]): Violation[] {
+function lintFile(
+  filePath: string,
+  rules: Rule[],
+  rootDir: string,
+): Violation[] {
   const violations: Violation[] = [];
   const content = fs.readFileSync(filePath, "utf-8");
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
-  const testFile = isTestFile(filePath);
+  const testFile = isTestFile(filePath, rootDir);
 
   const ast = parse(lang, content);
   const root = ast.root();
@@ -120,7 +126,7 @@ function runLint() {
   const allViolations: Violation[] = [];
 
   for (const file of files) {
-    const violations = lintFile(file, rules);
+    const violations = lintFile(file, rules, rootDir);
     allViolations.push(...violations);
   }
 
