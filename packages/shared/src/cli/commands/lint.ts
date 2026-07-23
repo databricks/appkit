@@ -41,10 +41,7 @@ const rules: Rule[] = [
 ];
 
 function isTestFile(filePath: string, rootDir: string): boolean {
-  // Match against the path relative to the scan root, not the absolute path:
-  // an ancestor directory named `tests` (e.g. `~/Developer/tests/my-app`)
-  // must not classify the whole project as tests and disable every
-  // `includeTests: false` rule.
+  // Relative to scan root: an ancestor `tests` dir must not mark the whole project as tests.
   const rel = path.relative(rootDir, filePath);
   return (
     /\.(test|spec)\.(ts|tsx)$/.test(rel) || /(^|[/\\])tests[/\\]/.test(rel)
@@ -78,7 +75,11 @@ interface Violation {
   code: string;
 }
 
-function lintFile(filePath: string, rules: Rule[], rootDir: string): Violation[] {
+function lintFile(
+  filePath: string,
+  rules: Rule[],
+  rootDir: string,
+): Violation[] {
   const violations: Violation[] = [];
   const content = fs.readFileSync(filePath, "utf-8");
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
