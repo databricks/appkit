@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { MetricColumnMeta } from "shared";
 import { connectSSE } from "@/js";
 import type {
@@ -6,7 +13,9 @@ import type {
   MetricKey,
   UseMetricViewOptions,
   UseMetricViewResult,
+  WarehouseStatus,
 } from "./types";
+import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
 
 function getDevMode(): string {
@@ -35,6 +44,16 @@ interface MetricSseContext {
   setErrorCode: (code: string | null) => void;
   setData: (data: Record<string, unknown>[] | null) => void;
   setMetadata: (metadata: Record<string, MetricColumnMeta> | undefined) => void;
+  publishWarehouseStatus: (status: WarehouseStatus | null) => void;
+  unpublishWarehouseStatus: () => void;
+}
+
+function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as WarehouseStatus).state === "string"
+  );
 }
 
 function handleMetricSseMessage(
@@ -42,9 +61,20 @@ function handleMetricSseMessage(
   ctx: MetricSseContext,
 ): void {
   // Warehouse-readiness progress. The metric result type does NOT expose
-  // warehouseStatus (Phase 0 contract), so these events keep the hook in its
-  // loading state without surfacing anything to the caller.
+  // warehouseStatus (Phase 0 contract), so we keep the hook in its loading
+  // state (no caller-facing field) but publish the status to the shared
+  // ResourceStatusProvider — the same side-channel `useAnalyticsQuery` uses to
+  // drive a global "warehouse starting…" indicator during a cold start. This
+  // is a publish-only path: it never mutates UseMetricViewResult.
   if (parsed.type === "warehouse_status") {
+    if (!isWarehouseStatusPayload(parsed.status)) {
+      ctx.setLoading(false);
+      ctx.setError(GENERIC_LOAD_ERROR);
+      ctx.unpublishWarehouseStatus();
+      console.error("[useMetricView] Malformed warehouse_status event", parsed);
+      return;
+    }
+    ctx.publishWarehouseStatus(parsed.status);
     return;
   }
 
@@ -62,6 +92,7 @@ function handleMetricSseMessage(
     ctx.setMetadata(
       parsed.metadata as Record<string, MetricColumnMeta> | undefined,
     );
+    ctx.unpublishWarehouseStatus();
     return;
   }
 
@@ -72,6 +103,7 @@ function handleMetricSseMessage(
       "Unable to execute metric query";
     ctx.setLoading(false);
     ctx.setError(errorMsg);
+    ctx.unpublishWarehouseStatus();
     // Propagate the upstream structured code so UI consumers can branch on a
     // stable identifier instead of parsing the human-readable message.
     if (typeof parsed.errorCode === "string") {
@@ -90,6 +122,7 @@ function handleMetricSseMessage(
   console.error("[useMetricView] Unrecognized SSE payload", parsed);
   ctx.setLoading(false);
   ctx.setError(GENERIC_LOAD_ERROR);
+  ctx.unpublishWarehouseStatus();
 }
 
 /**
@@ -136,6 +169,13 @@ export function useMetricView<K extends MetricKey = MetricKey>(
   >(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Warehouse-readiness status
+  const publisherId = useId();
+  const {
+    publish: publishWarehouseStatus,
+    unpublish: unpublishWarehouseStatus,
+  } = useAnalyticsWarehousePublisher(publisherId, key);
+
   if (!key || key.trim().length === 0) {
     throw new Error("useMetricView: 'key' must be a non-empty string.");
   }
@@ -178,6 +218,9 @@ export function useMetricView<K extends MetricKey = MetricKey>(
     setErrorCode(null);
     setData(null);
     setMetadata(undefined);
+    // Register this hook's slot (null = registered, not contributing) so a
+    // re-query clears any stale warehouse status from the prior run.
+    publishWarehouseStatus(null);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -188,6 +231,8 @@ export function useMetricView<K extends MetricKey = MetricKey>(
       setErrorCode,
       setData: (rows) => setData(rows as Rows | null),
       setMetadata,
+      publishWarehouseStatus,
+      unpublishWarehouseStatus,
     };
 
     connectSSE({
@@ -210,12 +255,14 @@ export function useMetricView<K extends MetricKey = MetricKey>(
           console.warn("[useMetricView] Malformed message received", error);
           setLoading(false);
           setError(GENERIC_LOAD_ERROR);
+          unpublishWarehouseStatus();
           abortController.abort();
         }
       },
       onError: (error) => {
         if (abortController.signal.aborted) return;
         setLoading(false);
+        unpublishWarehouseStatus();
 
         if (error instanceof Error) {
           console.error("[useMetricView] Error", {
@@ -227,7 +274,13 @@ export function useMetricView<K extends MetricKey = MetricKey>(
         setError(userFacingFetchError(error));
       },
     });
-  }, [key, payload, urlSuffix]);
+  }, [
+    key,
+    payload,
+    urlSuffix,
+    publishWarehouseStatus,
+    unpublishWarehouseStatus,
+  ]);
 
   useEffect(() => {
     if (autoStart) {
@@ -236,8 +289,9 @@ export function useMetricView<K extends MetricKey = MetricKey>(
 
     return () => {
       abortControllerRef.current?.abort();
+      unpublishWarehouseStatus();
     };
-  }, [start, autoStart]);
+  }, [start, autoStart, unpublishWarehouseStatus]);
 
   useQueryHMR(key, start);
 

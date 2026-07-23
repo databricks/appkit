@@ -31,6 +31,20 @@ vi.mock("../use-query-hmr", () => ({
   useQueryHMR: vi.fn(),
 }));
 
+// Mock the warehouse-status publisher so we can observe the publish-only
+// side-channel (useMetricView surfaces warehouse readiness ONLY by publishing
+// to the ResourceStatusProvider — it never adds a field to its result). The
+// two spies are stable across renders, mirroring the real hook's useCallback
+// contract, so start()'s identity doesn't churn.
+const mockPublishWarehouseStatus = vi.fn();
+const mockUnpublishWarehouseStatus = vi.fn();
+vi.mock("../use-analytics-warehouse-status", () => ({
+  useAnalyticsWarehousePublisher: () => ({
+    publish: mockPublishWarehouseStatus,
+    unpublish: mockUnpublishWarehouseStatus,
+  }),
+}));
+
 import { useMetricView } from "../use-metric-view";
 
 function markAborted() {
@@ -44,6 +58,8 @@ describe("useMetricView", () => {
     vi.clearAllMocks();
     lastConnectArgs = null;
     capturedCallbacks = {};
+    mockPublishWarehouseStatus.mockClear();
+    mockUnpublishWarehouseStatus.mockClear();
   });
 
   afterEach(() => {
@@ -136,27 +152,87 @@ describe("useMetricView", () => {
     expect(result.current.error).toBeNull();
   });
 
-  test("ignores warehouse_status events without leaving the loading state", async () => {
+  test("publishes warehouse_status to the resource provider without exposing it on the result", async () => {
     const { result } = renderHook(() =>
       useMetricView("orders", { measures: ["revenue"] }),
     );
 
     expect(result.current.loading).toBe(true);
+    // start() registers the slot with a null status (see the publish-only
+    // side-channel) before any event arrives.
+    expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(null);
+
+    const status = { state: "STARTING", elapsedMs: 1200 };
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "warehouse_status", status }),
+      });
+    });
+
+    // The event is published to the shared provider (driving a global
+    // "warehouse starting…" indicator) but the metric result shape does NOT
+    // expose warehouseStatus (Phase 0 contract) and the hook stays loading.
+    expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(status);
+    expect(mockUnpublishWarehouseStatus).not.toHaveBeenCalled();
+    expect(result.current).not.toHaveProperty("warehouseStatus");
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  test("unpublishes warehouse status once the result arrives", async () => {
+    const { result } = renderHook(() =>
+      useMetricView("orders", { measures: ["revenue"] }),
+    );
 
     act(() => {
       lastConnectArgs.onMessage({
         data: JSON.stringify({
           type: "warehouse_status",
-          status: { state: "STARTING", elapsedMs: 1200 },
+          status: { state: "STARTING", elapsedMs: 500 },
         }),
       });
     });
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "result", data: [{ revenue: 1 }] }),
+      });
+    });
 
-    // The metric result shape does not expose warehouseStatus — the event is a
-    // no-op that keeps the hook loading until the result arrives.
-    expect(result.current.loading).toBe(true);
-    expect(result.current.data).toBeNull();
-    expect(result.current.error).toBeNull();
+    await waitFor(() => {
+      expect(result.current.data).toEqual([{ revenue: 1 }]);
+    });
+    // The indicator must clear once the warehouse is ready and rows land.
+    expect(mockUnpublishWarehouseStatus).toHaveBeenCalled();
+  });
+
+  test("a malformed warehouse_status event errors and unpublishes rather than publishing", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { result } = renderHook(() =>
+      useMetricView("orders", { measures: ["revenue"] }),
+    );
+
+    // Baseline publish(null) from start(); a malformed event must not publish
+    // a status on top of it.
+    const publishCallsBefore = mockPublishWarehouseStatus.mock.calls.length;
+
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "warehouse_status" }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe(
+        "Unable to load data, please try again",
+      );
+    });
+    expect(result.current.loading).toBe(false);
+    expect(mockPublishWarehouseStatus.mock.calls.length).toBe(
+      publishCallsBefore,
+    );
+    expect(mockUnpublishWarehouseStatus).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   test("a server error event exposes both the message and the structured errorCode", async () => {
