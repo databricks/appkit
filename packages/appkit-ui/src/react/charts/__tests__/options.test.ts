@@ -28,6 +28,7 @@ interface EChartsOption {
     showSymbol?: boolean;
     symbol?: string;
     symbolSize?: number;
+    triggerLineEvent?: boolean;
     areaStyle?: { opacity: number };
     stack?: string;
     itemStyle?: { borderRadius?: number[] };
@@ -199,6 +200,65 @@ describe("buildCartesianOption", () => {
 
       expect(opt.series[0].smooth).toBe(false);
       expect(opt.series[0].showSymbol).toBe(false);
+    });
+
+    test("applies symbolSize to line series (not just scatter)", () => {
+      const ctx = createBaseContext();
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "line",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: true,
+          showSymbol: true,
+          symbolSize: 14,
+        }),
+      );
+
+      expect(opt.series[0].symbolSize).toBe(14);
+    });
+
+    test("sets triggerLineEvent only when interactive", () => {
+      const ctx = createBaseContext();
+      const base = {
+        ...ctx,
+        chartType: "line" as const,
+        isTimeSeries: false,
+        stacked: false,
+        smooth: true,
+        showSymbol: true,
+        symbolSize: 8,
+      };
+
+      // Non-interactive line: no triggerLineEvent.
+      expect(
+        asOption(buildCartesianOption(base)).series[0].triggerLineEvent,
+      ).toBeUndefined();
+
+      // Interactive line: whole stroke is clickable.
+      expect(
+        asOption(buildCartesianOption({ ...base, interactive: true })).series[0]
+          .triggerLineEvent,
+      ).toBe(true);
+    });
+
+    test("does not set triggerLineEvent on a bar series even when interactive", () => {
+      const ctx = createBaseContext();
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "bar",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: false,
+          showSymbol: false,
+          symbolSize: 8,
+          interactive: true,
+        }),
+      );
+
+      expect(opt.series[0].triggerLineEvent).toBeUndefined();
     });
   });
 

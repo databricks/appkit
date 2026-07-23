@@ -9,12 +9,14 @@ import {
   BarChart,
   Button,
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
   DonutChart,
   LineChart,
+  notify,
   Select,
   SelectContent,
   SelectItem,
@@ -30,6 +32,7 @@ import {
   useMetricView,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
+import { FilterIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Header } from "@/components/layout/header";
 
@@ -85,6 +88,47 @@ function buildFilter(
     shorthand[dimension] = value;
   }
   return toMetricFilter(shorthand);
+}
+
+/**
+ * The dimensions actually shaping a card's data, given the shared selection and
+ * the card's own excluded dimension. Mirrors `buildFilter`'s facet-exclusion so
+ * the badge tells the truth per-card: the ARR-by-region card excludes `region`,
+ * so it never claims a region filter it deliberately ignores.
+ */
+function appliedDimensions(
+  selection: Selection,
+  exclude?: FilterDimension,
+): FilterDimension[] {
+  return FILTER_DIMENSIONS.filter(
+    (dimension) => dimension !== exclude && selection[dimension] !== undefined,
+  );
+}
+
+/**
+ * Header badge that makes a card explicit about which filters shaped its data.
+ * Renders nothing when the card is unfiltered, so an unsliced card stays clean.
+ * Placed in `CardAction` (top-right of the header) via the caller.
+ */
+function FilterBadge({
+  selection,
+  exclude,
+}: {
+  selection: Selection;
+  exclude?: FilterDimension;
+}) {
+  const applied = appliedDimensions(selection, exclude);
+  if (applied.length === 0) return null;
+  return (
+    <Badge variant="secondary" className="gap-1">
+      <FilterIcon className="size-3" aria-hidden />
+      {applied
+        .map(
+          (dimension) => `${formatLabel(dimension)}: ${selection[dimension]}`,
+        )
+        .join(" · ")}
+    </Badge>
+  );
 }
 
 /**
@@ -313,6 +357,11 @@ function MetricViewsRoute() {
               <CardDescription>
                 revenue · arr · grouped by region
               </CardDescription>
+              <CardAction>
+                {/* Excludes `region` — same facet-exclusion as this card's
+                    filter, so it never claims the region slice it ignores. */}
+                <FilterBadge selection={selection} exclude="region" />
+              </CardAction>
             </CardHeader>
             <CardContent>
               <VisualStatus
@@ -329,7 +378,6 @@ function MetricViewsRoute() {
                     xKey="region"
                     yKey="arr"
                     height={280}
-                    title="Annual recurring revenue by region"
                     onDataClick={(d) => setDimension("region", d.name)}
                     selected={selection.region}
                   />
@@ -344,6 +392,9 @@ function MetricViewsRoute() {
               <CardDescription>
                 revenue · arr · grouped by segment
               </CardDescription>
+              <CardAction>
+                <FilterBadge selection={selection} exclude="segment" />
+              </CardAction>
             </CardHeader>
             <CardContent>
               <VisualStatus
@@ -362,7 +413,6 @@ function MetricViewsRoute() {
                     height={280}
                     innerRadius={55}
                     showLegend
-                    title="Annual recurring revenue by segment"
                     onDataClick={(d) => setDimension("segment", d.name)}
                     selected={selection.segment}
                   />
@@ -378,6 +428,11 @@ function MetricViewsRoute() {
             <CardDescription>
               revenue · measures {TREND_MEASURES.join(", ")} · grouped by month
             </CardDescription>
+            <CardAction>
+              {/* No `exclude` — the trend groups by time, so it applies the
+                  full selection (both region and segment narrow it). */}
+              <FilterBadge selection={selection} />
+            </CardAction>
           </CardHeader>
           <CardContent>
             <VisualStatus
@@ -395,7 +450,45 @@ function MetricViewsRoute() {
                   yKey={[...TREND_MEASURES]}
                   height={320}
                   showLegend
-                  title="ARR vs MRR over time"
+                  // Render point symbols + trigger clicks along the whole line
+                  // (SDK's triggerLineEvent, on because onDataClick is set) so
+                  // the hairline isn't the only hit target.
+                  showSymbol
+                  // Clicking a point fires a transient "write-back" toast (the
+                  // "Apps = action layer" gesture) through the same Toaster the
+                  // warehouse-status indicator uses.
+                  onDataClick={(d) => {
+                    // Resolve the measure by series INDEX — yKey order ===
+                    // TREND_MEASURES order, and sorting only reorders points
+                    // WITHIN a series, not the series array. (Parsing the "Arr"
+                    // label wouldn't round-trip to keys like "new_arr", and
+                    // indexing trend.data by dataIndex is wrong because the
+                    // time series is sorted before rendering.)
+                    const measureKey = TREND_MEASURES[d.seriesIndex];
+                    if (!measureKey) return;
+                    const meta = trend.metadata?.[measureKey];
+                    const label = meta?.display_name ?? measureKey;
+                    // A time-series point is a [epochMs, value] tuple on
+                    // ECharts' params.value (d.value is null for tuples); read
+                    // it off the raw params so both the date and amount survive.
+                    const tuple = (d.raw as { value?: unknown } | undefined)
+                      ?.value;
+                    const [ts, amount] = Array.isArray(tuple)
+                      ? tuple
+                      : [undefined, undefined];
+                    const month =
+                      typeof ts === "number"
+                        ? new Date(ts).toLocaleDateString(undefined, {
+                            year: "numeric",
+                            month: "short",
+                          })
+                        : String(d.name || "");
+                    const formatted = formatValue(amount, meta?.format);
+                    notify.message(
+                      `Write back: ${label} · ${month} · ${formatted}`,
+                      { description: "Point selected for write-back (demo)." },
+                    );
+                  }}
                 />
               )}
           </CardContent>
@@ -409,6 +502,11 @@ function MetricViewsRoute() {
               Click a row to filter every visual by that region — click again
               (or a chip above) to clear.
             </CardDescription>
+            <CardAction>
+              {/* Grouped by region, so it excludes `region` (same as the region
+                  bar) — a segment filter still narrows it. */}
+              <FilterBadge selection={selection} exclude="region" />
+            </CardAction>
           </CardHeader>
           <CardContent>
             <VisualStatus

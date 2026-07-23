@@ -232,6 +232,15 @@ export function BaseChart({
 
   const ui = useChartUITokens();
 
+  // Only the *presence* of a click handler shapes the option (it flips
+  // `triggerLineEvent`/`symbolSize` on line/area). Depend on this boolean, not
+  // the handler reference — consumers pass an inline `onDataClick`, whose
+  // identity changes every render, so depending on the reference would rebuild
+  // the whole option object on every parent re-render (e.g. each SSE tick). The
+  // `onEvents` memo below still depends on `onDataClick` itself — it needs the
+  // real function.
+  const interactive = !!onDataClick;
+
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
 
@@ -348,6 +357,9 @@ export function BaseChart({
         smooth,
         showSymbol,
         symbolSize,
+        // A click handler turns on `triggerLineEvent` for line/area so the
+        // whole stroke is clickable, not just symbols.
+        interactive,
       });
     }
 
@@ -375,6 +387,7 @@ export function BaseChart({
     max,
     customOptions,
     selected,
+    interactive,
   ]);
 
   // Build the ECharts event map only when a click handler is provided. Memoized

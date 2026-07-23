@@ -29,6 +29,12 @@ export interface CartesianContext extends OptionBuilderContext {
   smooth: boolean;
   showSymbol: boolean;
   symbolSize: number;
+  /**
+   * Whether a click handler is attached. When true, line/area series set
+   * `triggerLineEvent` so a click anywhere on the stroke fires (not just on a
+   * symbol) — otherwise clicking a thin line is nearly impossible to land.
+   */
+  interactive?: boolean;
 }
 
 // ============================================================================
@@ -331,11 +337,19 @@ export function buildCartesianOption(
   ctx: CartesianContext,
 ): Record<string, unknown> {
   const ui = ctx.ui ?? FALLBACK_UI_TOKENS;
-  const { chartType, isTimeSeries, stacked, smooth, showSymbol, symbolSize } =
-    ctx;
+  const {
+    chartType,
+    isTimeSeries,
+    stacked,
+    smooth,
+    showSymbol,
+    symbolSize,
+    interactive,
+  } = ctx;
   const hasMultipleSeries = ctx.yFields.length > 1;
   const seriesType = chartType === "area" ? "line" : chartType;
   const isScatter = chartType === "scatter";
+  const isLineLike = chartType === "line" || chartType === "area";
 
   return {
     ...buildBaseOption(ctx),
@@ -378,11 +392,15 @@ export function buildCartesianOption(
         : isTimeSeries
           ? createTimeSeriesData(ctx.xData, ctx.yDataMap[key])
           : ctx.yDataMap[key],
-      smooth: chartType === "line" || chartType === "area" ? smooth : undefined,
-      showSymbol:
-        chartType === "line" || chartType === "area" ? showSymbol : undefined,
+      smooth: isLineLike ? smooth : undefined,
+      showSymbol: isLineLike ? showSymbol : undefined,
       symbol: isScatter ? "circle" : undefined,
-      symbolSize: isScatter ? symbolSize : undefined,
+      // Symbol size now applies to line/area too (previously scatter-only), so
+      // an interactive line can present a clickable point, not just a hairline.
+      symbolSize: isScatter || isLineLike ? symbolSize : undefined,
+      // Fire click events along the whole line stroke, not only on symbols,
+      // when the chart is interactive. No effect on non-line series.
+      triggerLineEvent: isLineLike && interactive ? true : undefined,
       areaStyle: chartType === "area" ? { opacity: 0.3 } : undefined,
       stack: stacked && chartType === "area" ? "total" : undefined,
       itemStyle:
