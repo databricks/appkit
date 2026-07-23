@@ -330,6 +330,8 @@ function MetricViewsRoute() {
                     yKey="arr"
                     height={280}
                     title="Annual recurring revenue by region"
+                    onDataClick={(d) => setDimension("region", d.name)}
+                    selected={selection.region}
                   />
                 )}
             </CardContent>
@@ -361,6 +363,8 @@ function MetricViewsRoute() {
                     innerRadius={55}
                     showLegend
                     title="Annual recurring revenue by segment"
+                    onDataClick={(d) => setDimension("segment", d.name)}
+                    selected={selection.segment}
                   />
                 )}
             </CardContent>
