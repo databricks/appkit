@@ -1,4 +1,5 @@
 import type { Table } from "apache-arrow";
+import type { MetricColumnMeta } from "shared";
 
 // ============================================================================
 // Data Format Types
@@ -247,3 +248,128 @@ export type InferServingRequest<K> =
       ? Req
       : Record<string, unknown>
     : Record<string, unknown>;
+
+// ============================================================================
+// Metric View Registry
+// ============================================================================
+
+/**
+ * Metric view registry for type-safe metric keys, measure/dimension names,
+ * time grains, and row shapes. Extend this interface via module augmentation
+ * to get autocomplete for `useMetricView`:
+ *
+ * @example
+ * ```typescript
+ * // Auto-generated (generated metric-views.ts)
+ * declare module "@databricks/appkit-ui/react" {
+ *   interface MetricRegistry {
+ *     orders: {
+ *       measureKeys: "revenue" | "order_count";
+ *       dimensionKeys: "region" | "order_date";
+ *       timeGrains: "day" | "month";
+ *       measures: { revenue: number; order_count: number };
+ *       dimensions: { region: string; order_date: string };
+ *     };
+ *   }
+ * }
+ * ```
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation (generated metric-views.ts)
+export interface MetricRegistry {}
+
+/** Resolves to registry keys if populated, otherwise string */
+export type MetricKey = AugmentedRegistry<MetricRegistry> extends never
+  ? string
+  : AugmentedRegistry<MetricRegistry>;
+
+/** Infers measure key names from the registry when K is a known key */
+export type InferMeasureKeys<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { measureKeys: infer M }
+    ? M
+    : string
+  : string;
+
+/** Infers dimension key names from the registry when K is a known key */
+export type InferDimensionKeys<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { dimensionKeys: infer D }
+    ? D
+    : string
+  : string;
+
+/** Infers time-grain names from the registry when K is a known key */
+export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { timeGrains: infer G }
+    ? G
+    : string
+  : string;
+
+/**
+ * Infers the row shape (measures + dimensions) from the registry when K is a
+ * known key, otherwise a total `Record<string, unknown>`. Never resolves to
+ * `never` — always assignable to `Record<string, unknown>`.
+ */
+export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends {
+      measures: infer Meas;
+      dimensions: infer Dim;
+    }
+    ? Meas & Dim
+    : Record<string, unknown>
+  : Record<string, unknown>;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Metric filter vocabulary.
+//
+// **Kept in sync with appkit `plugins/analytics/types.ts`** — appkit-ui cannot
+// depend on appkit, so this mirrors the twelve-operator filter grammar by hand.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** v1 filter operator vocabulary — exactly twelve names. */
+export type MetricFilterOperatorName =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "set"
+  | "notSet";
+
+/** A single filter predicate — the leaf node of the recursive {@link MetricFilter} tree. */
+export interface MetricPredicate {
+  member: string;
+  operator: MetricFilterOperatorName;
+  values?: ReadonlyArray<string | number>;
+}
+
+/** Recursive filter expression: a leaf {@link MetricPredicate} or an `and`/`or` group. */
+export type MetricFilter =
+  | MetricPredicate
+  | { and: ReadonlyArray<MetricFilter> }
+  | { or: ReadonlyArray<MetricFilter> };
+
+/** Options for configuring a `useMetricView` query. */
+export interface UseMetricViewOptions<K extends MetricKey = MetricKey> {
+  measures: ReadonlyArray<InferMeasureKeys<K>>;
+  dimensions?: ReadonlyArray<InferDimensionKeys<K>>;
+  filter?: MetricFilter;
+  timeGrain?: InferTimeGrains<K>;
+  timeDimension?: InferDimensionKeys<K>;
+  limit?: number;
+  autoStart?: boolean;
+}
+
+/** Result state returned by `useMetricView`. */
+export interface UseMetricViewResult<T = Record<string, unknown>[]> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  /** Structured upstream error code, mirroring useAnalyticsQuery. */
+  errorCode: string | null;
+  /** Per-column display metadata for the queried columns, carried in the SSE result payload. `undefined` when the server injected no metadata (dormant / unknown key). */
+  metadata: Record<string, MetricColumnMeta> | undefined;
+}
