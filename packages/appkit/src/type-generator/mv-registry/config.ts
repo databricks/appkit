@@ -9,6 +9,7 @@ import path from "node:path";
 // shared source directly and drags in no zod.
 import {
   MAX_UC_OBJECT_NAME_LENGTH,
+  METRIC_CONFIG_FILE,
   UC_FQN_PATTERN,
 } from "../../../../shared/src/schemas/metric-fqn";
 import type {
@@ -17,8 +18,6 @@ import type {
   MetricSourceConfig,
   ResolvedMetricEntry,
 } from "./types";
-
-const MV_CONFIG_FILE = "metric-views.json";
 
 /**
  * Safety cap on declared metric views — a typo / DoS guard, NOT a Unity Catalog
@@ -44,18 +43,19 @@ function compareKeys(a: string, b: string): number {
 }
 
 /**
- * Read {@link MV_CONFIG_FILE} from a queries folder.
+ * Read {@link METRIC_CONFIG_FILE} from a metric-views folder
+ * (`config/metric-views/`).
  *
  * Returns `null` if the file does not exist (the metric-view path is
- * additive — apps without metric-views.json must not be penalized). There is
- * deliberately no fallback to the legacy `metric.json` filename.
+ * additive — apps without definitions.json must not be penalized). There is
+ * deliberately no fallback to a legacy filename.
  *
  * Throws on JSON parse errors so misconfiguration surfaces loudly.
  */
 export async function readMetricConfig(
-  queryFolder: string,
+  metricViewsFolder: string,
 ): Promise<MetricSourceConfig | null> {
-  const metricPath = path.join(queryFolder, MV_CONFIG_FILE);
+  const metricPath = path.join(metricViewsFolder, METRIC_CONFIG_FILE);
   let raw: string;
   try {
     raw = await fs.readFile(metricPath, "utf8");
@@ -71,13 +71,13 @@ export async function readMetricConfig(
     parsed = JSON.parse(raw);
   } catch (err) {
     throw new Error(
-      `Failed to parse metric-views.json at ${metricPath}: ${(err as Error).message}`,
+      `Failed to parse definitions.json at ${metricPath}: ${(err as Error).message}`,
     );
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(
-      `Invalid metric-views.json at ${metricPath}: expected an object with a 'metricViews' map.`,
+      `Invalid definitions.json at ${metricPath}: expected an object with a 'metricViews' map.`,
     );
   }
 
@@ -94,26 +94,9 @@ function isValidMetricKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 }
 
-/**
- * Total predicate: is `fqn` a well-formed three-part UC metric view FQN?
- *
- * Well-formed = exactly three non-empty, dot-separated segments, each a valid
- * Unity Catalog object name per the shared {@link UC_FQN_PATTERN} (the single
- * source of truth, also used by the canonical Zod schema). Used as the
- * defense-in-depth re-check at the describe fetcher seam; {@link resolveMetricConfig}
- * runs the same checks but with specific, staged error messages.
- *
- * @note Segment length ({@link MAX_FQN_SEGMENT_LENGTH}) is NOT checked here —
- * an over-long but otherwise legal name is still "valid shape". The length cap
- * is a separate concern enforced (with its own message) in resolveMetricConfig.
- */
-export function isValidFqn(fqn: string): boolean {
-  const segments = fqn.split(".");
-  if (segments.length !== FQN_SEGMENT_COUNT) {
-    return false;
-  }
-  return segments.every((segment) => UC_FQN_PATTERN.test(segment));
-}
+// `resolveMetricConfig` re-derives the three-part UC FQN checks inline (rather
+// than calling a shared predicate) so it can emit specific, staged error
+// messages: arity, per-segment charset, per-segment length.
 
 /**
  * Field allowlists enforced by {@link resolveMetricConfig}.
@@ -130,7 +113,7 @@ export function resolveMetricConfig(
   for (const field of Object.keys(config)) {
     if (!ALLOWED_TOP_LEVEL_FIELDS.has(field)) {
       throw new Error(
-        `Invalid top-level field "${field}" in metric-views.json: only '$schema' and 'metricViews' are allowed.`,
+        `Invalid top-level field "${field}" in definitions.json: only '$schema' and 'metricViews' are allowed.`,
       );
     }
   }
@@ -146,7 +129,7 @@ export function resolveMetricConfig(
     Array.isArray(metricViews)
   ) {
     throw new Error(
-      `Invalid 'metricViews' in metric-views.json: expected an object map of metric entries.`,
+      `Invalid 'metricViews' in definitions.json: expected an object map of metric entries.`,
     );
   }
 
@@ -154,7 +137,7 @@ export function resolveMetricConfig(
   const sortedKeys = Object.keys(metricViews).sort(compareKeys);
   if (sortedKeys.length > MAX_METRIC_VIEWS) {
     throw new Error(
-      `Invalid 'metricViews' in metric-views.json: ${sortedKeys.length} metric views exceed the maximum of ${MAX_METRIC_VIEWS}.`,
+      `Invalid 'metricViews' in definitions.json: ${sortedKeys.length} metric views exceed the maximum of ${MAX_METRIC_VIEWS}.`,
     );
   }
   for (const key of sortedKeys) {

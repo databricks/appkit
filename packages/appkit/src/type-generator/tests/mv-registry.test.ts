@@ -3,13 +3,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+// `quoteFqnForSql` now lives in the shared zod-free leaf alongside the FQN
+// grammar (moved so the analytics runtime can reuse it); the describe seam
+// imports it from there.
+import { quoteFqnForSql } from "../../../../shared/src/schemas/metric-fqn";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
 import { readMetricConfig, resolveMetricConfig } from "../mv-registry/config";
 import {
   createWorkspaceDescribeFetcher,
   extractMetricColumns,
   parseDescribeTableExtendedJson,
-  quoteFqnForSql,
 } from "../mv-registry/describe";
 import { generateMetricTypeDeclarations } from "../mv-registry/render-types";
 import { syncMetrics } from "../mv-registry/sync";
@@ -77,7 +80,7 @@ describe("readMetricConfig", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  test("returns null when metric-views.json is absent", async () => {
+  test("returns null when definitions.json is absent", async () => {
     expect(await readMetricConfig(tmpDir)).toBeNull();
   });
 
@@ -91,9 +94,9 @@ describe("readMetricConfig", () => {
     expect(await readMetricConfig(tmpDir)).toBeNull();
   });
 
-  test("parses a valid metric-views.json", async () => {
+  test("parses a valid definitions.json", async () => {
     await fs.writeFile(
-      path.join(tmpDir, "metric-views.json"),
+      path.join(tmpDir, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "demo.public.revenue" } },
       }),
@@ -103,9 +106,9 @@ describe("readMetricConfig", () => {
   });
 
   test("throws on malformed JSON", async () => {
-    await fs.writeFile(path.join(tmpDir, "metric-views.json"), "{not json");
+    await fs.writeFile(path.join(tmpDir, "definitions.json"), "{not json");
     await expect(readMetricConfig(tmpDir)).rejects.toThrowError(
-      /parse metric-views\.json/,
+      /parse definitions\.json/,
     );
   });
 });

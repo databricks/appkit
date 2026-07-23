@@ -29,6 +29,13 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
+import {
+  buildMetricSql,
+  composeMetricCacheKey,
+  deriveMetricExecutorKey,
+  loadMetricRegistry,
+  validateMetricRequest,
+} from "./metric";
 import { QueryProcessor } from "./query";
 import {
   type ArrowCapability,
@@ -41,6 +48,7 @@ import {
   type AnalyticsStreamMessage,
   type IAnalyticsConfig,
   type IAnalyticsQueryRequest,
+  type MetricRegistration,
   normalizeAnalyticsFormat,
   type WarehouseStatus,
 } from "./types";
@@ -137,10 +145,20 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       },
     });
 
+    // Metric-view route. Registered parallel to `/query`
+    // measures a registered UC Metric View over the same SSE envelope.
+    this.route(router, {
+      name: "metric",
+      method: "post",
+      path: "/metric/:key",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleMetricRoute(req, res);
+      },
+    });
+
     // Column-names fallback for very wide Arrow schemas whose names don't fit
-    // in the `X-Appkit-Arrow-Columns` response header (see
-    // `_setArrowColumnsHeader`). The client hits this with the statement id
-    // from `X-Appkit-Arrow-Columns-Ref`.
+    // in the `X-Appkit-Arrow-Columns` response header.
+    // The client hits this with the statement id from `X-Appkit-Arrow-Columns-Ref`.
     this.route(router, {
       name: "arrow-columns",
       method: "get",
@@ -410,6 +428,264 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) and sanitized `clientMessage`
           // survive to the SSE error payload. Fall back to a generic
           // statement failure only if the original wasn't an AppKitError.
+          if (originalError instanceof AppKitError) {
+            throw originalError;
+          }
+          const inner = msg.startsWith("Statement failed: ")
+            ? msg.slice("Statement failed: ".length)
+            : msg;
+          throw ExecutionError.statementFailed(inner);
+        }
+
+        yield sqlResult.data as AnalyticsStreamMessage;
+      },
+      streamExecutionSettings,
+      executorKey,
+    );
+  }
+
+  /**
+   * Handle metric-view execution requests (`POST /api/analytics/metric/:key`).
+   *
+   * Mirrors {@link _handleQueryRoute}'s JSON SSE path: the outer
+   * `executeStream` disables cache/retry and streams warehouse-readiness
+   * (`warehouse_status`) events, then the inner `execute` builds the metric SQL
+   * and delivers rows through {@link deliverJsonResult} as a `result` message.
+   * The `originalError` re-throw discipline preserves each error's structured
+   * `errorCode`/`clientMessage` for the SSE error payload.
+   *
+   * Lane dispatch is driven by the registration: an SP-lane metric runs as the
+   * app service principal (shared cache); an OBO-lane metric runs
+   * on-behalf-of the requesting user via `asUser(req)` (per-user cache keyed by
+   * a hash of the user identity).
+   */
+  async _handleMetricRoute(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { key } = req.params;
+
+    logger.debug(req, "Executing metric: %s", key);
+
+    const event = logger.event(req);
+    event?.setComponent("analytics", "executeMetric").setContext("analytics", {
+      metric_key: key,
+      plugin: this.name,
+    });
+
+    if (!key) {
+      res.status(400).json({ error: "metric key is required" });
+      return;
+    }
+
+    // Resolve the registry from disk: read + parse `definitions.json` once per
+    // request (no memoization). Reads through the plugin's shared `this.app`
+    // (the base `Plugin`'s `AppManager`) from `config/metric-views/` under the
+    // process cwd, so this is dev-tunnel aware and inherits the traversal
+    // guard — the same mechanism as the sibling `.sql` query path.
+    let registry: Record<string, MetricRegistration>;
+    try {
+      registry = await loadMetricRegistry(this.app, req, this.devFileReader);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn(req, "Failed to load metric registry: %s", reason);
+      event?.setContext("analytics", {
+        metric_registry_load_error: reason,
+      });
+      res.status(503).json({
+        error: "Metric registry not available",
+        code: "METRIC_REGISTRY_LOAD_FAILED",
+      });
+      return;
+    }
+
+    // Own-property lookup: never resolve `key` to an inherited `Object.prototype` member.
+    const registration = Object.hasOwn(registry, key)
+      ? registry[key]
+      : undefined;
+    if (!registration) {
+      // Don't echo the user-supplied `key` back in the public response.
+      event?.setContext("analytics", { unknown_metric_key: key });
+      res.status(404).json({ error: "Metric not found" });
+      return;
+    }
+
+    // Validate the body on the canonical error path.
+    // `validateMetricRequest` throws a `ValidationError` (400) whose message names only field paths, never raw values.
+    let request: ReturnType<typeof validateMetricRequest>;
+    try {
+      request = validateMetricRequest(req.body ?? {});
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({ error: err.message, code: err.code });
+        return;
+      }
+      event?.setContext("analytics", {
+        unexpected_error: err instanceof Error ? err.message : String(err),
+        metric_key: key,
+      });
+      logger.warn(
+        req,
+        "Unexpected throw during metric request validation for %s: %s",
+        key,
+        err instanceof Error ? err.message : String(err),
+      );
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+
+    // Lane dispatch. The lane comes from the registration (the entry's
+    // `executor` in definitions.json), NOT a URL segment or `.obo.sql`
+    // filename: an OBO-lane metric runs on-behalf-of the requesting user
+    // (per-user cache via `asUser(req)`), an SP-lane metric as the app service
+    // principal (shared cache).
+    let executor: AnalyticsPlugin;
+    let executorKey: string;
+    try {
+      const isObo = registration.lane === "obo";
+      executor = isObo ? this.asUser(req) : this;
+      executorKey = deriveMetricExecutorKey({
+        lane: registration.lane,
+        userIdentity: isObo ? this.resolveUserId(req) : undefined,
+      });
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
+
+    // Cache key. Composed over the canonicalized args (sorted measures/
+    // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
+    // the `executorKey` — `"sp"` shares the cache across all users, a per-user
+    // identity hash isolates OBO callers.
+    const cacheConfig = {
+      ...queryDefaults.cache,
+      cacheKey: composeMetricCacheKey({
+        metricKey: key,
+        source: registration.source,
+        measures: request.measures,
+        dimensions: request.dimensions,
+        timeGrain: request.timeGrain,
+        timeDimension: request.timeDimension,
+        filter: request.filter,
+        format: "JSON_ARRAY",
+        executorKey,
+        limit: request.limit,
+      }),
+    };
+
+    // Cache/retry/timeout scoped to the SQL execution itself (inner `execute`)
+    // so the warehouse-readiness phase isn't retried and the generator value
+    // never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
+      ...queryDefaults,
+      cache: cacheConfig,
+    };
+
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // trace context still apply.
+    const streamExecutionSettings: StreamExecutionSettings = {
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
+    };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
+
+    await executor.executeStream(
+      res,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
+        );
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            },
+          };
+        }
+
+        // `execute()` reduces a thrown error to `{ status, message }`,
+        // dropping the rich fields (`errorCode`, `clientMessage`). Capture the
+        // original here so we can re-throw it intact — the SSE error path
+        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
+        let originalError: unknown;
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            try {
+              const { statement, parameters } = buildMetricSql(
+                registration,
+                request,
+              );
+              const processedParams =
+                await self.queryProcessor.processQueryParams(
+                  statement,
+                  Object.keys(parameters).length > 0 ? parameters : undefined,
+                );
+              // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
+              // an ARROW_STREAM-inline fallback, returning plain rows in a
+              // `result` message — byte-identical envelope to `/query`.
+              return await self._executeJsonArrayPath(
+                executor,
+                statement,
+                processedParams,
+                sig,
+              );
+            } catch (err) {
+              originalError = err;
+              throw err;
+            }
+          },
+          { default: sqlConfig },
+          executorKey,
+        );
+
+        if (!sqlResult.ok) {
+          const msg = sqlResult.message;
+          const lower = msg.toLowerCase();
+          if (
+            lower.includes("operation was aborted") ||
+            lower.includes("the request was aborted") ||
+            lower.includes("statement was canceled")
+          ) {
+            const err = new DOMException(
+              lower.includes("canceled") ? msg : "The operation was aborted.",
+              "AbortError",
+            );
+            throw err;
+          }
+          // Re-throw the original error so its structured `errorCode` and
+          // sanitized `clientMessage` survive to the SSE error payload. Fall
+          // back to a generic statement failure only if it wasn't an
+          // AppKitError.
           if (originalError instanceof AppKitError) {
             throw originalError;
           }

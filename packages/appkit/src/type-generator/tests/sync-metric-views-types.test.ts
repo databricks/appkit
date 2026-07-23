@@ -92,7 +92,7 @@ const DESCRIBE_BY_FQN: Record<string, unknown> = {
 
 describe("syncMetricViewsTypes", () => {
   let tmpRoot: string;
-  let queryFolder: string;
+  let metricViewsFolder: string;
   let metricOutFile: string;
 
   // A spy fetcher so cache tests can assert which FQNs were (re)described.
@@ -106,7 +106,7 @@ describe("syncMetricViewsTypes", () => {
 
   const writeMixedConfig = () => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
         metricViews: {
           // SP lane (default executor).
@@ -122,8 +122,8 @@ describe("syncMetricViewsTypes", () => {
     fetcher.mockClear();
     mocks.cacheFile.contents = undefined;
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sync-metric-types-"));
-    queryFolder = path.join(tmpRoot, "config", "queries");
-    fs.mkdirSync(queryFolder, { recursive: true });
+    metricViewsFolder = path.join(tmpRoot, "config", "metric-views");
+    fs.mkdirSync(metricViewsFolder, { recursive: true });
     metricOutFile = path.join(
       tmpRoot,
       "shared",
@@ -140,7 +140,7 @@ describe("syncMetricViewsTypes", () => {
     writeMixedConfig();
 
     const result = await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -177,9 +177,9 @@ describe("syncMetricViewsTypes", () => {
     expect(declarations).toContain('"$#,##0.00"');
   });
 
-  test("returns noConfig and writes nothing when metric-views.json is absent", async () => {
+  test("returns noConfig and writes nothing when definitions.json is absent", async () => {
     const result = await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -198,7 +198,7 @@ describe("syncMetricViewsTypes", () => {
 
     // First run: both keys are cache misses → both described, results persisted.
     await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -210,7 +210,7 @@ describe("syncMetricViewsTypes", () => {
     // Second run, same config: both keys hit the cache → zero DESCRIBE calls,
     // and the artifacts are still regenerated from the cached schemas.
     const result = await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -232,7 +232,7 @@ describe("syncMetricViewsTypes", () => {
 
     // Warm the cache.
     await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -243,7 +243,7 @@ describe("syncMetricViewsTypes", () => {
 
     // cache: false ignores the warm section → both keys re-described.
     await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       cache: false,
@@ -257,7 +257,7 @@ describe("syncMetricViewsTypes", () => {
     // sticky cache entry; the second run must re-describe it rather than ship
     // the degraded schema.
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "demo.sales.revenue" } },
       }),
@@ -266,7 +266,7 @@ describe("syncMetricViewsTypes", () => {
     // First run: fetcher throws → degraded schema + a failure, cached retry:true.
     fetcher.mockRejectedValueOnce(new Error("TABLE_OR_VIEW_NOT_FOUND"));
     const first = await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -279,7 +279,7 @@ describe("syncMetricViewsTypes", () => {
     // Second run, unchanged config, cache ON: the degraded entry is NOT a hit
     // (degraded !== true clause + retry:true) → re-described, now succeeds.
     const second = await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -295,7 +295,7 @@ describe("syncMetricViewsTypes", () => {
 
     // Warm both keys.
     await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,
@@ -308,14 +308,14 @@ describe("syncMetricViewsTypes", () => {
 
     // Shrink the config to a single key.
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "demo.sales.revenue" } },
       }),
     );
 
     await syncMetricViewsTypes({
-      queryFolder,
+      metricViewsFolder,
       warehouseId: "wh-1",
       metricOutFile,
       metricFetcher: fetcher,

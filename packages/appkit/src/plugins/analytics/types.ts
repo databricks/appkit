@@ -112,3 +112,99 @@ export interface AnalyticsQueryResponse {
   row_count: number;
   data: any[];
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Metric views — POST /api/analytics/metric/:key
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Execution lane for a registered metric view, derived from the entry's
+ * `executor` in `definitions.json`:
+ *   - `"sp"`  ← `executor: "app_service_principal"` — queried as the app
+ *     service principal (cache shared across all users).
+ *   - `"obo"` ← `executor: "user"` — queried on-behalf-of the requesting
+ *     user (per-user cache). OBO dispatch is wired in a later phase.
+ */
+export type MetricLane = "sp" | "obo";
+
+/**
+ * A single registered metric view, loaded from `config/metric-views/definitions.json`.
+ *
+ * The registration carries only what the runtime needs to build and dispatch
+ * SQL: the metric `key`, the three-part UC FQN `source`, and the `lane`. There
+ * is intentionally NO build-time measure/dimension metadata here — the security
+ * boundary is the grammar gate plus parameterized values, not a name allowlist,
+ * so the runtime never enumerates known measures/dimensions.
+ */
+export interface MetricRegistration {
+  key: string;
+  source: string;
+  lane: MetricLane;
+}
+
+/**
+ * v1 filter operator vocabulary — exactly twelve names. The runtime tuple
+ * `METRIC_FILTER_OPERATORS` (next to the validator in `metric.ts`) is the
+ * server-side source of truth; this union mirrors it statically.
+ */
+export type MetricFilterOperatorName =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "set"
+  | "notSet";
+
+/**
+ * A single filter predicate — the leaf node of the recursive
+ * {@link MetricFilter} tree. `member` is a dimension name (grammar-gated, not
+ * allowlisted); `values` is bound through parameterized `:f_<idx>` bind vars
+ * and never interpolated into the SQL string.
+ */
+export interface MetricPredicate {
+  member: string;
+  operator: MetricFilterOperatorName;
+  values?: ReadonlyArray<string | number>;
+}
+
+/**
+ * Recursive filter expression for the metric-view request body: a leaf
+ * {@link MetricPredicate} or an `{ and: [...] }` / `{ or: [...] }` group. The
+ * shape is intentionally non-generic server-side — per-metric narrowing (if
+ * any) lives client-side.
+ */
+export type MetricFilter =
+  | MetricPredicate
+  | { and: ReadonlyArray<MetricFilter> }
+  | { or: ReadonlyArray<MetricFilter> };
+
+/**
+ * Validated request body for `POST /api/analytics/metric/:key`.
+ *
+ * `measures` is required. `dimensions` drive `GROUP BY ALL`; `filter` is the
+ * recursive structured predicate tree translated into a parameterized `WHERE`
+ * clause. `timeGrain` buckets the single dimension named by `timeDimension`
+ * via `date_trunc`; it requires `timeDimension`, and `timeDimension` must be
+ * one of `dimensions` so it is selected and in `GROUP BY ALL`. Both tokens are
+ * grammar-gated before they reach SQL.
+ */
+export interface IAnalyticsMetricRequest {
+  measures: string[];
+  dimensions?: string[];
+  filter?: MetricFilter;
+  timeGrain?: string;
+  /**
+   * The single dimension that `timeGrain` buckets via `date_trunc`. Must be
+   * one of `dimensions` (so it is selected and in `GROUP BY ALL`) and is
+   * required whenever `timeGrain` is set. Grammar-gated as a SQL identifier.
+   */
+  timeDimension?: string;
+  limit?: number;
+  format?: AnalyticsFormat;
+}
