@@ -171,6 +171,13 @@ jobs:
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
+    # Job-level permissions REPLACE (not merge with) the top-level set, so all
+    # three must be listed: pull-requests: write for the sticky comment step,
+    # and id-token: write which setup-jfrog-npm needs for its OIDC token.
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -225,6 +232,55 @@ jobs:
         with:
           name: appkit-template-${{ steps.version.outputs.version }}
           path: appkit-template-${{ steps.version.outputs.version }}.zip
+
+      # Build the PR-bot comment: a link to the evals-monitor app, plus a
+      # self-contained, run-anywhere command that downloads this run's artifact
+      # and scaffolds an app from it. Every value (run id, repo, artifact name,
+      # output dir) is baked in so the reader can paste it into any folder — no
+      # repo checkout or specific cwd required.
+      - name: Build PR-bot comment
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          ARTIFACT="appkit-template-${VERSION}"
+          OUT="appkit-pr-${PR_NUMBER}"
+          EVALS_URL="https://evals-monitor-6051921418418893.staging.aws.databricksapps.com/prs/appkit/${PR_NUMBER}"
+          {
+            echo "<!-- pr-bot -->"
+            echo "## 🤖 AppKit PR bot"
+            echo ""
+            echo "### 🔬 Run evals"
+            echo ""
+            echo "Start an eval for this PR from the evals-monitor app: [**Go to Evals Monitor →**](${EVALS_URL})"
+            echo ""
+            echo "### 📦 Try this PR's app template"
+            echo ""
+            echo "Scaffolds a new app from this PR's SDK build. Run it in **any** folder (requires the GitHub CLI — \`gh auth login\` — and the Databricks CLI):"
+            echo ""
+            echo '```bash'
+            echo "gh run download ${RUN_ID} -R ${REPO} -n ${ARTIFACT} -D ${OUT} \\"
+            echo "  && unzip -o \"${OUT}/${ARTIFACT}.zip\" -d \"${OUT}\" \\"
+            echo "  && databricks apps init --template \"${OUT}\""
+            echo '```'
+            echo ""
+            echo "The template pins \`@databricks/appkit\` and \`@databricks/appkit-ui\` to tarballs built from this branch, so the scaffolded app runs against this PR's code."
+          } > pr-bot-comment.md
+
+      # Fork PRs get a read-only GITHUB_TOKEN, so commenting would 403 and fail
+      # a job the author can't fix. Skip for forks — the command is still in the
+      # job log above. Matches bundle-size.yml.
+      - name: Upsert PR-bot comment
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          COMMENT_PATH: pr-bot-comment.md
+        with:
+          script: |
+            const upsert = require('./.github/scripts/upsert-pr-bot-comment.cjs');
+            await upsert({ github, context });
 
   docs-build:
     name: Docs Build
