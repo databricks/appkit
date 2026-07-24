@@ -84,9 +84,11 @@ function isVariantElement(node: ReactNode): node is ReactElement<VariantProps> {
  * a violet distinct from most apps' `primary`) so it doesn't blend into the
  * content it wraps.
  *
- * Degrades gracefully: if the recorder endpoint is absent (feature off or a
- * production build), the switcher still works as a viewer and Confirm reports
- * that recording is unavailable.
+ * Degrades gracefully. In a production build the picker chrome is dropped
+ * entirely and only the first variant renders as plain content — a safety net
+ * for a block that shipped without being finalized. In dev, if the recorder
+ * endpoint is absent (feature off) the switcher still works as a viewer and
+ * Confirm reports that recording is unavailable.
  *
  * @example Page section (default layout — full-width, stacks vertically)
  * ```tsx
@@ -124,6 +126,13 @@ export function Variants({
   const [confirmState, setConfirmState] = useState<ConfirmState>("idle");
 
   if (variants.length === 0) return null;
+
+  // Production safety net: if a block ever ships without being finalized, render
+  // the first variant as plain content instead of the dev-only picker chrome.
+  // `variants[0]` (not null) avoids leaving a blank section. This is cosmetic
+  // belt-and-suspenders on top of the no-variants-in-prod lint — the recorder
+  // itself is already server-gated. `import.meta.env.DEV` matches use-query-hmr.
+  if (!import.meta.env.DEV) return <>{variants[0]}</>;
 
   const clampedActive = Math.min(active, variants.length - 1);
   const current = variants[clampedActive];
