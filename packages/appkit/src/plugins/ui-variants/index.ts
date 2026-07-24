@@ -2,30 +2,10 @@ import type { BasePluginConfig, IAppRouter } from "shared";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import {
-  type ChoiceSink,
-  FileChoiceSink,
-  type UiChoiceRecord,
-} from "./choice-sink";
+import { FileChoiceStore, type UiChoiceRecord } from "./choice-sink";
 import manifest from "./manifest.json";
 
-export {
-  type ChoiceSink,
-  FileChoiceSink,
-  type UiChoiceRecord,
-} from "./choice-sink";
-
 const logger = createLogger("ui-variants");
-
-interface UiVariantsConfig extends BasePluginConfig {
-  /**
-   * Storage backend for confirmed choices. Defaults to a {@link FileChoiceSink}
-   * writing a local JSONL file, which works wherever the coding agent shares
-   * the app's filesystem. Supply a custom sink for environments without a
-   * shared filesystem.
-   */
-  sink?: ChoiceSink;
-}
 
 /** Untrusted body of `POST /api/ui-variants/confirm`; validated in the handler. */
 interface ConfirmRequestBody {
@@ -40,22 +20,21 @@ interface ConfirmRequestBody {
  *
  * When a developer confirms a variant in the browser, the `<Variants>`
  * component POSTs to `/api/ui-variants/confirm`. This plugin records the choice
- * through a {@link ChoiceSink} (default: a keyed JSONL file), which a coding
- * agent reads to finalize the chosen variant into the component source.
- * Recording is a keyed upsert — one entry per `<Variants>` id — and the plugin
- * only records; it never edits source.
+ * into a keyed JSONL file, which a coding agent reads to finalize the chosen
+ * variant into the component source. Recording is a keyed upsert — one entry
+ * per `<Variants>` id — and the plugin only records; it never edits source.
  */
-class UiVariantsPlugin extends Plugin<UiVariantsConfig> {
+class UiVariantsPlugin extends Plugin<BasePluginConfig> {
   static manifest = manifest as PluginManifest<"ui-variants">;
 
   protected static description =
     "Dev-only recorder for the <Variants> UI picker";
 
-  private readonly sink: ChoiceSink;
+  private readonly store: FileChoiceStore;
 
-  constructor(config: UiVariantsConfig = {}) {
+  constructor(config: BasePluginConfig = {} as BasePluginConfig) {
     super(config);
-    this.sink = config.sink ?? new FileChoiceSink();
+    this.store = new FileChoiceStore();
   }
 
   injectRoutes(router: IAppRouter): void {
@@ -101,7 +80,7 @@ class UiVariantsPlugin extends Plugin<UiVariantsConfig> {
         };
 
         try {
-          await this.sink.record(record);
+          await this.store.record(record);
         } catch (error) {
           logger.error("Failed to record UI variant choice", {
             error,

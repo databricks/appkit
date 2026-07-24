@@ -9,7 +9,6 @@ import {
   PolicyDeniedError,
   server,
   serving,
-  uiVariants,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
 import { agents, createAgent, tool } from "@databricks/appkit/beta";
@@ -344,7 +343,6 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
-    uiVariants(),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),

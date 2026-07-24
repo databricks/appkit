@@ -21,7 +21,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ConnectionError](Class.ConnectionError.md) | Error thrown when a connection or network operation fails. Use for database pool errors, API failures, timeouts, etc. |
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
-| [FileChoiceSink](Class.FileChoiceSink.md) | Default [ChoiceSink](Interface.ChoiceSink.md): upserts choices into UI\_CHOICES\_FILE, one line per `<Variants>` id. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
@@ -43,7 +42,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:` (object or function form in code, `plugin:NAME` entries in markdown frontmatter). |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
-| [ChoiceSink](Interface.ChoiceSink.md) | Storage backend for confirmed variant choices, decoupled from the recorder plugin so the destination can vary by environment. The default [FileChoiceSink](Class.FileChoiceSink.md) writes a local JSONL file, suitable wherever the coding agent shares the app's filesystem; an environment without a shared filesystem can supply its own implementation (e.g. a table-backed store). |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
@@ -83,7 +81,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolkitEntry](Interface.ToolkitEntry.md) | A tool reference produced by a plugin's `.toolkit()` call. The agents plugin recognizes the `__toolkitRef` brand and dispatches tool invocations through `PluginContext.executeTool(req, pluginName, localName, ...)`, preserving OBO (asUser) and telemetry spans. |
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
 | [ToolProvider](Interface.ToolProvider.md) | - |
-| [UiChoiceRecord](Interface.UiChoiceRecord.md) | One recorded variant choice. |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases
@@ -119,7 +116,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
-| [uiVariants](Variable.uiVariants.md) | - |
 | [WRITE\_ACTIONS](Variable.WRITE_ACTIONS.md) | Actions that mutate data. |
 
 ## Functions

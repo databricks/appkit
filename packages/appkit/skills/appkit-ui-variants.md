@@ -24,11 +24,11 @@ stored, "I read it next turn", or whether you decided to ask).
 - **`<Variants>` / `<Variant>`** — `@databricks/appkit-ui/react`. A dev-time
   wrapper that renders one candidate at a time with a hover-revealed switcher
   (prev/next, an index pill + label) and a **Confirm** tick.
-- **`uiVariants()` plugin** — `@databricks/appkit`. Records the confirmed
+- **The recorder** — built into `@databricks/appkit`. Records the confirmed
   choice: Confirm POSTs `{ blockId, chosenIndex, label }` to
   `POST /api/ui-variants/confirm`, upserted into a JSONL file keyed by `blockId`.
-  Just add `uiVariants()` to the plugin list — it's dev-only and drops out of
-  production on its own.
+  It runs automatically in dev and drops out of production on its own — there's
+  nothing to set up.
 - **Choices file** — `node_modules/.databricks/appkit/.appkit-ui-choices.jsonl`,
   gitignored. A **keyed store: one line per `<Variants>` blockId** (not an append
   log) — re-confirming a variant replaces that block's line, so the file always
@@ -99,10 +99,7 @@ import { Variants, Variant } from "@databricks/appkit-ui/react";
 
 ## 3. Ensure the recorder is running
 
-- Make sure `uiVariants()` is in the app's plugin list; if not, add it:
-  ```ts
-  createApp({ plugins: [server(), uiVariants() /* , … */] });
-  ```
+- The recorder runs automatically in dev — no setup needed.
 - Confirm the dev server is running so the browser can POST the choice.
 
 ## 4. Hand off to the developer

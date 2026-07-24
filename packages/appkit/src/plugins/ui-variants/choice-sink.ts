@@ -41,31 +41,21 @@ export interface UiChoiceRecord {
 }
 
 /**
- * Storage backend for confirmed variant choices, decoupled from the recorder
- * plugin so the destination can vary by environment. The default
- * {@link FileChoiceSink} writes a local JSONL file, suitable wherever the
- * coding agent shares the app's filesystem; an environment without a shared
- * filesystem can supply its own implementation (e.g. a table-backed store).
+ * File store for confirmed variant choices: upserts choices into
+ * {@link UI_CHOICES_FILE}, one line per `<Variants>` id.
  *
- * Implementations must be **keyed and latest-wins**: at most one record per
- * `blockId`, and recording an existing `blockId` replaces it rather than
- * appending, so the store always reflects the current choice for each block.
- */
-export interface ChoiceSink {
-  /** Record (upsert) a choice, keyed by `record.blockId`. */
-  record(record: UiChoiceRecord): Promise<void>;
-}
-
-/**
- * Default {@link ChoiceSink}: upserts choices into {@link UI_CHOICES_FILE},
- * one line per `<Variants>` id.
+ * The store is **keyed and latest-wins**: at most one record per `blockId`, and
+ * recording an existing `blockId` replaces it rather than appending, so the file
+ * always reflects the current choice for each block.
  *
  * The file is resolved against `process.cwd()`, so it lands under whatever
  * directory the dev server runs from. Concurrent confirms are serialized behind
  * an internal queue so their read-modify-write can't interleave and lose an
  * update.
+ *
+ * @internal
  */
-export class FileChoiceSink implements ChoiceSink {
+export class FileChoiceStore {
   private readonly filePath: string;
   private writeQueue: Promise<void> = Promise.resolve();
 
