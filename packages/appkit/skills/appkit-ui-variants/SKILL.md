@@ -1,4 +1,5 @@
 ---
+name: appkit-ui-variants
 description: Builds a piece of UI in multiple variants, lets the developer pick one live in the browser, then finalizes the chosen variant into source
 argument-hint: <what to build>
 ---

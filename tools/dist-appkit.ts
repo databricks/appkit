@@ -72,7 +72,7 @@ if (fs.existsSync("bin")) {
   fs.cpSync("bin", "tmp/bin", { recursive: true });
 }
 
-// Copy shipped skills (slash commands installed via `appkit skills install`)
+// Copy shipped skills (slash commands for AI assistants)
 if (fs.existsSync("skills")) {
   fs.cpSync("skills", "tmp/skills", { recursive: true });
 }
