@@ -304,7 +304,7 @@ export class ResourceRegistry {
    * const result = registry.validate();
    *
    * if (!result.valid) {
-   *   console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
+   *   console.error(ResourceRegistry.formatMissingResources(result.missing));
    * }
    * ```
    */
@@ -392,7 +392,7 @@ export class ResourceRegistry {
               type: r.type,
               alias: r.alias,
               plugin: r.plugin,
-              envVars: Object.values(r.fields).map((f) => f.env),
+              envVars: ResourceRegistry.unsetEnvVars(r),
             })),
           },
         });
@@ -411,6 +411,25 @@ export class ResourceRegistry {
   }
 
   /**
+   * Env var names for an entry's fields that are actually unset (undefined or
+   * empty), skipping fields that declare no env var (e.g. discovery-only
+   * fields resolved at deploy time). Mirrors the resolution check in
+   * {@link validate} so error output lists exactly what the caller must set —
+   * not every field on the resource.
+   */
+  private static unsetEnvVars(entry: ResourceEntry): string[] {
+    const unset: string[] = [];
+    for (const field of Object.values(entry.fields)) {
+      if (!field.env) continue;
+      const val = process.env[field.env];
+      if (val === undefined || val === "") {
+        unset.push(field.env);
+      }
+    }
+    return unset;
+  }
+
+  /**
    * Formats missing resources into a human-readable error message.
    *
    * @param missing - Array of missing resource entries
@@ -422,8 +441,8 @@ export class ResourceRegistry {
     }
 
     const lines = missing.map((entry) => {
-      const envVars = Object.values(entry.fields).map((f) => f.env);
-      const envHint = ` (set ${envVars.join(", ")})`;
+      const envVars = ResourceRegistry.unsetEnvVars(entry);
+      const envHint = envVars.length > 0 ? ` (set ${envVars.join(", ")})` : "";
       return `  - ${entry.type}:${entry.alias} [${entry.plugin}]${envHint}`;
     });
 
@@ -444,11 +463,13 @@ export class ResourceRegistry {
     ];
 
     for (const entry of missing) {
-      const envVars = Object.values(entry.fields).map((f) => f.env);
+      const envVars = ResourceRegistry.unsetEnvVars(entry);
       contentLines.push(
         `  ${entry.type}:${entry.alias}  (plugin: ${entry.plugin})`,
       );
-      contentLines.push(`    Set: ${envVars.join(", ")}`);
+      if (envVars.length > 0) {
+        contentLines.push(`    Set: ${envVars.join(", ")}`);
+      }
     }
 
     contentLines.push("");

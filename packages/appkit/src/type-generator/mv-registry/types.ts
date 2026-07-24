@@ -11,7 +11,7 @@ import type { DatabricksStatementExecutionResponse } from "../types";
 export type MetricLane = "sp" | "obo";
 
 /**
- * Single entry in the `metricViews` map of metric-views.json.
+ * Single entry in the `metricViews` map of definitions.json.
  *
  * v1 allows `source` plus the optional `executor`. Object form (rather than
  * bare string) is the forward-compat seam for future per-entry options
@@ -23,7 +23,7 @@ export interface MetricEntryConfig {
 }
 
 /**
- * Shape of metric-views.json (mirrors `metricSourceSchema` in
+ * Shape of definitions.json (mirrors `metricSourceSchema` in
  * `packages/shared/src/schemas/metric-source.ts`). Inlined here so the
  * type-generator does not pull in the shared schema package at runtime.
  */
@@ -82,7 +82,7 @@ export interface MetricColumnMetadata {
  * time-typed dimensions additionally carry their inferred `timeGrains`.
  */
 export interface MetricSchema {
-  /** Stable metric key (the map key under `metricViews` in metric-views.json). */
+  /** Stable metric key (the map key under `metricViews` in definitions.json). */
   key: string;
   /** Three-part FQN of the metric view. */
   source: string;
@@ -101,7 +101,7 @@ export interface MetricSchema {
   degraded?: boolean;
 }
 
-// Result of reading and resolving metric-views.json — a flat entries list
+// Result of reading and resolving definitions.json — a flat entries list
 // with the lane denormalized for iteration.
 export interface MetricConfigResolution {
   entries: ResolvedMetricEntry[];
@@ -121,7 +121,7 @@ export type DescribeFetcher = (
  * to the caller so they can decide whether to exit non-zero.
  */
 export interface MetricSyncFailure {
-  /** Stable metric key — matches the key under `metricViews` in metric-views.json. */
+  /** Stable metric key — matches the key under `metricViews` in definitions.json. */
   key: string;
   /** Three-part FQN that failed to resolve. */
   source: string;

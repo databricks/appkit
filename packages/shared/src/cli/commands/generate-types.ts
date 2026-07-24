@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Command, Option } from "commander";
+import { METRIC_CONFIG_FILE } from "../../schemas/metric-fqn";
 import {
   acquireSpawnLock,
   getSpawnLockPath,
@@ -66,17 +67,31 @@ async function runGenerateTypes(
         path.join(process.cwd(), "shared/appkit-types/analytics.d.ts");
 
       const queryFolder = path.join(resolvedRootDir, "config/queries");
-      if (fs.existsSync(queryFolder)) {
+      const metricViewsFolder = path.join(
+        resolvedRootDir,
+        "config/metric-views",
+      );
+      const hasQueries = fs.existsSync(queryFolder);
+      const hasMetricViews = fs.existsSync(metricViewsFolder);
+
+      // Generate when either config surface exists. Metric-view types are
+      // independent of `.sql` queries — an app can declare metric views in
+      // `config/metric-views/` without a `config/queries/` folder.
+      if (hasQueries || hasMetricViews) {
         await typeGen.generateFromEntryPoint({
-          queryFolder,
+          queryFolder: hasQueries ? queryFolder : undefined,
+          metricViewsFolder: hasMetricViews ? metricViewsFolder : undefined,
           outFile: resolvedOutFile,
           warehouseId: resolvedWarehouseId,
           noCache,
           mode,
         });
-        console.log(`Generated query types: ${resolvedOutFile}`);
 
-        const metricConfig = path.join(queryFolder, "metric-views.json");
+        if (hasQueries) {
+          console.log(`Generated query types: ${resolvedOutFile}`);
+        }
+
+        const metricConfig = path.join(metricViewsFolder, METRIC_CONFIG_FILE);
         if (fs.existsSync(metricConfig)) {
           const typesDir = path.dirname(resolvedOutFile);
           console.log(

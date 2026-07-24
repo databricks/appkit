@@ -528,6 +528,77 @@ describe("ResourceRegistry", () => {
         else delete process.env.DATABRICKS_WAREHOUSE_ID;
       }
     });
+
+    it("should list only the unset env vars, not the ones already set", () => {
+      const prevScope = process.env.SECRET_SCOPE;
+      const prevKey = process.env.SECRET_KEY;
+      process.env.SECRET_SCOPE = "my-scope";
+      delete process.env.SECRET_KEY;
+      try {
+        const registry = new ResourceRegistry();
+        registry.register("analytics", {
+          type: ResourceType.SECRET,
+          alias: "creds",
+          resourceKey: "creds",
+          description: "Credentials",
+          permission: "READ",
+          required: true,
+          fields: {
+            scope: { env: "SECRET_SCOPE" },
+            key: { env: "SECRET_KEY" },
+          },
+        });
+
+        const result = registry.validate();
+        expect(result.valid).toBe(false);
+
+        const formatted = ResourceRegistry.formatMissingResources(
+          result.missing,
+        );
+        // Only the genuinely-missing var is reported; the one already set is not.
+        expect(formatted).toContain("SECRET_KEY");
+        expect(formatted).not.toContain("SECRET_SCOPE");
+      } finally {
+        if (prevScope !== undefined) process.env.SECRET_SCOPE = prevScope;
+        else delete process.env.SECRET_SCOPE;
+        if (prevKey !== undefined) process.env.SECRET_KEY = prevKey;
+        else delete process.env.SECRET_KEY;
+      }
+    });
+
+    it("should omit fields that declare no env var (e.g. discovery-only fields)", () => {
+      const prevHost = process.env.PGHOST_TEST;
+      delete process.env.PGHOST_TEST;
+      try {
+        const registry = new ResourceRegistry();
+        registry.register("lakebase", {
+          type: ResourceType.POSTGRES,
+          alias: "Postgres",
+          resourceKey: "postgres",
+          description: "Lakebase Postgres",
+          permission: "CAN_CONNECT_AND_CREATE",
+          required: true,
+          fields: {
+            // Discovery-only field: no env var, resolved at deploy time.
+            project: { description: "Project resource name" },
+            host: { env: "PGHOST_TEST" },
+          },
+        });
+
+        const result = registry.validate();
+        const formatted = ResourceRegistry.formatMissingResources(
+          result.missing,
+        );
+        // The one real missing env var is present…
+        expect(formatted).toContain("PGHOST_TEST");
+        // …and there are no stray empty entries from the env-less field.
+        expect(formatted).not.toContain("(set , ");
+        expect(formatted).not.toContain(", )");
+      } finally {
+        if (prevHost !== undefined) process.env.PGHOST_TEST = prevHost;
+        else delete process.env.PGHOST_TEST;
+      }
+    });
   });
 
   describe("collectResources with getResourceRequirements", () => {

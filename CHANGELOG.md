@@ -82,6 +82,44 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.47.1](https://github.com/databricks/appkit/compare/v0.47.0...v0.47.1) (2026-07-23)
+
+### cli
+
+* **cli:** match lint test-file exclusion relative to scan root ([#490](https://github.com/databricks/appkit/issues/490)) ([716a219](https://github.com/databricks/appkit/commit/716a2196bc7123e4f1341f3da3c4e299b857fef7))
+
+
+## [0.47.0](https://github.com/databricks/appkit/compare/v0.46.0...v0.47.0) (2026-07-23)
+
+* metric-view runtime ([#474](https://github.com/databricks/appkit/issues/474)) ([1b1a122](https://github.com/databricks/appkit/commit/1b1a122d3e08baf600df982b5f52d4c37d93aa04)), closes [#341](https://github.com/databricks/appkit/issues/341) [#484](https://github.com/databricks/appkit/issues/484) [#487](https://github.com/databricks/appkit/issues/487)
+
+
+## [0.46.0](https://github.com/databricks/appkit/compare/v0.45.0...v0.46.0) (2026-07-22)
+
+### appkit
+
+* **appkit:** forward async handler rejections to a terminal error middleware instead of crashing ([#439](https://github.com/databricks/appkit/issues/439)) ([5ef5404](https://github.com/databricks/appkit/commit/5ef5404d9b4497cd3b399b03f7027705d5e20314))
+* **appkit:** report only the actually-missing env vars in resource errors ([#486](https://github.com/databricks/appkit/issues/486)) ([2e2af02](https://github.com/databricks/appkit/commit/2e2af02acb61d639b793764ac5c663244d0608d8))
+
+### server
+
+* **server:** invoke plugin shutdown hooks and close connections during graceful shutdown ([#441](https://github.com/databricks/appkit/issues/441)) ([f8cd9ec](https://github.com/databricks/appkit/commit/f8cd9ecb00071c2f4b11c5a3cb029f89b0377ba7))
+
+### stream
+
+* **stream:** remove completed/errored streams from registry after buffer TTL ([#438](https://github.com/databricks/appkit/issues/438)) ([e606900](https://github.com/databricks/appkit/commit/e6069008547caf156f3077b7bb02d9f460349053))
+
+### agents
+
+* **agents:** forward generation params (temperature/top_p/stop/...) to the serving adapter ([#450](https://github.com/databricks/appkit/issues/450)) ([44cb589](https://github.com/databricks/appkit/commit/44cb5891be997c1acb63873a4da74cd6de236df8))
+
+
 ## [0.45.0](https://github.com/databricks/appkit/compare/v0.44.0...v0.45.0) (2026-07-09)
 
 * decode inline Arrow IPC + warehouse-compat fallback ([#329](https://github.com/databricks/appkit/issues/329)) ([86bebff](https://github.com/databricks/appkit/commit/86bebffa389bcbac087edd200954b7efe3123a9f))
