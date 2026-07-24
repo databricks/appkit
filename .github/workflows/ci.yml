@@ -171,6 +171,11 @@ jobs:
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
+    # Override the top-level `pull-requests: read` so the sticky comment step
+    # can create/update the "try this template" comment.
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -225,6 +230,43 @@ jobs:
         with:
           name: appkit-template-${{ steps.version.outputs.version }}
           path: appkit-template-${{ steps.version.outputs.version }}.zip
+
+      # Build a self-contained, run-anywhere command that downloads this run's
+      # artifact and scaffolds an app from it. Every value (run id, repo,
+      # artifact name, output dir) is baked in so the reader can paste it into
+      # any folder — no repo checkout or specific cwd required.
+      - name: Build "try this template" comment
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          ARTIFACT="appkit-template-${VERSION}"
+          OUT="appkit-pr-${PR_NUMBER}"
+          {
+            echo "<!-- pr-template-artifact -->"
+            echo "### 📦 Try this PR's app template"
+            echo ""
+            echo "Scaffolds a new app from this PR's SDK build. Run it in **any** folder (requires the GitHub CLI — \`gh auth login\` — and the Databricks CLI):"
+            echo ""
+            echo '```bash'
+            echo "gh run download ${RUN_ID} -R ${REPO} -n ${ARTIFACT} -D ${OUT} \\"
+            echo "  && unzip -o \"${OUT}/${ARTIFACT}.zip\" -d \"${OUT}\" \\"
+            echo "  && databricks apps init --template \"${OUT}\""
+            echo '```'
+            echo ""
+            echo "The template pins \`@databricks/appkit\` and \`@databricks/appkit-ui\` to tarballs built from this branch, so the scaffolded app runs against this PR's code."
+          } > template-artifact-comment.md
+
+      - name: Upsert "try this template" PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          COMMENT_PATH: template-artifact-comment.md
+        with:
+          script: |
+            const upsert = require('./.github/scripts/upsert-template-artifact-comment.cjs');
+            await upsert({ github, context });
 
   docs-build:
     name: Docs Build
