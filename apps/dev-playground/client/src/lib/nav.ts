@@ -13,6 +13,7 @@ import {
   SearchIcon,
   ServerIcon,
   ShieldIcon,
+  Wand2Icon,
   ZapIcon,
 } from "lucide-react";
 
@@ -161,6 +162,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Resilient SSE streams: automatic Last-Event-ID tracking and reconnection.",
         icon: RadioIcon,
+      },
+      {
+        to: "/ui-variants",
+        label: "UI Variants",
+        description:
+          "Author UI in variants, pick one live in the browser, and let the agent finalize it into source.",
+        icon: Wand2Icon,
       },
     ],
   },

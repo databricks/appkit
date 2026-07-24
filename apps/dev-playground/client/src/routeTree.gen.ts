@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.route'
+import { Route as UiVariantsRouteRouteImport } from './routes/ui-variants.route'
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
@@ -31,6 +32,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const VectorSearchRouteRoute = VectorSearchRouteRouteImport.update({
   id: '/vector-search',
   path: '/vector-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UiVariantsRouteRoute = UiVariantsRouteRouteImport.update({
+  id: '/ui-variants',
+  path: '/ui-variants',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TypeSafetyRouteRoute = TypeSafetyRouteRouteImport.update({
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/ui-variants': typeof UiVariantsRouteRoute
   '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesByTo {
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/ui-variants': typeof UiVariantsRouteRoute
   '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesById {
@@ -178,6 +186,7 @@ export interface FileRoutesById {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/ui-variants': typeof UiVariantsRouteRoute
   '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRouteTypes {
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/ui-variants'
     | '/vector-search'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/ui-variants'
     | '/vector-search'
   id:
     | '__root__'
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/ui-variants'
     | '/vector-search'
   fileRoutesById: FileRoutesById
 }
@@ -261,6 +273,7 @@ export interface RootRouteChildren {
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
+  UiVariantsRouteRoute: typeof UiVariantsRouteRoute
   VectorSearchRouteRoute: typeof VectorSearchRouteRoute
 }
 
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       path: '/vector-search'
       fullPath: '/vector-search'
       preLoaderRoute: typeof VectorSearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ui-variants': {
+      id: '/ui-variants'
+      path: '/ui-variants'
+      fullPath: '/ui-variants'
+      preLoaderRoute: typeof UiVariantsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/type-safety': {
@@ -413,6 +433,7 @@ const rootRouteChildren: RootRouteChildren = {
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
+  UiVariantsRouteRoute: UiVariantsRouteRoute,
   VectorSearchRouteRoute: VectorSearchRouteRoute,
 }
 export const routeTree = rootRouteImport

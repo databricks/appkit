@@ -278,6 +278,7 @@ The rules block is propagated unchanged from the plugin manifest into the synced
 | `license` | SPDX identifier. |
 | `onSetupMessage` | One-shot message displayed after init. Use for short hints; prefer `scaffolding.rules` for actionable directives an agent must enforce. |
 | `hidden` | When `true`, the plugin is excluded from the synced template manifest. |
+| `devOnly` | When `true`, `createApp` only registers the plugin when `NODE_ENV === "development"`; in any other environment it is skipped entirely (not constructed, no routes, resources not validated). Use for dev-only tooling that must never run in a deployed app. |
 | `stability` | `"beta"` or `"ga"`. Beta plugins may break across minor releases — see [Plugin stability tiers](./stability.md). |
 | `config.schema` | JSON Schema for the plugin's runtime config (used by the type generator and for validation). |
 

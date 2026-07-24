@@ -72,6 +72,22 @@ Omit.description
 
 ***
 
+### devOnly?
+
+```ts
+optional devOnly: boolean;
+```
+
+When true, this plugin is only registered when NODE_ENV === "development". In any other environment createApp skips it entirely (not constructed, no routes, resources not validated). Use for dev-only tooling that must never run in a deployed app.
+
+#### Inherited from
+
+```ts
+Omit.devOnly
+```
+
+***
+
 ### displayName
 
 ```ts

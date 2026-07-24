@@ -733,6 +733,12 @@ export const pluginManifestSchema = z
       .describe(
         "When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.",
       ),
+    devOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, this plugin is only registered when NODE_ENV === 'development'. In any other environment createApp skips it entirely (not constructed, no routes, resources not validated). Use for dev-only tooling that must never run in a deployed app.",
+      ),
     stability: z
       .enum(["beta", "ga"])
       .optional()

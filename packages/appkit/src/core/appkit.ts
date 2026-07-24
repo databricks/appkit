@@ -17,6 +17,7 @@ import {
 } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { isPlainObject } from "../plugin/plugin";
+import { uiVariants } from "../plugins/ui-variants";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
@@ -192,7 +193,8 @@ export class AppKit<TPlugins extends InputPluginMap> {
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
 
-    const rawPlugins = config.plugins as T;
+    const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
+    const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
 
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();
@@ -256,6 +258,67 @@ export class AppKit<TPlugins extends InputPluginMap> {
     });
     reporter.start();
     reporter.sendStartup().catch(() => {});
+  }
+
+  /**
+   * Injects framework-owned default plugins the app author shouldn't have to
+   * register by hand. Runs before {@link filterDevOnlyPlugins}, so a default
+   * that is itself `devOnly` (like `ui-variants`) is present in dev and stripped
+   * in prod through the exact same guard as any user plugin — never alive in a
+   * deployed app.
+   *
+   * Currently injects the dev-only `ui-variants` recorder that backs the
+   * `<Variants>` UI picker, so neither the developer nor their coding agent has
+   * to remember to add it. If the app already registered it explicitly, that
+   * entry wins and no duplicate is added.
+   */
+  private static withDefaultPlugins<
+    T extends PluginData<PluginConstructor, unknown, string>[],
+  >(plugins: T): T {
+    const list = (plugins ?? []) as PluginData<
+      PluginConstructor,
+      unknown,
+      string
+    >[];
+
+    const defaults: PluginData<PluginConstructor, unknown, string>[] = [
+      uiVariants(),
+    ];
+
+    const missing = defaults.filter(
+      (def) => !list.some((p) => p?.name === def.name),
+    );
+
+    return [...list, ...missing] as T;
+  }
+
+  /**
+   * Drops plugins whose manifest declares `devOnly: true` unless
+   * `NODE_ENV === "development"`. Runs before resource collection so a skipped
+   * plugin is never constructed, never injects routes, and has its resource
+   * requirements ignored — the framework, not the app author, enforces that
+   * dev-only tooling can never run in a deployed app.
+   *
+   * This is the primary guard; plugins that expose a mutating dev endpoint
+   * should still keep an in-handler `NODE_ENV` check as fail-safe defense
+   * against being mounted through a path that bypasses this filter.
+   */
+  private static filterDevOnlyPlugins<
+    T extends PluginData<PluginConstructor, unknown, string>[],
+  >(plugins: T): T {
+    if (!plugins || process.env.NODE_ENV === "development") return plugins;
+
+    return plugins.filter((pluginData) => {
+      const isDevOnly = pluginData?.plugin?.manifest?.devOnly === true;
+      if (isDevOnly) {
+        logger.debug(
+          "Skipping dev-only plugin %s (NODE_ENV=%s)",
+          pluginData?.name ?? "unknown",
+          process.env.NODE_ENV ?? "<unset>",
+        );
+      }
+      return !isDevOnly;
+    }) as T;
   }
 
   private static preparePlugins(
