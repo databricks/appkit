@@ -250,7 +250,11 @@ jobs:
           EVALS_URL="https://evals-monitor-6051921418418893.staging.aws.databricksapps.com/prs/appkit/${PR_NUMBER}"
           {
             echo "<!-- pr-bot -->"
-            echo "> 🔬 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Go to Evals Monitor →**](${EVALS_URL})"
+            echo "## 🤖 AppKit PR bot"
+            echo ""
+            echo "### 🔬 Run evals"
+            echo ""
+            echo "Start an eval for this PR from the evals-monitor app: [**Go to Evals Monitor →**](${EVALS_URL})"
             echo ""
             echo "### 📦 Try this PR's app template"
             echo ""
