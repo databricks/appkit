@@ -126,12 +126,6 @@ export function Variants({
   const [confirmState, setConfirmState] = useState<ConfirmState>("idle");
 
   if (variants.length === 0) return null;
-
-  // Production safety net: if a block ever ships without being finalized, render
-  // the first variant as plain content instead of the dev-only picker chrome.
-  // `variants[0]` (not null) avoids leaving a blank section. This is cosmetic
-  // belt-and-suspenders on top of the no-variants-in-prod lint — the recorder
-  // itself is already server-gated. `import.meta.env.DEV` matches use-query-hmr.
   if (!import.meta.env.DEV) return <>{variants[0]}</>;
 
   const clampedActive = Math.min(active, variants.length - 1);
