@@ -236,8 +236,10 @@ jobs:
       # Build a self-contained, run-anywhere command that downloads this run's
       # artifact and scaffolds an app from it. Every value (run id, repo,
       # artifact name, output dir) is baked in so the reader can paste it into
-      # any folder — no repo checkout or specific cwd required.
-      - name: Build "try this template" comment
+      # any folder — no repo checkout or specific cwd required. This is the
+      # `template` section of the shared PR-bot comment; the section markers are
+      # added by upsert-pr-comment-section.cjs, not here.
+      - name: Build "try this template" comment section
         env:
           VERSION: ${{ steps.version.outputs.version }}
           RUN_ID: ${{ github.run_id }}
@@ -247,7 +249,6 @@ jobs:
           ARTIFACT="appkit-template-${VERSION}"
           OUT="appkit-pr-${PR_NUMBER}"
           {
-            echo "<!-- pr-template-artifact -->"
             echo "### 📦 Try this PR's app template"
             echo ""
             echo "Scaffolds a new app from this PR's SDK build. Run it in **any** folder (requires the GitHub CLI — \`gh auth login\` — and the Databricks CLI):"
@@ -259,19 +260,20 @@ jobs:
             echo '```'
             echo ""
             echo "The template pins \`@databricks/appkit\` and \`@databricks/appkit-ui\` to tarballs built from this branch, so the scaffolded app runs against this PR's code."
-          } > template-artifact-comment.md
+          } > template-section.md
 
       # Fork PRs get a read-only GITHUB_TOKEN, so commenting would 403 and fail
       # a job the author can't fix. Skip for forks — the command is still in the
       # job log above. Matches bundle-size.yml / eval-pr-comment.yml.
-      - name: Upsert "try this template" PR comment
+      - name: Upsert template section into PR comment
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          COMMENT_PATH: template-artifact-comment.md
+          SECTION_ID: template
+          SECTION_PATH: template-section.md
         with:
           script: |
-            const upsert = require('./.github/scripts/upsert-template-artifact-comment.cjs');
+            const upsert = require('./.github/scripts/upsert-pr-comment-section.cjs');
             await upsert({ github, context });
 
   docs-build:

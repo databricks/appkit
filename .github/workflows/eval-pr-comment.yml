@@ -1,9 +1,9 @@
 name: Eval PR Comment
 
-# Posts a small comment on every new PR with a link to the evals-monitor app,
-# where the author can start an eval for their PR. We post a link rather than
-# triggering the job from CI because GitHub Actions runners cannot reach the
-# dogfood.staging workspace (network perimeter).
+# Contributes the `evals` section (a link to the evals-monitor app, where the
+# author can start an eval for their PR) to the shared PR-bot comment. We post a
+# link rather than triggering the job from CI because GitHub Actions runners
+# cannot reach the dogfood.staging workspace (network perimeter).
 on:
   pull_request:
     types: [opened, reopened]
@@ -13,10 +13,9 @@ permissions:
   contents: read
   pull-requests: write
 
-# Serialize per-PR so a rapid open+reopen can't race the marker check and
-# double-post. cancel-in-progress: false — the queued run still executes and
-# deterministically sees the prior run's comment (then skips); there's no
-# "latest commit wins" semantics here, the posted link is identical either way.
+# Serialize per-PR so a rapid open+reopen can't race the section upsert.
+# cancel-in-progress: false — the queued run still executes and re-writes an
+# identical section, which is harmless.
 concurrency:
   group: eval-pr-comment-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -32,29 +31,21 @@ jobs:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
     steps:
-      - name: Post eval link comment
+      # Checkout so the github-script step can require the shared section helper.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build eval link comment section
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          URL="https://evals-monitor-6051921418418893.staging.aws.databricksapps.com/prs/appkit/${PR_NUMBER}"
+          echo "> 🔬 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Go to Evals Monitor →**](${URL})" > eval-section.md
+
+      - name: Upsert eval section into PR comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SECTION_ID: evals
+          SECTION_PATH: eval-section.md
         with:
           script: |
-            const marker = "<!-- pr-eval-link -->";
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const url = `https://evals-monitor-6051921418418893.staging.aws.databricksapps.com/prs/appkit/${issue_number}`;
-
-            // Idempotent: skip if we've already commented on this PR.
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            if (comments.some((c) => c.body?.includes(marker))) return;
-
-            const body = `${marker}\n> 🔬 &nbsp;**Run evals on this PR** &nbsp;·&nbsp; [**Go to Evals Monitor →**](${url})`;
-
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number,
-              body,
-            });
+            const upsert = require('./.github/scripts/upsert-pr-comment-section.cjs');
+            await upsert({ github, context });
