@@ -171,11 +171,13 @@ jobs:
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
-    # Override the top-level `pull-requests: read` so the sticky comment step
-    # can create/update the "try this template" comment.
+    # Job-level permissions REPLACE (not merge with) the top-level set, so all
+    # three must be listed: pull-requests: write for the sticky comment step,
+    # and id-token: write which setup-jfrog-npm needs for its OIDC token.
     permissions:
       contents: read
       pull-requests: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
