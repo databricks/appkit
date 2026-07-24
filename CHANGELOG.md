@@ -88,6 +88,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.48.0](https://github.com/databricks/appkit/compare/v0.47.1...v0.48.0) (2026-07-24)
+
+### appkit
+
+* **appkit:** /ui visual variant picker ([#476](https://github.com/databricks/appkit/issues/476)) ([8f62d59](https://github.com/databricks/appkit/commit/8f62d594428fd79818a2b336d7502917cef3a6ea))
+
+
 ## [0.47.1](https://github.com/databricks/appkit/compare/v0.47.0...v0.47.1) (2026-07-23)
 
 ### cli
