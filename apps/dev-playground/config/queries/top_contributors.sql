@@ -1,33 +1,19 @@
--- Top contributors by app with aggregation support
+-- Top contributors by pickup ZIP (stands in for "app") with aggregation support.
 -- @param aggregationLevel STRING
 -- @param startDate DATE
 -- @param endDate DATE
-WITH aggregated_costs AS (
-  SELECT 
-    u.usage_metadata.app_name AS app_name,
-    CASE 
-      WHEN :aggregationLevel = 'daily' THEN DATE(u.usage_date)
-      WHEN :aggregationLevel = 'weekly' THEN DATE_TRUNC('week', u.usage_date)
-      WHEN :aggregationLevel = 'monthly' THEN DATE_TRUNC('month', u.usage_date)
-      ELSE DATE(u.usage_date)
-    END AS period,
-    SUM(u.usage_quantity * lp.pricing.effective_list.default) AS cost_usd
-  FROM system.billing.usage AS u
-  JOIN system.billing.list_prices AS lp 
-    ON u.sku_name = lp.sku_name 
-    AND u.cloud = lp.cloud 
-    AND u.usage_end_time >= lp.price_start_time 
-    AND (lp.price_end_time IS NULL OR u.usage_end_time < lp.price_end_time)
-  WHERE u.billing_origin_product = 'APPS' 
-    AND u.workspace_id = :workspaceId 
-    AND u.usage_date BETWEEN :startDate AND :endDate
-    AND u.usage_metadata.app_name IS NOT NULL
-  GROUP BY u.usage_metadata.app_name, period
-)
-SELECT 
-  app_name,
-  SUM(cost_usd) AS total_cost_usd
-FROM aggregated_costs
-GROUP BY app_name
-ORDER BY total_cost_usd DESC
-LIMIT 10
+-- NOTE: 2016-only data; :startDate/:endDate are no-op guards (see spend_data).
+WITH agg AS (
+  SELECT CAST(pickup_zip AS STRING) AS app_name,
+    CASE WHEN :aggregationLevel='weekly'  THEN date_trunc('week', tpep_pickup_datetime)
+         WHEN :aggregationLevel='monthly' THEN date_trunc('month', tpep_pickup_datetime)
+         ELSE date(tpep_pickup_datetime) END AS period,
+    SUM(fare_amount) AS cost_usd
+  FROM samples.nyctaxi.trips
+  WHERE tpep_pickup_datetime >= TIMESTAMP'2016-01-01' AND tpep_pickup_datetime < TIMESTAMP'2017-01-01'
+    AND (COALESCE(CAST(:startDate AS DATE), DATE'2016-01-01') IS NOT NULL)
+    AND (COALESCE(CAST(:endDate   AS DATE), DATE'2016-12-31') IS NOT NULL)
+    AND pickup_zip IS NOT NULL
+  GROUP BY pickup_zip, period)
+SELECT app_name, ROUND(SUM(cost_usd),2) AS total_cost_usd
+FROM agg GROUP BY app_name ORDER BY total_cost_usd DESC LIMIT 10

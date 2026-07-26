@@ -301,6 +301,60 @@ function ArrowAnalyticsRoute() {
             </div>
 
             {/* ============================================================ */}
+            {/* untagged_apps Query (OBO) - Bar Charts */}
+            {/* ============================================================ */}
+            <h3 className="text-lg font-semibold mb-4 mt-8 border-b pb-2">
+              🔐 OBO Query - <code className="text-sm">untagged_apps</code>{" "}
+              query
+            </h3>
+            <p className="text-muted-foreground mb-4">
+              <code className="bg-muted px-1 rounded">
+                untagged_apps.obo.sql
+              </code>{" "}
+              runs <strong>on behalf of the logged-in user</strong> (not the
+              service principal), in both JSON and Arrow formats.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>JSON Format (OBO)</CardTitle>
+                  <CardDescription>
+                    <code>format="json"</code> - Executed as the user
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <BarChart
+                    queryKey="untagged_apps"
+                    parameters={commonParams}
+                    format="json"
+                    orientation="horizontal"
+                    xKey="app_name"
+                    yKey="total_cost_usd"
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Arrow Format (OBO)</CardTitle>
+                  <CardDescription>
+                    <code>format="arrow"</code> - Executed as the user
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <BarChart
+                    queryKey="untagged_apps"
+                    parameters={commonParams}
+                    format="arrow"
+                    orientation="horizontal"
+                    xKey="app_name"
+                    yKey="total_cost_usd"
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* ============================================================ */}
             {/* Auto Format Selection */}
             {/* ============================================================ */}
             <h3 className="text-lg font-semibold mb-4 mt-8 border-b pb-2">
