@@ -343,57 +343,62 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
-    genie({
-      spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
-    }),
-    ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
-    lakebaseExamples(),
-    files({
-      volumes: {
-        // Smart Dashboard saved views land here. Backed by
-        // DATABRICKS_VOLUME_FILES (see app.yaml / .env). Open policy for
-        // the demo — production apps should narrow this.
-        files: { policy: files.policy.allowAll() },
-        // baseline: everything allowed
-        allow_all: { policy: files.policy.allowAll() },
-        // read-only: uploads/mkdir/delete return 403
-        public_read: { policy: files.policy.publicRead() },
-        // locked: every action returns 403 (yes, even list)
-        deny_all: { policy: files.policy.denyAll() },
-        // SP can do everything, users can only read (docs example)
-        sp_only: {
-          policy: files.policy.any(
-            (_action, _resource, user) => !!user.isServicePrincipal,
-            files.policy.publicRead(),
-          ),
-        },
-        // writes gated on ADMIN_USER_ID env var, reads open
-        admin_only: { policy: adminOnly },
-        // drop-box: writes only, reads denied (not(publicRead))
-        write_only: { policy: files.policy.not(files.policy.publicRead()) },
-        // no explicit policy → falls back to publicRead() + startup warning
-        implicit: {},
-        // OBO demo volume — auth: "on-behalf-of-user" routes HTTP traffic
-        // through `runInUserContext` so SDK calls execute with the end
-        // user's access token. The `usersOnly` policy denies any traffic
-        // that wasn't authenticated via `x-forwarded-access-token`.
-        obo_demo: {
-          auth: "on-behalf-of-user",
-          policy: usersOnly,
-        },
-      },
-    }),
-    serving(),
-    agents({
-      agents: { helper, sql_analyst, dashboard_pilot },
-      // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
-      // wire the /smart-dashboard route. `insights` and `anomaly` are
-      // ephemeral markdown agents auto-fired by the route's AgentSidebar.
-      // `helper` is the conversational default for the bare `/agent` route
-      // (the markdown agents are dispatchers or ephemeral and don't make
-      // sense as the user-facing landing agent).
-      defaultAgent: "helper",
-    }),
+    // ── Analytics-only deploy: everything below is commented out so the app
+    // boots with just server + analytics (+ reconnect/telemetry demos). The
+    // corresponding `valueFrom` resource bindings are also removed from
+    // app.yaml since these plugins' resources aren't bound on the deployed
+    // apps. Re-enable by uncommenting and re-adding the bindings.
+    // genie({
+    //   spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
+    // }),
+    // ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
+    // lakebaseExamples(),
+    // files({
+    //   volumes: {
+    //     // Smart Dashboard saved views land here. Backed by
+    //     // DATABRICKS_VOLUME_FILES (see app.yaml / .env). Open policy for
+    //     // the demo — production apps should narrow this.
+    //     files: { policy: files.policy.allowAll() },
+    //     // baseline: everything allowed
+    //     allow_all: { policy: files.policy.allowAll() },
+    //     // read-only: uploads/mkdir/delete return 403
+    //     public_read: { policy: files.policy.publicRead() },
+    //     // locked: every action returns 403 (yes, even list)
+    //     deny_all: { policy: files.policy.denyAll() },
+    //     // SP can do everything, users can only read (docs example)
+    //     sp_only: {
+    //       policy: files.policy.any(
+    //         (_action, _resource, user) => !!user.isServicePrincipal,
+    //         files.policy.publicRead(),
+    //       ),
+    //     },
+    //     // writes gated on ADMIN_USER_ID env var, reads open
+    //     admin_only: { policy: adminOnly },
+    //     // drop-box: writes only, reads denied (not(publicRead))
+    //     write_only: { policy: files.policy.not(files.policy.publicRead()) },
+    //     // no explicit policy → falls back to publicRead() + startup warning
+    //     implicit: {},
+    //     // OBO demo volume — auth: "on-behalf-of-user" routes HTTP traffic
+    //     // through `runInUserContext` so SDK calls execute with the end
+    //     // user's access token. The `usersOnly` policy denies any traffic
+    //     // that wasn't authenticated via `x-forwarded-access-token`.
+    //     obo_demo: {
+    //       auth: "on-behalf-of-user",
+    //       policy: usersOnly,
+    //     },
+    //   },
+    // }),
+    // serving(),
+    // agents({
+    //   agents: { helper, sql_analyst, dashboard_pilot },
+    //   // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
+    //   // wire the /smart-dashboard route. `insights` and `anomaly` are
+    //   // ephemeral markdown agents auto-fired by the route's AgentSidebar.
+    //   // `helper` is the conversational default for the bare `/agent` route
+    //   // (the markdown agents are dispatchers or ephemeral and don't make
+    //   // sense as the user-facing landing agent).
+    //   defaultAgent: "helper",
+    // }),
     // TODO: re-enable once vector-search is exported from @databricks/appkit
     // vectorSearch({
     //   indexes: {
