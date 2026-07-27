@@ -29,10 +29,7 @@ interface CurrentUserClient {
  * Validates `DATABRICKS_HOST` before we hand it to the SDK, so an unfilled
  * placeholder (e.g. `https://...`) gets a clear message instead of the SDK's
  * opaque "cannot configure default credentials" error. Returns an error
- * message, or null when the host is acceptable (or unset — then the SDK's own
- * auth chain takes over).
- *
- * @internal exported for unit testing.
+ * message, or null when the host is acceptable or unset.
  */
 export function validateHost(host: string | undefined): string | null {
   if (host === undefined || host.trim().length === 0) return null;
@@ -64,14 +61,15 @@ export function validateHost(host: string | undefined): string | null {
  * existence check (they all need the client).
  */
 export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
-  const hostError = validateHost(process.env.DATABRICKS_HOST);
+  const host = process.env.DATABRICKS_HOST;
+  const hostError = validateHost(host);
   if (hostError) {
     return {
       result: {
         status: "error",
         code: "HOST_INVALID",
         detail: hostError,
-        host: process.env.DATABRICKS_HOST,
+        host,
         profile: options.profile,
       },
     };
@@ -88,7 +86,7 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
         status: "ok",
         code: "AUTH_OK",
         detail: `authenticated as ${who}`,
-        host: process.env.DATABRICKS_HOST,
+        host,
         profile: options.profile,
       },
     };
@@ -110,7 +108,7 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
         code: "AUTH_FAILED",
         detail: `failed to authenticate to the workspace: ${detail}`,
         hint: authFailureHint(detail, options.profile),
-        host: process.env.DATABRICKS_HOST,
+        host,
         profile: options.profile,
       },
     };
@@ -118,10 +116,9 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
 }
 
 /**
- * Infers guidance for the common auth failures, which the SDK surfaces as
- * opaque strings. Patterns are matched against real SDK messages (a missing
- * profile, an expired CLI token, and no credentials at all), most specific
- * first. Returns the command that fixes each, or undefined for the unknown.
+ * Infers guidance for common auth failures, which the SDK surfaces as opaque
+ * strings. Patterns are matched most specific first; returns the fixing command
+ * or undefined for an unrecognized failure.
  */
 function authFailureHint(
   message: string,
@@ -139,8 +136,7 @@ function authFailureHint(
   ) {
     return `Profile not found in ~/.databrickscfg. Run \`${loginCmd}\`, or pass an existing profile via --profile.`;
   }
-  // Expired/failed CLI token: "cannot get access token", "databricks auth
-  // token", "refresh token is invalid", "reauthenticate".
+  // Expired/failed CLI token.
   if (
     /cannot get access token|refresh token|reauthenticate|databricks auth token|token .*expired/i.test(
       message,
@@ -160,9 +156,8 @@ function authFailureHint(
 }
 
 /**
- * Layer: config. Offline check that each declared env var is present. Presence
- * only — whether a set value points at a real resource is the existence layer's
- * job, so this never guesses at placeholder values.
+ * Layer: config. Offline presence check of each declared env var; whether a set
+ * value points at a real resource is the existence layer's job.
  */
 export async function checkConfig(
   target: ResourceTarget,

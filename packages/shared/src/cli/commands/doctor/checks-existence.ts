@@ -41,8 +41,8 @@ type ExistenceProbe = (
   target: ResourceTarget,
 ) => Promise<LayerResult>;
 
-// The SDK's ApiError carries statusCode/errorCode; we read them off the caught
-// error structurally rather than importing the class, keeping `shared` SDK-free.
+// Read statusCode/errorCode off the SDK's ApiError structurally, keeping
+// `shared` SDK-free.
 function statusCodeOf(err: unknown): number | undefined {
   if (err && typeof err === "object" && "statusCode" in err) {
     const code = (err as { statusCode?: unknown }).statusCode;
@@ -59,9 +59,8 @@ function errorCodeOf(err: unknown): string | undefined {
   return undefined;
 }
 
-// The SDK message often embeds a JSON blob (`Response from server (...)
-// {"message":"..."}`); pull the inner `message` out so doctor prints one clean
-// line, not a dump.
+// The SDK message often embeds a JSON blob; pull the inner `message` out so
+// doctor prints one clean line, not a dump.
 function cleanMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const m = raw.match(/"message"\s*:\s*"([^"]+)"/);
@@ -106,9 +105,8 @@ function classifyError(err: unknown, target: ResourceTarget): LayerResult {
   };
 }
 
-/** Normalizes a field key for comparison: manifests use camelCase (`indexName`)
- * while scaffold defaults use snake_case (`index_name`), so match case- and
- * separator-insensitively. */
+/** Normalizes a field key so camelCase (`indexName`) and snake_case
+ * (`index_name`) spellings match. */
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[_-]/g, "");
 }
@@ -153,9 +151,8 @@ const probeWarehouse: ExistenceProbe = async (client, target) => {
 
 const probeServing: ExistenceProbe = async (client, target) => {
   const name = field(target, "name");
-  // Serving endpoints are looked up by name. If the manifest instead keys this
-  // resource by `id`, we still probe with that value but flag the likely cause
-  // when it fails, since the API only accepts a name.
+  // The API only accepts a name; if configured by id we probe with it anyway
+  // and flag the likely cause on failure.
   const idOnly = name === null ? field(target, "id") : null;
   const value = name ?? idOnly;
   if (!value) return missingField("name");
@@ -247,9 +244,6 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   }
 };
 
-// Lakebase authenticates with an OAuth token as the Postgres password, so
-// "password authentication failed" almost never means a wrong password — it
-// usually means PGUSER doesn't match the token's identity.
 function lakebaseAuthHint(message: string): string | undefined {
   if (/password authentication failed/i.test(message)) {
     return (
@@ -262,8 +256,7 @@ function lakebaseAuthHint(message: string): string | undefined {
 }
 
 // Lakebase has no cheap control-plane `.get()`, so existence is proven by a
-// real connection + `SELECT 1` (exercising endpoint resolution, OAuth token
-// mint, TLS, and reachability — the same path the app uses).
+// real connection + `SELECT 1`.
 const probePostgres: ExistenceProbe = async (client, target) => {
   if (!field(target, "endpointPath") && !field(target, "host")) {
     return missingField("host/endpoint");
@@ -316,8 +309,7 @@ export function toThreeLevelVolumeName(raw: string): string | null {
   return null;
 }
 
-// Types not listed (secret, uc_connection, database, app, experiment) have no
-// probe and fall through to NOT_IMPLEMENTED in runExistenceProbe.
+// Unlisted types fall through to NOT_IMPLEMENTED in runExistenceProbe.
 const PROBES: Record<string, ExistenceProbe> = {
   sql_warehouse: probeWarehouse,
   serving_endpoint: probeServing,

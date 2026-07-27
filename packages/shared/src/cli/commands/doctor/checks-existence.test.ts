@@ -211,9 +211,9 @@ describe("runExistenceProbe — postgres (Lakebase)", () => {
   });
 });
 
-// These use the REAL first-party manifest field keys (e.g. vector-search's
-// camelCase `indexName`) — the case that previously slipped through as a silent
-// skip. Each supported probe gets a happy path + a missing-field skip.
+// These use the real first-party manifest field keys (e.g. vector-search's
+// camelCase `indexName`). Each supported probe gets a happy path + a
+// missing-field skip.
 describe("runExistenceProbe — per-type coverage with real manifest keys", () => {
   it("serving_endpoint: ok via `name`", async () => {
     const client = { servingEndpoints: { get: async () => ({}) } };

@@ -66,8 +66,7 @@ export function printReport(report: DoctorReport): void {
     );
     for (const r of ordered) {
       const { target } = r;
-      // The `plugin · type` attribution only earns its place when a row needs
-      // fixing (tells you where to go); on a pass the alias alone is cleaner.
+      // Only attribute plugin · type on rows that need fixing.
       const suffix =
         r.status !== "ok" ? `   ${target.plugin} · ${target.type}` : "";
       console.log(`  ${glyph(r.status)}  ${target.alias}${suffix}`);
@@ -80,8 +79,7 @@ export function printReport(report: DoctorReport): void {
   }
   console.log("");
 
-  // Fold auth failure into the counts so it doesn't read as "0 errors" just
-  // because resources weren't probed.
+  // Fold auth failure into the counts so it doesn't read as "0 errors".
   const authError = auth.status === "error" ? 1 : 0;
   console.log(summaryLine({ ...summary, error: summary.error + authError }));
   if (authError) {

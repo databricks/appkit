@@ -40,14 +40,10 @@ export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
   if (profile) {
-    // Permanent for this process — fine for a one-shot CLI, but note it if this
-    // is ever reused in a test or long-lived context.
     process.env[CONFIG_PROFILE_ENV] = profile;
   }
 
-  // Untyped dynamic import: `shared` has no dependency on the SDK (kept
-  // SDK-free on purpose), so a `typeof import(...)` annotation would fail to
-  // resolve at compile time. We narrow to the one call we make below.
+  // Narrowed to the one call we make; `shared` has no static SDK dependency.
   let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
   try {
     sdk = (await import("@databricks/sdk-experimental")) as typeof sdk;
@@ -84,11 +80,8 @@ export interface LakebasePoolHandle {
 export async function getLakebasePool(
   client: unknown,
 ): Promise<LakebasePoolHandle> {
-  // `shared` intentionally has no dependency on `@databricks/appkit`, and CI
-  // typechecks it without appkit's `dist` built — so a static import specifier
-  // would fail to resolve at compile time. Going through a variable specifier
-  // keeps TS from resolving it statically; the module is an optional peer
-  // resolved (and guarded) at runtime.
+  // A variable specifier stops TS from statically resolving `@databricks/appkit`,
+  // which `shared` has no dependency on; it's an optional peer resolved at runtime.
   const appkitPkg = "@databricks/appkit";
   let appkit: {
     createLakebasePool: (cfg: Record<string, unknown>) => unknown;

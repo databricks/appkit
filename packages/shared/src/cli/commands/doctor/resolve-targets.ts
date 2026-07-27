@@ -40,9 +40,8 @@ interface TemplateManifest {
   plugins?: Record<string, ManifestPlugin>;
 }
 
-/** A field's env var is only the developer's to supply when it has no static
- * default and isn't platform-injected at deploy time (origin "platform" /
- * localOnly). Those the config layer must not flag as missing. */
+/** A field's env var is the developer's to supply only when it has no static
+ * default and isn't platform-injected at deploy time. */
 function isUserSuppliedEnv(field: ManifestField): boolean {
   if (field.value !== undefined) return false;
   if (field.origin === "platform" || field.origin === "static") return false;
@@ -60,11 +59,8 @@ function envVarsOf(resource: ManifestResource): string[] {
   return envs;
 }
 
-/** Resolves each field's value, keyed by manifest field name. Prefers the
- * environment, then falls back to a static `value` default in the manifest, so
- * a field configured either way reaches the probe (matching what the config
- * layer treats as configured). Unset/empty fields are omitted so probes can
- * tell provided from absent. */
+/** Resolves each field's value keyed by manifest field name, preferring the
+ * environment over a static `value` default. Unset/empty fields are omitted. */
 function fieldValuesOf(resource: ManifestResource): Record<string, string> {
   const fields = resource.fields ?? {};
   const values: Record<string, string> = {};

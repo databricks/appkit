@@ -8,9 +8,8 @@ export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 export interface LayerResult {
   layer: CheckLayer;
   status: CheckStatus;
-  /** The raw finding (what happened). */
   detail?: string;
-  /** Optional inferred guidance, rendered on its own line below `detail`. */
+  /** Inferred guidance for fixing the finding. */
   hint?: string;
   /** Machine-readable code for `--json` consumers (e.g. `NOT_FOUND`). */
   code?: string;
@@ -27,8 +26,7 @@ export interface ResourceTarget {
   /** Mandatory (vs optional) for the app. */
   required: boolean;
   envVars: string[];
-  /** Field values resolved from `process.env`, keyed by manifest field name
-   * (e.g. `id`, `name`). Unset fields are omitted. */
+  /** Resolved field values keyed by manifest field name; unset fields omitted. */
   fieldValues: Record<string, string>;
 }
 
@@ -42,7 +40,6 @@ export interface ResourceCheckResult {
 export interface AuthCheckResult {
   status: CheckStatus;
   detail?: string;
-  /** Optional inferred guidance, rendered on its own line below `detail`. */
   hint?: string;
   code?: string;
   host?: string;

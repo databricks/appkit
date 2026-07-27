@@ -28,18 +28,10 @@ function worst(a: CheckStatus, b: CheckStatus): CheckStatus {
   return STATUS_SEVERITY[b] > STATUS_SEVERITY[a] ? b : a;
 }
 
-/** Returns an empty list when no manifest is present — an app may legitimately
- * declare no resources, which doctor reports rather than treating as an error. */
-export async function resolveTargets(
-  options: DoctorOptions,
-): Promise<ResourceTarget[]> {
-  return resolveTargetsFromCwd(process.cwd(), options.manifest);
-}
-
 async function checkResource(
   target: ResourceTarget,
   // undefined = auth failed, so the live existence layer is skipped.
-  client: unknown | undefined,
+  client: unknown,
 ): Promise<ResourceCheckResult> {
   const layers: LayerResult[] = [];
   let rolled: CheckStatus = "ok";
@@ -47,7 +39,7 @@ async function checkResource(
   const configResult = await checkConfig(target);
   layers.push(configResult);
   rolled = worst(rolled, configResult.status);
-  // A hard config failure (missing id) makes the existence probe meaningless.
+  // A hard config failure makes the existence probe meaningless.
   if (configResult.status === "error") {
     return { target, status: rolled, layers };
   }
@@ -77,9 +69,13 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 
   // Resources are resolved and config-checked even when auth failed, so a bad
   // connection still surfaces config problems instead of hiding them all.
-  const targets = await resolveTargets(options);
-  for (const target of targets) {
-    const result = await checkResource(target, client);
+  // Probes are independent reads, so run them concurrently; Promise.all
+  // preserves input order, keeping the report deterministic.
+  const targets = resolveTargetsFromCwd(process.cwd(), options.manifest);
+  const results = await Promise.all(
+    targets.map((target) => checkResource(target, client)),
+  );
+  for (const result of results) {
     resources.push(result);
     summary[result.status] += 1;
   }
