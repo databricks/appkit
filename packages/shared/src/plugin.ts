@@ -16,7 +16,24 @@ export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 export interface BasePlugin {
   name: string;
 
+  /**
+   * Cancel in-flight work (abort signals, SSE streams). Runs in the first
+   * phase of graceful shutdown, BEFORE any plugin's `shutdown()` hook —
+   * so it must not tear down shared resources (e.g. connection pools)
+   * that other plugins' hooks may still need. Put teardown in `shutdown()`.
+   */
   abortActiveOperations?(): void;
+
+  /**
+   * Optional graceful-shutdown hook.
+   *
+   * Invoked by AppKit's core lifecycle manager during graceful shutdown
+   * (SIGTERM/SIGINT), after `abortActiveOperations()` has run. Use it to
+   * drain in-flight work or release resources. Each plugin's hook is bounded
+   * by a per-plugin timeout and runs concurrently with other plugins' hooks;
+   * errors are logged and never abort the shutdown.
+   */
+  shutdown?(): Promise<void> | void;
 
   setup(): Promise<void>;
 
@@ -118,6 +135,7 @@ export interface PluginManifest<TName extends string = string>
     | "license"
     | "onSetupMessage"
     | "hidden"
+    | "devOnly"
     | "stability"
   > {
   name: TName;
@@ -146,6 +164,8 @@ export interface PluginManifest<TName extends string = string>
   onSetupMessage?: string;
   /** When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync. */
   hidden?: boolean;
+  /** When true, this plugin is only registered when NODE_ENV === "development". In any other environment createApp skips it entirely (not constructed, no routes, resources not validated). Use for dev-only tooling that must never run in a deployed app. */
+  devOnly?: boolean;
   /** Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly. */
   stability?: "beta" | "ga";
 }

@@ -275,6 +275,10 @@ describe("generateFromEntryPoint — query failure handling", () => {
 describe("generateFromEntryPoint — metric-view emission", () => {
   const metricsDir = path.join(__dirname, "__output_metrics__");
   const queryFolder = path.join(metricsDir, "queries");
+  // The metric config lives in `config/metric-views/` — a sibling of the
+  // queries folder. `generateFromEntryPoint` derives it from `queryFolder` when
+  // not passed explicitly, so these tests only pass `queryFolder` below.
+  const metricViewsFolder = path.join(metricsDir, "metric-views");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
   // Default: the metric .d.ts is a sibling of `outFile`.
   const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
@@ -302,7 +306,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
   const writeMetricConfig = () => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
         metricViews: { revenue: { source: "demo.sales.revenue" } },
       }),
@@ -314,6 +318,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     mocks.cacheFile.contents = undefined;
     fs.rmSync(metricsDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
+    fs.mkdirSync(metricViewsFolder, { recursive: true });
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [],
       syntaxErrors: [],
@@ -325,7 +330,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric-views.d.ts when metric-views.json exists", async () => {
+  test("writes metric-views.d.ts when definitions.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -347,7 +352,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain('"DECIMAL(38,2)"');
   });
 
-  test("emits no metric artifacts and no errors when metric-views.json is absent", async () => {
+  test("emits no metric artifacts and no errors when definitions.json is absent", async () => {
     await expect(
       generateFromEntryPoint({
         outFile,
@@ -451,7 +456,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
   test("non-blocking + warehouse not running: skips all DESCRIBEs but still emits degraded artifacts", async () => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
         metricViews: {
           revenue: { source: "demo.sales.revenue" },
@@ -621,9 +626,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     }
   });
 
-  test("malformed metric-views.json: a clean TypegenFatalError, not a raw parse error (any mode)", async () => {
+  test("malformed definitions.json: a clean TypegenFatalError, not a raw parse error (any mode)", async () => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       "{ not valid",
     );
 
@@ -642,7 +647,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
 
     expect(error).toBeInstanceOf(TypegenFatalError);
-    expect((error as Error).message).toContain("metric-views.json");
+    expect((error as Error).message).toContain("definitions.json");
     // Query types were written before the metric config was read.
     expect(fs.existsSync(outFile)).toBe(true);
   });
@@ -949,7 +954,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
   test("empty metricViews map: no probe, no preflight, no client — empty artifacts still ship", async () => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({ metricViews: {} }),
     );
 
@@ -1063,6 +1068,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 describe("generateFromEntryPoint — metric cache section", () => {
   const cacheTestDir = path.join(__dirname, "__output_metric_cache__");
   const queryFolder = path.join(cacheTestDir, "queries");
+  // Metric config lives in the sibling metric-views folder; generateFromEntryPoint
+  // derives it from queryFolder when not passed explicitly.
+  const metricViewsFolder = path.join(cacheTestDir, "metric-views");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
   const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
 
@@ -1092,7 +1100,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     >,
   ) => {
     fs.writeFileSync(
-      path.join(queryFolder, "metric-views.json"),
+      path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({ metricViews }),
     );
   };
@@ -1116,6 +1124,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     mocks.cacheFile.contents = undefined;
     fs.rmSync(cacheTestDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
+    fs.mkdirSync(metricViewsFolder, { recursive: true });
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [],
       syntaxErrors: [],

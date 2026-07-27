@@ -2,6 +2,7 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../context/service-context";
+import { uiVariants } from "../../plugins/ui-variants";
 import type { PluginManifest } from "../../registry/types";
 import { ResourceType } from "../../registry/types";
 import { AppKit, createApp } from "../appkit";
@@ -388,6 +389,118 @@ describe("AppKit", () => {
 
       // Each call creates a new instance
       expect(instance2).not.toBe(instance1);
+    });
+  });
+
+  describe("devOnly plugins", () => {
+    // A plugin whose manifest opts into dev-only registration.
+    class DevOnlyPlugin extends NormalTestPlugin {
+      static manifest = {
+        ...createTestManifest("devOnly"),
+        devOnly: true,
+      };
+      name = "devOnly";
+    }
+
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("registers devOnly plugin when NODE_ENV is development", async () => {
+      process.env.NODE_ENV = "development";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      expect(instance.devOnly).toBeDefined();
+      expect(instance.devOnly.setupCalled).toBe(true);
+    });
+
+    test("skips devOnly plugin when NODE_ENV is production", async () => {
+      process.env.NODE_ENV = "production";
+
+      const instance = (await createApp({
+        plugins: [
+          { plugin: DevOnlyPlugin, config: {}, name: "devOnly" },
+          { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
+        ],
+      })) as any;
+
+      // Dev-only plugin is absent; other plugins register normally.
+      expect(Object.keys(instance)).not.toContain("devOnly");
+      expect(instance.normalTest).toBeDefined();
+      expect(instance.normalTest.setupCalled).toBe(true);
+    });
+
+    test("skips devOnly plugin when NODE_ENV is unset", async () => {
+      process.env.NODE_ENV = undefined;
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      expect(Object.keys(instance)).not.toContain("devOnly");
+    });
+
+    test("skips devOnly plugin when NODE_ENV is test", async () => {
+      process.env.NODE_ENV = "test";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: DevOnlyPlugin, config: {}, name: "devOnly" }],
+      })) as any;
+
+      // Only NODE_ENV === "development" registers a devOnly plugin; anything
+      // else (including "test") fails closed.
+      expect(Object.keys(instance)).not.toContain("devOnly");
+    });
+  });
+
+  describe("default plugins (ui-variants)", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    test("registers ui-variants by default in development", async () => {
+      process.env.NODE_ENV = "development";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
+      })) as any;
+
+      expect(instance["ui-variants"]).toBeDefined();
+    });
+
+    test("drops the default ui-variants in production", async () => {
+      process.env.NODE_ENV = "production";
+
+      const instance = (await createApp({
+        plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
+      })) as any;
+
+      // The default is devOnly, so the same guard that skips user devOnly
+      // plugins strips it from a deployed app.
+      expect(Object.keys(instance)).not.toContain("ui-variants");
+      expect(instance.normalTest).toBeDefined();
+    });
+
+    test("does not duplicate ui-variants when the app registers it explicitly", async () => {
+      process.env.NODE_ENV = "development";
+
+      const explicit = uiVariants();
+      const instance = (await createApp({
+        plugins: [explicit],
+      })) as any;
+
+      expect(instance["ui-variants"]).toBeDefined();
+      // Only one instance was constructed for the single name.
+      expect(
+        Object.keys(instance).filter((k) => k === "ui-variants"),
+      ).toHaveLength(1);
     });
   });
 

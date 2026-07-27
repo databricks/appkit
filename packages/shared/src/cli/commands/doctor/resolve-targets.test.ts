@@ -139,6 +139,70 @@ describe("targetsFromManifestFile", () => {
     expect(pg?.envVars).toEqual(["LAKEBASE_ENDPOINT"]);
   });
 
+  it("resolves fieldValues from a static `value` when the env var is unset", () => {
+    delete process.env.SOME_UNSET_ENV;
+    const targets = targetsFromManifestFile(
+      writeManifest({
+        version: "2.0",
+        plugins: {
+          demo: {
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  resourceKey: "wh",
+                  alias: "WH",
+                  permission: "CAN_USE",
+                  fields: {
+                    // Configured by a baked-in value, not an env var — the
+                    // existence probe must still receive it.
+                    id: { env: "SOME_UNSET_ENV", value: "baked-in-id" },
+                  },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      }),
+    );
+    const wh = targets.find((t) => t.type === "sql_warehouse");
+    expect(wh?.fieldValues.id).toBe("baked-in-id");
+  });
+
+  it("prefers the env value over a static `value` default", () => {
+    process.env.DOCTOR_ENV_WINS = "from-env";
+    try {
+      const targets = targetsFromManifestFile(
+        writeManifest({
+          version: "2.0",
+          plugins: {
+            demo: {
+              resources: {
+                required: [
+                  {
+                    type: "sql_warehouse",
+                    resourceKey: "wh",
+                    alias: "WH",
+                    permission: "CAN_USE",
+                    fields: {
+                      id: { env: "DOCTOR_ENV_WINS", value: "baked-in-id" },
+                    },
+                  },
+                ],
+                optional: [],
+              },
+            },
+          },
+        }),
+      );
+      const wh = targets.find((t) => t.type === "sql_warehouse");
+      expect(wh?.fieldValues.id).toBe("from-env");
+    } finally {
+      delete process.env.DOCTOR_ENV_WINS;
+    }
+  });
+
   it("returns an empty list for a manifest with no resources", () => {
     const targets = targetsFromManifestFile(
       writeManifest({ version: "2.0", plugins: { server: {} } }),

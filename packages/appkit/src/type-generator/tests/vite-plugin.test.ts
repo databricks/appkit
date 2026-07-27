@@ -262,7 +262,7 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
   });
 
-  test("a metric-views.json change triggers a regeneration like a .sql edit", async () => {
+  test("a definitions.json change in the metric-views folder triggers a regeneration like a .sql edit", async () => {
     mocks.generateFromEntryPoint.mockResolvedValue(undefined);
 
     const plugin = makeConfiguredPlugin();
@@ -278,7 +278,7 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     // regenerate flow as a .sql edit (no separate machinery).
     watcher.emit(
       "change",
-      path.join(process.cwd(), "config", "queries", "metric-views.json"),
+      path.join(process.cwd(), "config", "metric-views", "definitions.json"),
     );
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
@@ -296,7 +296,7 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
 
-    // Inside the watched folder, but neither .sql nor metric-views.json.
+    // Inside the watched folder, but neither .sql nor the metric config.
     watcher.emit(
       "change",
       path.join(process.cwd(), "config", "queries", "foo.txt"),
@@ -305,7 +305,7 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
   });
 
-  test("a legacy-metric-views.json change does NOT regenerate; metric-views.json still does (basename match, not suffix)", async () => {
+  test("a definitions.json OUTSIDE the metric-views folder does NOT regenerate; one inside does (directory match, not bare basename)", async () => {
     mocks.generateFromEntryPoint.mockResolvedValue(undefined);
 
     const plugin = makeConfiguredPlugin();
@@ -317,19 +317,19 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
 
-    // Suffix-matches "metric-views.json" but is a different file — the
-    // basename check must not fire for it.
+    // Same basename "definitions.json" but under config/queries/, not the
+    // metric-views folder — the directory-scoped check must not fire for it.
     watcher.emit(
       "change",
-      path.join(process.cwd(), "config", "queries", "legacy-metric-views.json"),
+      path.join(process.cwd(), "config", "queries", "definitions.json"),
     );
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
 
-    // The real config file still triggers.
+    // The real config file (inside config/metric-views/) still triggers.
     watcher.emit(
       "change",
-      path.join(process.cwd(), "config", "queries", "metric-views.json"),
+      path.join(process.cwd(), "config", "metric-views", "definitions.json"),
     );
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(2);
@@ -376,6 +376,10 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
           process.cwd(),
           `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
         ),
+        // Both config folders are threaded explicitly (not inferred from
+        // watchFolders ordering): queries + the sibling metric-views dir.
+        queryFolder: path.join(process.cwd(), "config", "queries"),
+        metricViewsFolder: path.join(process.cwd(), "config", "metric-views"),
         mvOutFile: undefined,
       }),
     );

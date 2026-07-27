@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { Plugin } from "vite";
+import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
@@ -38,7 +39,11 @@ interface AppKitTypesPluginOptions {
    * Defaults to a sibling of `outFile`, computed by the generator.
    */
   mvOutFile?: string;
-  /** Folders to watch for changes. */
+  /**
+   * Folders to watch for changes. Defaults to `config/queries` and
+   * `config/metric-views`. When overridden, include a `queries` folder and/or a
+   * `metric-views` folder — they are resolved by their trailing path segment.
+   */
   watchFolders?: string[];
 }
 
@@ -52,6 +57,11 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
   let mvOutFile: string | undefined;
   let watchFolders: string[];
+  // The queries + metric-views config folders, resolved in `configResolved`.
+  // Passed explicitly into generateFromEntryPoint so neither is inferred from
+  // `watchFolders` ordering (which used to assume queries was `watchFolders[0]`).
+  let queryFolder: string | undefined;
+  let metricViewsFolder: string | undefined;
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
   // currently-running drain (null when idle); `queued` records that a trigger
@@ -96,7 +106,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
       await generateFromEntryPoint({
         outFile,
-        queryFolder: watchFolders[0],
+        queryFolder,
+        metricViewsFolder,
         warehouseId,
         noCache: false,
         mode,
@@ -290,7 +301,17 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         return false;
       }
 
-      if (!existsSync(path.join(process.cwd(), "config", "queries"))) {
+      // Run when either config surface exists. Metric-view types are
+      // independent of `.sql` queries, so a metric-only project (a
+      // `config/metric-views/` with no `config/queries/`) must still activate
+      // the plugin.
+      const hasQueries = existsSync(
+        path.join(process.cwd(), "config", "queries"),
+      );
+      const hasMetricViews = existsSync(
+        path.join(process.cwd(), "config", "metric-views"),
+      );
+      if (!hasQueries && !hasMetricViews) {
         return false;
       }
 
@@ -313,9 +334,30 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         options?.mvOutFile !== undefined
           ? path.resolve(projectRoot, options.mvOutFile)
           : undefined;
+
+      const defaultQueryFolder = path.join(process.cwd(), "config", "queries");
+      const defaultMetricViewsFolder = path.join(
+        process.cwd(),
+        "config",
+        "metric-views",
+      );
       watchFolders = options?.watchFolders ?? [
-        path.join(process.cwd(), "config", "queries"),
+        defaultQueryFolder,
+        defaultMetricViewsFolder,
       ];
+
+      // Resolve the two config folders explicitly rather than assuming a
+      // position in `watchFolders`. With a custom `watchFolders`, match by the
+      // trailing segment; otherwise use the computed defaults.
+      if (options?.watchFolders) {
+        queryFolder = watchFolders.find((f) => path.basename(f) === "queries");
+        metricViewsFolder = watchFolders.find(
+          (f) => path.basename(f) === "metric-views",
+        );
+      } else {
+        queryFolder = defaultQueryFolder;
+        metricViewsFolder = defaultMetricViewsFolder;
+      }
     },
 
     buildStart() {
@@ -343,14 +385,18 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           changedFile.startsWith(folder),
         );
 
-        if (
-          isWatchedFile &&
-          (changedFile.endsWith(".sql") ||
-            // Basename equality, not endsWith: a sibling like
-            // "legacy-metric-views.json" must not trigger a regenerate —
-            // only the real config file does.
-            path.basename(changedFile) === "metric-views.json")
-        ) {
+        // The metric config is `definitions.json` — a far more generic name
+        // than the old `metric-views.json`. Match it by DIRECTORY, not bare
+        // basename: only a `definitions.json` sitting directly in the
+        // metric-views folder is the config (a `definitions.json` elsewhere in
+        // a watched tree must not trigger a regenerate).
+        const isMetricConfig =
+          metricViewsFolder !== undefined &&
+          path.basename(changedFile) === METRIC_CONFIG_FILE &&
+          path.dirname(path.resolve(changedFile)) ===
+            path.resolve(metricViewsFolder);
+
+        if (isWatchedFile && (changedFile.endsWith(".sql") || isMetricConfig)) {
           // Route through the single-flight runner (was fire-and-forget
           // generate(), which could race the initial build / watch). This is a
           // dev-only hook, so degrade instantly (non-blocking), then re-arm the

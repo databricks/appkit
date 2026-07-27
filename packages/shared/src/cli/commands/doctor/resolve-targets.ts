@@ -60,17 +60,23 @@ function envVarsOf(resource: ManifestResource): string[] {
   return envs;
 }
 
-/** Resolves each field's value from the environment, keyed by manifest field
- * name. Unset/empty fields are omitted so probes can tell provided from absent. */
+/** Resolves each field's value, keyed by manifest field name. Prefers the
+ * environment, then falls back to a static `value` default in the manifest, so
+ * a field configured either way reaches the probe (matching what the config
+ * layer treats as configured). Unset/empty fields are omitted so probes can
+ * tell provided from absent. */
 function fieldValuesOf(resource: ManifestResource): Record<string, string> {
   const fields = resource.fields ?? {};
   const values: Record<string, string> = {};
   for (const [fieldName, field] of Object.entries(fields)) {
-    const env = field?.env;
-    if (!env) continue;
-    const value = process.env[env];
-    if (value !== undefined && value.trim().length > 0) {
-      values[fieldName] = value;
+    if (!field) continue;
+    const envValue = field.env ? process.env[field.env] : undefined;
+    const resolved =
+      envValue !== undefined && envValue.trim().length > 0
+        ? envValue
+        : field.value;
+    if (resolved !== undefined && resolved.trim().length > 0) {
+      values[fieldName] = resolved;
     }
   }
   return values;

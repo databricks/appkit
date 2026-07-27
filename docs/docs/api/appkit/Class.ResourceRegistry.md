@@ -244,7 +244,7 @@ const registry = ResourceRegistry.getInstance();
 const result = registry.validate();
 
 if (!result.valid) {
-  console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
+  console.error(ResourceRegistry.formatMissingResources(result.missing));
 }
 ```
 

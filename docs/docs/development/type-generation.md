@@ -86,13 +86,13 @@ In blocking mode the generator starts a stopped warehouse, waits (bounded) for i
 
 ## Metric-view types
 
-`generate-types` (and the Vite plugin) emit metric-view types **additively** — there is no separate command. When a `config/queries/metric-views.json` file is present, the same run that generates your query types also DESCRIBEs each declared [UC Metric View](../plugins/analytics.md) and writes `metric-views.d.ts` into `shared/appkit-types/`:
+`generate-types` (and the Vite plugin) emit metric-view types **additively** — there is no separate command. When a `config/metric-views/definitions.json` file is present, the same run that generates your query types also DESCRIBEs each declared [UC Metric View](../plugins/analytics.md) and writes `metric-views.d.ts` into `shared/appkit-types/`:
 
 - `metric-views.d.ts` — augments the `MetricRegistry` interface so `useMetricView('<key>', …)` is autocompleted and type-checked. Each view's measures, dimensions, and their semantic metadata (SQL type, display name, format, time grains) are encoded at the type level.
 
-If `metric-views.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` that same situation fails the build so CI never ships incomplete metric types. A malformed `metric-views.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
+If `config/metric-views/definitions.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` that same situation fails the build so CI never ships incomplete metric types. A malformed `definitions.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
 
-`metric-views.json` is keyed by metric key; each entry names the three-part UC FQN of the view and, optionally, the executor it runs as (`app_service_principal`, the default, or `user`):
+`definitions.json` is keyed by metric key; each entry names the three-part UC FQN of the view and, optionally, the executor it runs as (`app_service_principal`, the default, or `user`):
 
 ```json
 {

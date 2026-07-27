@@ -90,16 +90,21 @@ describe("Analytics Plugin", () => {
   });
 
   describe("injectRoutes", () => {
-    test("should register single POST route for queries", () => {
+    test("should register the query and metric POST routes", () => {
       const plugin = new AnalyticsPlugin(config);
       const { router } = createMockRouter();
 
       plugin.injectRoutes(router);
 
-      // Only 1 POST route - asUser is determined by .obo.sql file convention
-      expect(router.post).toHaveBeenCalledTimes(1);
+      // Two POST routes: the SQL query route (asUser determined by the
+      // .obo.sql file convention) and the metric-view route.
+      expect(router.post).toHaveBeenCalledTimes(2);
       expect(router.post).toHaveBeenCalledWith(
         "/query/:query_key",
+        expect.any(Function),
+      );
+      expect(router.post).toHaveBeenCalledWith(
+        "/metric/:key",
         expect.any(Function),
       );
     });

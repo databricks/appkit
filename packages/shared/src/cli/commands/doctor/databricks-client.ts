@@ -45,9 +45,12 @@ export async function getServiceClient(
     process.env[CONFIG_PROFILE_ENV] = profile;
   }
 
-  let sdk: typeof import("@databricks/sdk-experimental");
+  // Untyped dynamic import: `shared` has no dependency on the SDK (kept
+  // SDK-free on purpose), so a `typeof import(...)` annotation would fail to
+  // resolve at compile time. We narrow to the one call we make below.
+  let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
   try {
-    sdk = await import("@databricks/sdk-experimental");
+    sdk = (await import("@databricks/sdk-experimental")) as typeof sdk;
   } catch (err) {
     if (isModuleNotFound(err)) {
       throw new SdkNotInstalledError();
@@ -81,9 +84,17 @@ export interface LakebasePoolHandle {
 export async function getLakebasePool(
   client: unknown,
 ): Promise<LakebasePoolHandle> {
-  let appkit: typeof import("@databricks/appkit");
+  // `shared` intentionally has no dependency on `@databricks/appkit`, and CI
+  // typechecks it without appkit's `dist` built — so a static import specifier
+  // would fail to resolve at compile time. Going through a variable specifier
+  // keeps TS from resolving it statically; the module is an optional peer
+  // resolved (and guarded) at runtime.
+  const appkitPkg = "@databricks/appkit";
+  let appkit: {
+    createLakebasePool: (cfg: Record<string, unknown>) => unknown;
+  };
   try {
-    appkit = await import("@databricks/appkit");
+    appkit = await import(appkitPkg);
   } catch (err) {
     if (isModuleNotFound(err)) {
       throw new AppkitNotInstalledError();
@@ -91,6 +102,6 @@ export async function getLakebasePool(
     throw err;
   }
 
-  const pool = appkit.createLakebasePool({ workspaceClient: client as never });
+  const pool = appkit.createLakebasePool({ workspaceClient: client });
   return pool as unknown as LakebasePoolHandle;
 }

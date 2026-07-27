@@ -75,7 +75,7 @@ describe("PluginContext", () => {
       expect(ctx.getPluginNames()).toEqual([]);
     });
 
-    test("flushRoutes applies buffered routes via addExtension", () => {
+    test("flushRoutes applies buffered routes via addExtension", async () => {
       const handler = vi.fn();
       ctx.addRoute("post", "/invocations", handler);
 
@@ -87,10 +87,19 @@ describe("PluginContext", () => {
 
       const mockApp = { post: vi.fn() };
       extensionFn(mockApp);
-      expect(mockApp.post).toHaveBeenCalledWith("/invocations", handler);
+      // Handlers are wrapped (forwardAsyncErrors) so async rejections reach
+      // the Express error middleware — assert the wrapper delegates.
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/invocations",
+        expect.any(Function),
+      );
+      const wrapped = mockApp.post.mock.calls[0][1];
+      const next = vi.fn();
+      await wrapped("req", "res", next);
+      expect(handler).toHaveBeenCalledWith("req", "res", next);
     });
 
-    test("addRoute called after registerAsRouteTarget applies immediately", () => {
+    test("addRoute called after registerAsRouteTarget applies immediately", async () => {
       const addExtension = vi.fn();
       ctx.registerAsRouteTarget({ addExtension });
 
@@ -102,10 +111,13 @@ describe("PluginContext", () => {
 
       const mockApp = { get: vi.fn() };
       extensionFn(mockApp);
-      expect(mockApp.get).toHaveBeenCalledWith("/health", handler);
+      expect(mockApp.get).toHaveBeenCalledWith("/health", expect.any(Function));
+      const wrapped = mockApp.get.mock.calls[0][1];
+      await wrapped("req", "res", vi.fn());
+      expect(handler).toHaveBeenCalled();
     });
 
-    test("addRoute supports middleware chains", () => {
+    test("addRoute supports middleware chains", async () => {
       const auth = vi.fn();
       const handler = vi.fn();
 
@@ -117,10 +129,19 @@ describe("PluginContext", () => {
       const extensionFn = addExtension.mock.calls[0][0];
       const mockApp = { post: vi.fn() };
       extensionFn(mockApp);
-      expect(mockApp.post).toHaveBeenCalledWith("/api", auth, handler);
+      expect(mockApp.post).toHaveBeenCalledWith(
+        "/api",
+        expect.any(Function),
+        expect.any(Function),
+      );
+      const [, wrappedAuth, wrappedHandler] = mockApp.post.mock.calls[0];
+      await wrappedAuth("req", "res", vi.fn());
+      await wrappedHandler("req", "res", vi.fn());
+      expect(auth).toHaveBeenCalled();
+      expect(handler).toHaveBeenCalled();
     });
 
-    test("addMiddleware buffers and applies via use()", () => {
+    test("addMiddleware buffers and applies via use()", async () => {
       const handler = vi.fn();
       ctx.addMiddleware("/api", handler);
 
@@ -132,7 +153,46 @@ describe("PluginContext", () => {
 
       const mockApp = { use: vi.fn() };
       extensionFn(mockApp);
-      expect(mockApp.use).toHaveBeenCalledWith("/api", handler);
+      expect(mockApp.use).toHaveBeenCalledWith("/api", expect.any(Function));
+      const wrapped = mockApp.use.mock.calls[0][1];
+      await wrapped("req", "res", vi.fn());
+      expect(handler).toHaveBeenCalled();
+    });
+
+    test("wrapped route handlers forward async rejections to next", async () => {
+      const failure = new Error("handler rejected");
+      const handler = vi.fn().mockRejectedValue(failure);
+      const addExtension = vi.fn();
+      ctx.registerAsRouteTarget({ addExtension });
+
+      ctx.addRoute("get", "/boom", handler);
+
+      const extensionFn = addExtension.mock.calls[0][0];
+      const mockApp = { get: vi.fn() };
+      extensionFn(mockApp);
+      const wrapped = mockApp.get.mock.calls[0][1];
+      const next = vi.fn();
+      await wrapped("req", "res", next);
+      expect(next).toHaveBeenCalledWith(failure);
+    });
+
+    test("addMiddleware leaves 4-arg error middleware unwrapped", () => {
+      const errorMiddleware = (
+        _err: unknown,
+        _req: unknown,
+        _res: unknown,
+        _next: unknown,
+      ) => {};
+      const addExtension = vi.fn();
+      ctx.registerAsRouteTarget({ addExtension });
+
+      ctx.addMiddleware("/api", errorMiddleware as never);
+
+      const extensionFn = addExtension.mock.calls[0][0];
+      const mockApp = { use: vi.fn() };
+      extensionFn(mockApp);
+      // Express detects error middleware by arity — wrapping would break it.
+      expect(mockApp.use).toHaveBeenCalledWith("/api", errorMiddleware);
     });
 
     test("multiple buffered routes are all applied on registration", () => {
