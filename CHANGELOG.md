@@ -90,6 +90,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.49.0](https://github.com/databricks/appkit/compare/v0.48.0...v0.49.0) (2026-07-28)
+
+### appkit
+
+* **appkit:** supervisor API adapter for agents plugin ([#400](https://github.com/databricks/appkit/issues/400)) ([4e6da4d](https://github.com/databricks/appkit/commit/4e6da4dd8109c4d9eb99cd09b87dfb3653fb2d76)), closes [#345](https://github.com/databricks/appkit/issues/345) [#345](https://github.com/databricks/appkit/issues/345) [#345](https://github.com/databricks/appkit/issues/345)
+
+
 ## [0.48.0](https://github.com/databricks/appkit/compare/v0.47.1...v0.48.0) (2026-07-24)
 
 ### appkit
