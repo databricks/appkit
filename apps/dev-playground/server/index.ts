@@ -15,6 +15,7 @@ import {
   agents,
   createAgent,
   DatabricksAdapter,
+  supervisorTools,
   tool,
 } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
@@ -91,14 +92,14 @@ const supervisor = createAgent({
     model: "databricks-claude-sonnet-4-5",
   }),
   tools: () => ({
-    // nyc: supervisorTools.genieSpace({
-    //   id: "01ABCDEF12345678",
-    //   description: "NYC taxi trip records and zones",
-    // }),
-    // add: supervisorTools.ucFunction({
-    //   name: "main.default.add",
-    //   description: "Adds two integers and returns the sum.",
-    // }),
+    nyc: supervisorTools.genieSpace({
+      id: process.env.DATABRICKS_GENIE_SPACE_ID ?? "",
+      description: "NYC taxi trip records and zones",
+    }),
+    add: supervisorTools.ucFunction({
+      name: process.env.DATABRICKS_UC_FUNCTION_NAME ?? "",
+      description: "Adds two integers and returns the sum.",
+    }),
   }),
 });
 

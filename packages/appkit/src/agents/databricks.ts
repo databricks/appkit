@@ -390,7 +390,7 @@ export class DatabricksAdapter implements AgentAdapter {
     if (!resolvedEndpoint) {
       throw new Error(
         "No endpoint name provided and DATABRICKS_SERVING_ENDPOINT_NAME env var is not set. " +
-        "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
+          "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
       );
     }
 
