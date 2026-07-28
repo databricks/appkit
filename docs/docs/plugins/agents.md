@@ -25,7 +25,7 @@ Or skip serving-endpoint setup entirely with the managed [Supervisor API adapter
 `agents` is a regular plugin. Add it to `plugins[]` alongside `server()` and any ToolProvider plugins whose tools you want agents to reach.
 
 ```ts
-import { agents, analytics, createApp, files, server } from "@databricks/appkit";
+import { analytics, createApp, files, server } from "@databricks/appkit";
 import { agents } from "@databricks/appkit/beta";
 
 await createApp({
@@ -180,7 +180,7 @@ Each key in `agents: {...}` on an `AgentDefinition` becomes an `agent-<key>` too
 ## Level 5: standalone (no `createApp`)
 
 ```ts
-import { createAgent, runAgent, tool } from "@databricks/appkit";
+import { createAgent, runAgent, tool } from "@databricks/appkit/beta";
 import { z } from "zod";
 
 const classifier = createAgent({
@@ -230,8 +230,8 @@ MCP hosted tools (`mcpServer(...)`) still require `agents()` (they need a live M
 The minimal agent is one extra line versus a markdown agent:
 
 ```ts
-import { createApp, createAgent } from "@databricks/appkit";
-import { agents, DatabricksAdapter } from "@databricks/appkit/beta";
+import { createApp } from "@databricks/appkit";
+import { agents, createAgent, DatabricksAdapter } from "@databricks/appkit/beta";
 
 await createApp({
   plugins: [
@@ -256,8 +256,8 @@ await createApp({
 Expose Genie spaces, Unity Catalog functions/connections, Knowledge Assistants, or other AppKit apps to the model by declaring them as agent tools — same place every other tool is declared. Execution stays server-side; you write no tool code:
 
 ```ts
-import { createAgent } from "@databricks/appkit";
 import {
+  createAgent,
   DatabricksAdapter,
   supervisorTools,
 } from "@databricks/appkit/beta";
@@ -482,10 +482,10 @@ Flow:
 
 1. Before running the tool, the agents plugin emits an `appkit.approval_pending` SSE event carrying the pending call's `approval_id`, `stream_id`, `tool_name`, `args`, and `annotations`.
 2. The chat client renders an approval prompt (see the reference app's approval card).
-3. The same user who initiated the stream posts the decision to `POST /api/agent/approve`:
+3. The same user who initiated the stream posts the decision to `POST /api/agents/approve`:
 
    ```http
-   POST /api/agent/approve
+   POST /api/agents/approve
    Content-Type: application/json
    X-Forwarded-User: <end-user id>
    X-Forwarded-Access-Token: <OBO token>
@@ -494,7 +494,7 @@ Flow:
    ```
 4. If approved, the tool executes normally and the stream continues. If denied, the adapter receives the string `"Tool execution denied by user approval gate (tool: <name>)."` as the tool output and the LLM can apologise / replan. If no decision arrives within `approval.timeoutMs` (default 60 s), the gate auto-denies.
 
-The route enforces that the decider is the stream owner: an approve from a different `x-forwarded-user` returns `403`. Cancelling the stream via `POST /api/agent/cancel` denies every pending approval on that stream.
+The route enforces that the decider is the stream owner: an approve from a different `x-forwarded-user` returns `403`. Cancelling the stream via `POST /api/agents/cancel` denies every pending approval on that stream.
 
 ### Resource limits
 
