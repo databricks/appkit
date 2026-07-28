@@ -46,11 +46,17 @@ function compareKeys(a: string, b: string): number {
  * Read {@link METRIC_CONFIG_FILE} from a metric-views folder
  * (`config/metric-views/`).
  *
- * Returns `null` if the file does not exist (the metric-view path is
- * additive — apps without definitions.json must not be penalized). There is
- * deliberately no fallback to a legacy filename.
+ * Returns `null` if the file does not exist, is empty, or has not been rendered
+ * yet (the metric-view path is additive — apps without a defined
+ * definitions.json must not be penalized). The template ships definitions.json
+ * wrapped in a `{{if .plugins.analytics}}` guard, so scaffolding without the
+ * analytics plugin leaves the file empty, and running typegen against the raw
+ * (un-rendered) template leaves the literal `{{...}}` in place — neither is a
+ * misconfiguration, so both are treated the same as an absent file rather than
+ * a fatal parse error. There is deliberately no fallback to a legacy filename.
  *
- * Throws on JSON parse errors so misconfiguration surfaces loudly.
+ * Throws on JSON parse errors in a *non-empty, rendered* file so genuine
+ * misconfiguration still surfaces loudly.
  */
 export async function readMetricConfig(
   metricViewsFolder: string,
@@ -64,6 +70,14 @@ export async function readMetricConfig(
       return null;
     }
     throw err;
+  }
+
+  // An empty file (analytics plugin off → the `{{if}}` guard renders nothing)
+  // or an un-rendered template (raw `{{...}}` left in place during typegen on
+  // the template itself) means "no metric views" — treat like an absent file.
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.startsWith("{{")) {
+    return null;
   }
 
   let parsed: unknown;

@@ -94,6 +94,29 @@ describe("readMetricConfig", () => {
     expect(await readMetricConfig(tmpDir)).toBeNull();
   });
 
+  test("returns null for an empty definitions.json (analytics plugin off)", async () => {
+    // The template wraps definitions.json in `{{if .plugins.analytics}}`, so
+    // scaffolding without the analytics plugin renders an empty file. That's
+    // "no metric views", not a parse error.
+    await fs.writeFile(path.join(tmpDir, "definitions.json"), "");
+    expect(await readMetricConfig(tmpDir)).toBeNull();
+  });
+
+  test("returns null for a whitespace-only definitions.json", async () => {
+    await fs.writeFile(path.join(tmpDir, "definitions.json"), "\n  \n");
+    expect(await readMetricConfig(tmpDir)).toBeNull();
+  });
+
+  test("returns null for an un-rendered template definitions.json", async () => {
+    // Running typegen against the raw template (e.g. npm-install warmup before
+    // `appkit setup`) leaves the Go-template guard literal in place.
+    await fs.writeFile(
+      path.join(tmpDir, "definitions.json"),
+      '{{if .plugins.analytics -}}\n{ "metricViews": {} }\n{{- end}}\n',
+    );
+    expect(await readMetricConfig(tmpDir)).toBeNull();
+  });
+
   test("parses a valid definitions.json", async () => {
     await fs.writeFile(
       path.join(tmpDir, "definitions.json"),
