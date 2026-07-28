@@ -434,4 +434,119 @@ describe("runAgent", () => {
     // Both parent and child reported the same instance id.
     expect(result.text).toBe("parent-id=1;child-id=1");
   });
+
+  test("hosted-supervisor tools are routed via AgentInput.extensions and filtered out of input.tools", async () => {
+    // Standalone runAgent must accept Supervisor-API hosted tools — unlike
+    // MCP hosted tools (which need a live MCP client). The tagged record
+    // gets classified as `hosted-supervisor`; its placeholder def is kept
+    // out of `input.tools` (the spec doesn't expose a callable function)
+    // and the spec is routed via `input.extensions[SUPERVISOR_EXTENSION_KEY]`.
+    const { supervisorTools, SUPERVISOR_EXTENSION_KEY } = await import(
+      "../../../agents/supervisor-api"
+    );
+
+    let captured: AgentInput | null = null;
+    const adapter: AgentAdapter = {
+      acceptsExtensions: [SUPERVISOR_EXTENSION_KEY],
+      consumesInputTools: false,
+      async *run(input, _context) {
+        captured = input;
+        yield { type: "message_delta", content: "ok" };
+      },
+    };
+
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools: {
+        nyc: supervisorTools.genieSpace({
+          id: "01ABC",
+          description: "NYC taxi",
+        }),
+      },
+    });
+
+    const result = await runAgent(def, { messages: "hi" });
+    expect(result.text).toBe("ok");
+
+    expect(captured).not.toBeNull();
+    // biome-ignore lint/style/noNonNullAssertion: asserted above
+    const inp = captured!;
+    expect(inp.tools).toEqual([]);
+    expect(inp.extensions?.[SUPERVISOR_EXTENSION_KEY]).toEqual({
+      hostedTools: [
+        {
+          type: "genie_space",
+          genie_space: { id: "01ABC", description: "NYC taxi" },
+        },
+      ],
+    });
+  });
+
+  test("warns when hosted-supervisor tools are paired with an adapter that does not accept the extension", async () => {
+    const { supervisorTools } = await import("../../../agents/supervisor-api");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const adapter: AgentAdapter = {
+      // No `acceptsExtensions` declared.
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const def = createAgent({
+      name: "mismatched",
+      instructions: "x",
+      model: adapter,
+      tools: {
+        nyc: supervisorTools.genieSpace({
+          id: "01ABC",
+          description: "NYC taxi",
+        }),
+      },
+    });
+
+    await runAgent(def, { messages: "hi" });
+
+    const warning = warnSpy.mock.calls
+      .map((args) => args.join(" "))
+      .find((s) => s.includes("hosted-supervisor"));
+    expect(warning).toBeTruthy();
+    expect(warning).toContain("'mismatched'");
+    warnSpy.mockRestore();
+  });
+
+  test("warns when function tools are paired with an adapter that opts out of input.tools", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const adapter: AgentAdapter = {
+      consumesInputTools: false,
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const def = createAgent({
+      name: "leaky",
+      instructions: "x",
+      model: adapter,
+      tools: {
+        get_weather: tool({
+          name: "get_weather",
+          description: "Weather",
+          schema: z.object({ city: z.string() }),
+          execute: async () => "sunny",
+        }),
+      },
+    });
+
+    await runAgent(def, { messages: "hi" });
+
+    const warning = warnSpy.mock.calls
+      .map((args) => args.join(" "))
+      .find((s) => s.includes("does not consume input.tools"));
+    expect(warning).toBeTruthy();
+    expect(warning).toContain("'leaky'");
+    warnSpy.mockRestore();
+  });
 });

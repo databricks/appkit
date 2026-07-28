@@ -15,6 +15,11 @@ import type {
   ToolAnnotations,
   ToolProvider,
 } from "shared";
+import {
+  isSupervisorTool,
+  SUPERVISOR_EXTENSION_KEY,
+  type SupervisorTool,
+} from "../../agents/supervisor-api";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
@@ -436,6 +441,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const adapter = await this.resolveAdapter(def, name);
     const toolIndex = await this.buildToolIndex(name, def, src);
 
+    warnOnCapabilityMismatch(name, adapter, toolIndex);
+
     return {
       name,
       instructions: def.instructions,
@@ -559,6 +566,22 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           source: "function",
           functionTool: tool,
           def: { ...functionToolToDefinition(tool), name: key },
+        });
+        continue;
+      }
+      if (isSupervisorTool(tool)) {
+        index.set(key, {
+          source: "hosted-supervisor",
+          spec: tool.spec,
+          def: {
+            // `def` is a placeholder so the index has a uniform shape; it
+            // is intentionally not passed to the adapter's `tools` array
+            // (the SA endpoint owns its own tool execution and would
+            // reject our synthetic schema).
+            name: key,
+            description: supervisorToolDescription(tool.spec),
+            parameters: { type: "object", properties: {} },
+          },
         });
         continue;
       }
@@ -1037,7 +1060,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const requestId = randomUUID();
     this.trackStream(requestId, userId, abortController);
 
-    const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
+    // `hosted-supervisor` entries are not callable from the Node process
+    // (the SA endpoint executes them server-side). Their `def` is a
+    // placeholder; including it in the adapter's `tools` array would
+    // make the SA endpoint reject the request with a schema mismatch.
+    // The hosted-tool specs are routed via `AgentInput.extensions` below.
+    const tools = Array.from(registered.toolIndex.values())
+      .filter((e) => e.source !== "hosted-supervisor")
+      .map((e) => e.def);
     const approvalPolicy = this.resolvedApprovalPolicy;
     const limits = this.resolvedLimits;
     const outboundEvents = new EventChannel<ResponseStreamEvent>();
@@ -1107,6 +1137,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             tools,
             threadId: thread.id,
             signal,
+            extensions: buildAdapterExtensions(registered.toolIndex),
           },
           { executeTool, signal },
         );
@@ -1437,6 +1468,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       if (!childAgent)
         throw new Error(`Sub-agent not found: ${entry.agentName}`);
       result = await this.runSubAgent(runState, childAgent, args, depth + 1);
+    } else if (entry.source === "hosted-supervisor") {
+      // Defense-in-depth: should never fire. Hosted-supervisor entries are
+      // routed via `AgentInput.extensions` and the SA endpoint executes
+      // them server-side; their `def` is filtered out of the adapter's
+      // `tools` array, so the model never sees a callable schema for them.
+      // If we reach here, the agent is paired with a non-SA adapter that
+      // somehow surfaced the placeholder def to the model — surface a
+      // clear error rather than crash later in `normalizeToolResult`.
+      throw new Error(
+        `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+          "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
+      );
     }
 
     return normalizeToolResult(result);
@@ -1475,7 +1518,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       typeof (args as { input?: unknown }).input === "string"
         ? (args as { input: string }).input
         : JSON.stringify(args);
-    const childTools = Array.from(child.toolIndex.values()).map((e) => e.def);
+    // Same filter as the top-level path: hosted-supervisor `def` is a
+    // placeholder, not a callable function — exclude from the adapter's
+    // `tools` array. The specs are routed via `extensions` instead.
+    const childTools = Array.from(child.toolIndex.values())
+      .filter((e) => e.source !== "hosted-supervisor")
+      .map((e) => e.def);
 
     const childExecute = (name: string, childArgs: unknown): Promise<unknown> =>
       this.dispatchToolCall(runState, child.toolIndex, name, childArgs, depth);
@@ -1522,6 +1570,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           tools: childTools,
           threadId: randomUUID(),
           signal: runState.signal,
+          extensions: buildAdapterExtensions(child.toolIndex),
         },
         runContext,
       ),
@@ -1736,6 +1785,93 @@ function composePromptForAgent(
   }
 
   return composeSystemPrompt(base, registered.instructions);
+}
+
+/**
+ * Pulls the LLM-readable description off any {@link SupervisorTool} kind.
+ * Used to populate the synthetic placeholder `def.description` on
+ * hosted-supervisor tool-index entries.
+ */
+function supervisorToolDescription(spec: SupervisorTool): string {
+  switch (spec.type) {
+    case "genie_space":
+      return spec.genie_space.description;
+    case "uc_function":
+      return spec.uc_function.description;
+    case "knowledge_assistant":
+      return spec.knowledge_assistant.description;
+    case "app":
+      return spec.app.description;
+    case "uc_connection":
+      return spec.uc_connection.description;
+  }
+}
+
+/**
+ * Builds the `AgentInput.extensions` payload from a tool index, aggregating
+ * the hosted-supervisor specs under {@link SUPERVISOR_EXTENSION_KEY}. Returns
+ * `undefined` when there are no adapter-side hosted tools so the field stays
+ * absent on the wire — adapters that don't read extensions never see it.
+ */
+function buildAdapterExtensions(
+  toolIndex: Map<string, ResolvedToolEntry>,
+): Readonly<Record<string, unknown>> | undefined {
+  const supervisorSpecs: SupervisorTool[] = [];
+  for (const entry of toolIndex.values()) {
+    if (entry.source === "hosted-supervisor") {
+      supervisorSpecs.push(entry.spec);
+    }
+  }
+  if (supervisorSpecs.length === 0) return undefined;
+  return {
+    [SUPERVISOR_EXTENSION_KEY]: { hostedTools: supervisorSpecs },
+  };
+}
+
+/**
+ * Compares the adapter's declared capabilities against the tool index and
+ * logs a warning when the agent's tool declarations would be silently
+ * dropped at runtime. Warn-not-throw: misconfiguration is loud enough to
+ * notice without taking the whole app down.
+ */
+function warnOnCapabilityMismatch(
+  agentName: string,
+  adapter: AgentAdapter,
+  toolIndex: Map<string, ResolvedToolEntry>,
+): void {
+  const accepted = new Set(adapter.acceptsExtensions ?? []);
+
+  const hostedSupervisorKeys: string[] = [];
+  const inputToolKeys: string[] = [];
+  for (const [key, entry] of toolIndex) {
+    if (entry.source === "hosted-supervisor") {
+      hostedSupervisorKeys.push(key);
+    } else {
+      inputToolKeys.push(key);
+    }
+  }
+
+  if (
+    hostedSupervisorKeys.length > 0 &&
+    !accepted.has(SUPERVISOR_EXTENSION_KEY)
+  ) {
+    logger.warn(
+      `Agent '${agentName}' declares hosted-supervisor tools (${hostedSupervisorKeys.join(", ")}) ` +
+        "but its model adapter does not accept the 'databricks.supervisor' extension. " +
+        "These tools will not reach the model. Pair them with `DatabricksAdapter.fromSupervisorApi(...)`, or remove them.",
+    );
+  }
+
+  // `consumesInputTools` defaults to true. Only warn when an adapter
+  // explicitly opts out (`false`) and an input tool would be silently
+  // ignored.
+  if (adapter.consumesInputTools === false && inputToolKeys.length > 0) {
+    logger.warn(
+      `Agent '${agentName}' declares function tools / sub-agents / MCP tools (${inputToolKeys.join(", ")}) ` +
+        "but its model adapter does not consume input.tools (Supervisor API owns its own tool loop). " +
+        "These tools will not be exposed to the model. See docs/plugins/agents.md.",
+    );
+  }
 }
 
 /**

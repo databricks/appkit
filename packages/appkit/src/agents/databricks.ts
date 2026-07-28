@@ -5,7 +5,10 @@ import type {
   AgentRunContext,
   AgentToolDefinition,
 } from "shared";
-import { stream as servingStream } from "../connectors/serving/client";
+import {
+  type StreamBody,
+  stream as servingStream,
+} from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
@@ -100,17 +103,6 @@ function throwIfExceedsStreamLimit(
     );
   }
 }
-
-/**
- * Transport shim: given an OpenAI-compatible request body, returns the raw
- * SSE byte stream from the serving endpoint. Injected at construction time so
- * callers can swap in the workspace SDK (factory paths), a bare `fetch`
- * (the raw constructor), or a test fake.
- */
-type StreamBody = (
-  body: Record<string, unknown>,
-  signal?: AbortSignal,
-) => Promise<ReadableStream<Uint8Array>>;
 
 /**
  * Escape-hatch options: provide an `endpointUrl` + `authenticate()` and the
@@ -422,6 +414,34 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars: options?.maxStreamTextChars,
       maxToolArgumentsChars: options?.maxToolArgumentsChars,
     });
+  }
+
+  /**
+   * Discoverability shim for the Supervisor API adapter. Returns an
+   * {@link AgentAdapter} (a `SupervisorApiAdapter` at runtime), NOT a
+   * {@link DatabricksAdapter} — the two are separate classes (different
+   * wire formats, different lifecycle). The return type is the
+   * {@link AgentAdapter} interface so callers aren't bound to the concrete
+   * class. Surfaced here so application developers see a single
+   * `DatabricksAdapter.from*` autocomplete root.
+   *
+   * Dynamic-imports `./supervisor-api` to avoid forming a load-time cycle:
+   * both files share `connectors/serving/client.ts`.
+   *
+   * @example
+   * ```ts
+   * import { DatabricksAdapter } from "@databricks/appkit/beta";
+   *
+   * const model = await DatabricksAdapter.fromSupervisorApi({
+   *   model: "databricks-claude-sonnet-4-5",
+   * });
+   * ```
+   */
+  static async fromSupervisorApi(
+    options: import("./supervisor-api").SupervisorApiAdapterOptions,
+  ): Promise<AgentAdapter> {
+    const { fromSupervisorApi } = await import("./supervisor-api");
+    return fromSupervisorApi(options);
   }
 
   async *run(

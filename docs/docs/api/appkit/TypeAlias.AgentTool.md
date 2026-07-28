@@ -4,9 +4,11 @@
 type AgentTool = 
   | FunctionTool
   | HostedTool
-  | ToolkitEntry;
+  | ToolkitEntry
+  | HostedSupervisorTool;
 ```
 
 Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP
-tools (`mcpServer()` / raw hosted), or toolkit references from plugins
-(`analytics().toolkit()`).
+tools (`mcpServer()` / raw hosted), toolkit references from plugins
+(`analytics().toolkit()`), or adapter-hosted Supervisor-API tools
+(`supervisorTools.*`).
