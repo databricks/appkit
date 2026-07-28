@@ -17,7 +17,6 @@ export const Route = createFileRoute("/agent")({
 const AGENT_OPTIONS = [
   { value: "helper", label: "Helper — general assistant" },
   { value: "sql_analyst", label: "SQL Analyst — NYC taxi queries" },
-  { value: "dashboard_pilot", label: "Dashboard Pilot — dashboard controls" },
   { value: "supervisor", label: "Supervisor — Databricks-hosted tools" },
 ] as const;
 
