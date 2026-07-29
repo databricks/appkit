@@ -83,6 +83,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.SupervisorApiAdapter",
+          label: "SupervisorApiAdapter"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.TunnelError",
           label: "TunnelError"
         },
@@ -176,6 +181,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerationParams",
           label: "GenerationParams"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.HostedSupervisorTool",
+          label: "HostedSupervisorTool"
         },
         {
           type: "doc",
@@ -294,6 +304,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.SupervisorApiAdapterOptions",
+          label: "SupervisorApiAdapterOptions"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SupervisorExtension",
+          label: "SupervisorExtension"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.TelemetryConfig",
           label: "TelemetryConfig"
         },
@@ -341,6 +361,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClientLike",
+          label: "WorkspaceClientLike"
         }
       ]
     },
@@ -445,6 +470,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.SupervisorTool",
+          label: "SupervisorTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ToolRegistry",
           label: "ToolRegistry"
         },
@@ -473,6 +503,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.SUPERVISOR_EXTENSION_KEY",
+          label: "SUPERVISOR_EXTENSION_KEY"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.supervisorTools",
+          label: "supervisorTools"
         },
         {
           type: "doc",
@@ -542,6 +582,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.fromSupervisorApi",
+          label: "fromSupervisorApi"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.functionToolToDefinition",
           label: "functionToolToDefinition"
         },
@@ -599,6 +644,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isSupervisorTool",
+          label: "isSupervisorTool"
         },
         {
           type: "doc",

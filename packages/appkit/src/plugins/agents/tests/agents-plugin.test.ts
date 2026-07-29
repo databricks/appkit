@@ -665,4 +665,128 @@ describe("AgentsPlugin", () => {
       expect(toolsFn).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("hosted-supervisor tools and capability negotiation", () => {
+    test("indexes supervisorTools.* entries with source 'hosted-supervisor'", async () => {
+      const { supervisorTools, SUPERVISOR_EXTENSION_KEY } = await import(
+        "../../../agents/supervisor-api"
+      );
+      const ctx = fakeContext([]);
+
+      const saAdapter: AgentAdapter = {
+        acceptsExtensions: [SUPERVISOR_EXTENSION_KEY],
+        consumesInputTools: false,
+        async *run(_input, _ctx) {
+          yield { type: "message_delta", content: "" };
+        },
+      };
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            assistant: {
+              instructions: "x",
+              model: saAdapter,
+              tools: {
+                nyc: supervisorTools.genieSpace({
+                  id: "01ABC",
+                  description: "NYC taxi",
+                }),
+              },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        // biome-ignore lint/suspicious/noExplicitAny: structural test access
+        get: (name: string) => any;
+      };
+      const entry = api.get("assistant").toolIndex.get("nyc");
+      expect(entry.source).toBe("hosted-supervisor");
+      expect(entry.spec).toEqual({
+        type: "genie_space",
+        genie_space: { id: "01ABC", description: "NYC taxi" },
+      });
+    });
+
+    test("warns at setup when hosted-supervisor tools paired with non-supervisor adapter", async () => {
+      const { supervisorTools } = await import(
+        "../../../agents/supervisor-api"
+      );
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const ctx = fakeContext([]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            mismatched: {
+              instructions: "x",
+              model: stubAdapter(), // does NOT declare acceptsExtensions
+              tools: {
+                nyc: supervisorTools.genieSpace({
+                  id: "01ABC",
+                  description: "NYC taxi",
+                }),
+              },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const warning = warnSpy.mock.calls
+        .map((args) => args.join(" "))
+        .find((s) => s.includes("hosted-supervisor"));
+      expect(warning).toBeTruthy();
+      expect(warning).toContain("'mismatched'");
+      warnSpy.mockRestore();
+    });
+
+    test("warns at setup when function tools paired with consumesInputTools:false adapter", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const ctx = fakeContext([]);
+
+      const saLikeAdapter: AgentAdapter = {
+        consumesInputTools: false,
+        async *run(_input, _ctx) {
+          yield { type: "message_delta", content: "" };
+        },
+      };
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            leaky: {
+              instructions: "x",
+              model: saLikeAdapter,
+              tools: {
+                weather: tool({
+                  name: "weather",
+                  description: "w",
+                  schema: z.object({ city: z.string() }),
+                  execute: async () => "sunny",
+                }),
+              },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const warning = warnSpy.mock.calls
+        .map((args) => args.join(" "))
+        .find((s) => s.includes("does not consume input.tools"));
+      expect(warning).toBeTruthy();
+      expect(warning).toContain("'leaky'");
+      warnSpy.mockRestore();
+    });
+  });
 });

@@ -275,6 +275,17 @@ export interface AgentInput {
   tools: AgentToolDefinition[];
   threadId: string;
   signal?: AbortSignal;
+  /**
+   * Adapter-specific opaque payloads, keyed by adapter namespace. The
+   * shared contract intentionally does not enumerate keys — see each
+   * adapter's docs for which keys it reads and the shape of each value.
+   *
+   * The agents plugin and standalone `runAgent` populate this from the
+   * agent's tool index when entries declare an adapter-side spec (e.g.
+   * Supervisor API hosted tools). Adapters that don't read extensions
+   * should leave it untouched.
+   */
+  extensions?: Readonly<Record<string, unknown>>;
 }
 
 export interface AgentRunContext {
@@ -288,4 +299,23 @@ export interface AgentAdapter {
     input: AgentInput,
     context: AgentRunContext,
   ): AsyncGenerator<AgentEvent, void, unknown>;
+
+  /**
+   * Extension keys this adapter consumes from {@link AgentInput.extensions}.
+   * The agents plugin (and standalone `runAgent`) warns at registration
+   * if the tool index produces extensions whose keys aren't listed here.
+   *
+   * Adapters that don't read extensions can omit this field.
+   */
+  readonly acceptsExtensions?: readonly string[];
+
+  /**
+   * Whether the adapter consumes tools from `input.tools`. Defaults to
+   * true. Adapters whose tool execution happens elsewhere (e.g. the
+   * Supervisor API, where SA owns the tool loop server-side) declare
+   * false; the agents plugin warns at registration if the agent declares
+   * function tools or local sub-agents alongside such an adapter, since
+   * those tools would never reach the model.
+   */
+  readonly consumesInputTools?: boolean;
 }

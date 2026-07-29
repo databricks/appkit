@@ -11,7 +11,13 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, createAgent, tool } from "@databricks/appkit/beta";
+import {
+  agents,
+  createAgent,
+  DatabricksAdapter,
+  supervisorTools,
+  tool,
+} from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -66,6 +72,35 @@ const helper = createAgent({
       }),
     };
   },
+});
+
+// Supervisor API demo agent. The Databricks AI Gateway executes hosted
+// tools server-side; declare them via `createAgent({ tools })` like any
+// other agent tool — the agents plugin classifies the tagged record and
+// routes it to the adapter via AgentInput.extensions. Import
+// `supervisorTools` from '@databricks/appkit/beta' and uncomment an
+// entry below to give the model real powers.
+//
+// `createAgent({ model })` accepts an adapter promise, so the factory's
+// host/credential resolution is awaited lazily on first dispatch (via
+// `resolveAdapter` in the agents plugin). A misconfigured workspace will
+// surface at first chat request, not at module init.
+const supervisor = createAgent({
+  instructions:
+    "You are an assistant powered by the Databricks Supervisor API.",
+  model: DatabricksAdapter.fromSupervisorApi({
+    model: "databricks-claude-sonnet-4-5",
+  }),
+  tools: () => ({
+    nyc: supervisorTools.genieSpace({
+      id: process.env.DATABRICKS_GENIE_SPACE_ID ?? "",
+      description: "NYC taxi trip records and zones",
+    }),
+    add: supervisorTools.ucFunction({
+      name: process.env.DATABRICKS_UC_FUNCTION_NAME ?? "",
+      description: "Adds two integers and returns the sum.",
+    }),
+  }),
 });
 
 /*
@@ -385,7 +420,7 @@ createApp({
     }),
     serving(),
     agents({
-      agents: { helper, sql_analyst, dashboard_pilot },
+      agents: { helper, sql_analyst, dashboard_pilot, supervisor },
       // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
       // wire the /smart-dashboard route. `insights` and `anomaly` are
       // ephemeral markdown agents auto-fired by the route's AgentSidebar.

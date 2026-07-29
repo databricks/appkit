@@ -26,6 +26,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
+| [SupervisorApiAdapter](Class.SupervisorApiAdapter.md) | Adapter that calls the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |
 
@@ -49,6 +50,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [GenerationParams](Interface.GenerationParams.md) | Optional generation parameters forwarded to the OpenAI-compatible serving request body. Names match the serving API wire keys. Only keys that are set are sent — undefined values are omitted so the endpoint applies its own defaults. Ranges are not validated here; the serving endpoint validates. |
+| [HostedSupervisorTool](Interface.HostedSupervisorTool.md) | Tagged record returned by every [supervisorTools](Variable.supervisorTools.md) factory. The `__kind` discriminator lets the agents plugin (and standalone `runAgent`) classify these tools without a structural match against the wire format — keeps the SA wire shape free to evolve and avoids namespace collisions with MCP hosted tools (which use `type: "genie-space"` hyphenated, vs SA's `type: "genie_space"` underscored). |
 | [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [JobAPI](Interface.JobAPI.md) | User-facing API for a single configured job. |
@@ -72,6 +74,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ServingEndpointEntry](Interface.ServingEndpointEntry.md) | Shape of a single registry entry. |
 | [ServingEndpointRegistry](Interface.ServingEndpointRegistry.md) | Registry interface for serving endpoint type generation. Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation. When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
+| [SupervisorApiAdapterOptions](Interface.SupervisorApiAdapterOptions.md) | - |
+| [SupervisorExtension](Interface.SupervisorExtension.md) | Shape of the value at `AgentInput.extensions[SUPERVISOR_EXTENSION_KEY]`. The agents plugin / `runAgent` build this from the tool index; advanced callers invoking `adapter.run(...)` directly populate it themselves. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 | [Thread](Interface.Thread.md) | - |
 | [ThreadStore](Interface.ThreadStore.md) | - |
@@ -82,13 +86,14 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
 | [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
+| [WorkspaceClientLike](Interface.WorkspaceClientLike.md) | Structural shape of a Databricks SDK client used by [fromSupervisorApi](Function.fromSupervisorApi.md). Only what we need: `apiClient.request` for streaming and `config.ensureResolved` to materialise the host/credentials. |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
 | [AgentEvent](TypeAlias.AgentEvent.md) | - |
-| [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), or toolkit references from plugins (`analytics().toolkit()`). |
+| [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
@@ -106,6 +111,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
+| [SupervisorTool](TypeAlias.SupervisorTool.md) | Tools supported by the Databricks AI Gateway Responses API. The shapes match the wire format the endpoint expects, so the adapter passes the array straight into the request body. |
 | [ToolRegistry](TypeAlias.ToolRegistry.md) | - |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |
 
@@ -116,6 +122,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
+| [SUPERVISOR\_EXTENSION\_KEY](Variable.SUPERVISOR_EXTENSION_KEY.md) | Namespace key under which the adapter reads its hosted-tool payload from [AgentInput.extensions](Interface.AgentInput.md#extensions). Exported so the agents plugin and standalone `runAgent` (the producers) can write under the same key the adapter reads. |
+| [supervisorTools](Variable.supervisorTools.md) | Concise factories for declaring Supervisor API tools. |
 | [WRITE\_ACTIONS](Variable.WRITE_ACTIONS.md) | Actions that mutate data. |
 
 ## Functions
@@ -133,6 +141,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
+| [fromSupervisorApi](Function.fromSupervisorApi.md) | Creates an [AgentAdapter](Interface.AgentAdapter.md) backed by the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
@@ -145,6 +154,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [isFunctionTool](Function.isFunctionTool.md) | - |
 | [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |
+| [isSupervisorTool](Function.isSupervisorTool.md) | Type guard for [HostedSupervisorTool](Interface.HostedSupervisorTool.md). Used by the agents plugin (`buildToolIndex`) and standalone `runAgent` (`classifyTool`) to route supervisor-hosted tools to the extensions payload rather than the adapter's `tools` array. |
 | [isToolkitEntry](Function.isToolkitEntry.md) | Type guard for `ToolkitEntry` — used by the agents plugin to differentiate toolkit references from inline tools in a mixed `tools` record. |
 | [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
 | [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for one subdirectory per agent, each containing `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed by agent id (folder name). Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |

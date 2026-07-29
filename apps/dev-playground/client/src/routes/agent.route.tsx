@@ -1,11 +1,24 @@
 import { getPluginClientConfig } from "@databricks/appkit-ui/js";
-import { Button } from "@databricks/appkit-ui/react";
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export const Route = createFileRoute("/agent")({
   component: AgentRoute,
 });
+
+const AGENT_OPTIONS = [
+  { value: "helper", label: "Helper — general assistant" },
+  { value: "sql_analyst", label: "SQL Analyst — NYC taxi queries" },
+  { value: "supervisor", label: "Supervisor — Databricks-hosted tools" },
+] as const;
 
 interface SSEEvent {
   type: string;
@@ -142,6 +155,7 @@ function AgentRoute() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [agent, setAgent] = useState<string>(AGENT_OPTIONS[0].value);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
   );
@@ -211,6 +225,7 @@ function AgentRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage,
+          agent,
           ...(threadId && { threadId }),
         }),
       });
@@ -310,7 +325,7 @@ function AgentRoute() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, threadId, clearSuggestion]);
+  }, [input, isLoading, threadId, agent, clearSuggestion]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
@@ -328,23 +343,42 @@ function AgentRoute() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-6 py-12">
-        <div className="mb-8 flex items-end justify-between">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">Agent Chat</h1>
-            <p className="text-base text-muted-foreground">
-              AI agent with auto-discovered tools from all AppKit plugins.
-              {threadId && (
-                <span className="ml-2 text-xs font-mono opacity-60">
-                  Thread: {threadId.slice(0, 8)}...
-                </span>
-              )}
-            </p>
+        <div className="flex items-center gap-6 justify-between">
+          <div className="mb-8 flex-1 flex items-end justify-between">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Agent Chat</h1>
+              <p className="text-base text-muted-foreground">
+                AI agent with auto-discovered tools from all AppKit plugins.
+                {threadId && (
+                  <span className="ml-2 text-xs font-mono opacity-60">
+                    Thread: {threadId.slice(0, 8)}...
+                  </span>
+                )}
+              </p>
+            </div>
+            {hasAutocomplete && (
+              <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                Autocomplete enabled
+              </span>
+            )}
           </div>
-          {hasAutocomplete && (
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-              Autocomplete enabled
-            </span>
-          )}
+          <div className="w-80 flex items-center gap-3">
+            <div className="flex flex-1 flex-col gap-1">
+              <span className="text-xs font-medium">Agent</span>
+              <Select value={agent} onValueChange={setAgent}>
+                <SelectTrigger className="w-80 h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AGENT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-6 h-[700px]">
