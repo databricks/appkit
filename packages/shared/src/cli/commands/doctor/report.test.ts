@@ -94,9 +94,9 @@ describe("printReport ordering", () => {
     expect(plain.some((l) => l.includes("<long blob>"))).toBe(false);
     expect(plain.some((l) => /Run with --detail/.test(l))).toBe(true);
 
-    // --detail: raw blob is surfaced under a "details:" block; no nudge.
+    // --detail: raw blob is surfaced under a "Details:" block; no nudge.
     const detailed = capture(() => printReport(withRaw, true));
-    expect(detailed.some((l) => l.includes("details:"))).toBe(true);
+    expect(detailed.some((l) => l.includes("Details:"))).toBe(true);
     expect(detailed.some((l) => l.includes("<long blob>"))).toBe(true);
     expect(detailed.some((l) => /Run with --detail/.test(l))).toBe(false);
   });
