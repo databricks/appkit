@@ -50,10 +50,23 @@ function formatNumber(
 }
 
 /**
+ * The currency symbol a spec carries — everything before the first digit
+ * placeholder (`#`/`0`). The metric-view generator emits `$`, `€`, `£`, `¥`,
+ * `₹`, `R$`, or an unknown ISO code + space (e.g. `"XYZ "`); this recovers any
+ * of them verbatim. Returns `""` for a bare numeric spec (`"#,##0"`) or a
+ * percent spec (`"0.0%"`), neither of which has a leading symbol.
+ */
+function currencyPrefix(format: string): string {
+  const match = format.match(/^[^#0]+/);
+  return match ? match[0] : "";
+}
+
+/**
  * Format a raw value using a UC/YAML printf-style format spec.
  *
  * Recognizes the common spreadsheet-style specs:
- * - currency prefix, e.g. `"$#,##0.00"` (1234.5 -> "$1,234.50")
+ * - currency prefix, e.g. `"$#,##0.00"` (1234.5 -> "$1,234.50"); the prefix is
+ *   emitted verbatim, so `"€#,##0"`, `"R$#,##0.00"`, etc. survive end-to-end
  * - thousands grouping + N decimals, e.g. `"#,##0"` (1234567 -> "1,234,567")
  *   or `"#,##0.00"` (1234.5 -> "1,234.50")
  * - percent, e.g. `"0.0%"` (0.1234 -> "12.3%") — the value is multiplied by 100
@@ -73,22 +86,42 @@ export function formatValue(value: unknown, format?: string): string {
     return String(value);
   }
 
+  const isPercent = format.includes("%");
+  const grouping = format.includes(",");
+  const decimals = countDecimals(format);
+  // Any leading symbol (before the first digit placeholder) is a currency
+  // prefix — emit it verbatim so non-USD symbols the generator produces are
+  // preserved instead of collapsing to "$".
+  const prefix = currencyPrefix(format);
+
+  // bigint fast path. A bigint is an exact integer, so `BigInt.toLocaleString`
+  // formats it losslessly — `Number(bigint)` would corrupt values beyond ±2^53
+  // (int64 counts / cents). The percent path multiplies by 100 (float math a
+  // large bigint can't survive), so refuse it rather than emit a wrong number.
+  if (typeof value === "bigint") {
+    if (isPercent) return String(value);
+    const sign = value < 0n ? "-" : "";
+    // `Intl.NumberFormat` accepts a bigint directly and formats it exactly (no
+    // float coercion), unlike `Number(value)`.
+    const body = new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+      useGrouping: grouping,
+    }).format(value < 0n ? -value : value);
+    return `${sign}${prefix}${body}`;
+  }
+
   const num = coerceNumber(value);
   // Non-numeric value with a numeric-ish spec: nothing sensible to format.
   if (num === null) return String(value);
-
-  const isPercent = format.includes("%");
-  const isCurrency = format.includes("$");
-  const grouping = format.includes(",");
-  const decimals = countDecimals(format);
 
   if (isPercent) {
     return `${formatNumber(num * 100, decimals, grouping)}%`;
   }
 
-  if (isCurrency) {
+  if (prefix) {
     const sign = num < 0 ? "-" : "";
-    return `${sign}$${formatNumber(Math.abs(num), decimals, grouping)}`;
+    return `${sign}${prefix}${formatNumber(Math.abs(num), decimals, grouping)}`;
   }
 
   return formatNumber(num, decimals, grouping);
@@ -136,19 +169,25 @@ export function formatLabel(
  *
  * Best-effort mapping for the common specs:
  * - `"$#,##0.00"` -> `"$,.2f"`
- * - `"#,##0"`     -> `",.0f"`
- * - `"#,##0.00"`  -> `",.2f"`
- * - `"0.0%"`      -> `".1%"`
+ * - `"€#,##0.00"` -> `"$,.2f"` (currency), `"#,##0"` -> `",.0f"`, `"0.0%"` -> `".1%"`
+ *
+ * A d3 specifier's currency marker is the single `$` symbol; the actual glyph
+ * ($, €, R$, …) is supplied by the d3 *locale*, not the specifier string — so a
+ * non-USD currency spec still maps to the `$` currency type here (it is not
+ * rejected as unrecognized), and the caller's d3 locale renders the right glyph.
  *
  * No spec, or a spec that is not a recognizable numeric pattern -> `undefined`.
  */
 export function toD3Format(format?: string): string | undefined {
   if (!format) return undefined;
 
-  // Only map specs built purely from numeric-format characters; anything else
-  // (date patterns, free text, ...) is left unrecognized.
-  if (format.replace(/[#0,.$%\s]/g, "") !== "") return undefined;
-  if (!/[0#]/.test(format)) return undefined;
+  // Strip any leading currency prefix first, then require the remainder to be
+  // built purely from numeric-format characters; anything else (date patterns,
+  // free text, ...) is left unrecognized.
+  const prefix = currencyPrefix(format);
+  const numeric = format.slice(prefix.length);
+  if (numeric.replace(/[#0,.%\s]/g, "") !== "") return undefined;
+  if (!/[0#]/.test(numeric)) return undefined;
 
   const group = format.includes(",") ? "," : "";
   const decimals = countDecimals(format);
@@ -157,6 +196,7 @@ export function toD3Format(format?: string): string | undefined {
     return `${group}.${decimals}%`;
   }
 
-  const prefix = format.includes("$") ? "$" : "";
-  return `${prefix}${group}.${decimals}f`;
+  // `$` is d3's currency marker (glyph comes from the locale); emit it for any
+  // currency prefix, USD or otherwise.
+  return `${prefix ? "$" : ""}${group}.${decimals}f`;
 }

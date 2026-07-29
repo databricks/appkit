@@ -33,29 +33,12 @@ export function toChartArray(data: unknown[]): (string | number)[] {
   return data.map(toChartValue);
 }
 
-/**
- * Formats a field name into a human-readable label.
- * Handles camelCase, snake_case, acronyms, and ALL_CAPS.
- * E.g., "totalSpend" -> "Total Spend", "user_name" -> "User Name",
- *       "userID" -> "User Id", "TOTAL_SPEND" -> "Total Spend"
- */
-export function formatLabel(field: string): string {
-  return (
-    field
-      // Handle consecutive uppercase followed by lowercase (e.g., HTTPUrl → HTTP Url)
-      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-      // Handle lowercase followed by uppercase (e.g., totalSpend → total Spend)
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      // Replace underscores with spaces
-      .replace(/_/g, " ")
-      // Collapse multiple spaces into one
-      .replace(/\s+/g, " ")
-      // Normalize to title case
-      .toLowerCase()
-      .replace(/\b\w/g, (l) => l.toUpperCase())
-      .trim()
-  );
-}
+// `formatLabel` lives canonically on the `/js` axis (it also accepts a
+// `MetricColumnMeta` to prefer a `display_name`). Re-export the superset so the
+// `/react` surface has a single humanize implementation — a `/react` consumer
+// and a `/js` consumer get identical behavior. Chart internals call it with
+// just a field name, which the superset handles.
+export { formatLabel } from "@/js";
 
 /**
  * Escapes HTML special characters to prevent XSS.
@@ -138,9 +121,15 @@ export function sortNumericAscending(
  * `ECElementEvent`.
  *
  * Field handling:
- * - `name` → coerced to a string, falling back to `""` when missing.
- * - `value` → passed through when it is a `number` or `string`; arrays,
- *   objects, and missing values become `null`.
+ * - `name` → coerced to a string, falling back to `""` when missing. For a
+ *   tuple datum whose name is absent, the x-component's string form is used so
+ *   callers still get a meaningful label.
+ * - `value` → for a scalar datum, passed through when a `number`/`string` (else
+ *   `null`); for an `[x, y]` tuple datum (time-series / scatter), the
+ *   y-component.
+ * - `x` / `y` → the components of an `[x, y]` tuple datum; `undefined` for
+ *   scalar data. Lets callers read the timestamp + amount of a clicked
+ *   time-series point without reaching into `raw`.
  * - `seriesName` → kept when it is a string, otherwise left `undefined`.
  * - `dataIndex` / `seriesIndex` → kept when numeric, otherwise `-1`.
  * - `raw` → the entire original `params` object, untouched.
@@ -153,13 +142,27 @@ export function mapToDatum(params: unknown): ChartClickDatum {
     params !== null && typeof params === "object" ? params : {}
   ) as Record<string, unknown>;
 
-  const name = typeof p.name === "string" ? p.name : "";
+  const isScalar = (v: unknown): v is number | string =>
+    typeof v === "number" || typeof v === "string";
 
   const rawValue = p.value;
-  const value =
-    typeof rawValue === "number" || typeof rawValue === "string"
-      ? rawValue
-      : null;
+
+  // `[x, y]` tuple datum (time-series / scatter): split the components out so
+  // callers don't have to re-parse `raw`. Only the first two scalar entries are
+  // read; anything else falls through to the scalar path.
+  let x: number | string | undefined;
+  let y: number | string | undefined;
+  if (Array.isArray(rawValue)) {
+    if (isScalar(rawValue[0])) x = rawValue[0];
+    if (isScalar(rawValue[1])) y = rawValue[1];
+  }
+
+  const value = isScalar(rawValue) ? rawValue : (y ?? null);
+
+  // Prefer the datum's own name; for a tuple point without one, fall back to
+  // the x-component's string form (e.g. a timestamp) rather than "".
+  const name =
+    typeof p.name === "string" ? p.name : x !== undefined ? String(x) : "";
 
   const seriesName =
     typeof p.seriesName === "string" ? p.seriesName : undefined;
@@ -170,6 +173,8 @@ export function mapToDatum(params: unknown): ChartClickDatum {
   return {
     name,
     value,
+    x,
+    y,
     seriesName,
     dataIndex,
     seriesIndex,

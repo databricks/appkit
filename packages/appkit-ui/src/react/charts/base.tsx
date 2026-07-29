@@ -233,13 +233,17 @@ export function BaseChart({
   const ui = useChartUITokens();
 
   // Only the *presence* of a click handler shapes the option (it flips
-  // `triggerLineEvent`/`symbolSize` on line/area). Depend on this boolean, not
-  // the handler reference — consumers pass an inline `onDataClick`, whose
-  // identity changes every render, so depending on the reference would rebuild
-  // the whole option object on every parent re-render (e.g. each SSE tick). The
-  // `onEvents` memo below still depends on `onDataClick` itself — it needs the
-  // real function.
+  // `triggerLineEvent`/`symbolSize` on line/area) AND the `onEvents` map below.
+  // Depend on this boolean, not the handler reference — consumers pass an inline
+  // `onDataClick`, whose identity changes every render, so depending on the
+  // reference would rebuild the whole option object AND re-subscribe the ECharts
+  // click listener on every parent re-render (e.g. each SSE tick).
   const interactive = !!onDataClick;
+
+  // Keep the latest handler in a ref so `onEvents` can call the current
+  // `onDataClick` without listing it as a dependency (see `onEvents` below).
+  const onDataClickRef = useRef(onDataClick);
+  onDataClickRef.current = onDataClick;
 
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
@@ -391,17 +395,35 @@ export function BaseChart({
   ]);
 
   // Build the ECharts event map only when a click handler is provided. Memoized
-  // on `onDataClick` so the object identity is stable across renders —
-  // echarts-for-react re-subscribes whenever `onEvents` identity changes, so an
-  // unstable object would thrash listeners. When no handler is set, this is
-  // `undefined` and no idle click listener is attached. `onEvents` is an internal
-  // implementation detail and is intentionally not a public prop.
+  // on the `interactive` boolean (handler PRESENCE), NOT on `onDataClick`'s
+  // identity: consumers pass an inline arrow whose identity changes every render,
+  // and echarts-for-react re-subscribes whenever `onEvents` identity changes — so
+  // keying on the reference would tear down and re-attach the click listener on
+  // every parent re-render (e.g. each SSE tick). The handler is invoked through
+  // `onDataClickRef` so it always calls the latest closure. When no handler is
+  // set this is `undefined` and no idle click listener is attached. `onEvents`
+  // is an internal implementation detail, intentionally not a public prop.
   const onEvents = useMemo(
     () =>
-      onDataClick
-        ? { click: (params: unknown) => onDataClick(mapToDatum(params)) }
+      interactive
+        ? {
+            click: (params: unknown) => {
+              // Fire-and-forget: the datum callback may be async, and a rejected
+              // promise must not surface as an unhandled rejection (the docs
+              // promise async handlers are fine). Swallow rejections here.
+              const result = onDataClickRef.current?.(
+                mapToDatum(params),
+              ) as void | Promise<void>;
+              if (
+                result &&
+                typeof (result as Promise<void>).then === "function"
+              ) {
+                (result as Promise<void>).catch(() => {});
+              }
+            },
+          }
         : undefined,
-    [onDataClick],
+    [interactive],
   );
 
   if (!option) {

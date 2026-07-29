@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { FALLBACK_UI_TOKENS } from "../constants";
 import {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -986,5 +987,196 @@ describe("tooltip theming", () => {
     expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
     // Formatter still runs (and still escapes) on top of the themed tooltip.
     expect(opt.tooltip?.formatter?.({ data: [0, 0, 10] })).toBe("A, Mon: 10");
+  });
+});
+
+// ============================================================================
+// applySelectionEmphasis — the cross-filter highlight transform
+// ============================================================================
+
+describe("applySelectionEmphasis", () => {
+  // Minimal helpers to read opacity off a transformed datum, tolerating both the
+  // object form ({ value, itemStyle }) and the wrapped-primitive form.
+  const opacityOf = (datum: unknown): number | undefined =>
+    (datum as { itemStyle?: { opacity?: number } })?.itemStyle?.opacity;
+
+  const barOption = (categories: (string | number)[], values: number[]) => ({
+    xAxis: { type: "category", data: categories },
+    yAxis: { type: "value" },
+    series: [{ type: "bar", data: values }],
+  });
+
+  describe("no-op cases (identity)", () => {
+    test("undefined selection returns the input unchanged (same reference)", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, undefined)).toBe(opt);
+    });
+
+    test("empty-string selection is a no-op — does NOT dim everything (guards #4)", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      // The bug being guarded: "" would match no category and dim all bars.
+      expect(applySelectionEmphasis(opt, "")).toBe(opt);
+    });
+
+    test("empty-array selection is a no-op", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, [])).toBe(opt);
+    });
+
+    test("an array of only empty strings is a no-op", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, ["", ""])).toBe(opt);
+    });
+
+    test("option without a series array is returned unchanged", () => {
+      const opt = { xAxis: { type: "category", data: ["A"] } };
+      expect(applySelectionEmphasis(opt, "A")).toBe(opt);
+    });
+  });
+
+  describe("bar series (category axis)", () => {
+    test("dims non-selected categories and keeps the selected one at full opacity", () => {
+      const opt = barOption(["EMEA", "APAC", "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, "APAC"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // APAC selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("a mixed array selection ignores the dead empty-string member", () => {
+      const opt = barOption(["EMEA", "APAC", "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, ["EMEA", "", "AMER"]));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(1); // EMEA selected
+      expect(opacityOf(data[1])).toBe(0.3); // APAC dimmed
+      expect(opacityOf(data[2])).toBe(1); // AMER selected
+    });
+
+    test("preserves the series-level itemStyle (bar borderRadius) via a real builder", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC"],
+        yDataMap: { value: [10, 20] },
+      });
+      const built = buildCartesianOption({
+        ...ctx,
+        chartType: "bar",
+        isTimeSeries: false,
+        stacked: false,
+        smooth: false,
+        showSymbol: false,
+        symbolSize: 8,
+      });
+      const out = asOption(applySelectionEmphasis(built, "EMEA"));
+
+      // The per-datum itemStyle carries opacity but the bar's borderRadius is
+      // set at the series level and must survive (per-datum merges OVER series).
+      expect(opacityOf(out.series[0].data[0])).toBe(1);
+      expect(opacityOf(out.series[0].data[1])).toBe(0.3);
+      expect(out.series[0].itemStyle?.borderRadius).toEqual([4, 4, 0, 0]);
+    });
+
+    test("matches numeric category names by their string form", () => {
+      const opt = barOption([2024, 2025, 2026], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, "2025"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3);
+      expect(opacityOf(data[1])).toBe(1);
+      expect(opacityOf(data[2])).toBe(0.3);
+    });
+
+    test("respects custom opacity overrides", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      const out = asOption(
+        applySelectionEmphasis(opt, "EMEA", {
+          dimmedOpacity: 0.1,
+          selectedOpacity: 0.9,
+        }),
+      );
+      expect(opacityOf(out.series[0].data[0])).toBe(0.9);
+      expect(opacityOf(out.series[0].data[1])).toBe(0.1);
+    });
+
+    test("horizontal bars read categories from the yAxis", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC", "AMER"],
+        yDataMap: { value: [10, 20, 30] },
+      });
+      const built = buildHorizontalBarOption(ctx, false);
+      const out = asOption(applySelectionEmphasis(built, "APAC"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3);
+      expect(opacityOf(data[1])).toBe(1);
+      expect(opacityOf(data[2])).toBe(0.3);
+    });
+  });
+
+  describe("pie series (name-keyed data)", () => {
+    test("dims non-selected slices, reading the name off each datum", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC", "AMER"],
+        yDataMap: { value: [10, 20, 30] },
+        yFields: ["value"],
+      });
+      const built = buildPieOption(ctx, "pie", 0, true, "outside");
+      const out = asOption(applySelectionEmphasis(built, "AMER"));
+
+      const data = out.series[0].data as Array<{
+        name: string;
+        itemStyle?: { opacity?: number };
+      }>;
+      // Object data items are spread — name/value survive alongside opacity.
+      expect(data[0]).toMatchObject({ name: "EMEA" });
+      expect(data[0].itemStyle?.opacity).toBe(0.3);
+      expect(data[2].itemStyle?.opacity).toBe(1);
+    });
+  });
+
+  describe("non-categorical series are passed through untouched", () => {
+    test("line series (no category name per datum) is unchanged", () => {
+      const opt = {
+        xAxis: { type: "category", data: ["A", "B"] },
+        yAxis: { type: "value" },
+        series: [{ type: "line", data: [10, 20] }],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "A"));
+      // Line data is left as raw values (no itemStyle wrapping).
+      expect(out.series[0].data).toEqual([10, 20]);
+    });
+
+    test("scatter series is unchanged", () => {
+      const opt = {
+        xAxis: { type: "value" },
+        yAxis: { type: "value" },
+        series: [
+          {
+            type: "scatter",
+            data: [
+              [1, 2],
+              [3, 4],
+            ],
+          },
+        ],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "anything"));
+      expect(out.series[0].data).toEqual([
+        [1, 2],
+        [3, 4],
+      ]);
+    });
+
+    test("bar with no category axis (e.g. value/value) is left unchanged", () => {
+      const opt = {
+        xAxis: { type: "value" },
+        yAxis: { type: "value" },
+        series: [{ type: "bar", data: [10, 20] }],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "A"));
+      expect(out.series[0].data).toEqual([10, 20]);
+    });
   });
 });

@@ -85,6 +85,7 @@ export {
 // ============================================================================
 
 export {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,

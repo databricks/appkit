@@ -3,6 +3,7 @@ import {
   createTimeSeriesData,
   escapeHtml,
   formatLabel,
+  mapToDatum,
   sortTimeSeriesAscending,
   toChartArray,
   toChartValue,
@@ -332,5 +333,69 @@ describe("createTimeSeriesData", () => {
       [2, 20],
       [3, undefined],
     ]);
+  });
+});
+
+describe("mapToDatum", () => {
+  test("normalizes a scalar (bar/pie) click: name + value, no x/y", () => {
+    const d = mapToDatum({
+      name: "EMEA",
+      value: 42,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d).toMatchObject({
+      name: "EMEA",
+      value: 42,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d.x).toBeUndefined();
+    expect(d.y).toBeUndefined();
+  });
+
+  test("splits an [x, y] tuple point into x/y and surfaces y as value", () => {
+    // A time-series point: value is [epochMs, amount]. Previously value became
+    // null and callers had to re-parse `raw`.
+    const d = mapToDatum({
+      value: [1704067200000, 8_100_000],
+      seriesName: "ARR",
+      seriesIndex: 0,
+      dataIndex: 3,
+    });
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(8_100_000);
+    expect(d.value).toBe(8_100_000);
+    // No explicit name → the x component's string form fills in.
+    expect(d.name).toBe("1704067200000");
+  });
+
+  test("keeps an explicit name even for a tuple datum", () => {
+    const d = mapToDatum({ name: "Apr 2026", value: [1704067200000, 5] });
+    expect(d.name).toBe("Apr 2026");
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(5);
+  });
+
+  test("missing name and non-tuple value falls back to empty string / null", () => {
+    const d = mapToDatum({ seriesIndex: 0 });
+    expect(d.name).toBe("");
+    expect(d.value).toBeNull();
+    expect(d.dataIndex).toBe(-1);
+    expect(d.seriesIndex).toBe(0);
+  });
+
+  test("preserves the raw params untouched", () => {
+    const params = { name: "X", value: 1, extra: { deep: true } };
+    expect(mapToDatum(params).raw).toBe(params);
+  });
+
+  test("tolerates a non-object payload", () => {
+    const d = mapToDatum(null);
+    expect(d.name).toBe("");
+    expect(d.value).toBeNull();
+    expect(d.raw).toBeNull();
   });
 });

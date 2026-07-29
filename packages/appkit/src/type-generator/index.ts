@@ -720,6 +720,22 @@ export async function syncMetricViewsTypes(options: {
     "utf-8",
   );
 
+  // Sweep a stale sibling `metric-views.d.ts` from a pre-`.ts` version. Older
+  // typegen emitted an ambient `.d.ts`; the current output is a real `.ts` at
+  // `metricOutFile`. Left behind, the old sibling would duplicate the
+  // `declare module` augmentation and re-introduce the bare side-effect import
+  // the new header deliberately drops. Best-effort: only removed when the new
+  // file is itself a `.ts` (never delete the file we just wrote), ENOENT-safe.
+  if (metricOutFile.endsWith(".ts") && !metricOutFile.endsWith(".d.ts")) {
+    const staleDts = `${metricOutFile.slice(0, -".ts".length)}.d.ts`;
+    try {
+      await fs.unlink(staleDts);
+      logger.debug("Removed stale generated types at %s", staleDts);
+    } catch {
+      // No stale sibling — nothing to clean up.
+    }
+  }
+
   logger.debug(
     "Wrote MetricRegistry augmentation for %d metric(s)%s",
     schemas.length,

@@ -16,7 +16,6 @@ import {
   CardTitle,
   DonutChart,
   LineChart,
-  notify,
   Select,
   SelectContent,
   SelectItem,
@@ -54,10 +53,10 @@ const TREND_MEASURES = ["arr", "mrr"] as const;
 const TABLE_MEASURES = ["arr", "mrr", "new_arr", "churned_arr"] as const;
 const TABLE_COLUMNS = ["region", ...TABLE_MEASURES] as const;
 
-// The dimensions the page lets you slice by. Both the filter bar (dropdowns)
-// and the detail table (row click) write selections keyed by these names, and
-// every visual composes them into a `MetricFilter` the same way — so a future
-// chart-click cross-filter drops into the same `selection` state unchanged.
+// The dimensions the page lets you slice by. The filter-bar dropdowns, the
+// detail-table row click, AND the chart clicks (region bar / segment donut)
+// all write selections keyed by these names, and every visual composes them
+// into a `MetricFilter` the same way — one shared `selection` state drives them.
 const FILTER_DIMENSIONS = ["region", "segment"] as const;
 type FilterDimension = (typeof FILTER_DIMENSIONS)[number];
 type Selection = Partial<Record<FilterDimension, string>>;
@@ -450,45 +449,6 @@ function MetricViewsRoute() {
                   yKey={[...TREND_MEASURES]}
                   height={320}
                   showLegend
-                  // Render point symbols + trigger clicks along the whole line
-                  // (SDK's triggerLineEvent, on because onDataClick is set) so
-                  // the hairline isn't the only hit target.
-                  showSymbol
-                  // Clicking a point fires a transient "write-back" toast (the
-                  // "Apps = action layer" gesture) through the same Toaster the
-                  // warehouse-status indicator uses.
-                  onDataClick={(d) => {
-                    // Resolve the measure by series INDEX — yKey order ===
-                    // TREND_MEASURES order, and sorting only reorders points
-                    // WITHIN a series, not the series array. (Parsing the "Arr"
-                    // label wouldn't round-trip to keys like "new_arr", and
-                    // indexing trend.data by dataIndex is wrong because the
-                    // time series is sorted before rendering.)
-                    const measureKey = TREND_MEASURES[d.seriesIndex];
-                    if (!measureKey) return;
-                    const meta = trend.metadata?.[measureKey];
-                    const label = meta?.display_name ?? measureKey;
-                    // A time-series point is a [epochMs, value] tuple on
-                    // ECharts' params.value (d.value is null for tuples); read
-                    // it off the raw params so both the date and amount survive.
-                    const tuple = (d.raw as { value?: unknown } | undefined)
-                      ?.value;
-                    const [ts, amount] = Array.isArray(tuple)
-                      ? tuple
-                      : [undefined, undefined];
-                    const month =
-                      typeof ts === "number"
-                        ? new Date(ts).toLocaleDateString(undefined, {
-                            year: "numeric",
-                            month: "short",
-                          })
-                        : String(d.name || "");
-                    const formatted = formatValue(amount, meta?.format);
-                    notify.message(
-                      `Write back: ${label} · ${month} · ${formatted}`,
-                      { description: "Point selected for write-back (demo)." },
-                    );
-                  }}
                 />
               )}
           </CardContent>

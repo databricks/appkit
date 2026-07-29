@@ -34,6 +34,20 @@ describe("js/format formatValue", () => {
     expect(formatValue(1234567n, "#,##0")).toBe("1,234,567");
   });
 
+  test("preserves bigint precision beyond 2^53 (no Number() rounding)", () => {
+    // 9_007_199_254_740_993n = 2^53 + 1, which is NOT representable as a JS
+    // number — Number(bigint) would round it to 9_007_199_254_740_992.
+    expect(formatValue(9_007_199_254_740_993n, "#,##0")).toBe(
+      "9,007,199,254,740,993",
+    );
+    expect(formatValue(9_007_199_254_740_993n, "$#,##0")).toBe(
+      "$9,007,199,254,740,993",
+    );
+    expect(formatValue(-9_007_199_254_740_993n, "$#,##0")).toBe(
+      "-$9,007,199,254,740,993",
+    );
+  });
+
   test("no format falls back to toLocaleString for numbers", () => {
     expect(formatValue(1234.5)).toBe((1234.5).toLocaleString());
   });
@@ -50,6 +64,28 @@ describe("js/format formatValue", () => {
 
   test("non-numeric value with numeric spec falls back to String()", () => {
     expect(formatValue("N/A", "#,##0")).toBe("N/A");
+  });
+
+  // End-to-end over the currency symbols the metric-view generator emits
+  // (mv-registry/describe.ts CURRENCY_SYMBOLS + the unknown-code fallback).
+  // Each spec here is exactly what the generator produces for that symbol.
+  describe("preserves every currency symbol the generator emits", () => {
+    test.each([
+      ["$#,##0.00", 1234.5, "$1,234.50"], // USD
+      ["€#,##0.00", 1234.5, "€1,234.50"], // EUR
+      ["£#,##0.00", 1234.5, "£1,234.50"], // GBP
+      ["¥#,##0", 1234, "¥1,234"], // JPY / CNY
+      ["₹#,##0.00", 1234.5, "₹1,234.50"], // INR
+      ["R$#,##0.00", 1234.5, "R$1,234.50"], // BRL (multi-char symbol)
+      ["XYZ #,##0.00", 1234.5, "XYZ 1,234.50"], // unknown ISO code + space
+    ])("formatValue(%s) preserves the symbol", (spec, value, expected) => {
+      expect(formatValue(value, spec)).toBe(expected);
+    });
+
+    test("negative currency keeps the sign before the symbol for every prefix", () => {
+      expect(formatValue(-1234.5, "€#,##0.00")).toBe("-€1,234.50");
+      expect(formatValue(-1234.5, "R$#,##0.00")).toBe("-R$1,234.50");
+    });
   });
 });
 
@@ -92,5 +128,20 @@ describe("js/format toD3Format", () => {
   test("unrecognized specs return undefined", () => {
     expect(toD3Format("yyyy-MM-dd")).toBeUndefined();
     expect(toD3Format("abc")).toBeUndefined();
+  });
+
+  // Every currency spec the generator emits maps to d3's `$` currency type
+  // (the actual glyph is supplied by the consuming d3 locale, not the
+  // specifier) — none of them are dropped as unrecognized.
+  test.each([
+    ["$#,##0.00", "$,.2f"],
+    ["€#,##0.00", "$,.2f"],
+    ["£#,##0.00", "$,.2f"],
+    ["¥#,##0", "$,.0f"],
+    ["₹#,##0.00", "$,.2f"],
+    ["R$#,##0.00", "$,.2f"],
+    ["XYZ #,##0.00", "$,.2f"],
+  ])("maps currency spec %s to a $-typed d3 specifier", (spec, expected) => {
+    expect(toD3Format(spec)).toBe(expected);
   });
 });

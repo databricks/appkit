@@ -185,6 +185,37 @@ describe("syncMetricViewsTypes", () => {
     );
   });
 
+  test("removes a stale sibling metric-views.d.ts left by a pre-.ts version on upgrade", async () => {
+    writeMixedConfig();
+
+    // Simulate an app upgraded from a version that emitted an ambient
+    // `metric-views.d.ts`. Left in place beside the new `.ts`, it would
+    // duplicate the `declare module` augmentation and re-introduce the bare
+    // side-effect import the new header drops.
+    const staleDts = path.join(
+      tmpRoot,
+      "shared",
+      "appkit-types",
+      "metric-views.d.ts",
+    );
+    fs.mkdirSync(path.dirname(staleDts), { recursive: true });
+    fs.writeFileSync(
+      staleDts,
+      '// old\nimport "@databricks/appkit-ui/react";\n',
+    );
+
+    await syncMetricViewsTypes({
+      metricViewsFolder,
+      warehouseId: "wh-1",
+      metricOutFile,
+      metricFetcher: fetcher,
+    });
+
+    // The new .ts is written and the stale .d.ts sibling is swept.
+    expect(fs.existsSync(metricOutFile)).toBe(true);
+    expect(fs.existsSync(staleDts)).toBe(false);
+  });
+
   test("returns noConfig and writes nothing when definitions.json is absent", async () => {
     const result = await syncMetricViewsTypes({
       metricViewsFolder,

@@ -1,4 +1,8 @@
-import type { BasePluginConfig, MetricViewsMetadata } from "shared";
+import type {
+  BasePluginConfig,
+  MetricColumnMeta,
+  MetricViewsMetadata,
+} from "shared";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
@@ -68,20 +72,32 @@ export interface WarehouseStatus {
 }
 
 /**
- * Discriminated union of every SSE message shape emitted by
- * `POST /api/analytics/query/:query_key`. Useful for typing the client-side
+ * Discriminated union of every SSE message shape emitted by the analytics
+ * routes (`POST /api/analytics/query/:query_key` and
+ * `POST /api/analytics/metric/:key`). Useful for typing the client-side
  * `onMessage` handler (and is the source of truth re-mirrored in
  * `appkit-ui` since that package can't depend on `appkit`).
+ *
+ * The `result` message carries an optional `metadata` map (per-column display
+ * metadata) — present on the metric route, absent on plain `/query`. The
+ * `error` message carries an optional structured `errorCode` (a stable upstream
+ * identifier) alongside the legacy `code`.
  */
 export type AnalyticsStreamMessage =
   | { type: "warehouse_status"; status: WarehouseStatus }
-  | { type: "result"; data: unknown[] }
+  | {
+      type: "result";
+      data?: unknown[];
+      status?: unknown;
+      statement_id?: string;
+      metadata?: Record<string, MetricColumnMeta>;
+    }
   | {
       type: "arrow";
       statement_id: string;
       status: { state: string };
     }
-  | { type: "error"; error: string; code?: string };
+  | { type: "error"; error: string; code?: string; errorCode?: string };
 
 /**
  * Supported response formats for analytics queries.
@@ -137,7 +153,7 @@ export interface AnalyticsQueryResponse {
  *   - `"sp"`  ← `executor: "app_service_principal"` — queried as the app
  *     service principal (cache shared across all users).
  *   - `"obo"` ← `executor: "user"` — queried on-behalf-of the requesting
- *     user (per-user cache). OBO dispatch is wired in a later phase.
+ *     user (per-user cache) via `asUser(req)`.
  */
 export type MetricLane = "sp" | "obo";
 

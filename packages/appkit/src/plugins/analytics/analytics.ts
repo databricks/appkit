@@ -3,7 +3,6 @@ import {
   type AgentToolDefinition,
   type AnalyticsSseMessage,
   type IAppRouter,
-  type MetricColumnMeta,
   makeResultMessage,
   type PluginExecuteConfig,
   type SQLTypeMarker,
@@ -667,14 +666,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
                 );
               // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
               // an ARROW_STREAM-inline fallback, returning plain rows in a
-              // `result` message — byte-identical envelope to `/query`, plus the
-              // metric's per-column `metadata` slice (omitted when absent).
+              // `result` message — byte-identical envelope to `/query`. The
+              // per-column `metadata` is stamped AFTER this cached call returns
+              // (see below), never baked into the cached message.
               return await self._executeJsonArrayPath(
                 executor,
                 statement,
                 processedParams,
                 sig,
-                metadata,
               );
             } catch (err) {
               originalError = err;
@@ -712,7 +711,17 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           throw ExecutionError.statementFailed(inner);
         }
 
-        yield sqlResult.data as AnalyticsStreamMessage;
+        // Stamp the FRESH per-column metadata onto the (possibly cached) result
+        // message. The cache key excludes metadata and the cached message never
+        // carries it, so a cache HIT after a redeploy that changed a column's
+        // display_name/format serves the current metadata, not a stale copy.
+        // `undefined` leaves the field absent — envelope-identical to `/query`.
+        const resultMessage = sqlResult.data as AnalyticsSseMessage;
+        yield (
+          metadata !== undefined
+            ? { ...resultMessage, metadata }
+            : resultMessage
+        ) as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,
@@ -725,10 +734,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * INLINE ARROW_STREAM decoded to rows) and wraps the rows in a `result`
    * message. External links are never used for the JSON fallback.
    *
-   * `metadata` (metric route only) is the pre-computed per-column slice stamped
-   * into the `result` message; it is pure response decoration (never affects
-   * the SQL or the cache key). `undefined` → the field is omitted, keeping the
-   * envelope byte-identical to a plain `/query` result.
+   * This returns the bare `result` message (rows + status/statement_id) and is
+   * cached by the caller. The metric route's per-column `metadata` is stamped
+   * onto the message AFTER the cached call returns (so a cache hit never serves
+   * stale metadata), never inside here — keeping the cached payload
+   * metadata-free and byte-identical to a plain `/query` result.
    */
   private async _executeJsonArrayPath(
     executor: AnalyticsPlugin,
@@ -737,7 +747,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     signal?: AbortSignal,
-    metadata?: Record<string, MetricColumnMeta>,
   ): Promise<AnalyticsSseMessage> {
     const result = await deliverJsonResult(
       executor,
@@ -748,7 +757,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     return makeResultMessage(result.data, {
       status: result.status,
       statement_id: result.statement_id,
-      metadata,
     });
   }
 

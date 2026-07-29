@@ -535,7 +535,7 @@ When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view ty
 }
 ```
 
-Like `useAnalyticsQuery`, the option object is serialized internally, so object/array literals passed fresh each render stay referentially stable — you do **not** need to `useMemo` the options. (Hoisting `measures`/`dimensions` to module scope or memoizing is still fine, and keeps the arrays type-narrowed to their literal tuple.)
+Like `useAnalyticsQuery`, the option object is serialized (`JSON.stringify`) internally, so object/array literals passed fresh each render do **not** trigger a refetch as long as they serialize to the same string — you do **not** need to `useMemo` the options. (This is same-serialization, not deep structural equality: reordering keys within `filter` changes the string and does re-query. Hoisting `measures`/`dimensions` to module scope or memoizing is still fine, and keeps the arrays type-narrowed to their literal tuple.)
 
 `metadata` is the per-column display metadata for **only the columns you queried**, scoped and carried in the SSE `result` payload. It is `undefined` when the server injected no metadata (the metric key is unknown, or `analytics({ metricViewsMetadata })` was not wired) — so always treat it as optional.
 

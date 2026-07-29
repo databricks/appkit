@@ -22,8 +22,7 @@
       "!**/*.gen.ts",
       "!**/typedoc-sidebar.ts",
       "!**/template",
-      "!**/metric-views.ts",
-      "!**/metric-views.d.ts"
+      "!**/appkit-types/metric-views.ts"
     ]
   },
   "formatter": {

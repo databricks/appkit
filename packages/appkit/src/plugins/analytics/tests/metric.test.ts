@@ -136,7 +136,7 @@ function writeRegistry(
   writeFileSync(path.join(dir, "definitions.json"), body);
 }
 
-describe("analytics metric route (Phase 1)", () => {
+describe("analytics metric route", () => {
   let config: IAnalyticsConfig;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
@@ -296,8 +296,8 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimensions + GROUP BY ALL. Bare dimensions here; date_trunc
-  // grain application (via timeDimension) is covered in its own block below.
+  // ── dimensions + GROUP BY ALL. Bare dimensions here; date_trunc grain
+  // application (via timeDimension) is covered in its own block below.
   describe("buildMetricSql dimensions + GROUP BY", () => {
     const registration: MetricRegistration = {
       key: "revenue",
@@ -368,7 +368,7 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2a: timeGrain + timeDimension → date_trunc on the named column.
+  // ── timeGrain + timeDimension → date_trunc on the named column.
   // The grain is a grammar-gated single-quoted literal; the column keeps its
   // plain alias; other dimensions render bare; GROUP BY ALL is present.
   describe("buildMetricSql timeGrain + timeDimension (date_trunc)", () => {
@@ -422,7 +422,7 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimension identifier safety. A dimension is backtick-quoted at
+  // ── dimension identifier safety. A dimension is backtick-quoted at
   // interpolation, so an injection-shaped name is neutralized (inert quoted
   // column), and only an unquotable (control-char) name throws.
   describe("buildMetricSql dimension identifier safety (quoting)", () => {
@@ -463,7 +463,7 @@ describe("analytics metric route (Phase 1)", () => {
   });
 
   // ── Envelope parity — streams warehouse_status* then a `result` message,
-  // byte-identical to the /query route's JSON SSE path.
+  // the same event shape as the /query route's JSON SSE path.
   describe("_handleMetricRoute SSE envelope", () => {
     test("streams warehouse_status then a result message with aliased rows", async () => {
       const plugin = pluginForDir(
@@ -591,10 +591,10 @@ describe("analytics metric route (Phase 1)", () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
     });
 
-    // ── Metadata stamping (Phase 2). The injected `metricViewsMetadata` is
-    // sliced to the requested columns and stamped into the `result` message; it
-    // is pure decoration (no SQL / cache-key effect). See `selectMetricMetadata`
-    // below for the unit-level scoping tests.
+    // ── Metadata stamping. The injected `metricViewsMetadata` is sliced to the
+    // requested columns and stamped into the `result` message; it is pure
+    // decoration (no SQL / cache-key effect). See `selectMetricMetadata` below
+    // for the unit-level scoping tests.
     const REVENUE_METADATA: MetricViewsMetadata = {
       revenue: {
         measures: {
@@ -683,8 +683,8 @@ describe("analytics metric route (Phase 1)", () => {
       );
 
       const payload = readResultPayload(mockRes);
-      // The `result` message is byte-identical to a plain `/query` result: the
-      // `metadata` key is absent, not present-but-undefined.
+      // Envelope parity with a plain `/query` result: the `metadata` key is
+      // absent, not present-but-undefined.
       expect(payload).toBeDefined();
       expect(Object.hasOwn(payload, "metadata")).toBe(false);
       expect(payload.data).toEqual([{ arr: 1234 }]);
@@ -769,6 +769,73 @@ describe("analytics metric route (Phase 1)", () => {
         }),
         expect.any(AbortSignal),
       );
+    });
+
+    test("cache HIT serves the FRESH metadata, not the metadata baked in at cache-fill time", async () => {
+      // Regression: metadata was formerly stamped INSIDE the cached execute(),
+      // so a cache hit replayed the OLD labels/formats even after a redeploy
+      // changed them. The cache key excludes metadata, so the SQL result is a
+      // hit across the two runs below; only the injected metadata differs.
+      const registry = {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp" as const,
+        },
+      };
+      const body = { measures: ["arr"], dimensions: ["region"] };
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1, region: "EMEA" }] },
+      });
+
+      const runWithMetadata = async (mvMeta: MetricViewsMetadata) => {
+        const plugin = pluginForDir(
+          { ...config, metricViewsMetadata: mvMeta },
+          registryDir(registry),
+        );
+        (plugin as any).SQLClient.executeStatement = executeMock;
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+        const handler = getHandler("POST", "/metric/:key");
+        const mockRes = createMockResponse();
+        await handler(
+          createMockRequest({ params: { key: "revenue" }, body }),
+          mockRes,
+        );
+        return readResultPayload(mockRes);
+      };
+
+      // First run fills the cache with the OLD labels.
+      const oldMeta: MetricViewsMetadata = {
+        revenue: {
+          measures: { arr: { type: "decimal", display_name: "ARR (old)" } },
+          dimensions: { region: { type: "string", display_name: "Region" } },
+        },
+      };
+      const first = await runWithMetadata(oldMeta);
+      expect(first.metadata.arr.display_name).toBe("ARR (old)");
+
+      // Second run: same body → SQL cache HIT (executeStatement not called
+      // again), but the app now injects NEW labels. The response must reflect
+      // the fresh metadata, not the stale copy from the cached message.
+      executeMock.mockClear();
+      const newMeta: MetricViewsMetadata = {
+        revenue: {
+          measures: {
+            arr: {
+              type: "decimal",
+              display_name: "ARR (new)",
+              format: "$#,##0",
+            },
+          },
+          dimensions: { region: { type: "string", display_name: "Region" } },
+        },
+      };
+      const second = await runWithMetadata(newMeta);
+
+      expect(executeMock).not.toHaveBeenCalled(); // SQL served from cache
+      expect(second.metadata.arr.display_name).toBe("ARR (new)");
+      expect(second.metadata.arr.format).toBe("$#,##0");
     });
   });
 
@@ -989,9 +1056,9 @@ describe("analytics metric route (Phase 1)", () => {
 });
 
 // ── loadMetricRegistry: config parse against the landed metricSourceSchema.
-// The loader reads the config file THROUGH an `AppManager` (Phase 2), so each
-// test points an `AppManager` at its temp dir instead of passing a bare
-// directory string. The loader is stateless — it reads + parses on every call
+// The loader reads the config file THROUGH an `AppManager`, so each test points
+// an `AppManager` at its temp dir instead of passing a bare directory string.
+// The loader is stateless — it reads + parses on every call
 // (no memoization), so there is no cache to reset between tests.
 describe("loadMetricRegistry", () => {
   let dir: string;
@@ -1124,9 +1191,9 @@ describe("loadMetricRegistry", () => {
   });
 });
 
-// ── Phase 2: the structured filter engine (translator + validator).
-// Registry-free: names are grammar-gated, values are parameterized. No
-// allowlist, no op⇄dimension-type check.
+// ── The structured filter engine (translator + validator). Registry-free:
+// names are grammar-gated, values are parameterized. No allowlist, no
+// op⇄dimension-type check.
 describe("metric — filter translator", () => {
   const registration: MetricRegistration = {
     key: "revenue",
@@ -1844,8 +1911,8 @@ describe("metric — filter translator", () => {
   });
 
   // The warehouse-authoritative unknown-name parity test (sanitized
-  // clientMessage/errorCode envelope) lands here because the Phase 1 harness
-  // can drive the metric route end-to-end and assert on the SSE error bytes.
+  // clientMessage/errorCode envelope) lands here because this harness can drive
+  // the metric route end-to-end and assert on the SSE error bytes.
   describe("warehouse-authoritative unknown-name parity", () => {
     let config: IAnalyticsConfig;
     let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -1927,7 +1994,7 @@ describe("metric — filter translator", () => {
   });
 });
 
-// ── Phase 3: cache-key composition. `composeMetricCacheKey` produces the
+// ── cache-key composition. `composeMetricCacheKey` produces the
 // array `CacheManager.generateKey` concatenates + sha256s; the invariants
 // below are what make the cache both correct (semantically equal calls collapse)
 // and safe (distinct args / executors never collide).
@@ -2167,7 +2234,7 @@ describe("composeMetricCacheKey", () => {
   });
 });
 
-// ── Phase 3: executor-key isolation. The key is what scopes the cache — `"sp"`
+// ── executor-key isolation. The key is what scopes the cache — `"sp"`
 // shares it across all callers, a per-user hash isolates OBO callers. The raw
 // identity must never enter the key verbatim (privacy: cache keys are logged
 // and persisted).
@@ -2240,12 +2307,12 @@ describe("deriveMetricExecutorKey", () => {
   });
 });
 
-// ── Phase 3: lane dispatch at the handler level. The lane comes from the
+// ── lane dispatch at the handler level. The lane comes from the
 // registration (the entry's `executor` in definitions.json), NOT the URL:
 // OBO-lane routes through `asUser(req)`, SP-lane through the default executor.
 // A missing/whitespace OBO identity must land on the canonical 401 envelope,
 // never an out-of-envelope 500.
-describe("metric route — lane dispatch (Phase 3)", () => {
+describe("metric route — lane dispatch", () => {
   let config: IAnalyticsConfig;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
@@ -2415,7 +2482,7 @@ describe("metric route — lane dispatch (Phase 3)", () => {
   });
 });
 
-// ── Phase 2: metadata slicing. `selectMetricMetadata` flattens the injected
+// ── metadata slicing. `selectMetricMetadata` flattens the injected
 // per-metric metadata down to only the requested columns for the SSE `result`
 // message. It is pure and total; the invariants below are what keep the stamp
 // scoped, degrade-safe, and prototype-safe.

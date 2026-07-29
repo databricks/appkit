@@ -129,8 +129,23 @@ export interface ChartBaseProps {
 export interface ChartClickDatum {
   /** Category label of the clicked element — the dimension value in the common cross-filter case. */
   name: string;
-  /** The datum's value. */
+  /**
+   * The datum's scalar value. For `[x, y]` tuple points (time-series / scatter)
+   * this is the y-component (see {@link ChartClickDatum.x} / {@link ChartClickDatum.y});
+   * `null` when there is no scalar value to surface.
+   */
   value: number | string | null;
+  /**
+   * The x-component of an `[x, y]` tuple datum (e.g. the timestamp of a
+   * time-series point, or the x of a scatter point). `undefined` for scalar
+   * (bar/pie) data that carries no separate x.
+   */
+  x?: number | string;
+  /**
+   * The y-component of an `[x, y]` tuple datum. Mirrors {@link ChartClickDatum.value}
+   * for tuple points; `undefined` for scalar data.
+   */
+  y?: number | string;
   /** Series label, when present. */
   seriesName?: string;
   /** Index of the datum within its series. */

@@ -7,6 +7,7 @@ export {
 } from "../resource-status-indicator";
 export type {
   AnalyticsFormat,
+  GrainsForSelectedTimeDims,
   InferDimensionKeys,
   InferMeasureKeys,
   InferMetricRow,
@@ -15,12 +16,14 @@ export type {
   InferServingChunk,
   InferServingRequest,
   InferServingResponse,
+  InferTimeDimensionKeys,
   InferTimeGrains,
   MetricFilter,
   MetricFilterOperatorName,
   MetricKey,
   MetricPredicate,
   MetricRegistry,
+  PickMetricRow,
   PluginRegistry,
   QueryRegistry,
   ServingAlias,

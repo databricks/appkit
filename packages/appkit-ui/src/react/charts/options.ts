@@ -306,6 +306,9 @@ export function buildHeatmapOption(
       top: "center",
       textStyle: { color: ui.axisTitle },
       inRange: {
+        // A visualMap gradient needs at least two stops; with a single-color
+        // palette, ramp from a light grey to that color instead of passing a
+        // one-entry array (which ECharts renders as a flat, unreadable scale).
         color: ctx.colors.length >= 2 ? ctx.colors : ["#f0f0f0", ctx.colors[0]],
       },
     },
@@ -395,8 +398,8 @@ export function buildCartesianOption(
       smooth: isLineLike ? smooth : undefined,
       showSymbol: isLineLike ? showSymbol : undefined,
       symbol: isScatter ? "circle" : undefined,
-      // Symbol size now applies to line/area too (previously scatter-only), so
-      // an interactive line can present a clickable point, not just a hairline.
+      // Symbol size applies to line/area as well as scatter, so an interactive
+      // line can present a clickable point, not just a hairline.
       symbolSize: isScatter || isLineLike ? symbolSize : undefined,
       // Fire click events along the whole line stroke, not only on symbols,
       // when the chart is interactive. No effect on non-line series.
@@ -436,13 +439,21 @@ interface SelectionEmphasisOptions {
  * Normalizes the `selected` input into a lookup set of category names.
  * Returns `null` when there is nothing selected (undefined, or an empty
  * string/array), which callers treat as "no emphasis".
+ *
+ * Falsy entries (`""`, and after stringify anything empty) are dropped BEFORE
+ * the size check: an empty-string selection would otherwise survive as
+ * `Set{""}`, match no category, and dim every element — the opposite of the
+ * "empty = no-op" contract. A mixed array like `["EMEA","","APAC"]` likewise
+ * sheds its dead `""` member.
  */
 function toSelectionSet(
   selected: string | string[] | undefined,
 ): Set<string> | null {
   if (selected == null) return null;
   const names = Array.isArray(selected) ? selected : [selected];
-  const set = new Set(names.map((name) => String(name)));
+  const set = new Set(
+    names.map((name) => String(name)).filter((name) => name !== ""),
+  );
   return set.size > 0 ? set : null;
 }
 
@@ -450,6 +461,11 @@ function toSelectionSet(
  * Finds the category-axis label array (`xAxis`/`yAxis` with `type: "category"`),
  * used to map a bar datum's position to its category name. Returns `null` when
  * no category axis is present (e.g. time-series or value axes).
+ *
+ * Assumes exactly one category axis (the first of x/y wins) — true for the
+ * builders here: vertical bars carry a category `xAxis` + value `yAxis`,
+ * horizontal bars the reverse. A chart with two category axes is not a shape
+ * these builders produce.
  */
 function categoryNamesFromAxes(
   option: Record<string, unknown>,
@@ -562,7 +578,6 @@ export function applySelectionEmphasis<T>(
   opts: SelectionEmphasisOptions = {},
 ): T {
   const selectedSet = toSelectionSet(selected);
-  // No selection → identity: no emphasis, no dimming.
   if (!selectedSet) return option;
 
   if (option === null || typeof option !== "object" || Array.isArray(option)) {

@@ -136,6 +136,58 @@ describe("useMetricView", () => {
     expect(result.current.metadata).toBeUndefined();
   });
 
+  test("treats a non-object metadata (null/array) as absent", async () => {
+    const { result } = renderHook(() =>
+      useMetricView("orders", { measures: ["revenue"] }),
+    );
+
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({
+          type: "result",
+          data: [{ revenue: 1 }],
+          // Malformed wire value — must not be surfaced as a metadata map.
+          metadata: ["not", "an", "object"],
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual([{ revenue: 1 }]);
+    });
+    expect(result.current.metadata).toBeUndefined();
+  });
+
+  test("a successful result after a transient error clears the stale error", async () => {
+    const { result } = renderHook(() =>
+      useMetricView("orders", { measures: ["revenue"] }),
+    );
+
+    // First: an error envelope sets error + errorCode.
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({
+          type: "error",
+          error: "boom",
+          errorCode: "UPSTREAM_ERROR",
+        }),
+      });
+    });
+    await waitFor(() => expect(result.current.error).toBe("boom"));
+    expect(result.current.errorCode).toBe("UPSTREAM_ERROR");
+
+    // Then: a successful result must clear both, so error-first consumers show
+    // the fresh data instead of the stale error.
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "result", data: [{ revenue: 7 }] }),
+      });
+    });
+    await waitFor(() => expect(result.current.data).toEqual([{ revenue: 7 }]));
+    expect(result.current.error).toBeNull();
+    expect(result.current.errorCode).toBeNull();
+  });
+
   test("normalizes an empty result message (no data field) to []", async () => {
     const { result } = renderHook(() =>
       useMetricView("orders", { measures: ["revenue"] }),
@@ -377,14 +429,6 @@ describe("useMetricView", () => {
     rerender({ grain: "month" });
 
     expect(mockConnectSSE).toHaveBeenCalledTimes(2);
-  });
-
-  test("does not issue a request when autoStart is false", () => {
-    renderHook(() =>
-      useMetricView("orders", { measures: ["revenue"], autoStart: false }),
-    );
-
-    expect(mockConnectSSE).not.toHaveBeenCalled();
   });
 
   test("throws when the metric key is empty", () => {

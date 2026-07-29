@@ -9,8 +9,10 @@ import {
 import type { MetricColumnMeta } from "shared";
 import { connectSSE } from "@/js";
 import type {
-  InferMetricRow,
+  InferDimensionKeys,
+  InferMeasureKeys,
   MetricKey,
+  PickMetricRow,
   UseMetricViewOptions,
   UseMetricViewResult,
   WarehouseStatus,
@@ -56,16 +58,31 @@ function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
   );
 }
 
+/**
+ * Narrow the wire `metadata` field to a per-column map. The value is only a
+ * meaningful metadata map when it is a plain object; a `null`, array, or scalar
+ * is treated as absent (`undefined`). Per-column shapes are not validated —
+ * the server constructs them via the typed builder.
+ */
+function asMetricMetadata(
+  value: unknown,
+): Record<string, MetricColumnMeta> | undefined {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, MetricColumnMeta>;
+  }
+  return undefined;
+}
+
 function handleMetricSseMessage(
   parsed: Record<string, unknown>,
   ctx: MetricSseContext,
 ): void {
   // Warehouse-readiness progress. The metric result type does NOT expose
-  // warehouseStatus (Phase 0 contract), so we keep the hook in its loading
-  // state (no caller-facing field) but publish the status to the shared
-  // ResourceStatusProvider — the same side-channel `useAnalyticsQuery` uses to
-  // drive a global "warehouse starting…" indicator during a cold start. This
-  // is a publish-only path: it never mutates UseMetricViewResult.
+  // warehouseStatus, so we keep the hook in its loading state (no caller-facing
+  // field) but publish the status to the shared ResourceStatusProvider — the
+  // same side-channel `useAnalyticsQuery` uses to drive a global "warehouse
+  // starting…" indicator during a cold start. This is a publish-only path: it
+  // never mutates UseMetricViewResult.
   if (parsed.type === "warehouse_status") {
     if (!isWarehouseStatusPayload(parsed.status)) {
       ctx.setLoading(false);
@@ -79,19 +96,21 @@ function handleMetricSseMessage(
   }
 
   // JSON result. The SSE wire schema is intentionally loose (`data` is an
-  // optional array of unknown values), so a structural check is enough here —
-  // no need to ship a schema validator (zod, ~60 KB gz) to the browser just
-  // to read our own same-origin server's messages. Missing or non-array
-  // `data` normalizes to [] so `undefined` never bleeds into the hook's
-  // `T | null` state. `metadata` (per-column display metadata scoped to the
-  // queried columns) is surfaced as-is, or `undefined` when the server
-  // injected none (dormant / unknown key).
+  // optional array of unknown values), so a shallow structural check is enough
+  // here rather than a full schema validator. Missing or non-array `data`
+  // normalizes to [] so `undefined` never bleeds into the hook's `T | null`
+  // state. `metadata` (per-column display metadata scoped to the queried
+  // columns) is surfaced as-is only when it is a plain object; anything else
+  // (null / array / scalar) is treated as absent. It is `undefined` when the
+  // server injected none (dormant / unknown key).
   if (parsed.type === "result") {
     ctx.setLoading(false);
+    // A successful result supersedes any error from a prior (retried) attempt —
+    // clear it so error-first consumers don't hide valid data.
+    ctx.setError(null);
+    ctx.setErrorCode(null);
     ctx.setData(Array.isArray(parsed.data) ? parsed.data : []);
-    ctx.setMetadata(
-      parsed.metadata as Record<string, MetricColumnMeta> | undefined,
-    );
+    ctx.setMetadata(asMetricMetadata(parsed.metadata));
     ctx.unpublishWarehouseStatus();
     return;
   }
@@ -133,11 +152,13 @@ function handleMetricSseMessage(
  * mirroring {@link useAnalyticsQuery}'s JSON_ARRAY path.
  *
  * The measure/dimension names, time grain, and row shape are inferred from the
- * `MetricRegistry` module augmentation when `key` is a known metric key.
+ * `MetricRegistry` module augmentation when `key` is a known metric key. The
+ * returned rows are narrowed to exactly the SELECTED measures/dimensions (not
+ * every column the metric exposes).
  *
  * @param key - Metric view identifier
  * @param options - Measures (required) plus optional dimensions, filter,
- *   timeGrain/timeDimension, limit, and autoStart
+ *   timeGrain/timeDimension, and limit
  * @returns Metric result state with typed rows and per-column display metadata
  *
  * @example
@@ -150,16 +171,22 @@ function handleMetricSseMessage(
  * // data: Array<{ revenue: number; region: string }> | null
  * ```
  */
-export function useMetricView<K extends MetricKey = MetricKey>(
+export function useMetricView<
+  K extends MetricKey = MetricKey,
+  const M extends ReadonlyArray<InferMeasureKeys<K>> = ReadonlyArray<
+    InferMeasureKeys<K>
+  >,
+  const D extends ReadonlyArray<InferDimensionKeys<K>> = ReadonlyArray<
+    InferDimensionKeys<K>
+  >,
+>(
   key: K,
-  options: UseMetricViewOptions<K>,
-): UseMetricViewResult<InferMetricRow<K>[]> {
-  const autoStart = options?.autoStart ?? true;
-
+  options: UseMetricViewOptions<K, M, D>,
+): UseMetricViewResult<PickMetricRow<K, M, D>[]> {
   const devMode = getDevMode();
   const urlSuffix = `/api/analytics/metric/${encodeURIComponent(key)}${devMode}`;
 
-  type Rows = InferMetricRow<K>[];
+  type Rows = PickMetricRow<K, M, D>[];
   const [data, setData] = useState<Rows | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,10 +208,12 @@ export function useMetricView<K extends MetricKey = MetricKey>(
   }
 
   // Serialize the request body from only the defined fields. A JSON string is
-  // a primitive, so a structurally-equal body across renders stays
+  // a primitive, so a body that serializes identically across renders stays
   // referentially stable for the `start` callback's dependency check even
   // though the caller passes fresh `measures`/`filter` object literals each
-  // render — no manual deep-equality/ref juggling required.
+  // render — no manual deep-equality/ref juggling required. (Reordering keys
+  // changes the serialization and does re-fire, but the field order here is
+  // fixed and the caller does not control it.)
   const payload = useMemo(() => {
     const body: {
       measures: ReadonlyArray<unknown>;
@@ -283,15 +312,13 @@ export function useMetricView<K extends MetricKey = MetricKey>(
   ]);
 
   useEffect(() => {
-    if (autoStart) {
-      start();
-    }
+    start();
 
     return () => {
       abortControllerRef.current?.abort();
       unpublishWarehouseStatus();
     };
-  }, [start, autoStart, unpublishWarehouseStatus]);
+  }, [start, unpublishWarehouseStatus]);
 
   useQueryHMR(key, start);
 

@@ -541,7 +541,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain("timeGrains: string");
   });
 
-  // ── Non-blocking warehouse gate: metric DESCRIBEs honor the #406 contract ──
+  // ── Non-blocking warehouse gate: metric DESCRIBEs are skipped when the
+  // warehouse isn't running (degraded types still emitted) ──
 
   test("non-blocking + warehouse not running: skips all DESCRIBEs but still emits degraded artifacts", async () => {
     fs.writeFileSync(
@@ -931,7 +932,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       mocks.waitUntilRunning.mock.calls[0][2].treatStoppedAsTransient,
     ).toBeUndefined();
     // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
-    // degraded the key per Phase 1 semantics.
+    // degraded the key.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
       "measureKeys: string",

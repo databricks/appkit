@@ -304,9 +304,13 @@ export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
   : string;
 
 /**
- * Infers the row shape (measures + dimensions) from the registry when K is a
- * known key, otherwise a total `Record<string, unknown>`. Never resolves to
- * `never` — always assignable to `Record<string, unknown>`.
+ * Infers the full row shape (every measure + dimension) from the registry when
+ * K is a known key, otherwise a total `Record<string, unknown>`. Never resolves
+ * to `never` — always assignable to `Record<string, unknown>`.
+ *
+ * This types EVERY column as present. `useMetricView` instead returns
+ * {@link PickMetricRow}, which narrows to only the selected measures/dimensions;
+ * this remains exported as a convenience for the "all columns" case.
  */
 export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends {
@@ -316,6 +320,78 @@ export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
     ? Meas & Dim
     : Record<string, unknown>
   : Record<string, unknown>;
+
+/**
+ * The row shape for a query that selected exactly the measures in `M` and the
+ * dimensions in `D` — a `Pick` over the registry's measure/dimension shapes
+ * rather than the whole metric. This is what keeps `data` honest: a query
+ * selecting `["arr"] + ["region"]` types `row.arr`/`row.region` but not the
+ * unselected `mrr`/`segment`.
+ *
+ * When `M`/`D` are the wide default (caller passed a non-literal array, or K is
+ * an unknown/degraded key), this degrades to the full row / a total
+ * `Record<string, unknown>` — it never resolves to `never`.
+ */
+export type PickMetricRow<
+  K,
+  M extends ReadonlyArray<PropertyKey>,
+  D extends ReadonlyArray<PropertyKey>,
+> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends {
+      measures: infer Meas;
+      dimensions: infer Dim;
+    }
+    ? Pick<Meas, Extract<M[number], keyof Meas>> &
+        Pick<Dim, Extract<D[number], keyof Dim>>
+    : Record<string, unknown>
+  : Record<string, unknown>;
+
+/** The per-dimension metadata map for K (carries `time_grain` on temporal dims). */
+type MetricDimensionMeta<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { metadata: { dimensions: infer DM } }
+    ? DM
+    : never
+  : never;
+
+/**
+ * The dimension keys of K that are TEMPORAL — i.e. carry a `time_grain` tuple in
+ * the generated metadata. Only these can be a `timeDimension`; grouping a
+ * non-temporal dimension by a grain (`date_trunc` over a string) is nonsense.
+ * Degrades to `string` for an unknown key.
+ */
+export type InferTimeDimensionKeys<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? {
+        [P in keyof MetricDimensionMeta<K>]: MetricDimensionMeta<K>[P] extends {
+          time_grain: unknown;
+        }
+          ? P
+          : never;
+      }[keyof MetricDimensionMeta<K>]
+    : string;
+
+/**
+ * The valid grains for the SELECTED temporal dimensions `D` of K — the union of
+ * each selected temporal dimension's `time_grain` tuple. In practice grains are
+ * type-driven (all `timestamp` dims share one set, all `date` dims another), so
+ * the union is exactly the grains applicable to the query. Falls back to the
+ * metric's whole `timeGrains` union (or `string`) for an unknown/degraded key.
+ */
+export type GrainsForSelectedTimeDims<
+  K,
+  D extends ReadonlyArray<PropertyKey>,
+> = K extends AugmentedRegistry<MetricRegistry>
+  ? {
+      [P in Extract<
+        D[number],
+        keyof MetricDimensionMeta<K>
+      >]: MetricDimensionMeta<K>[P] extends {
+        time_grain: infer G extends readonly unknown[];
+      }
+        ? G[number]
+        : never;
+    }[Extract<D[number], keyof MetricDimensionMeta<K>>]
+  : string;
 
 // The metric-filter vocabulary is pure data (no React), so it lives canonically
 // on the `/js` axis. Re-export it here so the `/react` public surface — and
@@ -329,15 +405,30 @@ export type {
 
 import type { MetricFilter } from "@/js";
 
-/** Options for configuring a `useMetricView` query. */
-export interface UseMetricViewOptions<K extends MetricKey = MetricKey> {
-  measures: ReadonlyArray<InferMeasureKeys<K>>;
-  dimensions?: ReadonlyArray<InferDimensionKeys<K>>;
+/**
+ * Options for configuring a `useMetricView` query.
+ *
+ * Generic over the selected measure tuple `M` and dimension tuple `D` so the
+ * returned row shape ({@link PickMetricRow}) narrows to exactly the columns the
+ * query asked for. `timeDimension` must be a SELECTED, TEMPORAL dimension, and
+ * `timeGrain` is correlated to the grains valid for those dimensions — so
+ * bucketing a non-temporal dimension is a type error.
+ */
+export interface UseMetricViewOptions<
+  K extends MetricKey = MetricKey,
+  M extends ReadonlyArray<InferMeasureKeys<K>> = ReadonlyArray<
+    InferMeasureKeys<K>
+  >,
+  D extends ReadonlyArray<InferDimensionKeys<K>> = ReadonlyArray<
+    InferDimensionKeys<K>
+  >,
+> {
+  measures: M;
+  dimensions?: D;
   filter?: MetricFilter;
-  timeGrain?: InferTimeGrains<K>;
-  timeDimension?: InferDimensionKeys<K>;
+  timeDimension?: Extract<D[number], InferTimeDimensionKeys<K>>;
+  timeGrain?: GrainsForSelectedTimeDims<K, D>;
   limit?: number;
-  autoStart?: boolean;
 }
 
 /** Result state returned by `useMetricView`. */
