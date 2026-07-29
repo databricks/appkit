@@ -155,7 +155,9 @@ describe("checkAuth", () => {
     const { result } = await checkAuth({});
     expect(result.status).toBe("error");
     expect(result.code).toBe("AUTH_FAILED");
-    expect(result.detail).toContain("something odd");
+    // detail stays a short headline; the raw message is carried separately.
+    expect(result.detail).toBe("authentication failed");
+    expect(result.raw).toContain("something odd");
     expect(result.hint).toBeUndefined(); // unrecognized failure → no guess
   });
 
@@ -168,8 +170,10 @@ describe("checkAuth", () => {
     );
 
     const { result } = await checkAuth({ profile: "prod" });
-    expect(result.hint).toMatch(/expired|reauthenticate/i);
+    // Action-first: tells the user what to run and to confirm the target,
+    // without redundantly repeating the profile name (it's in the command).
     expect(result.hint).toContain("databricks auth login --profile prod");
+    expect(result.hint).toMatch(/confirm the profile\/host/i);
   });
 
   it("hints about a missing profile (real SDK message)", async () => {
@@ -179,6 +183,76 @@ describe("checkAuth", () => {
     );
 
     const { result } = await checkAuth({});
-    expect(result.hint).toMatch(/Profile not found/i);
+    expect(result.hint).toContain("databricks auth login");
+    expect(result.hint).toMatch(/--profile/i);
+  });
+
+  it("reports the profile from DATABRICKS_CONFIG_PROFILE when --profile is unset", async () => {
+    process.env.DATABRICKS_HOST = "https://foo.cloud.databricks.com";
+    process.env.DATABRICKS_CONFIG_PROFILE = "from-env";
+    const client = { currentUser: { me: async () => ({ userName: "u" }) } };
+    mockGetServiceClient.mockResolvedValue({ client });
+    try {
+      const { result } = await checkAuth({});
+      expect(result.profile).toBe("from-env");
+    } finally {
+      delete process.env.DATABRICKS_CONFIG_PROFILE;
+    }
+  });
+
+  it("mines the profile the SDK used when none was passed, so the login hint targets it", async () => {
+    process.env.DATABRICKS_HOST = "https://foo.cloud.databricks.com";
+    delete process.env.DATABRICKS_CONFIG_PROFILE;
+    mockGetServiceClient.mockRejectedValue(
+      new Error(
+        "default auth: databricks-cli: cannot get access token: the refresh token is invalid. To reauthenticate, run\n  $ databricks auth login --profile DEFAULT",
+      ),
+    );
+
+    // No --profile given, but the SDK fell back to DEFAULT — the hint must name it.
+    const { result } = await checkAuth({});
+    expect(result.hint).toContain("databricks auth login --profile DEFAULT");
+    // Not the bare, profile-less command (which would reauth the wrong profile).
+    expect(result.hint).not.toContain("`databricks auth login`");
+  });
+
+  it("hints that the workspace is unreachable on a network error", async () => {
+    process.env.DATABRICKS_HOST = "https://wrong.cloud.databricks.com";
+    mockGetServiceClient.mockRejectedValue(
+      new Error("getaddrinfo ENOTFOUND wrong.cloud.databricks.com"),
+    );
+
+    const { result } = await checkAuth({});
+    expect(result.hint).toMatch(/host is correct and reachable/i);
+    expect(result.hint).toMatch(/DATABRICKS_HOST/);
+  });
+
+  it("hints to log in and confirm the target when creds fail with nothing set", async () => {
+    delete process.env.DATABRICKS_HOST;
+    delete process.env.DATABRICKS_CONFIG_PROFILE;
+    mockGetServiceClient.mockRejectedValue(
+      new Error("default auth: cannot configure default credentials"),
+    );
+
+    const { result } = await checkAuth({});
+    // No profile/host known → generic login command + confirm-the-target note.
+    expect(result.hint).toContain("databricks auth login");
+    expect(result.hint).toMatch(
+      /confirm the profile\/host is the one you intend/i,
+    );
+  });
+
+  it("keeps detail short and carries the full message in raw for --detail/--json", async () => {
+    process.env.DATABRICKS_HOST = "https://foo.cloud.databricks.com";
+    const sprawling = `first line of the failure\n${"x".repeat(300)}`;
+    mockGetServiceClient.mockRejectedValue(new Error(sprawling));
+
+    const { result } = await checkAuth({});
+    // Human report headline is always the short, constant string...
+    expect(result.detail).toBe("authentication failed");
+    // ...while the full multi-line error is preserved verbatim in raw.
+    expect(result.raw).toBe(sprawling);
+    expect(result.raw).toContain("first line of the failure");
+    expect(result.raw).toContain("x".repeat(300));
   });
 });

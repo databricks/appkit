@@ -20,6 +20,28 @@ so the reported problem is the *root* cause, not a symptom.
 is the `existence` layer's job. (`DATABRICKS_HOST` is the exception — `auth`
 validates it structurally, since a bad host means no client can be built.)
 
+### Auth outcomes
+
+Host and credentials aren't resolved by doctor — an empty `WorkspaceClient({})`
+defers to the SDK's unified-auth chain (explicit env, then the selected
+`~/.databrickscfg` profile, then OAuth). `--profile` is forwarded via
+`DATABRICKS_CONFIG_PROFILE`; with neither host nor profile set, the SDK falls
+back to the default profile. Doctor emits:
+
+| Code | When | Detected |
+| ---- | ---- | -------- |
+| `HOST_INVALID` | `DATABRICKS_HOST` set but malformed / placeholder | offline, before any network |
+| `SDK_NOT_INSTALLED` | Databricks SDK not resolvable | client build |
+| `AUTH_OK` | `currentUser.me()` succeeded | live |
+| `AUTH_FAILED` | `me()` threw | live |
+
+`AUTH_FAILED` carries an action-first `hint` inferred from the SDK message
+(workspace unreachable, profile not found, expired login / no credentials). Each
+hint says what to *run* and to confirm the profile/host actually in use — a
+failure can mean the wrong target, not just a stale token. `detail` is the short
+headline `authentication failed`; the full SDK message is kept in `raw` and shown
+only with `--detail` (always in `--json`). The report labels hints `Hint:`.
+
 ## Files
 
 - `types.ts` — the contract: layers, statuses, `ResourceTarget`, `DoctorReport`.

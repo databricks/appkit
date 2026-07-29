@@ -44,6 +44,9 @@ export interface AuthCheckResult {
   code?: string;
   host?: string;
   profile?: string;
+  /** Full underlying error (e.g. the raw SDK message). Shown only with
+   * `--detail` or in `--json`; the human report relies on `detail` + `hint`. */
+  raw?: string;
 }
 
 export interface DoctorReport {
@@ -57,4 +60,12 @@ export interface DoctorOptions {
   manifest?: string;
   profile?: string;
   json?: boolean;
+  /** Show full underlying error messages (raw SDK output) in the human report. */
+  detail?: boolean;
+  /**
+   * Path to an env file to load before checking (e.g. `.env.local`). Its values
+   * override the `.env` the CLI auto-loads at startup, so doctor checks the same
+   * environment the app runs with.
+   */
+  envFile?: string;
 }

@@ -76,6 +76,31 @@ describe("printReport ordering", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  it("hides raw error by default, shows it with detail=true", () => {
+    const withRaw = report({
+      auth: {
+        status: "error",
+        detail: "authentication failed",
+        hint: "Run `databricks auth login`.",
+        raw: "default auth: databricks-cli: cannot get access token: <long blob>",
+      },
+      summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
+    });
+
+    // Default: headline + hint, no raw blob, plus a nudge toward --detail.
+    const plain = capture(() => printReport(withRaw));
+    expect(plain.some((l) => l.includes("authentication failed"))).toBe(true);
+    expect(plain.some((l) => l.includes("Hint:"))).toBe(true);
+    expect(plain.some((l) => l.includes("<long blob>"))).toBe(false);
+    expect(plain.some((l) => /Run with --detail/.test(l))).toBe(true);
+
+    // --detail: raw blob is surfaced under a "details:" block; no nudge.
+    const detailed = capture(() => printReport(withRaw, true));
+    expect(detailed.some((l) => l.includes("details:"))).toBe(true);
+    expect(detailed.some((l) => l.includes("<long blob>"))).toBe(true);
+    expect(detailed.some((l) => /Run with --detail/.test(l))).toBe(false);
+  });
+
   it("summary shows only non-zero categories", () => {
     const lines = capture(() =>
       printReport(
@@ -97,7 +122,6 @@ describe("printReport ordering", () => {
     );
     // Auth failure counts as an error even though no resource errored.
     expect(lines.some((l) => l.startsWith("1 error"))).toBe(true);
-    expect(lines.some((l) => /Fix authentication first/.test(l))).toBe(true);
   });
 });
 
