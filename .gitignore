@@ -14,3 +14,5 @@ coverage
 
 .claude/scheduled_tasks.lock
 internal
+
+.isaac/
