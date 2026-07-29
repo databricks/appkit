@@ -27,7 +27,6 @@ function getDevMode(): string {
 
 const GENERIC_LOAD_ERROR = "Unable to load data, please try again";
 
-/** Map a fetch/SSE transport error to a user-facing message. */
 function userFacingFetchError(error: unknown): string {
   if (error instanceof Error) {
     if (error.name === "AbortError") {
@@ -136,8 +135,6 @@ function handleMetricSseMessage(
     return;
   }
 
-  // Not a warehouse-status, result, or error event — surface a generic error
-  // rather than silently dropping an unrecognized payload.
   console.error("[useMetricView] Unrecognized SSE payload", parsed);
   ctx.setLoading(false);
   ctx.setError(GENERIC_LOAD_ERROR);

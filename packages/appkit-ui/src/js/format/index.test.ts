@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { formatLabel, formatValue, toD3Format } from "./format";
+import { formatLabel, formatValue, toD3Format } from "./index";
 
 describe("js/format formatValue", () => {
   test("currency spec formats with prefix, grouping and 2 decimals", () => {

@@ -1,16 +1,10 @@
 // ────────────────────────────────────────────────────────────────────────────
 // Metric filter vocabulary + builder.
 //
-// Pure, framework-agnostic. Lives on the `/js` axis because a `MetricFilter` is
-// plain data — a Node script, an SSR pass, or a test can build one without React
-// in the graph. The React `useMetricView` hook re-exports these types from
-// `@databricks/appkit-ui/react` so its public surface is unchanged.
-//
 // **Kept in sync with appkit `plugins/analytics/types.ts`** — appkit-ui cannot
 // depend on appkit, so this mirrors the twelve-operator filter grammar by hand.
 // ────────────────────────────────────────────────────────────────────────────
 
-/** v1 filter operator vocabulary — exactly twelve names. */
 export type MetricFilterOperatorName =
   | "equals"
   | "notEquals"
