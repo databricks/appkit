@@ -12,11 +12,16 @@ function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
   };
 }
 
-/** Runs `fn` with console.log captured; returns the printed lines. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+/** Runs `fn` with console.log captured; returns the printed lines with any ANSI
+ * colour codes stripped, so assertions are colour-agnostic (picocolors emits
+ * codes when CI forces colour / a TTY is present, and none otherwise). */
 function capture(fn: () => void): string[] {
   const lines: string[] = [];
   const spy = vi.spyOn(console, "log").mockImplementation((msg?: unknown) => {
-    lines.push(String(msg));
+    lines.push(String(msg).replace(ANSI, ""));
   });
   try {
     fn();
