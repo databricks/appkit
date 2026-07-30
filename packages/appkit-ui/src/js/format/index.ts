@@ -81,9 +81,6 @@ export function formatValue(value: unknown, format?: string): string {
   const isPercent = format.includes("%");
   const grouping = format.includes(",");
   const decimals = countDecimals(format);
-  // Any leading symbol (before the first digit placeholder) is a currency
-  // prefix — emit it verbatim so non-USD symbols the generator produces are
-  // preserved instead of collapsing to "$".
   const prefix = currencyPrefix(format);
 
   // bigint fast path. A bigint is an exact integer, so `BigInt.toLocaleString`

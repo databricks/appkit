@@ -98,10 +98,7 @@ function handleMetricSseMessage(
   // optional array of unknown values), so a shallow structural check is enough
   // here rather than a full schema validator. Missing or non-array `data`
   // normalizes to [] so `undefined` never bleeds into the hook's `T | null`
-  // state. `metadata` (per-column display metadata scoped to the queried
-  // columns) is surfaced as-is only when it is a plain object; anything else
-  // (null / array / scalar) is treated as absent. It is `undefined` when the
-  // server injected none (dormant / unknown key).
+  // state. `metadata` is narrowed by `asMetricMetadata` (see its doc).
   if (parsed.type === "result") {
     ctx.setLoading(false);
     // A successful result supersedes any error from a prior (retried) attempt —

@@ -233,11 +233,10 @@ export function BaseChart({
   const ui = useChartUITokens();
 
   // Only the *presence* of a click handler shapes the option (it flips
-  // `triggerLineEvent`/`symbolSize` on line/area) AND the `onEvents` map below.
-  // Depend on this boolean, not the handler reference — consumers pass an inline
-  // `onDataClick`, whose identity changes every render, so depending on the
-  // reference would rebuild the whole option object AND re-subscribe the ECharts
-  // click listener on every parent re-render (e.g. each SSE tick).
+  // `triggerLineEvent`/`symbolSize` on line/area) AND gates the `onEvents` map
+  // below. Depend on this boolean, not the handler reference, so an inline
+  // `onDataClick` (new identity every render) doesn't rebuild the option object
+  // each render — see `onEvents` for the matching subscription rationale.
   const interactive = !!onDataClick;
 
   // Keep the latest handler in a ref so `onEvents` can call the current

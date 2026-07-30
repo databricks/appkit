@@ -236,15 +236,17 @@ ${entries};
 `;
 }
 
-// Build the full metric-views.ts file from a list of metric schemas.
-//
-// This is a real `.ts` source file (not a `.d.ts`), so it carries BOTH the
-// erasable `declare module` type augmentation AND a runtime value export
-// (`metricViewsMetadata`). It must therefore never emit a runtime side-effect
-// import — a bare `import "@databricks/appkit-ui/react"` would execute the
-// client package entry on the Node server. The header is a type-only
-// `import type {} from "..."`, which (a) compiles to zero runtime code and
-// (b) anchors the module so the global `declare module` augmentation resolves.
+/**
+ * Build the full metric-views.ts file from a list of metric schemas.
+ *
+ * This is a real `.ts` source file (not a `.d.ts`), so it carries BOTH the
+ * erasable `declare module` type augmentation AND a runtime value export
+ * (`metricViewsMetadata`). It must therefore never emit a runtime side-effect
+ * import — a bare `import "@databricks/appkit-ui/react"` would execute the
+ * client package entry on the Node server. The header is a type-only
+ * `import type {} from "..."`, which (a) compiles to zero runtime code and
+ * (b) anchors the module so the global `declare module` augmentation resolves.
+ */
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
 ): string {
