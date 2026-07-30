@@ -34,6 +34,13 @@ interface ManifestPlugin {
     required?: ManifestResource[];
     optional?: ManifestResource[];
   };
+  /**
+   * True when the plugin is actually used by the app (imported and passed to
+   * `createApp`). `plugin sync` discovers *every* plugin shipped by installed
+   * packages but only marks the used ones; doctor checks only those, so an
+   * unused built-in doesn't produce phantom "missing env var" errors.
+   */
+  requiredByTemplate?: boolean;
 }
 
 interface TemplateManifest {
@@ -115,8 +122,17 @@ export function targetsFromManifestFile(
     throw new Error(`Failed to parse manifest file ${manifestPath}: ${msg}`);
   }
 
+  // `plugin sync` writes a resource entry for *every* plugin the installed
+  // packages ship (a catalog for `apps init`), not just the ones this app uses.
+  // Only plugins actually wired into `createApp` are marked
+  // `requiredByTemplate`, so check exactly those — otherwise doctor reports
+  // phantom "missing env var" errors for plugins the app never imports.
+  const selected = Object.entries(data.plugins ?? {}).filter(
+    ([, plugin]) => plugin.requiredByTemplate === true,
+  );
+
   const targets: ResourceTarget[] = [];
-  for (const [pluginName, plugin] of Object.entries(data.plugins ?? {})) {
+  for (const [pluginName, plugin] of selected) {
     const resources = plugin.resources ?? {};
     for (const resource of resources.required ?? []) {
       targets.push(toTarget(pluginName, resource, true));

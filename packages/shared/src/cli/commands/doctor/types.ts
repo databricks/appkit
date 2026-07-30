@@ -5,6 +5,17 @@ export type CheckLayer = "auth" | "config" | "existence";
 
 export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 
+/**
+ * Where a resource's value comes from, per the bundle (`databricks.yml`):
+ * - `external`      — an existing resource referenced by id/name (`${var.*}` or a
+ *                     literal). It should exist now, so the live probe applies.
+ * - `bundle-managed`— created by this same bundle (`${resources.<type>.<key>.*}`);
+ *                     it doesn't exist until `bundle deploy`, so we validate the
+ *                     declaration instead of probing.
+ * Undefined ⇒ external (no bundle info, or an AppKit app with no databricks.yml).
+ */
+export type ResourceOrigin = "external" | "bundle-managed";
+
 export interface LayerResult {
   layer: CheckLayer;
   status: CheckStatus;
@@ -28,6 +39,8 @@ export interface ResourceTarget {
   envVars: string[];
   /** Resolved field values keyed by manifest field name; unset fields omitted. */
   fieldValues: Record<string, string>;
+  /** Provenance from the bundle; undefined ⇒ treated as external. */
+  origin?: ResourceOrigin;
 }
 
 export interface ResourceCheckResult {
@@ -49,9 +62,29 @@ export interface AuthCheckResult {
   raw?: string;
 }
 
+/**
+ * A finding from the offline three-file wiring check (Phase 2): does each
+ * `app.yaml` `valueFrom` bind to a real databricks.yml binding, and does each
+ * bundle-managed `${resources.*}` reference resolve to a declared bundle
+ * resource. Independent of auth — it's a deploy-declaration check, not a live one.
+ */
+export interface WiringFinding {
+  status: CheckStatus;
+  /** Machine-readable code (e.g. `VALUEFROM_UNBOUND`, `BUNDLE_REF_MISSING`). */
+  code: string;
+  /** Short row label (the env var or binding at fault), so a wiring row renders
+   * with the same shape as a resource row: `glyph  label` then indented detail. */
+  label: string;
+  detail: string;
+  hint?: string;
+}
+
 export interface DoctorReport {
   auth: AuthCheckResult;
+  /** Live connectivity checks for external resources. */
   resources: ResourceCheckResult[];
+  /** Deploy-declaration findings: bundle-managed resources + wiring consistency. */
+  wiring: WiringFinding[];
   summary: { ok: number; warn: number; error: number; skipped: number };
 }
 

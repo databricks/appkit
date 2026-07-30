@@ -566,6 +566,9 @@ importers:
       dotenv:
         specifier: 16.6.1
         version: 16.6.1
+      picocolors:
+        specifier: 1.1.1
+        version: 1.1.1
       zod:
         specifier: 4.3.6
         version: 4.3.6

@@ -6,6 +6,7 @@ function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
   return {
     auth: { status: "ok" },
     resources: [],
+    wiring: [],
     summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
     ...overrides,
   };
@@ -63,6 +64,7 @@ describe("printReport ordering", () => {
         res("error", "errored"),
         res("skipped", "skip"),
       ],
+      wiring: [],
       summary: { ok: 1, warn: 1, error: 1, skipped: 1 },
     };
 
@@ -111,6 +113,45 @@ describe("printReport ordering", () => {
     expect(lines.some((l) => /warning|error|skipped/.test(l))).toBe(false);
   });
 
+  it("renders bundle-managed resources and wiring findings in the flat list", () => {
+    const external = res("ok", "sql_warehouse"); // origin undefined ⇒ runtime
+    const managed = res("skipped", "job");
+    managed.target.origin = "bundle-managed";
+    managed.target.alias = "Report Job";
+    managed.layers = [
+      { layer: "existence", status: "skipped", code: "BUNDLE_MANAGED" },
+    ];
+
+    const lines = capture(() =>
+      printReport(
+        report({
+          resources: [external, managed],
+          wiring: [
+            {
+              status: "error",
+              code: "VALUEFROM_UNBOUND",
+              label: "SOME_ENV",
+              detail: "app.yaml binds X to Y, no such binding",
+            },
+          ],
+          summary: { ok: 1, warn: 0, error: 0, skipped: 1 },
+        }),
+      ),
+    );
+    const out = lines.join("\n");
+    // No titled sub-sections: a single flat, severity-sorted checklist.
+    expect(out).not.toContain("Runtime connectivity");
+    expect(out).not.toContain("Deploy declaration");
+    // A bundle-managed resource is shown as deploy-created, not probed.
+    expect(out).toContain("will be created on deploy");
+    expect(out).toContain("Report Job");
+    // The wiring error sorts to the top (most severe), above the ok resource.
+    const wiringIdx = lines.findIndex((l) => l.includes("no such binding"));
+    const okIdx = lines.findIndex((l) => l.includes("sql_warehouse"));
+    expect(wiringIdx).toBeGreaterThanOrEqual(0);
+    expect(wiringIdx).toBeLessThan(okIdx);
+  });
+
   it("folds an auth error into the summary error count", () => {
     const lines = capture(() =>
       printReport(
@@ -142,6 +183,24 @@ describe("exitCodeFor", () => {
     expect(
       exitCodeFor(
         report({ summary: { ok: 0, warn: 0, error: 1, skipped: 0 } }),
+      ),
+    ).toBe(1);
+  });
+
+  it("is 1 when a wiring finding errored (gates pre-deploy)", () => {
+    expect(
+      exitCodeFor(
+        report({
+          summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
+          wiring: [
+            {
+              status: "error",
+              code: "VALUEFROM_UNBOUND",
+              label: "X",
+              detail: "x",
+            },
+          ],
+        }),
       ),
     ).toBe(1);
   });

@@ -48,6 +48,7 @@ describe("runDoctor", () => {
         version: "2.0",
         plugins: {
           analytics: {
+            requiredByTemplate: true,
             resources: {
               required: [
                 {

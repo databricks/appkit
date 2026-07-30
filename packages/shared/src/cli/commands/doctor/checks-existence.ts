@@ -67,26 +67,40 @@ function cleanMessage(err: unknown): string {
   return m ? m[1] : raw;
 }
 
+/** The resource's configured identifier (id / name / path / host), for short
+ * messages. The row label already names the *type*, so details never repeat it
+ * — they only surface the value you'd act on, quoted so the report highlights
+ * it. */
+function displayId(target: ResourceTarget): string | null {
+  return field(target, "id", "name", "path", "index_name", "indexName", "host");
+}
+
 function classifyError(err: unknown, target: ResourceTarget): LayerResult {
   const status = statusCodeOf(err);
   const errorCode = errorCodeOf(err);
   const message = cleanMessage(err);
+  const id = displayId(target);
+  const quoted = id ? `"${id}"` : null;
 
   if (status === 404 || errorCode === "RESOURCE_DOES_NOT_EXIST") {
     return {
       layer: "existence",
       status: "error",
       code: "NOT_FOUND",
-      detail: `${target.type} not found — check the configured id/name (${message})`,
+      detail: quoted ? `${quoted} not found` : "not found",
     };
   }
-  // A malformed id/name often comes back as 400 rather than 404.
+  // A malformed id/name often comes back as 400 rather than 404. We own the
+  // wording (quoting the value so it highlights) rather than echoing the SDK's
+  // sentence, which repeats "invalid" and leaks the raw type.
   if (status === 400 || errorCode === "INVALID_PARAMETER_VALUE") {
     return {
       layer: "existence",
       status: "error",
       code: "INVALID_VALUE",
-      detail: `invalid ${target.type} id/name: ${message}`,
+      detail: quoted
+        ? `${quoted} is not a valid id/name`
+        : `invalid id/name: ${message}`,
     };
   }
   if (status === 403 || errorCode === "PERMISSION_DENIED") {
@@ -94,14 +108,18 @@ function classifyError(err: unknown, target: ResourceTarget): LayerResult {
       layer: "existence",
       status: "error",
       code: "ACCESS_DENIED",
-      detail: `access denied reading ${target.type} — the identity may lack visibility (${message})`,
+      detail: quoted
+        ? `no permission to read ${quoted}`
+        : "no permission to read it",
     };
   }
   return {
     layer: "existence",
     status: "error",
     code: "PROBE_FAILED",
-    detail: `failed to read ${target.type}: ${message}`,
+    detail: quoted
+      ? `read failed for ${quoted}: ${message}`
+      : `read failed: ${message}`,
   };
 }
 
@@ -125,7 +143,7 @@ function missingField(fieldName: string): LayerResult {
     layer: "existence",
     status: "skipped",
     code: "MISSING_FIELD",
-    detail: `cannot probe existence: no resolved value for "${fieldName}"`,
+    detail: `no ${fieldName} configured — can't probe`,
   };
 }
 
@@ -189,7 +207,7 @@ const probeJob: ExistenceProbe = async (client, target) => {
       layer: "existence",
       status: "error",
       code: "INVALID_ID",
-      detail: `job id is not a valid integer: "${raw}"`,
+      detail: `"${raw}" is not a valid job id (expected an integer)`,
     };
   }
   try {
@@ -211,7 +229,7 @@ const probeVolume: ExistenceProbe = async (client, target) => {
       layer: "existence",
       status: "error",
       code: "INVALID_NAME",
-      detail: `cannot derive a 3-level volume name from "${raw}"`,
+      detail: `"${raw}" is not a valid volume path (expected /Volumes/catalog/schema/volume or catalog.schema.volume)`,
     };
   }
   try {

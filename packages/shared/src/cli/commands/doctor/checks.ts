@@ -118,7 +118,7 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
         // Keep the headline short and let the hint explain the fix; the raw SDK
         // message is carried separately for `--detail` / `--json`.
         detail: "authentication failed",
-        hint: authFailureHint(raw, profile, host),
+        hint: authFailureHint(raw, profile),
         host,
         profile: shownProfile,
         raw,
@@ -137,7 +137,6 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
 function authFailureHint(
   message: string,
   profile?: string,
-  host?: string,
 ): string | undefined {
   // The SDK resolves a profile even when the user gave none (falling back to
   // DEFAULT / DATABRICKS_CONFIG_PROFILE), and its error embeds that name (e.g.
@@ -198,11 +197,19 @@ export async function checkConfig(
   }
 
   if (missing.length > 0) {
+    const plural = missing.length > 1;
+    const names = missing.join(", ");
     return {
       layer: "config",
       status: target.required ? "error" : "warn",
       code: target.required ? "ENV_MISSING" : "ENV_MISSING_OPTIONAL",
-      detail: `${target.required ? "required" : "optional"} resource is missing env var(s): ${missing.join(", ")}`,
+      // The env var name(s) do the work — the report bolds SCREAMING_SNAKE
+      // names. Optional resources say so: a missing optional is a warn, not a
+      // blocker.
+      detail: target.required
+        ? `${names} ${plural ? "are" : "is"} not set`
+        : `${names} ${plural ? "are" : "is"} not set (optional)`,
+      hint: `Set ${plural ? "them" : "it"} in your .env (local) and wire ${plural ? "them" : "it"} through app.yaml + databricks.yml for deploy.`,
     };
   }
 

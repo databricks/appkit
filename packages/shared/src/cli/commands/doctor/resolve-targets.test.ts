@@ -23,6 +23,7 @@ const MANIFEST = {
   version: "2.0",
   plugins: {
     analytics: {
+      requiredByTemplate: true,
       resources: {
         required: [
           {
@@ -37,6 +38,7 @@ const MANIFEST = {
       },
     },
     agents: {
+      requiredByTemplate: true,
       resources: {
         required: [],
         optional: [
@@ -50,7 +52,10 @@ const MANIFEST = {
         ],
       },
     },
-    server: { resources: { required: [], optional: [] } },
+    server: {
+      requiredByTemplate: true,
+      resources: { required: [], optional: [] },
+    },
   },
 };
 
@@ -92,12 +97,76 @@ describe("targetsFromManifestFile", () => {
     });
   });
 
+  it("checks only requiredByTemplate plugins when any are marked", () => {
+    // analytics is marked (used in the app); agents is discovered-but-unused.
+    const targets = targetsFromManifestFile(
+      writeManifest({
+        version: "2.0",
+        plugins: {
+          analytics: {
+            requiredByTemplate: true,
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  resourceKey: "sql-warehouse",
+                  permission: "CAN_USE",
+                  fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+                },
+              ],
+            },
+          },
+          agents: {
+            // no requiredByTemplate → discovered but not used → skipped
+            resources: {
+              optional: [
+                {
+                  type: "serving_endpoint",
+                  resourceKey: "serving",
+                  permission: "CAN_QUERY",
+                  fields: { name: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    expect(targets).toHaveLength(1);
+    expect(targets[0].plugin).toBe("analytics");
+  });
+
+  it("returns nothing when no plugin is marked requiredByTemplate", () => {
+    // A manifest whose plugins are all discovered-but-unused → nothing to check.
+    const targets = targetsFromManifestFile(
+      writeManifest({
+        version: "2.0",
+        plugins: {
+          analytics: {
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  resourceKey: "sql-warehouse",
+                  permission: "CAN_USE",
+                  fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    expect(targets).toEqual([]);
+  });
+
   it("excludes value-default and platform-injected fields from envVars (regression: bug #3)", () => {
     const targets = targetsFromManifestFile(
       writeManifest({
         version: "2.0",
         plugins: {
           lakebase: {
+            requiredByTemplate: true,
             resources: {
               required: [
                 {
@@ -146,6 +215,7 @@ describe("targetsFromManifestFile", () => {
         version: "2.0",
         plugins: {
           demo: {
+            requiredByTemplate: true,
             resources: {
               required: [
                 {
@@ -178,6 +248,7 @@ describe("targetsFromManifestFile", () => {
           version: "2.0",
           plugins: {
             demo: {
+              requiredByTemplate: true,
               resources: {
                 required: [
                   {

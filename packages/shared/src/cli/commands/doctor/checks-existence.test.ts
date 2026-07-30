@@ -63,7 +63,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
     expect(r.code).toBe("NOT_FOUND");
   });
 
-  it("errors INVALID_VALUE on a 400 with a clean message", async () => {
+  it("errors INVALID_VALUE on a 400, quoting the value (no type/blob leak)", async () => {
     const client = {
       warehouses: {
         get: async () => {
@@ -76,12 +76,17 @@ describe("runExistenceProbe — sql_warehouse", () => {
         },
       },
     };
-    const r = await runExistenceProbe(client, target());
+    // The target has an id, so we own the wording: quote the value, don't echo
+    // the SDK sentence, don't leak the raw type or JSON blob.
+    const r = await runExistenceProbe(
+      client,
+      target({ fieldValues: { id: "wh-123" } }),
+    );
     expect(r.status).toBe("error");
     expect(r.code).toBe("INVALID_VALUE");
-    // The clean inner message is extracted, not the whole JSON blob.
-    expect(r.detail).toContain("not a valid endpoint id");
+    expect(r.detail).toContain('"wh-123"');
     expect(r.detail).not.toContain("error_code");
+    expect(r.detail).not.toContain("sql_warehouse");
   });
 
   it("errors ACCESS_DENIED on a 403", async () => {

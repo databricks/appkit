@@ -1,12 +1,17 @@
 /**
  * Orchestration for `appkit doctor`.
  *
- * Resolves the resources the app declares, runs the app-wide auth check once,
- * then per resource runs the offline `config` layer followed by the live
- * `existence` layer. Rolls everything up into a {@link DoctorReport}.
+ * Resolves the resources the app declares, overlays bundle provenance, runs the
+ * app-wide auth check once, then per resource runs the offline `config` layer
+ * followed by the live `existence` layer — except for bundle-managed resources,
+ * whose existence can't be probed before deploy. Separately runs the offline
+ * wiring check (deploy-declaration consistency). Rolls everything into a
+ * {@link DoctorReport}.
  */
 
+import { originForEnvVars, readBundleInfo } from "./bundle";
 import { checkAuth, checkConfig, checkExistence } from "./checks";
+import { checkWiring } from "./checks-wiring";
 import { resolveTargetsFromCwd } from "./resolve-targets";
 import type {
   CheckStatus,
@@ -44,6 +49,18 @@ async function checkResource(
     return { target, status: rolled, layers };
   }
 
+  // A bundle-managed resource doesn't exist until `bundle deploy`, so probing it
+  // would be a false NOT_FOUND. Report it as deploy-managed instead.
+  if (target.origin === "bundle-managed") {
+    layers.push({
+      layer: "existence",
+      status: "skipped",
+      code: "BUNDLE_MANAGED",
+      detail: "created by this bundle on deploy — not probed",
+    });
+    return { target, status: worst(rolled, "skipped"), layers };
+  }
+
   if (client === undefined) {
     layers.push({
       layer: "existence",
@@ -69,9 +86,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 
   // Resources are resolved and config-checked even when auth failed, so a bad
   // connection still surfaces config problems instead of hiding them all.
+  const cwd = process.cwd();
+  const targets = resolveTargetsFromCwd(cwd, options.manifest);
+
+  // Overlay bundle provenance (Phase 1) and gather wiring info (Phase 2).
+  const bundle = readBundleInfo(cwd);
+  for (const target of targets) {
+    const origin = originForEnvVars(target.envVars, bundle);
+    if (origin) target.origin = origin;
+  }
+
   // Probes are independent reads, so run them concurrently; Promise.all
   // preserves input order, keeping the report deterministic.
-  const targets = resolveTargetsFromCwd(process.cwd(), options.manifest);
   const results = await Promise.all(
     targets.map((target) => checkResource(target, client)),
   );
@@ -80,5 +106,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     summary[result.status] += 1;
   }
 
-  return { auth, resources, summary };
+  const wiring = checkWiring(bundle, targets);
+
+  return { auth, resources, wiring, summary };
 }
