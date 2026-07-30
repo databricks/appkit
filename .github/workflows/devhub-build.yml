@@ -1,8 +1,7 @@
 name: DevHub Build
 
-# Reusable workflow: clones DevHub, syncs AppKit docs from the given ref, and runs
-# DevHub's build to validate that our docs build inside the actual consumer site.
-# Called by ci.yml (per-PR) and devhub-nightly.yml (scheduled against main).
+# Builds DevHub with AppKit docs synced from the given ref.
+# Called by ci.yml (per-PR) and devhub-nightly.yml.
 
 on:
   workflow_call:

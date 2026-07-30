@@ -37,6 +37,3 @@ The `pnpm build` command:
 2. Runs `apply-redirects` — replaces HTML pages with redirect pages pointing to developers.databricks.com
 
 Static files remain served from GitHub Pages: JSON schemas (`/schemas/`), `llms.txt`, and `.md` files (used by `npx @databricks/appkit docs` for npm-bundled documentation).
-
-<!-- ci: temporary touch to run devhub-validation via the reusable workflow; reverted before merge -->
-

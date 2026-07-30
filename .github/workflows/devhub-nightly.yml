@@ -6,7 +6,7 @@ name: DevHub Nightly Build
 on:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC daily
-  workflow_dispatch: # allow manual re-run
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,5 +14,5 @@ permissions:
 
 jobs:
   devhub-build:
-    # No inputs → defaults sync databricks/appkit main and build it against DevHub.
+    # Defaults build databricks/appkit main against DevHub.
     uses: ./.github/workflows/devhub-build.yml
