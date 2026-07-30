@@ -8,6 +8,12 @@ import {
 } from "react";
 import type { MetricColumnMeta } from "shared";
 import { connectSSE } from "@/js";
+import {
+  type AnalyticsSseHandlerContext,
+  getDevMode,
+  handleAnalyticsSseError,
+  handleAnalyticsSseMessage,
+} from "./analytics-sse";
 import type {
   InferDimensionKeys,
   InferMeasureKeys,
@@ -15,47 +21,9 @@ import type {
   PickMetricRow,
   UseMetricViewOptions,
   UseMetricViewResult,
-  WarehouseStatus,
 } from "./types";
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
-
-function getDevMode(): string {
-  const dev = new URL(window.location.href).searchParams.get("dev");
-  return dev ? `?dev=${dev}` : "";
-}
-
-const GENERIC_LOAD_ERROR = "Unable to load data, please try again";
-
-function userFacingFetchError(error: unknown): string {
-  if (error instanceof Error) {
-    if (error.name === "AbortError") {
-      return "Request timed out, please try again";
-    }
-    if (error.message.includes("Failed to fetch")) {
-      return "Network error. Please check your connection.";
-    }
-  }
-  return GENERIC_LOAD_ERROR;
-}
-
-interface MetricSseContext {
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  setErrorCode: (code: string | null) => void;
-  setData: (data: Record<string, unknown>[] | null) => void;
-  setMetadata: (metadata: Record<string, MetricColumnMeta> | undefined) => void;
-  publishWarehouseStatus: (status: WarehouseStatus | null) => void;
-  unpublishWarehouseStatus: () => void;
-}
-
-function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as WarehouseStatus).state === "string"
-  );
-}
 
 /**
  * Narrow the wire `metadata` field to a per-column map. The value is only a
@@ -70,72 +38,6 @@ function asMetricMetadata(
     return value as Record<string, MetricColumnMeta>;
   }
   return undefined;
-}
-
-function handleMetricSseMessage(
-  parsed: Record<string, unknown>,
-  ctx: MetricSseContext,
-): void {
-  // Warehouse-readiness progress. The metric result type does NOT expose
-  // warehouseStatus, so we keep the hook in its loading state (no caller-facing
-  // field) but publish the status to the shared ResourceStatusProvider — the
-  // same side-channel `useAnalyticsQuery` uses to drive a global "warehouse
-  // starting…" indicator during a cold start. This is a publish-only path: it
-  // never mutates UseMetricViewResult.
-  if (parsed.type === "warehouse_status") {
-    if (!isWarehouseStatusPayload(parsed.status)) {
-      ctx.setLoading(false);
-      ctx.setError(GENERIC_LOAD_ERROR);
-      ctx.unpublishWarehouseStatus();
-      console.error("[useMetricView] Malformed warehouse_status event", parsed);
-      return;
-    }
-    ctx.publishWarehouseStatus(parsed.status);
-    return;
-  }
-
-  // JSON result. The SSE wire schema is intentionally loose (`data` is an
-  // optional array of unknown values), so a shallow structural check is enough
-  // here rather than a full schema validator. Missing or non-array `data`
-  // normalizes to [] so `undefined` never bleeds into the hook's `T | null`
-  // state. `metadata` is narrowed by `asMetricMetadata` (see its doc).
-  if (parsed.type === "result") {
-    ctx.setLoading(false);
-    // A successful result supersedes any error from a prior (retried) attempt —
-    // clear it so error-first consumers don't hide valid data.
-    ctx.setError(null);
-    ctx.setErrorCode(null);
-    ctx.setData(Array.isArray(parsed.data) ? parsed.data : []);
-    ctx.setMetadata(asMetricMetadata(parsed.metadata));
-    ctx.unpublishWarehouseStatus();
-    return;
-  }
-
-  if (parsed.type === "error" || parsed.error || parsed.code) {
-    const errorMsg =
-      (parsed.error as string | undefined) ||
-      (parsed.message as string | undefined) ||
-      "Unable to execute metric query";
-    ctx.setLoading(false);
-    ctx.setError(errorMsg);
-    ctx.unpublishWarehouseStatus();
-    // Propagate the upstream structured code so UI consumers can branch on a
-    // stable identifier instead of parsing the human-readable message.
-    if (typeof parsed.errorCode === "string") {
-      ctx.setErrorCode(parsed.errorCode);
-    }
-    if (parsed.code) {
-      console.error(
-        `[useMetricView] Code: ${parsed.code}, Message: ${errorMsg}`,
-      );
-    }
-    return;
-  }
-
-  console.error("[useMetricView] Unrecognized SSE payload", parsed);
-  ctx.setLoading(false);
-  ctx.setError(GENERIC_LOAD_ERROR);
-  ctx.unpublishWarehouseStatus();
 }
 
 /**
@@ -248,13 +150,26 @@ export function useMetricView<
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const sseContext: MetricSseContext = {
+    const sseContext: AnalyticsSseHandlerContext = {
+      source: "useMetricView",
+      resource: { key },
+      defaultExecutionError: "Unable to execute metric query",
+      unpublishOnMalformedMessage: true,
+      signal: abortController.signal,
+      abort: () => abortController.abort(),
       setLoading,
       setError,
       setErrorCode,
-      setData: (rows) => setData(rows as Rows | null),
-      setMetadata,
-      publishWarehouseStatus,
+      // Metric results expose warehouse readiness only through the shared
+      // resource-status publisher, not through UseMetricViewResult.
+      onWarehouseStatus: publishWarehouseStatus,
+      onResult: (message) => {
+        // A successful result supersedes a prior retried error.
+        setError(null);
+        setErrorCode(null);
+        setData(message.data as Rows);
+        setMetadata(asMetricMetadata(message.payload.metadata));
+      },
       unpublishWarehouseStatus,
     };
 
@@ -262,40 +177,9 @@ export function useMetricView<
       url: urlSuffix,
       payload,
       signal: abortController.signal,
-      onMessage: async (message) => {
-        // Drop late envelopes from a stream whose controller was already
-        // aborted (React StrictMode unmount→remount). Mirrors onError below.
-        if (abortController.signal.aborted) return;
-        try {
-          const parsed = JSON.parse(message.data) as Record<string, unknown>;
-          handleMetricSseMessage(parsed, sseContext);
-        } catch (error) {
-          // A `JSON.parse` failure (or any other thrown error inside the SSE
-          // message handler) must not strand the hook in `loading=true` with
-          // no error surfaced — the UI would spin forever. Clear loading,
-          // report a user-facing error, and abort the stream so a broken
-          // upstream doesn't re-fire the same failure on every frame.
-          console.warn("[useMetricView] Malformed message received", error);
-          setLoading(false);
-          setError(GENERIC_LOAD_ERROR);
-          unpublishWarehouseStatus();
-          abortController.abort();
-        }
-      },
-      onError: (error) => {
-        if (abortController.signal.aborted) return;
-        setLoading(false);
-        unpublishWarehouseStatus();
-
-        if (error instanceof Error) {
-          console.error("[useMetricView] Error", {
-            key,
-            error: error.message,
-            stack: error.stack,
-          });
-        }
-        setError(userFacingFetchError(error));
-      },
+      onMessage: (message) =>
+        handleAnalyticsSseMessage(message.data, sseContext),
+      onError: (error) => handleAnalyticsSseError(error, sseContext),
     });
   }, [
     key,

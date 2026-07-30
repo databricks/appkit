@@ -116,6 +116,35 @@ function renderDegradedMetricEntry(schema: MetricSchema): string {
     }`;
 }
 
+type RenderedMetadataField = readonly [name: string, value: string];
+
+// Build the canonical rendered fields shared by type-level and runtime
+// metadata. `time_grain` is type-only and is included only when requested.
+function metadataFields(
+  col: MetricColumnMetadata,
+  includeTimeGrain = false,
+): RenderedMetadataField[] {
+  const fields: RenderedMetadataField[] = [["type", JSON.stringify(col.type)]];
+  const optionalFields = [
+    ["display_name", col.displayName],
+    ["format", col.format],
+    ["description", col.description],
+  ] as const;
+
+  for (const [name, value] of optionalFields) {
+    if (value) {
+      fields.push([name, JSON.stringify(value)]);
+    }
+  }
+
+  if (includeTimeGrain && col.timeGrains && col.timeGrains.length > 0) {
+    const grainTuple = col.timeGrains.map((g) => JSON.stringify(g)).join(", ");
+    fields.push(["time_grain", `readonly [${grainTuple}]`]);
+  }
+
+  return fields;
+}
+
 // Render the type-level shape of a column's semantic-metadata map
 // for the `metadata` field of a MetricRegistry entry.
 function renderMetadataMap(
@@ -127,23 +156,9 @@ function renderMetadataMap(
 
   const inner = cols
     .map((col) => {
-      const fields: string[] = [`type: ${JSON.stringify(col.type)}`];
-      if (col.displayName) {
-        fields.push(`display_name: ${JSON.stringify(col.displayName)}`);
-      }
-      if (col.format) {
-        fields.push(`format: ${JSON.stringify(col.format)}`);
-      }
-      if (col.description) {
-        fields.push(`description: ${JSON.stringify(col.description)}`);
-      }
-      if (includeTimeGrain && col.timeGrains && col.timeGrains.length > 0) {
-        const grainTuple = col.timeGrains
-          .map((g) => JSON.stringify(g))
-          .join(", ");
-        fields.push(`time_grain: readonly [${grainTuple}]`);
-      }
-      const fieldsBlock = fields.map((f) => `${indent}  ${f}`).join(";\n");
+      const fieldsBlock = metadataFields(col, includeTimeGrain)
+        .map(([name, value]) => `${indent}  ${name}: ${value}`)
+        .join(";\n");
       return `${indent}${JSON.stringify(col.name)}: {
 ${fieldsBlock};
 ${indent}}`;
@@ -161,16 +176,9 @@ ${inner};
 // MetricColumnMeta). Strings go through JSON.stringify so quotes/backticks in
 // display_name/description stay escape-safe.
 function renderMetadataValueField(col: MetricColumnMetadata): string {
-  const fields: string[] = [`type: ${JSON.stringify(col.type)}`];
-  if (col.displayName) {
-    fields.push(`display_name: ${JSON.stringify(col.displayName)}`);
-  }
-  if (col.format) {
-    fields.push(`format: ${JSON.stringify(col.format)}`);
-  }
-  if (col.description) {
-    fields.push(`description: ${JSON.stringify(col.description)}`);
-  }
+  const fields = metadataFields(col).map(
+    ([name, value]) => `${name}: ${value}`,
+  );
   return `{ ${fields.join(", ")} }`;
 }
 

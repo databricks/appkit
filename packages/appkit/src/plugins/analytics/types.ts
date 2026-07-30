@@ -1,7 +1,14 @@
 import type {
   BasePluginConfig,
   MetricColumnMeta,
+  MetricFilter,
   MetricViewsMetadata,
+} from "shared";
+
+export type {
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricPredicate,
 } from "shared";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
@@ -171,48 +178,6 @@ export interface MetricRegistration {
   source: string;
   lane: MetricLane;
 }
-
-/**
- * v1 filter operator vocabulary — exactly twelve names. The runtime tuple
- * `METRIC_FILTER_OPERATORS` (next to the validator in `metric.ts`) is the
- * server-side source of truth; this union mirrors it statically.
- */
-export type MetricFilterOperatorName =
-  | "equals"
-  | "notEquals"
-  | "in"
-  | "notIn"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "notContains"
-  | "set"
-  | "notSet";
-
-/**
- * A single filter predicate — the leaf node of the recursive
- * {@link MetricFilter} tree. `member` is a dimension name (grammar-gated, not
- * allowlisted); `values` is bound through parameterized `:f_<idx>` bind vars
- * and never interpolated into the SQL string.
- */
-export interface MetricPredicate {
-  member: string;
-  operator: MetricFilterOperatorName;
-  values?: ReadonlyArray<string | number>;
-}
-
-/**
- * Recursive filter expression for the metric-view request body: a leaf
- * {@link MetricPredicate} or an `{ and: [...] }` / `{ or: [...] }` group. The
- * shape is intentionally non-generic server-side — per-metric narrowing (if
- * any) lives client-side.
- */
-export type MetricFilter =
-  | MetricPredicate
-  | { and: ReadonlyArray<MetricFilter> }
-  | { or: ReadonlyArray<MetricFilter> };
 
 /**
  * Validated request body for `POST /api/analytics/metric/:key`.

@@ -1,7 +1,23 @@
-import { describe, expect, test } from "vitest";
-import { type MetricFilter, toMetricFilter } from "./index";
+import type {
+  MetricFilter as SharedMetricFilter,
+  MetricFilterOperatorName as SharedMetricFilterOperatorName,
+  MetricPredicate as SharedMetricPredicate,
+} from "shared";
+import { describe, expect, expectTypeOf, test } from "vitest";
+import {
+  type MetricFilter,
+  type MetricFilterOperatorName,
+  type MetricPredicate,
+  toMetricFilter,
+} from "./index";
 
 describe("toMetricFilter", () => {
+  test("re-exports the shared metric-filter AST types", () => {
+    expectTypeOf<MetricFilter>().toEqualTypeOf<SharedMetricFilter>();
+    expectTypeOf<MetricFilterOperatorName>().toEqualTypeOf<SharedMetricFilterOperatorName>();
+    expectTypeOf<MetricPredicate>().toEqualTypeOf<SharedMetricPredicate>();
+  });
+
   test("returns undefined for an empty selection", () => {
     expect(toMetricFilter({})).toBeUndefined();
   });

@@ -1,36 +1,10 @@
-// ────────────────────────────────────────────────────────────────────────────
-// Metric filter vocabulary + builder.
-//
-// **Kept in sync with appkit `plugins/analytics/types.ts`** — appkit-ui cannot
-// depend on appkit, so this mirrors the twelve-operator filter grammar by hand.
-// ────────────────────────────────────────────────────────────────────────────
+import type { MetricFilter, MetricPredicate } from "shared";
 
-export type MetricFilterOperatorName =
-  | "equals"
-  | "notEquals"
-  | "in"
-  | "notIn"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "notContains"
-  | "set"
-  | "notSet";
-
-/** A single filter predicate — the leaf node of the recursive {@link MetricFilter} tree. */
-export interface MetricPredicate {
-  member: string;
-  operator: MetricFilterOperatorName;
-  values?: ReadonlyArray<string | number>;
-}
-
-/** Recursive filter expression: a leaf {@link MetricPredicate} or an `and`/`or` group. */
-export type MetricFilter =
-  | MetricPredicate
-  | { and: ReadonlyArray<MetricFilter> }
-  | { or: ReadonlyArray<MetricFilter> };
+export type {
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricPredicate,
+} from "shared";
 
 /**
  * Shorthand map of `dimension -> selected value(s)` that {@link toMetricFilter}
