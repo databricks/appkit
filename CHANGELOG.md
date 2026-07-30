@@ -90,6 +90,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.50.0](https://github.com/databricks/appkit/compare/v0.49.0...v0.50.0) (2026-07-30)
+
+### appkit-ui
+
+* **appkit-ui:** remove stray focus ring on Command input and menu items ([#494](https://github.com/databricks/appkit/issues/494)) ([72dd0a6](https://github.com/databricks/appkit/commit/72dd0a69ad0b44d89c107b440e189304c44a196e))
+
+
 ## [0.48.0](https://github.com/databricks/appkit/compare/v0.47.1...v0.48.0) (2026-07-24)
 
 ### appkit
