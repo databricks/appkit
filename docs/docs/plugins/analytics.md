@@ -521,7 +521,6 @@ When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view ty
 | `timeGrain`     | `string`                    | no       | Bucket a time dimension (`day`, `month`, …). Requires `timeDimension`. Inferred `timeGrains`.    |
 | `timeDimension` | `string`                    | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`.                           |
 | `limit`         | `number`                    | no       | Positive integer row cap.                                                                        |
-| `autoStart`     | `boolean`                   | no       | Start the query on mount. Default `true`.                                                        |
 
 **Return type:**
 
