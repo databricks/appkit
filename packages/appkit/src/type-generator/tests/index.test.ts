@@ -17,12 +17,6 @@ const mocks = vi.hoisted(() => ({
   startWarehouse: vi.fn(),
   waitUntilRunning: vi.fn(),
   executeStatement: vi.fn(),
-  // In-memory stand-in for the on-disk typegen cache file. `undefined` means
-  // "no file yet"; otherwise it holds the serialized JSON exactly as
-  // saveCache would have written it, so load/save round-trips behave like
-  // the real implementation (string parse, own-property semantics, unknown
-  // sibling keys preserved) without touching node_modules/.databricks.
-  cacheFile: { contents: undefined as string | undefined },
 }));
 
 // Mock only the warehouse-describe step; index.ts owns the throw decision we
@@ -35,37 +29,10 @@ vi.mock("../query-registry", async (importOriginal) => {
   };
 });
 
-// The metric path persists schemas in the shared typegen cache; redirect
-// loadCache/saveCache to the in-memory `cacheFile` above so tests control
-// cache state per test and nothing leaks to the real cache file (which would
-// make DESCRIBE-count assertions order- and rerun-dependent). hashSQL and
-// CACHE_VERSION pass through unmocked.
-vi.mock("../cache", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../cache")>();
-  return {
-    ...actual,
-    loadCache: vi.fn(async () => {
-      const raw = mocks.cacheFile.contents;
-      if (raw !== undefined) {
-        try {
-          const parsed = JSON.parse(raw) as Awaited<
-            ReturnType<typeof actual.loadCache>
-          >;
-          if (parsed.version === actual.CACHE_VERSION) {
-            return parsed;
-          }
-        } catch {
-          // Corrupted "file": fall through to the fresh-cache default, same
-          // as the real loadCache.
-        }
-      }
-      return { version: actual.CACHE_VERSION, queries: {} };
-    }),
-    saveCache: vi.fn(async (cache: unknown) => {
-      mocks.cacheFile.contents = JSON.stringify(cache, null, 2);
-    }),
-  };
-});
+// The metric cache now travels IN the committed metric-views.d.ts, which each
+// test writes to a real path — so it round-trips through that file with no
+// module mocking. `savedCache()` below reconstructs the small shape these tests
+// assert against directly from that file.
 
 // The metric gate's status-only probe and the metric blocking preflight
 // resolve through getWarehouseState/startWarehouse/waitUntilRunning; stub all
@@ -96,9 +63,6 @@ vi.mock("@databricks/sdk-experimental", () => ({
 const { WorkspaceClient } = await import("@databricks/sdk-experimental");
 const { generateFromEntryPoint, TypegenFatalError, TypegenSyntaxError } =
   await import("../index");
-// The "../cache" mock spreads the actual module, so this is the real hashSQL —
-// used to seed cache entries whose hash genuinely matches the config.
-const { hashSQL } = await import("../cache");
 
 const outputDir = path.join(__dirname, "__output__");
 
@@ -313,9 +277,25 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   };
 
+  // A metric key is "cached" iff it appears in the committed metric file's
+  // cache header (degraded keys carry no header hash). Reads the real file.
+  const cachedMetricKeys = (): Set<string> => {
+    let source = "";
+    try {
+      source = fs.readFileSync(metricFile, "utf-8");
+    } catch {
+      return new Set();
+    }
+    const keys = new Set<string>();
+    for (const line of source.split("\n")) {
+      const m = line.match(/^\/\/\s{3}(\S+)\s+.*\s+[0-9a-f]{6,}$/);
+      if (m) keys.add(m[1]);
+    }
+    return keys;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.cacheFile.contents = undefined;
     fs.rmSync(metricsDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
     fs.mkdirSync(metricViewsFolder, { recursive: true });
@@ -734,8 +714,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The degraded outcome is NEVER cached (mirrors the query path): the key is
     // left uncached so a later pass re-probes, and no stale/sticky entry can be
     // served on a subsequent --wait run.
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
-    expect(metrics.revenue).toBeUndefined();
+    expect(cachedMetricKeys().has("revenue")).toBe(false);
   });
 
   test("blocking + preflight wait rejects with a timeout: fatal after artifacts (no silent stall)", async () => {
@@ -789,8 +768,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
     // The degraded outcome is not cached — the key stays uncached for the next
     // pass to re-probe.
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
-    expect(metrics.revenue).toBeUndefined();
+    expect(cachedMetricKeys().has("revenue")).toBe(false);
   });
 
   test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw", async () => {
@@ -846,8 +824,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The degraded outcome is not cached; the key stays uncached and the next
     // describe-capable pass re-probes it (convergence via re-describe, not via a
     // cached retry flag).
-    const metrics = JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
-    expect(metrics.revenue).toBeUndefined();
+    expect(cachedMetricKeys().has("revenue")).toBe(false);
   });
 
   test.each<[string, boolean]>([
@@ -897,9 +874,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect(declarations).toContain("measureKeys: string");
 
       // The degraded outcome is not cached — no sticky entry to serve later.
-      const metrics =
-        JSON.parse(mocks.cacheFile.contents ?? "{}").metrics ?? {};
-      expect(metrics.revenue).toBeUndefined();
+      expect(cachedMetricKeys().has("revenue")).toBe(false);
     },
   );
 
@@ -1105,8 +1080,71 @@ describe("generateFromEntryPoint — metric cache section", () => {
     );
   };
 
-  // Parse the in-memory "cache file" the way the next pass's loadCache would.
-  const savedCache = () => JSON.parse(mocks.cacheFile.contents ?? "{}");
+  // Reconstruct the small cache shape these tests assert against, directly from
+  // the committed metric-views.d.ts (the cache now lives there). A metric key is
+  // "cached" iff it appears in the file's cache header AND its rendered member
+  // is non-degraded. We surface just the fields the assertions read:
+  //   metrics[key].retry            → always false for a present entry
+  //   metrics[key].schema.source    → parsed from the member's `source:` field
+  //   metrics[key].schema.degraded  → true when the member is the permissive form
+  //   metrics[key].schema.measures[0].name → first measure key parsed from the member
+  type SavedMetric = {
+    retry: boolean;
+    schema: {
+      source?: string;
+      degraded?: true;
+      measures: Array<{ name: string }>;
+    };
+  };
+  const savedCache = (): {
+    version: string;
+    queries: Record<string, unknown>;
+    metrics: Record<string, SavedMetric>;
+  } => {
+    let source = "";
+    try {
+      source = fs.readFileSync(metricFile, "utf-8");
+    } catch {
+      return { version: "3", queries: {}, metrics: Object.create(null) };
+    }
+    // Header hash table lines: `//   <key>   <source> · <lane>   <hash>`.
+    const headerKeys = new Set<string>();
+    for (const line of source.split("\n")) {
+      const m = line.match(/^\/\/\s{3}(\S+)\s+.*\s+[0-9a-f]{6,}$/);
+      if (m) headerKeys.add(m[1]);
+    }
+    const metrics: Record<string, SavedMetric> = Object.create(null);
+    for (const key of headerKeys) {
+      // Scope to the slice starting at this member's `"<key>": {` declaration;
+      // the fields the tests read (source, first measure, degraded form) all
+      // appear before the next member, so a scoped forward search suffices.
+      const keyDeclRe = new RegExp(
+        `${JSON.stringify(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*\\{`,
+      );
+      const at = source.search(keyDeclRe);
+      // Bound the slice to THIS member: from its declaration up to the member's
+      // own `measures:`/`dimensions:`/`measureKeys:` region — enough to read the
+      // fields the tests check without spilling into the next member.
+      const rawSlice = at === -1 ? "" : source.slice(at);
+      const boundEnd = rawSlice.indexOf("measureKeys:");
+      const slice = boundEnd === -1 ? rawSlice : rawSlice.slice(0, boundEnd);
+      const src = slice.match(/source:\s*"([^"]*)"/)?.[1];
+      // A degraded member renders permissive `measures: Record<string, unknown>`.
+      const isDegraded = /measures:\s*Record<string, unknown>/.test(slice);
+      // First measure key: the first `"<name>":` after the `measures: {` token.
+      const afterMeasures = slice.slice(slice.indexOf("measures: {"));
+      const firstMeasure = afterMeasures.match(/"([^"]+)":/)?.[1];
+      metrics[key] = {
+        retry: false,
+        schema: {
+          source: src,
+          degraded: isDegraded ? true : undefined,
+          measures: firstMeasure ? [{ name: firstMeasure }] : [],
+        },
+      };
+    }
+    return { version: "3", queries: {}, metrics };
+  };
 
   const run = (
     overrides: Partial<Parameters<typeof generateFromEntryPoint>[0]> = {},
@@ -1121,7 +1159,6 @@ describe("generateFromEntryPoint — metric cache section", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.cacheFile.contents = undefined;
     fs.rmSync(cacheTestDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
     fs.mkdirSync(metricViewsFolder, { recursive: true });
@@ -1147,8 +1184,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     const firstDeclarations = fs.readFileSync(metricFile, "utf-8");
 
-    // Wipe the artifact so pass 2 provably rewrites it from cache alone.
-    fs.rmSync(metricFile);
+    // Pass 2 reconstructs the cache from the committed metric file (the file IS
+    // the cache now, so it must NOT be wiped) and serves every key as a HIT.
     vi.clearAllMocks();
 
     await expect(run()).resolves.toBeUndefined();
@@ -1157,6 +1194,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     // ... and the whole pass constructed zero SDK clients.
     expect(vi.mocked(WorkspaceClient)).not.toHaveBeenCalled();
+    // The .d.ts is rewritten byte-identical from cache (timestamp unchanged
+    // because no describe occurred → the renderer reuses the same members).
     expect(fs.readFileSync(metricFile, "utf-8")).toBe(firstDeclarations);
   });
 
@@ -1254,9 +1293,10 @@ describe("generateFromEntryPoint — metric cache section", () => {
     );
     await expect(run()).resolves.toBeUndefined();
 
+    // The committed metric file IS the cache — keep it. A warehouse-down pass
+    // reconstructs the cached real schema from it and serves it (no describe).
     vi.clearAllMocks();
     mocks.getWarehouseState.mockResolvedValue("STOPPED");
-    fs.rmSync(metricFile);
 
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
@@ -1302,20 +1342,10 @@ describe("generateFromEntryPoint — metric cache section", () => {
     ]);
   });
 
-  test("metric-path save preserves the queries section byte-for-byte, and a metrics-less cache file loads fine", async () => {
-    const seededQueries = {
-      my_query: {
-        hash: "abc123",
-        type: '{ name: "my_query"; parameters: Record<string, never>; result: unknown; }',
-        retry: false,
-      },
-    };
-    // Pre-metrics cache file: version "3" with no `metrics` section at all.
-    mocks.cacheFile.contents = JSON.stringify(
-      { version: "3", queries: seededQueries },
-      null,
-      2,
-    );
+  test("metric and query caches live in separate files (metric write lands only in the metric file)", async () => {
+    // The query cache travels in analytics.d.ts and the metric cache in
+    // metric-views.d.ts — two independent files. The metric member is written
+    // only to the metric file, never leaking into the analytics file.
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue(
@@ -1325,39 +1355,18 @@ describe("generateFromEntryPoint — metric cache section", () => {
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
 
+    // Metric cache landed in its own file with a real (non-degraded) schema.
     const saved = savedCache();
-    // Same version (no bump), queries byte-identical, metrics added beside.
-    expect(saved.version).toBe("3");
-    expect(JSON.stringify(saved.queries)).toBe(JSON.stringify(seededQueries));
     expect(saved.metrics.revenue.retry).toBe(false);
     expect(saved.metrics.revenue.schema.measures[0].name).toBe("total_revenue");
+    // The metric member appears only in the metric file, not the analytics one.
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain('"revenue"');
+    expect(fs.readFileSync(outFile, "utf-8")).not.toContain('"revenue"');
   });
 
-  test("a configured metric key named __proto__ neither pollutes prototypes nor vanishes on save", async () => {
-    const protoEntry = {
-      hash: "deadbeef",
-      schema: {
-        key: "__proto__",
-        source: "demo.evil.proto",
-        lane: "sp",
-        measures: [],
-        dimensions: [],
-        degraded: true,
-      },
-      retry: true,
-    };
-    // Computed key keeps "__proto__" an own property of the literal, so the
-    // serialized cache file genuinely contains a "__proto__" metrics key.
-    mocks.cacheFile.contents = JSON.stringify({
-      version: "3",
-      queries: {},
-      metrics: { ["__proto__"]: protoEntry },
-    });
-    expect(mocks.cacheFile.contents).toContain('"__proto__"');
-
-    // "__proto__" passes the metric key regex, so a config can genuinely
-    // declare it. Keeping it CONFIGURED is what exempts it from pruning —
-    // the unconfigured-key case is covered by the prune tests.
+  test("a configured metric key named __proto__ round-trips through the committed cache without polluting prototypes", async () => {
+    // Pass 1: describe both keys and write the committed metric file, whose
+    // header + body will carry a literal "__proto__" entry.
     writeConfig({
       ["__proto__"]: { source: "demo.evil.proto" },
       revenue: { source: "demo.sales.revenue" },
@@ -1366,32 +1375,23 @@ describe("generateFromEntryPoint — metric cache section", () => {
     mocks.executeStatement.mockResolvedValue(
       describeResponseFor("total_revenue"),
     );
-
     await expect(run()).resolves.toBeUndefined();
-
-    // The seeded hash mismatches the configured source, so the key was
-    // re-described alongside revenue.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(2);
 
-    // No prototype pollution: the entry's fields never leaked onto plain
-    // objects via an Object.prototype mutation — neither on the load copy
-    // nor on the describe-result write into the section.
-    expect(({} as Record<string, unknown>).hash).toBeUndefined();
-    expect(({} as Record<string, unknown>).retry).toBeUndefined();
-    expect(Object.prototype).not.toHaveProperty("hash");
+    // Pass 2: warm. Reconstructing the cache from the committed file parses a
+    // "__proto__" entry — the loader uses null-prototype maps, so it's stored as
+    // an own key and never mutates Object.prototype. Both keys are cache HITs.
+    vi.clearAllMocks();
+    await expect(run()).resolves.toBeUndefined();
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-    // The entry survived load → null-prototype copy → write → save as an
-    // OWN key of the section (a plain-object section would have hit the
-    // __proto__ setter and silently dropped it from the serialized output).
-    expect(mocks.cacheFile.contents).toContain('"__proto__"');
+    // No prototype pollution from parsing the "__proto__" key.
+    expect(({} as Record<string, unknown>).source).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty("source");
+
+    // Both keys survived as own entries of the reconstructed cache.
     const metrics = savedCache().metrics;
     expect(Object.hasOwn(metrics, "__proto__")).toBe(true);
-    const protoSaved = Object.getOwnPropertyDescriptor(
-      metrics,
-      "__proto__",
-    )?.value;
-    expect(protoSaved.retry).toBe(false);
-    expect(protoSaved.schema.measures[0].name).toBe("total_revenue");
     expect(metrics.revenue.retry).toBe(false);
   });
 
@@ -1704,91 +1704,70 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(Object.keys(savedCache().metrics)).toEqual(["revenue"]);
   });
 
-  // ── Revival validation: malformed cache entries are misses, not crashes ──
+  // ── Committed-file reconstruction: malformed files are misses, not crashes ──
 
-  const revivableSchema = {
-    key: "revenue",
-    source: "demo.sales.revenue",
-    lane: "sp",
-    measures: [{ name: "m", type: "BIGINT", isMeasure: true }],
-    dimensions: [{ name: "region", type: "STRING", isMeasure: false }],
-  };
-
-  test("revival control: a well-formed seeded entry with a matching hash is served without describing", async () => {
-    // Control for the malformed matrix below: same hash/retry mechanics,
-    // valid shape ⇒ HIT. Proves the matrix's misses come from validation,
-    // not from a hash mismatch.
-    mocks.cacheFile.contents = JSON.stringify({
-      version: "3",
-      queries: {},
-      metrics: {
-        revenue: {
-          hash: hashSQL("demo.sales.revenue|sp"),
-          retry: false,
-          schema: revivableSchema,
-        },
-      },
-    });
+  test("hit control: a warm committed file with a matching hash is served without describing", async () => {
+    // Pass 1 writes the committed metric file with a real schema.
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
+    mocks.getWarehouseState.mockResolvedValue("RUNNING");
+    mocks.executeStatement.mockResolvedValue(
+      describeResponseFor("total_revenue"),
+    );
+    await expect(run()).resolves.toBeUndefined();
 
+    // Pass 2 reconstructs the cache from that file → HIT, no describe, no probe.
+    vi.clearAllMocks();
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain('"m": number');
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      '"total_revenue": number',
+    );
   });
 
-  test.each<[string, Record<string, unknown>]>([
-    ["schema is null", { schema: null }],
-    ["schema is an array", { schema: [] }],
+  test.each<[string, (file: string) => string]>([
     [
-      "schema missing measures",
-      { schema: { ...revivableSchema, measures: undefined } },
+      "no cache header at all",
+      () => "// hand-written, no header\nexport {};\n",
     ],
-    ["invalid lane", { schema: { ...revivableSchema, lane: "x" } }],
+    ["header version mismatch", (file) => file.replace(/· v\d+ ·/, "· v0 ·")],
     [
-      "measures not an array",
-      { schema: { ...revivableSchema, measures: "nope" } },
+      "header hash present but body member removed",
+      (file) =>
+        // Drop the rendered "revenue" member from the body, leaving a dangling
+        // header hash. Reconstruction must treat this as a MISS (drift), not
+        // serve a phantom entry or crash.
+        file.replace(/ {4}"revenue":[\s\S]*?\n {4}\};\n/, ""),
     ],
-    [
-      "column element missing type",
-      { schema: { ...revivableSchema, measures: [{ name: "m" }] } },
-    ],
-    [
-      "non-boolean degraded",
-      { schema: { ...revivableSchema, degraded: "yep" } },
-    ],
-    ["non-string hash", { hash: 42 }],
-    ["non-boolean retry", { retry: "yes" }],
+    ["truncated mid-member", (file) => file.slice(0, file.length / 2)],
   ])(
-    "revival validation: %s is a cache miss (re-described), never a crash",
-    async (_label, overrides) => {
-      mocks.cacheFile.contents = JSON.stringify({
-        version: "3",
-        queries: {},
-        metrics: {
-          revenue: {
-            hash: hashSQL("demo.sales.revenue|sp"),
-            retry: false,
-            schema: revivableSchema,
-            ...overrides,
-          },
-        },
-      });
+    "reconstruction: %s is a cache miss (re-described), never a crash",
+    async (_label, mangle) => {
+      // Pass 1: produce a valid committed file.
       writeConfig({ revenue: { source: "demo.sales.revenue" } });
+      mocks.getWarehouseState.mockResolvedValue("RUNNING");
+      mocks.executeStatement.mockResolvedValue(
+        describeResponseFor("total_revenue"),
+      );
+      await expect(run()).resolves.toBeUndefined();
+
+      // Corrupt the committed file, then re-run.
+      const mangled = mangle(fs.readFileSync(metricFile, "utf-8"));
+      fs.writeFileSync(metricFile, mangled);
+
+      vi.clearAllMocks();
       mocks.getWarehouseState.mockResolvedValue("RUNNING");
       mocks.executeStatement.mockResolvedValue(
         describeResponseFor("total_revenue"),
       );
 
       await expect(run()).resolves.toBeUndefined();
-      // The malformed entry was not revived: the key was re-described and
-      // the cache healed with the fresh result.
+      // The mangled entry was not revived: the key was re-described and the
+      // file healed with the fresh result.
       expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-      expect(savedCache().metrics.revenue.retry).toBe(false);
       expect(savedCache().metrics.revenue.schema.measures[0].name).toBe(
         "total_revenue",
       );
-      // The artifacts render the fresh schema — never the revived garbage.
       expect(fs.readFileSync(metricFile, "utf-8")).toContain(
         '"total_revenue": number',
       );

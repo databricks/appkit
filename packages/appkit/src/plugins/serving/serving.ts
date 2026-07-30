@@ -66,14 +66,15 @@ export class ServingPlugin extends Plugin {
   }
 
   async setup(): Promise<void> {
-    const cacheFile = path.join(
+    // The request-parameter allowlist is derived from the committed generated
+    // serving types.
+    const typesFile = path.join(
       process.cwd(),
-      "node_modules",
-      ".databricks",
-      "appkit",
-      ".appkit-serving-types-cache.json",
+      "shared",
+      "appkit-types",
+      "serving.d.ts",
     );
-    this.schemaAllowlists = await loadEndpointSchemas(cacheFile);
+    this.schemaAllowlists = await loadEndpointSchemas(typesFile);
     if (this.schemaAllowlists.size > 0) {
       logger.debug(
         "Loaded schema allowlists for %d endpoint(s)",

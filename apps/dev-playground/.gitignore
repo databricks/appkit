@@ -1,6 +1,3 @@
 # Playwright
 test-results/
 playwright-report/
-
-# Auto-generated types (regenerated on `pnpm dev` by appKitTypesPlugin)
-shared/appkit-types/serving.d.ts

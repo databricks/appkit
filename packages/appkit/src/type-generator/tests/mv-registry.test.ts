@@ -1522,7 +1522,9 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
           });
 
     const { schemas } = await syncMetrics(resolution, fetcher);
-    const output = generateMetricTypeDeclarations(schemas);
+    const output = generateMetricTypeDeclarations(schemas, {
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     expect(output).toMatchSnapshot();
 
     // Sanity assertions in addition to the snapshot, so future drift surfaces
@@ -1535,7 +1537,9 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
   });
 
   test("emits an empty MetricRegistry interface when no metrics are registered", () => {
-    const output = generateMetricTypeDeclarations([]);
+    const output = generateMetricTypeDeclarations([], {
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     expect(output).toMatchSnapshot();
   });
 
@@ -1566,7 +1570,9 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
 
     const { schemas, failures } = await syncMetrics(resolution, fetcher);
     expect(failures).toEqual([]);
-    const output = generateMetricTypeDeclarations(schemas);
+    const output = generateMetricTypeDeclarations(schemas, {
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     expect(output).toMatchSnapshot();
 
     // Sanity assertions in addition to the snapshot, so future drift surfaces
@@ -1607,7 +1613,9 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
       });
 
     const { schemas } = await syncMetrics(resolution, fetcher);
-    const output = generateMetricTypeDeclarations(schemas);
+    const output = generateMetricTypeDeclarations(schemas, {
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     expect(output).toMatchSnapshot();
 
     // Sanity assertions in addition to the snapshot, so future drift surfaces
@@ -1975,7 +1983,9 @@ describe("artifact key-order determinism", () => {
 
     // Entry keys in the .d.ts appear as `    "<key>": {` lines (4-space
     // indent — metadata column maps sit deeper and don't match).
-    const declarations = generateMetricTypeDeclarations(schemas);
+    const declarations = generateMetricTypeDeclarations(schemas, {
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
     const dtsKeys = [...declarations.matchAll(/^ {4}"([^"]+)": \{$/gm)].map(
       (m) => m[1],
     );

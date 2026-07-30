@@ -1,54 +1,50 @@
 import fs from "node:fs/promises";
 import { createLogger } from "../../logging/logger";
 import {
-  CACHE_VERSION,
-  type ServingCache,
-} from "../../type-generator/serving/cache";
+  objectMemberValue,
+  objectTopLevelKeys,
+  splitEntryBlocks,
+} from "../../type-generator/embedded-cache";
 
 const logger = createLogger("serving:schema-filter");
 
-function isValidCache(data: unknown): data is ServingCache {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    "version" in data &&
-    (data as ServingCache).version === CACHE_VERSION &&
-    "endpoints" in data &&
-    typeof (data as ServingCache).endpoints === "object"
-  );
-}
+/** Registry interface name whose members hold the serving type blocks. */
+const SERVING_INTERFACE = "ServingEndpointRegistry";
 
 /**
- * Loads endpoint schemas from the type generation cache file.
- * Returns a map of alias → allowed parameter keys.
+ * Load per-endpoint request-parameter allowlists from the committed generated
+ * `serving.d.ts`. The allowlist for an alias is the set of top-level keys of
+ * its rendered `request` object type (`stream` is already excluded at
+ * generation time). A generic `Record<string, unknown>` request has no keys, so
+ * it yields no allowlist (passthrough). A missing file → no filtering
+ * (passthrough).
  */
 export async function loadEndpointSchemas(
-  cacheFile: string,
+  typesFile: string,
 ): Promise<Map<string, Set<string>>> {
   const allowlists = new Map<string, Set<string>>();
 
   try {
-    const raw = await fs.readFile(cacheFile, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (!isValidCache(parsed)) {
-      logger.warn("Serving types cache has invalid structure, skipping");
-      return allowlists;
-    }
-    const cache = parsed;
-
-    for (const [alias, entry] of Object.entries(cache.endpoints)) {
-      if (entry.requestKeys && entry.requestKeys.length > 0) {
-        allowlists.set(alias, new Set(entry.requestKeys));
+    const source = await fs.readFile(typesFile, "utf8");
+    const blocks = splitEntryBlocks(source, SERVING_INTERFACE);
+    for (const [alias, block] of Object.entries(blocks)) {
+      // Each member is `{ request: <type>; response: ...; chunk: ...; }`.
+      // Extract the `request` value, then its top-level object keys.
+      const requestType = objectMemberValue(block, "request");
+      if (!requestType) continue;
+      const keys = objectTopLevelKeys(requestType);
+      if (keys.length > 0) {
+        allowlists.set(alias, new Set(keys));
       }
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       logger.warn(
-        "Failed to load serving types cache: %s",
+        "Failed to load serving types for request filtering: %s",
         (err as Error).message,
       );
     }
-    // No cache → no filtering, passthrough mode
+    // No file → no filtering, passthrough mode
   }
 
   return allowlists;

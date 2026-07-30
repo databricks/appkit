@@ -4,6 +4,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
+import { renderCacheHeader, resolveHeaderTimestamp } from "../embedded-cache";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
@@ -11,16 +12,14 @@ import {
 } from "../migration";
 import {
   CACHE_VERSION,
-  hashSchema,
+  endpointIdentityHash,
   loadServingCache,
   type ServingCache,
-  saveServingCache,
 } from "./cache";
 import {
   convertRequestSchema,
   convertResponseSchema,
   deriveChunkType,
-  extractRequestKeys,
 } from "./converter";
 import { fetchOpenApiSchema } from "./fetcher";
 import {
@@ -66,14 +65,25 @@ export async function generateServingTypes(
 
   const startTime = performance.now();
 
-  const cache = noCache
+  // Read the committed serving.d.ts once: it's both the cache source and the
+  // prior file we diff against to preserve the timestamp on an unchanged run.
+  const priorSource = await fs.readFile(outFile, "utf-8").catch(() => "");
+
+  // Reconstruct the serving cache from the committed serving.d.ts (its header
+  // identity hashes + body member blocks). Missing/old file → empty.
+  const cache: ServingCache = noCache
     ? { version: CACHE_VERSION, endpoints: {} }
-    : await loadServingCache();
+    : await loadServingCache(outFile);
 
   let client: WorkspaceClient | undefined;
-  let updated = false;
+  const getClient = (): WorkspaceClient => {
+    client ??= new WorkspaceClient({});
+    return client;
+  };
 
   const registryEntries: string[] = [];
+  const headerEntries: Array<{ name: string; hash: string; detail: string }> =
+    [];
   const logEntries: Array<{
     alias: string;
     status: "HIT" | "MISS";
@@ -81,16 +91,19 @@ export async function generateServingTypes(
   }> = [];
 
   for (const [alias, config] of Object.entries(endpoints)) {
-    client ??= new WorkspaceClient({});
-    const result = await processEndpoint(alias, config, client, cache);
-    if (result.cacheUpdated) updated = true;
+    const result = await processEndpoint(alias, config, cache, getClient);
     registryEntries.push(result.entry);
+    if (result.headerEntry) headerEntries.push(result.headerEntry);
     logEntries.push(result.log);
   }
 
   printLogTable(logEntries, startTime);
 
-  const output = generateTypeDeclarations(registryEntries);
+  const output = generateTypeDeclarations(
+    registryEntries,
+    headerEntries,
+    priorSource,
+  );
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, output, "utf-8");
 
@@ -106,16 +119,17 @@ export async function generateServingTypes(
   } else {
     logger.debug("Wrote serving types to %s", outFile);
   }
-
-  if (updated) {
-    await saveServingCache(cache as ServingCache);
-  }
 }
 
 interface EndpointResult {
   entry: string;
   log: { alias: string; status: "HIT" | "MISS"; error?: string };
-  cacheUpdated: boolean;
+  /**
+   * Present only for a fully-resolved endpoint (cache hit or a fresh successful
+   * conversion), recording its identity hash in the file header. Omitted for a
+   * permissive/generic fallback so it re-reads as a MISS next pass.
+   */
+  headerEntry?: { name: string; hash: string; detail: string };
 }
 
 function genericEntry(alias: string): string {
@@ -130,20 +144,37 @@ function genericEntry(alias: string): string {
 async function processEndpoint(
   alias: string,
   config: EndpointConfig,
-  client: WorkspaceClient,
-  cache: { endpoints: Record<string, any> },
+  cache: ServingCache,
+  getClient: () => WorkspaceClient,
 ): Promise<EndpointResult> {
   const endpointName = process.env[config.env];
   if (!endpointName) {
+    // No resolved endpoint name → nothing to key on. Emit a generic entry and
+    // leave it out of the header so it re-reads as a MISS once configured.
     return {
       entry: genericEntry(alias),
       log: { alias, status: "MISS", error: `env ${config.env} not set` },
-      cacheUpdated: false,
     };
   }
 
+  // Local identity hash — computed WITHOUT any network call, so a committed hit
+  // skips the fetch entirely.
+  const hash = endpointIdentityHash(alias, endpointName);
+  const detail = endpointName;
+
+  // Cache hit: reuse the committed member verbatim. No getOpenApi call.
+  const cached = cache.endpoints[alias];
+  if (cached && cached.hash === hash) {
+    return {
+      entry: `    ${alias}: ${cached.member};`,
+      log: { alias, status: "HIT" },
+      headerEntry: { name: alias, hash, detail },
+    };
+  }
+
+  // Cache miss: fetch the OpenAPI schema and convert it.
   const result = await fetchOpenApiSchema(
-    client,
+    getClient(),
     endpointName,
     config.servedModel,
   );
@@ -151,27 +182,10 @@ async function processEndpoint(
     return {
       entry: genericEntry(alias),
       log: { alias, status: "MISS", error: "schema fetch failed" },
-      cacheUpdated: false,
     };
   }
 
   const { spec, pathKey } = result;
-  const hash = hashSchema(JSON.stringify(spec));
-
-  // Cache hit
-  const cached = cache.endpoints[alias];
-  if (cached && cached.hash === hash) {
-    return {
-      entry: buildRegistryEntry(
-        alias,
-        cached.requestType,
-        cached.responseType,
-        cached.chunkType,
-      ),
-      log: { alias, status: "HIT" },
-      cacheUpdated: false,
-    };
-  }
 
   // Cache miss — convert schema to types
   const operation = spec.paths[pathKey]?.post;
@@ -179,7 +193,6 @@ async function processEndpoint(
     return {
       entry: genericEntry(alias),
       log: { alias, status: "MISS", error: "no POST operation" },
-      cacheUpdated: false,
     };
   }
 
@@ -187,20 +200,11 @@ async function processEndpoint(
     const requestType = convertRequestSchema(operation);
     const responseType = convertResponseSchema(operation);
     const chunkType = deriveChunkType(operation);
-    const requestKeys = extractRequestKeys(operation);
-
-    cache.endpoints[alias] = {
-      hash,
-      requestType,
-      responseType,
-      chunkType,
-      requestKeys,
-    };
 
     return {
       entry: buildRegistryEntry(alias, requestType, responseType, chunkType),
       log: { alias, status: "MISS" },
-      cacheUpdated: true,
+      headerEntry: { name: alias, hash, detail },
     };
   } catch (convErr) {
     logger.warn(
@@ -211,7 +215,6 @@ async function processEndpoint(
     return {
       entry: genericEntry(alias),
       log: { alias, status: "MISS", error: "schema conversion failed" },
-      cacheUpdated: false,
     };
   }
 }
@@ -294,10 +297,20 @@ function indentType(typeStr: string, baseIndent: string): string {
     .join("\n");
 }
 
-function generateTypeDeclarations(entries: string[]): string {
-  return `// Auto-generated by AppKit - DO NOT EDIT
-// Generated from serving endpoint OpenAPI schemas
-import "@databricks/appkit";
+function generateTypeDeclarations(
+  entries: string[],
+  headerEntries: Array<{ name: string; hash: string; detail: string }>,
+  priorSource = "",
+): string {
+  const header = renderCacheHeader({
+    version: CACHE_VERSION,
+    explainer:
+      "A matching endpoint-identity hash skips the serving fetch on build & deploy.",
+    entries: headerEntries,
+    // Preserve the prior timestamp when the entry set is unchanged → no churn.
+    timestamp: resolveHeaderTimestamp(priorSource, headerEntries),
+  });
+  return `${header}import "@databricks/appkit";
 import "@databricks/appkit-ui/react";
 
 declare module "@databricks/appkit" {

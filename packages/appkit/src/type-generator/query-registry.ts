@@ -4,7 +4,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
-import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
+import { CACHE_VERSION, type Cache, hashSQL, loadQueryCache } from "./cache";
 import { getErrorDiagnostic, isConnectivityError } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
@@ -268,7 +268,7 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
  * `unknown` from SQL alone. Never persists `result: unknown`.
  */
 function degradedType(
-  cache: Awaited<ReturnType<typeof loadCache>>,
+  cache: Cache,
   queryName: string,
   sql: string,
   sqlHash: string,
@@ -539,12 +539,18 @@ export async function generateQueriesFromDescribe(
     noCache?: boolean;
     concurrency?: number;
     mode?: PreflightMode;
+    /**
+     * Path to the committed generated `analytics.d.ts`. Its header + body are
+     * the cache source. Absent → empty cache (every query is a MISS).
+     */
+    cacheFile?: string;
   } = {},
 ): Promise<QueryGenerationResult> {
   const {
     noCache = false,
     concurrency: rawConcurrency = 10,
     mode = "non-blocking",
+    cacheFile,
   } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
@@ -554,11 +560,9 @@ export async function generateQueriesFromDescribe(
   // read all query files and cache in parallel
   const [allFiles, cache] = await Promise.all([
     fs.readdir(queryFolder),
-    noCache
-      ? ({ version: CACHE_VERSION, queries: {} } as Awaited<
-          ReturnType<typeof loadCache>
-        >)
-      : loadCache(),
+    noCache || !cacheFile
+      ? Promise.resolve({ version: CACHE_VERSION, queries: {} } as Cache)
+      : loadQueryCache(cacheFile),
   ]);
 
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
@@ -605,7 +609,7 @@ export async function generateQueriesFromDescribe(
     if (cached && cached.hash === sqlHash && !cached.retry) {
       cachedResults.push({
         index: i,
-        schema: { name: queryName, type: cached.type },
+        schema: { name: queryName, type: cached.type, hash: sqlHash },
       });
       logEntries.push({ queryName, status: "HIT" });
     } else {
@@ -850,7 +854,7 @@ export async function generateQueriesFromDescribe(
         return {
           status: "ok",
           index,
-          schema: { name: queryName, type },
+          schema: { name: queryName, type, hash: sqlHash },
           cacheEntry: { hash: sqlHash, type, retry: false },
         };
       };
@@ -946,19 +950,20 @@ export async function generateQueriesFromDescribe(
         }
       };
 
+      // The cache is persisted by the caller writing the generated `.d.ts`
+      // (its header records each entry's hash; its body holds the type block),
+      // so there is no separate cache file to save between batches here.
       if (uncachedQueries.length > concurrency) {
         for (let b = 0; b < uncachedQueries.length; b += concurrency) {
           const batch = uncachedQueries.slice(b, b + concurrency);
           const batchResults = await Promise.allSettled(batch.map(describeOne));
           processBatchResults(batchResults, b);
-          await saveCache(cache);
         }
       } else {
         const settled = await Promise.allSettled(
           uncachedQueries.map(describeOne),
         );
         processBatchResults(settled, 0);
-        await saveCache(cache);
       }
 
       spinner.stop("");

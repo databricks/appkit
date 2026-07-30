@@ -1,99 +1,51 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { createLogger } from "../logging/logger";
-import type { MetricSchema } from "./mv-registry/types";
+import {
+  deindentBlock,
+  parseCacheHeader,
+  splitEntryBlocks,
+} from "./embedded-cache";
 
 const logger = createLogger("type-generator:cache");
 
 /**
- * Cache types
+ * Cache entry for a single query.
  * @property hash - the hash of the SQL query
- * @property type - the type of the query
+ * @property type - the rendered TypeScript type for the query
  * @property retry - when true the entry never satisfies a cache hit, so the
  *   query is re-described on the next pass; fresh successful describes
  *   persist `retry: false`
  */
-interface CacheEntry {
+export interface CacheEntry {
   hash: string;
   type: string;
   retry: boolean;
 }
 
 /**
- * One cached metric-view DESCRIBE outcome.
+ * In-memory query cache, reconstructed from a committed generated `analytics.d.ts`.
  *
- * `hash` is md5 over `"<source>|<lane>"` — the two config inputs that
- * determine a DESCRIBE — so editing either invalidates the entry. `schema`
- * is the full {@link MetricSchema} persisted verbatim (it is JSON-safe by
- * design), letting a warm pass regenerate the metric artifact without a
- * single warehouse call.
+ * The generated file carries one hash per entry in its header comment and the
+ * rendered type block in its body; {@link loadQueryCache} pairs the two back
+ * into this shape, which the query hit/degrade logic consumes.
  */
-export interface MetricCacheEntry {
-  hash: string;
-  schema: MetricSchema;
-  retry: boolean;
-}
-
-/**
- * Structural gate for reviving a cached metric entry at partition time.
- *
- * The cache file lives in `node_modules/.databricks` and is plain JSON —
- * hand-edits, truncation, or a stale writer can leave entries whose shape no
- * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
- * cache MISS (re-describe) rather than crash the pass or render revived
- * garbage into the artifacts.
- */
-export function isRevivableMetricCacheEntry(entry: unknown): boolean {
-  if (typeof entry !== "object" || entry === null) return false;
-  const e = entry as Record<string, unknown>;
-  if (typeof e.hash !== "string" || typeof e.retry !== "boolean") {
-    return false;
-  }
-  const schema = e.schema;
-  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
-    return false;
-  }
-  const s = schema as Record<string, unknown>;
-  const isColumnArray = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.every(
-      (col) =>
-        typeof col === "object" &&
-        col !== null &&
-        typeof (col as Record<string, unknown>).name === "string" &&
-        typeof (col as Record<string, unknown>).type === "string",
-    );
-  return (
-    typeof s.key === "string" &&
-    typeof s.source === "string" &&
-    (s.lane === "sp" || s.lane === "obo") &&
-    (s.degraded === undefined || typeof s.degraded === "boolean") &&
-    isColumnArray(s.measures) &&
-    isColumnArray(s.dimensions)
-  );
-}
-
-/**
- * Cache interface
- * @property version - the version of the cache
- * @property queries - the queries in the cache
- * @property metrics - cached metric-view schemas keyed by metric key.
- */
-interface Cache {
+export interface Cache {
   version: string;
   queries: Record<string, CacheEntry>;
-  metrics?: Record<string, MetricCacheEntry>;
 }
 
 export const CACHE_VERSION = "3";
-const CACHE_FILE = ".appkit-types-cache.json";
-const CACHE_DIR = path.join(
-  process.cwd(),
-  "node_modules",
-  ".databricks",
-  "appkit",
-);
+
+/** Registry interface name whose members hold the query type blocks. */
+const QUERY_INTERFACE = "QueryRegistry";
+
+/**
+ * Indentation (in spaces) that {@link generateTypeDeclarations} applies to
+ * every non-first line of a query type block at assembly time. Reversed here so
+ * a block extracted from a committed file re-renders byte-identically.
+ */
+const QUERY_BLOCK_INDENT = 4;
 
 /**
  * Hash the SQL query
@@ -106,42 +58,108 @@ export function hashSQL(sql: string): string {
 }
 
 /**
- * Change detector stored on {@link MetricCacheEntry.hash}: md5 over
- * `"<source>|<lane>"` — the two config inputs that determine a DESCRIBE —
- * so editing either invalidates the entry.
+ * Change detector for a metric-view entry: md5 over `"<source>|<lane>"` — the
+ * two config inputs that determine a DESCRIBE — so editing either invalidates
+ * the entry.
  */
 export function metricCacheHash(source: string, lane: string): string {
   return hashSQL(`${source}|${lane}`);
 }
 
 /**
- * Load the cache from the file system
- * If the cache is not found, run the query explain
- * @returns - the cache
+ * Reconstruct the query cache from a committed `analytics.d.ts`.
+ *
+ * Reads the header hash table and pairs each entry with its rendered type block
+ * from the file body. A missing file, missing header, or a version mismatch all
+ * yield an empty cache (every query reads as a MISS and is re-described).
  */
-export async function loadCache(): Promise<Cache> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
+export async function loadQueryCache(outFile: string): Promise<Cache> {
+  let source: string;
   try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
-
-    const raw = await fs.readFile(cachePath, "utf8");
-    const cache = JSON.parse(raw) as Cache;
-    if (cache.version === CACHE_VERSION) {
-      return cache;
-    }
+    source = await fs.readFile(outFile, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      logger.warn("Cache file is corrupted, flushing cache completely.");
+      logger.warn(
+        "Could not read generated types at %s, treating as empty cache.",
+        outFile,
+      );
     }
+    return { version: CACHE_VERSION, queries: {} };
   }
-  return { version: CACHE_VERSION, queries: {} };
+
+  const header = parseCacheHeader(source);
+  if (header.version !== CACHE_VERSION) {
+    return { version: CACHE_VERSION, queries: {} };
+  }
+
+  const blocks = splitEntryBlocks(source, QUERY_INTERFACE);
+  const queries: Record<string, CacheEntry> = Object.create(null);
+  for (const [name, hash] of Object.entries(header.hashes)) {
+    const block = blocks[name];
+    if (block === undefined) continue; // header/body drift → miss
+    queries[name] = {
+      hash,
+      type: deindentBlock(block, QUERY_BLOCK_INDENT),
+      retry: false,
+    };
+  }
+
+  return { version: CACHE_VERSION, queries };
+}
+
+/** Registry interface name whose members hold the metric type blocks. */
+const METRIC_INTERFACE = "MetricRegistry";
+
+/**
+ * One reconstructed metric cache entry.
+ * @property hash - md5 of `"<source>|<lane>"` at generation time
+ * @property member - the full rendered member string (`    "key": { ... }`) as
+ *   produced by the metric renderer, reused verbatim on a cache hit
+ */
+export interface MetricCacheEntry {
+  hash: string;
+  member: string;
+}
+
+interface MetricCache {
+  version: string;
+  entries: Record<string, MetricCacheEntry>;
 }
 
 /**
- * Save the cache to the file system
- * @param cache - cache object to save
+ * Reconstruct the metric-view cache from a committed `metric-views.d.ts`.
+ *
+ * The value block extracted from the file body is exactly what the metric
+ * renderer emits for a metric's value, so the full member is reassembled as
+ * `    "<key>": <valueBlock>` — reusable verbatim without reconstructing the
+ * underlying `MetricSchema`. Missing file / header / version mismatch → empty.
  */
-export async function saveCache(cache: Cache): Promise<void> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
-  await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf8");
+export async function loadMetricCache(mvOutFile: string): Promise<MetricCache> {
+  let source: string;
+  try {
+    source = await fs.readFile(mvOutFile, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(
+        "Could not read generated metric types at %s, treating as empty cache.",
+        mvOutFile,
+      );
+    }
+    return { version: CACHE_VERSION, entries: {} };
+  }
+
+  const header = parseCacheHeader(source);
+  if (header.version !== CACHE_VERSION) {
+    return { version: CACHE_VERSION, entries: {} };
+  }
+
+  const blocks = splitEntryBlocks(source, METRIC_INTERFACE);
+  const entries: Record<string, MetricCacheEntry> = Object.create(null);
+  for (const [key, hash] of Object.entries(header.hashes)) {
+    const block = blocks[key];
+    if (block === undefined) continue; // header/body drift → miss
+    entries[key] = { hash, member: `    ${JSON.stringify(key)}: ${block}` };
+  }
+
+  return { version: CACHE_VERSION, entries };
 }

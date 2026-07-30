@@ -17,40 +17,10 @@ import type { DatabricksStatementExecutionResponse } from "../types";
  * shared typegen cache is honored (default) / bypassed (`cache: false`).
  */
 
-// In-memory stand-in for the on-disk typegen cache file so the focused metric
-// sync's loadCache/saveCache never touch node_modules/.databricks and each test
-// controls cache state. hashSQL / metricCacheHash / isRevivableMetricCacheEntry
-// / CACHE_VERSION pass through unmocked (mirrors index.test.ts).
-const mocks = vi.hoisted(() => ({
-  cacheFile: { contents: undefined as string | undefined },
-}));
-
-vi.mock("../cache", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../cache")>();
-  return {
-    ...actual,
-    loadCache: vi.fn(async () => {
-      const raw = mocks.cacheFile.contents;
-      if (raw !== undefined) {
-        try {
-          const parsed = JSON.parse(raw) as Awaited<
-            ReturnType<typeof actual.loadCache>
-          >;
-          if (parsed.version === actual.CACHE_VERSION) {
-            return parsed;
-          }
-        } catch {
-          // Corrupted "file": fall through to the fresh-cache default.
-        }
-      }
-      return { version: actual.CACHE_VERSION, queries: {} };
-    }),
-    saveCache: vi.fn(async (cache: unknown) => {
-      mocks.cacheFile.contents = JSON.stringify(cache, null, 2);
-    }),
-  };
-});
-
+// The metric cache now travels IN the committed metric-views.d.ts. Each test
+// writes to a real tmp `metricOutFile`, so the cache round-trips through that
+// file with no module mocking — a warm second run reconstructs the cache from
+// the file the first run wrote.
 const { syncMetricViewsTypes } = await import("../index");
 
 /**
@@ -120,7 +90,6 @@ describe("syncMetricViewsTypes", () => {
 
   beforeEach(() => {
     fetcher.mockClear();
-    mocks.cacheFile.contents = undefined;
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sync-metric-types-"));
     metricViewsFolder = path.join(tmpRoot, "config", "metric-views");
     fs.mkdirSync(metricViewsFolder, { recursive: true });
@@ -290,7 +259,7 @@ describe("syncMetricViewsTypes", () => {
     expect(declarations).toContain('"total_revenue": number');
   });
 
-  test("a removed metric key is pruned from the cache section", async () => {
+  test("a removed metric key is pruned from the generated file (and its cache header)", async () => {
     writeMixedConfig();
 
     // Warm both keys.
@@ -300,11 +269,9 @@ describe("syncMetricViewsTypes", () => {
       metricOutFile,
       metricFetcher: fetcher,
     });
-    const afterFirst = JSON.parse(mocks.cacheFile.contents ?? "{}");
-    expect(Object.keys(afterFirst.metrics).sort()).toEqual([
-      "churn",
-      "revenue",
-    ]);
+    const afterFirst = fs.readFileSync(metricOutFile, "utf-8");
+    expect(afterFirst).toContain('"revenue"');
+    expect(afterFirst).toContain('"churn"');
 
     // Shrink the config to a single key.
     fs.writeFileSync(
@@ -321,7 +288,9 @@ describe("syncMetricViewsTypes", () => {
       metricFetcher: fetcher,
     });
 
-    const afterSecond = JSON.parse(mocks.cacheFile.contents ?? "{}");
-    expect(Object.keys(afterSecond.metrics)).toEqual(["revenue"]);
+    // The stale key is gone from both the body and the cache header.
+    const afterSecond = fs.readFileSync(metricOutFile, "utf-8");
+    expect(afterSecond).toContain('"revenue"');
+    expect(afterSecond).not.toContain('"churn"');
   });
 });

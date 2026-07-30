@@ -1,25 +1,26 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { createLogger } from "../../logging/logger";
+import { parseCacheHeader, splitEntryBlocks } from "../embedded-cache";
 
 const logger = createLogger("type-generator:serving:cache");
 
 export const CACHE_VERSION = "1";
-const CACHE_FILE = ".appkit-serving-types-cache.json";
-const CACHE_DIR = path.join(
-  process.cwd(),
-  "node_modules",
-  ".databricks",
-  "appkit",
-);
+
+/** Registry interface name whose members hold the serving type blocks. */
+const SERVING_INTERFACE = "ServingEndpointRegistry";
 
 export interface ServingCacheEntry {
+  /**
+   * Local identity hash: sha256 of `"<alias>|<resolvedEndpointName>"`. It is
+   * computable WITHOUT fetching the OpenAPI schema, so a matching committed
+   * entry lets a build/deploy skip the network fetch entirely. Upstream schema
+   * drift (same endpoint, changed model) is not detected — use `--no-cache` to
+   * force a refresh.
+   */
   hash: string;
-  requestType: string;
-  responseType: string;
-  chunkType: string | null;
-  requestKeys: string[];
+  /** Rendered registry member body (`{ request: ...; response: ...; chunk: ...; }`). */
+  member: string;
 }
 
 export interface ServingCache {
@@ -27,30 +28,54 @@ export interface ServingCache {
   endpoints: Record<string, ServingCacheEntry>;
 }
 
-export function hashSchema(schemaJson: string): string {
-  return crypto.createHash("sha256").update(schemaJson).digest("hex");
+/**
+ * Local identity hash for a serving endpoint. Computed from the alias and the
+ * resolved endpoint name (from the config's env var) — both known locally, so
+ * a cache hit needs no `getOpenApi` call.
+ */
+export function endpointIdentityHash(
+  alias: string,
+  endpointName: string,
+): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${alias}|${endpointName}`)
+    .digest("hex");
 }
 
-export async function loadServingCache(): Promise<ServingCache> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
+/**
+ * Reconstruct the serving cache from a committed `serving.d.ts`.
+ *
+ * Reads the header hash table and pairs each alias with its rendered member
+ * body from the file (both `declare module` blocks are identical, so the first
+ * found suffices). Missing file / header / version mismatch → empty cache.
+ */
+export async function loadServingCache(outFile: string): Promise<ServingCache> {
+  let source: string;
   try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
-    const raw = await fs.readFile(cachePath, "utf8");
-    const cache = JSON.parse(raw) as ServingCache;
-    if (cache.version === CACHE_VERSION) {
-      return cache;
-    }
-    logger.debug("Cache version mismatch, starting fresh");
+    source = await fs.readFile(outFile, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      logger.warn("Cache file is corrupted, flushing cache completely.");
+      logger.warn(
+        "Could not read generated serving types at %s, treating as empty cache.",
+        outFile,
+      );
     }
+    return { version: CACHE_VERSION, endpoints: {} };
   }
-  return { version: CACHE_VERSION, endpoints: {} };
-}
 
-export async function saveServingCache(cache: ServingCache): Promise<void> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
-  await fs.mkdir(CACHE_DIR, { recursive: true });
-  await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf8");
+  const header = parseCacheHeader(source);
+  if (header.version !== CACHE_VERSION) {
+    return { version: CACHE_VERSION, endpoints: {} };
+  }
+
+  const blocks = splitEntryBlocks(source, SERVING_INTERFACE);
+  const endpoints: Record<string, ServingCacheEntry> = {};
+  for (const [alias, hash] of Object.entries(header.hashes)) {
+    const block = blocks[alias];
+    if (block === undefined) continue; // header/body drift → miss
+    endpoints[alias] = { hash, member: block };
+  }
+
+  return { version: CACHE_VERSION, endpoints };
 }

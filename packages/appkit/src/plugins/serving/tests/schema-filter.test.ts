@@ -109,50 +109,53 @@ describe("schema-filter", () => {
       expect(result.size).toBe(0);
     });
 
-    test("reads requestKeys from cache entries", async () => {
+    test("derives the allowlist from the request object's top-level keys", async () => {
       const fs = (await import("node:fs/promises")).default;
-      vi.mocked(fs.readFile).mockResolvedValue(
-        JSON.stringify({
-          version: "1",
-          endpoints: {
-            default: {
-              hash: "abc",
-              requestType: "{}",
-              responseType: "{}",
-              chunkType: null,
-              requestKeys: ["messages", "temperature", "max_tokens"],
-            },
-          },
-        }),
-      );
+      // A committed serving.d.ts: the `request` type's top-level keys are the
+      // allowlist for the alias.
+      vi.mocked(fs.readFile).mockResolvedValue(`import "@databricks/appkit";
+declare module "@databricks/appkit" {
+  interface ServingEndpointRegistry {
+    default: {
+      request: {
+        messages: Array<{ role: string; content: string }>;
+        temperature: number;
+        max_tokens: number;
+      };
+      response: { model: string };
+      chunk: unknown;
+    };
+  }
+}
+`);
 
-      const result = await loadEndpointSchemas("/some/path");
+      const result = await loadEndpointSchemas("/some/path/serving.d.ts");
       expect(result.size).toBe(1);
       const keys = result.get("default");
       expect(keys).toBeDefined();
       expect(keys?.has("messages")).toBe(true);
       expect(keys?.has("temperature")).toBe(true);
       expect(keys?.has("max_tokens")).toBe(true);
+      // Nested keys (e.g. `role`, `content`) are NOT part of the top-level allowlist.
+      expect(keys?.has("role")).toBe(false);
     });
 
-    test("skips entries without requestKeys (backwards compat)", async () => {
+    test("a generic Record request yields no allowlist (passthrough mode)", async () => {
       const fs = (await import("node:fs/promises")).default;
-      vi.mocked(fs.readFile).mockResolvedValue(
-        JSON.stringify({
-          version: "1",
-          endpoints: {
-            default: {
-              hash: "abc",
-              requestType: "{ messages: string[] }",
-              responseType: "{}",
-              chunkType: null,
-            },
-          },
-        }),
-      );
+      vi.mocked(fs.readFile).mockResolvedValue(`import "@databricks/appkit";
+declare module "@databricks/appkit" {
+  interface ServingEndpointRegistry {
+    default: {
+      request: Record<string, unknown>;
+      response: unknown;
+      chunk: unknown;
+    };
+  }
+}
+`);
 
-      const result = await loadEndpointSchemas("/some/path");
-      // No requestKeys → passthrough mode (no allowlist)
+      const result = await loadEndpointSchemas("/some/path/serving.d.ts");
+      // Record<string, unknown> has no top-level keys → passthrough (no allowlist).
       expect(result.size).toBe(0);
     });
   });

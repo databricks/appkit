@@ -103,6 +103,13 @@ export const sqlTypeToHelper: Record<string, string> = {
 export interface QuerySchema {
   name: string;
   type: string;
+  /**
+   * Local SQL change-detector hash (md5 of the source SQL), present only for
+   * entries that should be recorded in the generated file's cache header — i.e.
+   * cache hits and fresh successful describes. Omitted for degraded / `unknown`
+   * results so they always re-read as a MISS on the next pass.
+   */
+  hash?: string;
 }
 
 /**

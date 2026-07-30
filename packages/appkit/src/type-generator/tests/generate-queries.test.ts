@@ -12,8 +12,9 @@ const mocks = vi.hoisted(() => ({
   startWarehouse: vi.fn(),
   spinnerStop: vi.fn(),
   spinnerPrintDetail: vi.fn(),
-  loadCache: vi.fn(() => ({ version: "2", queries: {} })),
-  saveCache: vi.fn(),
+  // The query cache now loads from the committed analytics.d.ts (via a path).
+  // Default: empty cache (every query a MISS). Seed per-test for cache-hit cases.
+  loadQueryCache: vi.fn(async () => ({ version: "3", queries: {} })),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -41,11 +42,24 @@ vi.mock("../spinner", () => ({
 
 vi.mock("../cache", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, loadCache: mocks.loadCache, saveCache: mocks.saveCache };
+  return { ...actual, loadQueryCache: mocks.loadQueryCache };
 });
 
 const { generateQueriesFromDescribe } = await import("../query-registry");
 const { CACHE_VERSION, hashSQL } = await import("../cache");
+
+// Query generation no longer persists a separate cache file — the caller
+// persists by writing the .d.ts. So tests pass a cacheFile path (its presence
+// enables cache loading via the mocked loadQueryCache) and assert the returned
+// schemas' `.hash`, which is set exactly for entries that should be recorded in
+// the committed header (cache hits + fresh successful describes).
+const CACHE_FILE = "/out/analytics.d.ts";
+
+// Which query names carry a hash in the returned schemas — i.e. what the caller
+// would record in the committed cache header this run (the new equivalent of
+// "what got persisted").
+const persistedNames = (schemas: Array<{ name: string; hash?: string }>) =>
+  schemas.filter((s) => s.hash !== undefined).map((s) => s.name);
 
 // The default mode is "non-blocking", which never probes the warehouse and never
 // describes. The bulk of these tests exercise the DESCRIBE / classify path, so
@@ -58,6 +72,7 @@ function describeQueries(
 ) {
   return generateQueriesFromDescribe(queryFolder, warehouseId, {
     mode: "blocking",
+    cacheFile: CACHE_FILE,
     ...options,
   });
 }
@@ -66,14 +81,15 @@ function describeQueries(
 // through verbatim, so equality proves reuse rather than regeneration.
 const CACHED_GOOD_TYPE = "RESULT_REUSED_FROM_CACHE";
 
-// The `queries` map of the cache object last handed to saveCache — i.e. what
-// actually got persisted this run.
-const lastSavedQueries = () =>
-  (
-    mocks.saveCache.mock.calls.at(-1)?.[0] as
-      | { queries: Record<string, { type: string }> }
-      | undefined
-  )?.queries;
+// Schemas returned this run keyed by name, restricted to entries that carry a
+// hash (i.e. would be written to the committed cache header) — the new
+// equivalent of "what got persisted".
+const persistedByName = (
+  schemas: Array<{ name: string; type: string; hash?: string }>,
+) =>
+  Object.fromEntries(
+    schemas.filter((s) => s.hash !== undefined).map((s) => [s.name, s]),
+  );
 
 function succeededResult(columns: [string, string, string | null][]) {
   return {
@@ -142,11 +158,10 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[0].type).toContain("name: string");
     expect(mocks.spinnerStop).toHaveBeenCalledWith("");
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
-    // clean success: cached, and not flagged as a syntax error
+    // clean success: recorded in the header (carries a hash), not a syntax error
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
-    expect(lastSavedQueries()?.users.type).toContain("id: number");
+    expect(persistedByName(schemas).users.type).toContain("id: number");
   });
 
   test("ARROW attachment path — decodes Arrow rows into a real query schema", async () => {
@@ -178,8 +193,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).not.toContain("result: unknown");
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
-    // A resolved schema is cached (we only persist non-unknown results).
-    expect(lastSavedQueries()?.users.type).toContain("id: number");
+    // A resolved schema carries a hash (only non-unknown results are recorded).
+    expect(persistedByName(schemas).users.type).toContain("id: number");
   });
 
   test("DESCRIBE request — tries JSON_ARRAY/INLINE first with a 30s wait", async () => {
@@ -221,7 +236,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].name).toBe("bad_table");
     expect(schemas[0].type).toContain("result: unknown");
     expect(mocks.spinnerStop).toHaveBeenCalledWith("");
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    // A genuine SQL error is not recorded in the header (no hash).
+    expect(persistedNames(schemas)).not.toContain("bad_table");
   });
 
   test("FAILED status without error message — uses fallback message and produces unknown result type", async () => {
@@ -238,7 +254,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].name).toBe("query");
     expect(schemas[0].type).toContain("result: unknown");
     expect(mocks.spinnerStop).toHaveBeenCalledWith("");
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    expect(persistedNames(schemas)).not.toContain("query");
   });
 
   test("partial failure — caches success, unknown result for failure, output includes both", async () => {
@@ -269,8 +285,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[1].name).toBe("bad");
     expect(schemas[1].type).toContain("result: unknown");
 
-    // saveCache called once after all parallel queries complete
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    // Only the success entry is recorded in the header.
+    expect(persistedNames(schemas)).toEqual(["good"]);
   });
 
   test("all queries fail (connectivity + syntax) — all produce unknown result types", async () => {
@@ -297,19 +313,16 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[1].name).toBe("b");
     expect(schemas[1].type).toContain("result: unknown");
 
-    // saveCache called once after all parallel queries complete
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
     // a = connectivity (rejected) → NOT a syntax error; b = FAILED → syntax error
     expect(syntaxErrors).toEqual([{ name: "b", message: "Table not found" }]);
     // neither a connectivity failure nor a SQL error is classified as fatal
     expect(fatalErrors).toEqual([]);
-    // neither failure is persisted to the cache
-    expect(lastSavedQueries()).not.toHaveProperty("a");
-    expect(lastSavedQueries()).not.toHaveProperty("b");
+    // neither failure is recorded in the header
+    expect(persistedNames(schemas)).toEqual([]);
   });
 
-  test("concurrency batching — saves cache after each batch", async () => {
-    // 3 queries with concurrency=2 → 2 batches (2 + 1), saveCache called twice
+  test("concurrency batching — all batches' successes are recorded", async () => {
+    // 3 queries with concurrency=2 → 2 batches (2 + 1); all successes recorded
     mocks.readdir.mockResolvedValue(["q1.sql", "q2.sql", "q3.sql"]);
     mocks.readFile
       .mockResolvedValueOnce("SELECT id FROM t1")
@@ -330,8 +343,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[1].name).toBe("q2");
     expect(schemas[2].name).toBe("q3");
 
-    // 2 batches → 2 saveCache calls
-    expect(mocks.saveCache).toHaveBeenCalledTimes(2);
+    // All successes across both batches are recorded in the header.
+    expect(persistedNames(schemas).sort()).toEqual(["q1", "q2", "q3"]);
   });
 
   test("unknown result type includes parameters from SQL", async () => {
@@ -358,7 +371,7 @@ describe("generateQueriesFromDescribe", () => {
     // A prior good type cached under a STALE hash: the query is a cache MISS
     // (so DESCRIBE is attempted). If the warehouse is unreachable, do not
     // publish the stale result columns for different SQL text.
-    mocks.loadCache.mockReturnValueOnce({
+    mocks.loadQueryCache.mockResolvedValueOnce({
       version: CACHE_VERSION,
       queries: {
         users: { hash: "stale-hash", type: CACHED_GOOD_TYPE, retry: false },
@@ -380,12 +393,9 @@ describe("generateQueriesFromDescribe", () => {
     // connectivity is never recorded as a syntax error
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
-    // the existing good entry is left intact (not overwritten with unknown)
-    expect(lastSavedQueries()?.users).toEqual({
-      hash: "stale-hash",
-      type: CACHED_GOOD_TYPE,
-      retry: false,
-    });
+    // The stale entry was for different SQL, so it can't be published for the
+    // new SQL: the degraded result carries no hash and is not recorded.
+    expect(persistedNames(schemas)).not.toContain("users");
   });
 
   test("fatal rejected DESCRIBE request is not downgraded to offline", async () => {
@@ -407,8 +417,7 @@ describe("generateQueriesFromDescribe", () => {
         message: "PERMISSION_DENIED: missing warehouse permission",
       },
     ]);
-    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
-    expect(lastSavedQueries()).not.toHaveProperty("users");
+    expect(persistedNames(schemas)).not.toContain("users");
   });
 
   test("HTTP 503 wrapper error is classified as connectivity", async () => {
@@ -589,8 +598,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(fatalErrors).toEqual([
       { name: "bad_auth", message: "PERMISSION_DENIED" },
     ]);
-    expect(lastSavedQueries()?.good.type).toContain("id: number");
-    expect(lastSavedQueries()).not.toHaveProperty("bad_auth");
+    expect(persistedByName(schemas).good.type).toContain("id: number");
+    expect(persistedNames(schemas)).not.toContain("bad_auth");
   });
 
   test("empty result (described, no columns) is unknown, not a syntax error, not cached", async () => {
@@ -605,7 +614,7 @@ describe("generateQueriesFromDescribe", () => {
 
     expect(schemas[0].type).toContain("result: unknown");
     expect(syntaxErrors).toEqual([]);
-    expect(lastSavedQueries()).not.toHaveProperty("empty");
+    expect(persistedNames(schemas)).not.toContain("empty");
   });
 
   test("PENDING (non-terminal, warehouse not ready) degrades to unknown, not empty, not cached", async () => {
@@ -630,7 +639,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
     // a non-ready warehouse must never persist `result: unknown`
-    expect(lastSavedQueries()).not.toHaveProperty("users");
+    expect(persistedNames(schemas)).not.toContain("users");
   });
 
   test("PENDING reuses a prior good cached type when the SQL hash matches", async () => {
@@ -665,7 +674,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
     // the good cached type persists; PENDING never overwrites it with unknown
-    expect(lastSavedQueries()?.users.type).toContain("id: number");
+    expect(persistedByName(schemas).users.type).toContain("id: number");
   });
 
   test("syntax error (FAILED) is recorded in syntaxErrors and not cached", async () => {
@@ -688,14 +697,14 @@ describe("generateQueriesFromDescribe", () => {
     expect(syntaxErrors).toEqual([
       { name: "broken", message: "Table or view not found: missing" },
     ]);
-    expect(lastSavedQueries()).not.toHaveProperty("broken");
+    expect(persistedNames(schemas)).not.toContain("broken");
   });
 
   test("cache HIT serves the stored type without calling the warehouse", async () => {
     const sql = "SELECT id FROM t";
     mocks.readdir.mockResolvedValue(["t.sql"]);
     mocks.readFile.mockResolvedValue(sql);
-    mocks.loadCache.mockReturnValueOnce({
+    mocks.loadQueryCache.mockResolvedValueOnce({
       version: CACHE_VERSION,
       queries: {
         t: { hash: hashSQL(sql), type: CACHED_GOOD_TYPE, retry: false },
@@ -717,7 +726,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readdir.mockResolvedValue(["t.sql"]);
     mocks.readFile.mockResolvedValue(sql);
     // Matching hash but retry:true (legacy poisoned entry) → must NOT be a HIT.
-    mocks.loadCache.mockReturnValueOnce({
+    mocks.loadQueryCache.mockResolvedValueOnce({
       version: CACHE_VERSION,
       queries: {
         t: { hash: hashSQL(sql), type: "STALE_UNKNOWN", retry: true },
@@ -854,8 +863,8 @@ describe("generateQueriesFromDescribe", () => {
       expect(fatalErrors).toEqual([]);
       expect(syntaxErrors).toEqual([]);
       expect(schemas[0].type).toContain("result: unknown");
-      // degraded, never a fatal failure
-      expect(lastSavedQueries()).toBeUndefined();
+      // degraded, never a fatal failure — nothing recorded in the header
+      expect(persistedNames(schemas)).toEqual([]);
     });
 
     test("STARTING + blocking — waits for RUNNING, then describes normally", async () => {
@@ -966,7 +975,7 @@ describe("generateQueriesFromDescribe", () => {
       mocks.readFile.mockResolvedValue(sql);
       // Seed a last-good cached type under the current SQL hash. non-blocking
       // serves it via the normal cache HIT path — still no probe, no DESCRIBE.
-      mocks.loadCache.mockReturnValueOnce({
+      mocks.loadQueryCache.mockResolvedValueOnce({
         version: CACHE_VERSION,
         queries: {
           users: { hash: hashSQL(sql), type: CACHED_GOOD_TYPE, retry: false },
@@ -977,6 +986,7 @@ describe("generateQueriesFromDescribe", () => {
       const { schemas, syntaxErrors, fatalErrors } =
         await generateQueriesFromDescribe("/queries", "wh-123", {
           mode: "non-blocking",
+          cacheFile: CACHE_FILE,
         });
 
       expect(mocks.getWarehouse).not.toHaveBeenCalled();
