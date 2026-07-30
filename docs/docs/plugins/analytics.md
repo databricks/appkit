@@ -558,7 +558,7 @@ createApp({
 });
 ```
 
-This is **pure response decoration**: the injected metadata never enters the cache key and never changes the SQL. With it wired, every metric `result` message carries a `metadata` field scoped to the requested columns; without it, the message is byte-identical to a plain `/query` result and the hook's `metadata` is `undefined`. Because the metadata rides on the payload, the client never has to import the generated file or hard-code a format string — it is **payload-carried and client-agnostic**.
+This is **pure response decoration**: the injected metadata never enters the cache key and never changes the SQL. With it wired, every metric `result` message carries a `metadata` field scoped to the requested columns; without it, the message is byte-identical to a plain `/query` result and the hook's `metadata` is `undefined`. Because the metadata rides on the payload, the client never has to import the generated file or hardcode a format string — it is **payload-carried and client-agnostic**.
 
 ### Format utilities
 
@@ -614,7 +614,7 @@ function RevenueTable() {
 
 Because `metadata[col].format` is just a string on the payload, the same spec drives axis ticks and tooltips in any chart library.
 
-**Plotly** — pass the spec straight through as a d3 `tickformat` / `hovertemplate` (Plotly axes speak d3-format):
+**[Plotly](https://plotly.com/javascript/)** — pass the spec straight through as a d3 `tickformat` / `hovertemplate` (Plotly axes speak d3-format):
 
 ```tsx
 import Plot from "react-plotly.js";
@@ -650,7 +650,7 @@ function RevenuePlot() {
 }
 ```
 
-**ECharts** — use the format spec inside `axisLabel.formatter` / `tooltip.formatter` via `formatValue`:
+**[ECharts](https://echarts.apache.org/)** — use the format spec inside `axisLabel.formatter` / `tooltip.formatter` via `formatValue`:
 
 ```tsx
 import ReactECharts from "echarts-for-react";

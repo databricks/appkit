@@ -117,9 +117,7 @@ export interface ChartBaseProps {
 /**
  * A normalized description of a clicked chart element.
  *
- * This is the public, ECharts-free shape emitted by chart click handlers. It is
- * the single boundary that keeps ECharts event types out of appkit-ui's public
- * API — consumers should read the strongly-typed fields below and reach for
+ * Consumers should read the strongly-typed fields below and reach for
  * {@link ChartClickDatum.raw} only when they knowingly opt into unsupported
  * internals.
  *
