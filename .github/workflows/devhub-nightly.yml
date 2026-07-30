@@ -1,9 +1,7 @@
 name: DevHub Nightly Build
 
-# Daily validation that AppKit main docs still build inside DevHub. Catches breaks
-# introduced by DevHub-side changes (their deps/framework) between AppKit docs PRs,
-# which the per-PR devhub-validation job cannot see. Failures surface via GitHub's
-# built-in scheduled-workflow-failure email to whoever last edited this file.
+# Daily check that AppKit main docs still build inside DevHub, catching DevHub-side
+# breaks that land between docs PRs. Failures surface via GitHub's scheduled-failure email.
 
 on:
   schedule:
