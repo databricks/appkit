@@ -325,37 +325,11 @@ jobs:
     name: DevHub Build Validation
     needs: detect-changes
     if: needs.detect-changes.outputs.docs == 'true'
-    runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Setup JFrog npm
-        uses: ./.github/actions/setup-jfrog-npm
-
-      - name: Clone DevHub
-        run: git clone --depth 1 https://github.com/databricks/devhub.git /tmp/devhub
-
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 22
-
-      - name: Install DevHub dependencies
-        working-directory: /tmp/devhub
-        run: pnpm install --frozen-lockfile
-
-      - name: Sync AppKit docs from PR branch
-        working-directory: /tmp/devhub
-        env:
-          APPKIT_REMOTE: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
-          APPKIT_BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: node scripts/sync-appkit-docs.mjs --force
-
-      - name: Build DevHub
-        working-directory: /tmp/devhub
-        run: pnpm build
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/devhub-build.yml
+    with:
+      appkit-remote: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
+      appkit-ref: ${{ github.head_ref || github.ref_name }}
 

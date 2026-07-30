@@ -1,0 +1,20 @@
+name: DevHub Nightly Build
+
+# Daily validation that AppKit main docs still build inside DevHub. Catches breaks
+# introduced by DevHub-side changes (their deps/framework) between AppKit docs PRs,
+# which the per-PR devhub-validation job cannot see. Failures surface via GitHub's
+# built-in scheduled-workflow-failure email to whoever last edited this file.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch: # allow manual re-run
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  devhub-build:
+    # No inputs → defaults sync databricks/appkit main and build it against DevHub.
+    uses: ./.github/workflows/devhub-build.yml
