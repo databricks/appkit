@@ -95,12 +95,21 @@ function classifyBinding(block: AppResourceBlock): {
   return { origin: "external" };
 }
 
+/**
+ * Reads and parses a YAML file. Returns `null` only when the file is *absent*
+ * (a legitimate "no bundle" state). A file that exists but fails to parse is a
+ * real, deploy-breaking error — swallowing it would let doctor skip every
+ * wiring check and treat bundle-managed resources as external, reporting a
+ * false all-clear — so it's rethrown with a clear message.
+ * @throws if `filePath` exists but contains invalid YAML.
+ */
 function readYaml<T>(filePath: string): T | null {
   if (!fs.existsSync(filePath)) return null;
   try {
     return (yaml.load(fs.readFileSync(filePath, "utf-8")) ?? {}) as T;
-  } catch {
-    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse ${path.basename(filePath)}: ${msg}`);
   }
 }
 

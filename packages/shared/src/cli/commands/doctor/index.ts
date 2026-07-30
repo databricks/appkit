@@ -37,11 +37,6 @@ export const doctorCommand = new Command("doctor")
   .description(
     "Diagnose an AppKit app's Databricks resources: authentication, config, and resource existence/reachability",
   )
-  .option(
-    "-m, --manifest <path>",
-    "Path to the resolved template manifest",
-    "appkit.plugins.json",
-  )
   .option("-p, --profile <name>", "Databricks CLI profile to authenticate with")
   .option(
     "-e, --env-file <path>",

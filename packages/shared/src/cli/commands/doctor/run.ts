@@ -87,7 +87,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   // Resources are resolved and config-checked even when auth failed, so a bad
   // connection still surfaces config problems instead of hiding them all.
   const cwd = process.cwd();
-  const targets = resolveTargetsFromCwd(cwd, options.manifest);
+  const targets = resolveTargetsFromCwd(cwd);
 
   // Overlay bundle provenance (Phase 1) and gather wiring info (Phase 2).
   const bundle = readBundleInfo(cwd);

@@ -54,6 +54,23 @@ describe("readBundleInfo", () => {
     expect(info.bindings.size).toBe(0);
   });
 
+  it("throws on malformed databricks.yml instead of treating it as absent", () => {
+    // A present-but-unparseable bundle is a deploy-breaking error; swallowing it
+    // would let doctor skip all wiring checks and report a false all-clear.
+    const dir = tmp({ "databricks.yml": "resources: [ this: is: not: valid" });
+    dirs.push(dir);
+    expect(() => readBundleInfo(dir)).toThrow(/databricks\.yml/);
+  });
+
+  it("throws on malformed app.yaml", () => {
+    const dir = tmp({
+      "databricks.yml": BUNDLE,
+      "app.yaml": "env:\n  - name: X\n   valueFrom: bad-indent",
+    });
+    dirs.push(dir);
+    expect(() => readBundleInfo(dir)).toThrow(/app\.yaml/);
+  });
+
   it("classifies external (var) vs bundle-managed (resources ref) bindings", () => {
     const dir = tmp({ "databricks.yml": BUNDLE, "app.yaml": APP_YAML });
     dirs.push(dir);

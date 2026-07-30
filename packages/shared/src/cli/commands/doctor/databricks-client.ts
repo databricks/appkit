@@ -40,6 +40,11 @@ export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
   if (profile) {
+    // Deliberate, unrestored mutation: the SDK's unified auth reads the profile
+    // from this env var, and there's no per-call config seam for it. Safe here
+    // because doctor is a one-shot CLI that exits after a single run — this is
+    // not a long-lived process where a lingering profile could leak between
+    // operations.
     process.env[CONFIG_PROFILE_ENV] = profile;
   }
 

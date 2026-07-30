@@ -89,8 +89,6 @@ export interface DoctorReport {
 }
 
 export interface DoctorOptions {
-  /** Path to the resolved template manifest (defaults to appkit.plugins.json). */
-  manifest?: string;
   profile?: string;
   json?: boolean;
   /** Show full underlying error messages (raw SDK output) in the human report. */
