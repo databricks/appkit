@@ -31,23 +31,14 @@ function isModuleNotFound(err: unknown): boolean {
   );
 }
 
-/** Env var the Databricks SDK's unified auth reads to select a CLI profile. */
-const CONFIG_PROFILE_ENV = "DATABRICKS_CONFIG_PROFILE";
-
-/** Constructs a `WorkspaceClient` via the SDK's unified-auth chain. `profile`
- * is applied through the env var the SDK reads. */
+/** Constructs a `WorkspaceClient` via the SDK's unified-auth chain. An explicit
+ * `profile` is passed through the SDK's own `Config.profile` field — a per-call
+ * seam, so we never mutate `process.env` (which would leak the profile beyond
+ * this call and race with anything else reading the environment). When omitted,
+ * the SDK falls back to its normal chain (env, then the default profile). */
 export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
-  if (profile) {
-    // Deliberate, unrestored mutation: the SDK's unified auth reads the profile
-    // from this env var, and there's no per-call config seam for it. Safe here
-    // because doctor is a one-shot CLI that exits after a single run — this is
-    // not a long-lived process where a lingering profile could leak between
-    // operations.
-    process.env[CONFIG_PROFILE_ENV] = profile;
-  }
-
   // Narrowed to the one call we make; `shared` has no static SDK dependency.
   let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
   try {
@@ -59,7 +50,7 @@ export async function getServiceClient(
     throw err;
   }
 
-  const client = new sdk.WorkspaceClient({});
+  const client = new sdk.WorkspaceClient(profile ? { profile } : {});
   return { client };
 }
 
