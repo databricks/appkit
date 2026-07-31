@@ -7,10 +7,8 @@ import { runDoctor } from "./run";
 import type { DoctorOptions } from "./types";
 
 /**
- * Loads an explicit env file into `process.env`, overriding the `.env` the CLI
- * auto-loads at startup so doctor checks the same environment the app runs with.
- * @throws if the file is missing — an explicit `--env-file` that doesn't exist
- * is a mistake worth surfacing, not silently ignoring.
+ * Loads an explicit env file into `process.env`, overriding the auto-loaded
+ * `.env`. Throws if the file is missing.
  */
 export function loadEnvFile(envFile: string): void {
   if (!fs.existsSync(envFile)) {
@@ -25,7 +23,7 @@ async function runDoctorCommand(options: DoctorOptions): Promise<void> {
   const report = await runDoctor(options);
 
   if (options.json) {
-    printReportJson(report);
+    printReportJson(report, options.detail);
   } else {
     printReport(report, options.detail);
   }

@@ -11,6 +11,10 @@ import {
   type LakebasePoolHandle,
 } from "./databricks-client";
 import type { LayerResult, ResourceTarget } from "./types";
+import { errorMessage } from "./utils";
+
+/** A passing existence check. Shared, never mutated by callers. */
+const EXISTENCE_OK: LayerResult = { layer: "existence", status: "ok" };
 
 interface DoctorWorkspaceClient {
   warehouses: {
@@ -41,8 +45,7 @@ type ExistenceProbe = (
   target: ResourceTarget,
 ) => Promise<LayerResult>;
 
-// Read statusCode/errorCode off the SDK's ApiError structurally, keeping
-// `shared` SDK-free.
+// Read statusCode/errorCode off the SDK's ApiError structurally.
 function statusCodeOf(err: unknown): number | undefined {
   if (err && typeof err === "object" && "statusCode" in err) {
     const code = (err as { statusCode?: unknown }).statusCode;
@@ -62,15 +65,13 @@ function errorCodeOf(err: unknown): string | undefined {
 // The SDK message often embeds a JSON blob; pull the inner `message` out so
 // doctor prints one clean line, not a dump.
 function cleanMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = errorMessage(err);
   const m = raw.match(/"message"\s*:\s*"([^"]+)"/);
   return m ? m[1] : raw;
 }
 
 /** The resource's configured identifier (id / name / path / host), for short
- * messages. The row label already names the *type*, so details never repeat it
- * — they only surface the value you'd act on, quoted so the report highlights
- * it. */
+ * messages. */
 function displayId(target: ResourceTarget): string | null {
   return field(target, "id", "name", "path", "index_name", "indexName", "host");
 }
@@ -90,9 +91,7 @@ function classifyError(err: unknown, target: ResourceTarget): LayerResult {
       detail: quoted ? `${quoted} not found` : "not found",
     };
   }
-  // A malformed id/name often comes back as 400 rather than 404. We own the
-  // wording (quoting the value so it highlights) rather than echoing the SDK's
-  // sentence, which repeats "invalid" and leaks the raw type.
+  // A malformed id/name often comes back as 400 rather than 404.
   if (status === 400 || errorCode === "INVALID_PARAMETER_VALUE") {
     return {
       layer: "existence",
@@ -161,7 +160,7 @@ const probeWarehouse: ExistenceProbe = async (client, target) => {
         detail: `warehouse exists but is ${state} (will cold-start on first query)`,
       };
     }
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -169,14 +168,14 @@ const probeWarehouse: ExistenceProbe = async (client, target) => {
 
 const probeServing: ExistenceProbe = async (client, target) => {
   const name = field(target, "name");
-  // The API only accepts a name; if configured by id we probe with it anyway
-  // and flag the likely cause on failure.
+  // The API only accepts a name; if configured by id, probe with it anyway and
+  // flag the likely cause on failure.
   const idOnly = name === null ? field(target, "id") : null;
   const value = name ?? idOnly;
   if (!value) return missingField("name");
   try {
     await client.servingEndpoints.get({ name: value });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     const result = classifyError(err, target);
     if (idOnly && result.status === "error") {
@@ -192,7 +191,7 @@ const probeGenie: ExistenceProbe = async (client, target) => {
   if (!spaceId) return missingField("id");
   try {
     await client.genie.getSpace({ space_id: spaceId });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -212,7 +211,7 @@ const probeJob: ExistenceProbe = async (client, target) => {
   }
   try {
     await client.jobs.get({ job_id: jobId });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -234,7 +233,7 @@ const probeVolume: ExistenceProbe = async (client, target) => {
   }
   try {
     await client.volumes.read({ name });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -245,7 +244,7 @@ const probeVectorIndex: ExistenceProbe = async (client, target) => {
   if (!name) return missingField("indexName");
   try {
     await client.vectorSearchIndexes.getIndex({ index_name: name });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -256,7 +255,7 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   if (!name) return missingField("name");
   try {
     await client.functions.get({ name });
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
   }
@@ -284,7 +283,7 @@ const probePostgres: ExistenceProbe = async (client, target) => {
   try {
     pool = await getLakebasePool(client);
     await pool.query("SELECT 1");
-    return { layer: "existence", status: "ok" };
+    return EXISTENCE_OK;
   } catch (err) {
     if (err instanceof AppkitNotInstalledError) {
       return {

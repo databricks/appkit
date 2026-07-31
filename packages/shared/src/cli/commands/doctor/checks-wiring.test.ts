@@ -108,9 +108,6 @@ describe("checkWiring", () => {
   });
 
   it("warns even when app.yaml has NO env block (used plugin, zero wiring)", () => {
-    // The 'works locally, crashes on deploy' case: analytics is used and its
-    // env var is set locally via .env, but app.yaml provides nothing, so the
-    // deployed container has no way to inject it.
     const findings = checkWiring(
       info({ present: true }), // empty bindings + empty envToBinding
       [

@@ -1,17 +1,12 @@
 /**
- * Reads the Databricks Asset Bundle (`databricks.yml`) and `app.yaml` to learn
- * two things doctor can't get from `appkit.plugins.json`:
+ * Reads `databricks.yml` + `app.yaml` for two things doctor can't get from
+ * `appkit.plugins.json`:
  *
- *  1. **Provenance** — whether each app resource binding references an *existing*
- *     resource (`${var.*}` or a literal → `external`) or one this bundle
- *     *creates* (`${resources.<type>.<key>.*}` → `bundle-managed`). A
- *     bundle-managed resource doesn't exist until `bundle deploy`, so doctor
- *     must not probe it (that would be a false NOT_FOUND).
- *
- *  2. **Wiring** — the join key that ties the three files together is the
- *     binding *name*: `app.yaml`'s `valueFrom: <name>` must match a
- *     `databricks.yml` binding `name`, which an AppKit plugin then reads via an
- *     env var. We surface the pieces so the wiring check can validate the join.
+ *  1. **Provenance** — whether each binding references an existing resource
+ *     (`${var.*}`/literal → `external`) or one this bundle creates
+ *     (`${resources.<type>.<key>.*}` → `bundle-managed`).
+ *  2. **Wiring** — the binding `name` joins the three files: `app.yaml`'s
+ *     `valueFrom: <name>` must match a `databricks.yml` binding `name`.
  *
  * SDK-free; pure YAML parsing. Absent files degrade to empty results.
  */
@@ -20,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { ResourceOrigin } from "./types";
+import { errorMessage } from "./utils";
 
 export const DEFAULT_BUNDLE_FILE = "databricks.yml";
 export const DEFAULT_APP_YAML_FILE = "app.yaml";
@@ -75,9 +71,11 @@ function bindingType(block: AppResourceBlock): string | undefined {
   return undefined;
 }
 
-/** Classifies a binding's origin by scanning its field values for a
- * `${resources.*}` reference (bundle-managed) vs anything else (external). */
+/** Classifies a binding by its typed sub-key and origin: scanning its field
+ * values for a `${resources.*}` reference (bundle-managed) vs anything else
+ * (external). */
 function classifyBinding(block: AppResourceBlock): {
+  type?: string;
   origin: ResourceOrigin;
   ref?: { type: string; key: string };
 } {
@@ -88,28 +86,30 @@ function classifyBinding(block: AppResourceBlock): {
       if (typeof value !== "string") continue;
       const m = value.match(RESOURCES_REF);
       if (m) {
-        return { origin: "bundle-managed", ref: { type: m[1], key: m[2] } };
+        return {
+          type,
+          origin: "bundle-managed",
+          ref: { type: m[1], key: m[2] },
+        };
       }
     }
   }
-  return { origin: "external" };
+  return { type, origin: "external" };
 }
 
 /**
- * Reads and parses a YAML file. Returns `null` only when the file is *absent*
- * (a legitimate "no bundle" state). A file that exists but fails to parse is a
- * real, deploy-breaking error — swallowing it would let doctor skip every
- * wiring check and treat bundle-managed resources as external, reporting a
- * false all-clear — so it's rethrown with a clear message.
- * @throws if `filePath` exists but contains invalid YAML.
+ * Reads and parses a YAML file. Returns `null` when the file is absent (a
+ * legitimate "no bundle" state); throws on invalid YAML, since silently
+ * ignoring it would let doctor report a false all-clear.
  */
 function readYaml<T>(filePath: string): T | null {
   if (!fs.existsSync(filePath)) return null;
   try {
     return (yaml.load(fs.readFileSync(filePath, "utf-8")) ?? {}) as T;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse ${path.basename(filePath)}: ${msg}`);
+    throw new Error(
+      `Failed to parse ${path.basename(filePath)}: ${errorMessage(err)}`,
+    );
   }
 }
 
@@ -132,21 +132,19 @@ export function readBundleInfo(
     return { bindings, envToBinding, declaredResources, present: false };
   }
 
-  // Every declared bundle resource, as "<type>.<key>" (apps included).
   for (const [type, group] of Object.entries(doc.resources ?? {})) {
     if (!group || typeof group !== "object") continue;
     for (const key of Object.keys(group))
       declaredResources.add(`${type}.${key}`);
   }
 
-  // App resource bindings across every app in the bundle.
   for (const app of Object.values(doc.resources?.apps ?? {})) {
     for (const block of app.resources ?? []) {
       if (!block?.name) continue;
-      const { origin, ref } = classifyBinding(block);
+      const { type, origin, ref } = classifyBinding(block);
       bindings.set(block.name, {
         name: block.name,
-        type: bindingType(block),
+        type,
         origin,
         ref,
       });

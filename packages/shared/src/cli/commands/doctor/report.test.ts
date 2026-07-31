@@ -217,4 +217,31 @@ describe("printReportJson", () => {
     const lines = capture(() => printReportJson(r));
     expect(JSON.parse(lines.join("\n"))).toEqual(r);
   });
+
+  it("strips the raw SDK error by default (matches the --detail gate)", () => {
+    const r = report({
+      auth: {
+        status: "error",
+        detail: "authentication failed",
+        raw: "default auth: cannot get access token: <sensitive blob>",
+      },
+    });
+    const parsed = capture(() => printReportJson(r));
+    const out = JSON.parse(parsed.join("\n")) as DoctorReport;
+    expect(out.auth.raw).toBeUndefined();
+    expect(parsed.join("\n")).not.toContain("<sensitive blob>");
+  });
+
+  it("includes raw when detail=true (opt-in)", () => {
+    const r = report({
+      auth: {
+        status: "error",
+        detail: "authentication failed",
+        raw: "default auth: cannot get access token: <sensitive blob>",
+      },
+    });
+    const parsed = capture(() => printReportJson(r, true));
+    const out = JSON.parse(parsed.join("\n")) as DoctorReport;
+    expect(out.auth.raw).toContain("<sensitive blob>");
+  });
 });

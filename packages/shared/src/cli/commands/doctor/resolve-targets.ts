@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ResourceTarget } from "./types";
+import { errorMessage } from "./utils";
 
 export const DEFAULT_MANIFEST_FILE = "appkit.plugins.json";
 
@@ -15,7 +16,6 @@ interface ManifestField {
   env?: string;
   /** Static default value baked into the manifest. */
   value?: string;
-  /** Computed origin: how the value is supplied (see the manifest schema). */
   origin?: "user" | "platform" | "static" | "cli";
   /** Only generated into the local .env; the platform injects it at deploy. */
   localOnly?: boolean;
@@ -110,29 +110,26 @@ export function targetsFromManifestFile(
   try {
     raw = fs.readFileSync(manifestPath, "utf-8");
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to read manifest file ${manifestPath}: ${msg}`);
+    throw new Error(
+      `Failed to read manifest file ${manifestPath}: ${errorMessage(err)}`,
+    );
   }
 
   let data: TemplateManifest;
   try {
     data = JSON.parse(raw) as TemplateManifest;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse manifest file ${manifestPath}: ${msg}`);
+    throw new Error(
+      `Failed to parse manifest file ${manifestPath}: ${errorMessage(err)}`,
+    );
   }
 
-  // `plugin sync` writes a resource entry for *every* plugin the installed
-  // packages ship (a catalog for `apps init`), not just the ones this app uses.
-  // Only plugins actually wired into `createApp` are marked
-  // `requiredByTemplate`, so check exactly those — otherwise doctor reports
-  // phantom "missing env var" errors for plugins the app never imports.
-  //
-  // KNOWN LIMITATION: `plugin sync` strips `requiredByTemplate` for non-GA
-  // plugins (its step 6b), so a *used* beta/experimental plugin (e.g. agents
-  // requiring a serving endpoint) is currently NOT checked here. Fixing this
-  // needs a usage signal that survives sync regardless of stability — see the
-  // doctor README. Documented and deferred rather than papered over.
+  // `plugin sync` catalogues every plugin the installed packages ship, marking
+  // only those wired into `createApp` with `requiredByTemplate`. Check exactly
+  // those, else doctor reports phantom "missing env var" errors for unimported
+  // plugins.
+  // KNOWN LIMITATION: sync strips `requiredByTemplate` for non-GA plugins, so a
+  // used beta/experimental plugin is not checked here yet. See the README.
   const selected = Object.entries(data.plugins ?? {}).filter(
     ([, plugin]) => plugin.requiredByTemplate === true,
   );

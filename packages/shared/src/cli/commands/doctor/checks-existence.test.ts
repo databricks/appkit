@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runExistenceProbe, toThreeLevelVolumeName } from "./checks-existence";
 import type { ResourceTarget } from "./types";
 
-// Mock the SDK bridge so the postgres probe can be driven without a real
-// Lakebase connection. `getLakebasePool` returns a fake pool per test.
+// Mock the SDK bridge so the postgres probe runs without a real connection.
 const { mockGetLakebasePool, endSpy } = vi.hoisted(() => ({
   mockGetLakebasePool: vi.fn(),
   endSpy: vi.fn(async () => {}),
@@ -76,8 +75,6 @@ describe("runExistenceProbe — sql_warehouse", () => {
         },
       },
     };
-    // The target has an id, so we own the wording: quote the value, don't echo
-    // the SDK sentence, don't leak the raw type or JSON blob.
     const r = await runExistenceProbe(
       client,
       target({ fieldValues: { id: "wh-123" } }),
@@ -191,7 +188,6 @@ describe("runExistenceProbe — postgres (Lakebase)", () => {
     const r = await runExistenceProbe({}, pgTarget());
     expect(r.status).toBe("error");
     expect(r.code).toBe("CONNECTION_FAILED");
-    // The raw error stays in detail; the actionable guidance is a separate hint.
     expect(r.detail).toMatch(/password authentication failed/i);
     expect(r.hint).toMatch(/OAuth token as the password/i);
     expect(r.hint).toMatch(/PGUSER/);
@@ -211,14 +207,10 @@ describe("runExistenceProbe — postgres (Lakebase)", () => {
     const r = await runExistenceProbe({}, pgTarget({ fieldValues: {} }));
     expect(r.status).toBe("skipped");
     expect(r.code).toBe("MISSING_FIELD");
-    // Pool was never created.
     expect(mockGetLakebasePool).not.toHaveBeenCalled();
   });
 });
 
-// These use the real first-party manifest field keys (e.g. vector-search's
-// camelCase `indexName`). Each supported probe gets a happy path + a
-// missing-field skip.
 describe("runExistenceProbe — per-type coverage with real manifest keys", () => {
   it("serving_endpoint: ok via `name`", async () => {
     const client = { servingEndpoints: { get: async () => ({}) } };
@@ -294,7 +286,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
     expect(r.status).toBe("ok");
   });
 
-  it("vector_search_index: probes via camelCase `indexName` (regression: bug #1)", async () => {
+  it("vector_search_index: probes via camelCase `indexName`", async () => {
     const getIndex = vi.fn(async () => ({}));
     const client = { vectorSearchIndexes: { getIndex } };
     const r = await runExistenceProbe(

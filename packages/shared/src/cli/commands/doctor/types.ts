@@ -6,13 +6,27 @@ export type CheckLayer = "auth" | "config" | "existence";
 export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 
 /**
- * Where a resource's value comes from, per the bundle (`databricks.yml`):
- * - `external`      — an existing resource referenced by id/name (`${var.*}` or a
- *                     literal). It should exist now, so the live probe applies.
- * - `bundle-managed`— created by this same bundle (`${resources.<type>.<key>.*}`);
- *                     it doesn't exist until `bundle deploy`, so we validate the
- *                     declaration instead of probing.
- * Undefined ⇒ external (no bundle info, or an AppKit app with no databricks.yml).
+ * The existence-layer `code` marking a probe skipped because auth failed. Set in
+ * `run.ts` and matched in `report.ts` to collapse those resources into one line;
+ * shared so the two sides can't drift.
+ */
+export const AUTH_UNAVAILABLE_CODE = "AUTH_UNAVAILABLE";
+
+/**
+ * Severity ranking for a status. Used both to roll up the worst status across
+ * layers and to sort report rows most-severe-first (descending severity).
+ */
+export const STATUS_SEVERITY: Record<CheckStatus, number> = {
+  ok: 0,
+  skipped: 1,
+  warn: 2,
+  error: 3,
+};
+
+/**
+ * Where a resource's value comes from: `external` (exists now, so probe it) or
+ * `bundle-managed` (created by this bundle on deploy, so not probed).
+ * Undefined ⇒ external.
  */
 export type ResourceOrigin = "external" | "bundle-managed";
 
@@ -39,7 +53,6 @@ export interface ResourceTarget {
   envVars: string[];
   /** Resolved field values keyed by manifest field name; unset fields omitted. */
   fieldValues: Record<string, string>;
-  /** Provenance from the bundle; undefined ⇒ treated as external. */
   origin?: ResourceOrigin;
 }
 
@@ -57,23 +70,16 @@ export interface AuthCheckResult {
   code?: string;
   host?: string;
   profile?: string;
-  /** Full underlying error (e.g. the raw SDK message). Shown only with
-   * `--detail` or in `--json`; the human report relies on `detail` + `hint`. */
+  /** Full underlying error, shown only with `--detail` or in `--json`. */
   raw?: string;
 }
 
-/**
- * A finding from the offline three-file wiring check (Phase 2): does each
- * `app.yaml` `valueFrom` bind to a real databricks.yml binding, and does each
- * bundle-managed `${resources.*}` reference resolve to a declared bundle
- * resource. Independent of auth — it's a deploy-declaration check, not a live one.
- */
+/** A finding from the offline three-file wiring check. */
 export interface WiringFinding {
   status: CheckStatus;
   /** Machine-readable code (e.g. `VALUEFROM_UNBOUND`, `BUNDLE_REF_MISSING`). */
   code: string;
-  /** Short row label (the env var or binding at fault), so a wiring row renders
-   * with the same shape as a resource row: `glyph  label` then indented detail. */
+  /** The env var or binding at fault. */
   label: string;
   detail: string;
   hint?: string;
@@ -81,9 +87,7 @@ export interface WiringFinding {
 
 export interface DoctorReport {
   auth: AuthCheckResult;
-  /** Live connectivity checks for external resources. */
   resources: ResourceCheckResult[];
-  /** Deploy-declaration findings: bundle-managed resources + wiring consistency. */
   wiring: WiringFinding[];
   summary: { ok: number; warn: number; error: number; skipped: number };
 }
@@ -91,12 +95,9 @@ export interface DoctorReport {
 export interface DoctorOptions {
   profile?: string;
   json?: boolean;
-  /** Show full underlying error messages (raw SDK output) in the human report. */
+  /** Show full underlying error messages in the human report. */
   detail?: boolean;
-  /**
-   * Path to an env file to load before checking (e.g. `.env.local`). Its values
-   * override the `.env` the CLI auto-loads at startup, so doctor checks the same
-   * environment the app runs with.
-   */
+  /** Env file to load before checking (e.g. `.env.local`); overrides the .env
+   * the CLI auto-loads at startup. */
   envFile?: string;
 }

@@ -113,7 +113,11 @@ back to the default profile. Doctor emits:
 hint says what to *run* and to confirm the profile/host actually in use — a
 failure can mean the wrong target, not just a stale token. `detail` is the short
 headline `authentication failed`; the full SDK message is kept in `raw` and shown
-only with `--detail` (always in `--json`). The report labels hints `Hint:`.
+only with `--detail` — in both the human report and `--json` (i.e. `--json`
+alone omits `raw`, since it can carry sensitive detail and CI often captures it;
+`--json --detail` opts back in). `DATABRICKS_HOST` is stored with any embedded
+`user:pass@` userinfo stripped, so credentials never reach the report or JSON.
+The report labels hints `Hint:`.
 
 ## Files
 
@@ -124,7 +128,7 @@ only with `--detail` (always in `--json`). The report labels hints `Hint:`.
 - `databricks-client.ts` — the sole SDK seam: dynamic `import()` of the SDK /
   `@databricks/appkit`, builds a `WorkspaceClient` and Lakebase pool, graceful
   fallback when uninstalled.
-- `checks.ts` — `checkAuth`, `checkConfig`, `checkExistence`.
+- `checks.ts` — `checkAuth`, `checkConfig`.
 - `checks-existence.ts` — per-type existence probe dispatch + error classifier.
 - `checks-wiring.ts` — offline three-file join / bundle-ref consistency check.
 - `run.ts` — orchestration: auth once → overlay origin → per resource

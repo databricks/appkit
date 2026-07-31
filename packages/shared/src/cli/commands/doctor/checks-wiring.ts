@@ -15,10 +15,6 @@
 import type { BundleInfo } from "./bundle";
 import type { ResourceTarget, WiringFinding } from "./types";
 
-/**
- * @param info    parsed bundle + app.yaml wiring
- * @param targets resolved resource targets (for env-var context in messages)
- */
 export function checkWiring(
   info: BundleInfo,
   targets: ResourceTarget[],
@@ -55,14 +51,9 @@ export function checkWiring(
     }
   }
 
-  // 3. A used plugin needs an env var that no app.yaml entry provides. Locally
-  // the value comes from .env, but .env isn't uploaded — on deploy the platform
-  // only injects what app.yaml maps. So a used plugin whose env var has no
-  // app.yaml entry will be *unset in the deployed container* and crash at
-  // runtime, even though local checks are green. This is the headline
-  // "works locally, breaks on deploy" case, so it fires whenever the app is a
-  // bundle (databricks.yml present) — including when app.yaml has no env block
-  // at all, which is the most broken state, not a "doesn't use injection" one.
+  // 3. A used plugin's env var with no app.yaml entry: set locally via .env, but
+  // .env isn't uploaded, so it's unset in the deployed container — the headline
+  // "works locally, breaks on deploy" case.
   for (const target of targets) {
     for (const envVar of target.envVars) {
       if (!info.envToBinding.has(envVar)) {

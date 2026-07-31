@@ -1,10 +1,7 @@
 /**
- * The single seam where `appkit doctor` crosses into the Databricks SDK.
- *
- * The CLI lives in the SDK-free `shared` package, so it reaches the SDK via a
- * runtime `import(...)` — keeping `shared` free of the dependency and degrading
- * gracefully when it's absent. All Databricks-touching check code goes through
- * this module; nothing else in the doctor command imports the SDK.
+ * The single seam where `appkit doctor` crosses into the Databricks SDK. The
+ * SDK-free `shared` package reaches it via a runtime `import(...)`, degrading
+ * gracefully when it's absent.
  */
 
 /** Raised when `@databricks/sdk-experimental` is not resolvable at runtime. */
@@ -32,14 +29,11 @@ function isModuleNotFound(err: unknown): boolean {
 }
 
 /** Constructs a `WorkspaceClient` via the SDK's unified-auth chain. An explicit
- * `profile` is passed through the SDK's own `Config.profile` field — a per-call
- * seam, so we never mutate `process.env` (which would leak the profile beyond
- * this call and race with anything else reading the environment). When omitted,
- * the SDK falls back to its normal chain (env, then the default profile). */
+ * `profile` is passed through `Config.profile` rather than mutating
+ * `process.env`, so it doesn't leak beyond this call. */
 export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
-  // Narrowed to the one call we make; `shared` has no static SDK dependency.
   let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
   try {
     sdk = (await import("@databricks/sdk-experimental")) as typeof sdk;
@@ -77,7 +71,7 @@ export async function getLakebasePool(
   client: unknown,
 ): Promise<LakebasePoolHandle> {
   // A variable specifier stops TS from statically resolving `@databricks/appkit`,
-  // which `shared` has no dependency on; it's an optional peer resolved at runtime.
+  // an optional peer that `shared` has no dependency on.
   const appkitPkg = "@databricks/appkit";
   let appkit: {
     createLakebasePool: (cfg: Record<string, unknown>) => unknown;

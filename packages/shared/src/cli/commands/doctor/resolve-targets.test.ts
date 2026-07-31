@@ -160,7 +160,7 @@ describe("targetsFromManifestFile", () => {
     expect(targets).toEqual([]);
   });
 
-  it("excludes value-default and platform-injected fields from envVars (regression: bug #3)", () => {
+  it("excludes value-default and platform-injected fields from envVars", () => {
     const targets = targetsFromManifestFile(
       writeManifest({
         version: "2.0",
@@ -203,8 +203,6 @@ describe("targetsFromManifestFile", () => {
       }),
     );
     const pg = targets.find((t) => t.type === "postgres");
-    // Only the user-supplied endpoint is presence-checked; value-default and
-    // platform-injected fields must not be flagged as missing.
     expect(pg?.envVars).toEqual(["LAKEBASE_ENDPOINT"]);
   });
 
@@ -224,8 +222,6 @@ describe("targetsFromManifestFile", () => {
                   alias: "WH",
                   permission: "CAN_USE",
                   fields: {
-                    // Configured by a baked-in value, not an env var — the
-                    // existence probe must still receive it.
                     id: { env: "SOME_UNSET_ENV", value: "baked-in-id" },
                   },
                 },

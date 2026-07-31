@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkAuth, checkConfig, validateHost } from "./checks";
+import { checkAuth, checkConfig, sanitizeHost, validateHost } from "./checks";
 import type { ResourceTarget } from "./types";
 
 const { mockGetServiceClient } = vi.hoisted(() => ({
@@ -49,8 +49,6 @@ describe("checkConfig", () => {
   });
 
   it("passes an unfilled-looking value (existence check is the authority)", async () => {
-    // Placeholder-looking values are NOT flagged here by design — the live
-    // existence check decides whether a set value is real.
     process.env.DOCTOR_TEST_ENV = "your_sql_warehouse_id";
     const result = await checkConfig(target());
     expect(result.status).toBe("ok");
@@ -108,6 +106,28 @@ describe("validateHost", () => {
   });
 });
 
+describe("sanitizeHost", () => {
+  it("passes through an unset or credential-free host unchanged", () => {
+    expect(sanitizeHost(undefined)).toBeUndefined();
+    expect(sanitizeHost("https://foo.cloud.databricks.com")).toBe(
+      "https://foo.cloud.databricks.com",
+    );
+  });
+
+  it("strips embedded userinfo (user:pass@) so it can't leak", () => {
+    const cleaned = sanitizeHost(
+      "https://user:secret@workspace.databricks.com",
+    );
+    expect(cleaned).not.toContain("secret");
+    expect(cleaned).not.toContain("user");
+    expect(cleaned).toContain("workspace.databricks.com");
+  });
+
+  it("leaves a non-URL value as-is (nothing to strip)", () => {
+    expect(sanitizeHost("not-a-url")).toBe("not-a-url");
+  });
+});
+
 describe("checkAuth", () => {
   const savedHost = process.env.DATABRICKS_HOST;
 
@@ -127,6 +147,17 @@ describe("checkAuth", () => {
     expect(result.code).toBe("AUTH_OK");
     expect(result.detail).toContain("sp-1");
     expect(returned).toBe(client); // handed to the live layers
+  });
+
+  it("stores the sanitized host (no embedded credentials) in the result", async () => {
+    process.env.DATABRICKS_HOST =
+      "https://user:secret@foo.cloud.databricks.com";
+    const client = { currentUser: { me: async () => ({ userName: "sp-1" }) } };
+    mockGetServiceClient.mockResolvedValue({ client });
+
+    const { result } = await checkAuth({});
+    expect(result.host).not.toContain("secret");
+    expect(result.host).toContain("foo.cloud.databricks.com");
   });
 
   it("errors HOST_INVALID before touching the SDK", async () => {
@@ -170,8 +201,6 @@ describe("checkAuth", () => {
     );
 
     const { result } = await checkAuth({ profile: "prod" });
-    // Action-first: tells the user what to run and to confirm the target,
-    // without redundantly repeating the profile name (it's in the command).
     expect(result.hint).toContain("databricks auth login --profile prod");
     expect(result.hint).toMatch(/confirm the profile\/host/i);
   });
@@ -209,10 +238,9 @@ describe("checkAuth", () => {
       ),
     );
 
-    // No --profile given, but the SDK fell back to DEFAULT — the hint must name it.
     const { result } = await checkAuth({});
     expect(result.hint).toContain("databricks auth login --profile DEFAULT");
-    // Not the bare, profile-less command (which would reauth the wrong profile).
+    // Not the bare command, which would reauth the wrong profile.
     expect(result.hint).not.toContain("`databricks auth login`");
   });
 
@@ -235,7 +263,6 @@ describe("checkAuth", () => {
     );
 
     const { result } = await checkAuth({});
-    // No profile/host known → generic login command + confirm-the-target note.
     expect(result.hint).toContain("databricks auth login");
     expect(result.hint).toMatch(
       /confirm the profile\/host is the one you intend/i,
@@ -248,9 +275,7 @@ describe("checkAuth", () => {
     mockGetServiceClient.mockRejectedValue(new Error(sprawling));
 
     const { result } = await checkAuth({});
-    // Human report headline is always the short, constant string...
     expect(result.detail).toBe("authentication failed");
-    // ...while the full multi-line error is preserved verbatim in raw.
     expect(result.raw).toBe(sprawling);
     expect(result.raw).toContain("first line of the failure");
     expect(result.raw).toContain("x".repeat(300));

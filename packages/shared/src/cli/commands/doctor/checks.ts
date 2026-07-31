@@ -3,7 +3,6 @@
  * probes live in `checks-existence.ts`.)
  */
 
-import { runExistenceProbe } from "./checks-existence";
 import { getServiceClient, SdkNotInstalledError } from "./databricks-client";
 import type {
   AuthCheckResult,
@@ -11,9 +10,9 @@ import type {
   LayerResult,
   ResourceTarget,
 } from "./types";
+import { errorMessage } from "./utils";
 
-/** The auth result plus the resolved client (present only on success), which
- * the orchestrator hands to the live layers so they don't rebuild it. */
+/** The auth result plus the resolved client (present only on success). */
 export interface AuthOutcome {
   result: AuthCheckResult;
   client?: unknown;
@@ -26,10 +25,27 @@ interface CurrentUserClient {
 }
 
 /**
- * Validates `DATABRICKS_HOST` before we hand it to the SDK, so an unfilled
- * placeholder (e.g. `https://...`) gets a clear message instead of the SDK's
- * opaque "cannot configure default credentials" error. Returns an error
- * message, or null when the host is acceptable or unset.
+ * Strips URL userinfo (`user:pass@`) from a host, so credentials someone
+ * embedded in `DATABRICKS_HOST` never reach the report or `--json`. Returns the
+ * input unchanged when it has no userinfo or isn't a parseable URL.
+ */
+export function sanitizeHost(host: string | undefined): string | undefined {
+  if (host === undefined) return undefined;
+  try {
+    const url = new URL(host);
+    if (!url.username && !url.password) return host;
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return host;
+  }
+}
+
+/**
+ * Validates `DATABRICKS_HOST` before the SDK sees it, so an unfilled placeholder
+ * gets a clear message instead of the SDK's opaque credentials error. Returns an
+ * error message, or null when the host is acceptable or unset.
  */
 export function validateHost(host: string | undefined): string | null {
   if (host === undefined || host.trim().length === 0) return null;
@@ -45,8 +61,7 @@ export function validateHost(host: string | undefined): string | null {
     return `DATABRICKS_HOST must be an http(s) URL: "${host}"`;
   }
 
-  // Placeholders like "https://..." parse as a URL but have a hostname with no
-  // real (dotted, alphanumeric) label.
+  // Placeholders like "https://..." parse but have no real dotted label.
   const hostname = url.hostname;
   const hasRealLabel = /[a-z0-9]/i.test(hostname) && hostname.includes(".");
   if (!hasRealLabel || /^[.\-_]+$/.test(hostname)) {
@@ -61,11 +76,14 @@ export function validateHost(host: string | undefined): string | null {
  * existence check (they all need the client).
  */
 export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
-  const host = process.env.DATABRICKS_HOST;
-  // What the report shows as the identity source: an explicit --profile, else
-  // the env var the SDK would pick up, so "which profile?" is never a mystery.
+  // Validate the raw value, but only ever store/report the sanitized one so
+  // credentials embedded in the URL (user:pass@) never reach the report/--json.
+  const rawHost = process.env.DATABRICKS_HOST;
+  const host = sanitizeHost(rawHost);
+  // The identity source shown in the report: explicit --profile, else the env
+  // var the SDK would pick up.
   const profile = options.profile ?? process.env.DATABRICKS_CONFIG_PROFILE;
-  const hostError = validateHost(host);
+  const hostError = validateHost(rawHost);
   if (hostError) {
     return {
       result: {
@@ -104,21 +122,19 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
         },
       };
     }
-    const raw = err instanceof Error ? err.message : String(err);
-    // If we didn't know the profile up front, recover the one the SDK actually
-    // resolved (embedded in its error) and mark it "(resolved)" so the header
-    // reveals which profile was used — otherwise a default fallback is invisible.
+    const raw = errorMessage(err);
+    // When no profile was given up front, recover the one the SDK resolved (it's
+    // embedded in the error) and mark it "(resolved)".
     const sdkProfile = raw.match(/--profile\s+(\S+)/)?.[1];
+    const usedProfile = profile ?? sdkProfile;
     const shownProfile =
       profile ?? (sdkProfile ? `${sdkProfile} (resolved)` : undefined);
     return {
       result: {
         status: "error",
         code: "AUTH_FAILED",
-        // Keep the headline short and let the hint explain the fix; the raw SDK
-        // message is carried separately for `--detail` / `--json`.
         detail: "authentication failed",
-        hint: authFailureHint(raw, profile),
+        hint: authFailureHint(raw, usedProfile),
         host,
         profile: shownProfile,
         raw,
@@ -128,31 +144,22 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
 }
 
 /**
- * Suggests a next action for common auth failures. Hints are phrased as
- * something to *do* (not a restatement of the error) and, since a failure may
- * mean the wrong profile/host is in play, tell the user to confirm which
- * profile/host they're targeting. Patterns are matched most specific first;
- * returns undefined for an unrecognized failure.
+ * Suggests a next action for common auth failures, matched most specific first.
+ * Returns undefined for an unrecognized failure.
+ *
+ * `profile` is the explicit --profile, else the one the SDK resolved (DEFAULT /
+ * DATABRICKS_CONFIG_PROFILE) and embedded in its error, so the login hint
+ * targets what actually failed.
  */
 function authFailureHint(
   message: string,
   profile?: string,
 ): string | undefined {
-  // The SDK resolves a profile even when the user gave none (falling back to
-  // DEFAULT / DATABRICKS_CONFIG_PROFILE), and its error embeds that name (e.g.
-  // "databricks auth login --profile DEFAULT"). Prefer the explicit profile,
-  // then the one the SDK actually used, so the hint points at the profile that
-  // truly failed — not a bare `databricks auth login` that reauths the wrong one.
-  const usedProfile = profile ?? message.match(/--profile\s+(\S+)/)?.[1];
-  const loginCmd = usedProfile
-    ? `databricks auth login --profile ${usedProfile}`
+  const loginCmd = profile
+    ? `databricks auth login --profile ${profile}`
     : "databricks auth login";
-  // The profile/host in use is already shown in the report header and in the
-  // login command, so hints don't repeat it — they just nudge the user to
-  // sanity-check the target rather than blindly re-logging-in.
-  // Network-level failure: the host is unreachable (bad workspace URL, DNS,
-  // offline, or TLS). Matched first — it's more specific than a credential
-  // problem and needs a different fix.
+  // Network-level failure (unreachable host, DNS, TLS). Matched first — more
+  // specific than a credential problem and needs a different fix.
   if (
     /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|certificate|self.signed|unable to verify|TLS/i.test(
       message,
@@ -160,7 +167,6 @@ function authFailureHint(
   ) {
     return "Check that the workspace host is correct and reachable (verify DATABRICKS_HOST or the profile's host, and that you're online).";
   }
-  // "resolve: ~/.databrickscfg has no <name> profile configured"
   if (
     /has no .* profile configured|profile .* (does not exist|not found)/i.test(
       message,
@@ -168,8 +174,7 @@ function authFailureHint(
   ) {
     return `Run \`${loginCmd}\`, or pass an existing profile via --profile.`;
   }
-  // Expired/failed CLI token, or no credentials resolved by any method — both
-  // point at the same next action: log in and verify the target.
+  // Expired/failed token, or no credentials resolved: same next action.
   if (
     /cannot get access token|refresh token|reauthenticate|databricks auth token|token .*expired|cannot configure default credentials|default auth|no .*credentials/i.test(
       message,
@@ -203,9 +208,6 @@ export async function checkConfig(
       layer: "config",
       status: target.required ? "error" : "warn",
       code: target.required ? "ENV_MISSING" : "ENV_MISSING_OPTIONAL",
-      // The env var name(s) do the work — the report bolds SCREAMING_SNAKE
-      // names. Optional resources say so: a missing optional is a warn, not a
-      // blocker.
       detail: target.required
         ? `${names} ${plural ? "are" : "is"} not set`
         : `${names} ${plural ? "are" : "is"} not set (optional)`,
@@ -214,12 +216,4 @@ export async function checkConfig(
   }
 
   return { layer: "config", status: "ok" };
-}
-
-/** Layer: existence. Dispatches to the per-type probe in `checks-existence.ts`. */
-export async function checkExistence(
-  target: ResourceTarget,
-  client: unknown,
-): Promise<LayerResult> {
-  return runExistenceProbe(client, target);
 }
