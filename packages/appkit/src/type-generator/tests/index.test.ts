@@ -11,6 +11,12 @@ import {
 } from "vitest";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
+// picocolors emits ANSI color codes when CI is set; strip them (ESC + the
+// bracketed SGR sequence) so message-content assertions match regardless of
+// the color environment.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC (\x1b) byte is the point.
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
+
 const mocks = vi.hoisted(() => ({
   generateQueriesFromDescribe: vi.fn(),
   getWarehouseState: vi.fn(),
@@ -304,11 +310,12 @@ describe("generateFromEntryPoint — query failure handling", () => {
       expect(err).toBeInstanceOf(TypegenFatalError);
       // This is the critical assertion: the message must reflect the state
       // BEFORE generation, not after (when the cache file now exists).
-      expect((err as Error).message).toMatch(/No committed type cache found/i);
-      expect((err as Error).message).toMatch(/generate-types --wait/i);
-      expect((err as Error).message).toMatch(/commit \.appkit\//i);
+      const message = stripAnsi((err as Error).message);
+      expect(message).toMatch(/No committed type cache found/i);
+      expect(message).toMatch(/generate-types --wait/i);
+      expect(message).toMatch(/commit \.appkit\//i);
       // Must NOT say "missing or stale" (the drift message):
-      expect((err as Error).message).not.toMatch(/missing or stale/i);
+      expect(message).not.toMatch(/missing or stale/i);
     }
   });
 
@@ -334,13 +341,12 @@ describe("generateFromEntryPoint — query failure handling", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(TypegenFatalError);
       // Cache existed at start → report drift (stale/missing key).
-      expect((err as Error).message).toMatch(/missing or stale/i);
-      expect((err as Error).message).toMatch(/Regenerate with/i);
-      expect((err as Error).message).toMatch(/generate-types --wait/i);
+      const message = stripAnsi((err as Error).message);
+      expect(message).toMatch(/missing or stale/i);
+      expect(message).toMatch(/Regenerate with/i);
+      expect(message).toMatch(/generate-types --wait/i);
       // Must NOT say "No committed type cache found" (the bootstrap message):
-      expect((err as Error).message).not.toMatch(
-        /No committed type cache found/i,
-      );
+      expect(message).not.toMatch(/No committed type cache found/i);
     }
   });
 });

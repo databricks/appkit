@@ -1,6 +1,5 @@
 export * from "./agent";
 export * from "./cache";
-export * from "./cli/commands/cache-paths";
 export * from "./execute";
 export * from "./genie";
 export * from "./plugin";

@@ -14,8 +14,11 @@ vi.mock("node:fs/promises", () => ({
   },
 }));
 
-// Mock getCommittedCacheDir to return a consistent test path
-vi.mock("shared", () => ({
+// Mock getCommittedCacheDir to return a consistent test path.
+// cache.ts imports it from the Node-only "shared/cli/commands/cache-paths"
+// subpath (kept out of the client-safe "shared" root barrel), so the mock must
+// target that exact specifier.
+vi.mock("shared/cli/commands/cache-paths", () => ({
   getCommittedCacheDir: () => "/test/app/.appkit",
 }));
 

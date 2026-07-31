@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getCommittedCacheDir } from "shared";
+import { getCommittedCacheDir } from "shared/cli/commands/cache-paths";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("type-generator:serving:cache");

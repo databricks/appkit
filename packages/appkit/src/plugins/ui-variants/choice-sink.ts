@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getEphemeralStateDir } from "shared";
+import { getEphemeralStateDir } from "shared/cli/commands/cache-paths";
 
 /**
  * Filename of the JSONL choices file. The agent skill discovers this file at
