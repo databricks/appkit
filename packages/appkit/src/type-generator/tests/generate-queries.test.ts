@@ -712,6 +712,37 @@ describe("generateQueriesFromDescribe", () => {
     expect(syntaxErrors).toEqual([]);
   });
 
+  test("blocking mode all-hit: makes ZERO warehouse round-trips on cache HIT", async () => {
+    const sql1 = "SELECT id FROM t1";
+    const sql2 = "SELECT name FROM t2";
+    mocks.readdir.mockResolvedValue(["t1.sql", "t2.sql"]);
+    mocks.readFile.mockResolvedValueOnce(sql1).mockResolvedValueOnce(sql2);
+    // All queries hit the cache with matching hashes.
+    mocks.loadCache.mockReturnValueOnce({
+      version: CACHE_VERSION,
+      queries: {
+        t1: { hash: hashSQL(sql1), type: CACHED_GOOD_TYPE, retry: false },
+        t2: { hash: hashSQL(sql2), type: CACHED_GOOD_TYPE, retry: false },
+      },
+    });
+
+    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
+      "/queries",
+      "wh-123",
+    );
+
+    // ZERO warehouse round-trips: no preflight probe (getWarehouse never called),
+    // no warehouse start, no DESCRIBE executions. All queries served from cache.
+    expect(mocks.getWarehouse).not.toHaveBeenCalled();
+    expect(mocks.startWarehouse).not.toHaveBeenCalled();
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
+    expect(schemas).toHaveLength(2);
+    expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
+    expect(schemas[1].type).toBe(CACHED_GOOD_TYPE);
+    expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
+  });
+
   test("stale retry-flagged cache entry is re-described, not reused", async () => {
     const sql = "SELECT id FROM t";
     mocks.readdir.mockResolvedValue(["t.sql"]);

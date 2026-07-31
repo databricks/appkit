@@ -9,6 +9,7 @@ import {
   loadCache,
   type MetricCacheEntry,
   metricCacheHash,
+  queryCacheFileExists,
   saveCache,
 } from "./cache";
 import { getErrorDiagnostic, isConnectivityError } from "./errors";
@@ -174,7 +175,21 @@ export class TypegenSyntaxError extends Error {
 export class TypegenFatalError extends Error {
   readonly queries: QueryFatalError[];
 
-  constructor(queries: QueryFatalError[], warehouseId?: string) {
+  constructor(
+    queries: QueryFatalError[],
+    warehouseId?: string,
+    cacheInitialized: boolean = true,
+  ) {
+    // Distinguish bootstrap (no committed cache yet) from drift (cache exists but is stale/missing key).
+    // Bootstrap → operator needs to initialize; drift → operator needs to regenerate the affected key.
+    const nextStep = cacheInitialized
+      ? // Drift: cache file exists but is missing/stale for the failing query/metric.
+        warehouseId
+        ? `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against warehouse ${pc.bold(warehouseId)} and commit ${pc.bold(".appkit/")}.`
+        : `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")}.`
+      : // Bootstrap: no committed cache found; operator needs to initialize from scratch.
+        `No committed type cache found (${pc.bold(".appkit/")}). Run ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")} before building without warehouse access.`;
+
     super(
       formatTypegenFailureMessage({
         syntaxErrors: [],
@@ -187,9 +202,7 @@ export class TypegenFatalError extends Error {
           "authentication failure",
           "SDK configuration errors",
         ],
-        nextStep: warehouseId
-          ? `Verify access to warehouse ${pc.bold(warehouseId)} and rerun type generation.`
-          : "Verify warehouse access and rerun type generation.",
+        nextStep,
       }),
     );
     this.name = "TypegenFatalError";
@@ -391,7 +404,8 @@ export async function generateFromEntryPoint(options: {
     throw new TypegenSyntaxError(syntaxErrors, warehouseId, fatalErrors);
   }
   if (fatalErrors.length > 0) {
-    throw new TypegenFatalError(fatalErrors, warehouseId);
+    const cacheExists = await queryCacheFileExists();
+    throw new TypegenFatalError(fatalErrors, warehouseId, cacheExists);
   }
 
   logger.debug("Type generation complete!");

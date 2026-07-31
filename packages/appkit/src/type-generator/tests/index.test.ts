@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   startWarehouse: vi.fn(),
   waitUntilRunning: vi.fn(),
   executeStatement: vi.fn(),
+  queryCacheFileExists: vi.fn(),
   // In-memory stand-in for the on-disk typegen cache file. `undefined` means
   // "no file yet"; otherwise it holds the serialized JSON exactly as
   // saveCache would have written it, so load/save round-trips behave like
@@ -64,6 +65,7 @@ vi.mock("../cache", async (importOriginal) => {
     saveCache: vi.fn(async (cache: unknown) => {
       mocks.cacheFile.contents = JSON.stringify(cache, null, 2);
     }),
+    queryCacheFileExists: mocks.queryCacheFileExists,
   };
 });
 
@@ -269,6 +271,57 @@ describe("generateFromEntryPoint — query failure handling", () => {
 
     expect(fs.existsSync(outFile)).toBe(true);
     expect(fs.readFileSync(outFile, "utf-8")).toContain("bad_auth");
+  });
+
+  test("bootstrap case: distinguishes missing cache from drift in fatal message", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [unknownSchema("query1")],
+      syntaxErrors: [],
+      fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
+    });
+    // Simulate first checkout: no committed cache file yet.
+    mocks.queryCacheFileExists.mockResolvedValue(false);
+
+    try {
+      await generateFromEntryPoint({
+        outFile,
+        queryFolder: "/queries",
+        warehouseId: "wh-1",
+      });
+      expect.fail("should have thrown TypegenFatalError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(TypegenFatalError);
+      expect((err as Error).message).toMatch(/No committed type cache found/i);
+      expect((err as Error).message).toMatch(/generate-types --wait/i);
+      expect((err as Error).message).toMatch(/commit \.appkit\//i);
+    }
+  });
+
+  test("drift case: cache exists but is stale/missing for failing query", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [unknownSchema("query1")],
+      syntaxErrors: [],
+      fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
+    });
+    // Cache file exists but is out of date (the query's key is missing or stale).
+    mocks.queryCacheFileExists.mockResolvedValue(true);
+
+    try {
+      await generateFromEntryPoint({
+        outFile,
+        queryFolder: "/queries",
+        warehouseId: "wh-1",
+      });
+      expect.fail("should have thrown TypegenFatalError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(TypegenFatalError);
+      expect((err as Error).message).toMatch(/missing or stale/i);
+      expect((err as Error).message).toMatch(/Regenerate with/i);
+      expect((err as Error).message).toMatch(/generate-types --wait/i);
+      expect((err as Error).message).not.toMatch(
+        /No committed type cache found/i,
+      );
+    }
   });
 });
 
