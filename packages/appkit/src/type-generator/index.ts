@@ -329,6 +329,13 @@ export async function generateFromEntryPoint(options: {
 
   logger.debug("Starting type generation...");
 
+  // Snapshot BEFORE any generation writes the cache: generateQueriesFromDescribe
+  // and syncMetricViewsTypes both persist to .appkit/types-cache.json during the
+  // run, so reading existence at the throw site would always report "exists".
+  // Capturing here is what lets the fatal message tell bootstrap (no cache yet)
+  // apart from drift (cache present but stale/missing the failing key).
+  const cacheExistedAtStart = await queryCacheFileExists();
+
   let queryRegistry: QuerySchema[] = [];
   let syntaxErrors: QuerySyntaxError[] = [];
   let fatalErrors: QueryFatalError[] = [];
@@ -404,8 +411,7 @@ export async function generateFromEntryPoint(options: {
     throw new TypegenSyntaxError(syntaxErrors, warehouseId, fatalErrors);
   }
   if (fatalErrors.length > 0) {
-    const cacheExists = await queryCacheFileExists();
-    throw new TypegenFatalError(fatalErrors, warehouseId, cacheExists);
+    throw new TypegenFatalError(fatalErrors, warehouseId, cacheExistedAtStart);
   }
 
   logger.debug("Type generation complete!");

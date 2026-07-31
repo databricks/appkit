@@ -1,0 +1,207 @@
+{
+  "version": "3",
+  "queries": {
+    "app_activity_heatmap": {
+      "hash": "744281be86b14c2b14ed76b94060e4af",
+      "type": "{\n    name: \"app_activity_heatmap\";\n    parameters: {\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType STRING */\n      day_of_week: string;\n      /** @sqlType DECIMAL(35,2) */\n      spend: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "apps_list": {
+      "hash": "4b7393b43f8e7beaa52174ed4d918c04",
+      "type": "{\n    name: \"apps_list\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType STRING */\n      id: string;\n      /** @sqlType STRING */\n      name: string;\n      /** @sqlType STRING */\n      creator: string;\n      /** @sqlType STRING */\n      tags: string;\n      /** @sqlType DECIMAL(38,6) */\n      totalSpend: number;\n      /** @sqlType DATE */\n      createdAt: string;\n    }>;\n  }",
+      "retry": false
+    },
+    "cost_recommendations": {
+      "hash": "730c7d8b5e2726981088b5975157b0da",
+      "type": "{\n    name: \"cost_recommendations\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType INT */\n      dummy: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_fare_distribution": {
+      "hash": "d280e96e06e1b5189d8fe734901e6e72",
+      "type": "{\n    name: \"dashboard_fare_distribution\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      fare_bucket: string;\n      /** @sqlType BIGINT */\n      trip_count: number;\n      /** @sqlType DOUBLE */\n      avg_distance: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_hourly_heatmap": {
+      "hash": "827ca45db36ccf6f9c86c653c6175d69",
+      "type": "{\n    name: \"dashboard_hourly_heatmap\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMin: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMax: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType INT */\n      day_of_week: number;\n      /** @sqlType INT */\n      hour_of_day: number;\n      /** @sqlType BIGINT */\n      trip_count: number;\n      /** @sqlType DOUBLE */\n      avg_fare: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_kpi_sparklines": {
+      "hash": "1b3c14b03e1de455ff78f2d3feaec047",
+      "type": "{\n    name: \"dashboard_kpi_sparklines\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMin: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMax: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType DATE */\n      trip_date: string;\n      /** @sqlType BIGINT */\n      trip_count: number;\n      /** @sqlType DOUBLE */\n      total_revenue: number;\n      /** @sqlType DOUBLE */\n      avg_fare: number;\n      /** @sqlType DOUBLE */\n      avg_distance: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_kpis": {
+      "hash": "24ef19b8b1218edb8f247f6d79c915ff",
+      "type": "{\n    name: \"dashboard_kpis\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMin: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMax: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType BIGINT */\n      total_trips: number;\n      /** @sqlType DOUBLE */\n      avg_fare: number;\n      /** @sqlType DOUBLE */\n      avg_distance: number;\n      /** @sqlType DOUBLE */\n      max_fare: number;\n      /** @sqlType DOUBLE */\n      min_fare: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_top_zone": {
+      "hash": "fe3ed4ef76e4e7eff329c88072a44fe9",
+      "type": "{\n    name: \"dashboard_top_zone\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMin: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMax: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType INT */\n      pickup_zip: number;\n      /** @sqlType BIGINT */\n      trip_count: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_top_zones": {
+      "hash": "363c554c5a060ee2236f4e9fa1cf3c61",
+      "type": "{\n    name: \"dashboard_top_zones\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMin: SQLStringMarker;\n      /** STRING - use sql.string() */\n      fareMax: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      pickup_zip: string;\n      /** @sqlType BIGINT */\n      trip_count: number;\n      /** @sqlType DOUBLE */\n      total_revenue: number;\n      /** @sqlType DOUBLE */\n      avg_fare: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "dashboard_trips_over_time": {
+      "hash": "eb8bed65ed02787ed050a016472b72f6",
+      "type": "{\n    name: \"dashboard_trips_over_time\";\n    parameters: {\n      /** STRING - use sql.string() */\n      dateFrom: SQLStringMarker;\n      /** STRING - use sql.string() */\n      dateTo: SQLStringMarker;\n      /** STRING - use sql.string() */\n      pickupZip: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType DATE */\n      trip_date: string;\n      /** @sqlType BIGINT */\n      trip_count: number;\n      /** @sqlType DOUBLE */\n      avg_fare: number;\n      /** @sqlType DOUBLE */\n      total_revenue: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "example": {
+      "hash": "aeb02ed3e8a6c77279099406f8709543",
+      "type": "{\n    name: \"example\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType BOOLEAN */\n      \"(1 = 1)\": boolean;\n    }>;\n  }",
+      "retry": false
+    },
+    "spend_data": {
+      "hash": "caa0430652fe15eff658e48e6dac2446",
+      "type": "{\n    name: \"spend_data\";\n    parameters: {\n      /** STRING - use sql.string() */\n      groupBy: SQLStringMarker;\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n      /** STRING - use sql.string() */\n      appId: SQLStringMarker;\n      /** STRING - use sql.string() */\n      creator: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      group_key: string;\n      /** @sqlType TIMESTAMP */\n      aggregation_period: string;\n      /** @sqlType DECIMAL(38,6) */\n      cost_usd: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "spend_summary": {
+      "hash": "bbe188624c3f5904c3a7593cb32982d5",
+      "type": "{\n    name: \"spend_summary\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType DECIMAL(33,0) */\n      total: number;\n      /** @sqlType DECIMAL(33,0) */\n      average: number;\n      /** @sqlType DECIMAL(33,0) */\n      forecasted: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "sql_helpers_test": {
+      "hash": "1322df4ba9c107e8d23e2a04bae860c5",
+      "type": "{\n    name: \"sql_helpers_test\";\n    parameters: {\n      /** STRING - use sql.string() */\n      stringParam: SQLStringMarker;\n      /** NUMERIC - use sql.numeric() */\n      numberParam: SQLNumberMarker;\n      /** BOOLEAN - use sql.boolean() */\n      booleanParam: SQLBooleanMarker;\n      /** DATE - use sql.date() */\n      dateParam: SQLDateMarker;\n      /** TIMESTAMP - use sql.timestamp() */\n      timestampParam: SQLTimestampMarker;\n      /** STRING - use sql.string() */\n      binaryParam: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      string_value: string;\n      /** @sqlType INT */\n      number_value: number;\n      /** @sqlType BOOLEAN */\n      boolean_value: boolean;\n      /** @sqlType STRING */\n      date_value: string;\n      /** @sqlType STRING */\n      timestamp_value: string;\n      /** @sqlType BINARY */\n      binary_value: string;\n      /** @sqlType STRING */\n      binary_hex: string;\n      /** @sqlType INT */\n      binary_length: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "top_contributors": {
+      "hash": "2d58759cca2fe31dae06475a23080120",
+      "type": "{\n    name: \"top_contributors\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType DECIMAL(38,6) */\n      total_cost_usd: number;\n    }>;\n  }",
+      "retry": false
+    },
+    "untagged_apps": {
+      "hash": "5946262b49710b8ab458d1bf950ff8c9",
+      "type": "{\n    name: \"untagged_apps\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType STRING */\n      creator: string;\n      /** @sqlType DECIMAL(38,6) */\n      total_cost_usd: number;\n      /** @sqlType DECIMAL(38,10) */\n      avg_period_cost_usd: number;\n    }>;\n  }",
+      "retry": false
+    }
+  },
+  "metrics": {
+    "customers": {
+      "hash": "26269cc37c4ea648a8a9cafb66a402dd",
+      "schema": {
+        "key": "customers",
+        "source": "appkit_demo.public.customer_metrics",
+        "lane": "obo",
+        "measures": [
+          {
+            "name": "active_accounts",
+            "type": "bigint",
+            "isMeasure": true,
+            "displayName": "Active Accounts",
+            "format": "#,##0"
+          },
+          {
+            "name": "churn_rate",
+            "type": "decimal",
+            "isMeasure": true,
+            "displayName": "Churn Rate"
+          },
+          {
+            "name": "avg_ltv",
+            "type": "double",
+            "isMeasure": true,
+            "displayName": "Average LTV",
+            "format": "$#,##0.00"
+          }
+        ],
+        "dimensions": [
+          {
+            "name": "segment",
+            "type": "string",
+            "isMeasure": false,
+            "displayName": "Customer Segment"
+          },
+          {
+            "name": "region",
+            "type": "string",
+            "isMeasure": false,
+            "displayName": "Region"
+          },
+          {
+            "name": "csm_email",
+            "type": "string",
+            "isMeasure": false,
+            "displayName": "CSM Email"
+          }
+        ]
+      },
+      "retry": false
+    },
+    "revenue": {
+      "hash": "8d0592a864778470213ca22517f21fae",
+      "schema": {
+        "key": "revenue",
+        "source": "appkit_demo.public.revenue_metrics",
+        "lane": "sp",
+        "measures": [
+          {
+            "name": "mrr",
+            "type": "double",
+            "isMeasure": true,
+            "displayName": "Monthly Recurring Revenue",
+            "format": "$#,##0.00"
+          },
+          {
+            "name": "arr",
+            "type": "double",
+            "isMeasure": true,
+            "description": "Annualized contract value across all active subscriptions",
+            "displayName": "Annual Recurring Revenue",
+            "format": "$#,##0.00"
+          },
+          {
+            "name": "new_arr",
+            "type": "double",
+            "isMeasure": true,
+            "displayName": "New ARR",
+            "format": "$#,##0.00"
+          },
+          {
+            "name": "churned_arr",
+            "type": "double",
+            "isMeasure": true,
+            "displayName": "Churned ARR",
+            "format": "$#,##0.00"
+          }
+        ],
+        "dimensions": [
+          {
+            "name": "region",
+            "type": "string",
+            "isMeasure": false,
+            "displayName": "Region"
+          },
+          {
+            "name": "segment",
+            "type": "string",
+            "isMeasure": false,
+            "displayName": "Customer Segment"
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp_ltz",
+            "isMeasure": false,
+            "displayName": "Subscription Start",
+            "timeGrains": [
+              "day",
+              "hour",
+              "minute",
+              "month",
+              "quarter",
+              "week",
+              "year"
+            ]
+          }
+        ]
+      },
+      "retry": false
+    }
+  }
+}

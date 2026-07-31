@@ -65,7 +65,9 @@ vi.mock("../cache", async (importOriginal) => {
     saveCache: vi.fn(async (cache: unknown) => {
       mocks.cacheFile.contents = JSON.stringify(cache, null, 2);
     }),
-    queryCacheFileExists: mocks.queryCacheFileExists,
+    queryCacheFileExists: vi.fn(
+      async () => mocks.cacheFile.contents !== undefined,
+    ),
   };
 });
 
@@ -273,14 +275,23 @@ describe("generateFromEntryPoint — query failure handling", () => {
     expect(fs.readFileSync(outFile, "utf-8")).toContain("bad_auth");
   });
 
-  test("bootstrap case: distinguishes missing cache from drift in fatal message", async () => {
-    mocks.generateQueriesFromDescribe.mockResolvedValue({
-      schemas: [unknownSchema("query1")],
-      syntaxErrors: [],
-      fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
+  test("bootstrap case: no cache at start → reports bootstrap message even if cache is written during generation", async () => {
+    // Start with no cache file (fresh checkout).
+    mocks.cacheFile.contents = undefined;
+    mocks.generateQueriesFromDescribe.mockImplementation(async () => {
+      // During generation, the query path's saveCache writes to the in-memory file.
+      // This simulates the bug scenario: if we checked existence AFTER this runs,
+      // we'd incorrectly report "drift" instead of "bootstrap".
+      mocks.cacheFile.contents = JSON.stringify({
+        version: "3",
+        queries: {},
+      });
+      return {
+        schemas: [unknownSchema("query1")],
+        syntaxErrors: [],
+        fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
+      };
     });
-    // Simulate first checkout: no committed cache file yet.
-    mocks.queryCacheFileExists.mockResolvedValue(false);
 
     try {
       await generateFromEntryPoint({
@@ -291,20 +302,27 @@ describe("generateFromEntryPoint — query failure handling", () => {
       expect.fail("should have thrown TypegenFatalError");
     } catch (err) {
       expect(err).toBeInstanceOf(TypegenFatalError);
+      // This is the critical assertion: the message must reflect the state
+      // BEFORE generation, not after (when the cache file now exists).
       expect((err as Error).message).toMatch(/No committed type cache found/i);
       expect((err as Error).message).toMatch(/generate-types --wait/i);
       expect((err as Error).message).toMatch(/commit \.appkit\//i);
+      // Must NOT say "missing or stale" (the drift message):
+      expect((err as Error).message).not.toMatch(/missing or stale/i);
     }
   });
 
-  test("drift case: cache exists but is stale/missing for failing query", async () => {
+  test("drift case: cache exists at start → reports drift message", async () => {
+    // Pre-seed the cache (simulating a previous successful run).
+    mocks.cacheFile.contents = JSON.stringify({
+      version: "3",
+      queries: { existing_query: { hash: "abc", type: "{}", retry: false } },
+    });
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [unknownSchema("query1")],
       syntaxErrors: [],
       fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
     });
-    // Cache file exists but is out of date (the query's key is missing or stale).
-    mocks.queryCacheFileExists.mockResolvedValue(true);
 
     try {
       await generateFromEntryPoint({
@@ -315,9 +333,11 @@ describe("generateFromEntryPoint — query failure handling", () => {
       expect.fail("should have thrown TypegenFatalError");
     } catch (err) {
       expect(err).toBeInstanceOf(TypegenFatalError);
+      // Cache existed at start → report drift (stale/missing key).
       expect((err as Error).message).toMatch(/missing or stale/i);
       expect((err as Error).message).toMatch(/Regenerate with/i);
       expect((err as Error).message).toMatch(/generate-types --wait/i);
+      // Must NOT say "No committed type cache found" (the bootstrap message):
       expect((err as Error).message).not.toMatch(
         /No committed type cache found/i,
       );
