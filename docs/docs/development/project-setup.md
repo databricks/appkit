@@ -24,6 +24,7 @@ my-app/
 ├── config/
 │   └── queries/
 │       └── my_query.sql
+├── .appkit/                  # committed type cache (do NOT gitignore)
 ├── app.yaml
 ├── package.json
 └── tsconfig.json
