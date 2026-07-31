@@ -81,14 +81,21 @@ describe("serving cache", () => {
   });
 
   describe("saveServingCache", () => {
-    test("writes cache to file", async () => {
+    test("writes cache to file with sorted endpoints", async () => {
       vi.mocked(fs.writeFile).mockResolvedValue();
 
       const cache: ServingCache = {
         version: CACHE_VERSION,
         endpoints: {
-          test: {
+          zebra: {
             hash: "xyz",
+            requestType: "{}",
+            responseType: "{}",
+            chunkType: null,
+            requestKeys: [],
+          },
+          apple: {
+            hash: "abc",
             requestType: "{}",
             responseType: "{}",
             chunkType: null,
@@ -99,9 +106,18 @@ describe("serving cache", () => {
 
       await saveServingCache(cache);
 
+      // Endpoints should be sorted alphabetically in the output
+      const expectedSorted: ServingCache = {
+        version: CACHE_VERSION,
+        endpoints: {
+          apple: cache.endpoints.apple,
+          zebra: cache.endpoints.zebra,
+        },
+      };
+
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining(".appkit-serving-types-cache.json"),
-        JSON.stringify(cache, null, 2),
+        expect.stringContaining("serving-types-cache.json"),
+        JSON.stringify(expectedSorted, null, 2),
         "utf8",
       );
     });

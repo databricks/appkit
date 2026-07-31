@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getCommittedCacheDir } from "shared/cli/commands/cache-paths";
 import { createLogger } from "../logging/logger";
 import type { MetricSchema } from "./mv-registry/types";
 
@@ -38,7 +39,7 @@ export interface MetricCacheEntry {
 /**
  * Structural gate for reviving a cached metric entry at partition time.
  *
- * The cache file lives in `node_modules/.databricks` and is plain JSON —
+ * The cache file lives in the committed `.appkit/` dir and is plain JSON —
  * hand-edits, truncation, or a stale writer can leave entries whose shape no
  * longer matches {@link MetricCacheEntry}. A malformed entry must read as a
  * cache MISS (re-describe) rather than crash the pass or render revived
@@ -87,13 +88,7 @@ interface Cache {
 }
 
 export const CACHE_VERSION = "3";
-const CACHE_FILE = ".appkit-types-cache.json";
-const CACHE_DIR = path.join(
-  process.cwd(),
-  "node_modules",
-  ".databricks",
-  "appkit",
-);
+const CACHE_FILE = "types-cache.json";
 
 /**
  * Hash the SQL query
@@ -120,9 +115,10 @@ export function metricCacheHash(source: string, lane: string): string {
  * @returns - the cache
  */
 export async function loadCache(): Promise<Cache> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
+  const cacheDir = getCommittedCacheDir();
+  const cachePath = path.join(cacheDir, CACHE_FILE);
   try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
+    await fs.mkdir(cacheDir, { recursive: true });
 
     const raw = await fs.readFile(cachePath, "utf8");
     const cache = JSON.parse(raw) as Cache;
@@ -138,10 +134,53 @@ export async function loadCache(): Promise<Cache> {
 }
 
 /**
- * Save the cache to the file system
+ * Save the cache to the file system with deterministic serialization
+ * (sorted top-level keys for no-op regen diffs and merge-friendly output).
  * @param cache - cache object to save
  */
 export async function saveCache(cache: Cache): Promise<void> {
-  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
-  await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf8");
+  const cacheDir = getCommittedCacheDir();
+  const cachePath = path.join(cacheDir, CACHE_FILE);
+
+  // Ensure the cache directory exists
+  await fs.mkdir(cacheDir, { recursive: true });
+
+  // Rebuild cache with sorted top-level record keys for deterministic output.
+  // This ensures a no-op regen produces an identical file (no spurious diffs)
+  // and unrelated query/metric changes don't collide in git merges.
+  const sorted: Cache = {
+    version: cache.version,
+    queries: Object.fromEntries(
+      Object.keys(cache.queries)
+        .sort()
+        .map((key) => [key, cache.queries[key]]),
+    ),
+  };
+
+  // Include sorted metrics if present
+  if (cache.metrics) {
+    const metrics = cache.metrics;
+    sorted.metrics = Object.fromEntries(
+      Object.keys(metrics)
+        .sort()
+        .map((key) => [key, metrics[key]]),
+    );
+  }
+
+  await fs.writeFile(cachePath, JSON.stringify(sorted, null, 2), "utf8");
+}
+
+/**
+ * Whether the committed query/metric cache file exists on disk. Lets the
+ * blocking-mode fatal path distinguish an uninitialized cache (bootstrap:
+ * run `generate-types --wait` against a warehouse and commit `.appkit/`) from
+ * a drifted key (regenerate the affected query/metric).
+ */
+export async function queryCacheFileExists(): Promise<boolean> {
+  try {
+    await fs.access(path.join(getCommittedCacheDir(), CACHE_FILE));
+    return true;
+  } catch {
+    return false;
+  }
 }

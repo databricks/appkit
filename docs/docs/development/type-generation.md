@@ -82,7 +82,27 @@ Pass `--wait` for CI and production builds, where accurate types must be present
 npx @databricks/appkit generate-types --wait
 ```
 
-In blocking mode the generator starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes your queries. It fails only when the configured warehouse no longer exists (deleted/deleting), so a transient outage or a cold warehouse degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
+In blocking mode the generator skips the warehouse entirely for any query whose types are already in the [type cache](#type-cache) (a cache **hit** makes zero warehouse round-trips). Only a cache **miss** contacts the warehouse: it starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes the query. A miss that cannot be resolved to a real type — a deleted warehouse, or (see below) a CI environment with no warehouse access — **fails the build** rather than shipping `result: unknown`. A transient connectivity blip still degrades gracefully. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
+
+## Type cache
+
+Type generation is backed by a per-app cache so that unchanged queries never pay for a repeat `DESCRIBE`. The cache lives in a committed `.appkit/` directory at your app root:
+
+- `.appkit/types-cache.json` — query and metric-view DESCRIBE results
+- `.appkit/serving-types-cache.json` — model-serving endpoint schemas
+
+**`.appkit/` is a committed build artifact — check it into git; do not add it to `.gitignore`.** Committing it is what lets a blocking (`--wait`) build succeed with **no warehouse access**: on a fresh `git checkout` + `pnpm install`, every query is already a cache hit, so the build makes zero warehouse round-trips. (Ephemeral coordination state — a background-worker lock and the UI-variant choices file — stays under `node_modules/.databricks/appkit/` and is *not* committed.)
+
+The cache serializes deterministically (top-level keys sorted), so a no-op regeneration produces a no-op diff and unrelated query changes don't collide in merges.
+
+### Deploying without warehouse access
+
+If your CI/CD environment cannot reach a SQL warehouse (for example, an authorization boundary removes warehouse access from the deploy pipeline), a blocking build still works **as long as the committed `.appkit/` cache covers every query** — all hits, no warehouse needed.
+
+This imposes a rollout ordering: **produce and commit `.appkit/` while the warehouse is still reachable, then remove warehouse access.** A build that runs after warehouse access is gone with an uninitialized or incomplete cache fails loudly (never silently degrades to `unknown`), and the error message tells you which case you hit:
+
+- **`No committed type cache found`** (no `.appkit/` yet) — run `generate-types --wait` against a warehouse and commit `.appkit/`.
+- **`The committed .appkit/ cache is missing or stale`** (a query was added or changed since the cache was built, or its entry is missing) — regenerate against a warehouse and commit the updated `.appkit/`.
 
 ## Metric-view types
 

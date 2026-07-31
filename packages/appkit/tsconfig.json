@@ -7,6 +7,9 @@
       "@/*": ["src/*"],
       "@tools/*": ["../../tools/*"],
       "shared": ["../../packages/shared/src"],
+      "shared/cli/commands/cache-paths": [
+        "../../packages/shared/src/cli/commands/cache-paths"
+      ],
       "@databricks/lakebase": ["../../packages/lakebase/src"]
     }
   },

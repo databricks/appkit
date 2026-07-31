@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getEphemeralStateDir } from "./cache-paths.js";
 
 /**
  * How long a spawn lock is considered fresh. A held lock newer than this means a
@@ -17,9 +18,10 @@ export const SPAWN_LOCK_STALE_MS = 6 * 60 * 1000;
 /**
  * Resolve the on-disk path of the single-flight spawn lock for a project.
  *
- * Lives alongside the type-generator cache (`node_modules/.databricks/appkit/`)
- * so it shares the same already-creatable, gitignored, per-project location and
- * doesn't introduce a new directory. The lock is keyed only by project root, so
+ * Lives in the ephemeral state dir (`node_modules/.databricks/appkit/`) — a
+ * gitignored, per-project location cleared on a clean install. This is
+ * transient coordination state, deliberately kept separate from the committed
+ * `.appkit/` type cache. The lock is keyed only by project root, so
  * concurrent `generate-types` invocations for the same project (postinstall +
  * predev, say) contend for one lock and only one wins the spawn.
  *
@@ -28,10 +30,7 @@ export const SPAWN_LOCK_STALE_MS = 6 * 60 * 1000;
  */
 export function getSpawnLockPath(rootDir: string): string {
   return path.join(
-    rootDir,
-    "node_modules",
-    ".databricks",
-    "appkit",
+    getEphemeralStateDir(rootDir),
     ".appkit-typegen-worker.lock",
   );
 }
