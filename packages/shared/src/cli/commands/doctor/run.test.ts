@@ -17,6 +17,11 @@ vi.mock("./databricks-client", () => ({
   })),
 }));
 
+// Real probes by default; individual tests override to simulate a hung probe.
+vi.mock("./checks-existence", async (importActual) => ({
+  ...(await importActual<typeof import("./checks-existence")>()),
+}));
+
 describe("runDoctor", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -81,5 +86,57 @@ describe("runDoctor", () => {
 
     spy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("bounds a hung probe with a timeout instead of hanging forever", async () => {
+    vi.useFakeTimers();
+    const existence = await import("./checks-existence");
+    // A probe that never settles — the reachable-but-unresponsive endpoint case.
+    vi.spyOn(existence, "runExistenceProbe").mockReturnValue(
+      new Promise(() => {}),
+    );
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-hang-"));
+    fs.writeFileSync(
+      path.join(dir, "appkit.plugins.json"),
+      JSON.stringify({
+        version: "2.0",
+        plugins: {
+          analytics: {
+            requiredByTemplate: true,
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  resourceKey: "sql-warehouse",
+                  alias: "SQL Warehouse",
+                  permission: "CAN_USE",
+                  fields: { id: { env: "DOCTOR_HANG_ENV" } },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      }),
+    );
+    const spy = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    process.env.DOCTOR_HANG_ENV = "wh-123"; // config passes → reach existence
+
+    const runPromise = runDoctor({});
+    // Fire the deadline; without the timeout this promise would never resolve.
+    await vi.advanceTimersByTimeAsync(10_000);
+    const report = await runPromise;
+
+    const existenceLayer = report.resources[0].layers.find(
+      (l) => l.layer === "existence",
+    );
+    expect(existenceLayer?.status).toBe("error");
+    expect(existenceLayer?.code).toBe("PROBE_TIMEOUT");
+
+    delete process.env.DOCTOR_HANG_ENV;
+    spy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+    vi.useRealTimers();
   });
 });

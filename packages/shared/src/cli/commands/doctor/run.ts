@@ -15,6 +15,7 @@ import {
   type ResourceTarget,
   STATUS_SEVERITY,
 } from "./types";
+import { errorMessage, TimeoutError, withTimeout } from "./utils";
 
 function worst(a: CheckStatus, b: CheckStatus): CheckStatus {
   return STATUS_SEVERITY[b] > STATUS_SEVERITY[a] ? b : a;
@@ -57,7 +58,16 @@ async function checkResource(
     });
     rolled = worst(rolled, "skipped");
   } else {
-    const result = await runExistenceProbe(client, target);
+    // A reachable-but-unresponsive endpoint must not hang doctor, so bound the
+    // probe; a timeout becomes an error row rather than a hung process.
+    const result = await withTimeout(runExistenceProbe(client, target)).catch(
+      (err): LayerResult => ({
+        layer: "existence",
+        status: "error",
+        code: err instanceof TimeoutError ? "PROBE_TIMEOUT" : "PROBE_FAILED",
+        detail: `probe did not complete: ${errorMessage(err)}`,
+      }),
+    );
     layers.push(result);
     rolled = worst(rolled, result.status);
   }

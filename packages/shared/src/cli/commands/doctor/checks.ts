@@ -10,7 +10,7 @@ import type {
   LayerResult,
   ResourceTarget,
 } from "./types";
-import { errorMessage } from "./utils";
+import { errorMessage, withTimeout } from "./utils";
 
 /** The auth result plus the resolved client (present only on success). */
 export interface AuthOutcome {
@@ -98,7 +98,11 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
 
   try {
     const { client } = await getServiceClient(options.profile);
-    const me = await (client as CurrentUserClient).currentUser.me();
+    // Bound the live call so an unresponsive workspace can't hang the CLI; a
+    // timeout throws and is reported as an auth failure below.
+    const me = await withTimeout(
+      (client as CurrentUserClient).currentUser.me(),
+    );
     const who = me.userName ?? me.id ?? "unknown";
 
     return {

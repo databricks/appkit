@@ -192,6 +192,23 @@ describe("checkAuth", () => {
     expect(result.hint).toBeUndefined(); // unrecognized failure → no guess
   });
 
+  it("fails (not hangs) when currentUser.me() never responds", async () => {
+    vi.useFakeTimers();
+    process.env.DATABRICKS_HOST = "https://foo.cloud.databricks.com";
+    // Client resolves, but the live me() call never settles.
+    mockGetServiceClient.mockResolvedValue({
+      client: { currentUser: { me: () => new Promise(() => {}) } },
+    });
+
+    const authPromise = checkAuth({});
+    await vi.advanceTimersByTimeAsync(10_000);
+    const { result } = await authPromise;
+    expect(result.status).toBe("error");
+    expect(result.code).toBe("AUTH_FAILED");
+    expect(result.raw).toMatch(/timed out/i);
+    vi.useRealTimers();
+  });
+
   it("hints to reauthenticate on an expired/failed CLI token (real SDK message)", async () => {
     process.env.DATABRICKS_HOST = "https://foo.cloud.databricks.com";
     mockGetServiceClient.mockRejectedValue(

@@ -20,6 +20,14 @@ so the reported problem is the *root* cause, not a symptom.
 is the `existence` layer's job. (`DATABRICKS_HOST` is the exception — `auth`
 validates it structurally, since a bad host means no client can be built.)
 
+Every live call (`auth`'s `currentUser.me()` and each `existence` probe) is
+bounded by a 10s wall-clock deadline (`withTimeout`). A reachable-but-unresponsive
+endpoint must never hang doctor — it's a CI gate that has to return — so a
+timeout surfaces as an error (`PROBE_TIMEOUT`, or an auth failure) rather than a
+hung process. The race can't cancel the underlying request, but it stops doctor
+*waiting* on it. (Lakebase connections are separately bounded at 10s by the
+pool's `connectionTimeoutMillis`.)
+
 ## Which plugins are checked
 
 `plugin sync` writes `appkit.plugins.json` cataloguing *every* plugin the
