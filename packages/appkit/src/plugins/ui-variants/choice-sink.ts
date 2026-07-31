@@ -1,22 +1,31 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getEphemeralStateDir } from "shared";
 
 /**
- * Path of the JSONL choices file, relative to the app's working directory.
- * A coding agent reads it to pick up the developer's in-browser confirmation
- * and finalize the chosen variant.
+ * Filename of the JSONL choices file. The agent skill discovers this file at
+ * the ephemeral state directory (under node_modules/).
+ */
+const UI_CHOICES_FILENAME = ".appkit-ui-choices.jsonl";
+
+/**
+ * Default absolute path to the JSONL choices file: ephemeral state dir
+ * (node_modules/.databricks/appkit/) + the contract filename. Kept
+ * ephemeral & gitignored; NOT part of the committed .appkit/ relocation.
  *
- * Under `node_modules/`, so it's gitignored and cleared on a clean install.
- * Each line is spent on read — the agent removes it once the choice is
- * finalized.
+ * A coding agent reads it to pick up the developer's in-browser confirmation
+ * and finalize the chosen variant. Each line is spent on read — the agent
+ * removes it once the choice is finalized.
  *
  * CONTRACT: the `databricks-app-variants` agent skill (in the
- * databricks-agent-skills repo) discovers the choices file at this path.
- * Changing this value silently breaks that skill's file discovery — update the
- * skill's `find` path in the same change.
+ * databricks-agent-skills repo) discovers the choices file at this absolute
+ * path. Changing this value silently breaks that skill's file discovery —
+ * update the skill's `find` path in the same change.
  */
-const UI_CHOICES_FILE =
-  "node_modules/.databricks/appkit/.appkit-ui-choices.jsonl";
+const DEFAULT_UI_CHOICES_PATH = path.join(
+  getEphemeralStateDir(),
+  UI_CHOICES_FILENAME,
+);
 
 /**
  * One recorded variant choice.
@@ -42,14 +51,16 @@ export interface UiChoiceRecord {
 
 /**
  * File store for confirmed variant choices: upserts choices into
- * {@link UI_CHOICES_FILE}, one line per `<Variants>` id.
+ * {@link DEFAULT_UI_CHOICES_PATH}, one line per `<Variants>` id.
  *
  * The store is **keyed and latest-wins**: at most one record per `blockId`, and
  * recording an existing `blockId` replaces it rather than appending, so the file
  * always reflects the current choice for each block.
  *
- * The file is resolved against `process.cwd()`, so it lands under whatever
- * directory the dev server runs from. Concurrent confirms are serialized behind
+ * By default, the file lands at the ephemeral state directory under
+ * `node_modules/.databricks/appkit/`. Callers may override the path (e.g., for
+ * testing), in which case it is resolved against `process.cwd()`; absolute
+ * paths are passed through unchanged. Concurrent confirms are serialized behind
  * an internal queue so their read-modify-write can't interleave and lose an
  * update.
  *
@@ -59,8 +70,8 @@ export class FileChoiceStore {
   private readonly filePath: string;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(relativePath: string = UI_CHOICES_FILE) {
-    this.filePath = path.resolve(process.cwd(), relativePath);
+  constructor(pathArg: string = DEFAULT_UI_CHOICES_PATH) {
+    this.filePath = path.resolve(process.cwd(), pathArg);
   }
 
   record(record: UiChoiceRecord): Promise<void> {

@@ -110,6 +110,7 @@ This creates:
 
 - `dist/server.js` - Compiled server bundle
 - `client/dist/` - Bundled client assets
+- `.appkit/` - TypeScript type definitions cache (committed to git; do not ignore)
 
 ### Production
 

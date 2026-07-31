@@ -18,9 +18,10 @@ export const SPAWN_LOCK_STALE_MS = 6 * 60 * 1000;
 /**
  * Resolve the on-disk path of the single-flight spawn lock for a project.
  *
- * Lives alongside the type-generator cache (`node_modules/.databricks/appkit/`)
- * so it shares the same already-creatable, gitignored, per-project location and
- * doesn't introduce a new directory. The lock is keyed only by project root, so
+ * Lives in the ephemeral state dir (`node_modules/.databricks/appkit/`) — a
+ * gitignored, per-project location cleared on a clean install. This is
+ * transient coordination state, deliberately kept separate from the committed
+ * `.appkit/` type cache. The lock is keyed only by project root, so
  * concurrent `generate-types` invocations for the same project (postinstall +
  * predev, say) contend for one lock and only one wins the spawn.
  *
