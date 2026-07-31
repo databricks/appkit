@@ -178,17 +178,25 @@ export class TypegenFatalError extends Error {
   constructor(
     queries: QueryFatalError[],
     warehouseId?: string,
-    cacheInitialized: boolean = true,
+    cacheInitialized?: boolean,
   ) {
-    // Distinguish bootstrap (no committed cache yet) from drift (cache exists but is stale/missing key).
-    // Bootstrap → operator needs to initialize; drift → operator needs to regenerate the affected key.
-    const nextStep = cacheInitialized
-      ? // Drift: cache file exists but is missing/stale for the failing query/metric.
-        warehouseId
-        ? `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against warehouse ${pc.bold(warehouseId)} and commit ${pc.bold(".appkit/")}.`
-        : `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")}.`
-      : // Bootstrap: no committed cache found; operator needs to initialize from scratch.
-        `No committed type cache found (${pc.bold(".appkit/")}). Run ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")} before building without warehouse access.`;
+    // The cache snapshot is optional: callers whose failure relates to the type
+    // cache pass it to get bootstrap/drift remediation; callers with an unrelated
+    // fatal (e.g. a malformed definitions.json) omit it and get generic wording.
+    const nextStep =
+      cacheInitialized === undefined
+        ? // No cache snapshot: the failure is unrelated to the cache — don't
+          // misdirect the operator toward regenerating/committing `.appkit/`.
+          `Fix the ${pc.bold("FATAL")} error(s) above, then re-run ${pc.bold("generate-types")}.`
+        : // Distinguish bootstrap (no committed cache yet) from drift (cache exists but is stale/missing key).
+          // Bootstrap → operator needs to initialize; drift → operator needs to regenerate the affected key.
+          cacheInitialized
+          ? // Drift: cache file exists but is missing/stale for the failing query/metric.
+            warehouseId
+            ? `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against warehouse ${pc.bold(warehouseId)} and commit ${pc.bold(".appkit/")}.`
+            : `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")}.`
+          : // Bootstrap: no committed cache found; operator needs to initialize from scratch.
+            `No committed type cache found (${pc.bold(".appkit/")}). Run ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")} before building without warehouse access.`;
 
     super(
       formatTypegenFailureMessage({

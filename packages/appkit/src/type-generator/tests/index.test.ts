@@ -727,6 +727,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
     expect(error).toBeInstanceOf(TypegenFatalError);
     expect((error as Error).message).toContain("definitions.json");
+    // A config parse error is unrelated to the type cache: the remediation must
+    // NOT tell the operator to regenerate/commit `.appkit/` (that's the cache
+    // bootstrap/drift wording, reserved for callers that pass the cache snapshot).
+    expect((error as Error).message).not.toContain(".appkit/");
+    expect((error as Error).message).toContain("Fix the");
     // Query types were written before the metric config was read.
     expect(fs.existsSync(outFile)).toBe(true);
   });
