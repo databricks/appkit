@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getEphemeralStateDir } from "./cache-paths.js";
 
 /**
  * How long a spawn lock is considered fresh. A held lock newer than this means a
@@ -28,10 +29,7 @@ export const SPAWN_LOCK_STALE_MS = 6 * 60 * 1000;
  */
 export function getSpawnLockPath(rootDir: string): string {
   return path.join(
-    rootDir,
-    "node_modules",
-    ".databricks",
-    "appkit",
+    getEphemeralStateDir(rootDir),
     ".appkit-typegen-worker.lock",
   );
 }
