@@ -85,6 +85,13 @@ export async function getLakebasePool(
     throw err;
   }
 
-  const pool = appkit.createLakebasePool({ workspaceClient: client });
+  // Silence Lakebase's own logger. It defaults to an error-only console logger
+  // that dumps the raw SDK ApiError (stack + full response blob) to stderr on a
+  // failed token fetch. doctor classifies and prints that failure itself, so the
+  // library's dump is just noise on top of our clean one-line report.
+  const pool = appkit.createLakebasePool({
+    workspaceClient: client,
+    logger: { error: false },
+  });
   return pool as unknown as LakebasePoolHandle;
 }

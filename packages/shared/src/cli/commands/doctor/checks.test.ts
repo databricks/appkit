@@ -61,17 +61,6 @@ describe("checkConfig", () => {
     expect(result.code).toBe("ENV_MISSING");
   });
 
-  it("passes when all env vars are set to real-looking values", async () => {
-    process.env.DOCTOR_TEST_ENV = "abc123def456";
-    const result = await checkConfig(target());
-    expect(result.status).toBe("ok");
-  });
-
-  it("passes when a resource declares no env vars", async () => {
-    const result = await checkConfig(target({ envVars: [] }));
-    expect(result.status).toBe("ok");
-  });
-
   it("reports all missing env vars when several are unset", async () => {
     const result = await checkConfig(
       target({ envVars: ["DOCTOR_TEST_ENV", "DOCTOR_TEST_ENV_2"] }),

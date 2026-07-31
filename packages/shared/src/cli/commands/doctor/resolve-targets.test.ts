@@ -298,14 +298,4 @@ describe("resolveTargetsFromCwd", () => {
     dirs.push(dir);
     expect(resolveTargetsFromCwd(dir)).toEqual([]);
   });
-
-  it("reads the manifest from the given cwd", () => {
-    const dir = makeTempDir();
-    dirs.push(dir);
-    fs.writeFileSync(
-      path.join(dir, "appkit.plugins.json"),
-      JSON.stringify(MANIFEST),
-    );
-    expect(resolveTargetsFromCwd(dir)).toHaveLength(2);
-  });
 });

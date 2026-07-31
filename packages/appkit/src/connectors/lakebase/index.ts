@@ -13,11 +13,9 @@ import { createLogger } from "../../logging/logger";
  * @returns PostgreSQL pool with appkit integration
  */
 export function createLakebasePool(config?: Partial<LakebasePoolConfig>): Pool {
-  const logger = createLogger("connectors:lakebase");
-
   return createLakebasePoolBase({
+    logger: createLogger("connectors:lakebase"),
     ...config,
-    logger,
   });
 }
 

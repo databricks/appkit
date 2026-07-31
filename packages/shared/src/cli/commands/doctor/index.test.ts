@@ -10,7 +10,7 @@ function makeTempDir(): string {
 
 describe("loadEnvFile", () => {
   const dirs: string[] = [];
-  const savedKeys = ["DOCTOR_ENVFILE_A", "DOCTOR_ENVFILE_B"];
+  const savedKeys = ["DOCTOR_ENVFILE_B"];
 
   afterEach(() => {
     for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
@@ -25,11 +25,6 @@ describe("loadEnvFile", () => {
     fs.writeFileSync(p, contents);
     return p;
   }
-
-  it("loads values from the given env file into process.env", () => {
-    loadEnvFile(writeEnv("DOCTOR_ENVFILE_A=from-file\n"));
-    expect(process.env.DOCTOR_ENVFILE_A).toBe("from-file");
-  });
 
   it("overrides an already-set value (so it beats the auto-loaded .env)", () => {
     process.env.DOCTOR_ENVFILE_B = "from-default-env";

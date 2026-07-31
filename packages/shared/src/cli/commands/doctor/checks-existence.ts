@@ -266,7 +266,7 @@ function lakebaseAuthHint(message: string): string | undefined {
     return (
       "Lakebase uses an OAuth token as the password, so this usually means the" +
       " PGUSER/role doesn't match your identity. Check PGUSER is your exact" +
-      " login (the literal `user@domain`, not URL-encoded)."
+      " login."
     );
   }
   return undefined;
