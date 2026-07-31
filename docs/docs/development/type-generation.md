@@ -101,8 +101,8 @@ If your CI/CD environment cannot reach a SQL warehouse (for example, an authoriz
 
 This imposes a rollout ordering: **produce and commit `.appkit/` while the warehouse is still reachable, then remove warehouse access.** A build that runs after warehouse access is gone with an uninitialized or incomplete cache fails loudly (never silently degrades to `unknown`), and the error message tells you which case you hit:
 
-- **Uninitialized cache** (no `.appkit/` yet) — run `generate-types --wait` against a warehouse and commit `.appkit/`.
-- **Drifted cache** (a query changed since the cache was built) — regenerate the affected query against a warehouse and commit the updated `.appkit/`.
+- **`No committed type cache found`** (no `.appkit/` yet) — run `generate-types --wait` against a warehouse and commit `.appkit/`.
+- **`The committed .appkit/ cache is missing or stale`** (a query was added or changed since the cache was built, or its entry is missing) — regenerate against a warehouse and commit the updated `.appkit/`.
 
 ## Metric-view types
 
