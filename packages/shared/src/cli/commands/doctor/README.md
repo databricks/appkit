@@ -154,6 +154,12 @@ The report labels hints `Hint:`.
 Exit code is non-zero if auth, any resource, or any wiring finding is in an
 `error` state, so `appkit doctor` can gate CI / pre-deploy.
 
+The report's `summary` counts *everything* with a status — resources, the auth
+check, and wiring findings — so a `--json` consumer can trust
+`summary.error === 0` to mean "nothing failed". The report also carries a
+top-level `exitCode` (0/1) as the single unambiguous pass/fail signal. Both are
+computed once in `runDoctor`, so `--json` and the human report never disagree.
+
 Checks run as the identity that runs doctor (the developer locally, the app in
 deployment).
 

@@ -78,8 +78,6 @@ async function checkResource(
 export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const { result: auth, client } = await checkAuth(options);
 
-  const summary = { ok: 0, warn: 0, error: 0, skipped: 0 };
-
   // Resolve and config-check resources even when auth failed, so a bad
   // connection still surfaces config problems instead of hiding them.
   const cwd = process.cwd();
@@ -96,9 +94,17 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const resources = await Promise.all(
     targets.map((target) => checkResource(target, client)),
   );
-  for (const result of resources) {
-    summary[result.status] += 1;
-  }
+  const wiring = checkWiring(bundle, targets);
 
-  return { auth, resources, wiring: checkWiring(bundle, targets), summary };
+  // The summary counts *everything* with a status — resources, the auth check,
+  // and wiring findings — so a --json consumer reading summary.error can trust
+  // it, and the human/JSON outputs share one source of truth.
+  const summary = { ok: 0, warn: 0, error: 0, skipped: 0 };
+  for (const result of resources) summary[result.status] += 1;
+  summary[auth.status] += 1;
+  for (const finding of wiring) summary[finding.status] += 1;
+
+  const exitCode = summary.error > 0 ? 1 : 0;
+
+  return { auth, resources, wiring, summary, exitCode };
 }

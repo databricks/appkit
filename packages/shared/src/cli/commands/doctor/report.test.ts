@@ -8,6 +8,7 @@ function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
     resources: [],
     wiring: [],
     summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
+    exitCode: 0,
     ...overrides,
   };
 }
@@ -71,6 +72,7 @@ describe("printReport ordering", () => {
       ],
       wiring: [],
       summary: { ok: 1, warn: 1, error: 1, skipped: 1 },
+      exitCode: 1,
     };
 
     printReport(report);
@@ -157,57 +159,28 @@ describe("printReport ordering", () => {
     expect(wiringIdx).toBeLessThan(okIdx);
   });
 
-  it("folds an auth error into the summary error count", () => {
+  it("renders the authoritative summary verbatim (no re-folding)", () => {
+    // summary is built in runDoctor and already includes auth + wiring; the
+    // renderer must print it as-is, not recompute.
     const lines = capture(() =>
       printReport(
         report({
           auth: { status: "error", detail: "bad creds" },
-          summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
+          summary: { ok: 0, warn: 0, error: 1, skipped: 0 },
+          exitCode: 1,
         }),
       ),
     );
-    // Auth failure counts as an error even though no resource errored.
     expect(lines.some((l) => l.startsWith("1 error"))).toBe(true);
   });
 });
 
 describe("exitCodeFor", () => {
-  it("is 0 when auth ok and no resource errors", () => {
-    expect(
-      exitCodeFor(
-        report({ summary: { ok: 2, warn: 1, error: 0, skipped: 1 } }),
-      ),
-    ).toBe(0);
-  });
-
-  it("is 1 when auth failed", () => {
-    expect(exitCodeFor(report({ auth: { status: "error" } }))).toBe(1);
-  });
-
-  it("is 1 when any resource errored", () => {
-    expect(
-      exitCodeFor(
-        report({ summary: { ok: 0, warn: 0, error: 1, skipped: 0 } }),
-      ),
-    ).toBe(1);
-  });
-
-  it("is 1 when a wiring finding errored (gates pre-deploy)", () => {
-    expect(
-      exitCodeFor(
-        report({
-          summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
-          wiring: [
-            {
-              status: "error",
-              code: "VALUEFROM_UNBOUND",
-              label: "X",
-              detail: "x",
-            },
-          ],
-        }),
-      ),
-    ).toBe(1);
+  // The exit code is computed once in runDoctor and stored on the report;
+  // exitCodeFor just surfaces it. (Aggregation is covered in run.test.ts.)
+  it("returns the report's exitCode field", () => {
+    expect(exitCodeFor(report({ exitCode: 0 }))).toBe(0);
+    expect(exitCodeFor(report({ exitCode: 1 }))).toBe(1);
   });
 });
 

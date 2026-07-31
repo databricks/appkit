@@ -33,12 +33,29 @@ describe("runDoctor", () => {
     expect(report.auth.code).toBe("AUTH_OK");
   });
 
-  it("resolves no resources when cwd has no manifest, with an empty summary", async () => {
-    // Point cwd at a dir guaranteed to have no appkit.plugins.json.
+  it("counts the auth check in the summary (no resources ⇒ ok auth = 1 ok)", async () => {
     const spy = vi.spyOn(process, "cwd").mockReturnValue("/nonexistent-doctor");
     const report = await runDoctor({});
     expect(report.resources).toEqual([]);
-    expect(report.summary).toEqual({ ok: 0, warn: 0, error: 0, skipped: 0 });
+    // Auth ok, no resources/wiring → summary reflects the auth check alone.
+    expect(report.summary).toEqual({ ok: 1, warn: 0, error: 0, skipped: 0 });
+    expect(report.exitCode).toBe(0);
+    spy.mockRestore();
+  });
+
+  it("folds an auth failure into summary.error and exitCode (the --json gap)", async () => {
+    const { getServiceClient } = await import("./databricks-client");
+    vi.mocked(getServiceClient).mockRejectedValueOnce(new Error("no creds"));
+    // No manifest ⇒ no resources; only the failed auth contributes.
+    const spy = vi.spyOn(process, "cwd").mockReturnValue("/nonexistent-doctor");
+
+    const report = await runDoctor({});
+
+    expect(report.auth.status).toBe("error");
+    // The bug this guards: a --json consumer reading summary.error must see 1,
+    // not 0, and exitCode must be non-zero.
+    expect(report.summary.error).toBe(1);
+    expect(report.exitCode).toBe(1);
     spy.mockRestore();
   });
 

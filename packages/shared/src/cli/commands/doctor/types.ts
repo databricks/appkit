@@ -89,7 +89,15 @@ export interface DoctorReport {
   auth: AuthCheckResult;
   resources: ResourceCheckResult[];
   wiring: WiringFinding[];
+  /**
+   * Authoritative counts across *everything* that has a status — resources,
+   * the auth check, and wiring findings — not just resources. A `--json`
+   * consumer can trust `summary.error === 0` to mean "nothing failed".
+   */
   summary: { ok: number; warn: number; error: number; skipped: number };
+  /** Process exit code (0 ok, 1 if anything errored). The single unambiguous
+   * pass/fail signal for programmatic consumers. */
+  exitCode: number;
 }
 
 export interface DoctorOptions {

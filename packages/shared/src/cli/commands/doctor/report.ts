@@ -225,23 +225,10 @@ export function printReport(report: DoctorReport, detail = false): void {
     row.print();
   });
 
-  // Fold auth and wiring findings into the counts so nothing that affects the
-  // exit code reads as "0 errors".
-  const authError = auth.status === "error" ? 1 : 0;
-  let wiringErrors = 0;
-  let wiringWarns = 0;
-  for (const w of wiring) {
-    if (w.status === "error") wiringErrors += 1;
-    else if (w.status === "warn") wiringWarns += 1;
-  }
+  // `summary` already counts auth + wiring (built authoritatively in run.ts),
+  // so render it directly — no re-folding, and it matches what --json emits.
   console.log("");
-  console.log(
-    summaryLine({
-      ...summary,
-      error: summary.error + authError + wiringErrors,
-      warn: summary.warn + wiringWarns,
-    }),
-  );
+  console.log(summaryLine(summary));
   // Point at --detail when there's more to show and it wasn't requested.
   if (!detail && auth.raw) {
     console.log(pc.dim("\nRun with --detail for full error output."));
@@ -262,10 +249,8 @@ export function printReportJson(report: DoctorReport, detail = false): void {
   console.log(JSON.stringify(emitted, null, 2));
 }
 
-/** Non-zero if auth, any resource, or any wiring finding errored, so
- * `appkit doctor` can gate CI / pre-deploy. */
+/** The report's exit code (non-zero if anything errored), so `appkit doctor`
+ * can gate CI / pre-deploy. Computed in `runDoctor`; this reads the field. */
 export function exitCodeFor(report: DoctorReport): number {
-  if (report.auth.status === "error") return 1;
-  if (report.summary.error > 0) return 1;
-  return report.wiring.some((w) => w.status === "error") ? 1 : 0;
+  return report.exitCode;
 }
