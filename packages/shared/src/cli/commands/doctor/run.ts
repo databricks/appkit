@@ -75,6 +75,34 @@ async function checkResource(
   return { target, status: rolled, layers };
 }
 
+/**
+ * Runs {@link checkResource} behind a guaranteed boundary: any unexpected throw
+ * (a probe's own `.catch` handles the common case, but this covers config
+ * errors and anything else) becomes a single error row instead of rejecting the
+ * `Promise.all` and losing the entire report to a stack trace.
+ */
+async function checkResourceSafe(
+  target: ResourceTarget,
+  client: unknown,
+): Promise<ResourceCheckResult> {
+  try {
+    return await checkResource(target, client);
+  } catch (err) {
+    return {
+      target,
+      status: "error",
+      layers: [
+        {
+          layer: "existence",
+          status: "error",
+          code: "PROBE_EXCEPTION",
+          detail: `unexpected error while checking: ${errorMessage(err)}`,
+        },
+      ],
+    };
+  }
+}
+
 export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const { result: auth, client } = await checkAuth(options);
 
@@ -92,7 +120,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   // Probes are independent reads; Promise.all preserves order for a
   // deterministic report.
   const resources = await Promise.all(
-    targets.map((target) => checkResource(target, client)),
+    targets.map((target) => checkResourceSafe(target, client)),
   );
   const wiring = checkWiring(bundle, targets);
 

@@ -156,4 +156,53 @@ describe("runDoctor", () => {
     fs.rmSync(dir, { recursive: true, force: true });
     vi.useRealTimers();
   });
+
+  it("maps an unexpected throw to a PROBE_EXCEPTION row (never crashes the report)", async () => {
+    const existence = await import("./checks-existence");
+    // A synchronous throw — before withTimeout wraps it — so it bypasses the
+    // probe's own .catch and would otherwise reject Promise.all.
+    vi.spyOn(existence, "runExistenceProbe").mockImplementation(() => {
+      throw new Error("kaboom");
+    });
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-throw-"));
+    fs.writeFileSync(
+      path.join(dir, "appkit.plugins.json"),
+      JSON.stringify({
+        version: "2.0",
+        plugins: {
+          analytics: {
+            requiredByTemplate: true,
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  resourceKey: "sql-warehouse",
+                  alias: "SQL Warehouse",
+                  permission: "CAN_USE",
+                  fields: { id: { env: "DOCTOR_THROW_ENV" } },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      }),
+    );
+    const spy = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    process.env.DOCTOR_THROW_ENV = "wh-123"; // config passes → reach existence
+
+    // Must resolve (not reject) — the whole report survives one bad resource.
+    const report = await runDoctor({});
+    expect(report.resources).toHaveLength(1);
+    expect(report.resources[0].status).toBe("error");
+    const layer = report.resources[0].layers.find(
+      (l) => l.code === "PROBE_EXCEPTION",
+    );
+    expect(layer?.detail).toContain("kaboom");
+
+    delete process.env.DOCTOR_THROW_ENV;
+    spy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
