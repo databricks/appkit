@@ -84,7 +84,7 @@ describe("checkWiring", () => {
     expect(findings.some((f) => f.code === "BUNDLE_REF_MISSING")).toBe(false);
   });
 
-  it("warns when a plugin needs an env var app.yaml doesn't provide", () => {
+  it("warns for an OPTIONAL plugin's env var that app.yaml doesn't provide", () => {
     const findings = checkWiring(
       info({
         // app.yaml provides one env, bindings exist for it.
@@ -100,25 +100,34 @@ describe("checkWiring", () => {
           ],
         ]),
       }),
-      [target({ envVars: ["DATABRICKS_WAREHOUSE_ID", "DATABRICKS_MISSING"] })],
+      [
+        target({
+          required: false,
+          envVars: ["DATABRICKS_WAREHOUSE_ID", "DATABRICKS_MISSING"],
+        }),
+      ],
     );
     const unwired = findings.find((f) => f.code === "ENV_UNWIRED");
     expect(unwired?.status).toBe("warn");
     expect(unwired?.label).toBe("DATABRICKS_MISSING");
   });
 
-  it("warns even when app.yaml has NO env block (used plugin, zero wiring)", () => {
+  it("errors for a REQUIRED plugin's unwired env var, gating the exit code", () => {
+    // The "works locally, breaks on deploy" case: a required env is set via
+    // local .env but has no app.yaml entry, so it's unset in the deployed
+    // container — a guaranteed break, so it must be an error, not a warning.
     const findings = checkWiring(
       info({ present: true }), // empty bindings + empty envToBinding
       [
         target({
+          required: true,
           alias: "SQL Warehouse",
           envVars: ["DATABRICKS_WAREHOUSE_ID"],
         }),
       ],
     );
     const unwired = findings.find((f) => f.code === "ENV_UNWIRED");
-    expect(unwired?.status).toBe("warn");
+    expect(unwired?.status).toBe("error");
     expect(unwired?.label).toBe("DATABRICKS_WAREHOUSE_ID");
     expect(unwired?.detail).toMatch(/unset in the deployed app/i);
   });
