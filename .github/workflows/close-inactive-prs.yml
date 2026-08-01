@@ -22,7 +22,7 @@ jobs:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
     steps:
-      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
         with:
           # Only operate on pull requests, leave issues untouched.
           days-before-issue-stale: -1
