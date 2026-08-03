@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type express from "express";
@@ -8,7 +9,6 @@ import { createLogger } from "../../logging";
 import { type ExecutionResult, Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
-import { getServingCachePath } from "../../type-generator/serving/cache";
 import { servingInvokeDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
@@ -66,7 +66,14 @@ export class ServingPlugin extends Plugin {
   }
 
   async setup(): Promise<void> {
-    this.schemaAllowlists = await loadEndpointSchemas(getServingCachePath());
+    const cacheFile = path.join(
+      process.cwd(),
+      "node_modules",
+      ".databricks",
+      "appkit",
+      ".appkit-serving-types-cache.json",
+    );
+    this.schemaAllowlists = await loadEndpointSchemas(cacheFile);
     if (this.schemaAllowlists.size > 0) {
       logger.debug(
         "Loaded schema allowlists for %d endpoint(s)",
