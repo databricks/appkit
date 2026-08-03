@@ -587,11 +587,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect((error as Error).message).toContain("revenue");
     expect((error as Error).message).toContain("DESCRIBE exploded");
 
-    // Write-first semantics: the degraded artifacts still ship before the throw.
-    expect(fs.existsSync(metricFile)).toBe(true);
+    // Phase 1: the degraded metric write is suppressed in blocking mode (committed types preserved).
+    expect(fs.existsSync(metricFile)).toBe(false);
   });
 
-  test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate", async () => {
+  test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate, Phase 1 suppresses write", async () => {
     writeMetricConfig();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -601,6 +601,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       // a per-key failure. Unlike a bad source (which `--wait` fails), a not-ready
       // warehouse stays a soft degrade even under `--wait`, so infra flakiness
       // can't break the build (mirrors the STOPPED-resolve preflight case).
+      // Per Phase 1 anti-clobber: degraded artifacts are NOT written in blocking
+      // mode when there are no failures (to preserve committed good types).
       await expect(
         generateFromEntryPoint({
           outFile,
@@ -616,10 +618,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
       const warned = warnSpy.mock.calls.flat().map(String).join("\n");
       expect(warned).not.toContain("metric sync failed");
-      // Permissive artifacts still ship.
-      const declarations = fs.readFileSync(metricFile, "utf-8");
-      expect(declarations).toContain('"revenue"');
-      expect(declarations).toContain("measureKeys: string");
+      // Phase 1: degraded artifacts are suppressed, not written (to preserve committed types).
+      expect(fs.existsSync(metricFile)).toBe(false);
     } finally {
       warnSpy.mockRestore();
       logSpy.mockRestore();
@@ -698,7 +698,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   });
 
-  test("blocking + DELETED: fails through the query path's fatal pathway (TypegenFatalError after artifacts are written)", async () => {
+  test("blocking + DELETED: fails through the query path's fatal pathway (TypegenFatalError, committed types untouched)", async () => {
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("DELETED");
 
@@ -726,10 +726,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-    // Write-first semantics match query fatals: degraded artifacts exist.
-    const declarations = fs.readFileSync(metricFile, "utf-8");
-    expect(declarations).toContain('"revenue"');
-    expect(declarations).toContain("measureKeys: string");
+    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is NEVER cached (mirrors the query path): the key is
     // left uncached so a later pass re-probes, and no stale/sticky entry can be
@@ -738,7 +736,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(metrics.revenue).toBeUndefined();
   });
 
-  test("blocking + preflight wait rejects with a timeout: fatal after artifacts (no silent stall)", async () => {
+  test("blocking + preflight wait rejects with a timeout: fatal, committed types untouched (no silent stall)", async () => {
     // A timed-out wait is deterministic, not a connectivity blip: surface it as
     // fatal rather than falling through to DESCRIBE a not-ready warehouse — the
     // ~5-min stall that still "succeeds". (Hybrid: warehouse-level → fatal.)
@@ -782,10 +780,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect.objectContaining({ maxMs: 300_000 }),
     );
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    // ... but degraded artifacts are still written before the throw.
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      "measureKeys: string",
-    );
+    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is not cached — the key stays uncached for the next
     // pass to re-probe.
@@ -793,10 +789,12 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(metrics.revenue).toBeUndefined();
   });
 
-  test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw", async () => {
+  test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw, Phase 1 suppresses write", async () => {
     // A non-RUNNING *resolve* (not a throw) for a startable state is soft: fall
     // through to DESCRIBE, which degrades on the still-cold warehouse. Only a
     // DELETED/DELETING resolve (or a thrown deterministic error) is fatal.
+    // Per Phase 1 anti-clobber: degraded artifacts are NOT written in blocking
+    // mode when there are no failures (to preserve committed good types).
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("STARTING");
     mocks.waitUntilRunning.mockResolvedValue("STOPPED");
@@ -839,9 +837,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
     // degraded the key per Phase 1 semantics.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      "measureKeys: string",
-    );
+    // Phase 1: degraded artifacts are suppressed, not written (to preserve committed types).
+    expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is not cached; the key stays uncached and the next
     // describe-capable pass re-probes it (convergence via re-describe, not via a
@@ -857,7 +854,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // STARTING probe → wait-only; a DELETED resolve is fatal there too.
     ["STARTING", false],
   ])(
-    "blocking + warehouse deleted mid-wait (probe read %s): fatal after artifacts, degraded outcome not cached",
+    "blocking + warehouse deleted mid-wait (probe read %s): fatal, committed types untouched, degraded outcome not cached",
     async (probedState, startsWarehouse) => {
       writeMetricConfig();
       mocks.getWarehouseState.mockResolvedValue(probedState);
@@ -891,10 +888,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       // The DESCRIBE batch is skipped — nothing can answer it.
       expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-      // Degraded artifacts are still written before the throw.
-      const declarations = fs.readFileSync(metricFile, "utf-8");
-      expect(declarations).toContain('"revenue"');
-      expect(declarations).toContain("measureKeys: string");
+      // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+      expect(fs.existsSync(metricFile)).toBe(false);
 
       // The degraded outcome is not cached — no sticky entry to serve later.
       const metrics =
@@ -1794,4 +1789,304 @@ describe("generateFromEntryPoint — metric cache section", () => {
       );
     },
   );
+});
+
+// ── Phase 1: Write suppression for blocking mode with degraded types ──
+describe("generateFromEntryPoint — Phase 1: anti-clobber for blocking mode", () => {
+  const antiClobberDir = path.join(__dirname, "__output_anti_clobber__");
+  const queryFolder = path.join(antiClobberDir, "queries");
+  const metricViewsFolder = path.join(antiClobberDir, "metric-views");
+  const outFile = path.join(antiClobberDir, "generated", "analytics.d.ts");
+  const metricFile = path.join(antiClobberDir, "generated", "metric-views.d.ts");
+
+  const degradedQuerySchema = (name: string) => ({
+    name,
+    type: `{ name: "${name}"; parameters: Record<string, never>; result: unknown; }`,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.cacheFile.contents = undefined;
+    fs.rmSync(antiClobberDir, { recursive: true, force: true });
+    fs.mkdirSync(queryFolder, { recursive: true });
+    fs.mkdirSync(metricViewsFolder, { recursive: true });
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [],
+      syntaxErrors: [],
+      fatalErrors: [],
+    });
+  });
+
+  afterAll(() => {
+    fs.rmSync(antiClobberDir, { recursive: true, force: true });
+  });
+
+  test("blocking mode + degraded query (no errors): no write to outFile (queries .d.ts)", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [degradedQuerySchema("offline_query")],
+      syntaxErrors: [],
+      fatalErrors: [],
+    });
+
+    // Pre-write a "good" committed file so we can verify it's NOT overwritten
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    const committedContent =
+      "// Committed good types\nexport const GOOD_VERSION = true;";
+    fs.writeFileSync(outFile, committedContent, "utf-8");
+
+    // Run in blocking mode with degraded query and NO errors
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // The committed file must NOT be overwritten with degraded types
+    const finalContent = fs.readFileSync(outFile, "utf-8");
+    expect(finalContent).toBe(committedContent);
+    expect(finalContent).not.toContain("offline_query");
+  });
+
+  test("blocking mode + non-degraded query: writes to outFile normally", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [
+        {
+          name: "good_query",
+          type: `{ name: "good_query"; parameters: Record<string, never>; result: Array<{ id: number; }> }`,
+        },
+      ],
+      syntaxErrors: [],
+      fatalErrors: [],
+    });
+
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // File should be written with good types
+    const content = fs.readFileSync(outFile, "utf-8");
+    expect(content).toContain("interface QueryRegistry");
+    expect(content).toContain("good_query");
+  });
+
+  test("non-blocking mode + degraded query: writes to outFile anyway", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [degradedQuerySchema("offline_query")],
+      syntaxErrors: [],
+      fatalErrors: [],
+    });
+
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "non-blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // In non-blocking mode, the file is written even with degraded types
+    const content = fs.readFileSync(outFile, "utf-8");
+    expect(content).toContain("interface QueryRegistry");
+    expect(content).toContain("offline_query");
+  });
+
+  test("blocking mode + degraded metric (no failures): no write to metric-views.d.ts", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+
+    // Pre-write a "good" committed metric file
+    fs.mkdirSync(path.dirname(metricFile), { recursive: true });
+    const committedMetricContent =
+      "// Committed good metric types\nexport const GOOD_METRIC = true;";
+    fs.writeFileSync(metricFile, committedMetricContent, "utf-8");
+
+    // Inject a fetcher that returns PENDING (non-terminal, triggers degradation with NO failures)
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+        metricFetcher: async () => ({
+          statement_id: "stmt-mock",
+          status: { state: "PENDING" },
+        }),
+      }),
+    ).resolves.toBeUndefined();
+
+    // The committed metric file must NOT be overwritten with degraded types
+    const finalMetricContent = fs.readFileSync(metricFile, "utf-8");
+    expect(finalMetricContent).toBe(committedMetricContent);
+    expect(finalMetricContent).not.toContain("revenue");
+  });
+
+  test("blocking mode + degraded query WITH syntax errors: no write to outFile, still throws", async () => {
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [degradedQuerySchema("bad_query")],
+      syntaxErrors: [{ name: "bad_query", message: "Table not found" }],
+      fatalErrors: [],
+    });
+
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+      mode: "blocking",
+    }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(TypegenSyntaxError);
+    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    expect(fs.existsSync(outFile)).toBe(false);
+  });
+
+  test("blocking mode + non-degraded metric: writes to metric-views.d.ts normally", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+
+    const describeResponse: DatabricksStatementExecutionResponse = {
+      statement_id: "stmt-mock",
+      status: { state: "SUCCEEDED" },
+      result: {
+        data_array: [
+          [
+            JSON.stringify({
+              columns: [
+                {
+                  name: "total_revenue",
+                  type: "DECIMAL(38,2)",
+                  is_measure: true,
+                },
+                { name: "region", type: "STRING", is_measure: false },
+              ],
+            }),
+          ],
+        ],
+      },
+    };
+
+    mocks.getWarehouseState.mockResolvedValue("RUNNING");
+    mocks.executeStatement.mockResolvedValue(describeResponse);
+
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // File should be written with good types
+    const content = fs.readFileSync(metricFile, "utf-8");
+    expect(content).toContain("interface MetricRegistry");
+    expect(content).toContain("revenue");
+    expect(content).toContain('"total_revenue": number');
+  });
+
+  test("non-blocking mode + degraded metric: writes to metric-views.d.ts anyway", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+
+    mocks.getWarehouseState.mockResolvedValue("STOPPED");
+
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "non-blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // In non-blocking mode, the file is written even with degraded types
+    const content = fs.readFileSync(metricFile, "utf-8");
+    expect(content).toContain("interface MetricRegistry");
+    expect(content).toContain("revenue");
+    expect(content).toContain("measureKeys: string"); // Permissive degraded type
+  });
+
+  test("blocking mode + degraded query (no syntax/fatal errors): resolves without write", async () => {
+    // When a query is degraded but there are no syntax or fatal errors,
+    // the function resolves normally. In blocking mode, the degraded write
+    // is suppressed, so outFile is not written.
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [degradedQuerySchema("offline_query")],
+      syntaxErrors: [],
+      fatalErrors: [],
+    });
+
+    await expect(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-1",
+        mode: "blocking",
+      }),
+    ).resolves.toBeUndefined();
+
+    // The file was not written because the query was degraded in blocking mode
+    expect(fs.existsSync(outFile)).toBe(false);
+  });
+
+  test("blocking mode + degraded query WITH fatal errors (auth/bad-id): no write to outFile, still throws TypegenFatalError", async () => {
+    // This test covers the fresh-CI-checkout fatal-degrade clobber-prevention case:
+    // a degraded schema result with fatal errors (not syntax errors) should NOT write
+    // artifacts in blocking mode, yet should still throw TypegenFatalError.
+    mocks.generateQueriesFromDescribe.mockResolvedValue({
+      schemas: [
+        {
+          name: "bad_query",
+          type: `{ name: "bad_query"; parameters: Record<string, never>; result: unknown; }`,
+        },
+      ],
+      syntaxErrors: [],
+      fatalErrors: [{ name: "bad_query", message: "warehouse wh-1: auth failed" }],
+    });
+
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+      mode: "blocking",
+    }).then(
+      () => {
+        throw new Error("expected generateFromEntryPoint to reject");
+      },
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    expect(fs.existsSync(outFile)).toBe(false);
+  });
 });

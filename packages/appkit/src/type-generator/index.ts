@@ -57,6 +57,24 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
+/**
+ * Detects if a query schema has degraded to `result: unknown`.
+ * A degraded query cannot be distinguished from a successful one that simply
+ * has no result columns (both emit `result: unknown`), so we conservatively
+ * treat any `result: unknown` as potentially degraded for write-suppression
+ * purposes in blocking mode.
+ */
+function isQueryDegraded(schema: QuerySchema): boolean {
+  return schema.type.includes("result: unknown");
+}
+
+/**
+ * Detects if any metric schemas are degraded (marked with `degraded: true`).
+ */
+function hasAnyDegradedMetrics(schemas: MetricSchema[]): boolean {
+  return schemas.some((s) => s.degraded === true);
+}
+
 function formatFailureRows(
   label: string,
   queries: TypegenFailure[],
@@ -331,8 +349,19 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  await fs.mkdir(path.dirname(outFile), { recursive: true });
-  await fs.writeFile(outFile, typeDeclarations, "utf-8");
+  // In blocking mode, suppress writes when any query is degraded AND there are
+  // no syntax/fatal errors to preserve committed .d.ts files as the fallback of
+  // record. Degraded writes still happen when there are preflight errors (which
+  // write before throwing). Non-blocking mode always writes. The throw still
+  // fires at the end if there are errors — this just prevents overwriting
+  // committed good types with degraded ones from pure connectivity failures.
+  const hasAnyDegradedQuery = queryRegistry.some(isQueryDegraded);
+  const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
+
+  if (shouldWriteQueries) {
+    await fs.mkdir(path.dirname(outFile), { recursive: true });
+    await fs.writeFile(outFile, typeDeclarations, "utf-8");
+  }
 
   // Metric-view types: emit whenever a metric-views folder is resolved (gated
   // on the metric config's own dir, NOT the queries folder — an app can declare
@@ -351,6 +380,10 @@ export async function generateFromEntryPoint(options: {
         cache: !noCache,
         metricFetcher,
         mode,
+        // In blocking mode, only suppress writes for pure degradation (no failures).
+        // If there are preflight fatals or sync failures, degraded artifacts are
+        // still written before the throw.
+        suppressDegradedWrite: mode === "blocking",
       });
     } catch (configError) {
       // syncMetricViewsTypes only throws for a malformed definitions.json — re-throw as a message-only TypegenFatalError.
@@ -433,7 +466,11 @@ export interface SyncMetricViewsTypesResult {
  * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching).
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
- * @param options.mode - preflight/gate policy, default `"describe-now"`.
+ * @param options.mode - preflight/gate policy, default `"describe-now"`. When set to `"blocking"`,
+ *   metric-view .d.ts writes are suppressed if any metric is degraded (to preserve committed files).
+ * @param options.suppressDegradedWrite - when true (only in `mode === "blocking"` context), skip
+ *   the metricOutFile write if any metric schema has `degraded === true`. Used to prevent
+ *   overwriting committed .d.ts files with degraded types in blocking mode.
  */
 export async function syncMetricViewsTypes(options: {
   metricViewsFolder: string;
@@ -442,6 +479,7 @@ export async function syncMetricViewsTypes(options: {
   cache?: boolean;
   metricFetcher?: DescribeFetcher;
   mode?: "describe-now" | "non-blocking" | "blocking";
+  suppressDegradedWrite?: boolean;
 }): Promise<SyncMetricViewsTypesResult> {
   const {
     metricViewsFolder,
@@ -450,6 +488,7 @@ export async function syncMetricViewsTypes(options: {
     cache: cacheEnabled,
     metricFetcher,
     mode = "describe-now",
+    suppressDegradedWrite,
   } = options;
 
   // Only `cache === false` disables caching; `undefined`/`true` keep it on.
@@ -683,12 +722,23 @@ export async function syncMetricViewsTypes(options: {
     return emptyMetricSchema(entry);
   });
 
-  await fs.mkdir(path.dirname(metricOutFile), { recursive: true });
-  await fs.writeFile(
-    metricOutFile,
-    generateMetricTypeDeclarations(schemas),
-    "utf-8",
-  );
+  // In blocking mode, suppress writes when any metric is degraded AND there are
+  // no failures to preserve committed .d.ts files as the fallback of record.
+  // Degraded writes still happen when there are preflight fatals or sync failures
+  // (which throw after writing). Non-blocking mode always writes. This just
+  // prevents overwriting committed good types with degraded ones from pure
+  // warehouse-not-ready scenarios.
+  const shouldWriteMetrics =
+    !suppressDegradedWrite || !hasAnyDegradedMetrics(schemas);
+
+  if (shouldWriteMetrics) {
+    await fs.mkdir(path.dirname(metricOutFile), { recursive: true });
+    await fs.writeFile(
+      metricOutFile,
+      generateMetricTypeDeclarations(schemas),
+      "utf-8",
+    );
+  }
 
   logger.debug(
     "Wrote MetricRegistry augmentation for %d metric(s)%s",
