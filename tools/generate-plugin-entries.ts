@@ -31,7 +31,8 @@ const HEADER = `// AUTO-GENERATED from packages/appkit/src/plugins/<name>/manife
 `;
 
 interface PluginInfo {
-  name: string;
+  /** camelCase JS-identifier binding emitted into the barrel. */
+  binding: string;
   folder: string;
   stability: "beta" | "ga";
 }
@@ -39,25 +40,34 @@ interface PluginInfo {
 /**
  * Mirrors `^[a-z][a-z0-9-]*$` from `plugin-manifest.schema.json`. Catches
  * malformed manifests that bypassed `appkit plugin validate`.
+ *
+ * Doubles as a defense-in-depth gate against code-injection (CWE-94): both the
+ * manifest `name` and the folder name flow into the generated TS source, and
+ * this charset forbids quotes, semicolons, braces, backslashes, and newlines,
+ * so neither can break out of the string/identifier context it lands in.
  */
 const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /**
- * Generator-only: the `name` field is interpolated unescaped into a TS
- * `export { <name> } from "./<folder>";` template, so it MUST be a valid
- * JavaScript identifier. The schema accepts hyphens (e.g. "my-plugin"),
- * which would produce `export { my-plugin }` — a TypeScript syntax error.
- *
- * This is also a defense-in-depth gate against code-injection (CWE-94)
- * via a malicious `name` containing `}`, `;`, quotes, newlines, etc.
- *
- * Restricted to camelCase / underscore identifiers starting with a lowercase
- * letter to match the existing built-in plugins (`analytics`, `lakebase`,
- * `vectorSearch`, …) and the schema's lowercase-first rule.
+ * The barrel exports each plugin under a JS-identifier binding
+ * (`export { <binding> } from "./<folder>";`). A manifest `name` may be
+ * kebab-case per the schema, but the binding must be a valid identifier, so it
+ * is derived via kebab->camelCase. This pattern is the final assertion that the
+ * derived binding is safe to interpolate unescaped.
  */
 const JS_IDENTIFIER_PATTERN = /^[a-z][a-zA-Z0-9_]*$/;
 
-function validateIdentifier(
+/**
+ * Convert a kebab-case manifest name to its camelCase JS-identifier binding
+ * (e.g. `vector-search` -> `vectorSearch`). Mirrors `manifestNameToBinding` in
+ * the plugin `promote` command and the convention first-party plugin index
+ * files follow, so the emitted binding matches the plugin's actual export.
+ */
+function manifestNameToBinding(name: string): string {
+  return name.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+}
+
+function validateSchemaName(
   value: string,
   kind: "manifest name" | "folder name",
   manifestPath: string,
@@ -65,11 +75,6 @@ function validateIdentifier(
   if (!SCHEMA_NAME_PATTERN.test(value)) {
     throw new Error(
       `${kind} "${value}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$. Run \`appkit plugin validate\` to catch this earlier.`,
-    );
-  }
-  if (!JS_IDENTIFIER_PATTERN.test(value)) {
-    throw new Error(
-      `${kind} "${value}" in ${manifestPath} is not a valid JavaScript identifier (must match ^[a-z][a-zA-Z0-9_]*$). The generator interpolates this name into \`export { ${value} } from "./<folder>";\` and would emit invalid TypeScript. Rename the plugin folder + manifest \`name\` to camelCase, or set \`hidden: true\` to exclude it from the auto-generated barrels.`,
     );
   }
 }
@@ -102,12 +107,21 @@ function readPluginInfos(): PluginInfo[] {
       throw new Error(`Manifest missing "name": ${manifestPath}`);
     }
 
-    // Both the manifest `name` (used as the exported binding) and the
+    // Both the manifest `name` (source of the exported binding) and the
     // folder name (used as the `from` path) flow into a TS source file
-    // unescaped. Validate both against the schema and the JS-identifier
-    // rule before we emit anything.
-    validateIdentifier(manifest.name, "manifest name", manifestPath);
-    validateIdentifier(entry.name, "folder name", manifestPath);
+    // unescaped, so both must match the schema charset before we emit
+    // anything.
+    validateSchemaName(manifest.name, "manifest name", manifestPath);
+    validateSchemaName(entry.name, "folder name", manifestPath);
+
+    // The schema permits kebab-case names, but the barrel binding must be a
+    // valid JS identifier, so derive it via kebab->camelCase and assert.
+    const binding = manifestNameToBinding(manifest.name);
+    if (!JS_IDENTIFIER_PATTERN.test(binding)) {
+      throw new Error(
+        `Manifest name "${manifest.name}" in ${manifestPath} does not convert to a valid JavaScript identifier (got "${binding}"). The generator emits \`export { ${binding} } from "./<folder>";\`, which would be invalid TypeScript. Rename the plugin so its name is kebab-case or camelCase, or set \`hidden: true\` to exclude it from the auto-generated barrels.`,
+      );
+    }
 
     const tier = manifest.stability ?? "ga";
     if (tier !== "ga" && tier !== "beta") {
@@ -117,14 +131,14 @@ function readPluginInfos(): PluginInfo[] {
     }
 
     infos.push({
-      name: manifest.name,
+      binding,
       folder: entry.name,
       stability: tier,
     });
   }
 
   // Deterministic order so re-runs produce reproducible diffs.
-  infos.sort((a, b) => a.name.localeCompare(b.name));
+  infos.sort((a, b) => a.binding.localeCompare(b.binding));
   return infos;
 }
 
@@ -132,7 +146,9 @@ function renderBarrel(infos: PluginInfo[]): string {
   if (infos.length === 0) {
     return `${HEADER}\nexport {};\n`;
   }
-  const lines = infos.map((p) => `export { ${p.name} } from "./${p.folder}";`);
+  const lines = infos.map(
+    (p) => `export { ${p.binding} } from "./${p.folder}";`,
+  );
   return `${HEADER}\n${lines.join("\n")}\n`;
 }
 

@@ -89,5 +89,15 @@ export {
   loadAgentFromFile,
   loadAgentsFromDir,
 } from "./plugins/agents";
-
 export * from "./plugins/beta-exports.generated";
+// Vector Search plugin config and query types (the `vectorSearch` binding
+// itself is exported via the generated barrel above).
+export type {
+  IndexConfig,
+  IVectorSearchConfig,
+  RerankerConfig,
+  SearchFilters,
+  SearchRequest,
+  SearchResponse,
+  SearchResult,
+} from "./plugins/vector-search/types";

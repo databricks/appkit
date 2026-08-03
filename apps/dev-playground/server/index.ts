@@ -18,6 +18,7 @@ import {
   DatabricksAdapter,
   supervisorTools,
   tool,
+  vectorSearch,
 } from "@databricks/appkit/beta";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -429,17 +430,16 @@ createApp({
       // sense as the user-facing landing agent).
       defaultAgent: "helper",
     }),
-    // TODO: re-enable once vector-search is exported from @databricks/appkit
-    // vectorSearch({
-    //   indexes: {
-    //     demo: {
-    //       indexName:
-    //         process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
-    //       columns: ["id", "text", "title"],
-    //       queryType: "hybrid",
-    //     },
-    //   },
-    // }),
+    vectorSearch({
+      indexes: {
+        demo: {
+          indexName:
+            process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
+          columns: ["id", "text", "title"],
+          queryType: "hybrid",
+        },
+      },
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
   async onPluginsReady(appkit) {

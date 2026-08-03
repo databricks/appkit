@@ -4,6 +4,12 @@ sidebar_position: 9
 
 # Vector Search plugin
 
+<!-- AUTO-GENERATED: stability-banner-start -->
+:::warning Beta plugin
+This plugin is currently **beta**. APIs may change between minor releases. Import from `@databricks/appkit/beta`. See [Plugin Stability Tiers](./stability.md).
+:::
+<!-- AUTO-GENERATED: stability-banner-end -->
+
 Query Databricks Vector Search indexes with hybrid search, reranking, and cursor pagination from your AppKit application.
 
 **Key features:**
