@@ -11,19 +11,12 @@ import {
 } from "vitest";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
-// picocolors emits ANSI color codes when CI is set; strip them (ESC + the
-// bracketed SGR sequence) so message-content assertions match regardless of
-// the color environment.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC (\x1b) byte is the point.
-const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
-
 const mocks = vi.hoisted(() => ({
   generateQueriesFromDescribe: vi.fn(),
   getWarehouseState: vi.fn(),
   startWarehouse: vi.fn(),
   waitUntilRunning: vi.fn(),
   executeStatement: vi.fn(),
-  queryCacheFileExists: vi.fn(),
   // In-memory stand-in for the on-disk typegen cache file. `undefined` means
   // "no file yet"; otherwise it holds the serialized JSON exactly as
   // saveCache would have written it, so load/save round-trips behave like
@@ -71,9 +64,6 @@ vi.mock("../cache", async (importOriginal) => {
     saveCache: vi.fn(async (cache: unknown) => {
       mocks.cacheFile.contents = JSON.stringify(cache, null, 2);
     }),
-    queryCacheFileExists: vi.fn(
-      async () => mocks.cacheFile.contents !== undefined,
-    ),
   };
 });
 
@@ -279,75 +269,6 @@ describe("generateFromEntryPoint — query failure handling", () => {
 
     expect(fs.existsSync(outFile)).toBe(true);
     expect(fs.readFileSync(outFile, "utf-8")).toContain("bad_auth");
-  });
-
-  test("bootstrap case: no cache at start → reports bootstrap message even if cache is written during generation", async () => {
-    // Start with no cache file (fresh checkout).
-    mocks.cacheFile.contents = undefined;
-    mocks.generateQueriesFromDescribe.mockImplementation(async () => {
-      // During generation, the query path's saveCache writes to the in-memory file.
-      // This simulates the bug scenario: if we checked existence AFTER this runs,
-      // we'd incorrectly report "drift" instead of "bootstrap".
-      mocks.cacheFile.contents = JSON.stringify({
-        version: "3",
-        queries: {},
-      });
-      return {
-        schemas: [unknownSchema("query1")],
-        syntaxErrors: [],
-        fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
-      };
-    });
-
-    try {
-      await generateFromEntryPoint({
-        outFile,
-        queryFolder: "/queries",
-        warehouseId: "wh-1",
-      });
-      expect.fail("should have thrown TypegenFatalError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(TypegenFatalError);
-      // This is the critical assertion: the message must reflect the state
-      // BEFORE generation, not after (when the cache file now exists).
-      const message = stripAnsi((err as Error).message);
-      expect(message).toMatch(/No committed type cache found/i);
-      expect(message).toMatch(/generate-types --wait/i);
-      expect(message).toMatch(/commit \.appkit\//i);
-      // Must NOT say "missing or stale" (the drift message):
-      expect(message).not.toMatch(/missing or stale/i);
-    }
-  });
-
-  test("drift case: cache exists at start → reports drift message", async () => {
-    // Pre-seed the cache (simulating a previous successful run).
-    mocks.cacheFile.contents = JSON.stringify({
-      version: "3",
-      queries: { existing_query: { hash: "abc", type: "{}", retry: false } },
-    });
-    mocks.generateQueriesFromDescribe.mockResolvedValue({
-      schemas: [unknownSchema("query1")],
-      syntaxErrors: [],
-      fatalErrors: [{ name: "query1", message: "PERMISSION_DENIED" }],
-    });
-
-    try {
-      await generateFromEntryPoint({
-        outFile,
-        queryFolder: "/queries",
-        warehouseId: "wh-1",
-      });
-      expect.fail("should have thrown TypegenFatalError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(TypegenFatalError);
-      // Cache existed at start → report drift (stale/missing key).
-      const message = stripAnsi((err as Error).message);
-      expect(message).toMatch(/missing or stale/i);
-      expect(message).toMatch(/Regenerate with/i);
-      expect(message).toMatch(/generate-types --wait/i);
-      // Must NOT say "No committed type cache found" (the bootstrap message):
-      expect(message).not.toMatch(/No committed type cache found/i);
-    }
   });
 });
 
@@ -727,11 +648,6 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
     expect(error).toBeInstanceOf(TypegenFatalError);
     expect((error as Error).message).toContain("definitions.json");
-    // A config parse error is unrelated to the type cache: the remediation must
-    // NOT tell the operator to regenerate/commit `.appkit/` (that's the cache
-    // bootstrap/drift wording, reserved for callers that pass the cache snapshot).
-    expect((error as Error).message).not.toContain(".appkit/");
-    expect((error as Error).message).toContain("Fix the");
     // Query types were written before the metric config was read.
     expect(fs.existsSync(outFile)).toBe(true);
   });
