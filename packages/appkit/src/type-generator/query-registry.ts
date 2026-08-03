@@ -5,7 +5,11 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
-import { getErrorDiagnostic, isConnectivityError } from "./errors";
+import {
+  classifyBlockingFailure,
+  getErrorDiagnostic,
+  isConnectivityError,
+} from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
@@ -675,7 +679,12 @@ export async function generateQueriesFromDescribe(
   // Genuine SQL errors (reachable warehouse). Connectivity failures are NOT
   // recorded here — they degrade silently so a transient outage isn't fatal.
   const syntaxErrors: QuerySyntaxError[] = [];
+  // Deterministic fatal errors only (404/400). Environmental failures are
+  // tracked separately below.
   const fatalErrors: QueryFatalError[] = [];
+  // Track whether an environmental failure occurred in blocking mode (for the
+  // has-types gate in generateFromEntryPoint).
+  let hadEnvironmentalFailure = false;
 
   if (uncachedQueries.length > 0) {
     // One-time warehouse preflight (before issuing any DESCRIBE). A single
@@ -685,6 +694,8 @@ export async function generateQueriesFromDescribe(
     // not-ready warehouse degrades exactly like a per-query outage.
     let decision: ReturnType<typeof decidePreflight> = "proceed";
     let fatalMessage = "";
+    // Track whether a non-connectivity environmental failure occurred (for Phase 3).
+    let isEnvironmental = false;
     if (mode === "non-blocking") {
       // `non-blocking` never describes and must make ZERO warehouse round-trips:
       // skip the probe entirely (no getWarehouseState) and go straight to
@@ -697,7 +708,9 @@ export async function generateQueriesFromDescribe(
         const state = await getWarehouseState(client, warehouseId);
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
+          // DELETED/DELETING is state-based and environmental.
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
+          isEnvironmental = true;
         }
         if (decision === "startWaitProceed") {
           // Stopped/stopping warehouse: nudge it out of the stopped state, then
@@ -714,6 +727,7 @@ export async function generateQueriesFromDescribe(
           } else {
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+            isEnvironmental = true; // DELETED/DELETING or timeout is environmental
           }
         }
         if (decision === "waitThenProceed") {
@@ -725,6 +739,7 @@ export async function generateQueriesFromDescribe(
           } else {
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+            isEnvironmental = true; // DELETED/DELETING or timeout is environmental
           }
         }
       } catch (err) {
@@ -733,18 +748,41 @@ export async function generateQueriesFromDescribe(
           // per-query connectivity failure — never fail a build on a blip.
           decision = "degradeAll";
         } else {
-          // Auth, bad warehouse id, malformed config, or a timed-out wait: fatal.
-          decision = "fatal";
-          fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          // Classify the exception: deterministic (404/400) or environmental (auth, etc).
+          const classification = classifyBlockingFailure(err);
+          if (classification === "deterministic") {
+            // Build-failing deterministic error (bad warehouse id, malformed request).
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+            isEnvironmental = false;
+          } else {
+            // Environmental: auth, timeouts, unrecognized, etc. Degrade for the
+            // has-types gate to handle later.
+            decision = "degradeAll";
+            isEnvironmental = true;
+            fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          }
         }
       }
+    }
+
+    // Track environmental failures in blocking mode for Phase 3 gate.
+    if (
+      mode === "blocking" &&
+      ((decision === "degradeAll" && isEnvironmental) ||
+        (decision === "fatal" && isEnvironmental))
+    ) {
+      hadEnvironmentalFailure = true;
     }
 
     if (decision !== "proceed") {
       // degradeAll or fatal: skip DESCRIBE entirely. Every uncached query gets a
       // degraded schema (reused cache or `unknown`); fatal additionally records
-      // a fatalError per query so the caller fails the build after writing.
-      const kind = decision === "fatal" ? "fatal" : "connectivity";
+      // a fatalError per query so the caller fails the build after writing. Only
+      // deterministic fatals are recorded; environmental degradations go silent
+      // so the has-types gate can decide.
+      const kind =
+        decision === "fatal" && !isEnvironmental ? "fatal" : "connectivity";
       for (const { index, queryName, sql, sqlHash } of uncachedQueries) {
         freshResults.push({
           index,
@@ -753,7 +791,9 @@ export async function generateQueriesFromDescribe(
             type: degradedType(cache, queryName, sql, sqlHash),
           },
         });
-        if (decision === "fatal") {
+        if (decision === "fatal" && !isEnvironmental) {
+          // Only deterministic fatals record an error; environmental failures
+          // degrade silently for the has-types gate.
           fatalErrors.push({ name: queryName, message: fatalMessage });
           logEntries.push({
             queryName,
@@ -1039,7 +1079,7 @@ export async function generateQueriesFromDescribe(
     .sort((a, b) => a.index - b.index)
     .map((r) => r.schema);
 
-  return { schemas, syntaxErrors, fatalErrors };
+  return { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure };
 }
 
 /**

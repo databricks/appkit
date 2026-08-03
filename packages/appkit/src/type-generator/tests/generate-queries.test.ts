@@ -774,44 +774,46 @@ describe("generateQueriesFromDescribe", () => {
     });
 
     test.each(["DELETED", "DELETING"] as const)(
-      "%s + blocking mode — fatal per query after schemas are written, never describes",
+      "%s + blocking mode — environmental, degrades silently, hadEnvironmentalFailure set for gate",
       async (state) => {
+        // Phase 3: DELETED/DELETING are environmental (state-based fatals).
+        // They degrade silently (fatalErrors empty) but set hadEnvironmentalFailure
+        // for the entry point's has-types gate to handle.
         mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
         mocks.readFile
           .mockResolvedValueOnce("SELECT id FROM a")
           .mockResolvedValueOnce("SELECT id FROM b");
         mocks.getWarehouse.mockReturnValue({ state });
 
-        const { schemas, syntaxErrors, fatalErrors } =
+        const { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure } =
           await generateQueriesFromDescribe("/queries", "wh-123", {
             mode: "blocking",
           });
 
-        // A deleted/deleting warehouse is the only fatal case: never started,
-        // never described; one fatal entry per uncached query.
+        // Phase 3: environmental failures degrade, not fatal at query level.
         expect(mocks.startWarehouse).not.toHaveBeenCalled();
         expect(mocks.executeStatement).not.toHaveBeenCalled();
-        expect(fatalErrors).toEqual([
-          { name: "a", message: `warehouse wh-123 is ${state}` },
-          { name: "b", message: `warehouse wh-123 is ${state}` },
-        ]);
+        expect(fatalErrors).toEqual([]); // Phase 3: environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // Phase 3: track for gate
         expect(syntaxErrors).toEqual([]);
         // Schemas are still produced (degraded) so the .d.ts is written before
-        // generateFromEntryPoint throws on the recorded fatalErrors.
+        // generateFromEntryPoint uses the gate to decide throw/warn.
         expect(schemas).toHaveLength(2);
         expect(schemas[0].type).toContain("result: unknown");
         expect(schemas[1].type).toContain("result: unknown");
       },
     );
 
-    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is fatal", async () => {
+    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is environmental, degrades silently", async () => {
+      // Phase 3: wait timeout (non-RUNNING resolve) is environmental (state-based fatal).
+      // It degrades silently (fatalErrors empty) but sets hadEnvironmentalFailure for the gate.
       vi.useFakeTimers();
       try {
         mocks.readdir.mockResolvedValue(["a.sql"]);
         mocks.readFile.mockResolvedValue("SELECT id FROM a");
         // Preflight sees STOPPED → start fires, but the warehouse then reports
         // DELETED (a genuinely terminal state even with treatStoppedAsTransient).
-        // The wait resolves non-RUNNING → fatal; schemas still written.
+        // The wait resolves non-RUNNING → environmental; schemas still written.
         mocks.getWarehouse
           .mockReturnValueOnce({ state: "STOPPED" })
           .mockReturnValue({ state: "DELETED" });
@@ -820,17 +822,14 @@ describe("generateQueriesFromDescribe", () => {
           mode: "blocking",
         });
         await vi.runAllTimersAsync();
-        const { schemas, syntaxErrors, fatalErrors } = await promise;
+        const { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure } =
+          await promise;
 
         expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
         expect(mocks.executeStatement).not.toHaveBeenCalled();
         expect(syntaxErrors).toEqual([]);
-        expect(fatalErrors).toEqual([
-          {
-            name: "a",
-            message: "warehouse wh-123 did not reach RUNNING (now DELETED)",
-          },
-        ]);
+        expect(fatalErrors).toEqual([]); // Phase 3: environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // Phase 3: track for gate
         expect(schemas[0].type).toContain("result: unknown");
       } finally {
         vi.useRealTimers();
