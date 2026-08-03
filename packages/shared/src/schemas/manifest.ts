@@ -555,7 +555,7 @@ export const configSchemaPropertySchema: z.ZodType = z.lazy(() =>
       maxLength: z.number().int().min(0).optional(),
       required: z.array(z.string()).optional(),
       // `additionalProperties` is a standard JSON Schema keyword used by core
-      // plugin manifests (e.g., serving, vector-search, genie) to constrain
+      // plugin manifests (e.g., serving, ai-search, genie) to constrain
       // dictionary-shaped properties. Allowed on nested property entries as
       // either a boolean or a sub-schema, mirroring JSON Schema semantics.
       additionalProperties: z

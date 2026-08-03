@@ -11,8 +11,8 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
 
-export const Route = createFileRoute("/vector-search")({
-  component: VectorSearchRoute,
+export const Route = createFileRoute("/ai-search")({
+  component: AiSearchRoute,
 });
 
 interface SearchResult {
@@ -27,7 +27,7 @@ interface SearchResponse {
   queryType: string;
 }
 
-function VectorSearchRoute() {
+function AiSearchRoute() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +40,7 @@ function VectorSearchRoute() {
     setResponse(null);
 
     try {
-      const res = await fetch("/api/vector-search/demo/query", {
+      const res = await fetch("/api/ai-search/demo/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ queryText: query }),

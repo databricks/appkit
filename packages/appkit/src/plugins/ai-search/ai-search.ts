@@ -1,39 +1,39 @@
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
-import { VectorSearchConnector } from "../../connectors/vector-search/client";
-import type { VsRawResponse } from "../../connectors/vector-search/types";
+import { AiSearchConnector } from "../../connectors/ai-search/client";
+import type { VsRawResponse } from "../../connectors/ai-search/types";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { vectorSearchDefaults } from "./defaults";
+import { aiSearchDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
+  IAiSearchConfig,
   IndexConfig,
-  IVectorSearchConfig,
   SearchRequest,
   SearchResponse,
 } from "./types";
 
-const logger = createLogger("vector-search");
+const logger = createLogger("ai-search");
 
 const querySettings: PluginExecutionSettings = {
-  default: vectorSearchDefaults,
+  default: aiSearchDefaults,
 };
 
-export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
-  static manifest = manifest as PluginManifest<"vector-search">;
+export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
+  static manifest = manifest as PluginManifest<"ai-search">;
 
   protected static description =
     "Query Databricks Vector Search indexes with hybrid search, reranking, and pagination";
-  protected declare config: IVectorSearchConfig;
+  protected declare config: IAiSearchConfig;
 
-  private connector: VectorSearchConnector;
+  private connector: AiSearchConnector;
 
-  constructor(config: IVectorSearchConfig) {
+  constructor(config: IAiSearchConfig) {
     super(config);
     this.config = config;
-    this.connector = new VectorSearchConnector({
+    this.connector = new AiSearchConnector({
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
@@ -42,7 +42,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   async setup(): Promise<void> {
     if (!this.config.indexes || Object.keys(this.config.indexes).length === 0) {
       throw new Error(
-        'VectorSearchPlugin requires at least one index in "indexes" config',
+        'AiSearchPlugin requires at least one index in "indexes" config',
       );
     }
     for (const [alias, idx] of Object.entries(this.config.indexes)) {
@@ -226,7 +226,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 
   /**
-   * Programmatic query API — available as `appkit.vectorSearch.query()`.
+   * Programmatic query API — available as `appkit.aiSearch.query()`.
    * When called through `asUser(req)`, executes with the user's credentials.
    */
   async query(alias: string, request: SearchRequest): Promise<SearchResponse> {
@@ -373,4 +373,4 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 }
 
-export const vectorSearch = toPlugin(VectorSearchPlugin);
+export const aiSearch = toPlugin(AiSearchPlugin);

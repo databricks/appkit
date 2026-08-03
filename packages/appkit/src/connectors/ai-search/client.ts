@@ -8,20 +8,20 @@ import {
 } from "../../telemetry";
 import type { WorkspaceClient } from "../../workspace-client";
 import type {
-  VectorSearchConnectorConfig,
+  AiSearchConnectorConfig,
   VsNextPageParams,
   VsQueryParams,
   VsRawResponse,
 } from "./types";
 
-const logger = createLogger("connectors:vector-search");
+const logger = createLogger("connectors:ai-search");
 
-export class VectorSearchConnector {
+export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
 
-  constructor(config: VectorSearchConnectorConfig = {}) {
+  constructor(config: AiSearchConnectorConfig = {}) {
     this.telemetry = TelemetryManager.getProvider(
-      "vector-search",
+      "ai-search",
       config.telemetry,
     );
   }
@@ -62,7 +62,7 @@ export class VectorSearchConnector {
     );
 
     return this.telemetry.startActiveSpan(
-      "vector-search.query",
+      "ai-search.query",
       {
         kind: SpanKind.CLIENT,
         attributes: {
@@ -97,7 +97,7 @@ export class VectorSearchConnector {
           span.setAttribute("vs.duration_ms", duration);
           span.setStatus({ code: SpanStatusCode.OK });
 
-          logger.event()?.setContext("vector-search", {
+          logger.event()?.setContext("ai-search", {
             index_name: params.indexName,
             query_type: params.queryType,
             result_count: response.result.row_count,
@@ -115,7 +115,7 @@ export class VectorSearchConnector {
           throw error;
         }
       },
-      { name: "vector-search", includePrefix: true },
+      { name: "ai-search", includePrefix: true },
     );
   }
 
@@ -135,7 +135,7 @@ export class VectorSearchConnector {
     );
 
     return this.telemetry.startActiveSpan(
-      "vector-search.queryNextPage",
+      "ai-search.queryNextPage",
       {
         kind: SpanKind.CLIENT,
         attributes: {
@@ -170,7 +170,7 @@ export class VectorSearchConnector {
           throw error;
         }
       },
-      { name: "vector-search", includePrefix: true },
+      { name: "ai-search", includePrefix: true },
     );
   }
 }

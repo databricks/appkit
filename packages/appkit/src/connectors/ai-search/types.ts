@@ -1,6 +1,6 @@
 import type { TelemetryOptions } from "shared";
 
-export interface VectorSearchConnectorConfig {
+export interface AiSearchConnectorConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
 }

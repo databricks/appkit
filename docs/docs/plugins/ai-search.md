@@ -2,7 +2,7 @@
 sidebar_position: 9
 ---
 
-# Vector Search plugin
+# AI Search plugin
 
 <!-- AUTO-GENERATED: stability-banner-start -->
 :::warning Beta plugin
@@ -23,12 +23,12 @@ Query Databricks Vector Search indexes with hybrid search, reranking, and cursor
 ## Basic usage
 
 ```ts
-import { createApp, vectorSearch, server } from "@databricks/appkit";
+import { createApp, aiSearch, server } from "@databricks/appkit";
 
 await createApp({
   plugins: [
     server(),
-    vectorSearch({
+    aiSearch({
       indexes: {
         products: {
           indexName: "catalog.schema.products_idx",
@@ -54,7 +54,7 @@ await createApp({
 Index aliases let you reference multiple Vector Search indexes by name. The alias is used in API routes and programmatic calls:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -94,7 +94,7 @@ vectorSearch({
 Reranking improves result relevance by running a second-stage model over the initial candidates:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -112,7 +112,7 @@ Pass `reranker: true` to rerank across all returned columns.
 By default, queries run as the app's service principal. Set `auth: "on-behalf-of-user"` to execute queries as the signed-in user instead:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     documents: {
       indexName: "catalog.schema.documents_idx",
@@ -128,7 +128,7 @@ vectorSearch({
 Enable cursor pagination to page through large result sets:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -149,7 +149,7 @@ For indexes that manage their own embeddings, provide an `embeddingFn` that take
 ```ts
 import { embed } from "./my-embedding-client";
 
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -163,7 +163,7 @@ vectorSearch({
 
 ## HTTP routes
 
-Routes are mounted at `/api/vector-search`.
+Routes are mounted at `/api/ai-search`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -174,7 +174,7 @@ Routes are mounted at `/api/vector-search`.
 ### Query an index
 
 ```
-POST /api/vector-search/:alias/query
+POST /api/ai-search/:alias/query
 Content-Type: application/json
 
 {
@@ -199,7 +199,7 @@ Response:
 ### Fetch the next page
 
 ```
-POST /api/vector-search/:alias/next-page
+POST /api/ai-search/:alias/next-page
 Content-Type: application/json
 
 {
@@ -211,7 +211,7 @@ Content-Type: application/json
 ### Get index config
 
 ```
-GET /api/vector-search/:alias/config
+GET /api/ai-search/:alias/config
 ```
 
 Returns the resolved `IndexConfig` for the alias (excluding `embeddingFn`).
@@ -224,7 +224,7 @@ The plugin exposes a `query` method for server-side use:
 const AppKit = await createApp({
   plugins: [
     server(),
-    vectorSearch({
+    aiSearch({
       indexes: {
         products: {
           indexName: "catalog.schema.products_idx",
@@ -235,7 +235,7 @@ const AppKit = await createApp({
   ],
 });
 
-const result = await AppKit.vectorSearch.query("products", {
+const result = await AppKit.aiSearch.query("products", {
   queryText: "machine learning guide",
 });
 

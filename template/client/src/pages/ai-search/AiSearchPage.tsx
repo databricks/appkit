@@ -1,4 +1,4 @@
-{{if .plugins.vectorSearch -}}
+{{if .plugins.aiSearch -}}
 import {
   Button,
   Card,
@@ -23,7 +23,7 @@ interface SearchResponse {
   queryType: string;
 }
 
-export function VectorSearchPage() {
+export function AiSearchPage() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export function VectorSearchPage() {
     setResponse(null);
 
     try {
-      const res = await fetch('/api/vector-search/default/query', {
+      const res = await fetch('/api/ai-search/default/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ queryText: query }),

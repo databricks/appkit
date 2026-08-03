@@ -14,11 +14,11 @@ import {
 } from "@databricks/appkit";
 import {
   agents,
+  aiSearch,
   createAgent,
   DatabricksAdapter,
   supervisorTools,
   tool,
-  vectorSearch,
 } from "@databricks/appkit/beta";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -430,7 +430,7 @@ createApp({
       // sense as the user-facing landing agent).
       defaultAgent: "helper",
     }),
-    vectorSearch({
+    aiSearch({
       indexes: {
         demo: {
           indexName:

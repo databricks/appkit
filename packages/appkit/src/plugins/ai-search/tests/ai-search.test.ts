@@ -96,9 +96,9 @@ const mockWorkspaceClient = {
   apiClient: { request: mockRequest },
 };
 
-import { VectorSearchPlugin } from "../vector-search";
+import { AiSearchPlugin } from "../ai-search";
 
-describe("VectorSearchPlugin", () => {
+describe("AiSearchPlugin", () => {
   beforeEach(() => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValue(validVsResponse);
@@ -106,7 +106,7 @@ describe("VectorSearchPlugin", () => {
 
   describe("setup()", () => {
     it("throws if any index is missing indexName", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "", columns: ["id"] },
         },
@@ -115,7 +115,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("throws if any index is missing columns", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: [] },
         },
@@ -124,7 +124,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("throws if pagination enabled but no endpointName", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -137,7 +137,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("succeeds with valid config", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           products: {
             indexName: "cat.sch.products_idx",
@@ -153,13 +153,13 @@ describe("VectorSearchPlugin", () => {
 
   describe("manifest", () => {
     it("has correct name", () => {
-      expect(VectorSearchPlugin.manifest.name).toBe("vector-search");
+      expect(AiSearchPlugin.manifest.name).toBe("ai-search");
     });
   });
 
   describe("exports()", () => {
     it("returns object with query function", () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },
@@ -172,7 +172,7 @@ describe("VectorSearchPlugin", () => {
 
   describe("query()", () => {
     it("calls VS API via connector and parses response", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           products: {
             indexName: "cat.sch.products",
@@ -196,7 +196,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("constructs correct API request", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -224,7 +224,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("throws Error for unknown alias", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },
@@ -237,7 +237,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("includes filters when provided", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -256,7 +256,7 @@ describe("VectorSearchPlugin", () => {
     });
 
     it("includes reranker config when enabled on index", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -278,7 +278,7 @@ describe("VectorSearchPlugin", () => {
 
     it("calls embeddingFn for self-managed indexes", async () => {
       const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -300,7 +300,7 @@ describe("VectorSearchPlugin", () => {
       const mockEmbeddingFn = vi
         .fn()
         .mockRejectedValue(new Error("embedding service unavailable"));
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -319,7 +319,7 @@ describe("VectorSearchPlugin", () => {
 
   describe("shutdown()", () => {
     it("does not throw", async () => {
-      const plugin = new VectorSearchPlugin({
+      const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },

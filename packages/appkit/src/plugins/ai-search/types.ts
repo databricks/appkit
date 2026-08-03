@@ -1,6 +1,6 @@
 import type { BasePluginConfig } from "shared";
 
-export interface IVectorSearchConfig extends BasePluginConfig {
+export interface IAiSearchConfig extends BasePluginConfig {
   timeout?: number;
   indexes?: Record<string, IndexConfig>;
 }

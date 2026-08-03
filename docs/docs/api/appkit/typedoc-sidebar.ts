@@ -189,8 +189,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.IAiSearchConfig",
+          label: "IAiSearchConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.IJobsConfig",
           label: "IJobsConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.IndexConfig",
+          label: "IndexConfig"
         },
         {
           type: "doc",
@@ -269,6 +279,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RerankerConfig",
+          label: "RerankerConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ResourceEntry",
           label: "ResourceEntry"
         },
@@ -286,6 +301,21 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RunAgentResult",
           label: "RunAgentResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchRequest",
+          label: "SearchRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchResponse",
+          label: "SearchResponse"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchResult",
+          label: "SearchResult"
         },
         {
           type: "doc",
@@ -475,6 +505,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.SearchFilters",
+          label: "SearchFilters"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ServingFactory",
           label: "ServingFactory"
         },
@@ -503,6 +538,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Variable.agents",
           label: "agents"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.aiSearch",
+          label: "aiSearch"
         },
         {
           type: "doc",
