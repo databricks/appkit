@@ -248,9 +248,3 @@ export function printReportJson(report: DoctorReport, detail = false): void {
       : { ...report, auth: { ...report.auth, raw: undefined } };
   console.log(JSON.stringify(emitted, null, 2));
 }
-
-/** The report's exit code (non-zero if anything errored), so `appkit doctor`
- * can gate CI / pre-deploy. Computed in `runDoctor`; this reads the field. */
-export function exitCodeFor(report: DoctorReport): number {
-  return report.exitCode;
-}

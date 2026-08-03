@@ -2,7 +2,7 @@ import fs from "node:fs";
 import process from "node:process";
 import { Command } from "commander";
 import dotenv from "dotenv";
-import { exitCodeFor, printReport, printReportJson } from "./report";
+import { printReport, printReportJson } from "./report";
 import { runDoctor } from "./run";
 import type { DoctorOptions } from "./types";
 
@@ -28,7 +28,7 @@ async function runDoctorCommand(options: DoctorOptions): Promise<void> {
     printReport(report, options.detail);
   }
 
-  process.exit(exitCodeFor(report));
+  process.exit(report.exitCode);
 }
 
 export const doctorCommand = new Command("doctor")

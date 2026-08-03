@@ -64,7 +64,7 @@ export function validateHost(host: string | undefined): string | null {
   // Placeholders like "https://..." parse but have no real dotted label.
   const hostname = url.hostname;
   const hasRealLabel = /[a-z0-9]/i.test(hostname) && hostname.includes(".");
-  if (!hasRealLabel || /^[.\-_]+$/.test(hostname)) {
+  if (!hasRealLabel) {
     return `DATABRICKS_HOST looks like an unfilled placeholder: "${host}"`;
   }
 
@@ -193,9 +193,7 @@ function authFailureHint(
  * Layer: config. Offline presence check of each declared env var; whether a set
  * value points at a real resource is the existence layer's job.
  */
-export async function checkConfig(
-  target: ResourceTarget,
-): Promise<LayerResult> {
+export function checkConfig(target: ResourceTarget): LayerResult {
   const missing: string[] = [];
 
   for (const envVar of target.envVars) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { exitCodeFor, printReport, printReportJson } from "./report";
+import { printReport, printReportJson } from "./report";
 import type { DoctorReport, ResourceCheckResult } from "./types";
 
 function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
@@ -172,15 +172,6 @@ describe("printReport ordering", () => {
       ),
     );
     expect(lines.some((l) => l.startsWith("1 error"))).toBe(true);
-  });
-});
-
-describe("exitCodeFor", () => {
-  // The exit code is computed once in runDoctor and stored on the report;
-  // exitCodeFor just surfaces it. (Aggregation is covered in run.test.ts.)
-  it("returns the report's exitCode field", () => {
-    expect(exitCodeFor(report({ exitCode: 0 }))).toBe(0);
-    expect(exitCodeFor(report({ exitCode: 1 }))).toBe(1);
   });
 });
 

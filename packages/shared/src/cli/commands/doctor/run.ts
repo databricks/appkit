@@ -29,7 +29,7 @@ async function checkResource(
   const layers: LayerResult[] = [];
   let rolled: CheckStatus = "ok";
 
-  const configResult = await checkConfig(target);
+  const configResult = checkConfig(target);
   layers.push(configResult);
   rolled = worst(rolled, configResult.status);
   // A hard config failure makes the existence probe meaningless.
