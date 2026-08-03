@@ -139,3 +139,57 @@ export function isConnectivityError(error: unknown): boolean {
 
   return false;
 }
+
+const AUTH_ERROR_STATUSES = new Set([401, 403]);
+
+/**
+ * Classifies a thrown failure into one of two buckets: deterministic failures
+ * that must be surfaced (bad warehouse id, malformed request) or environmental
+ * issues (connectivity, auth, deleted warehouse, timeouts) that the has-types
+ * gate will handle later.
+ *
+ * Returns:
+ * - "deterministic": HTTP 404 (bad warehouse id) or 400 (malformed request).
+ *   The build must fail.
+ * - "environmental": Everything else — auth (401/403), connectivity errors,
+ *   warehouse state changes (DELETED/DELETING), wait-for-RUNNING timeouts,
+ *   unrecognized failures. Default = environmental.
+ *
+ * Walks `cause`/`AggregateError` chains when checking for deterministic status,
+ * so a wrapped 404 is still recognized as deterministic.
+ */
+export function classifyBlockingFailure(
+  error: unknown,
+): "deterministic" | "environmental" {
+  // Deterministic: check first so they're never swallowed by environmental rules.
+  // Walk the error chain to find any deterministic status.
+  const seen = new Set<unknown>();
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const status = getErrorStatus(current);
+    if (status === 404 || status === 400) {
+      return "deterministic";
+    }
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  // Environmental: auth, connectivity, unrecognized, default.
+  const topLevelStatus = getErrorStatus(error);
+  if (topLevelStatus !== undefined && AUTH_ERROR_STATUSES.has(topLevelStatus)) {
+    return "environmental";
+  }
+
+  if (isConnectivityError(error)) {
+    return "environmental";
+  }
+
+  // Default: any unrecognized failure or no status (DELETED/DELETING messages,
+  // timeout messages, plain Error objects) → environmental.
+  return "environmental";
+}
