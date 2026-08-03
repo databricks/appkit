@@ -42,12 +42,6 @@ databricks apps deploy --help
 ```
 :::
 
-:::info Type cache and warehouse-less deploys
-
-The build step runs type generation in blocking mode. If your deploy pipeline cannot reach a SQL warehouse, the build still succeeds **only if the committed `.appkit/` type cache covers every query** — otherwise it fails rather than shipping degraded types. Commit `.appkit/` while the warehouse is still reachable, before removing warehouse access from CI/CD. See [Type generation → Deploying without warehouse access](./development/type-generation.md#deploying-without-warehouse-access).
-
-:::
-
 ### Examples
 
 - Deploy to a specific target:

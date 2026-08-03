@@ -16,9 +16,6 @@
       "@databricks/appkit": ["packages/appkit/*"],
       "@databricks/appkit-ui": ["packages/appkit-ui/*"],
       "shared": ["packages/shared/src"],
-      "shared/cli/commands/cache-paths": [
-        "packages/shared/src/cli/commands/cache-paths"
-      ],
       "@tools/*": ["tools/*"]
     }
   },
