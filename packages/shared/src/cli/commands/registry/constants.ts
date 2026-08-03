@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
-/** shadcn registry namespace consumers reference, e.g. `@appkit/metric-card`. */
-export const REGISTRY_NAMESPACE = "@appkit";
+/** shadcn registry namespace consumers reference, e.g. `@databricks-appkit/metric-card`. */
+export const REGISTRY_NAMESPACE = "@databricks-appkit";
 
 /** GitHub repo hosting the registry, and the branch the built items live on. */
 export const REGISTRY_REPO = "databricks/appkit-registry";

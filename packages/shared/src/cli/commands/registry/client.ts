@@ -23,7 +23,7 @@ export interface RegistryItem {
   files?: RegistryItemFile[];
 }
 
-/** Removes a leading `@appkit/` namespace from a component reference. */
+/** Removes a leading `@databricks-appkit/` namespace from a component reference. */
 export function stripNamespace(component: string): string {
   const prefix = `${REGISTRY_NAMESPACE}/`;
   return component.startsWith(prefix)
