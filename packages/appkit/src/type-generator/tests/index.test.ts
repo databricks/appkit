@@ -593,11 +593,11 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect((error as Error).message).toContain("revenue");
     expect((error as Error).message).toContain("DESCRIBE exploded");
 
-    // Phase 1: the degraded metric write is suppressed in blocking mode (committed types preserved).
+    // The degraded metric write is suppressed in blocking mode (committed types preserved).
     expect(fs.existsSync(metricFile)).toBe(false);
   });
 
-  test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate, Phase 1 suppresses write", async () => {
+  test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate", async () => {
     writeMetricConfig();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -607,8 +607,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       // a per-key failure. Unlike a bad source (which `--wait` fails), a not-ready
       // warehouse stays a soft degrade even under `--wait`, so infra flakiness
       // can't break the build (mirrors the STOPPED-resolve preflight case).
-      // Per Phase 1 anti-clobber: degraded artifacts are NOT written in blocking
-      // mode when there are no failures (to preserve committed good types).
+      // Degraded artifacts are NOT written in blocking mode when there are no failures
+      // (to preserve committed good types).
       await expect(
         generateFromEntryPoint({
           outFile,
@@ -624,7 +624,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
       const warned = warnSpy.mock.calls.flat().map(String).join("\n");
       expect(warned).not.toContain("metric sync failed");
-      // Phase 1: degraded artifacts are suppressed, not written (to preserve committed types).
+      // Degraded artifacts are suppressed, not written (to preserve committed types).
       expect(fs.existsSync(metricFile)).toBe(false);
     } finally {
       warnSpy.mockRestore();
@@ -705,7 +705,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   });
 
   test("blocking + DELETED: environmental failure with committed types → no throw, warning emitted", async () => {
-    // Phase 3: DELETED is environmental. Since the query path writes analytics.d.ts
+    // DELETED is environmental. Since the query path writes analytics.d.ts
     // (even with empty registry), committed types exist, so emit warning + return 0.
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("DELETED");
@@ -719,7 +719,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
         mode: "blocking",
       });
 
-      // Phase 3: environmental failure with committed types → no throw.
+      // Environmental failure with committed types → no throw.
       // The generator returns normally (exit 0).
     } finally {
       warnSpy.mockRestore();
@@ -730,7 +730,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-    // Phase 1: degraded metric artifacts are NOT written in blocking mode (committed types preserved).
+    // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
     expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is NEVER cached (mirrors the query path): the key is
@@ -741,7 +741,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   });
 
   test("blocking + preflight wait rejects with a timeout: environmental failure with committed types → no throw, warning emitted", async () => {
-    // Phase 3: timeout is environmental. Since the query path writes analytics.d.ts,
+    // Timeout is environmental. Since the query path writes analytics.d.ts,
     // committed types exist, so emit warning + return 0.
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("STARTING");
@@ -761,7 +761,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
         mode: "blocking",
       });
 
-      // Phase 3: environmental failure with committed types → no throw.
+      // Environmental failure with committed types → no throw.
     } finally {
       warnSpy.mockRestore();
       logSpy.mockRestore();
@@ -776,7 +776,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect.objectContaining({ maxMs: 300_000 }),
     );
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    // Phase 1: degraded metric artifacts are NOT written in blocking mode (committed types preserved).
+    // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
     expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is not cached — the key stays uncached for the next
@@ -785,12 +785,12 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(metrics.revenue).toBeUndefined();
   });
 
-  test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw, Phase 1 suppresses write", async () => {
+  test("blocking + preflight wait resolves non-RUNNING (STOPPED): degrades, does not throw", async () => {
     // A non-RUNNING *resolve* (not a throw) for a startable state is soft: fall
     // through to DESCRIBE, which degrades on the still-cold warehouse. Only a
     // DELETED/DELETING resolve (or a thrown deterministic error) is fatal.
-    // Per Phase 1 anti-clobber: degraded artifacts are NOT written in blocking
-    // mode when there are no failures (to preserve committed good types).
+    // Degraded artifacts are NOT written in blocking mode when there are no failures
+    // (to preserve committed good types).
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("STARTING");
     mocks.waitUntilRunning.mockResolvedValue("STOPPED");
@@ -831,9 +831,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       mocks.waitUntilRunning.mock.calls[0][2].treatStoppedAsTransient,
     ).toBeUndefined();
     // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
-    // degraded the key per Phase 1 semantics.
+    // degraded the key.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-    // Phase 1: degraded artifacts are suppressed, not written (to preserve committed types).
+    // Degraded artifacts are suppressed, not written (to preserve committed types).
     expect(fs.existsSync(metricFile)).toBe(false);
 
     // The degraded outcome is not cached; the key stays uncached and the next
@@ -852,7 +852,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   ])(
     "blocking + warehouse deleted mid-wait (probe read %s): environmental failure with committed types → no throw, warning emitted",
     async (probedState, startsWarehouse) => {
-      // Phase 3: DELETED mid-wait is environmental. Since the query path writes
+      // DELETED mid-wait is environmental. Since the query path writes
       // analytics.d.ts, committed types exist, so emit warning + return 0.
       writeMetricConfig();
       mocks.getWarehouseState.mockResolvedValue(probedState);
@@ -868,7 +868,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
         mode: "blocking",
       });
 
-      // Phase 3: environmental failure with committed types → no throw.
+      // Environmental failure with committed types → no throw.
 
       expect(mocks.startWarehouse).toHaveBeenCalledTimes(
         startsWarehouse ? 1 : 0,
@@ -876,7 +876,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       // The DESCRIBE batch is skipped — nothing can answer it.
       expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-      // Phase 1: degraded metric artifacts are NOT written in blocking mode (committed types preserved).
+      // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
       expect(fs.existsSync(metricFile)).toBe(false);
 
       // The degraded outcome is not cached — no sticky entry to serve later.
@@ -1779,8 +1779,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
   );
 });
 
-// ── Phase 1: Write suppression for blocking mode with degraded types ──
-describe("generateFromEntryPoint — Phase 1: anti-clobber for blocking mode", () => {
+// ── Write suppression for blocking mode with degraded types ──
+describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
   const antiClobberDir = path.join(__dirname, "__output_anti_clobber__");
   const queryFolder = path.join(antiClobberDir, "queries");
   const metricViewsFolder = path.join(antiClobberDir, "metric-views");
@@ -1947,7 +1947,7 @@ describe("generateFromEntryPoint — Phase 1: anti-clobber for blocking mode", (
     );
 
     expect(error).toBeInstanceOf(TypegenSyntaxError);
-    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    // Degraded artifacts are NOT written in blocking mode (committed types preserved).
     expect(fs.existsSync(outFile)).toBe(false);
   });
 
@@ -2080,12 +2080,12 @@ describe("generateFromEntryPoint — Phase 1: anti-clobber for blocking mode", (
     );
 
     expect(error).toBeInstanceOf(TypegenFatalError);
-    // Phase 1: degraded artifacts are NOT written in blocking mode (committed types preserved).
+    // Degraded artifacts are NOT written in blocking mode (committed types preserved).
     expect(fs.existsSync(outFile)).toBe(false);
   });
 });
 
-describe("generateFromEntryPoint — Phase 3: warning message with cause labels", () => {
+describe("generateFromEntryPoint — warning message with cause labels", () => {
   const warningTestDir = path.join(__dirname, "__output_warning__");
   const queryFolder = path.join(warningTestDir, "queries");
   const metricViewsFolder = path.join(warningTestDir, "metric-views");
@@ -2400,7 +2400,7 @@ describe("generateFromEntryPoint — Phase 3: warning message with cause labels"
   });
 });
 
-describe("generateFromEntryPoint — Phase 3: has-types gate crash (no committed types)", () => {
+describe("generateFromEntryPoint — has-types gate crash (no committed types)", () => {
   const gateDir = path.join(__dirname, "__output_gate_crash__");
   const queryFolder = path.join(gateDir, "queries");
   const outFile = path.join(gateDir, "generated", "analytics.d.ts");
@@ -2416,7 +2416,7 @@ describe("generateFromEntryPoint — Phase 3: has-types gate crash (no committed
     // Clean slate: no generated/ dir, so no committed analytics.d.ts / metric-views.d.ts.
     fs.rmSync(gateDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
-    // A degraded query in blocking mode → write suppressed (Phase 1) → nothing on disk.
+    // A degraded query in blocking mode → write suppressed → nothing on disk.
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [degradedSchema("offline_query")],
       syntaxErrors: [],
@@ -2446,7 +2446,7 @@ describe("generateFromEntryPoint — Phase 3: has-types gate crash (no committed
     const message = stripAnsi((err as Error).message);
     expect(message).toContain("generate-types --wait");
     expect(message).toContain("wh-nogate");
-    // Phase 1 suppressed the degraded write, so nothing was written this run either.
+    // The degraded write was suppressed, so nothing was written this run either.
     expect(fs.existsSync(outFile)).toBe(false);
   });
 

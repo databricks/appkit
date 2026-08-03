@@ -57,7 +57,6 @@ function classifyEnvironmentalCause(
   error: unknown,
 ): "auth" | "unreachable" | "unavailable" {
   if (isConnectivityError(error)) return "unreachable";
-  // Check for auth status (401/403)
   if (typeof error === "object" && error !== null) {
     const err = error as Record<string, unknown>;
     const status = err.status ?? err.statusCode;
@@ -83,7 +82,7 @@ const MV_PREFLIGHT_WAIT_MAX_MS = 300_000;
  * @param warehouseId - the warehouse ID
  */
 function determineWarningMessage(
-  cause: "auth" | "unreachable" | "unavailable" = "unavailable",
+  cause: "auth" | "unreachable" | "unavailable",
   warehouseId: string,
 ): string {
   const causeLabel =
@@ -419,12 +418,9 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  // In blocking mode, suppress writes when any query is degraded AND there are
-  // no syntax/fatal errors to preserve committed .d.ts files as the fallback of
-  // record. Degraded writes still happen when there are preflight errors (which
-  // write before throwing). Non-blocking mode always writes. The throw still
-  // fires at the end if there are errors — this just prevents overwriting
-  // committed good types with degraded ones from pure connectivity failures.
+  // In blocking mode, never overwrite committed types with a degraded result:
+  // if any query degraded to `result: unknown`, skip the write and leave the
+  // committed .d.ts as the fallback of record. Non-blocking mode always writes.
   const hasAnyDegradedQuery = queryRegistry.some(isQueryDegraded);
   const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
 
@@ -496,8 +492,8 @@ export async function generateFromEntryPoint(options: {
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
 
-  // Phase 3: Unified terminal decision combining deterministic & environmental failures
-  // with a has-types gate in blocking mode.
+  // Unified terminal decision: deterministic failures crash; environmental
+  // failures fall to the has-types gate in blocking mode.
 
   // Deterministic failures (SQL syntax errors or 404/400 HTTP) always crash regardless of mode.
   if (syntaxErrors.length > 0) {
@@ -757,14 +753,12 @@ export async function syncMetricViewsTypes(options: {
     // degrade silently. The degraded schemas are not cached (see the write
     // block), so a later pass re-probes.
     described = describeNeeded.map(emptyMetricSchema);
+    // Only deterministic fatals (404/400) record errors; environmental failures
+    // degrade silently for the has-types gate to handle.
     if (!hadEnvironmentalFailure) {
-      // Only deterministic fatals (404/400) record errors.
       for (const entry of describeNeeded) {
         fatalErrors.push({ name: entry.key, message: preflightFatalMessage });
       }
-    } else {
-      // Environmental failure: don't record in fatalErrors, let the has-types
-      // gate handle it later.
     }
   } else if (describeNeeded.length === 0) {
     // Nothing left to describe — every configured key was a cache hit.
@@ -876,12 +870,9 @@ export async function syncMetricViewsTypes(options: {
     return emptyMetricSchema(entry);
   });
 
-  // In blocking mode, suppress writes when any metric is degraded AND there are
-  // no failures to preserve committed .d.ts files as the fallback of record.
-  // Degraded writes still happen when there are preflight fatals or sync failures
-  // (which throw after writing). Non-blocking mode always writes. This just
-  // prevents overwriting committed good types with degraded ones from pure
-  // warehouse-not-ready scenarios.
+  // Same anti-clobber rule as the query path: when suppressDegradedWrite is set
+  // (blocking mode), skip the write if any metric degraded, preserving the
+  // committed metric-views.d.ts. Non-blocking mode always writes.
   const shouldWriteMetrics =
     !suppressDegradedWrite || !hasAnyDegradedMetrics(schemas);
 

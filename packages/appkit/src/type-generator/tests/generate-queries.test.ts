@@ -776,9 +776,9 @@ describe("generateQueriesFromDescribe", () => {
     test.each(["DELETED", "DELETING"] as const)(
       "%s + blocking mode — environmental, degrades silently, hadEnvironmentalFailure set for gate",
       async (state) => {
-        // Phase 3: DELETED/DELETING are environmental (state-based fatals).
-        // They degrade silently (fatalErrors empty) but set hadEnvironmentalFailure
-        // for the entry point's has-types gate to handle.
+        // DELETED/DELETING are environmental (state-based fatals). They degrade
+        // silently (fatalErrors empty) but set hadEnvironmentalFailure for the
+        // entry point's has-types gate to handle.
         mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
         mocks.readFile
           .mockResolvedValueOnce("SELECT id FROM a")
@@ -790,11 +790,11 @@ describe("generateQueriesFromDescribe", () => {
             mode: "blocking",
           });
 
-        // Phase 3: environmental failures degrade, not fatal at query level.
+        // Environmental failures degrade, not fatal at query level.
         expect(mocks.startWarehouse).not.toHaveBeenCalled();
         expect(mocks.executeStatement).not.toHaveBeenCalled();
-        expect(fatalErrors).toEqual([]); // Phase 3: environmental, not fatal
-        expect(hadEnvironmentalFailure).toBe(true); // Phase 3: track for gate
+        expect(fatalErrors).toEqual([]); // environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // tracked for the gate
         expect(syntaxErrors).toEqual([]);
         // Schemas are still produced (degraded) so the .d.ts is written before
         // generateFromEntryPoint uses the gate to decide throw/warn.
@@ -805,8 +805,9 @@ describe("generateQueriesFromDescribe", () => {
     );
 
     test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is environmental, degrades silently", async () => {
-      // Phase 3: wait timeout (non-RUNNING resolve) is environmental (state-based fatal).
-      // It degrades silently (fatalErrors empty) but sets hadEnvironmentalFailure for the gate.
+      // A wait timeout (non-RUNNING resolve) is environmental (state-based
+      // fatal). It degrades silently (fatalErrors empty) but sets
+      // hadEnvironmentalFailure for the gate.
       vi.useFakeTimers();
       try {
         mocks.readdir.mockResolvedValue(["a.sql"]);
@@ -828,8 +829,8 @@ describe("generateQueriesFromDescribe", () => {
         expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
         expect(mocks.executeStatement).not.toHaveBeenCalled();
         expect(syntaxErrors).toEqual([]);
-        expect(fatalErrors).toEqual([]); // Phase 3: environmental, not fatal
-        expect(hadEnvironmentalFailure).toBe(true); // Phase 3: track for gate
+        expect(fatalErrors).toEqual([]); // environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // tracked for the gate
         expect(schemas[0].type).toContain("result: unknown");
       } finally {
         vi.useRealTimers();

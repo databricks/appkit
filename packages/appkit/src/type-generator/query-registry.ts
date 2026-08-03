@@ -694,7 +694,8 @@ export async function generateQueriesFromDescribe(
     // not-ready warehouse degrades exactly like a per-query outage.
     let decision: ReturnType<typeof decidePreflight> = "proceed";
     let fatalMessage = "";
-    // Track whether a non-connectivity environmental failure occurred (for Phase 3).
+    // Track whether a non-connectivity environmental failure occurred so the
+    // caller's has-types gate can decide crash-vs-fall-back.
     let isEnvironmental = false;
     if (mode === "non-blocking") {
       // `non-blocking` never describes and must make ZERO warehouse round-trips:
@@ -766,7 +767,7 @@ export async function generateQueriesFromDescribe(
       }
     }
 
-    // Track environmental failures in blocking mode for Phase 3 gate.
+    // Record blocking-mode environmental failures for the has-types gate.
     if (
       mode === "blocking" &&
       ((decision === "degradeAll" && isEnvironmental) ||
