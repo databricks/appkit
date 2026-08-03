@@ -23,7 +23,8 @@ Query Databricks Vector Search indexes with hybrid search, reranking, and cursor
 ## Basic usage
 
 ```ts
-import { createApp, aiSearch, server } from "@databricks/appkit";
+import { createApp, server } from "@databricks/appkit";
+import { aiSearch } from "@databricks/appkit/beta";
 
 await createApp({
   plugins: [
@@ -221,6 +222,9 @@ Returns the resolved `IndexConfig` for the alias (excluding `embeddingFn`).
 The plugin exposes a `query` method for server-side use:
 
 ```ts
+import { createApp, server } from "@databricks/appkit";
+import { aiSearch } from "@databricks/appkit/beta";
+
 const AppKit = await createApp({
   plugins: [
     server(),
