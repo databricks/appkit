@@ -68,7 +68,7 @@ jobs:
               docs/docs/plugins/lakebase.md \
               docs/docs/plugins/model-serving.md \
               docs/docs/plugins/server.md \
-              docs/docs/plugins/vector-search.md; then
+              docs/docs/plugins/ai-search.md; then
             echo "❌ Error: Generated files are out of sync with their source manifests/schemas."
             echo ""
             echo "To fix this:"
