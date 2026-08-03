@@ -408,8 +408,8 @@ export function BaseChart({
         ? {
             click: (params: unknown) => {
               // Fire-and-forget: the datum callback may be async, and a rejected
-              // promise must not surface as an unhandled rejection (the docs
-              // promise async handlers are fine). Swallow rejections here.
+              // promise must not surface as an unhandled rejection. Swallow
+              // rejections here.
               const result = onDataClickRef.current?.(
                 mapToDatum(params),
               ) as void | Promise<void>;

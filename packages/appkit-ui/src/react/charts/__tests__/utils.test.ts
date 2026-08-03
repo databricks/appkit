@@ -357,8 +357,7 @@ describe("mapToDatum", () => {
   });
 
   test("splits an [x, y] tuple point into x/y and surfaces y as value", () => {
-    // A time-series point: value is [epochMs, amount]. Previously value became
-    // null and callers had to re-parse `raw`.
+    // A time-series point: value is [epochMs, amount].
     const d = mapToDatum({
       value: [1704067200000, 8_100_000],
       seriesName: "ARR",

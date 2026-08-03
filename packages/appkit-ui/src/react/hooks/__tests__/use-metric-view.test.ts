@@ -223,7 +223,7 @@ describe("useMetricView", () => {
 
     // The event is published to the shared provider (driving a global
     // "warehouse starting…" indicator) but the metric result shape does NOT
-    // expose warehouseStatus (Phase 0 contract) and the hook stays loading.
+    // expose warehouseStatus and the hook stays loading.
     expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(status);
     expect(mockUnpublishWarehouseStatus).not.toHaveBeenCalled();
     expect(result.current).not.toHaveProperty("warehouseStatus");

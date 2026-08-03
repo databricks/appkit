@@ -268,7 +268,7 @@ function MetricViewsRoute() {
           tooltip="Each visual POSTs {measures, dimensions, filter} to /api/analytics/metric/revenue. Selections compose into a MetricFilter the server renders into a parameterized WHERE — the client never builds SQL."
         />
 
-        {/* Filter bar (A): dropdowns write into the shared selection. The Region
+        {/* Filter bar: dropdowns write into the shared selection. The Region
             value is bound to selection.region, so it also reflects a table-row
             click below. */}
         <Card className="mb-6">
@@ -454,7 +454,7 @@ function MetricViewsRoute() {
           </CardContent>
         </Card>
 
-        {/* Detail table (C): click a row to cross-filter by that region. */}
+        {/* Detail table: click a row to cross-filter by that region. */}
         <Card className="mt-6">
           <CardHeader>
             <CardTitle>Revenue detail by region</CardTitle>
