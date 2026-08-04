@@ -200,6 +200,29 @@ describe("AiSearchPlugin", () => {
       expect(result.queryTimeMs).toBe(35);
     });
 
+    it("types result.data via the generic parameter", async () => {
+      interface Doc extends Record<string, unknown> {
+        id: number;
+        title: string;
+      }
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          products: { indexName: "cat.sch.products", columns: ["id", "title"] },
+        },
+      });
+      await plugin.setup();
+
+      const result = await plugin.query<Doc>("products", {
+        queryText: "machine learning",
+      });
+
+      // Compile-time: `data` is typed as Doc, so these fields resolve without
+      // a cast. Runtime: they carry the parsed values.
+      const first: Doc = result.results[0].data;
+      expect(first.id).toBe(1);
+      expect(first.title).toBe("ML Guide");
+    });
+
     it("constructs correct API request", async () => {
       const plugin = new AiSearchPlugin({
         indexes: {

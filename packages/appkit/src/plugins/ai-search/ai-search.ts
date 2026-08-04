@@ -13,6 +13,7 @@ import type {
   IndexConfig,
   SearchRequest,
   SearchResponse,
+  SearchResult,
 } from "./types";
 
 const logger = createLogger("ai-search");
@@ -229,7 +230,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
    * Programmatic query API — available as `appkit.aiSearch.query()`.
    * When called through `asUser(req)`, executes with the user's credentials.
    */
-  async query(alias: string, request: SearchRequest): Promise<SearchResponse> {
+  async query<T extends Record<string, unknown> = Record<string, unknown>>(
+    alias: string,
+    request: SearchRequest,
+  ): Promise<SearchResponse<T>> {
     const indexConfig = this._resolveIndex(alias);
     if (!indexConfig) {
       throw new Error(`No index configured with alias "${alias}"`);
@@ -343,21 +347,26 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     return { columnsToRerank: columns.filter((c) => c !== "id") };
   }
 
-  private _parseResponse(
+  private _parseResponse<
+    T extends Record<string, unknown> = Record<string, unknown>,
+  >(
     raw: VsRawResponse,
     queryType: "ann" | "hybrid" | "full_text",
-  ): SearchResponse {
+  ): SearchResponse<T> {
     const columnNames = raw.manifest.columns.map((c) => c.name);
     const scoreIndex = columnNames.indexOf("score");
 
-    const results = raw.result.data_array.map((row) => {
+    // `data` is assembled dynamically from the index's returned columns, so
+    // its shape can't be statically verified against T — the caller asserts
+    // T matches the configured columns. Cast once here, at the boundary.
+    const results: SearchResult<T>[] = raw.result.data_array.map((row) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < columnNames.length; i++) {
         if (columnNames[i] !== "score") data[columnNames[i]] = row[i];
       }
       return {
         score: scoreIndex >= 0 ? (row[scoreIndex] as number) : 0,
-        data,
+        data: data as T,
       };
     });
 
