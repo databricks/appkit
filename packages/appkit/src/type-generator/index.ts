@@ -84,21 +84,6 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
-/**
- * Check if committed type artifacts exist (at least one of the requested surfaces).
- * Serving types are excluded (gitignored, never part of the gate).
- * Returns true if either the analytics or metric-views committed .d.ts file exists.
- */
-function hasCommittedTypes(
-  analyticsOutFile: string,
-  metricViewsOutFile: string | undefined,
-): boolean {
-  const hasAnalytics = existsSync(analyticsOutFile);
-  const hasMetrics =
-    metricViewsOutFile !== undefined && existsSync(metricViewsOutFile);
-  return hasAnalytics || hasMetrics;
-}
-
 function isQueryDegraded(schema: QuerySchema): boolean {
   return schema.degraded === true;
 }
@@ -361,6 +346,8 @@ export async function generateFromEntryPoint(options: {
   const metricViewsFolder =
     options.metricViewsFolder ??
     (queryFolder ? path.resolve(queryFolder, "..", "metric-views") : undefined);
+  const resolvedMvFile =
+    mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
 
   const projectRoot = resolveProjectRoot(outFile);
 
@@ -370,8 +357,8 @@ export async function generateFromEntryPoint(options: {
   let syntaxErrors: QuerySyntaxError[] = [];
   // Deterministic fatal errors only (404/400).
   let fatalErrors: QueryFatalError[] = [];
-  // Track whether an environmental failure occurred in blocking mode.
-  let hadEnvironmentalFailure = false;
+  let queryHadEnvironmentalFailure = false;
+  let metricsHadEnvironmentalFailure = false;
   // Track the coarse cause of the environmental failure for the warning message.
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
 
@@ -383,8 +370,7 @@ export async function generateFromEntryPoint(options: {
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];
     fatalErrors = result.fatalErrors ?? [];
-    hadEnvironmentalFailure =
-      hadEnvironmentalFailure || (result.hadEnvironmentalFailure ?? false);
+    queryHadEnvironmentalFailure = result.hadEnvironmentalFailure ?? false;
     environmentalCause =
       environmentalCause ?? result.environmentalCause ?? undefined;
   }
@@ -399,7 +385,7 @@ export async function generateFromEntryPoint(options: {
     // A degraded schema always participates in the committed-types gate. Keep
     // this invariant next to write suppression so a new producer cannot update
     // one decision without the other.
-    hadEnvironmentalFailure = true;
+    queryHadEnvironmentalFailure = true;
     environmentalCause = environmentalCause ?? "unavailable";
   }
   const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
@@ -414,15 +400,12 @@ export async function generateFromEntryPoint(options: {
   // metric views without any `.sql` queries). `syncMetricViewsTypes` still
   // returns `noConfig` when the folder holds no `definitions.json`.
   if (metricViewsFolder) {
-    const mvFile =
-      mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
-
     let mvResult: SyncMetricViewsTypesResult;
     try {
       mvResult = await syncMetricViewsTypes({
         metricViewsFolder,
         warehouseId,
-        metricOutFile: mvFile,
+        metricOutFile: resolvedMvFile,
         cache: !noCache,
         metricFetcher,
         mode,
@@ -451,9 +434,9 @@ export async function generateFromEntryPoint(options: {
       fatalErrors.push(fe);
     }
 
-    // Thread through the environmental failure flag and cause.
-    hadEnvironmentalFailure =
-      hadEnvironmentalFailure || (mvResult.hadEnvironmentalFailure ?? false);
+    metricsHadEnvironmentalFailure =
+      (mvResult.hadEnvironmentalFailure ?? false) ||
+      (mode === "blocking" && hasAnyDegradedMetrics(mvResult.schemas));
     environmentalCause =
       environmentalCause ?? mvResult.environmentalCause ?? undefined;
 
@@ -483,15 +466,19 @@ export async function generateFromEntryPoint(options: {
     throw new TypegenFatalError(fatalErrors, warehouseId);
   }
 
-  // Environmental failures (in blocking mode) trigger the has-types gate.
-  if (mode === "blocking" && hadEnvironmentalFailure) {
-    // Determine resolved metric-views file for the has-types check.
-    const resolvedMvFile =
-      options.mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
+  if (
+    mode === "blocking" &&
+    (queryHadEnvironmentalFailure || metricsHadEnvironmentalFailure)
+  ) {
+    const missingCommittedTypes: string[] = [];
+    if (queryHadEnvironmentalFailure && !existsSync(outFile)) {
+      missingCommittedTypes.push(path.basename(outFile));
+    }
+    if (metricsHadEnvironmentalFailure && !existsSync(resolvedMvFile)) {
+      missingCommittedTypes.push(path.basename(resolvedMvFile));
+    }
 
-    const hasTypes = hasCommittedTypes(outFile, resolvedMvFile);
-
-    if (hasTypes) {
+    if (missingCommittedTypes.length === 0) {
       // Committed types present: emit loud warning and exit 0.
       const warningMessage = determineWarningMessage(
         environmentalCause ?? "unavailable",
@@ -499,12 +486,11 @@ export async function generateFromEntryPoint(options: {
       );
       logger.warn(warningMessage);
     } else {
-      // No committed types: crash with a generic message.
       throw new TypegenFatalError(
         [
           {
             name: "type-generator",
-            message: `Warehouse ${warehouseId} could not be reached and no committed types exist. Run 'npx @databricks/appkit generate-types --wait' locally and commit the generated .d.ts files.`,
+            message: `Warehouse ${warehouseId} could not provide schemas and the required committed type ${plural(missingCommittedTypes.length, "artifact is", "artifacts are")} missing: ${missingCommittedTypes.join(", ")}. Run 'npx @databricks/appkit generate-types --wait' locally and commit the generated .d.ts files.`,
           },
         ],
         warehouseId,

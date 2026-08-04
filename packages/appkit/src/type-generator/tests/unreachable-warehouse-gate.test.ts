@@ -57,6 +57,7 @@ const { generateFromEntryPoint, TypegenFatalError } = await import("../index");
 const testDir = path.join(__dirname, "__output_unreachable_gate__");
 const queryFolder = path.join(testDir, "queries");
 const outFile = path.join(testDir, "generated", "analytics.d.ts");
+const metricFile = path.join(testDir, "generated", "metric-views.d.ts");
 
 /** DNS-style transport failure: what a CI runner without warehouse egress sees. */
 function unreachableError() {
@@ -132,6 +133,26 @@ describe("--wait gate: environmental query failures (real query path)", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  test("committed metric types do not satisfy a missing query fallback", async () => {
+    fs.mkdirSync(path.dirname(metricFile), { recursive: true });
+    fs.writeFileSync(metricFile, "// committed metric types\n", "utf-8");
+
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-unreachable",
+      mode: "blocking",
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain("analytics.d.ts");
+    expect(fs.existsSync(outFile)).toBe(false);
+    expect(fs.existsSync(metricFile)).toBe(true);
   });
 
   test("non-terminal DESCRIBE + no committed types → crashes instead of silently exiting 0", async () => {
