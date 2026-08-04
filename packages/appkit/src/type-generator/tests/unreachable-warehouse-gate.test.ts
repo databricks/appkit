@@ -12,7 +12,7 @@ import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
  * That is exactly how the original bug survived: the query path reported
  * `false` for a connectivity failure and no test joined the two halves.
  *
- * Here only the SDK boundary is mocked. The real query path classifies the
+ * Here only the client boundary is mocked. The real query path classifies the
  * failure and the real gate decides, so a regression in either half fails a
  * test.
  */
@@ -22,12 +22,21 @@ const mocks = vi.hoisted(() => ({
   executeStatement: vi.fn(),
 }));
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({
-    statementExecution: { executeStatement: mocks.executeStatement },
-    warehouses: { get: mocks.getWarehouse, start: vi.fn() },
-  })),
-}));
+// Stub the wrapper, not `@databricks/sdk-experimental` underneath it: the
+// wrapper re-exports SDK values (`ConfigError`, `Context`, `Time`, `TimeUnits`)
+// that a bare SDK factory mock would drop, breaking module init. Spreading
+// `importOriginal` keeps those intact while swapping only the factory.
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => ({
+      statementExecution: { executeStatement: mocks.executeStatement },
+      warehouses: { get: mocks.getWarehouse, start: vi.fn() },
+    }),
+  };
+});
 
 // Keep the on-disk typegen cache out of play: a reused cached type would mask
 // the degrade this test depends on.
