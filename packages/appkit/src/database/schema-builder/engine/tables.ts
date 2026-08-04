@@ -1,9 +1,7 @@
 import {
   type AnyPgColumn,
-  bigserial,
   type PgColumnBuilderBase,
   type PgEnum,
-  type PgTable,
   bigint as pgBigint,
   boolean as pgBoolean,
   pgEnum,
@@ -15,19 +13,14 @@ import {
   timestamp as pgTimestamp,
   uuid as pgUuid,
   varchar as pgVarchar,
-  serial,
 } from "drizzle-orm/pg-core";
-import type { ReferentialAction } from "../../contract";
-import { APPKIT_TABLE } from "../private";
 import {
-  type AppKitTable,
-  type ColumnMeta,
-  type EngineColumn,
+  type EngineTable,
   type MutableColumnMeta,
+  type ReferentialAction,
   SchemaBuildError,
 } from "../types";
 
-/** Loosely-typed engine column builder seam */
 type AnyColumnBuilder = PgColumnBuilderBase & {
   primaryKey(): AnyColumnBuilder;
   notNull(): AnyColumnBuilder;
@@ -35,6 +28,7 @@ type AnyColumnBuilder = PgColumnBuilderBase & {
   default(value: unknown): AnyColumnBuilder;
   defaultNow(): AnyColumnBuilder;
   defaultRandom(): AnyColumnBuilder;
+  generatedByDefaultAsIdentity(): AnyColumnBuilder;
   references(
     ref: () => AnyPgColumn,
     actions?: { onDelete?: ReferentialAction; onUpdate?: ReferentialAction },
@@ -42,167 +36,194 @@ type AnyColumnBuilder = PgColumnBuilderBase & {
 };
 
 type PgEnumValues = PgEnum<[string, ...string[]]>;
+/** Reuse one Drizzle enum object for each enum name in this schema. */
 type EnumRegistry = Map<string, PgEnumValues>;
+
+interface BuiltEngineTable {
+  readonly engine: EngineTable;
+  readonly columns: Record<string, MutableColumnMeta>;
+}
+
+function sameValues(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
 
 function getEnum(
   registry: EnumRegistry,
+  schemaName: string,
   name: string,
   values: readonly string[],
 ): PgEnumValues {
   const existing = registry.get(name);
-  if (existing) return existing;
+  if (existing) {
+    if (!sameValues(existing.enumValues, values)) {
+      throw new SchemaBuildError(
+        `Enum "${name}" is declared with conflicting values`,
+      );
+    }
+    return existing;
+  }
 
-  const created = pgEnum(name, values as [string, ...string[]]);
-  registry.set(name, created);
-  return created;
+  const tuple = values as [string, ...string[]];
+  const created =
+    schemaName === "public"
+      ? pgEnum(name, tuple)
+      : pgSchema(schemaName).enum(name, tuple);
+  registry.set(name, created as PgEnumValues);
+  return created as PgEnumValues;
 }
 
+/** Map resolved storage metadata to its Drizzle column builder. */
 function baseColumn(
   meta: MutableColumnMeta,
+  schemaName: string,
   enums: EnumRegistry,
 ): AnyColumnBuilder {
-  const col = meta.columnName;
+  const name = meta.columnName;
   let builder: PgColumnBuilderBase;
   switch (meta.storageKind) {
     case "id":
-      builder = serial(col);
+    case "integer":
+      builder = pgInteger(name);
       break;
     case "bigid":
-      builder = bigserial(col, { mode: "bigint" });
+    case "bigint":
+      builder = pgBigint(name, { mode: "bigint" });
       break;
     case "text":
-      builder = pgText(col);
+      builder = pgText(name);
       break;
     case "varchar":
-      builder = pgVarchar(col, { length: meta.varcharLength ?? 255 });
-      break;
-    case "integer":
-      builder = pgInteger(col);
-      break;
-    case "bigint":
-      builder = pgBigint(col, { mode: "bigint" });
+      builder = pgVarchar(name, { length: meta.varcharLength ?? 255 });
       break;
     case "boolean":
-      builder = pgBoolean(col);
+      builder = pgBoolean(name);
       break;
     case "uuid":
-      builder = pgUuid(col);
+      builder = pgUuid(name);
       break;
     case "timestamp":
-      builder = pgTimestamp(col, { withTimezone: meta.withTimezone ?? false });
+      builder = pgTimestamp(name, {
+        mode: "string",
+        withTimezone: meta.withTimezone ?? false,
+      });
       break;
     case "jsonb":
-      builder = pgJsonb(col);
+      builder = pgJsonb(name);
       break;
-    case "enum":
-      // biome-ignore lint/style/noNonNullAssertion: enum metas always carry an enumName.
-      builder = getEnum(enums, meta.enumName!, meta.enumValues ?? [])(col);
+    case "enum": {
+      if (!meta.enumName || !meta.enumValues?.length) {
+        throw new SchemaBuildError(
+          `Enum column "${meta.columnName}" has no enum definition`,
+        );
+      }
+      builder = getEnum(
+        enums,
+        schemaName,
+        meta.enumName,
+        meta.enumValues,
+      )(name);
       break;
+    }
   }
   return builder as AnyColumnBuilder;
 }
 
 function buildColumn(
   meta: MutableColumnMeta,
+  schemaName: string,
   enums: EnumRegistry,
   resolveTarget: (table: string, column: string) => AnyPgColumn,
 ): PgColumnBuilderBase {
-  let c = baseColumn(meta, enums);
-
-  if (meta.primaryKey && !meta.serverGenerated) c = c.primaryKey();
-  if (meta.notNull && !meta.serverGenerated) c = c.notNull();
-  if (meta.unique) c = c.unique();
+  let column = baseColumn(meta, schemaName, enums);
+  if (meta.serverGenerated) column = column.generatedByDefaultAsIdentity();
+  if (meta.primaryKey) column = column.primaryKey();
+  else if (meta.notNull) column = column.notNull();
+  if (meta.unique) column = column.unique();
 
   if (!meta.serverGenerated) {
-    if (meta.defaultNow) c = c.defaultNow();
-    else if (meta.defaultRandom) c = c.defaultRandom();
-    else if (meta.defaultValue !== undefined) c = c.default(meta.defaultValue);
+    if (meta.defaultNow) column = column.defaultNow();
+    else if (meta.defaultRandom) column = column.defaultRandom();
+    else if (Object.hasOwn(meta, "defaultValue")) {
+      column = column.default(meta.defaultValue);
+    }
   }
 
   if (meta.fk) {
     const target = meta.fk;
-    c = c.references(
+    // Drizzle resolves this thunk after all referenced tables are registered.
+    column = column.references(
       () => resolveTarget(target.targetTable, target.targetColumn),
       { onDelete: target.onDelete, onUpdate: target.onUpdate },
     );
   }
-
-  return c;
+  return column;
 }
 
-/**
- * Build one engine table from finalized column metas. `resolveTarget` reads the
- * shared registry so FK `.references()` thunks resolve forward/self refs.
- */
 function buildTable(
   name: string,
   schemaName: string,
   metas: Record<string, MutableColumnMeta>,
   enums: EnumRegistry,
   resolveTarget: (table: string, column: string) => AnyPgColumn,
-): { engine: PgTable; columns: Record<string, ColumnMeta> } {
-  const columnBuilders: Record<string, PgColumnBuilderBase> = {};
+): BuiltEngineTable {
+  const columnBuilders: Record<string, PgColumnBuilderBase> =
+    Object.create(null);
   for (const [key, meta] of Object.entries(metas)) {
-    columnBuilders[key] = buildColumn(meta, enums, resolveTarget);
+    columnBuilders[key] = buildColumn(meta, schemaName, enums, resolveTarget);
   }
 
   const engine =
     schemaName === "public"
       ? pgTable(name, columnBuilders)
       : pgSchema(schemaName).table(name, columnBuilders);
-
-  const columns: Record<string, ColumnMeta> = {};
   for (const [key, meta] of Object.entries(metas)) {
-    // store the real engine column behind the opaque handle (quarantine file).
-    meta.engineColumn = (engine as unknown as Record<string, AnyPgColumn>)[
+    const engineColumn = (engine as unknown as Record<string, AnyPgColumn>)[
       key
-    ] as unknown as EngineColumn;
-    columns[key] = meta as ColumnMeta;
+    ];
+    if (!engineColumn) {
+      throw new SchemaBuildError(
+        `Engine column "${name}.${key}" was not constructed`,
+      );
+    }
+    meta.engineColumn =
+      engineColumn as unknown as MutableColumnMeta["engineColumn"];
   }
-
-  return { engine, columns };
+  return { engine: engine as unknown as EngineTable, columns: metas };
 }
 
-function makeAppKitTable(
-  name: string,
-  schemaName: string,
-  built: { engine: PgTable; columns: Record<string, ColumnMeta> },
-): AppKitTable {
-  return {
-    $name: name,
-    $schemaName: schemaName,
-    $columns: built.columns,
-    $engine: built.engine,
-    $relations: [],
-    [APPKIT_TABLE]: true,
-  } as unknown as AppKitTable;
-}
-
-/**
- * Build every engine table from finalized metas, resolving FK targets across the
- * whole set via a shared registry so forward/self references wire correctly.
- */
+/** Build all Drizzle tables only after declaration validation has succeeded. */
 export function buildEngineTables(
   raw: Iterable<{ name: string; metas: Record<string, MutableColumnMeta> }>,
   schemaName: string,
-): Record<string, AppKitTable> {
-  const builtEngine: Record<string, Record<string, AnyPgColumn>> = {};
+): Map<string, BuiltEngineTable> {
+  const entries = [...raw];
+  const builtEngine = new Map<string, Record<string, AnyPgColumn>>();
   const resolveTarget = (table: string, column: string): AnyPgColumn => {
-    const t = builtEngine[table];
-    if (!t || !t[column])
+    const target = builtEngine.get(table)?.[column];
+    if (!target) {
       throw new SchemaBuildError(
         `Cannot resolve FK target "${table}.${column}"`,
       );
-
-    return t[column];
+    }
+    return target;
   };
 
   const enums: EnumRegistry = new Map();
-  const tables: Record<string, AppKitTable> = {};
-  for (const { name, metas } of raw) {
+  const tables = new Map<string, BuiltEngineTable>();
+  for (const { name, metas } of entries) {
     const built = buildTable(name, schemaName, metas, enums, resolveTarget);
-    builtEngine[name] = built.engine as unknown as Record<string, AnyPgColumn>;
-    tables[name] = makeAppKitTable(name, schemaName, built);
+    builtEngine.set(
+      name,
+      built.engine as unknown as Record<string, AnyPgColumn>,
+    );
+    tables.set(name, built);
   }
   return tables;
 }

@@ -1,14 +1,13 @@
 /** Max number of values allowed in an `in.(…)` list. */
 export const IN_CAP = 100;
-/** Hard ceiling for `.limit()` clamp. */
+/** Hard ceiling for a runtime query limit. */
 export const MAX_LIMIT = 500;
 /** Default page size when no `.limit()` is supplied. */
 export const DEFAULT_LIMIT = 50;
 /** Max number of relations resolvable in a single `.include()`. */
 export const MAX_INCLUDES = 10;
-
 /** Filter operators usable in the runtime WHERE translator and the `where` spec type. */
-export const FILTER_OPERATORS = [
+export const FILTER_OPERATORS = Object.freeze([
   "eq",
   "neq",
   "gt",
@@ -19,7 +18,7 @@ export const FILTER_OPERATORS = [
   "ilike",
   "in",
   "is",
-] as const;
+] as const);
 
 export type FilterOperator = (typeof FILTER_OPERATORS)[number];
 

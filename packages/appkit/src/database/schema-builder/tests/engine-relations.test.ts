@@ -1,7 +1,8 @@
 import { createTableRelationsHelpers, Many, One } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { buildEngineRelations, defineSchema, fk, id, text } from "../index";
+import { buildEngineRelations } from "../engine/relations";
+import { defineSchema, fk, id, text } from "../index";
 
 /** Structural view of a Drizzle `relations()` object (avoids leaning on internals' exact types). */
 type RelationsLike = {
@@ -63,14 +64,14 @@ describe("buildEngineRelations", () => {
     ).toBe("posts");
   });
 
-  it("resolves relation targets by table name even when return keys differ", () => {
+  it("resolves relation targets by canonical table identity", () => {
     const s = defineSchema((t) => {
       const cases = t.table("cases", { id: id() });
-      const statusHistory = t.table("status_history", {
+      const status_history = t.table("status_history", {
         id: id(),
         caseId: fk(() => cases.id),
       });
-      return { cases, statusHistory };
+      return { cases, status_history };
     });
     const rels = buildEngineRelations(s.$tables);
 
