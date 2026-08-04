@@ -3,7 +3,7 @@ import {
   createMockResponse,
   createMockRouter,
 } from "@tools/test-helpers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
@@ -110,13 +110,38 @@ describe("AiSearchPlugin", () => {
   });
 
   describe("setup()", () => {
-    it("throws if an index has an empty indexName (unset env var)", async () => {
+    const originalIndexEnv = process.env.DATABRICKS_VS_INDEX_NAME;
+    afterEach(() => {
+      if (originalIndexEnv === undefined) {
+        delete process.env.DATABRICKS_VS_INDEX_NAME;
+      } else {
+        process.env.DATABRICKS_VS_INDEX_NAME = originalIndexEnv;
+      }
+    });
+
+    it("throws if indexName is unset in both config and env", async () => {
+      delete process.env.DATABRICKS_VS_INDEX_NAME;
       const plugin = new AiSearchPlugin({
         indexes: {
-          test: { indexName: "", columns: ["id"] },
+          test: { columns: ["id"] },
         },
       });
       await expect(plugin.setup()).rejects.toThrow("indexName");
+    });
+
+    it("defaults indexName from DATABRICKS_VS_INDEX_NAME when omitted", async () => {
+      process.env.DATABRICKS_VS_INDEX_NAME = "cat.sch.from_env";
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: { columns: ["id"] },
+        },
+      });
+      await expect(plugin.setup()).resolves.not.toThrow();
+
+      await plugin.query("test", { queryText: "q" });
+      expect(mockRequest.mock.calls[0][0].path).toBe(
+        "/api/2.0/vector-search/indexes/cat.sch.from_env/query",
+      );
     });
 
     it("throws if pagination enabled but no endpointName", async () => {

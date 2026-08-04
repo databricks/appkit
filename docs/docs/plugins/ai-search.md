@@ -74,7 +74,7 @@ aiSearch({
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `indexName` | `string` | — | **Required.** Three-level Unity Catalog name (`catalog.schema.index`) |
+| `indexName` | `string` | `DATABRICKS_VS_INDEX_NAME` | Three-level Unity Catalog name (`catalog.schema.index`). Defaults to the `DATABRICKS_VS_INDEX_NAME` env var when omitted. |
 | `columns` | `string[]` | — | **Required.** Columns to return in query results |
 | `queryType` | `"ann" \| "hybrid" \| "full_text"` | `"hybrid"` | Search mode |
 | `numResults` | `number` | `20` | Maximum results per query |

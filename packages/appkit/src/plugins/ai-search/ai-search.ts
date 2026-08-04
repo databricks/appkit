@@ -44,13 +44,13 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   async setup(): Promise<void> {
-    // Only validate what the config schema and TS types can't: an empty
-    // indexName (an env var populating it was unset) and the runtime
-    // pagination -> endpointName dependency.
+    // Only validate what the config schema and TS types can't: an indexName
+    // that resolves to nothing (neither config nor DATABRICKS_VS_INDEX_NAME
+    // set) and the runtime pagination -> endpointName dependency.
     for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
-      if (!idx.indexName) {
+      if (!this._resolveIndex(alias)) {
         throw new Error(
-          `Index "${alias}" has an empty "indexName" (an env var populating it may be unset)`,
+          `Index "${alias}" has no indexName (set it in config or via DATABRICKS_VS_INDEX_NAME)`,
         );
       }
       if (idx.pagination && !idx.endpointName) {
@@ -255,8 +255,14 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     };
   }
 
-  private _resolveIndex(alias: string): IndexConfig | undefined {
-    return this.config.indexes?.[alias];
+  private _resolveIndex(
+    alias: string,
+  ): (IndexConfig & { indexName: string }) | undefined {
+    const idx = this.config.indexes?.[alias];
+    if (!idx) return undefined;
+    const indexName = idx.indexName ?? process.env.DATABRICKS_VS_INDEX_NAME;
+    if (!indexName) return undefined;
+    return { ...idx, indexName };
   }
 
   private async _prepareQuery(
