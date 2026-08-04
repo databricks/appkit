@@ -215,6 +215,40 @@ describe("syncMetricViewsTypes", () => {
     expect(fs.existsSync(staleDts)).toBe(false);
   });
 
+  test("preserves a legacy metric-views.d.ts when a degraded blocking pass suppresses the replacement write", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+
+    const legacyDts = path.join(
+      tmpRoot,
+      "shared",
+      "appkit-types",
+      "metric-views.d.ts",
+    );
+    fs.mkdirSync(path.dirname(legacyDts), { recursive: true });
+    const committedContent = "// committed legacy metric types\n";
+    fs.writeFileSync(legacyDts, committedContent);
+
+    await syncMetricViewsTypes({
+      metricViewsFolder,
+      warehouseId: "wh-1",
+      metricOutFile,
+      mode: "blocking",
+      suppressDegradedWrite: true,
+      metricFetcher: async () => ({
+        statement_id: "stmt-pending",
+        status: { state: "PENDING" },
+      }),
+    });
+
+    expect(fs.existsSync(metricOutFile)).toBe(false);
+    expect(fs.readFileSync(legacyDts, "utf-8")).toBe(committedContent);
+  });
+
   test("returns noConfig and writes nothing when definitions.json is absent", async () => {
     const result = await syncMetricViewsTypes({
       metricViewsFolder,

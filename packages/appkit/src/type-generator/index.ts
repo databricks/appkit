@@ -874,8 +874,14 @@ export async function syncMetricViewsTypes(options: {
   // `metricOutFile`. Left behind, the old sibling would duplicate the
   // `declare module` augmentation and re-introduce the bare side-effect import
   // the new header deliberately drops. Best-effort: only removed when the new
-  // file is itself a `.ts` (never delete the file we just wrote), ENOENT-safe.
-  if (metricOutFile.endsWith(".ts") && !metricOutFile.endsWith(".d.ts")) {
+  // file is itself a `.ts` and exists (never delete the only committed metric
+  // types when a degraded blocking pass suppressed the replacement write),
+  // ENOENT-safe.
+  if (
+    metricOutFile.endsWith(".ts") &&
+    !metricOutFile.endsWith(".d.ts") &&
+    existsSync(metricOutFile)
+  ) {
     const staleDts = `${metricOutFile.slice(0, -".ts".length)}.d.ts`;
     try {
       await fs.unlink(staleDts);
