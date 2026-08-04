@@ -504,6 +504,37 @@ describe("AppKit", () => {
     });
   });
 
+  describe("camelCase accessor alias", () => {
+    class MultiWordPlugin extends NormalTestPlugin {
+      static manifest = createTestManifest("multi-word");
+      name = "multi-word";
+    }
+
+    test("exposes a multi-word plugin under both the kebab name and a camelCase alias", async () => {
+      const instance = (await createApp({
+        plugins: [{ plugin: MultiWordPlugin, config: {}, name: "multi-word" }],
+      })) as any;
+
+      expect(instance["multi-word"]).toBeDefined();
+      expect(instance.multiWord).toBeDefined();
+      // Both keys resolve to the same underlying plugin exports.
+      expect(instance.multiWord.setupCalled).toBe(
+        instance["multi-word"].setupCalled,
+      );
+    });
+
+    test("does not add an alias key for single-word plugins", async () => {
+      const instance = (await createApp({
+        plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
+      })) as any;
+
+      // camelCase of a name with no hyphen is the name itself — no extra key.
+      expect(
+        Object.keys(instance).filter((k) => k === "normalTest"),
+      ).toHaveLength(1);
+    });
+  });
+
   describe("preparePlugins", () => {
     test("should transform plugin data array to plugin map", () => {
       const pluginData = [

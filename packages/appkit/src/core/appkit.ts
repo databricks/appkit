@@ -7,6 +7,7 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { kebabToCamel } from "shared";
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
@@ -107,13 +108,23 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const self = this;
 
-    Object.defineProperty(this, name, {
+    const accessor: PropertyDescriptor = {
       get() {
         const plugin = self.#pluginInstances[name];
         return self.wrapWithAsUser(plugin);
       },
       enumerable: true,
-    });
+    };
+    Object.defineProperty(this, name, accessor);
+
+    // Also expose the plugin under a camelCase alias so multi-word plugins are
+    // reachable as `appkit.aiSearch` in addition to `appkit["ai-search"]`. The
+    // HTTP route prefix stays the kebab `name`; this is purely the SDK handle.
+    // No-op for single-word names (camel === name).
+    const camelName = kebabToCamel(name);
+    if (camelName !== name) {
+      Object.defineProperty(this, camelName, accessor);
+    }
   }
 
   /**
