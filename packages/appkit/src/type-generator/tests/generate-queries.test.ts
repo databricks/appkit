@@ -624,16 +624,21 @@ describe("generateQueriesFromDescribe", () => {
       status: { state: "PENDING" },
     });
 
-    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
-      "/queries",
-      "wh-123",
-    );
+    const {
+      schemas,
+      syntaxErrors,
+      fatalErrors,
+      hadEnvironmentalFailure,
+      environmentalCause,
+    } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
     expect(schemas[0].type).toContain("result: unknown");
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
+    expect(hadEnvironmentalFailure).toBe(true);
+    expect(environmentalCause).toBe("unavailable");
     // a non-ready warehouse must never persist `result: unknown`
     expect(lastSavedQueries()).not.toHaveProperty("users");
   });
@@ -779,44 +784,47 @@ describe("generateQueriesFromDescribe", () => {
     });
 
     test.each(["DELETED", "DELETING"] as const)(
-      "%s + blocking mode — fatal per query after schemas are written, never describes",
+      "%s + blocking mode — environmental, degrades silently, hadEnvironmentalFailure set for gate",
       async (state) => {
+        // DELETED/DELETING are environmental (state-based fatals). They degrade
+        // silently (fatalErrors empty) but set hadEnvironmentalFailure for the
+        // entry point's has-types gate to handle.
         mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
         mocks.readFile
           .mockResolvedValueOnce("SELECT id FROM a")
           .mockResolvedValueOnce("SELECT id FROM b");
         mocks.getWarehouse.mockReturnValue({ state });
 
-        const { schemas, syntaxErrors, fatalErrors } =
+        const { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure } =
           await generateQueriesFromDescribe("/queries", "wh-123", {
             mode: "blocking",
           });
 
-        // A deleted/deleting warehouse is the only fatal case: never started,
-        // never described; one fatal entry per uncached query.
+        // Environmental failures degrade, not fatal at query level.
         expect(mocks.startWarehouse).not.toHaveBeenCalled();
         expect(mocks.executeStatement).not.toHaveBeenCalled();
-        expect(fatalErrors).toEqual([
-          { name: "a", message: `warehouse wh-123 is ${state}` },
-          { name: "b", message: `warehouse wh-123 is ${state}` },
-        ]);
+        expect(fatalErrors).toEqual([]); // environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // tracked for the gate
         expect(syntaxErrors).toEqual([]);
         // Schemas are still produced (degraded) so the .d.ts is written before
-        // generateFromEntryPoint throws on the recorded fatalErrors.
+        // generateFromEntryPoint uses the gate to decide throw/warn.
         expect(schemas).toHaveLength(2);
         expect(schemas[0].type).toContain("result: unknown");
         expect(schemas[1].type).toContain("result: unknown");
       },
     );
 
-    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is fatal", async () => {
+    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is environmental, degrades silently", async () => {
+      // A wait timeout (non-RUNNING resolve) is environmental (state-based
+      // fatal). It degrades silently (fatalErrors empty) but sets
+      // hadEnvironmentalFailure for the gate.
       vi.useFakeTimers();
       try {
         mocks.readdir.mockResolvedValue(["a.sql"]);
         mocks.readFile.mockResolvedValue("SELECT id FROM a");
         // Preflight sees STOPPED → start fires, but the warehouse then reports
         // DELETED (a genuinely terminal state even with treatStoppedAsTransient).
-        // The wait resolves non-RUNNING → fatal; schemas still written.
+        // The wait resolves non-RUNNING → environmental; schemas still written.
         mocks.getWarehouse
           .mockReturnValueOnce({ state: "STOPPED" })
           .mockReturnValue({ state: "DELETED" });
@@ -825,17 +833,14 @@ describe("generateQueriesFromDescribe", () => {
           mode: "blocking",
         });
         await vi.runAllTimersAsync();
-        const { schemas, syntaxErrors, fatalErrors } = await promise;
+        const { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure } =
+          await promise;
 
         expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
         expect(mocks.executeStatement).not.toHaveBeenCalled();
         expect(syntaxErrors).toEqual([]);
-        expect(fatalErrors).toEqual([
-          {
-            name: "a",
-            message: "warehouse wh-123 did not reach RUNNING (now DELETED)",
-          },
-        ]);
+        expect(fatalErrors).toEqual([]); // environmental, not fatal
+        expect(hadEnvironmentalFailure).toBe(true); // tracked for the gate
         expect(schemas[0].type).toContain("result: unknown");
       } finally {
         vi.useRealTimers();
@@ -896,7 +901,7 @@ describe("generateQueriesFromDescribe", () => {
       }
     });
 
-    test("preflight connectivity error — degradeAll, never describes", async () => {
+    test("preflight connectivity error — degradeAll, never describes, flagged environmental for the gate", async () => {
       mocks.readdir.mockResolvedValue(["a.sql"]);
       mocks.readFile.mockResolvedValue("SELECT id FROM a");
       mocks.getWarehouse.mockImplementation(() => {
@@ -906,16 +911,88 @@ describe("generateQueriesFromDescribe", () => {
         );
       });
 
-      const { schemas, syntaxErrors, fatalErrors } =
-        await generateQueriesFromDescribe("/queries", "wh-123", {
-          mode: "blocking",
-        });
+      const {
+        schemas,
+        syntaxErrors,
+        fatalErrors,
+        hadEnvironmentalFailure,
+        environmentalCause,
+      } = await generateQueriesFromDescribe("/queries", "wh-123", {
+        mode: "blocking",
+      });
 
-      // Unreachable warehouse degrades silently — even in blocking mode.
+      // Without the environmental flag a fresh checkout would exit 0 having
+      // written no types at all: degraded queries suppress the write, and
+      // nothing else fails the run.
       expect(mocks.executeStatement).not.toHaveBeenCalled();
       expect(fatalErrors).toEqual([]);
       expect(syntaxErrors).toEqual([]);
       expect(schemas[0].type).toContain("result: unknown");
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("unreachable");
+    });
+
+    test("preflight auth error — environmentalCause is auth, including on response.status", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      // Status carried on `response.status` rather than `status` — some HTTP
+      // clients report it there, and it must still label as auth.
+      mocks.getWarehouse.mockImplementation(() => {
+        throw Object.assign(new Error("PERMISSION_DENIED"), {
+          response: { status: 403 },
+        });
+      });
+
+      const { fatalErrors, hadEnvironmentalFailure, environmentalCause } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(fatalErrors).toEqual([]);
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("auth");
+    });
+
+    test("per-query DESCRIBE connectivity failure is flagged environmental for the gate", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+      mocks.executeStatement.mockRejectedValue(
+        Object.assign(new Error("connect ECONNREFUSED"), {
+          code: "ECONNREFUSED",
+        }),
+      );
+
+      const {
+        schemas,
+        syntaxErrors,
+        fatalErrors,
+        hadEnvironmentalFailure,
+        environmentalCause,
+      } = await generateQueriesFromDescribe("/queries", "wh-123", {
+        mode: "blocking",
+      });
+
+      expect(fatalErrors).toEqual([]);
+      expect(syntaxErrors).toEqual([]);
+      expect(schemas[0].type).toContain("result: unknown");
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("unreachable");
+    });
+
+    test("non-blocking mode never reports an environmental cause", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+
+      const { hadEnvironmentalFailure, environmentalCause } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "non-blocking",
+        });
+
+      // The gate is blocking-only; non-blocking degrades without signaling.
+      expect(hadEnvironmentalFailure).toBe(false);
+      expect(environmentalCause).toBeUndefined();
     });
 
     test("RUNNING preflight — describes normally", async () => {
