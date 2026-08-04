@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyBlockingFailure } from "../errors";
+import { classifyBlockingFailure, classifyEnvironmentalCause } from "../errors";
 
 describe("classifyBlockingFailure", () => {
   describe("deterministic failures", () => {
@@ -239,5 +239,55 @@ describe("classifyBlockingFailure", () => {
       );
       expect(classifyBlockingFailure(error1)).toBe("environmental");
     });
+  });
+});
+
+describe("classifyEnvironmentalCause", () => {
+  it("labels connectivity failures as unreachable", () => {
+    const error = Object.assign(new Error("connect ECONNREFUSED"), {
+      code: "ECONNREFUSED",
+    });
+    expect(classifyEnvironmentalCause(error)).toBe("unreachable");
+  });
+
+  it.each([401, 403])("labels HTTP %i as auth", (status) => {
+    const error = Object.assign(new Error("Denied"), { status });
+    expect(classifyEnvironmentalCause(error)).toBe("auth");
+  });
+
+  it("labels auth status carried on statusCode", () => {
+    const error = Object.assign(new Error("Denied"), { statusCode: 403 });
+    expect(classifyEnvironmentalCause(error)).toBe("auth");
+  });
+
+  it("labels auth status carried on response.status", () => {
+    const error = Object.assign(new Error("Denied"), {
+      response: { status: 401 },
+    });
+    expect(classifyEnvironmentalCause(error)).toBe("auth");
+  });
+
+  it("labels an auth status wrapped in a cause chain", () => {
+    const error = new Error("Request failed", {
+      cause: Object.assign(new Error("Denied"), { status: 403 }),
+    });
+    expect(classifyEnvironmentalCause(error)).toBe("auth");
+  });
+
+  it("prefers unreachable when a failure is both connectivity and status-bearing", () => {
+    // 503 is connectivity; the label should describe the transport problem.
+    const error = Object.assign(new Error("Service unavailable"), {
+      status: 503,
+    });
+    expect(classifyEnvironmentalCause(error)).toBe("unreachable");
+  });
+
+  it.each([
+    ["a warehouse state message", new Error("warehouse wh-1 is DELETED")],
+    ["a plain error", new Error("something went wrong")],
+    ["a non-auth status", Object.assign(new Error("teapot"), { status: 418 })],
+    ["a non-object", "just a string"],
+  ])("labels %s as unavailable", (_name, error) => {
+    expect(classifyEnvironmentalCause(error)).toBe("unavailable");
   });
 });

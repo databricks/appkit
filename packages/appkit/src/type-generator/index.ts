@@ -14,6 +14,7 @@ import {
 } from "./cache";
 import {
   classifyBlockingFailure,
+  classifyEnvironmentalCause,
   getErrorDiagnostic,
   isConnectivityError,
 } from "./errors";
@@ -48,25 +49,6 @@ import {
 dotenv.config();
 
 const logger = createLogger("type-generator");
-
-/**
- * Classify an environmental failure into one of three coarse cause labels
- * for the warning message.
- */
-function classifyEnvironmentalCause(
-  error: unknown,
-): "auth" | "unreachable" | "unavailable" {
-  if (isConnectivityError(error)) return "unreachable";
-  if (typeof error === "object" && error !== null) {
-    const err = error as Record<string, unknown>;
-    const status = err.status ?? err.statusCode;
-    if (typeof status === "number" && (status === 401 || status === 403)) {
-      return "auth";
-    }
-  }
-  // Default for other environmental failures (DELETED/DELETING, timeouts, etc.)
-  return "unavailable";
-}
 
 /**
  * Upper bound (~5 min) on how long the Metric Views path's `blocking`-mode preflight

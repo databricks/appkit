@@ -193,3 +193,37 @@ export function classifyBlockingFailure(
   // timeout messages, plain Error objects) → environmental.
   return "environmental";
 }
+
+/**
+ * Coarse cause label for an environmental failure, used by the `--wait`
+ * committed-types warning so the log says *why* generation fell back.
+ *
+ * Returns:
+ * - "unreachable": transport/connectivity failure (see {@link isConnectivityError}).
+ * - "auth": HTTP 401/403, including a status carried on `response.status` or
+ *   wrapped in a `cause`/`AggregateError` chain.
+ * - "unavailable": everything else (DELETED/DELETING, wait timeouts, degraded
+ *   DESCRIBEs).
+ */
+export function classifyEnvironmentalCause(
+  error: unknown,
+): "auth" | "unreachable" | "unavailable" {
+  if (isConnectivityError(error)) return "unreachable";
+
+  // Walk the error chain so a wrapped 401/403 is still labeled as auth.
+  const seen = new Set<unknown>();
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const status = getErrorStatus(current);
+    if (status !== undefined && AUTH_ERROR_STATUSES.has(status)) return "auth";
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  return "unavailable";
+}
