@@ -23,10 +23,16 @@ const PLUGINS_DIR = path.join(REPO_ROOT, "packages/appkit/src/plugins");
 const DOCS_DIR = path.join(REPO_ROOT, "docs/docs/plugins");
 
 /**
- * Same as `plugin-manifest.schema.json` `name` pattern; keeps `path.join` targets
- * under `docs/docs/plugins` (defense in depth vs path traversal in `name`).
+ * Same as `plugin-manifest.schema.json` `name` pattern (camelCase); keeps
+ * `path.join` targets under `docs/docs/plugins` (defense in depth vs path
+ * traversal in `name`).
  */
-const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+const SCHEMA_NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
+
+/** camelCase manifest name -> kebab doc basename (e.g. aiSearch -> ai-search). */
+function camelToKebab(name: string): string {
+  return name.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+}
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.
@@ -128,7 +134,7 @@ function readPluginInfos(): PluginInfo[] {
     }
 
     const docBasename =
-      DOC_FILE_OVERRIDES[manifest.name] ?? `${manifest.name}.md`;
+      DOC_FILE_OVERRIDES[manifest.name] ?? `${camelToKebab(manifest.name)}.md`;
     if (
       docBasename.includes("..") ||
       docBasename !== path.basename(docBasename) ||
@@ -191,7 +197,7 @@ function main(): void {
 
   for (const s of summary) {
     const rel = path.relative(REPO_ROOT, DOCS_DIR);
-    const docName = DOC_FILE_OVERRIDES[s.name] ?? `${s.name}.md`;
+    const docName = DOC_FILE_OVERRIDES[s.name] ?? `${camelToKebab(s.name)}.md`;
     if (s.action === "missing") {
       console.warn(
         `  warn: ${s.name} — no doc page at ${rel}/${docName} (skipping)`,

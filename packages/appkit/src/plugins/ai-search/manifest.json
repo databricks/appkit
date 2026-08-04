@@ -1,6 +1,6 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
-  "name": "ai-search",
+  "name": "aiSearch",
   "displayName": "AI Search Plugin",
   "stability": "beta",
   "description": "Query Databricks Vector Search indexes with built-in hybrid search, reranking, and pagination",

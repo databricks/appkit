@@ -164,7 +164,7 @@ describe("AiSearchPlugin", () => {
 
   describe("manifest", () => {
     it("has correct name", () => {
-      expect(AiSearchPlugin.manifest.name).toBe("ai-search");
+      expect(AiSearchPlugin.manifest.name).toBe("aiSearch");
     });
   });
 

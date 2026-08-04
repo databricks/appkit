@@ -672,9 +672,9 @@ export const pluginManifestSchema = z
       .describe("Reference to the JSON Schema for validation"),
     name: z
       .string()
-      .regex(/^[a-z][a-z0-9-]*$/)
+      .regex(/^[a-z][a-zA-Z0-9-]*$/)
       .describe(
-        "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+        "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
     displayName: z
       .string()
@@ -908,9 +908,9 @@ export const templatePluginSchema = z
   .object({
     name: z
       .string()
-      .regex(/^[a-z][a-z0-9-]*$/)
+      .regex(/^[a-z][a-zA-Z0-9-]*$/)
       .describe(
-        "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+        "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
     displayName: z
       .string()

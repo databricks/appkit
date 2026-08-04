@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
+import { camelToKebab } from "shared";
 import { AppKitError, ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
@@ -272,7 +273,7 @@ export class ServerPlugin extends Plugin {
 
         plugin.injectRoutes(router);
 
-        const basePath = `/api/${plugin.name}`;
+        const basePath = `/api/${camelToKebab(plugin.name)}`;
         this.serverApplication.use(basePath, router);
 
         endpoints[plugin.name] = plugin.getEndpoints();

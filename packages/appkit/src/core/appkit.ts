@@ -7,7 +7,6 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
-import { kebabToCamel } from "shared";
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
@@ -108,10 +107,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const self = this;
 
-    // The public handle key is camelCase; the kebab `name` still drives
-    // internal lookups and the HTTP route prefix.
-    const accessorKey = kebabToCamel(name);
-    Object.defineProperty(this, accessorKey, {
+    // The manifest `name` is camelCase, so it doubles as the public handle key
+    // (`appkit.aiSearch`). The kebab HTTP route is derived separately.
+    Object.defineProperty(this, name, {
       get() {
         const plugin = self.#pluginInstances[name];
         return self.wrapWithAsUser(plugin);

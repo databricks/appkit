@@ -38,15 +38,14 @@ interface PluginInfo {
 }
 
 /**
- * Mirrors `^[a-z][a-z0-9-]*$` from `plugin-manifest.schema.json`. Catches
- * malformed manifests that bypassed `appkit plugin validate`.
- *
- * Doubles as a defense-in-depth gate against code-injection (CWE-94): both the
- * manifest `name` and the folder name flow into the generated TS source, and
- * this charset forbids quotes, semicolons, braces, backslashes, and newlines,
- * so neither can break out of the string/identifier context it lands in.
+ * Charsets the manifest `name` (camelCase, from `plugin-manifest.schema.json`)
+ * and the folder name (kebab) must match. Both flow into generated TS source,
+ * so these double as a code-injection gate (CWE-94): the charsets forbid
+ * quotes, semicolons, braces, backslashes, and newlines, so neither can break
+ * out of the string/identifier context it lands in.
  */
-const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+const SCHEMA_NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
+const FOLDER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /**
  * The barrel exports each plugin under a JS-identifier binding
@@ -72,9 +71,11 @@ function validateSchemaName(
   kind: "manifest name" | "folder name",
   manifestPath: string,
 ): void {
-  if (!SCHEMA_NAME_PATTERN.test(value)) {
+  const pattern =
+    kind === "manifest name" ? SCHEMA_NAME_PATTERN : FOLDER_NAME_PATTERN;
+  if (!pattern.test(value)) {
     throw new Error(
-      `${kind} "${value}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$. Run \`appkit plugin validate\` to catch this earlier.`,
+      `${kind} "${value}" in ${manifestPath} doesn't match ${pattern.source}. Run \`appkit plugin validate\` to catch this earlier.`,
     );
   }
 }

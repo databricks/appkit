@@ -505,33 +505,21 @@ describe("AppKit", () => {
     });
   });
 
-  describe("camelCase accessor alias", () => {
+  describe("plugin accessor", () => {
     class MultiWordPlugin extends NormalTestPlugin {
-      static manifest = createTestManifest("multi-word");
-      name = "multi-word";
+      static manifest = createTestManifest("aiSearch");
+      name = "aiSearch";
     }
 
-    test("exposes a multi-word plugin under its camelCase key, not the kebab name", async () => {
+    test("exposes a plugin under its camelCase manifest name", async () => {
       const instance = (await createApp({
-        plugins: [{ plugin: MultiWordPlugin, config: {}, name: "multi-word" }],
+        plugins: [{ plugin: MultiWordPlugin, config: {}, name: "aiSearch" }],
       })) as any;
 
-      expect(instance.multiWord).toBeDefined();
-      expect(instance.multiWord.setupCalled).toBe(true);
-      // The kebab-case name is not exposed on the handle.
-      expect(instance["multi-word"]).toBeUndefined();
-      expect(Object.keys(instance)).not.toContain("multi-word");
-    });
-
-    test("does not add an alias key for single-word plugins", async () => {
-      const instance = (await createApp({
-        plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
-      })) as any;
-
-      // camelCase of a name with no hyphen is the name itself — no extra key.
-      expect(
-        Object.keys(instance).filter((k) => k === "normalTest"),
-      ).toHaveLength(1);
+      // The camelCase name is the accessor key verbatim (no transform).
+      expect(instance.aiSearch).toBeDefined();
+      expect(instance.aiSearch.setupCalled).toBe(true);
+      expect(Object.keys(instance)).toContain("aiSearch");
     });
   });
 

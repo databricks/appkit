@@ -25,7 +25,7 @@ import {
 import { resolveTargetDir, scaffoldPlugin } from "./scaffold";
 import type { CreateAnswers, Placement, SelectedResource } from "./types";
 
-const NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+const NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
 const DEFAULT_VERSION = "0.1.0";
 const VALID_PLACEMENTS: Placement[] = ["in-repo", "isolated"];
 const REQUIRED_FLAGS = ["placement", "path", "name", "description"] as const;

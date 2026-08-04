@@ -26,7 +26,7 @@ const querySettings: PluginExecutionSettings = {
 };
 
 export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
-  static manifest = manifest as PluginManifest<"ai-search">;
+  static manifest = manifest as PluginManifest<"aiSearch">;
 
   protected static description =
     "Query Databricks Vector Search indexes with hybrid search, reranking, and pagination";

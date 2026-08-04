@@ -28,8 +28,8 @@
       },
       "stability": "beta"
     },
-    "ai-search": {
-      "name": "ai-search",
+    "aiSearch": {
+      "name": "aiSearch",
       "displayName": "AI Search Plugin",
       "description": "Query Databricks Vector Search indexes with built-in hybrid search, reranking, and pagination",
       "package": "@databricks/appkit",
