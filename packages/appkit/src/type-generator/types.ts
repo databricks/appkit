@@ -99,10 +99,14 @@ export const sqlTypeToHelper: Record<string, string> = {
  * Query schema interface
  * @property name - the name of the query
  * @property type - the type of the query (string, number, boolean, object, array, etc.)
+ * @property degraded - true when the schema could not be resolved and `type`
+ *   is an unknown fallback. Absent when `type` came from DESCRIBE or a matching
+ *   last-known-good cache entry.
  */
 export interface QuerySchema {
   name: string;
   type: string;
+  degraded?: boolean;
 }
 
 /**
@@ -138,12 +142,21 @@ export interface QueryFatalError {
  *   warehouse (genuine SQL errors). Connectivity failures are deliberately NOT
  *   included: they degrade silently (reuse last-known-good type or emit
  *   `unknown`) so a transient outage never fails a build.
- * @property fatalErrors - non-SQL fatal describe request failures. These still
- *   produce `result: unknown` schemas so callers can write declarations before
- *   surfacing the error.
+ * @property fatalErrors - deterministic non-SQL fatal describe request failures
+ *   (404/400). These still produce `result: unknown` schemas so callers can write
+ *   declarations before surfacing the error.
+ * @property hadEnvironmentalFailure - `true` when an environmental failure occurred
+ *   in blocking mode (auth, connectivity, timeouts, or other unrecognized failures).
+ *   Used by {@link generateFromEntryPoint} to decide whether to apply the has-types
+ *   gate. Always false in non-blocking mode.
+ * @property environmentalCause - coarse cause label for the environmental failure,
+ *   one of "auth" (401/403), "unreachable" (connectivity), or "unavailable" (other).
+ *   Only set when hadEnvironmentalFailure is true; used by the warning message.
  */
 export interface QueryGenerationResult {
   schemas: QuerySchema[];
   syntaxErrors: QuerySyntaxError[];
   fatalErrors: QueryFatalError[];
+  hadEnvironmentalFailure?: boolean;
+  environmentalCause?: "auth" | "unreachable" | "unavailable";
 }
