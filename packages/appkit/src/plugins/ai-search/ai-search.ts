@@ -44,19 +44,14 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   async setup(): Promise<void> {
-    if (!this.config.indexes || Object.keys(this.config.indexes).length === 0) {
-      throw new Error(
-        'AiSearchPlugin requires at least one index in "indexes" config',
-      );
-    }
-    for (const [alias, idx] of Object.entries(this.config.indexes)) {
+    // Only validate what the config schema and TS types can't: an empty
+    // indexName (an env var populating it was unset) and the runtime
+    // pagination -> endpointName dependency.
+    for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
       if (!idx.indexName) {
         throw new Error(
-          `Index "${alias}" is missing required field "indexName"`,
+          `Index "${alias}" has an empty "indexName" (an env var populating it may be unset)`,
         );
-      }
-      if (!idx.columns || idx.columns.length === 0) {
-        throw new Error(`Index "${alias}" is missing required field "columns"`);
       }
       if (idx.pagination && !idx.endpointName) {
         throw new Error(
@@ -64,10 +59,6 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
         );
       }
     }
-    logger.debug(
-      "Vector Search plugin configured with %d index(es)",
-      Object.keys(this.config.indexes).length,
-    );
   }
 
   injectRoutes(router: IAppRouter) {

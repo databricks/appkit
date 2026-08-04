@@ -110,22 +110,13 @@ describe("AiSearchPlugin", () => {
   });
 
   describe("setup()", () => {
-    it("throws if any index is missing indexName", async () => {
+    it("throws if an index has an empty indexName (unset env var)", async () => {
       const plugin = new AiSearchPlugin({
         indexes: {
           test: { indexName: "", columns: ["id"] },
         },
       });
       await expect(plugin.setup()).rejects.toThrow("indexName");
-    });
-
-    it("throws if any index is missing columns", async () => {
-      const plugin = new AiSearchPlugin({
-        indexes: {
-          test: { indexName: "cat.sch.idx", columns: [] },
-        },
-      });
-      await expect(plugin.setup()).rejects.toThrow("columns");
     });
 
     it("throws if pagination enabled but no endpointName", async () => {
