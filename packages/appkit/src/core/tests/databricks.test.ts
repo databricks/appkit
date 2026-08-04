@@ -472,7 +472,8 @@ describe("AppKit", () => {
         plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
       })) as any;
 
-      expect(instance["ui-variants"]).toBeDefined();
+      // Exposed under the camelCase handle key, not the kebab manifest name.
+      expect(instance.uiVariants).toBeDefined();
     });
 
     test("drops the default ui-variants in production", async () => {
@@ -484,7 +485,7 @@ describe("AppKit", () => {
 
       // The default is devOnly, so the same guard that skips user devOnly
       // plugins strips it from a deployed app.
-      expect(Object.keys(instance)).not.toContain("ui-variants");
+      expect(Object.keys(instance)).not.toContain("uiVariants");
       expect(instance.normalTest).toBeDefined();
     });
 
@@ -496,10 +497,10 @@ describe("AppKit", () => {
         plugins: [explicit],
       })) as any;
 
-      expect(instance["ui-variants"]).toBeDefined();
+      expect(instance.uiVariants).toBeDefined();
       // Only one instance was constructed for the single name.
       expect(
-        Object.keys(instance).filter((k) => k === "ui-variants"),
+        Object.keys(instance).filter((k) => k === "uiVariants"),
       ).toHaveLength(1);
     });
   });
@@ -510,17 +511,16 @@ describe("AppKit", () => {
       name = "multi-word";
     }
 
-    test("exposes a multi-word plugin under both the kebab name and a camelCase alias", async () => {
+    test("exposes a multi-word plugin under its camelCase key, not the kebab name", async () => {
       const instance = (await createApp({
         plugins: [{ plugin: MultiWordPlugin, config: {}, name: "multi-word" }],
       })) as any;
 
-      expect(instance["multi-word"]).toBeDefined();
       expect(instance.multiWord).toBeDefined();
-      // Both keys resolve to the same underlying plugin exports.
-      expect(instance.multiWord.setupCalled).toBe(
-        instance["multi-word"].setupCalled,
-      );
+      expect(instance.multiWord.setupCalled).toBe(true);
+      // The kebab-case name is not exposed on the handle.
+      expect(instance["multi-word"]).toBeUndefined();
+      expect(Object.keys(instance)).not.toContain("multi-word");
     });
 
     test("does not add an alias key for single-word plugins", async () => {

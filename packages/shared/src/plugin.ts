@@ -268,19 +268,18 @@ export function kebabToCamel(name: string): string {
 
 /**
  * Maps plugin names to their exported types (with asUser automatically added).
+ * Each plugin exposes its public API via the exports() method, and AppKit
+ * wraps it with asUser() for user-scoped execution.
  *
- * Each plugin is reachable under both its declared kebab-case name
- * (`appkit["ai-search"]`) and the camelCase alias derived from it
- * (`appkit.aiSearch`); the alias equals the original for single-word names, so
- * this only adds keys for multi-word plugins.
+ * The handle key is the camelCase form of the plugin name, so a multi-word
+ * plugin is reached as `appkit.aiSearch` rather than `appkit["ai-search"]`.
+ * For single-word names the camelCase form is identical, so the key is
+ * unchanged. Callable exports (functions) are passed through without wrapping,
+ * as they manage their own `asUser` pattern (e.g. files plugin).
  */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],
 > = {
-  [P in U[number] as P["name"]]: WithAsUser<
-    PluginExports<InstanceType<P["plugin"]>>
-  >;
-} & {
   [P in U[number] as KebabToCamel<P["name"]>]: WithAsUser<
     PluginExports<InstanceType<P["plugin"]>>
   >;

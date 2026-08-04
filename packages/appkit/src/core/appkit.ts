@@ -108,23 +108,19 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const self = this;
 
-    const accessor: PropertyDescriptor = {
+    // The SDK handle key is always the camelCase form of the plugin name, so a
+    // multi-word plugin is reached as `appkit.aiSearch` (not
+    // `appkit["ai-search"]`). Internal lookups and the HTTP route prefix still
+    // use the kebab `name`; this only shapes the public accessor. For
+    // single-word names the camel form equals the name, so nothing changes.
+    const accessorKey = kebabToCamel(name);
+    Object.defineProperty(this, accessorKey, {
       get() {
         const plugin = self.#pluginInstances[name];
         return self.wrapWithAsUser(plugin);
       },
       enumerable: true,
-    };
-    Object.defineProperty(this, name, accessor);
-
-    // Also expose the plugin under a camelCase alias so multi-word plugins are
-    // reachable as `appkit.aiSearch` in addition to `appkit["ai-search"]`. The
-    // HTTP route prefix stays the kebab `name`; this is purely the SDK handle.
-    // No-op for single-word names (camel === name).
-    const camelName = kebabToCamel(name);
-    if (camelName !== name) {
-      Object.defineProperty(this, camelName, accessor);
-    }
+    });
   }
 
   /**
