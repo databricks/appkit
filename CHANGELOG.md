@@ -90,6 +90,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.51.0](https://github.com/databricks/appkit/compare/v0.50.0...v0.51.0) (2026-08-03)
+
+* relocate typegen cache to committed .appkit/ dir ([#502](https://github.com/databricks/appkit/issues/502)) ([#509](https://github.com/databricks/appkit/issues/509)) ([9497431](https://github.com/databricks/appkit/commit/94974317cb67506477169328039c6e14e81c2a1e))
+
+### appkit
+
+* **appkit:** relocate typegen cache to committed .appkit/ dir ([#502](https://github.com/databricks/appkit/issues/502)) ([14ea16d](https://github.com/databricks/appkit/commit/14ea16df62e50675c2aa18fa319b1ca7de73fc2e))
+
+
 ## [0.48.0](https://github.com/databricks/appkit/compare/v0.47.1...v0.48.0) (2026-07-24)
 
 ### appkit
