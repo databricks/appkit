@@ -9,7 +9,7 @@ export interface IAnalyticsConfig extends BasePluginConfig {
   /**
    * Build-generated per-metric column metadata, keyed by metric key. The
    * metric route scopes this to the requested measures and dimensions before
-   * attaching it to the SSE result. It never affects SQL or cache identity.
+   * attaching it to the SSE result.
    */
   metricViewsMetadata?: MetricViewsMetadata;
   /**

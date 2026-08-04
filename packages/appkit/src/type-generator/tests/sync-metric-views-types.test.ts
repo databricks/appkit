@@ -175,8 +175,8 @@ describe("syncMetricViewsTypes", () => {
     // The semantic metadata (format spec, SQL type) rides in the type-level
     // `metadata` block — the sole carrier now the JSON is gone.
     expect(declarations).toContain('"$#,##0.00"');
-    // The file is a real `.ts`: it also carries the runtime `metricViewsMetadata`
-    // const, and never a runtime side-effect import (only a type-only one).
+    // The file is a real `.ts`, so it also carries the runtime const and a
+    // type-only import.
     expect(declarations).toContain("export const metricViewsMetadata");
     expect(declarations).toContain("as const");
     expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
@@ -189,9 +189,8 @@ describe("syncMetricViewsTypes", () => {
     writeMixedConfig();
 
     // Simulate an app upgraded from a version that emitted an ambient
-    // `metric-views.d.ts`. Left in place beside the new `.ts`, it would
-    // duplicate the `declare module` augmentation and re-introduce the bare
-    // side-effect import the new header drops.
+    // `metric-views.d.ts`, which would duplicate the augmentation if left
+    // beside the new `.ts`.
     const staleDts = path.join(
       tmpRoot,
       "shared",

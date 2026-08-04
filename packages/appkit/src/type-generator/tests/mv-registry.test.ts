@@ -1622,10 +1622,9 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
   });
 });
 
-// ── The emitted file is a real `.ts` carrying BOTH the (erasable) `declare
-// module` type augmentation AND a runtime `metricViewsMetadata` value. It must
-// never emit a runtime side-effect import (that would execute the client
-// package entry on the Node server) — only a zero-runtime type-only import.
+// ── The emitted file is a real `.ts` carrying the erasable `declare module`
+// augmentation alongside a runtime `metricViewsMetadata` value, so its header
+// must stay a type-only import. See `generateMetricTypeDeclarations`.
 describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value", () => {
   test("emits both the declare-module augmentation and the metricViewsMetadata const", async () => {
     const resolution = resolveMetricConfig({
@@ -1655,7 +1654,7 @@ describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value",
     // Value half: a runtime const conforming to MetricViewsMetadata, `as const`.
     expect(output).toContain("export const metricViewsMetadata = {");
     expect(output).toContain("} as const;");
-    // The measure/dimension maps carry the SAME per-column fields as the type
+    // The measure/dimension maps carry the same per-column fields as the type
     // block (type/display_name/format), keyed by column name.
     expect(output).toContain(
       '"arr": { type: "DECIMAL(38,2)", display_name: "Annual Recurring Revenue", format: "$#,##0.00" }',
@@ -1665,8 +1664,8 @@ describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value",
 
   test("uses a zero-runtime type-only import, never a side-effect import", () => {
     const output = generateMetricTypeDeclarations([]);
-    // A bare `import "..."` in a `.ts` would EXECUTE the client entry on the
-    // Node server — it must never be emitted.
+    // A bare `import "..."` in a `.ts` would execute the client entry on the
+    // Node server.
     expect(output).not.toContain('import "@databricks/appkit-ui/react"');
     expect(output).toContain(
       'import type {} from "@databricks/appkit-ui/react"',

@@ -118,8 +118,8 @@ function renderDegradedMetricEntry(schema: MetricSchema): string {
 
 type RenderedMetadataField = readonly [name: string, value: string];
 
-// Build the canonical rendered fields shared by type-level and runtime
-// metadata. `time_grain` is type-only and is included only when requested.
+// Rendered per-column fields shared by the type-level and runtime metadata.
+// `time_grain` is type-only, so it is included only when requested.
 function metadataFields(
   col: MetricColumnMetadata,
   includeTimeGrain = false,
@@ -170,11 +170,9 @@ ${inner};
     }`;
 }
 
-// Render one column's runtime metadata object literal — the value-side twin of
-// a `renderMetadataMap` entry. Sources the SAME per-column fields
-// (type/display_name/format/description) but omits `time_grain` (not part of
-// MetricColumnMeta). Strings go through JSON.stringify so quotes/backticks in
-// display_name/description stay escape-safe.
+// Render one column's runtime metadata literal — the value-side twin of a
+// `renderMetadataMap` entry, minus `time_grain` (not part of MetricColumnMeta).
+// Strings go through JSON.stringify to stay escape-safe.
 function renderMetadataValueField(col: MetricColumnMetadata): string {
   const fields = metadataFields(col).map(
     ([name, value]) => `${name}: ${value}`,
@@ -182,9 +180,8 @@ function renderMetadataValueField(col: MetricColumnMetadata): string {
   return `{ ${fields.join(", ")} }`;
 }
 
-// Render the runtime value map (measures or dimensions) for one metric — an
-// object literal keyed by column name. Empty → `{}` (the value twin of the
-// type-level `Record<string, never>`, which is a type-only construct).
+// Render one metric's runtime measures/dimensions map, keyed by column name.
+// Empty → `{}`, the value twin of the type-level `Record<string, never>`.
 function renderMetadataValueMap(
   cols: MetricColumnMetadata[],
   indent: string,
@@ -203,10 +200,7 @@ ${indent}}`;
 
 // Render the runtime `metricViewsMetadata` const — a value twin of the
 // type-level `metadata` blocks, conforming to MetricViewsMetadata from
-// "shared". Emitted `as const`. Iterates `schemas` in the SAME order as the
-// type augmentation. A degraded schema (empty measure/dimension arrays)
-// contributes empty `measures: {}` / `dimensions: {}` maps, consistent with
-// its degraded type block.
+// "shared" and emitted `as const` in the same key order as the augmentation.
 function renderMetricViewsMetadata(schemas: MetricSchema[]): string {
   if (schemas.length === 0) {
     return "export const metricViewsMetadata = {} as const;\n";
@@ -247,13 +241,12 @@ ${entries};
 /**
  * Build the full metric-views.ts file from a list of metric schemas.
  *
- * This is a real `.ts` source file (not a `.d.ts`), so it carries BOTH the
- * erasable `declare module` type augmentation AND a runtime value export
- * (`metricViewsMetadata`). It must therefore never emit a runtime side-effect
- * import — a bare `import "@databricks/appkit-ui/react"` would execute the
- * client package entry on the Node server. The header is a type-only
- * `import type {} from "..."`, which (a) compiles to zero runtime code and
- * (b) anchors the module so the global `declare module` augmentation resolves.
+ * A real `.ts` source file, not a `.d.ts`, because it carries the erasable
+ * `declare module` augmentation alongside a runtime `metricViewsMetadata`
+ * export. The header must therefore stay a type-only `import type {} from`:
+ * it compiles to zero runtime code while still anchoring the module so the
+ * augmentation resolves, whereas a bare `import "@databricks/appkit-ui/react"`
+ * would execute the client package entry on the Node server.
  */
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],

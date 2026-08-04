@@ -373,8 +373,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // `metricViewsMetadata` const (value twin of the type-level metadata).
     expect(declarations).toContain("export const metricViewsMetadata");
     expect(declarations).toContain("as const");
-    // ...and NEVER a runtime side-effect import that would execute the client
-    // package entry on the Node server — only a zero-runtime type-only import.
+    // ...and a type-only import, never a runtime side-effect one.
     expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
     expect(declarations).toContain(
       'import type {} from "@databricks/appkit-ui/react"',
