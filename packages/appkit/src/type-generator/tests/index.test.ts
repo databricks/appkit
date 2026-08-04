@@ -2313,8 +2313,7 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
     }
   });
 
-  test("CI=true: warning output is ANSI-free (plain text for log parsing)", async () => {
-    process.env.CI = "true";
+  test("warning output is ANSI-free (plain text for CI log parsing)", async () => {
     // Query path returns environmental failure
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [],
@@ -2347,7 +2346,6 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
       expect(warnings).toContain("wh-ci");
       expect(warnings).toContain("warehouse unavailable");
     } finally {
-      delete process.env.CI;
       warnSpy.mockRestore();
     }
   });

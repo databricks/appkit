@@ -428,9 +428,9 @@ export async function generateFromEntryPoint(options: {
         cache: !noCache,
         metricFetcher,
         mode,
-        // In blocking mode, only suppress writes for pure degradation (no failures).
-        // If there are preflight fatals or sync failures, degraded artifacts are
-        // still written before the throw.
+        // In blocking mode, never overwrite committed metric types with a
+        // degraded result — including on runs that go on to throw, so a failing
+        // build leaves the committed .d.ts intact. Non-blocking always writes.
         suppressDegradedWrite: mode === "blocking",
       });
     } catch (configError) {
@@ -533,9 +533,10 @@ export interface SyncMetricViewsTypesResult {
   noConfig: boolean;
   /**
    * Per-key fatal preflight errors (empty except in the `blocking`-mode
-   * deleted/deleting-warehouse and deterministic-preflight-failure cases). The
-   * artifacts are still written; {@link generateFromEntryPoint} surfaces these
-   * by throwing {@link TypegenFatalError} after the writes. A `"describe-now"`
+   * deleted/deleting-warehouse and deterministic-preflight-failure cases).
+   * {@link generateFromEntryPoint} surfaces these by throwing
+   * {@link TypegenFatalError}; when the run also degraded, `suppressDegradedWrite`
+   * means no artifact was written and the committed types stand. A `"describe-now"`
    * run sets no blocking preflight, so for that mode this is always empty.
    * ONLY contains deterministic failures (404/400).
    */
