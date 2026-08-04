@@ -14,6 +14,7 @@ import manifest from "./manifest.json";
 import type {
   IAiSearchConfig,
   IndexConfig,
+  IndexSummary,
   SearchRequest,
   SearchResponse,
   SearchResult,
@@ -290,6 +291,23 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
         });
       },
     });
+  }
+
+  /**
+   * Configured index aliases + metadata, serialized to the browser at boot via
+   * `window.__appkit__` (read client-side with `usePluginClientConfig`). Lets the
+   * UI discover available indexes instead of hardcoding an alias. No secrets —
+   * only alias names and non-sensitive query metadata.
+   */
+  clientConfig(): { indexes: IndexSummary[] } {
+    const indexes = Object.entries(this.config.indexes ?? {}).map(
+      ([alias, idx]) => ({
+        alias,
+        queryType: idx.queryType ?? "hybrid",
+        pagination: !!idx.pagination,
+      }),
+    );
+    return { indexes };
   }
 
   /**

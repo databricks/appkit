@@ -45,6 +45,13 @@ export interface RerankerConfig {
   columnsToRerank: string[];
 }
 
+/** Public summary of a configured index, exposed to the client via `clientConfig()`. */
+export interface IndexSummary {
+  alias: string;
+  queryType: "ann" | "hybrid" | "full_text";
+  pagination: boolean;
+}
+
 export type SearchFilters = Record<
   string,
   string | number | boolean | (string | number)[]

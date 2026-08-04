@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  useAiSearchQuery,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Search } from "lucide-react";
@@ -15,64 +16,25 @@ export const Route = createFileRoute("/ai-search")({
   component: AiSearchRoute,
 });
 
-interface SearchResult {
-  score: number;
-  data: Record<string, unknown>;
-}
-
-interface SearchResponse {
-  results: SearchResult[];
-  totalCount: number;
-  queryTimeMs: number;
-  queryType: string;
-}
-
 function AiSearchRoute() {
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<SearchResponse | null>(null);
+  const { search, data, loading, error } = useAiSearchQuery({ alias: "demo" });
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResponse(null);
-
-    try {
-      const res = await fetch("/api/ai-search/demo/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ queryText: query }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const data: SearchResponse = await res.json();
-      setResponse(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+  const handleSearch = () => {
+    if (query.trim()) void search(query);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      void handleSearch();
-    }
+    if (e.key === "Enter") handleSearch();
   };
 
   return (
     <div className="min-h-screen bg-background">
       <main className="max-w-4xl mx-auto px-6 py-12">
         <Header
-          title="Vector Search"
-          description="Query a Databricks Vector Search index with hybrid search."
-          tooltip="Uses the Vector Search plugin to query a Databricks Vector Search index via the REST API"
+          title="AI Search"
+          description="Query a Databricks AI Search index with hybrid search."
+          tooltip="Uses the AI Search plugin to query a Databricks Vector Search index via the REST API"
         />
 
         <div className="flex flex-col gap-6">
@@ -84,10 +46,7 @@ function AiSearchRoute() {
               onKeyDown={handleKeyDown}
               className="flex-1"
             />
-            <Button
-              onClick={() => void handleSearch()}
-              disabled={loading || !query.trim()}
-            >
+            <Button onClick={handleSearch} disabled={loading || !query.trim()}>
               {loading ? (
                 "Searching..."
               ) : (
@@ -105,20 +64,20 @@ function AiSearchRoute() {
             </div>
           )}
 
-          {response && (
+          {data && (
             <div className="flex flex-col gap-4">
               <div className="text-sm text-muted-foreground">
-                {response.totalCount} result
-                {response.totalCount !== 1 ? "s" : ""} &middot;{" "}
-                {response.queryTimeMs}ms &middot; {response.queryType}
+                {data.totalCount} result
+                {data.totalCount !== 1 ? "s" : ""} &middot; {data.queryTimeMs}ms
+                &middot; {data.queryType}
               </div>
 
-              {response.results.length === 0 ? (
+              {data.results.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No results found.
                 </p>
               ) : (
-                response.results.map((result, index) => (
+                data.results.map((result, index) => (
                   <Card key={`${result.score}-${index}`}>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center justify-between">

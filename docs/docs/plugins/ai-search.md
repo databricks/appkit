@@ -253,3 +253,27 @@ console.log(result.results);
 ```
 
 Pass optional overrides as a second argument to `query` to adjust `numResults` or other per-call settings.
+
+## React hook
+
+`useAiSearchQuery` reads the configured indexes from the plugin's client config and posts to the right `/:alias/query` route, so the UI never hardcodes an alias. With one index configured it needs no arguments; pass `{ alias }` to target a specific one.
+
+```tsx
+import { useAiSearchQuery } from "@databricks/appkit-ui/react";
+
+function Search() {
+  const { search, data, loading, error } = useAiSearchQuery();
+
+  return (
+    <>
+      <input onKeyDown={(e) => e.key === "Enter" && search(e.currentTarget.value)} />
+      {error && <p>{error}</p>}
+      {data?.results.map((r, i) => (
+        <div key={i}>{JSON.stringify(r.data)}</div>
+      ))}
+    </>
+  );
+}
+```
+
+`search` also accepts a full request object (`{ queryText, numResults, filters, ... }`) for per-call control. The hook's `indexes` field lists every configured index, which you can use to build an index picker.

@@ -6,6 +6,12 @@ export {
   useResourceStatusToaster,
 } from "../resource-status-indicator";
 export type {
+  AiSearchClientConfig,
+  AiSearchIndexSummary,
+  AiSearchQueryType,
+  AiSearchRequest,
+  AiSearchResponse,
+  AiSearchResult,
   AnalyticsFormat,
   InferResultByFormat,
   InferRowType,
@@ -28,6 +34,11 @@ export {
   type UseAgentChatResult,
   useAgentChat,
 } from "./use-agent-chat";
+export {
+  type UseAiSearchQueryOptions,
+  type UseAiSearchQueryResult,
+  useAiSearchQuery,
+} from "./use-ai-search-query";
 export { useAnalyticsQuery } from "./use-analytics-query";
 export {
   type UseChartDataOptions,
