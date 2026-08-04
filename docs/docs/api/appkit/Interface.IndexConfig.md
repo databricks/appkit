@@ -14,13 +14,15 @@ Programmatic callers select per call via `appkit.aiSearch.asUser(req)`.
 
 ***
 
-### columns
+### columns?
 
 ```ts
-columns: string[];
+optional columns: string[];
 ```
 
-Columns to return in results
+Columns to return in results. Optional: in development the plugin
+auto-discovers them from the index's source table when omitted (and warns
+that they should be set explicitly for production).
 
 ***
 

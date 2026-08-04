@@ -55,6 +55,78 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
         );
       }
     }
+
+    // Development convenience: fill in `columns` for any index that omits them
+    // by reading the index's source table. Never runs in production, where a
+    // missing `columns` surfaces as a normal query error — so this can't mask a
+    // config gap that would fail once deployed.
+    if (process.env.NODE_ENV === "development") {
+      await this._autoDiscoverColumns();
+    }
+  }
+
+  /**
+   * For each configured index missing `columns`, discover the returnable
+   * columns from its Delta-Sync source table and store them back on the config.
+   * Best-effort: any failure (no auth, index not ready, non-Delta-Sync index)
+   * is logged and skipped rather than thrown. Emits one warning banner listing
+   * what was auto-filled, since these must be set explicitly before production.
+   */
+  private async _autoDiscoverColumns(): Promise<void> {
+    const discovered: Record<string, string[]> = {};
+    for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
+      if (idx.columns && idx.columns.length > 0) continue;
+      const indexName = idx.indexName ?? process.env.DATABRICKS_VS_INDEX_NAME;
+      if (!indexName) continue;
+      try {
+        const client = getWorkspaceClient();
+        const info = await this.connector.getIndex(client, indexName);
+        const sourceTable = info.delta_sync_index_spec?.source_table;
+        if (!sourceTable) continue;
+        const excluded = new Set(
+          (info.delta_sync_index_spec?.embedding_vector_columns ?? []).map(
+            (c) => c.name,
+          ),
+        );
+        const columns = (
+          await this.connector.getSourceColumns(client, sourceTable)
+        ).filter((c) => !excluded.has(c));
+        if (columns.length > 0) {
+          idx.columns = columns;
+          discovered[alias] = columns;
+        }
+      } catch (error) {
+        logger.warn(
+          'Could not auto-discover columns for index "%s": %s',
+          alias,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    if (Object.keys(discovered).length > 0) {
+      logger.warn("\n%s", this._formatColumnDiscoveryBanner(discovered));
+    }
+  }
+
+  private _formatColumnDiscoveryBanner(
+    discovered: Record<string, string[]>,
+  ): string {
+    const lines = [
+      "AI SEARCH: columns auto-discovered (dev mode — would fail in production)",
+      "",
+    ];
+    for (const [alias, columns] of Object.entries(discovered)) {
+      lines.push(`  ${alias}: ${columns.join(", ")}`);
+    }
+    lines.push("");
+    lines.push(
+      "Set `columns` explicitly in the plugin config before deploying.",
+    );
+
+    const maxLen = Math.max(...lines.map((l) => l.length));
+    const border = "=".repeat(maxLen + 4);
+    const boxed = lines.map((l) => `| ${l.padEnd(maxLen)} |`);
+    return [border, ...boxed, border].join("\n");
   }
 
   injectRoutes(router: IAppRouter) {
@@ -286,7 +358,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       }
     }
 
-    const columns = request.columns ?? indexConfig.columns;
+    const columns = request.columns ?? indexConfig.columns ?? [];
     return {
       queryText,
       queryVector,
@@ -309,7 +381,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     if (typeof indexConfig.reranker === "object") {
       return indexConfig.reranker;
     }
-    return { columnsToRerank: columns.filter((c) => c !== "id") };
+    // Auto-derive from returnable columns (excluding the id). With no columns
+    // resolved there's nothing to rerank on, so skip it.
+    const columnsToRerank = columns.filter((c) => c !== "id");
+    return columnsToRerank.length > 0 ? { columnsToRerank } : undefined;
   }
 
   private _parseResponse<

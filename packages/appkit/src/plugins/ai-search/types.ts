@@ -11,8 +11,12 @@ export interface IndexConfig {
    * `DATABRICKS_VS_INDEX_NAME` env var when omitted.
    */
   indexName?: string;
-  /** Columns to return in results */
-  columns: string[];
+  /**
+   * Columns to return in results. Optional: in development the plugin
+   * auto-discovers them from the index's source table when omitted (and warns
+   * that they should be set explicitly for production).
+   */
+  columns?: string[];
   /** Default search mode */
   queryType?: "ann" | "hybrid" | "full_text";
   /** Max results per query */

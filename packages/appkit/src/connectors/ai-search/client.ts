@@ -10,6 +10,8 @@ import type { WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 import type {
   AiSearchConnectorConfig,
+  UcTableInfo,
+  VsIndexInfo,
   VsNextPageParams,
   VsQueryParams,
   VsRawResponse,
@@ -179,5 +181,48 @@ export class AiSearchConnector {
       },
       { name: "ai-search", includePrefix: true },
     );
+  }
+
+  /**
+   * Fetches index metadata (index type, source table). Used to auto-discover
+   * returnable columns when they aren't configured. No warehouse required.
+   */
+  async getIndex(
+    workspaceClient: WorkspaceClient,
+    indexName: string,
+    signal?: AbortSignal,
+  ): Promise<VsIndexInfo> {
+    return (await workspaceClient.apiClient.request(
+      {
+        method: "GET",
+        path: `/api/2.0/vector-search/indexes/${indexName}`,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        raw: false,
+        query: {},
+      },
+      contextFromAbortSignal(signal),
+    )) as VsIndexInfo;
+  }
+
+  /**
+   * Lists a Unity Catalog table's column names via the tables REST API
+   * (no warehouse required).
+   */
+  async getSourceColumns(
+    workspaceClient: WorkspaceClient,
+    sourceTable: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const table = (await workspaceClient.apiClient.request(
+      {
+        method: "GET",
+        path: `/api/2.1/unity-catalog/tables/${sourceTable}`,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        raw: false,
+        query: {},
+      },
+      contextFromAbortSignal(signal),
+    )) as UcTableInfo;
+    return (table.columns ?? []).map((c) => c.name);
   }
 }

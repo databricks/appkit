@@ -75,7 +75,7 @@ aiSearch({
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `indexName` | `string` | `DATABRICKS_VS_INDEX_NAME` | Three-level Unity Catalog name (`catalog.schema.index`). Defaults to the `DATABRICKS_VS_INDEX_NAME` env var when omitted. |
-| `columns` | `string[]` | — | **Required.** Columns to return in query results |
+| `columns` | `string[]` | auto-discovered in dev | Columns to return in query results. Optional in development — when omitted, the plugin reads them from the index's source table and warns. **Set explicitly for production**, where a missing value is not auto-filled. |
 | `queryType` | `"ann" \| "hybrid" \| "full_text"` | `"hybrid"` | Search mode |
 | `numResults` | `number` | `20` | Maximum results per query |
 | `reranker` | `boolean \| { columnsToRerank: string[] }` | — | Enable reranking. Pass `true` to rerank all result columns, or specify a subset |

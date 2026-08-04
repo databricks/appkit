@@ -26,6 +26,15 @@
     ],
     "optional": []
   },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "List the vector search index's source-table columns (unity-catalog tables API) so the user can pick which to return",
+        "Ask the user which columns each index should return, and which alias name to use for it",
+        "Write a complete aiSearch({ indexes: { <alias>: { columns: [...] } } }) into the server file using the chosen columns"
+      ]
+    }
+  },
   "config": {
     "schema": {
       "type": "object",
@@ -54,8 +63,7 @@
                 "type": "number",
                 "default": 20
               }
-            },
-            "required": ["columns"]
+            }
           }
         },
         "timeout": {

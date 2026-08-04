@@ -162,6 +162,82 @@ describe("AiSearchPlugin", () => {
     });
   });
 
+  describe("setup() column auto-discovery", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    // Route GET metadata calls to discovery fixtures; POST queries stay on the
+    // default validVsResponse.
+    const routeByPath = (opts: { method: string; path: string }) => {
+      if (opts.path.endsWith("/query")) return Promise.resolve(validVsResponse);
+      if (opts.path.startsWith("/api/2.0/vector-search/indexes/")) {
+        return Promise.resolve({
+          index_type: "DELTA_SYNC",
+          delta_sync_index_spec: {
+            source_table: "cat.sch.src",
+            embedding_vector_columns: [{ name: "__vec" }],
+          },
+        });
+      }
+      if (opts.path.startsWith("/api/2.1/unity-catalog/tables/")) {
+        return Promise.resolve({
+          columns: [{ name: "id" }, { name: "body" }, { name: "__vec" }],
+        });
+      }
+      return Promise.resolve(validVsResponse);
+    };
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    it("fills columns from the source table in development and warns", async () => {
+      process.env.NODE_ENV = "development";
+      mockRequest.mockImplementation(routeByPath);
+      const plugin = new AiSearchPlugin({
+        indexes: { docs: { indexName: "cat.sch.idx" } },
+      });
+
+      await plugin.setup();
+
+      // Discovered columns, minus the embedding vector column.
+      await plugin.query("docs", { queryText: "q" });
+      const queryCall = mockRequest.mock.calls.find((c) =>
+        c[0].path.endsWith("/query"),
+      );
+      expect(queryCall?.[0].payload.columns).toEqual(["id", "body"]);
+    });
+
+    it("does not discover columns outside development", async () => {
+      process.env.NODE_ENV = "production";
+      mockRequest.mockImplementation(routeByPath);
+      const plugin = new AiSearchPlugin({
+        indexes: { docs: { indexName: "cat.sch.idx" } },
+      });
+
+      await plugin.setup();
+
+      // No get-index / get-table calls were made.
+      const metadataCalls = mockRequest.mock.calls.filter(
+        (c) => !c[0].path.endsWith("/query"),
+      );
+      expect(metadataCalls).toHaveLength(0);
+    });
+
+    it("skips (does not throw) when an index already has columns", async () => {
+      process.env.NODE_ENV = "development";
+      mockRequest.mockImplementation(routeByPath);
+      const plugin = new AiSearchPlugin({
+        indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
+      });
+
+      await plugin.setup();
+
+      const metadataCalls = mockRequest.mock.calls.filter(
+        (c) => !c[0].path.endsWith("/query"),
+      );
+      expect(metadataCalls).toHaveLength(0);
+    });
+  });
+
   describe("manifest", () => {
     it("has correct name", () => {
       expect(AiSearchPlugin.manifest.name).toBe("aiSearch");
@@ -514,6 +590,18 @@ describe("AiSearchPlugin", () => {
 
       const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.reranker).toBeUndefined();
+    });
+
+    it("skips the reranker when enabled but no columns are resolved", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: { test: { indexName: "cat.sch.idx", reranker: true } },
+      });
+      await plugin.setup();
+      await plugin.query("test", { queryText: "q" });
+
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.reranker).toBeUndefined();
+      expect(callBody.columns).toEqual([]);
     });
 
     it("throws a wrapped error when the connector query fails", async () => {
