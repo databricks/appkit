@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { describe, expect, test } from "vitest";
+import type { WorkspaceClient } from "../../workspace-client";
 import {
   type DescribeFormatMemo,
   describeAdaptive,

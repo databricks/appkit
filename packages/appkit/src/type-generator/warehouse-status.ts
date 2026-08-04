@@ -1,4 +1,4 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type { WorkspaceClient } from "../workspace-client";
 
 /**
  * Lifecycle states a SQL warehouse can report. Mirrors the Databricks SDK

@@ -1,7 +1,7 @@
-import type { jobs } from "@databricks/sdk-experimental";
 import type { BasePluginConfig, IAppRequest } from "shared";
 import type { z } from "zod";
 import type { ExecutionResult } from "../../plugin";
+import type { jobs } from "../../workspace-client";
 
 /** Supported task types for job parameter mapping. */
 export type TaskType =

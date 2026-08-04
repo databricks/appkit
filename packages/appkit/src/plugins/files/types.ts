@@ -1,5 +1,5 @@
-import type { files } from "@databricks/sdk-experimental";
 import type { BasePluginConfig, IAppRequest } from "shared";
+import type { files } from "../../workspace-client";
 import type { FilePolicy } from "./policy";
 
 /**

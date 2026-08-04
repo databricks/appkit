@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
 import {
-  type ClientOptions,
-  ConfigError,
-  type sql,
-  WorkspaceClient,
-} from "@databricks/sdk-experimental";
-import {
   AuthenticationError,
   ConfigurationError,
   InitializationError,
 } from "../errors";
+import {
+  type ClientOptions,
+  ConfigError,
+  createWorkspaceClient,
+  type sql,
+  type WorkspaceClient,
+} from "../workspace-client";
 import { getClientOptions } from "./client-options";
 import type { UserContext } from "./user-context";
 
@@ -113,14 +114,12 @@ export class ServiceContext {
     // Create user client with the OAuth token from Databricks Apps
     // Note: We use authType: "pat" because the token is passed as a Bearer token
     // just like a PAT, even though it's technically an OAuth token
-    const userClient = new WorkspaceClient(
-      {
-        token,
-        host,
-        authType: "pat",
-      },
-      getClientOptions(),
-    );
+    const userClient = createWorkspaceClient({
+      token,
+      host,
+      authType: "pat",
+      clientOptions: getClientOptions(),
+    });
 
     const tokenFingerprint = createHash("sha256")
       .update(token)
@@ -152,7 +151,8 @@ export class ServiceContext {
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     try {
-      const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
+      const wsClient =
+        client ?? createWorkspaceClient({ clientOptions: getClientOptions() });
 
       const [resolvedWorkspaceId, currentUser, resolvedWarehouseId] =
         await Promise.all([

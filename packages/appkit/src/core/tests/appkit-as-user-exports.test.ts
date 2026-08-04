@@ -101,10 +101,15 @@ const { MockWorkspaceClient } = vi.hoisted(() => {
   return { MockWorkspaceClient };
 });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: MockWorkspaceClient,
-  ConfigError: class extends Error {},
-}));
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: (...args: unknown[]) => MockWorkspaceClient(...args),
+    ConfigError: class extends Error {},
+  };
+});
 
 // ── Test plugin ─────────────────────────────────────────────────────
 

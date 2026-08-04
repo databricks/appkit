@@ -999,11 +999,16 @@ describe("DatabricksAdapter.fromModelServing", () => {
   test("reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var", async () => {
     process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "my-model";
 
-    vi.mock("@databricks/sdk-experimental", () => ({
-      WorkspaceClient: vi.fn().mockImplementation(() => ({
-        apiClient: { request: vi.fn() },
-      })),
-    }));
+    vi.mock("../../workspace-client", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("../../workspace-client")>();
+      return {
+        ...actual,
+        createWorkspaceClient: vi.fn().mockImplementation(() => ({
+          apiClient: { request: vi.fn() },
+        })),
+      };
+    });
 
     const adapter = await DatabricksAdapter.fromModelServing();
     expect(adapter).toBeInstanceOf(DatabricksAdapter);

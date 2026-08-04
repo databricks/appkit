@@ -7,7 +7,7 @@ import {
 } from "../../errors";
 import { ServiceContext } from "../service-context";
 
-// ── Mock @databricks/sdk-experimental ──────────────────────────────
+// ── Mock the workspace-client wrapper ──────────────────────────────
 
 const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
   vi.hoisted(() => {
@@ -30,10 +30,15 @@ const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
     return { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError };
   });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: MockWorkspaceClient,
-  ConfigError: MockConfigError,
-}));
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: (...args: unknown[]) => MockWorkspaceClient(...args),
+    ConfigError: MockConfigError,
+  };
+});
 
 // ── Helpers ────────────────────────────────────────────────────────
 

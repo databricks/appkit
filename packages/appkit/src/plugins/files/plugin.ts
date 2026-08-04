@@ -1,6 +1,5 @@
 import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
-import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -38,6 +37,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import { ApiError } from "../../workspace-client";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
