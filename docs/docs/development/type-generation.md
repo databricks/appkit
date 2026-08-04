@@ -84,18 +84,18 @@ npx @databricks/appkit generate-types --wait
 
 #### CI resilience: committed types as fallback
 
-In blocking mode (`--wait`), the generator attempts to fetch real types from your warehouse, but delegates to **committed `.d.ts` files** (`shared/appkit-types/analytics.d.ts`, `metric-views.d.ts`) as the fallback when the warehouse is unreachable. These committed files should be part of your repository. On a fresh CI checkout, every build attempts to DESCRIBE against the warehouse; the committed types are used only when that cannot complete.
+In blocking mode (`--wait`), the generator attempts to fetch real types from your warehouse, but delegates to **committed type files** (`shared/appkit-types/analytics.d.ts` and, when Metric Views are configured, `shared/appkit-types/metric-views.ts`) as the fallback when the warehouse is unreachable. These generated files should be part of your repository. On a fresh CI checkout, every build attempts to DESCRIBE against the warehouse; the committed types are used only when that cannot complete.
 
 The generator **never overwrites committed types with degraded (`result: unknown`) types** — it writes real types, or it does not write at all.
 
 A **two-bucket failure taxonomy** determines whether the build crashes or falls back to committed types:
 
 - **Deterministic failures (always crash):** SQL syntax errors in your queries (genuine DESCRIBE failure against a reachable warehouse), HTTP 404 (bad or unknown warehouse ID), HTTP 400 (malformed request). These are developer or configuration errors that committed types must not hide.
-- **Environmental failures (gate on committed types):** Authentication failures (401/403), network unreachability, warehouse unavailability (cold, deleting, or deleted), wait timeout on `RUNNING`, or any unrecognized failure. If committed types exist, the build **keeps them, emits a loud warning to stderr, and succeeds (exit 0)**. If no committed types exist, the build **crashes** with a message instructing you to run `npx @databricks/appkit generate-types --wait` locally (against a reachable warehouse) and commit the `.d.ts` files.
+- **Environmental failures (gate on committed types):** Authentication failures (401/403), network unreachability, warehouse unavailability (cold, deleting, or deleted), wait timeout on `RUNNING`, or any unrecognized failure. If every type file required by the app exists, the build **keeps them, emits a loud warning to stderr, and succeeds (exit 0)**. If a required file is missing, the build **crashes** with a message instructing you to run `npx @databricks/appkit generate-types --wait` locally (against a reachable warehouse) and commit the generated type files.
 
 The loud warning is a single greppable stderr line naming the coarse cause (auth blocked / warehouse unreachable / warehouse unavailable) and the warehouse ID, so CI logs surface that the build fell back to committed types.
 
-**Note:** If your app declares only metric views and no `config/queries/`, the first build still writes an empty `analytics.d.ts`, which counts as "committed types present" for the gate. An environmental failure will then fall back and warn rather than crash, even on a first build — an accepted v1 simplification.
+For a Metric Views app, `metric-views.ts` must already exist before an environmental failure can fall back successfully. Unlike a declaration-only artifact, this file also exports the runtime `metricViewsMetadata` value consumed by the server, so `analytics.d.ts` alone cannot satisfy the gate.
 
 The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
 
@@ -105,7 +105,7 @@ The app template wires this up for you: `postinstall` and `predev` run the non-b
 
 - `metric-views.ts` — augments the `MetricRegistry` interface so `useMetricView('<key>', …)` is autocompleted and type-checked. Each view's measures, dimensions, and their semantic metadata (SQL type, display name, format, time grains) are encoded at the type level. The same file also exports a runtime `metricViewsMetadata` constant (the same metadata as a value, not just types) — inject it via `analytics({ metricViewsMetadata })` so the metric route can carry per-column display metadata in its response payload. The type augmentation erases at build; the constant is a normal named export and is tree-shaken away when unused. See [the analytics plugin's metric-view docs](../plugins/analytics.md) for the hook + format-utility wiring.
 
-If `config/metric-views/definitions.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` metric views obey the [two-bucket taxonomy](#ci-resilience-committed-types-as-fallback) (environmental failures gate to committed `metric-views.d.ts` + warn; deterministic failures like malformed definitions crash the build). A malformed `definitions.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
+If `config/metric-views/definitions.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` metric views obey the [two-bucket taxonomy](#ci-resilience-committed-types-as-fallback) (environmental failures gate to committed `metric-views.ts` + warn; deterministic failures like malformed definitions crash the build). A malformed `definitions.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
 
 `definitions.json` is keyed by metric key; each entry names the three-part UC FQN of the view and, optionally, the executor it runs as (`app_service_principal`, the default, or `user`):
 
