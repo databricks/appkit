@@ -462,10 +462,13 @@ export async function generateFromEntryPoint(options: {
     environmentalCause =
       environmentalCause ?? mvResult.environmentalCause ?? undefined;
 
-    // Blocking (`--wait` / prod Vite) escalates per-key DESCRIBE failures — a bad or unreachable source, i.e. a config error
-    // to build failures so the end-of-run throw fails after the writes.
+    // Blocking (`--wait` / prod Vite) escalates only deterministic per-key
+    // DESCRIBE failures. Transient connectivity failures are already recorded
+    // as environmental by syncMetricViewsTypes and fall through to the
+    // committed-types gate below.
     if (mode === "blocking") {
       for (const failure of mvResult.failures) {
+        if (failure.transient) continue;
         fatalErrors.push({
           name: failure.key,
           message: `metric view ${failure.key} (${failure.source}) could not be described: ${failure.reason}`,
@@ -773,6 +776,14 @@ export async function syncMetricViewsTypes(options: {
           f.reason,
         );
       }
+    }
+
+    // A rejected DESCRIBE with a connectivity signal is expected to recover on
+    // a later pass. In blocking mode, route it through the same committed-types
+    // gate as preflight outages instead of treating it as a configuration error.
+    if (mode === "blocking" && failures.some((failure) => failure.transient)) {
+      hadEnvironmentalFailure = true;
+      environmentalCause = environmentalCause ?? "unreachable";
     }
 
     // Degraded-but-not-failed keys: the warehouse answered with a non-terminal

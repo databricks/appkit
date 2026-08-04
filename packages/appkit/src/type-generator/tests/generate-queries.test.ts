@@ -624,16 +624,21 @@ describe("generateQueriesFromDescribe", () => {
       status: { state: "PENDING" },
     });
 
-    const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
-      "/queries",
-      "wh-123",
-    );
+    const {
+      schemas,
+      syntaxErrors,
+      fatalErrors,
+      hadEnvironmentalFailure,
+      environmentalCause,
+    } = await describeQueries("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
     expect(schemas[0].type).toContain("result: unknown");
     expect(syntaxErrors).toEqual([]);
     expect(fatalErrors).toEqual([]);
+    expect(hadEnvironmentalFailure).toBe(true);
+    expect(environmentalCause).toBe("unavailable");
     // a non-ready warehouse must never persist `result: unknown`
     expect(lastSavedQueries()).not.toHaveProperty("users");
   });

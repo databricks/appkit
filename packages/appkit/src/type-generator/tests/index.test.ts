@@ -602,6 +602,39 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(fs.existsSync(metricFile)).toBe(false);
   });
 
+  test("blocking + transient metric DESCRIBE failure: warns and preserves committed metric types", async () => {
+    writeMetricConfig();
+    fs.mkdirSync(path.dirname(metricFile), { recursive: true });
+    const committed = "// committed metric types\n";
+    fs.writeFileSync(metricFile, committed, "utf-8");
+
+    const unreachable = Object.assign(
+      new Error("connect ECONNREFUSED 10.0.0.1:443"),
+      { code: "ECONNREFUSED" },
+    );
+    mocks.getWarehouseState.mockRejectedValue(unreachable);
+    mocks.executeStatement.mockRejectedValue(unreachable);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-1",
+          mode: "blocking",
+        }),
+      ).resolves.toBeUndefined();
+
+      const warnings = warnSpy.mock.calls.flat().map(String).join("\n");
+      expect(warnings).toContain("AppKit typegen: using committed types");
+      expect(warnings).toContain("warehouse unreachable");
+      expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate", async () => {
     writeMetricConfig();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

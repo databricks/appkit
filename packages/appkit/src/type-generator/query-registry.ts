@@ -944,6 +944,10 @@ export async function generateQueriesFromDescribe(
               // status === "unavailable": non-terminal DESCRIBE (warehouse
               // stopped/cold-starting/busy). Degrade like a transient outage:
               // tag OFFLINE, count as degraded, never cache.
+              if (mode === "blocking") {
+                hadEnvironmentalFailure = true;
+                environmentalCause = environmentalCause ?? "unavailable";
+              }
               logEntries.push({
                 queryName,
                 status: "MISS",

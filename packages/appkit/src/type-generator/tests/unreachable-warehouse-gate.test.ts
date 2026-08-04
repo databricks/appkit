@@ -3,8 +3,8 @@ import path from "node:path";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
- * End-to-end coverage for the `--wait` has-types gate when the warehouse is
- * unreachable.
+ * End-to-end coverage for the `--wait` has-types gate when query DESCRIBE
+ * cannot produce a schema for environmental reasons.
  *
  * The sibling `index.test.ts` mocks `generateQueriesFromDescribe`, so its gate
  * tests hand the entry point a `hadEnvironmentalFailure: true` they wrote
@@ -65,7 +65,7 @@ function unreachableError() {
   });
 }
 
-describe("--wait gate: unreachable warehouse (real query path)", () => {
+describe("--wait gate: environmental query failures (real query path)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fs.rmSync(testDir, { recursive: true, force: true });
@@ -128,6 +128,58 @@ describe("--wait gate: unreachable warehouse (real query path)", () => {
       // while connectivity failures reported no cause at all.
       expect(warnings).toContain("warehouse unreachable");
       // Anti-clobber: the degraded result must not overwrite what was committed.
+      expect(fs.readFileSync(outFile, "utf-8")).toBe(committed);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("non-terminal DESCRIBE + no committed types → crashes instead of silently exiting 0", async () => {
+    mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-pending",
+      status: { state: "PENDING" },
+    });
+
+    const err = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-scaling",
+      mode: "blocking",
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(TypegenFatalError);
+    expect((err as Error).message).toContain("generate-types --wait");
+    expect(fs.existsSync(outFile)).toBe(false);
+  });
+
+  test("non-terminal DESCRIBE + committed types → warns unavailable and keeps them", async () => {
+    mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt-pending",
+      status: { state: "RUNNING" },
+    });
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    const committed = "// committed types\n";
+    fs.writeFileSync(outFile, committed, "utf-8");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-scaling",
+          mode: "blocking",
+        }),
+      ).resolves.toBeUndefined();
+
+      const warnings = warnSpy.mock.calls.flat().map(String).join("\n");
+      expect(warnings).toContain("AppKit typegen: using committed types");
+      expect(warnings).toContain("warehouse unavailable");
       expect(fs.readFileSync(outFile, "utf-8")).toBe(committed);
     } finally {
       warnSpy.mockRestore();
