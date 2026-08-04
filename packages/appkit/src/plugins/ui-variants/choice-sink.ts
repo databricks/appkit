@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getEphemeralStateDir } from "shared/cli/commands/cache-paths";
 
 /**
- * Absolute path of the JSONL choices file, under `node_modules/`.
+ * Path of the JSONL choices file, relative to the app's working directory.
  * A coding agent reads it to pick up the developer's in-browser confirmation
  * and finalize the chosen variant.
  *
@@ -16,10 +15,8 @@ import { getEphemeralStateDir } from "shared/cli/commands/cache-paths";
  * Changing this value silently breaks that skill's file discovery — update the
  * skill's `find` path in the same change.
  */
-const UI_CHOICES_FILE = path.join(
-  getEphemeralStateDir(),
-  ".appkit-ui-choices.jsonl",
-);
+const UI_CHOICES_FILE =
+  "node_modules/.databricks/appkit/.appkit-ui-choices.jsonl";
 
 /**
  * One recorded variant choice.

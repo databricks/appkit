@@ -9,7 +9,6 @@ import {
   loadCache,
   type MetricCacheEntry,
   metricCacheHash,
-  queryCacheFileExists,
   saveCache,
 } from "./cache";
 import { getErrorDiagnostic, isConnectivityError } from "./errors";
@@ -175,29 +174,7 @@ export class TypegenSyntaxError extends Error {
 export class TypegenFatalError extends Error {
   readonly queries: QueryFatalError[];
 
-  constructor(
-    queries: QueryFatalError[],
-    warehouseId?: string,
-    cacheInitialized?: boolean,
-  ) {
-    // The cache snapshot is optional: callers whose failure relates to the type
-    // cache pass it to get bootstrap/drift remediation; callers with an unrelated
-    // fatal (e.g. a malformed definitions.json) omit it and get generic wording.
-    const nextStep =
-      cacheInitialized === undefined
-        ? // No cache snapshot: the failure is unrelated to the cache — don't
-          // misdirect the operator toward regenerating/committing `.appkit/`.
-          `Fix the ${pc.bold("FATAL")} error(s) above, then re-run ${pc.bold("generate-types")}.`
-        : // Distinguish bootstrap (no committed cache yet) from drift (cache exists but is stale/missing key).
-          // Bootstrap → operator needs to initialize; drift → operator needs to regenerate the affected key.
-          cacheInitialized
-          ? // Drift: cache file exists but is missing/stale for the failing query/metric.
-            warehouseId
-            ? `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against warehouse ${pc.bold(warehouseId)} and commit ${pc.bold(".appkit/")}.`
-            : `The committed ${pc.bold(".appkit/")} cache is missing or stale for the failed ${plural(queries.length, "query", "queries")}. Regenerate with ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")}.`
-          : // Bootstrap: no committed cache found; operator needs to initialize from scratch.
-            `No committed type cache found (${pc.bold(".appkit/")}). Run ${pc.bold("generate-types --wait")} against a warehouse and commit ${pc.bold(".appkit/")} before building without warehouse access.`;
-
+  constructor(queries: QueryFatalError[], warehouseId?: string) {
     super(
       formatTypegenFailureMessage({
         syntaxErrors: [],
@@ -210,7 +187,9 @@ export class TypegenFatalError extends Error {
           "authentication failure",
           "SDK configuration errors",
         ],
-        nextStep,
+        nextStep: warehouseId
+          ? `Verify access to warehouse ${pc.bold(warehouseId)} and rerun type generation.`
+          : "Verify warehouse access and rerun type generation.",
       }),
     );
     this.name = "TypegenFatalError";
@@ -337,13 +316,6 @@ export async function generateFromEntryPoint(options: {
 
   logger.debug("Starting type generation...");
 
-  // Snapshot BEFORE any generation writes the cache: generateQueriesFromDescribe
-  // and syncMetricViewsTypes both persist to .appkit/types-cache.json during the
-  // run, so reading existence at the throw site would always report "exists".
-  // Capturing here is what lets the fatal message tell bootstrap (no cache yet)
-  // apart from drift (cache present but stale/missing the failing key).
-  const cacheExistedAtStart = await queryCacheFileExists();
-
   let queryRegistry: QuerySchema[] = [];
   let syntaxErrors: QuerySyntaxError[] = [];
   let fatalErrors: QueryFatalError[] = [];
@@ -419,7 +391,7 @@ export async function generateFromEntryPoint(options: {
     throw new TypegenSyntaxError(syntaxErrors, warehouseId, fatalErrors);
   }
   if (fatalErrors.length > 0) {
-    throw new TypegenFatalError(fatalErrors, warehouseId, cacheExistedAtStart);
+    throw new TypegenFatalError(fatalErrors, warehouseId);
   }
 
   logger.debug("Type generation complete!");
