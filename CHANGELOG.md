@@ -94,6 +94,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.53.0](https://github.com/databricks/appkit/compare/v0.52.0...v0.53.0) (2026-08-04)
+
+* CI-resilient `--wait` typegen with committed-types fallback ([#510](https://github.com/databricks/appkit/issues/510)) ([f90fa9b](https://github.com/databricks/appkit/commit/f90fa9bac76227afa3e655dd2cd5b0ef69104132)), closes [#475](https://github.com/databricks/appkit/issues/475)
+
+
 ## [0.52.0](https://github.com/databricks/appkit/compare/v0.51.0...v0.52.0) (2026-08-04)
 
 ### appkit
