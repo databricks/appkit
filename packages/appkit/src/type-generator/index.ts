@@ -101,15 +101,9 @@ function hasCommittedTypes(
   return hasAnalytics || hasMetrics;
 }
 
-/**
- * Detects if a query schema has degraded to `result: unknown`.
- * A degraded query cannot be distinguished from a successful one that simply
- * has no result columns (both emit `result: unknown`), so we conservatively
- * treat any `result: unknown` as potentially degraded for write-suppression
- * purposes in blocking mode.
- */
+/** Detects whether query generation explicitly marked a schema as degraded. */
 function isQueryDegraded(schema: QuerySchema): boolean {
-  return schema.type.includes("result: unknown");
+  return schema.degraded === true;
 }
 
 /**
@@ -403,10 +397,17 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  // In blocking mode, never overwrite committed types with a degraded result:
-  // if any query degraded to `result: unknown`, skip the write and leave the
-  // committed .d.ts as the fallback of record. Non-blocking mode always writes.
+  // In blocking mode, never overwrite committed types with a schema explicitly
+  // marked degraded. Leave the committed .d.ts as the fallback of record.
+  // Non-blocking mode always writes.
   const hasAnyDegradedQuery = queryRegistry.some(isQueryDegraded);
+  if (mode === "blocking" && hasAnyDegradedQuery) {
+    // A degraded schema always participates in the committed-types gate. Keep
+    // this invariant next to write suppression so a new producer cannot update
+    // one decision without the other.
+    hadEnvironmentalFailure = true;
+    environmentalCause = environmentalCause ?? "unavailable";
+  }
   const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
 
   if (shouldWriteQueries) {

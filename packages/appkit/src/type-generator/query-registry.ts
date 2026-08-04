@@ -277,12 +277,15 @@ function degradedType(
   queryName: string,
   sql: string,
   sqlHash: string,
-): string {
+): Pick<QuerySchema, "type" | "degraded"> {
   const prior = cache.queries[queryName];
   const canReusePrior = prior?.hash === sqlHash && !prior.retry;
   return canReusePrior
-    ? prior.type
-    : generateUnknownResultQuery(sql, queryName);
+    ? { type: prior.type }
+    : {
+        type: generateUnknownResultQuery(sql, queryName),
+        degraded: true,
+      };
 }
 
 // Single source of truth for the `@param` type alternation, shared by
@@ -800,7 +803,7 @@ export async function generateQueriesFromDescribe(
           index,
           schema: {
             name: queryName,
-            type: degradedType(cache, queryName, sql, sqlHash),
+            ...degradedType(cache, queryName, sql, sqlHash),
           },
         });
         if (decision === "fatal" && !isEnvironmental) {
@@ -871,7 +874,7 @@ export async function generateQueriesFromDescribe(
           return {
             status: "syntax",
             index,
-            schema: { name: queryName, type },
+            schema: { name: queryName, type, degraded: true },
             error: withIdentifierHint(parseError(sqlError), sql),
           };
         }
@@ -888,7 +891,7 @@ export async function generateQueriesFromDescribe(
             index,
             schema: {
               name: queryName,
-              type: degradedType(cache, queryName, sql, sqlHash),
+              ...degradedType(cache, queryName, sql, sqlHash),
             },
           };
         }
@@ -897,7 +900,11 @@ export async function generateQueriesFromDescribe(
         if (!hasResults) {
           // Described, but no result columns. Emit `unknown` and retry next run;
           // do not cache (we never persist `result: unknown`).
-          return { status: "empty", index, schema: { name: queryName, type } };
+          return {
+            status: "empty",
+            index,
+            schema: { name: queryName, type, degraded: true },
+          };
         }
         return {
           status: "ok",
@@ -970,8 +977,11 @@ export async function generateQueriesFromDescribe(
             const priorEntry = cache.queries[queryName];
             const canReusePrior =
               priorEntry?.hash === sqlHash && !priorEntry.retry;
-            const type = degradedType(cache, queryName, sql, sqlHash);
-            freshResults.push({ index, schema: { name: queryName, type } });
+            const degraded = degradedType(cache, queryName, sql, sqlHash);
+            freshResults.push({
+              index,
+              schema: { name: queryName, ...degraded },
+            });
 
             if (!isConnectivityError(entry.reason)) {
               fatalErrors.push({ name: queryName, message: error.message });
