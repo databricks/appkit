@@ -36,11 +36,24 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
 
   constructor(config: IAiSearchConfig) {
     super(config);
-    this.config = config;
+    this.config = {
+      ...config,
+      indexes: config.indexes ?? this._defaultIndexes(),
+    };
     this.connector = new AiSearchConnector({
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
+  }
+
+  /**
+   * Seeds a `default` index from `DATABRICKS_VS_INDEX_NAME` when no `indexes`
+   * are configured, so `aiSearch()` is usable with just the env var (columns
+   * are auto-discovered in dev). Mirrors the genie plugin's default space.
+   */
+  private _defaultIndexes(): Record<string, IndexConfig> {
+    const indexName = process.env.DATABRICKS_VS_INDEX_NAME;
+    return indexName ? { default: { indexName } } : {};
   }
 
   async setup(): Promise<void> {

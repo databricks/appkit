@@ -30,8 +30,8 @@
     "rules": {
       "must": [
         "List the vector search index's source-table columns (unity-catalog tables API) so the user can pick which to return",
-        "Ask the user which columns each index should return, and which alias name to use for it",
-        "Write a complete aiSearch({ indexes: { <alias>: { columns: [...] } } }) into the server file using the chosen columns"
+        "Ask the user which of those columns the search should return",
+        "Write aiSearch({ indexes: { default: { columns: [...] } } }) in the server file; the client queries the 'default' alias"
       ]
     }
   },

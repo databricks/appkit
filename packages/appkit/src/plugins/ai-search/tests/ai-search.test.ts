@@ -134,6 +134,17 @@ describe("AiSearchPlugin", () => {
       );
     });
 
+    it("seeds a 'default' index from the env var when no indexes are configured", async () => {
+      process.env.DATABRICKS_VS_INDEX_NAME = "cat.sch.from_env";
+      // Bare aiSearch() — no indexes config.
+      const plugin = new AiSearchPlugin({});
+
+      await plugin.query("default", { queryText: "q", columns: ["id"] });
+      expect(mockRequest.mock.calls[0][0].path).toBe(
+        "/api/2.0/vector-search/indexes/cat.sch.from_env/query",
+      );
+    });
+
     it("throws if pagination enabled but no endpointName", async () => {
       const plugin = new AiSearchPlugin({
         indexes: {
