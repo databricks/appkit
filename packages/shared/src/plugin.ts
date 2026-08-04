@@ -1,5 +1,6 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
+import { type KebabToCamel, kebabToCamel } from "./naming";
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
@@ -11,6 +12,8 @@ import type {
 // Sourced from `./schemas/manifest` (the Zod canonical) so `DiscoveryDescriptor`
 // stays the discriminated union shape rather than the free-form predecessor.
 export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
+// Re-export the naming helpers so `shared` consumers keep importing them here.
+export { type KebabToCamel, kebabToCamel };
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -247,17 +250,6 @@ export type WithAsUser<SDK> = SDK extends (...args: any[]) => any
        */
       asUser: (req: IAppRequest) => SDK;
     };
-
-/** Type-level kebab-to-camelCase (e.g. `"ai-search"` -> `"aiSearch"`). */
-export type KebabToCamel<S extends string> =
-  S extends `${infer Head}-${infer Tail}`
-    ? `${Head}${Capitalize<KebabToCamel<Tail>>}`
-    : S;
-
-/** Runtime {@link KebabToCamel}. */
-export function kebabToCamel(name: string): string {
-  return name.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-}
 
 /**
  * Maps plugin names to their exported types (with asUser automatically added).

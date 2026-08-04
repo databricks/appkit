@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
-import { kebabToCamel } from "../../../../plugin";
+import { kebabToCamel } from "../../../../naming";
 import { resolveManifestInDir } from "../manifest-resolve";
 import { isWithinDirectory } from "../sync/sync";
 import { shouldAllowJsManifestForDir } from "../trusted-js-manifest";
