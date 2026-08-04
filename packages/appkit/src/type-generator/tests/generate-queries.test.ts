@@ -891,7 +891,7 @@ describe("generateQueriesFromDescribe", () => {
       }
     });
 
-    test("preflight connectivity error — degradeAll, never describes", async () => {
+    test("preflight connectivity error — degradeAll, never describes, flagged environmental for the gate", async () => {
       mocks.readdir.mockResolvedValue(["a.sql"]);
       mocks.readFile.mockResolvedValue("SELECT id FROM a");
       mocks.getWarehouse.mockImplementation(() => {
@@ -901,16 +901,88 @@ describe("generateQueriesFromDescribe", () => {
         );
       });
 
-      const { schemas, syntaxErrors, fatalErrors } =
-        await generateQueriesFromDescribe("/queries", "wh-123", {
-          mode: "blocking",
-        });
+      const {
+        schemas,
+        syntaxErrors,
+        fatalErrors,
+        hadEnvironmentalFailure,
+        environmentalCause,
+      } = await generateQueriesFromDescribe("/queries", "wh-123", {
+        mode: "blocking",
+      });
 
-      // Unreachable warehouse degrades silently — even in blocking mode.
+      // Without the environmental flag a fresh checkout would exit 0 having
+      // written no types at all: degraded queries suppress the write, and
+      // nothing else fails the run.
       expect(mocks.executeStatement).not.toHaveBeenCalled();
       expect(fatalErrors).toEqual([]);
       expect(syntaxErrors).toEqual([]);
       expect(schemas[0].type).toContain("result: unknown");
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("unreachable");
+    });
+
+    test("preflight auth error — environmentalCause is auth, including on response.status", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      // Status carried on `response.status` rather than `status` — some HTTP
+      // clients report it there, and it must still label as auth.
+      mocks.getWarehouse.mockImplementation(() => {
+        throw Object.assign(new Error("PERMISSION_DENIED"), {
+          response: { status: 403 },
+        });
+      });
+
+      const { fatalErrors, hadEnvironmentalFailure, environmentalCause } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+
+      expect(mocks.executeStatement).not.toHaveBeenCalled();
+      expect(fatalErrors).toEqual([]);
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("auth");
+    });
+
+    test("per-query DESCRIBE connectivity failure is flagged environmental for the gate", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+      mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+      mocks.executeStatement.mockRejectedValue(
+        Object.assign(new Error("connect ECONNREFUSED"), {
+          code: "ECONNREFUSED",
+        }),
+      );
+
+      const {
+        schemas,
+        syntaxErrors,
+        fatalErrors,
+        hadEnvironmentalFailure,
+        environmentalCause,
+      } = await generateQueriesFromDescribe("/queries", "wh-123", {
+        mode: "blocking",
+      });
+
+      expect(fatalErrors).toEqual([]);
+      expect(syntaxErrors).toEqual([]);
+      expect(schemas[0].type).toContain("result: unknown");
+      expect(hadEnvironmentalFailure).toBe(true);
+      expect(environmentalCause).toBe("unreachable");
+    });
+
+    test("non-blocking mode never reports an environmental cause", async () => {
+      mocks.readdir.mockResolvedValue(["a.sql"]);
+      mocks.readFile.mockResolvedValue("SELECT id FROM a");
+
+      const { hadEnvironmentalFailure, environmentalCause } =
+        await generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "non-blocking",
+        });
+
+      // The gate is blocking-only; non-blocking degrades without signaling.
+      expect(hadEnvironmentalFailure).toBe(false);
+      expect(environmentalCause).toBeUndefined();
     });
 
     test("RUNNING preflight — describes normally", async () => {

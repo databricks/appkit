@@ -7,6 +7,7 @@ import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import {
   classifyBlockingFailure,
+  classifyEnvironmentalCause,
   getErrorDiagnostic,
   isConnectivityError,
 } from "./errors";
@@ -683,8 +684,10 @@ export async function generateQueriesFromDescribe(
   // tracked separately below.
   const fatalErrors: QueryFatalError[] = [];
   // Track whether an environmental failure occurred in blocking mode (for the
-  // has-types gate in generateFromEntryPoint).
+  // has-types gate in generateFromEntryPoint), plus its coarse cause so the
+  // gate's warning can say why generation fell back to committed types.
   let hadEnvironmentalFailure = false;
+  let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
 
   if (uncachedQueries.length > 0) {
     // One-time warehouse preflight (before issuing any DESCRIBE). A single
@@ -694,8 +697,8 @@ export async function generateQueriesFromDescribe(
     // not-ready warehouse degrades exactly like a per-query outage.
     let decision: ReturnType<typeof decidePreflight> = "proceed";
     let fatalMessage = "";
-    // Track whether a non-connectivity environmental failure occurred so the
-    // caller's has-types gate can decide crash-vs-fall-back.
+    // Track whether an environmental failure occurred so the caller's has-types
+    // gate can decide crash-vs-fall-back.
     let isEnvironmental = false;
     if (mode === "non-blocking") {
       // `non-blocking` never describes and must make ZERO warehouse round-trips:
@@ -712,6 +715,7 @@ export async function generateQueriesFromDescribe(
           // DELETED/DELETING is state-based and environmental.
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
           isEnvironmental = true;
+          environmentalCause = "unavailable";
         }
         if (decision === "startWaitProceed") {
           // Stopped/stopping warehouse: nudge it out of the stopped state, then
@@ -729,6 +733,7 @@ export async function generateQueriesFromDescribe(
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
             isEnvironmental = true; // DELETED/DELETING or timeout is environmental
+            environmentalCause = "unavailable";
           }
         }
         if (decision === "waitThenProceed") {
@@ -741,13 +746,18 @@ export async function generateQueriesFromDescribe(
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
             isEnvironmental = true; // DELETED/DELETING or timeout is environmental
+            environmentalCause = "unavailable";
           }
         }
       } catch (err) {
         if (isConnectivityError(err)) {
-          // Warehouse unreachable (transient outage): degrade silently like a
-          // per-query connectivity failure — never fail a build on a blip.
+          // Warehouse unreachable (transient outage): degrade rather than fail —
+          // never fail a build on a blip. Still environmental, so the caller's
+          // has-types gate decides warn-and-fall-back (committed types present)
+          // vs crash (fresh checkout with nothing to fall back to).
           decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unreachable";
         } else {
           // Classify the exception: deterministic (404/400) or environmental (auth, etc).
           const classification = classifyBlockingFailure(err);
@@ -761,6 +771,7 @@ export async function generateQueriesFromDescribe(
             // has-types gate to handle later.
             decision = "degradeAll";
             isEnvironmental = true;
+            environmentalCause = classifyEnvironmentalCause(err);
             fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
           }
         }
@@ -969,6 +980,13 @@ export async function generateQueriesFromDescribe(
               continue;
             }
 
+            // Environmental for the same reason as the preflight connectivity
+            // branch above, so the has-types gate still sees it.
+            if (mode === "blocking") {
+              hadEnvironmentalFailure = true;
+              environmentalCause = environmentalCause ?? "unreachable";
+            }
+
             logger.warn(
               "DESCRIBE unreachable for %s: %s — %s",
               queryName,
@@ -1080,7 +1098,15 @@ export async function generateQueriesFromDescribe(
     .sort((a, b) => a.index - b.index)
     .map((r) => r.schema);
 
-  return { schemas, syntaxErrors, fatalErrors, hadEnvironmentalFailure };
+  return {
+    schemas,
+    syntaxErrors,
+    fatalErrors,
+    hadEnvironmentalFailure,
+    environmentalCause: hadEnvironmentalFailure
+      ? environmentalCause
+      : undefined,
+  };
 }
 
 /**
