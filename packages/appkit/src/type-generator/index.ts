@@ -62,9 +62,7 @@ const MV_PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 /**
  * Generate a loud warning message for environmental failures with committed types present.
- * The message includes a coarse cause label and the warehouse ID.
  * @param cause - coarse cause label: "auth" (401/403), "unreachable" (connectivity), or "unavailable" (other)
- * @param warehouseId - the warehouse ID
  */
 function determineWarningMessage(
   cause: "auth" | "unreachable" | "unavailable",
@@ -101,20 +99,10 @@ function hasCommittedTypes(
   return hasAnalytics || hasMetrics;
 }
 
-/**
- * Detects if a query schema has degraded to `result: unknown`.
- * A degraded query cannot be distinguished from a successful one that simply
- * has no result columns (both emit `result: unknown`), so we conservatively
- * treat any `result: unknown` as potentially degraded for write-suppression
- * purposes in blocking mode.
- */
 function isQueryDegraded(schema: QuerySchema): boolean {
-  return schema.type.includes("result: unknown");
+  return schema.degraded === true;
 }
 
-/**
- * Detects if any metric schemas are degraded (marked with `degraded: true`).
- */
 function hasAnyDegradedMetrics(schemas: MetricSchema[]): boolean {
   return schemas.some((s) => s.degraded === true);
 }
@@ -403,10 +391,17 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  // In blocking mode, never overwrite committed types with a degraded result:
-  // if any query degraded to `result: unknown`, skip the write and leave the
-  // committed .d.ts as the fallback of record. Non-blocking mode always writes.
+  // In blocking mode, never overwrite committed types with a schema explicitly
+  // marked degraded. Leave the committed .d.ts as the fallback of record.
+  // Non-blocking mode always writes.
   const hasAnyDegradedQuery = queryRegistry.some(isQueryDegraded);
+  if (mode === "blocking" && hasAnyDegradedQuery) {
+    // A degraded schema always participates in the committed-types gate. Keep
+    // this invariant next to write suppression so a new producer cannot update
+    // one decision without the other.
+    hadEnvironmentalFailure = true;
+    environmentalCause = environmentalCause ?? "unavailable";
+  }
   const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
 
   if (shouldWriteQueries) {
@@ -479,9 +474,6 @@ export async function generateFromEntryPoint(options: {
 
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
-
-  // Unified terminal decision: deterministic failures crash; environmental
-  // failures fall to the has-types gate in blocking mode.
 
   // Deterministic failures (SQL syntax errors or 404/400 HTTP) always crash regardless of mode.
   if (syntaxErrors.length > 0) {
@@ -801,7 +793,7 @@ export async function syncMetricViewsTypes(options: {
         degradedKeys.length,
         degradedKeys.join(", "),
       );
-      hadEnvironmentalFailure = true; // Mark as environmental if any metric degraded.
+      hadEnvironmentalFailure = true;
       environmentalCause = environmentalCause ?? "unavailable";
     }
   } else {
@@ -815,7 +807,7 @@ export async function syncMetricViewsTypes(options: {
       describeNeeded.length,
       describeNeeded.map((e) => e.key).join(", "),
     );
-    hadEnvironmentalFailure = true; // Mark as environmental when not describing.
+    hadEnvironmentalFailure = true;
     environmentalCause = environmentalCause ?? "unavailable";
   }
 
@@ -883,7 +875,6 @@ export async function syncMetricViewsTypes(options: {
       "utf-8",
     );
   }
-
   // Sweep a stale sibling `metric-views.d.ts` from a pre-`.ts` version. Older
   // typegen emitted an ambient `.d.ts`; the current output is a real `.ts` at
   // `metricOutFile`. Left behind, the old sibling would duplicate the

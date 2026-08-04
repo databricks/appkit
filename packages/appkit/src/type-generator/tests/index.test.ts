@@ -168,6 +168,7 @@ describe("generateFromEntryPoint — query failure handling", () => {
   const unknownSchema = (name: string) => ({
     name,
     type: `{ name: "${name}"; parameters: Record<string, never>; result: unknown; }`,
+    degraded: true,
   });
 
   beforeAll(() => {
@@ -1843,6 +1844,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
   const degradedQuerySchema = (name: string) => ({
     name,
     type: `{ name: "${name}"; parameters: Record<string, never>; result: unknown; }`,
+    degraded: true,
   });
 
   beforeEach(() => {
@@ -2074,10 +2076,10 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(content).toContain("measureKeys: string"); // Permissive degraded type
   });
 
-  test("blocking mode + degraded query (no syntax/fatal errors): resolves without write", async () => {
-    // When a query is degraded but there are no syntax or fatal errors,
-    // the function resolves normally. In blocking mode, the degraded write
-    // is suppressed, so outFile is not written.
+  test("blocking mode + degraded query (no syntax/fatal errors): crashes when no committed types exist", async () => {
+    // The explicit degraded marker must drive both write suppression and the
+    // committed-types gate, even if the producer omitted the legacy
+    // hadEnvironmentalFailure summary bit.
     mocks.generateQueriesFromDescribe.mockResolvedValue({
       schemas: [degradedQuerySchema("offline_query")],
       syntaxErrors: [],
@@ -2091,7 +2093,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
         warehouseId: "wh-1",
         mode: "blocking",
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow(TypegenFatalError);
 
     // The file was not written because the query was degraded in blocking mode
     expect(fs.existsSync(outFile)).toBe(false);
@@ -2106,6 +2108,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
         {
           name: "bad_query",
           type: `{ name: "bad_query"; parameters: Record<string, never>; result: unknown; }`,
+          degraded: true,
         },
       ],
       syntaxErrors: [],
@@ -2455,6 +2458,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
   const degradedSchema = (name: string) => ({
     name,
     type: `{ name: "${name}"; parameters: Record<string, never>; result: unknown; }`,
+    degraded: true,
   });
 
   beforeEach(() => {

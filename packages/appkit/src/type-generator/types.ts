@@ -99,10 +99,14 @@ export const sqlTypeToHelper: Record<string, string> = {
  * Query schema interface
  * @property name - the name of the query
  * @property type - the type of the query (string, number, boolean, object, array, etc.)
+ * @property degraded - true when the schema could not be resolved and `type`
+ *   is an unknown fallback. Absent when `type` came from DESCRIBE or a matching
+ *   last-known-good cache entry.
  */
 export interface QuerySchema {
   name: string;
   type: string;
+  degraded?: boolean;
 }
 
 /**

@@ -146,6 +146,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].name).toBe("users");
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[0].type).toContain("name: string");
+    expect(schemas[0].degraded).toBeUndefined();
     expect(mocks.spinnerStop).toHaveBeenCalledWith("");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
     // clean success: cached, and not flagged as a syntax error
@@ -609,6 +610,7 @@ describe("generateQueriesFromDescribe", () => {
     );
 
     expect(schemas[0].type).toContain("result: unknown");
+    expect(schemas[0].degraded).toBe(true);
     expect(syntaxErrors).toEqual([]);
     expect(lastSavedQueries()).not.toHaveProperty("empty");
   });
