@@ -31,9 +31,9 @@ with an `asUser(req)` method for user-scoped execution.
 
 | Parameter | Type |
 | ------ | ------ |
-| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: `WorkspaceClient`; `disableInternalTelemetry?`: `boolean`; `onPluginsReady?`: (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\>; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} |
+| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: [`WorkspaceClient`](Interface.WorkspaceClient.md); `disableInternalTelemetry?`: `boolean`; `onPluginsReady?`: (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\>; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} |
 | `config.cache?` | [`CacheConfig`](Interface.CacheConfig.md) |
-| `config.client?` | `WorkspaceClient` |
+| `config.client?` | [`WorkspaceClient`](Interface.WorkspaceClient.md) |
 | `config.disableInternalTelemetry?` | `boolean` |
 | `config.onPluginsReady?` | (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\> |
 | `config.plugins?` | `T` |

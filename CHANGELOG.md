@@ -92,6 +92,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.52.0](https://github.com/databricks/appkit/compare/v0.51.0...v0.52.0) (2026-08-04)
+
+### appkit
+
+* **appkit:** introduce workspace-client wrapper over the Databricks SDK ([#475](https://github.com/databricks/appkit/issues/475)) ([f6e81eb](https://github.com/databricks/appkit/commit/f6e81ebbc0c0e939123252cbf2c8833a252e1747))
+
+
 ## [0.51.0](https://github.com/databricks/appkit/compare/v0.50.0...v0.51.0) (2026-08-03)
 
 * relocate typegen cache to committed .appkit/ dir ([#502](https://github.com/databricks/appkit/issues/502)) ([#509](https://github.com/databricks/appkit/issues/509)) ([9497431](https://github.com/databricks/appkit/commit/94974317cb67506477169328039c6e14e81c2a1e))

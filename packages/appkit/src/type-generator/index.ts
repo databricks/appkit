@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import dotenv from "dotenv";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
+import {
+  createWorkspaceClient,
+  type WorkspaceClient,
+} from "../workspace-client";
 import {
   isRevivableMetricCacheEntry,
   loadCache,
@@ -505,7 +508,7 @@ export async function syncMetricViewsTypes(options: {
 
   let mvClient: WorkspaceClient | undefined;
   const getMvClient = (): WorkspaceClient => {
-    mvClient ??= new WorkspaceClient({});
+    mvClient ??= createWorkspaceClient();
     return mvClient;
   };
 

@@ -10,6 +10,7 @@ import {
   stream as servingStream,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
+import { createWorkspaceClient } from "../workspace-client";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
 const DEFAULT_MAX_SSE_LINE_CHARS = 1024 * 1024;
@@ -238,12 +239,11 @@ interface DeltaToolCall {
  *
  * @example Using the factory (recommended)
  * ```ts
- * import { createApp, createAgent, agents } from "@databricks/appkit";
+ * import { createApp, createAgent, agents, createWorkspaceClient } from "@databricks/appkit";
  * import { DatabricksAdapter } from "@databricks/appkit/beta";
- * import { WorkspaceClient } from "@databricks/sdk-experimental";
  *
  * const adapter = DatabricksAdapter.fromServingEndpoint({
- *   workspaceClient: new WorkspaceClient({}),
+ *   workspaceClient: createWorkspaceClient(),
  *   endpointName: "my-endpoint",
  * });
  *
@@ -397,11 +397,9 @@ export class DatabricksAdapter implements AgentAdapter {
     let workspaceClient: WorkspaceClientLike | undefined =
       options?.workspaceClient;
     if (!workspaceClient) {
-      const sdk = await import("@databricks/sdk-experimental");
-      workspaceClient = new sdk.WorkspaceClient(
-        {},
-        getClientOptions(),
-      ) as unknown as WorkspaceClientLike;
+      workspaceClient = createWorkspaceClient({
+        clientOptions: getClientOptions(),
+      }) as unknown as WorkspaceClientLike;
     }
 
     return DatabricksAdapter.fromServingEndpoint({

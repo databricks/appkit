@@ -1,9 +1,9 @@
-import type { ClientOptions } from "@databricks/sdk-experimental";
 import { coerce } from "semver";
 import {
   name as productName,
   version as productVersion,
 } from "../../package.json";
+import type { ClientOptions } from "../workspace-client";
 
 const normalizedVersion = (coerce(productVersion)?.version ??
   productVersion) as ClientOptions["productVersion"];

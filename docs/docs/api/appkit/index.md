@@ -86,7 +86,9 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
 | [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
+| [WorkspaceClient](Interface.WorkspaceClient.md) | AppKit's workspace client facade. Mirrors the multi-client shape of the modular Databricks SDK: each service is its own accessor, so services can be migrated one at a time behind this stable interface. |
 | [WorkspaceClientLike](Interface.WorkspaceClientLike.md) | Structural shape of a Databricks SDK client used by [fromSupervisorApi](Function.fromSupervisorApi.md). Only what we need: `apiClient.request` for streaming and `config.ensureResolved` to materialise the host/credentials. |
+| [WorkspaceClientOptions](Interface.WorkspaceClientOptions.md) | Options used to construct the wrapper. Mirrors the subset of the old SDK's `Config` + `ClientOptions` that AppKit relies on today; we deliberately do NOT re-expose every old-SDK config knob. |
 
 ## Type Aliases
 
@@ -137,6 +139,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
+| [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |

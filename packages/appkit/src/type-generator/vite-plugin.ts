@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { Plugin } from "vite";
 import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
+import { createWorkspaceClient } from "../workspace-client";
 import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
@@ -236,7 +236,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     void (async () => {
       try {
-        const client = new WorkspaceClient({});
+        const client = createWorkspaceClient();
         const state = await getWarehouseState(client, warehouseId);
 
         // A deleted/deleting warehouse can't be started and blocking typegen

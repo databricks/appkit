@@ -30,11 +30,16 @@ vi.mock("../warehouse-status", () => ({
   waitUntilRunning: mocks.waitUntilRunning,
 }));
 
-// armWarehouseWatch constructs `new WorkspaceClient({})`. Stub the SDK so that
-// constructor is inert in unit tests.
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: class {},
-}));
+// armWarehouseWatch constructs a client via createWorkspaceClient(). Stub the
+// wrapper so that factory is inert in unit tests.
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => ({}),
+  };
+});
 
 const { appKitTypesPlugin } = await import("../vite-plugin");
 // Real constant values: the "../index" mock spreads the actual module, so these
