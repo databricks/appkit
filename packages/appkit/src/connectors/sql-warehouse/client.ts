@@ -1,8 +1,3 @@
-import {
-  Context,
-  type sql,
-  type WorkspaceClient,
-} from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
@@ -25,6 +20,11 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import {
+  Context,
+  type sql,
+  type WorkspaceClient,
+} from "../../workspace-client";
 import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
 import { WarehousePollBackoff } from "./warehouse-poll-backoff";

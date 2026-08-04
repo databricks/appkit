@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -7,6 +6,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import type { WorkspaceClient } from "../../workspace-client";
 import type {
   VectorSearchConnectorConfig,
   VsNextPageParams,

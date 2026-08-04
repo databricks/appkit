@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
+import { createWorkspaceClient } from "../workspace-client";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { getErrorDiagnostic, isConnectivityError } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
@@ -564,7 +564,7 @@ export async function generateQueriesFromDescribe(
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
   logger.debug("Found %d SQL queries", queryFiles.length);
 
-  const client = new WorkspaceClient({});
+  const client = createWorkspaceClient();
   const spinner = new Spinner();
 
   // Read all SQL files in parallel

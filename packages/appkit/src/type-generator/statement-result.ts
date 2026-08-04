@@ -1,5 +1,5 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../logging/logger";
+import type { WorkspaceClient } from "../workspace-client";
 import { getErrorMessage } from "./errors";
 import type { DatabricksStatementExecutionResponse } from "./types";
 

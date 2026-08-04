@@ -45,10 +45,15 @@ const { mockClient, mockCacheInstance } = vi.hoisted(() => {
   return { mockJobsApi, mockClient, mockCacheInstance };
 });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => mockClient),
-  Context: vi.fn(),
-}));
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => mockClient,
+    Context: vi.fn(),
+  };
+});
 
 vi.mock("../../../context", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../context")>();
@@ -685,7 +690,7 @@ describe("JobsPlugin", () => {
     test("connector's cancellation token reflects signal state live", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const { Context } = await import("@databricks/sdk-experimental");
+      const { Context } = await import("../../../workspace-client");
       const mockContext = Context as unknown as ReturnType<typeof vi.fn>;
       mockContext.mockClear();
 

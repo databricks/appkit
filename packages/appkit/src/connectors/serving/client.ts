@@ -1,10 +1,10 @@
-import type {
-  CancellationToken,
-  serving,
-  WorkspaceClient,
-} from "@databricks/sdk-experimental";
-import { Context } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
+import {
+  type CancellationToken,
+  Context,
+  type serving,
+  type WorkspaceClient,
+} from "../../workspace-client";
 
 const logger = createLogger("connectors:serving");
 

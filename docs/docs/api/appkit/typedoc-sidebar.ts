@@ -364,8 +364,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.WorkspaceClient",
+          label: "WorkspaceClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.WorkspaceClientLike",
           label: "WorkspaceClientLike"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClientOptions",
+          label: "WorkspaceClientOptions"
         }
       ]
     },
@@ -559,6 +569,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createLakebasePoolManager",
           label: "createLakebasePoolManager"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createWorkspaceClient",
+          label: "createWorkspaceClient"
         },
         {
           type: "doc",
