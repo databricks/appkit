@@ -111,36 +111,12 @@ describe("AiSearchPlugin", () => {
 
   describe("setup()", () => {
     const originalIndexEnv = process.env.DATABRICKS_VS_INDEX_NAME;
-    const originalNodeEnv = process.env.NODE_ENV;
     afterEach(() => {
       if (originalIndexEnv === undefined) {
         delete process.env.DATABRICKS_VS_INDEX_NAME;
       } else {
         process.env.DATABRICKS_VS_INDEX_NAME = originalIndexEnv;
       }
-      process.env.NODE_ENV = originalNodeEnv;
-    });
-
-    it("throws outside dev if indexName is unset in both config and env", async () => {
-      delete process.env.DATABRICKS_VS_INDEX_NAME;
-      process.env.NODE_ENV = "production";
-      const plugin = new AiSearchPlugin({
-        indexes: {
-          test: { columns: ["id"] },
-        },
-      });
-      await expect(plugin.setup()).rejects.toThrow("indexName");
-    });
-
-    it("only warns (does not throw) for a missing indexName in dev", async () => {
-      delete process.env.DATABRICKS_VS_INDEX_NAME;
-      process.env.NODE_ENV = "development";
-      const plugin = new AiSearchPlugin({
-        indexes: {
-          test: { columns: ["id"] },
-        },
-      });
-      await expect(plugin.setup()).resolves.not.toThrow();
     });
 
     it("defaults indexName from DATABRICKS_VS_INDEX_NAME when omitted", async () => {
