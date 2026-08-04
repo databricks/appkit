@@ -294,10 +294,19 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     let queryText = request.queryText;
     let queryVector = request.queryVector;
 
-    if (indexConfig.embeddingFn && queryText && !queryVector) {
+    // Self-managed embedding indexes need a query_vector for the vector half
+    // of the search (ann, hybrid). full_text never uses a vector, so skip
+    // embedding entirely. Only ann is vector-only — for hybrid the text is
+    // still needed for the keyword half, so keep queryText.
+    if (
+      indexConfig.embeddingFn &&
+      queryText &&
+      !queryVector &&
+      queryType !== "full_text"
+    ) {
       try {
         queryVector = await indexConfig.embeddingFn(queryText);
-        queryText = undefined;
+        if (queryType === "ann") queryText = undefined;
       } catch (error) {
         throw new Error(
           `Embedding generation failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -368,7 +377,13 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     fallbackMessage: string,
   ): void {
     logger.error("%s: %O", fallbackMessage, error);
-    const message = error instanceof Error ? error.message : fallbackMessage;
+    // Mirror the base Plugin.execute() convention: only surface the raw error
+    // message outside production. In production the detail stays in the log
+    // above and the client gets the generic fallback, so upstream error text
+    // (e.g. from a user-supplied embeddingFn) isn't leaked.
+    const isDev = process.env.NODE_ENV !== "production";
+    const message =
+      isDev && error instanceof Error ? error.message : fallbackMessage;
     res.status(500).json({ error: message, plugin: this.name });
   }
 }

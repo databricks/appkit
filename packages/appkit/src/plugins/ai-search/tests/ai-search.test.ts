@@ -1,3 +1,8 @@
+import {
+  createMockRequest,
+  createMockResponse,
+  createMockRouter,
+} from "@tools/test-helpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../context", () => ({
@@ -214,6 +219,8 @@ describe("AiSearchPlugin", () => {
           method: "POST",
           path: "/api/2.0/vector-search/indexes/cat.sch.idx/query",
         }),
+        // 2nd arg is the SDK Context bridging the execution's abort signal.
+        expect.anything(),
       );
 
       const callBody = mockRequest.mock.calls[0][0].payload;
@@ -276,13 +283,14 @@ describe("AiSearchPlugin", () => {
       ]);
     });
 
-    it("calls embeddingFn for self-managed indexes", async () => {
+    it("calls embeddingFn and drops query_text for ann (vector-only)", async () => {
       const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
       const plugin = new AiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
             columns: ["id", "title"],
+            queryType: "ann",
             embeddingFn: mockEmbeddingFn,
           },
         },
@@ -294,6 +302,48 @@ describe("AiSearchPlugin", () => {
       const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
       expect(callBody.query_text).toBeUndefined();
+    });
+
+    it("keeps query_text alongside the embedded vector for hybrid", async () => {
+      const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            queryType: "hybrid",
+            embeddingFn: mockEmbeddingFn,
+          },
+        },
+      });
+      await plugin.setup();
+      await plugin.query("test", { queryText: "test" });
+
+      expect(mockEmbeddingFn).toHaveBeenCalledWith("test");
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
+      expect(callBody.query_text).toBe("test");
+    });
+
+    it("skips embeddingFn for full_text and sends query_text only", async () => {
+      const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            queryType: "full_text",
+            embeddingFn: mockEmbeddingFn,
+          },
+        },
+      });
+      await plugin.setup();
+      await plugin.query("test", { queryText: "test" });
+
+      expect(mockEmbeddingFn).not.toHaveBeenCalled();
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.query_text).toBe("test");
+      expect(callBody.query_vector).toBeUndefined();
     });
 
     it("throws when embeddingFn fails", async () => {
@@ -325,6 +375,341 @@ describe("AiSearchPlugin", () => {
         },
       });
       await expect(plugin.shutdown()).resolves.not.toThrow();
+    });
+  });
+
+  describe("_parseResponse edge cases", () => {
+    it("defaults score to 0 when the index returns no score column", async () => {
+      mockRequest.mockResolvedValueOnce({
+        manifest: { column_count: 2, columns: [{ name: "id" }, { name: "t" }] },
+        result: { row_count: 1, data_array: [[1, "hi"]] },
+        next_page_token: null,
+      });
+      const plugin = new AiSearchPlugin({
+        indexes: { test: { indexName: "cat.sch.idx", columns: ["id", "t"] } },
+      });
+      await plugin.setup();
+      const res = await plugin.query("test", { queryText: "q" });
+
+      expect(res.results[0].score).toBe(0);
+      expect(res.results[0].data).toEqual({ id: 1, t: "hi" });
+    });
+
+    it("propagates a non-null next_page_token", async () => {
+      mockRequest.mockResolvedValueOnce({
+        ...validVsResponse,
+        next_page_token: "tok-123",
+      });
+      const plugin = new AiSearchPlugin({
+        indexes: { test: { indexName: "cat.sch.idx", columns: ["id"] } },
+      });
+      await plugin.setup();
+      const res = await plugin.query("test", { queryText: "q" });
+
+      expect(res.nextPageToken).toBe("tok-123");
+    });
+
+    it("falls back to latency_ms for queryTimeMs when response_time is absent", async () => {
+      mockRequest.mockResolvedValueOnce({
+        manifest: { column_count: 1, columns: [{ name: "id" }] },
+        result: { row_count: 0, data_array: [] },
+        next_page_token: null,
+        debug_info: { latency_ms: 42 },
+      });
+      const plugin = new AiSearchPlugin({
+        indexes: { test: { indexName: "cat.sch.idx", columns: ["id"] } },
+      });
+      await plugin.setup();
+      const res = await plugin.query("test", { queryText: "q" });
+
+      expect(res.queryTimeMs).toBe(42);
+      expect(res.results).toEqual([]);
+      expect(res.totalCount).toBe(0);
+    });
+  });
+
+  describe("query() overrides and reranker", () => {
+    it("lets the request override index queryType, numResults, and columns", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            queryType: "hybrid",
+            numResults: 10,
+          },
+        },
+      });
+      await plugin.setup();
+      await plugin.query("test", {
+        queryText: "q",
+        queryType: "ann",
+        numResults: 5,
+        columns: ["id"],
+      });
+
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.query_type).toBe("ANN");
+      expect(callBody.num_results).toBe(5);
+      expect(callBody.columns).toEqual(["id"]);
+    });
+
+    it("passes an object reranker through untouched", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title", "body"],
+            reranker: { columnsToRerank: ["title"] },
+          },
+        },
+      });
+      await plugin.setup();
+      await plugin.query("test", { queryText: "q" });
+
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.reranker.parameters.columns_to_rerank).toEqual(["title"]);
+    });
+
+    it("lets request.reranker=false suppress an index-enabled reranker", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            reranker: true,
+          },
+        },
+      });
+      await plugin.setup();
+      await plugin.query("test", { queryText: "q", reranker: false });
+
+      const callBody = mockRequest.mock.calls[0][0].payload;
+      expect(callBody.reranker).toBeUndefined();
+    });
+
+    it("throws a wrapped error when the connector query fails", async () => {
+      // Persistent reject so the retry interceptor exhausts its attempts and
+      // execute() surfaces a failed result, driving the !result.ok branch.
+      mockRequest.mockRejectedValue(new Error("VS 503"));
+      const plugin = new AiSearchPlugin({
+        indexes: { products: { indexName: "cat.sch.p", columns: ["id"] } },
+      });
+      await plugin.setup();
+
+      await expect(
+        plugin.query("products", { queryText: "q" }),
+      ).rejects.toThrow(/Vector search query failed for index "products"/);
+    });
+  });
+
+  describe("injectRoutes", () => {
+    const makePlugin = () =>
+      new AiSearchPlugin({
+        indexes: {
+          demo: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            queryType: "hybrid",
+          },
+          paged: {
+            indexName: "cat.sch.paged",
+            columns: ["id"],
+            pagination: true,
+            endpointName: "ep",
+          },
+        },
+      });
+
+    it("registers the three routes", () => {
+      const plugin = makePlugin();
+      const { router } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      expect(router.post).toHaveBeenCalledWith(
+        "/:alias/query",
+        expect.any(Function),
+      );
+      expect(router.post).toHaveBeenCalledWith(
+        "/:alias/next-page",
+        expect.any(Function),
+      );
+      expect(router.get).toHaveBeenCalledWith(
+        "/:alias/config",
+        expect.any(Function),
+      );
+    });
+
+    describe("/:alias/query", () => {
+      it("404s an unknown alias", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/query")(
+          createMockRequest({ params: { alias: "nope" }, body: {} }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(404);
+      });
+
+      it("400s when neither queryText nor queryVector is provided", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/query")(
+          createMockRequest({ params: { alias: "demo" }, body: {} }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+      });
+
+      it("returns the parsed response on success", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/query")(
+          createMockRequest({
+            params: { alias: "demo" },
+            body: { queryText: "hi" },
+          }),
+          res,
+        );
+
+        expect(res.json).toHaveBeenCalledWith(
+          expect.objectContaining({ totalCount: 2, queryType: "hybrid" }),
+        );
+      });
+
+      it("500s (via _handleError) when query preparation throws", async () => {
+        // A throw *outside* execute() (here, a failing embeddingFn) reaches the
+        // handler's catch → _handleError → 500. Connector failures instead flow
+        // through execute() as a non-ok result with its own status.
+        const plugin = new AiSearchPlugin({
+          indexes: {
+            demo: {
+              indexName: "cat.sch.idx",
+              columns: ["id", "title"],
+              queryType: "ann",
+              embeddingFn: vi.fn().mockRejectedValue(new Error("embed down")),
+            },
+          },
+        });
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/query")(
+          createMockRequest({
+            params: { alias: "demo" },
+            body: { queryText: "hi" },
+          }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(500);
+      });
+    });
+
+    describe("/:alias/next-page", () => {
+      it("400s when pagination is not enabled", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/next-page")(
+          createMockRequest({
+            params: { alias: "demo" },
+            body: { pageToken: "t" },
+          }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+      });
+
+      it("400s when pageToken is missing", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/next-page")(
+          createMockRequest({ params: { alias: "paged" }, body: {} }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(400);
+      });
+
+      it("fetches the next page on success", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/next-page")(
+          createMockRequest({
+            params: { alias: "paged" },
+            body: { pageToken: "t" },
+          }),
+          res,
+        );
+
+        expect(mockRequest).toHaveBeenCalledWith(
+          expect.objectContaining({
+            path: "/api/2.0/vector-search/indexes/cat.sch.paged/query-next-page",
+            payload: { endpoint_name: "ep", page_token: "t" },
+          }),
+          expect.anything(),
+        );
+        expect(res.json).toHaveBeenCalled();
+      });
+    });
+
+    describe("/:alias/config", () => {
+      it("404s an unknown alias", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("GET", "/:alias/config")(
+          createMockRequest({ params: { alias: "nope" } }),
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(404);
+      });
+
+      it("returns resolved config with defaults", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("GET", "/:alias/config")(
+          createMockRequest({ params: { alias: "demo" } }),
+          res,
+        );
+
+        expect(res.json).toHaveBeenCalledWith({
+          alias: "demo",
+          columns: ["id", "title"],
+          queryType: "hybrid",
+          numResults: 20,
+          reranker: false,
+          pagination: false,
+        });
+      });
     });
   });
 });

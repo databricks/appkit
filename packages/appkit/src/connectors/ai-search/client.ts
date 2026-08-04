@@ -1,3 +1,5 @@
+import type { CancellationToken } from "@databricks/sdk-experimental";
+import { Context } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -15,6 +17,42 @@ import type {
 } from "./types";
 
 const logger = createLogger("connectors:ai-search");
+
+/**
+ * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
+ * `apiClient.request` aborts the outbound HTTP request when the execution's
+ * timeout fires or the client disconnects. Mirrors the serving connector.
+ */
+function cancellationTokenFromAbortSignal(
+  signal: AbortSignal,
+): CancellationToken {
+  const listeners = new Set<() => void>();
+  signal.addEventListener(
+    "abort",
+    () => {
+      for (const cb of listeners) {
+        try {
+          cb();
+        } catch {
+          // ignore listener failures — abort must stay best-effort
+        }
+      }
+    },
+    { passive: true },
+  );
+
+  return {
+    get isCancellationRequested() {
+      return signal.aborted;
+    },
+    onCancellationRequested(callback: (e?: unknown) => unknown) {
+      listeners.add(callback as () => void);
+      if (signal.aborted) {
+        void callback();
+      }
+    },
+  };
+}
 
 export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
@@ -79,14 +117,21 @@ export class AiSearchConnector {
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = (await workspaceClient.apiClient.request({
-            method: "POST",
-            path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-            payload: body,
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
-          })) as VsRawResponse;
+          const response = (await workspaceClient.apiClient.request(
+            {
+              method: "POST",
+              path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
+              payload: body,
+              headers: new Headers({ "Content-Type": "application/json" }),
+              raw: false,
+              query: {},
+            },
+            signal
+              ? new Context({
+                  cancellationToken: cancellationTokenFromAbortSignal(signal),
+                })
+              : undefined,
+          )) as VsRawResponse;
 
           const duration = Date.now() - startTime;
           span.setAttribute("vs.result_count", response.result.row_count);
@@ -146,17 +191,24 @@ export class AiSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = (await workspaceClient.apiClient.request({
-            method: "POST",
-            path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-            payload: {
-              endpoint_name: params.endpointName,
-              page_token: params.pageToken,
+          const response = (await workspaceClient.apiClient.request(
+            {
+              method: "POST",
+              path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
+              payload: {
+                endpoint_name: params.endpointName,
+                page_token: params.pageToken,
+              },
+              headers: new Headers({ "Content-Type": "application/json" }),
+              raw: false,
+              query: {},
             },
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
-          })) as VsRawResponse;
+            signal
+              ? new Context({
+                  cancellationToken: cancellationTokenFromAbortSignal(signal),
+                })
+              : undefined,
+          )) as VsRawResponse;
 
           span.setAttribute("vs.result_count", response.result.row_count);
           span.setStatus({ code: SpanStatusCode.OK });

@@ -189,13 +189,19 @@ Response:
 ```json
 {
   "results": [
-    { "id": "42", "name": "Intro to ML", "description": "..." }
+    {
+      "score": 0.87,
+      "data": { "id": "42", "name": "Intro to ML", "description": "..." }
+    }
   ],
+  "totalCount": 1,
+  "queryTimeMs": 35,
+  "queryType": "hybrid",
   "nextPageToken": "eyJvZmZzZXQiOjEwfQ=="
 }
 ```
 
-`nextPageToken` is only present when `pagination` is enabled and more results are available.
+Each result carries its relevance `score` and the returned columns under `data`. `nextPageToken` is `null` unless `pagination` is enabled and more results are available.
 
 ### Fetch the next page
 
