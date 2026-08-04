@@ -248,20 +248,13 @@ export type WithAsUser<SDK> = SDK extends (...args: any[]) => any
       asUser: (req: IAppRequest) => SDK;
     };
 
-/**
- * Converts a kebab-case plugin name to its camelCase form at the type level
- * (e.g. `"ai-search"` -> `"aiSearch"`). Single-word names are unchanged.
- * Mirrors {@link kebabToCamel}.
- */
+/** Type-level kebab-to-camelCase (e.g. `"ai-search"` -> `"aiSearch"`). */
 export type KebabToCamel<S extends string> =
   S extends `${infer Head}-${infer Tail}`
     ? `${Head}${Capitalize<KebabToCamel<Tail>>}`
     : S;
 
-/**
- * Runtime counterpart to {@link KebabToCamel}: `"ai-search"` -> `"aiSearch"`.
- * A no-op for names without hyphens.
- */
+/** Runtime {@link KebabToCamel}. */
 export function kebabToCamel(name: string): string {
   return name.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 }
@@ -269,13 +262,12 @@ export function kebabToCamel(name: string): string {
 /**
  * Maps plugin names to their exported types (with asUser automatically added).
  * Each plugin exposes its public API via the exports() method, and AppKit
- * wraps it with asUser() for user-scoped execution.
+ * wraps it with asUser() for user-scoped execution. Callable exports
+ * (functions) are passed through without wrapping, as they manage their own
+ * `asUser` pattern (e.g. files plugin).
  *
- * The handle key is the camelCase form of the plugin name, so a multi-word
- * plugin is reached as `appkit.aiSearch` rather than `appkit["ai-search"]`.
- * For single-word names the camelCase form is identical, so the key is
- * unchanged. Callable exports (functions) are passed through without wrapping,
- * as they manage their own `asUser` pattern (e.g. files plugin).
+ * The key is the camelCase form of the plugin name (`appkit.aiSearch`, not
+ * `appkit["ai-search"]`).
  */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],

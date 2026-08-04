@@ -216,8 +216,7 @@ describe("AiSearchPlugin", () => {
         queryText: "machine learning",
       });
 
-      // Compile-time: `data` is typed as Doc, so these fields resolve without
-      // a cast. Runtime: they carry the parsed values.
+      // `data` is typed as Doc — these fields resolve without a cast.
       const first: Doc = result.results[0].data;
       expect(first.id).toBe(1);
       expect(first.title).toBe("ML Guide");
@@ -612,9 +611,8 @@ describe("AiSearchPlugin", () => {
       });
 
       it("500s (via _handleError) when query preparation throws", async () => {
-        // A throw *outside* execute() (here, a failing embeddingFn) reaches the
-        // handler's catch → _handleError → 500. Connector failures instead flow
-        // through execute() as a non-ok result with its own status.
+        // A throw outside execute() (failing embeddingFn) hits _handleError;
+        // connector failures instead surface as a non-ok result.
         const plugin = new AiSearchPlugin({
           indexes: {
             demo: {

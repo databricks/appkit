@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
+import { kebabToCamel } from "../../../../plugin";
 import { resolveManifestInDir } from "../manifest-resolve";
 import { isWithinDirectory } from "../sync/sync";
 import { shouldAllowJsManifestForDir } from "../trusted-js-manifest";
@@ -173,18 +174,6 @@ function escapeRegex(s: string): string {
 }
 
 /**
- * Convert a kebab-case manifest name to its camelCase JS identifier form
- * (e.g. `vector-search` -> `vectorSearch`). Mirrors the convention used by
- * first-party plugin index files: a manifest's `name` field may be
- * kebab-case (the schema permits `^[a-z][a-z0-9-]*$`), but the actual
- * exported binding is always a JS identifier. We try both forms when
- * matching specifiers in user code.
- */
-function manifestNameToBinding(pluginName: string): string {
-  return pluginName.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-}
-
-/**
  * Returns true when the named import specifier `spec` resolves to either
  * `pluginName` itself or its kebab-to-camelCase JS-identifier form.
  * Handles the `name`, `name as alias`, and inline-type (`type name`,
@@ -196,7 +185,7 @@ function specifierMatchesPlugin(spec: string, pluginName: string): boolean {
   const stripped = spec.replace(/^type\s+/, "").trim();
   const head = stripped.split(/\s+as\s+/)[0]?.trim();
   if (!head) return false;
-  return head === pluginName || head === manifestNameToBinding(pluginName);
+  return head === pluginName || head === kebabToCamel(pluginName);
 }
 
 /**

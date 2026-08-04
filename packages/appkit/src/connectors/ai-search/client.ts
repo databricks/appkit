@@ -1,5 +1,3 @@
-import type { CancellationToken } from "@databricks/sdk-experimental";
-import { Context } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -9,6 +7,7 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import type { WorkspaceClient } from "../../workspace-client";
+import { contextFromAbortSignal } from "../context";
 import type {
   AiSearchConnectorConfig,
   VsNextPageParams,
@@ -17,42 +16,6 @@ import type {
 } from "./types";
 
 const logger = createLogger("connectors:ai-search");
-
-/**
- * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
- * `apiClient.request` aborts the outbound HTTP request when the execution's
- * timeout fires or the client disconnects. Mirrors the serving connector.
- */
-function cancellationTokenFromAbortSignal(
-  signal: AbortSignal,
-): CancellationToken {
-  const listeners = new Set<() => void>();
-  signal.addEventListener(
-    "abort",
-    () => {
-      for (const cb of listeners) {
-        try {
-          cb();
-        } catch {
-          // ignore listener failures — abort must stay best-effort
-        }
-      }
-    },
-    { passive: true },
-  );
-
-  return {
-    get isCancellationRequested() {
-      return signal.aborted;
-    },
-    onCancellationRequested(callback: (e?: unknown) => unknown) {
-      listeners.add(callback as () => void);
-      if (signal.aborted) {
-        void callback();
-      }
-    },
-  };
-}
 
 export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
@@ -126,11 +89,7 @@ export class AiSearchConnector {
               raw: false,
               query: {},
             },
-            signal
-              ? new Context({
-                  cancellationToken: cancellationTokenFromAbortSignal(signal),
-                })
-              : undefined,
+            contextFromAbortSignal(signal),
           )) as VsRawResponse;
 
           const duration = Date.now() - startTime;
@@ -203,11 +162,7 @@ export class AiSearchConnector {
               raw: false,
               query: {},
             },
-            signal
-              ? new Context({
-                  cancellationToken: cancellationTokenFromAbortSignal(signal),
-                })
-              : undefined,
+            contextFromAbortSignal(signal),
           )) as VsRawResponse;
 
           span.setAttribute("vs.result_count", response.result.row_count);

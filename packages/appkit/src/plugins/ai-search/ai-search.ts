@@ -1,7 +1,10 @@
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
 import { AiSearchConnector } from "../../connectors/ai-search/client";
-import type { VsRawResponse } from "../../connectors/ai-search/types";
+import type {
+  VsQueryParams,
+  VsRawResponse,
+} from "../../connectors/ai-search/types";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -100,16 +103,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
             async (signal) =>
               this.connector.query(
                 getWorkspaceClient(),
-                {
-                  indexName: indexConfig.indexName,
-                  queryText: prepared.queryText,
-                  queryVector: prepared.queryVector,
-                  columns: prepared.columns,
-                  numResults: prepared.numResults,
-                  queryType: prepared.queryType,
-                  filters: body.filters,
-                  reranker: prepared.rerankerConfig,
-                },
+                { indexName: indexConfig.indexName, ...prepared },
                 signal,
               ),
             querySettings,
@@ -245,16 +239,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       async (signal) =>
         this.connector.query(
           getWorkspaceClient(),
-          {
-            indexName: indexConfig.indexName,
-            queryText: prepared.queryText,
-            queryVector: prepared.queryVector,
-            columns: prepared.columns,
-            numResults: prepared.numResults,
-            queryType: prepared.queryType,
-            filters: request.filters,
-            reranker: prepared.rerankerConfig,
-          },
+          { indexName: indexConfig.indexName, ...prepared },
           signal,
         ),
       querySettings,
@@ -286,22 +271,12 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   private async _prepareQuery(
     request: SearchRequest,
     indexConfig: IndexConfig,
-  ): Promise<{
-    queryText: string | undefined;
-    queryVector: number[] | undefined;
-    queryType: "ann" | "hybrid" | "full_text";
-    columns: string[];
-    numResults: number;
-    rerankerConfig: { columnsToRerank: string[] } | undefined;
-  }> {
+  ): Promise<Omit<VsQueryParams, "indexName">> {
     const queryType = request.queryType ?? indexConfig.queryType ?? "hybrid";
     let queryText = request.queryText;
     let queryVector = request.queryVector;
 
-    // Self-managed embedding indexes need a query_vector for the vector half
-    // of the search (ann, hybrid). full_text never uses a vector, so skip
-    // embedding entirely. Only ann is vector-only — for hybrid the text is
-    // still needed for the keyword half, so keep queryText.
+    // full_text uses no vector; hybrid keeps the text for its keyword half.
     if (
       indexConfig.embeddingFn &&
       queryText &&
@@ -325,11 +300,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       queryType,
       columns,
       numResults: request.numResults ?? indexConfig.numResults ?? 20,
-      rerankerConfig: this._resolveReranker(
-        request.reranker,
-        indexConfig,
-        columns,
-      ),
+      filters: request.filters,
+      reranker: this._resolveReranker(request.reranker, indexConfig, columns),
     };
   }
 
@@ -356,13 +328,11 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     const columnNames = raw.manifest.columns.map((c) => c.name);
     const scoreIndex = columnNames.indexOf("score");
 
-    // `data` is assembled dynamically from the index's returned columns, so
-    // its shape can't be statically verified against T — the caller asserts
-    // T matches the configured columns. Cast once here, at the boundary.
+    // `data` is built dynamically, so T is the caller's unchecked assertion.
     const results: SearchResult<T>[] = raw.result.data_array.map((row) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < columnNames.length; i++) {
-        if (columnNames[i] !== "score") data[columnNames[i]] = row[i];
+        if (i !== scoreIndex) data[columnNames[i]] = row[i];
       }
       return {
         score: scoreIndex >= 0 ? (row[scoreIndex] as number) : 0,
@@ -386,10 +356,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     fallbackMessage: string,
   ): void {
     logger.error("%s: %O", fallbackMessage, error);
-    // Mirror the base Plugin.execute() convention: only surface the raw error
-    // message outside production. In production the detail stays in the log
-    // above and the client gets the generic fallback, so upstream error text
-    // (e.g. from a user-supplied embeddingFn) isn't leaked.
+    // Match Plugin.execute(): the raw message is only exposed outside production.
     const isDev = process.env.NODE_ENV !== "production";
     const message =
       isDev && error instanceof Error ? error.message : fallbackMessage;
