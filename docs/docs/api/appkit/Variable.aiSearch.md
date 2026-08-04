@@ -1,5 +1,5 @@
 # Variable: aiSearch
 
 ```ts
-const aiSearch: ToPlugin<typeof AiSearchPlugin, IAiSearchConfig, "ai-search">;
+const aiSearch: ToPlugin<typeof AiSearchPlugin, IAiSearchConfig, "aiSearch">;
 ```
