@@ -433,8 +433,6 @@ createApp({
     aiSearch({
       indexes: {
         demo: {
-          indexName:
-            process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
           columns: ["id", "text", "title"],
           queryType: "hybrid",
         },

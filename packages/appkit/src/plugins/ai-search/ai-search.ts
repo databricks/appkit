@@ -44,15 +44,20 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   async setup(): Promise<void> {
-    // Only validate what the config schema and TS types can't: an indexName
-    // that resolves to nothing (neither config nor DATABRICKS_VS_INDEX_NAME
-    // set) and the runtime pagination -> endpointName dependency.
+    const isDev = process.env.NODE_ENV === "development";
     for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
+      // A missing indexName is a missing-resource condition, which the
+      // framework's resource validation already reports (warn in dev, throw
+      // in prod). Mirror that policy here instead of hard-crashing dev.
       if (!this._resolveIndex(alias)) {
-        throw new Error(
-          `Index "${alias}" has no indexName (set it in config or via DATABRICKS_VS_INDEX_NAME)`,
-        );
+        const message = `Index "${alias}" has no indexName (set it in config or via DATABRICKS_VS_INDEX_NAME)`;
+        if (isDev) {
+          logger.warn(message);
+          continue;
+        }
+        throw new Error(message);
       }
+      // A config logic error, not a missing resource — always fail fast.
       if (idx.pagination && !idx.endpointName) {
         throw new Error(
           `Index "${alias}" has pagination enabled but is missing "endpointName"`,
