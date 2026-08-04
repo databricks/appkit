@@ -128,7 +128,7 @@ describe("syncMetricViewsTypes", () => {
       tmpRoot,
       "shared",
       "appkit-types",
-      "metric-views.d.ts",
+      "metric-views.ts",
     );
   });
 
@@ -146,7 +146,7 @@ describe("syncMetricViewsTypes", () => {
       metricFetcher: fetcher,
     });
 
-    // The .d.ts exists on disk.
+    // The generated .ts exists on disk.
     expect(fs.existsSync(metricOutFile)).toBe(true);
 
     // Result reports both keys, no failures, config present.
@@ -158,7 +158,7 @@ describe("syncMetricViewsTypes", () => {
     ]);
     expect(result.metricOutFile).toBe(metricOutFile);
 
-    // --- metric-views.d.ts: MetricRegistry augmentation for both metrics ---
+    // --- metric-views.ts: MetricRegistry augmentation for both metrics ---
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
@@ -172,9 +172,48 @@ describe("syncMetricViewsTypes", () => {
     expect(declarations).toContain('lane: "sp"');
     // The TIMESTAMP dimension carries inferred time grains in its @timeGrain tag.
     expect(declarations).toContain("@timeGrain");
-    // The semantic metadata (format spec, SQL type) rides in the .d.ts's
-    // type-level `metadata` block — the sole carrier now the JSON is gone.
+    // The semantic metadata (format spec, SQL type) rides in the type-level
+    // `metadata` block — the sole carrier now the JSON is gone.
     expect(declarations).toContain('"$#,##0.00"');
+    // The file is a real `.ts`: it also carries the runtime `metricViewsMetadata`
+    // const, and never a runtime side-effect import (only a type-only one).
+    expect(declarations).toContain("export const metricViewsMetadata");
+    expect(declarations).toContain("as const");
+    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
+    expect(declarations).toContain(
+      'import type {} from "@databricks/appkit-ui/react"',
+    );
+  });
+
+  test("removes a stale sibling metric-views.d.ts left by a pre-.ts version on upgrade", async () => {
+    writeMixedConfig();
+
+    // Simulate an app upgraded from a version that emitted an ambient
+    // `metric-views.d.ts`. Left in place beside the new `.ts`, it would
+    // duplicate the `declare module` augmentation and re-introduce the bare
+    // side-effect import the new header drops.
+    const staleDts = path.join(
+      tmpRoot,
+      "shared",
+      "appkit-types",
+      "metric-views.d.ts",
+    );
+    fs.mkdirSync(path.dirname(staleDts), { recursive: true });
+    fs.writeFileSync(
+      staleDts,
+      '// old\nimport "@databricks/appkit-ui/react";\n',
+    );
+
+    await syncMetricViewsTypes({
+      metricViewsFolder,
+      warehouseId: "wh-1",
+      metricOutFile,
+      metricFetcher: fetcher,
+    });
+
+    // The new .ts is written and the stale .d.ts sibling is swept.
+    expect(fs.existsSync(metricOutFile)).toBe(true);
+    expect(fs.existsSync(staleDts)).toBe(false);
   });
 
   test("returns noConfig and writes nothing when definitions.json is absent", async () => {

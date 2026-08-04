@@ -8,6 +8,7 @@ import {
   mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
+import type { MetricViewsMetadata } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
@@ -18,6 +19,7 @@ import {
   composeMetricCacheKey,
   deriveMetricExecutorKey,
   loadMetricRegistry,
+  selectMetricMetadata,
   validateMetricRequest,
 } from "../metric";
 import type {
@@ -134,7 +136,7 @@ function writeRegistry(
   writeFileSync(path.join(dir, "definitions.json"), body);
 }
 
-describe("analytics metric route (Phase 1)", () => {
+describe("analytics metric route", () => {
   let config: IAnalyticsConfig;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
@@ -294,8 +296,8 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimensions + GROUP BY ALL. Bare dimensions here; date_trunc
-  // grain application (via timeDimension) is covered in its own block below.
+  // ── dimensions + GROUP BY ALL. Bare dimensions here; date_trunc grain
+  // application (via timeDimension) is covered in its own block below.
   describe("buildMetricSql dimensions + GROUP BY", () => {
     const registration: MetricRegistration = {
       key: "revenue",
@@ -366,7 +368,7 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2a: timeGrain + timeDimension → date_trunc on the named column.
+  // ── timeGrain + timeDimension → date_trunc on the named column.
   // The grain is a grammar-gated single-quoted literal; the column keeps its
   // plain alias; other dimensions render bare; GROUP BY ALL is present.
   describe("buildMetricSql timeGrain + timeDimension (date_trunc)", () => {
@@ -420,7 +422,7 @@ describe("analytics metric route (Phase 1)", () => {
     });
   });
 
-  // ── Phase 2: dimension identifier safety. A dimension is backtick-quoted at
+  // ── dimension identifier safety. A dimension is backtick-quoted at
   // interpolation, so an injection-shaped name is neutralized (inert quoted
   // column), and only an unquotable (control-char) name throws.
   describe("buildMetricSql dimension identifier safety (quoting)", () => {
@@ -461,7 +463,7 @@ describe("analytics metric route (Phase 1)", () => {
   });
 
   // ── Envelope parity — streams warehouse_status* then a `result` message,
-  // byte-identical to the /query route's JSON SSE path.
+  // the same event shape as the /query route's JSON SSE path.
   describe("_handleMetricRoute SSE envelope", () => {
     test("streams warehouse_status then a result message with aliased rows", async () => {
       const plugin = pluginForDir(
@@ -587,6 +589,253 @@ describe("analytics metric route (Phase 1)", () => {
       await handler(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
+    });
+
+    // ── Metadata stamping. The injected `metricViewsMetadata` is sliced to the
+    // requested columns and stamped into the `result` message; it is pure
+    // decoration (no SQL / cache-key effect). See `selectMetricMetadata` below
+    // for the unit-level scoping tests.
+    const REVENUE_METADATA: MetricViewsMetadata = {
+      revenue: {
+        measures: {
+          arr: { type: "decimal", display_name: "ARR", format: "currency" },
+          mrr: { type: "decimal", display_name: "MRR" },
+        },
+        dimensions: {
+          region: { type: "string", display_name: "Region" },
+          segment: { type: "string" },
+        },
+      },
+    };
+
+    /** Extract the parsed `result` SSE payload from the mock response writes. */
+    function readResultPayload(mockRes: ReturnType<typeof createMockResponse>) {
+      const dataLine = (mockRes.write as any).mock.calls
+        .map((call: any[]) => call[0] as string)
+        .find(
+          (s: string) =>
+            s.startsWith("data: ") && s.includes('"type":"result"'),
+        );
+      if (!dataLine) return undefined;
+      return JSON.parse(dataLine.slice("data: ".length).trim());
+    }
+
+    test("stamps the per-column metadata slice into the result message", async () => {
+      const plugin = pluginForDir(
+        { ...config, metricViewsMetadata: REVENUE_METADATA },
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1234, region: "EMEA" }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      const mockRes = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"], dimensions: ["region"] },
+        }),
+        mockRes,
+      );
+
+      const payload = readResultPayload(mockRes);
+      // Only the requested columns are present — `mrr`/`segment` are omitted.
+      expect(payload.metadata).toEqual({
+        arr: { type: "decimal", display_name: "ARR", format: "currency" },
+        region: { type: "string", display_name: "Region" },
+      });
+    });
+
+    test("omits the metadata field entirely when no metadata is injected (envelope parity with /query)", async () => {
+      const plugin = pluginForDir(
+        config, // no metricViewsMetadata
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1234 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      const mockRes = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"] },
+        }),
+        mockRes,
+      );
+
+      const payload = readResultPayload(mockRes);
+      // Envelope parity with a plain `/query` result: the `metadata` key is
+      // absent, not present-but-undefined.
+      expect(payload).toBeDefined();
+      expect(Object.hasOwn(payload, "metadata")).toBe(false);
+      expect(payload.data).toEqual([{ arr: 1234 }]);
+    });
+
+    test("omits metadata when only degraded/unknown columns are requested", async () => {
+      const plugin = pluginForDir(
+        { ...config, metricViewsMetadata: REVENUE_METADATA },
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ unknown_measure: 1 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      const mockRes = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["unknown_measure"] },
+        }),
+        mockRes,
+      );
+
+      const payload = readResultPayload(mockRes);
+      expect(Object.hasOwn(payload, "metadata")).toBe(false);
+    });
+
+    test("metadata presence does NOT change the SQL or the cache key", async () => {
+      const registry = {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp" as const,
+        },
+      };
+      const body = { measures: ["arr"], dimensions: ["region"] };
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1, region: "EMEA" }] },
+      });
+
+      // Capture the composed cache key the inner `execute` hands to the shared
+      // CacheManager mock — the same key whether or not metadata is injected.
+      const cacheKeyFor = async (mvMeta?: MetricViewsMetadata) => {
+        mockCacheInstance.getOrExecute.mockClear();
+        const plugin = pluginForDir(
+          { ...config, metricViewsMetadata: mvMeta },
+          registryDir(registry),
+        );
+        (plugin as any).SQLClient.executeStatement = executeMock;
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+        const handler = getHandler("POST", "/metric/:key");
+        await handler(
+          createMockRequest({ params: { key: "revenue" }, body }),
+          createMockResponse(),
+        );
+        // First getOrExecute call is the SQL execution's cache interceptor.
+        const call = mockCacheInstance.getOrExecute.mock.calls[0];
+        return { cacheKey: call[0], userKey: call[2] };
+      };
+
+      const withMeta = await cacheKeyFor(REVENUE_METADATA);
+      const withoutMeta = await cacheKeyFor(undefined);
+
+      expect(withMeta.cacheKey).toEqual(withoutMeta.cacheKey);
+      expect(withMeta.userKey).toEqual(withoutMeta.userKey);
+      // And the SQL is unchanged (measures/dimensions only).
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          statement:
+            "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("cache HIT serves the FRESH metadata, not the metadata baked in at cache-fill time", async () => {
+      // Regression: metadata was formerly stamped INSIDE the cached execute(),
+      // so a cache hit replayed the OLD labels/formats even after a redeploy
+      // changed them. The cache key excludes metadata, so the SQL result is a
+      // hit across the two runs below; only the injected metadata differs.
+      const registry = {
+        revenue: {
+          key: "revenue",
+          source: "cat.sch.revenue_metrics",
+          lane: "sp" as const,
+        },
+      };
+      const body = { measures: ["arr"], dimensions: ["region"] };
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1, region: "EMEA" }] },
+      });
+
+      const runWithMetadata = async (mvMeta: MetricViewsMetadata) => {
+        const plugin = pluginForDir(
+          { ...config, metricViewsMetadata: mvMeta },
+          registryDir(registry),
+        );
+        (plugin as any).SQLClient.executeStatement = executeMock;
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+        const handler = getHandler("POST", "/metric/:key");
+        const mockRes = createMockResponse();
+        await handler(
+          createMockRequest({ params: { key: "revenue" }, body }),
+          mockRes,
+        );
+        return readResultPayload(mockRes);
+      };
+
+      // First run fills the cache with the OLD labels.
+      const oldMeta: MetricViewsMetadata = {
+        revenue: {
+          measures: { arr: { type: "decimal", display_name: "ARR (old)" } },
+          dimensions: { region: { type: "string", display_name: "Region" } },
+        },
+      };
+      const first = await runWithMetadata(oldMeta);
+      expect(first.metadata.arr.display_name).toBe("ARR (old)");
+
+      // Second run: same body → SQL cache HIT (executeStatement not called
+      // again), but the app now injects NEW labels. The response must reflect
+      // the fresh metadata, not the stale copy from the cached message.
+      executeMock.mockClear();
+      const newMeta: MetricViewsMetadata = {
+        revenue: {
+          measures: {
+            arr: {
+              type: "decimal",
+              display_name: "ARR (new)",
+              format: "$#,##0",
+            },
+          },
+          dimensions: { region: { type: "string", display_name: "Region" } },
+        },
+      };
+      const second = await runWithMetadata(newMeta);
+
+      expect(executeMock).not.toHaveBeenCalled(); // SQL served from cache
+      expect(second.metadata.arr.display_name).toBe("ARR (new)");
+      expect(second.metadata.arr.format).toBe("$#,##0");
     });
   });
 
@@ -807,9 +1056,9 @@ describe("analytics metric route (Phase 1)", () => {
 });
 
 // ── loadMetricRegistry: config parse against the landed metricSourceSchema.
-// The loader reads the config file THROUGH an `AppManager` (Phase 2), so each
-// test points an `AppManager` at its temp dir instead of passing a bare
-// directory string. The loader is stateless — it reads + parses on every call
+// The loader reads the config file THROUGH an `AppManager`, so each test points
+// an `AppManager` at its temp dir instead of passing a bare directory string.
+// The loader is stateless — it reads + parses on every call
 // (no memoization), so there is no cache to reset between tests.
 describe("loadMetricRegistry", () => {
   let dir: string;
@@ -942,9 +1191,9 @@ describe("loadMetricRegistry", () => {
   });
 });
 
-// ── Phase 2: the structured filter engine (translator + validator).
-// Registry-free: names are grammar-gated, values are parameterized. No
-// allowlist, no op⇄dimension-type check.
+// ── The structured filter engine (translator + validator). Registry-free:
+// names are grammar-gated, values are parameterized. No allowlist, no
+// op⇄dimension-type check.
 describe("metric — filter translator", () => {
   const registration: MetricRegistration = {
     key: "revenue",
@@ -1662,8 +1911,8 @@ describe("metric — filter translator", () => {
   });
 
   // The warehouse-authoritative unknown-name parity test (sanitized
-  // clientMessage/errorCode envelope) lands here because the Phase 1 harness
-  // can drive the metric route end-to-end and assert on the SSE error bytes.
+  // clientMessage/errorCode envelope) lands here because this harness can drive
+  // the metric route end-to-end and assert on the SSE error bytes.
   describe("warehouse-authoritative unknown-name parity", () => {
     let config: IAnalyticsConfig;
     let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -1745,7 +1994,7 @@ describe("metric — filter translator", () => {
   });
 });
 
-// ── Phase 3: cache-key composition. `composeMetricCacheKey` produces the
+// ── cache-key composition. `composeMetricCacheKey` produces the
 // array `CacheManager.generateKey` concatenates + sha256s; the invariants
 // below are what make the cache both correct (semantically equal calls collapse)
 // and safe (distinct args / executors never collide).
@@ -1985,7 +2234,7 @@ describe("composeMetricCacheKey", () => {
   });
 });
 
-// ── Phase 3: executor-key isolation. The key is what scopes the cache — `"sp"`
+// ── executor-key isolation. The key is what scopes the cache — `"sp"`
 // shares it across all callers, a per-user hash isolates OBO callers. The raw
 // identity must never enter the key verbatim (privacy: cache keys are logged
 // and persisted).
@@ -2058,12 +2307,12 @@ describe("deriveMetricExecutorKey", () => {
   });
 });
 
-// ── Phase 3: lane dispatch at the handler level. The lane comes from the
+// ── lane dispatch at the handler level. The lane comes from the
 // registration (the entry's `executor` in definitions.json), NOT the URL:
 // OBO-lane routes through `asUser(req)`, SP-lane through the default executor.
 // A missing/whitespace OBO identity must land on the canonical 401 envelope,
 // never an out-of-envelope 500.
-describe("metric route — lane dispatch (Phase 3)", () => {
+describe("metric route — lane dispatch", () => {
   let config: IAnalyticsConfig;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
@@ -2230,5 +2479,91 @@ describe("metric route — lane dispatch (Phase 3)", () => {
       expect.objectContaining({ code: "AUTHENTICATION_ERROR" }),
     );
     expect(executeMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── metadata slicing. `selectMetricMetadata` flattens the injected
+// per-metric metadata down to only the requested columns for the SSE `result`
+// message. It is pure and total; the invariants below are what keep the stamp
+// scoped, degrade-safe, and prototype-safe.
+describe("selectMetricMetadata", () => {
+  const all: MetricViewsMetadata = {
+    revenue: {
+      measures: {
+        arr: { type: "decimal", display_name: "ARR", format: "currency" },
+        mrr: { type: "decimal", display_name: "MRR" },
+      },
+      dimensions: {
+        region: { type: "string", display_name: "Region" },
+        segment: { type: "string" },
+      },
+    },
+    orders: {
+      measures: { cnt: { type: "bigint" } },
+      dimensions: {},
+    },
+  };
+
+  test("returns only the requested measures and dimensions (flat slice)", () => {
+    expect(selectMetricMetadata(all, "revenue", ["arr"], ["region"])).toEqual({
+      arr: { type: "decimal", display_name: "ARR", format: "currency" },
+      region: { type: "string", display_name: "Region" },
+    });
+  });
+
+  test("omits requested columns absent from the metadata (degraded/unknown cols)", () => {
+    // `mrr` is known; `ebitda` and `country` are not → dropped, not placeheld.
+    expect(
+      selectMetricMetadata(all, "revenue", ["mrr", "ebitda"], ["country"]),
+    ).toEqual({
+      mrr: { type: "decimal", display_name: "MRR" },
+    });
+  });
+
+  test("undefined when no metadata is injected (all absent)", () => {
+    expect(
+      selectMetricMetadata(undefined, "revenue", ["arr"], ["region"]),
+    ).toBeUndefined();
+  });
+
+  test("undefined for an unknown metric key", () => {
+    expect(
+      selectMetricMetadata(all, "nope", ["arr"], undefined),
+    ).toBeUndefined();
+  });
+
+  test("undefined when none of the requested columns are present (empty slice)", () => {
+    expect(
+      selectMetricMetadata(all, "revenue", ["unknown"], ["also_unknown"]),
+    ).toBeUndefined();
+  });
+
+  test("undefined when dimensions is undefined and no measures match", () => {
+    expect(
+      selectMetricMetadata(all, "orders", ["missing"], undefined),
+    ).toBeUndefined();
+  });
+
+  test("handles undefined dimensions (measures only)", () => {
+    expect(selectMetricMetadata(all, "orders", ["cnt"], undefined)).toEqual({
+      cnt: { type: "bigint" },
+    });
+  });
+
+  test.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
+    "inherited Object.prototype key %j → undefined (own-property lookup)",
+    (dangerousKey) => {
+      expect(
+        selectMetricMetadata(all, dangerousKey, ["arr"], undefined),
+      ).toBeUndefined();
+    },
+  );
+
+  test("does not resolve a requested column to an inherited prototype member", () => {
+    // `toString` is an inherited member of the measures object, not an own
+    // entry — it must not leak into the slice as a bogus function value.
+    expect(
+      selectMetricMetadata(all, "revenue", ["toString"], ["hasOwnProperty"]),
+    ).toBeUndefined();
   });
 });

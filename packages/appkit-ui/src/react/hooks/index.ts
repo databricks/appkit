@@ -12,6 +12,7 @@ export type {
   InferServingChunk,
   InferServingRequest,
   InferServingResponse,
+  MetricRegistry,
   PluginRegistry,
   QueryRegistry,
   ServingAlias,

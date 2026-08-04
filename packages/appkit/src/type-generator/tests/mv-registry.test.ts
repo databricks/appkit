@@ -227,12 +227,12 @@ describe("resolveMetricConfig", () => {
   });
 });
 
-// ── Phase 2: UC-accurate FQN naming validation. The source FQN is validated
-// against UC_FQN_PATTERN (single-sourced from the zod-free
+// ── UC-accurate FQN naming validation. The source FQN is validated against
+// UC_FQN_PATTERN (single-sourced from the zod-free
 // packages/shared/src/schemas/metric-fqn.ts, shared with the canonical Zod
-// schema). The old hand-rolled segment charset [a-zA-Z0-9_-] was flagged in
-// PR #433 review (pkosiec) as "more restrictive than UC"; these tests pin the
-// arity/dot/charset rules and the now-accepted UC-legal characters.
+// schema). A hand-rolled segment charset [a-zA-Z0-9_-] would be more
+// restrictive than UC; these tests pin the arity/dot/charset rules and the
+// UC-legal characters that must be accepted.
 describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
   const sourceOf = (source: string) => ({
     metricViews: { revenue: { source } },
@@ -289,8 +289,8 @@ describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
     ).toThrowError(/the schema part .* contains a character/);
   });
 
-  // ── Regression: UC-legal characters the OLD [a-zA-Z0-9_-] regex rejected
-  // now PASS. PR #433 review (pkosiec): "more restrictive than UC". ───────
+  // ── UC-legal characters a narrow [a-zA-Z0-9_-] regex would reject must be
+  // accepted (hyphens, mixed case, non-ASCII). ───────────────────────────
   test("accepts hyphens, mixed case, and non-ASCII names UC permits", () => {
     for (const source of [
       "prod-data.analytics.revenue",
@@ -364,10 +364,9 @@ describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
   });
 });
 
-// ── Input caps (inline-only at v1): the canonical Zod schema has no caps
-// yet — aligning it is a PR4 rider, so these fixtures deliberately do NOT
-// run through metricSourceSchema (they'd pass it) and stay out of the
-// parity suite below.
+// ── Input caps (inline-only at v1): the canonical Zod schema does not yet
+// carry these caps, so these fixtures deliberately do NOT run through
+// metricSourceSchema (they'd pass it) and stay out of the parity suite below.
 describe("resolveMetricConfig — input caps", () => {
   const manyViews = (count: number) =>
     Object.fromEntries(
@@ -426,10 +425,10 @@ describe("resolveMetricConfig — input caps", () => {
 // inline; this block is the drift alarm for them. TEST-ONLY import of the Zod schema.
 //
 // Caps divergence: the inline validator enforces v1 input caps (≤200 entries,
-// ≤255 per FQN segment, ≤767 full FQN) that the canonical schema does not
-// carry yet — aligning the Zod schema is a PR4 rider. Cap fixtures therefore
-// live in the dedicated caps suite above and are asserted on the inline side
-// only; do NOT add them here expecting metricSourceSchema to reject them.
+// ≤255 per FQN segment, ≤767 full FQN) that the canonical schema does not carry
+// yet. Cap fixtures therefore live in the dedicated caps suite above and are
+// asserted on the inline side only; do NOT add them here expecting
+// metricSourceSchema to reject them.
 describe("resolveMetricConfig — parity with shared metricSourceSchema", () => {
   const accepts: Array<{ name: string; config: Record<string, unknown> }> = [
     {
@@ -775,11 +774,11 @@ describe("createWorkspaceDescribeFetcher", () => {
   });
 
   test("a backtick-bearing FQN is now accepted and safely quoted (UC permits it, quoting doubles it)", async () => {
-    // Under the old hand-rolled segment charset ([a-zA-Z0-9_-]) a backtick was
-    // rejected outright. UC actually permits a backtick inside a quoted name,
-    // and quoteFqnForSql (Phase 1) makes it injection-safe by doubling it. So
-    // naming validation now accepts it and the statement quotes it as a single
-    // identifier rather than refusing the FQN.
+    // A narrow segment charset ([a-zA-Z0-9_-]) would reject a backtick outright.
+    // UC actually permits a backtick inside a quoted name, and quoteFqnForSql
+    // makes it injection-safe by doubling it. So naming validation accepts it
+    // and the statement quotes it as a single identifier rather than refusing
+    // the FQN.
     const { client, statements } = stubClient();
     const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
 
@@ -843,7 +842,7 @@ describe("extractMetricColumns", () => {
     expect(extractMetricColumns({ unrelated: true })).toEqual([]);
   });
 
-  // ── Phase 2: time-typed dimensions ────────────────────────────────────
+  // ── time-typed dimensions ──────────────────────────────────────────────
   test("infers all 7 standard grains for a TIMESTAMP dimension", () => {
     const cols = extractMetricColumns({
       columns: [
@@ -1408,7 +1407,7 @@ describe("syncMetrics — bounded-concurrency scheduling", () => {
     expect(schemas.map((s) => s.key)).toEqual(keys);
 
     // Rejected entries land in `failures` (stable entry order) AND are
-    // degraded — the Phase-1 matrix, unchanged by chunking.
+    // degraded — the failure matrix is unchanged by chunking.
     expect(failures.map((f) => f.key)).toEqual(["m02", "m06", "m11"]);
     for (const failure of failures) {
       expect(failure.source).toBe(`demo.public.${failure.key}`);
@@ -1583,7 +1582,7 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain("measures: Record<string, never>");
   });
 
-  // ── Phase 2: time-typed dim + multiple non-time dims fixture ─────────
+  // ── time-typed dim + multiple non-time dims fixture ──────────────────
   test("emits TimeGrain<K> union for a metric view with time-typed + regular dimensions", async () => {
     const resolution = resolveMetricConfig({
       metricViews: {
@@ -1623,8 +1622,114 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
   });
 });
 
-// ── Phase 5: semantic-metadata extraction (display_name + format) ─────────
-describe("extractMetricColumns — Phase 5 semantic metadata", () => {
+// ── The emitted file is a real `.ts` carrying BOTH the (erasable) `declare
+// module` type augmentation AND a runtime `metricViewsMetadata` value. It must
+// never emit a runtime side-effect import (that would execute the client
+// package entry on the Node server) — only a zero-runtime type-only import.
+describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value", () => {
+  test("emits both the declare-module augmentation and the metricViewsMetadata const", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: {
+        revenue: { source: "appkit_demo.public.revenue_metrics" },
+      },
+    });
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            display_name: "Annual Recurring Revenue",
+            format: "$#,##0.00",
+          },
+          { name: "region", type: "STRING", is_measure: false },
+        ],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+
+    // Type half: the augmentation is still present, unchanged in shape.
+    expect(output).toContain('declare module "@databricks/appkit-ui/react"');
+    expect(output).toContain("interface MetricRegistry");
+    // Value half: a runtime const conforming to MetricViewsMetadata, `as const`.
+    expect(output).toContain("export const metricViewsMetadata = {");
+    expect(output).toContain("} as const;");
+    // The measure/dimension maps carry the SAME per-column fields as the type
+    // block (type/display_name/format), keyed by column name.
+    expect(output).toContain(
+      '"arr": { type: "DECIMAL(38,2)", display_name: "Annual Recurring Revenue", format: "$#,##0.00" }',
+    );
+    expect(output).toContain('"region": { type: "STRING" }');
+  });
+
+  test("uses a zero-runtime type-only import, never a side-effect import", () => {
+    const output = generateMetricTypeDeclarations([]);
+    // A bare `import "..."` in a `.ts` would EXECUTE the client entry on the
+    // Node server — it must never be emitted.
+    expect(output).not.toContain('import "@databricks/appkit-ui/react"');
+    expect(output).toContain(
+      'import type {} from "@databricks/appkit-ui/react"',
+    );
+  });
+
+  test("emits an empty metricViewsMetadata for no registered metrics", () => {
+    const output = generateMetricTypeDeclarations([]);
+    expect(output).toContain("export const metricViewsMetadata = {} as const;");
+    // Empty type augmentation stays too.
+    expect(output).toContain("interface MetricRegistry {}");
+  });
+
+  test("a degraded schema contributes empty measures/dimensions value maps", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: { cold: { source: "appkit_demo.public.cold" } },
+    });
+    // Non-terminal DESCRIBE → degraded schema (empty column arrays).
+    const fetcher =
+      async (): Promise<DatabricksStatementExecutionResponse> => ({
+        statement_id: "stmt-mock",
+        status: { state: "PENDING" },
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+    // Value side of a degraded entry: empty maps, consistent with its
+    // `Record<string, never>` metadata type block.
+    expect(output).toContain(`"cold": {
+    measures: {},
+    dimensions: {},
+  }`);
+  });
+
+  test("escapes quotes/backticks in display_name and description via JSON.stringify", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: { revenue: { source: "appkit_demo.public.revenue" } },
+    });
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            // A double quote AND a backtick — both must survive into a valid
+            // TS string literal in the runtime const.
+            display_name: 'Net "ARR" `growth`',
+            comment: 'Revenue with a " quote',
+          },
+        ],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+
+    // JSON.stringify escapes the embedded double quotes; the backtick rides
+    // through unescaped inside a double-quoted literal (valid TS).
+    expect(output).toContain('display_name: "Net \\"ARR\\" `growth`"');
+    expect(output).toContain('description: "Revenue with a \\" quote"');
+  });
+});
+
+// ── semantic-metadata extraction (display_name + format) ──────────────────
+describe("extractMetricColumns — semantic metadata", () => {
   test("captures display_name from a measure column", () => {
     const cols = extractMetricColumns({
       columns: [
@@ -1946,12 +2051,12 @@ describe("extractMetricColumns — Phase 5 semantic metadata", () => {
   });
 });
 
-// ── Key-order determinism: the .d.ts emitter sorts metric keys with a
+// ── Key-order determinism: the emitter sorts metric keys with a
 // locale-independent (code-unit) comparator. localeCompare-style collation
 // would interleave mixed-case keys ("ARPU", "churn", "Revenue") and could vary
 // by machine/locale, drifting the emitted augmentation between builds.
 describe("artifact key-order determinism", () => {
-  test("mixed-case keys order code-unit (uppercase before lowercase) in metric-views.d.ts", async () => {
+  test("mixed-case keys order code-unit (uppercase before lowercase) in metric-views.ts", async () => {
     const resolution = resolveMetricConfig({
       metricViews: {
         Revenue: { source: "a.b.r" },
@@ -1973,7 +2078,7 @@ describe("artifact key-order determinism", () => {
       });
     const { schemas } = await syncMetrics(resolution, fetcher);
 
-    // Entry keys in the .d.ts appear as `    "<key>": {` lines (4-space
+    // Entry keys in the augmentation appear as `    "<key>": {` lines (4-space
     // indent — metadata column maps sit deeper and don't match).
     const declarations = generateMetricTypeDeclarations(schemas);
     const dtsKeys = [...declarations.matchAll(/^ {4}"([^"]+)": \{$/gm)].map(
@@ -1984,7 +2089,7 @@ describe("artifact key-order determinism", () => {
   });
 });
 
-// ── Phase 2: syncMetrics propagates timeGrains end-to-end ────────────────
+// ── syncMetrics propagates timeGrains end-to-end ─────────────────────────
 describe("syncMetrics — time-typed dimension propagation", () => {
   test("propagates inferred grains onto the resulting MetricSchema", async () => {
     const resolution = resolveMetricConfig({

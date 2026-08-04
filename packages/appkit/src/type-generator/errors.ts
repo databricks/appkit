@@ -161,8 +161,6 @@ const AUTH_ERROR_STATUSES = new Set([401, 403]);
 export function classifyBlockingFailure(
   error: unknown,
 ): "deterministic" | "environmental" {
-  // Deterministic: check first so they're never swallowed by environmental rules.
-  // Walk the error chain to find any deterministic status.
   const seen = new Set<unknown>();
   const stack = [error];
 
@@ -179,18 +177,6 @@ export function classifyBlockingFailure(
     stack.push(...getErrorChildren(current));
   }
 
-  // Environmental: auth, connectivity, unrecognized, default.
-  const topLevelStatus = getErrorStatus(error);
-  if (topLevelStatus !== undefined && AUTH_ERROR_STATUSES.has(topLevelStatus)) {
-    return "environmental";
-  }
-
-  if (isConnectivityError(error)) {
-    return "environmental";
-  }
-
-  // Default: any unrecognized failure or no status (DELETED/DELETING messages,
-  // timeout messages, plain Error objects) → environmental.
   return "environmental";
 }
 

@@ -247,3 +247,14 @@ export type InferServingRequest<K> =
       ? Req
       : Record<string, unknown>
     : Record<string, unknown>;
+
+// ============================================================================
+// Metric View Registry
+// ============================================================================
+
+/**
+ * Metric view registry populated through module augmentation by the generated
+ * `metric-views.ts` file.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation (generated metric-views.ts)
+export interface MetricRegistry {}

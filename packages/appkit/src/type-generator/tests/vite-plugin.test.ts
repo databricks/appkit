@@ -392,7 +392,7 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
   test("a custom mvOutFile reaches generateFromEntryPoint", async () => {
     const plugin = appKitTypesPlugin({
-      mvOutFile: "custom/types/metric-views.d.ts",
+      mvOutFile: "custom/types/metric-views.ts",
     });
     getHook<ConfigResolvedHook>(
       plugin,
@@ -405,12 +405,22 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        mvOutFile: path.resolve(
-          process.cwd(),
-          "custom/types/metric-views.d.ts",
-        ),
+        mvOutFile: path.resolve(process.cwd(), "custom/types/metric-views.ts"),
       }),
     );
+  });
+
+  test("rejects a .d.ts custom mvOutFile up front (it would emit a runtime const into an ambient decl → TS1039)", () => {
+    const plugin = appKitTypesPlugin({
+      mvOutFile: "custom/types/metric-views.d.ts",
+    });
+    const configResolved = getHook<ConfigResolvedHook>(
+      plugin,
+      "configResolved",
+    );
+    expect(() =>
+      configResolved({ root: path.join(process.cwd(), "client") }),
+    ).toThrow(/must be a \.ts file, not a \.d\.ts/);
   });
 });
 

@@ -762,31 +762,20 @@ export async function generateQueriesFromDescribe(
           isEnvironmental = true;
           environmentalCause = "unreachable";
         } else {
-          // Classify the exception: deterministic (404/400) or environmental (auth, etc).
           const classification = classifyBlockingFailure(err);
           if (classification === "deterministic") {
-            // Build-failing deterministic error (bad warehouse id, malformed request).
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
-            isEnvironmental = false;
           } else {
-            // Environmental: auth, timeouts, unrecognized, etc. Degrade for the
-            // has-types gate to handle later.
             decision = "degradeAll";
             isEnvironmental = true;
             environmentalCause = classifyEnvironmentalCause(err);
-            fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
           }
         }
       }
     }
 
-    // Record blocking-mode environmental failures for the has-types gate.
-    if (
-      mode === "blocking" &&
-      ((decision === "degradeAll" && isEnvironmental) ||
-        (decision === "fatal" && isEnvironmental))
-    ) {
+    if (mode === "blocking" && decision !== "proceed" && isEnvironmental) {
       hadEnvironmentalFailure = true;
     }
 
