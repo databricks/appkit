@@ -339,7 +339,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       // clear message rather than emitting a file that won't compile.
       if (options?.mvOutFile?.endsWith(".d.ts")) {
         throw new Error(
-          `appKitAnalyticsTypesPlugin: mvOutFile must be a .ts file, not a .d.ts (got "${options.mvOutFile}"). ` +
+          `appKitTypesPlugin: mvOutFile must be a .ts file, not a .d.ts (got "${options.mvOutFile}"). ` +
             "The metric-views file carries a runtime const, which cannot live in an ambient .d.ts.",
         );
       }
