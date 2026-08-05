@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { MetricColumnMeta } from "../metric-metadata";
+import type { MetricViewColumnDisplay } from "../metric-metadata";
 
 /**
  * Wire protocol for analytics SSE messages emitted by `/api/analytics/query`.
@@ -38,11 +38,8 @@ export const AnalyticsResultMessage = z.object({
   // `unknown` so we don't bake the SDK's detailed shape into the contract.
   status: z.unknown().optional(),
   statement_id: z.string().optional(),
-  // Per-column display metadata for a metric-view result (display_name /
-  // format / type). Kept loose (`z.record(z.string(), z.unknown())`) for the
-  // same "keep client validation cheap" reason as `data` — the server
-  // constructs it via the typed builder, so the per-column shape is enforced
-  // at the source. Absent for plain `/query` results.
+  // Per-column display metadata for a metric-view result; absent for plain
+  // `/query` results. Kept loose for the same reason as `data` above.
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -54,15 +51,15 @@ export const AnalyticsResultMessage = z.object({
  * `z.record(z.string(), z.unknown())` for `metadata`) to keep client
  * validation cheap; this interface narrows `data` to
  * `Record<string, unknown>[]` and `metadata` to
- * `Record<string, MetricColumnMeta>` so consumers don't have to cast at every
- * call site. If you add a field to the Zod schema, add it here too.
+ * `Record<string, MetricViewColumnDisplay>` so consumers don't have to cast
+ * at every call site. If you add a field to the Zod schema, add it here too.
  */
 export interface AnalyticsResultMessage {
   type: "result";
   data?: Record<string, unknown>[];
   status?: unknown;
   statement_id?: string;
-  metadata?: Record<string, MetricColumnMeta>;
+  metadata?: Record<string, MetricViewColumnDisplay>;
 }
 
 /**
@@ -85,7 +82,7 @@ export function makeResultMessage(
   extras: {
     status?: unknown;
     statement_id?: string;
-    metadata?: Record<string, MetricColumnMeta>;
+    metadata?: Record<string, MetricViewColumnDisplay>;
   } = {},
 ): AnalyticsResultMessage {
   return { type: "result", data, ...extras };

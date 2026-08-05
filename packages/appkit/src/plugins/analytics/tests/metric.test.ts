@@ -771,11 +771,10 @@ describe("analytics metric route", () => {
       );
     });
 
-    test("cache HIT serves the FRESH metadata, not the metadata baked in at cache-fill time", async () => {
-      // Regression: metadata was formerly stamped INSIDE the cached execute(),
-      // so a cache hit replayed the OLD labels/formats even after a redeploy
-      // changed them. The cache key excludes metadata, so the SQL result is a
-      // hit across the two runs below; only the injected metadata differs.
+    test("a cache hit serves the current metadata, not the copy from cache-fill time", async () => {
+      // The cache key excludes metadata, so the SQL result is a hit across the
+      // two runs below; only the injected metadata differs. Stamping inside the
+      // cached call would replay stale labels/formats after a redeploy.
       const registry = {
         revenue: {
           key: "revenue",
@@ -805,7 +804,7 @@ describe("analytics metric route", () => {
         return readResultPayload(mockRes);
       };
 
-      // First run fills the cache with the OLD labels.
+      // First run fills the cache with the old labels.
       const oldMeta: MetricViewsMetadata = {
         revenue: {
           measures: { arr: { type: "decimal", display_name: "ARR (old)" } },
@@ -815,9 +814,9 @@ describe("analytics metric route", () => {
       const first = await runWithMetadata(oldMeta);
       expect(first.metadata.arr.display_name).toBe("ARR (old)");
 
-      // Second run: same body → SQL cache HIT (executeStatement not called
-      // again), but the injected metadata carries NEW labels. The response must
-      // reflect the fresh metadata, not the stale copy from the cached message.
+      // Second run: same body → SQL cache hit (executeStatement not called
+      // again), but the app now injects new labels, which must reach the
+      // response.
       executeMock.mockClear();
       const newMeta: MetricViewsMetadata = {
         revenue: {

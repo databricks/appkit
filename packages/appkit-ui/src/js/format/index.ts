@@ -1,4 +1,4 @@
-import type { MetricColumnMeta } from "shared";
+import type { MetricViewColumnDisplay } from "shared";
 
 /**
  * Counts the number of fractional digits declared by a numeric format spec.
@@ -145,7 +145,7 @@ function humanize(name: string): string {
  */
 export function formatLabel(
   name: string,
-  columnMeta?: MetricColumnMeta,
+  columnMeta?: MetricViewColumnDisplay,
 ): string {
   if (columnMeta?.display_name) return columnMeta.display_name;
   return humanize(name);

@@ -558,10 +558,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
-    // Per-column metadata slice for the responding metric, scoped to the
-    // requested measures/dimensions. Computed once here and stamped onto the
-    // `result` message below — see {@link selectMetricMetadata} for why this is
-    // response decoration only.
+    // Computed here, outside the cached execute below, so a cache hit still
+    // serves the current metadata. Absent config → `undefined` → the `result`
+    // message omits the field (envelope-identical to `/query`).
     const metadata = selectMetricMetadata(
       this.config.metricViewsMetadata,
       key,
@@ -665,8 +664,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
                 );
               // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
               // an ARROW_STREAM-inline fallback, returning plain rows in a
-              // `result` message. This is the cached call, so `metadata` is
-              // stamped on afterwards (see below), never baked in here.
+              // `result` message — byte-identical envelope to `/query`.
               return await self._executeJsonArrayPath(
                 executor,
                 statement,
@@ -709,10 +707,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           throw ExecutionError.statementFailed(inner);
         }
 
-        // Stamp the FRESH per-column metadata onto the (possibly cached) result
-        // message. The cache key excludes metadata, so a cache HIT after a
-        // redeploy that changed a column's display_name/format still serves the
-        // current metadata rather than a stale copy.
+        // Stamp the metadata onto the (possibly cached) result message; the
+        // cached message never carries it.
         const resultMessage = sqlResult.data as AnalyticsSseMessage;
         yield (
           metadata !== undefined
@@ -730,11 +726,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * {@link deliverJsonResult} (INLINE JSON_ARRAY → on `needs-arrow-inline`,
    * INLINE ARROW_STREAM decoded to rows) and wraps the rows in a `result`
    * message. External links are never used for the JSON fallback.
-   *
-   * This returns the bare `result` message (rows + status/statement_id) and is
-   * cached by the caller, so the metric route's per-column `metadata` is never
-   * stamped on inside here — keeping the cached payload metadata-free and
-   * byte-identical to a plain `/query` result.
    */
   private async _executeJsonArrayPath(
     executor: AnalyticsPlugin,

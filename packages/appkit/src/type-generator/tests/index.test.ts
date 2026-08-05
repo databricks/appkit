@@ -325,11 +325,14 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   };
 
-  const committedMetricTypes =
-    "// committed metric types\nexport const metricViewsMetadata = {};\n";
   const writeCommittedMetricTypes = () => {
+    // Mirrors a real committed metric-views.ts: the augmentation plus the
+    // runtime const, so a preserved fallback stays a loadable module.
+    const committed =
+      "// committed metric types\nexport const metricViewsMetadata = {};\n";
     fs.mkdirSync(path.dirname(metricFile), { recursive: true });
-    fs.writeFileSync(metricFile, committedMetricTypes, "utf-8");
+    fs.writeFileSync(metricFile, committed, "utf-8");
+    return committed;
   };
 
   beforeEach(() => {
@@ -373,8 +376,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // `metricViewsMetadata` const (value twin of the type-level metadata).
     expect(declarations).toContain("export const metricViewsMetadata");
     expect(declarations).toContain("as const");
-    // ...and NEVER a runtime side-effect import that would execute the client
-    // package entry on the Node server — only a zero-runtime type-only import.
+    // ...and a type-only import, never a runtime side-effect one.
     expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
     expect(declarations).toContain(
       'import type {} from "@databricks/appkit-ui/react"',
@@ -623,9 +625,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
   test("blocking + transient metric DESCRIBE failure: warns and preserves committed metric types", async () => {
     writeMetricConfig();
-    fs.mkdirSync(path.dirname(metricFile), { recursive: true });
-    const committed = "// committed metric types\n";
-    fs.writeFileSync(metricFile, committed, "utf-8");
+    const committed = writeCommittedMetricTypes();
 
     const unreachable = Object.assign(
       new Error("connect ECONNREFUSED 10.0.0.1:443"),
@@ -654,9 +654,33 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     }
   });
 
+  test("blocking + transient metric failure: generated analytics types do not satisfy a missing metric fallback", async () => {
+    writeMetricConfig();
+    const unreachable = Object.assign(
+      new Error("connect ECONNREFUSED 10.0.0.1:443"),
+      { code: "ECONNREFUSED" },
+    );
+    mocks.getWarehouseState.mockRejectedValue(unreachable);
+
+    const error = await generateFromEntryPoint({
+      outFile,
+      queryFolder,
+      warehouseId: "wh-1",
+      mode: "blocking",
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain("metric-views.ts");
+    expect(fs.existsSync(outFile)).toBe(true);
+    expect(fs.existsSync(metricFile)).toBe(false);
+  });
+
   test("blocking + a non-terminal DESCRIBE (warehouse not ready): degrades, does NOT escalate", async () => {
     writeMetricConfig();
-    writeCommittedMetricTypes();
+    const committed = writeCommittedMetricTypes();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -682,8 +706,9 @@ describe("generateFromEntryPoint — metric-view emission", () => {
 
       const warned = warnSpy.mock.calls.flat().map(String).join("\n");
       expect(warned).not.toContain("metric sync failed");
-      // Degraded artifacts are suppressed, not written (to preserve committed types).
-      expect(fs.readFileSync(metricFile, "utf-8")).toBe(committedMetricTypes);
+      // Degraded artifacts are suppressed, preserving the surface-specific
+      // committed fallback byte-for-byte.
+      expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
     } finally {
       warnSpy.mockRestore();
       logSpy.mockRestore();
@@ -763,10 +788,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   });
 
   test("blocking + DELETED: environmental failure with committed types → no throw, warning emitted", async () => {
-    // DELETED is environmental. Both required committed artifacts exist, so
-    // emit a warning and return 0.
+    // DELETED is environmental. A committed metric-view fallback lets the
+    // generator emit a warning and return 0.
     writeMetricConfig();
-    writeCommittedMetricTypes();
+    const committed = writeCommittedMetricTypes();
     mocks.getWarehouseState.mockResolvedValue("DELETED");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -789,8 +814,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-    // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
-    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committedMetricTypes);
+    // Degraded metric artifacts are NOT written in blocking mode.
+    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
 
     // The degraded outcome is NEVER cached (mirrors the query path): the key is
     // left uncached so a later pass re-probes, and no stale/sticky entry can be
@@ -800,10 +825,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   });
 
   test("blocking + preflight wait rejects with a timeout: environmental failure with committed types → no throw, warning emitted", async () => {
-    // Timeout is environmental. Both required committed artifacts exist, so
-    // emit a warning and return 0.
+    // Timeout is environmental. A committed metric-view fallback lets the
+    // generator emit a warning and return 0.
     writeMetricConfig();
-    writeCommittedMetricTypes();
+    const committed = writeCommittedMetricTypes();
     mocks.getWarehouseState.mockResolvedValue("STARTING");
     mocks.waitUntilRunning.mockRejectedValue(
       new Error(
@@ -836,8 +861,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       expect.objectContaining({ maxMs: 300_000 }),
     );
     expect(mocks.executeStatement).not.toHaveBeenCalled();
-    // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
-    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committedMetricTypes);
+    // Degraded metric artifacts are NOT written in blocking mode.
+    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
 
     // The degraded outcome is not cached — the key stays uncached for the next
     // pass to re-probe.
@@ -849,10 +874,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // A non-RUNNING *resolve* (not a throw) for a startable state is soft: fall
     // through to DESCRIBE, which degrades on the still-cold warehouse. Only a
     // DELETED/DELETING resolve (or a thrown deterministic error) is fatal.
-    // Degraded artifacts are NOT written in blocking mode when there are no failures
-    // (to preserve committed good types).
+    // Degraded artifacts are NOT written in blocking mode when there are no
+    // failures (to preserve committed good types).
     writeMetricConfig();
-    writeCommittedMetricTypes();
+    const committed = writeCommittedMetricTypes();
     mocks.getWarehouseState.mockResolvedValue("STARTING");
     mocks.waitUntilRunning.mockResolvedValue("STOPPED");
     // The fall-through DESCRIBE hits a still-cold warehouse: non-terminal
@@ -894,8 +919,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The DESCRIBE batch still ran (fall-through), and its non-terminal answer
     // degraded the key.
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
-    // Degraded artifacts are suppressed, not written (to preserve committed types).
-    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committedMetricTypes);
+    // Degraded artifacts are suppressed, preserving committed types.
+    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
 
     // The degraded outcome is not cached; the key stays uncached and the next
     // describe-capable pass re-probes it (convergence via re-describe, not via a
@@ -913,10 +938,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   ])(
     "blocking + warehouse deleted mid-wait (probe read %s): environmental failure with committed types → no throw, warning emitted",
     async (probedState, startsWarehouse) => {
-      // DELETED mid-wait is environmental. Both required committed artifacts
-      // exist, so emit a warning and return 0.
+      // DELETED mid-wait is environmental. A committed metric-view fallback
+      // lets the generator emit a warning and return 0.
       writeMetricConfig();
-      writeCommittedMetricTypes();
+      const committed = writeCommittedMetricTypes();
       mocks.getWarehouseState.mockResolvedValue(probedState);
       mocks.startWarehouse.mockResolvedValue(undefined);
       // The warehouse was deleted while the preflight waited: the wait
@@ -938,8 +963,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       // The DESCRIBE batch is skipped — nothing can answer it.
       expect(mocks.executeStatement).not.toHaveBeenCalled();
 
-      // Degraded metric artifacts are NOT written in blocking mode (committed types preserved).
-      expect(fs.readFileSync(metricFile, "utf-8")).toBe(committedMetricTypes);
+      // Degraded metric artifacts are NOT written in blocking mode.
+      expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
 
       // The degraded outcome is not cached — no sticky entry to serve later.
       const metrics =
@@ -2158,7 +2183,7 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
     fs.rmSync(warningTestDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
     fs.mkdirSync(metricViewsFolder, { recursive: true });
-    // Pre-create committed types files so the gate triggers
+    // Pre-create the committed query types required by these query-only cases.
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, "// committed types\n", "utf-8");
     mocks.generateQueriesFromDescribe.mockResolvedValue({
@@ -2330,8 +2355,9 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
     }
   });
 
-  test("analytics.d.ts alone satisfies the gate when metric views are not configured", async () => {
-    // Keep analytics.d.ts but remove the unneeded metric file.
+  test("query degradation only: analytics.d.ts exists and metric types are absent → warning emitted", async () => {
+    // This surface has no metric-view configuration, so only query types are
+    // required as a committed fallback.
     expect(fs.existsSync(outFile)).toBe(true);
     fs.rmSync(metricFile, { force: true });
 
@@ -2354,7 +2380,7 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
         mode: "blocking",
       });
 
-      // No metric config exists, so analytics.d.ts is the only required file.
+      // Warning emitted because the affected query surface has its artifact.
       const warnCalls = warnSpy.mock.calls
         .flat()
         .map(String)
@@ -2399,7 +2425,11 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
 
       expect(error).toBeInstanceOf(TypegenFatalError);
       const message = stripAnsi((error as Error).message);
-      expect(message).toContain("required committed type files are missing");
+      // Per-surface gate: only the metric surface failed, so the remedy names
+      // metric-views.ts specifically rather than the whole artifact set.
+      expect(message).toContain(
+        "required committed type artifact is missing: metric-views.ts",
+      );
       expect(message).toContain("commit the generated type files");
       expect(
         warnSpy.mock.calls

@@ -173,10 +173,10 @@ describe("syncMetricViewsTypes", () => {
     // The TIMESTAMP dimension carries inferred time grains in its @timeGrain tag.
     expect(declarations).toContain("@timeGrain");
     // The semantic metadata (format spec, SQL type) rides in the type-level
-    // `metadata` block — the sole carrier of semantic metadata.
+    // `metadata` block — the sole carrier now the JSON is gone.
     expect(declarations).toContain('"$#,##0.00"');
-    // The file is a real `.ts`: it also carries the runtime `metricViewsMetadata`
-    // const, and never a runtime side-effect import (only a type-only one).
+    // The file is a real `.ts`, so it also carries the runtime const and a
+    // type-only import.
     expect(declarations).toContain("export const metricViewsMetadata");
     expect(declarations).toContain("as const");
     expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
@@ -189,9 +189,8 @@ describe("syncMetricViewsTypes", () => {
     writeMixedConfig();
 
     // Simulate an app upgraded from a version that emitted an ambient
-    // `metric-views.d.ts`. Left in place beside the new `.ts`, it would
-    // duplicate the `declare module` augmentation and re-introduce the bare
-    // side-effect import the new header drops.
+    // `metric-views.d.ts`, which would duplicate the augmentation if left
+    // beside the new `.ts`.
     const staleDts = path.join(
       tmpRoot,
       "shared",
@@ -214,6 +213,40 @@ describe("syncMetricViewsTypes", () => {
     // The new .ts is written and the stale .d.ts sibling is swept.
     expect(fs.existsSync(metricOutFile)).toBe(true);
     expect(fs.existsSync(staleDts)).toBe(false);
+  });
+
+  test("preserves a legacy metric-views.d.ts when a degraded blocking pass suppresses the replacement write", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+
+    const legacyDts = path.join(
+      tmpRoot,
+      "shared",
+      "appkit-types",
+      "metric-views.d.ts",
+    );
+    fs.mkdirSync(path.dirname(legacyDts), { recursive: true });
+    const committedContent = "// committed legacy metric types\n";
+    fs.writeFileSync(legacyDts, committedContent);
+
+    await syncMetricViewsTypes({
+      metricViewsFolder,
+      warehouseId: "wh-1",
+      metricOutFile,
+      mode: "blocking",
+      suppressDegradedWrite: true,
+      metricFetcher: async () => ({
+        statement_id: "stmt-pending",
+        status: { state: "PENDING" },
+      }),
+    });
+
+    expect(fs.existsSync(metricOutFile)).toBe(false);
+    expect(fs.readFileSync(legacyDts, "utf-8")).toBe(committedContent);
   });
 
   test("returns noConfig and writes nothing when definitions.json is absent", async () => {

@@ -34,7 +34,7 @@ export function toChartArray(data: unknown[]): (string | number)[] {
 }
 
 // `formatLabel` lives canonically on the `/js` axis (it also accepts a
-// `MetricColumnMeta` to prefer a `display_name`). Re-export the superset so the
+// `MetricViewColumnDisplay` to prefer a `display_name`). Re-export the superset so the
 // `/react` surface has a single humanize implementation — a `/react` consumer
 // and a `/js` consumer get identical behavior. Chart internals call it with
 // just a field name, which the superset handles.

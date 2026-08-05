@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MetricColumnMeta } from "shared";
+import type { MetricViewColumnDisplay } from "shared";
 import { connectSSE } from "@/js";
 import {
   type AnalyticsSseHandlerContext,
@@ -33,9 +33,9 @@ import { useQueryHMR } from "./use-query-hmr";
  */
 function asMetricMetadata(
   value: unknown,
-): Record<string, MetricColumnMeta> | undefined {
+): Record<string, MetricViewColumnDisplay> | undefined {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, MetricColumnMeta>;
+    return value as Record<string, MetricViewColumnDisplay>;
   }
   return undefined;
 }
@@ -86,7 +86,7 @@ export function useMetricView<
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<
-    Record<string, MetricColumnMeta> | undefined
+    Record<string, MetricViewColumnDisplay> | undefined
   >(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
 

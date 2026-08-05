@@ -1,5 +1,5 @@
 import type { Table } from "apache-arrow";
-import type { MetricColumnMeta } from "shared";
+import type { MetricViewColumnDisplay } from "shared";
 
 // ============================================================================
 // Data Format Types
@@ -450,5 +450,5 @@ export interface UseMetricViewResult<T = Record<string, unknown>[]> {
   /** Structured upstream error code, mirroring useAnalyticsQuery. */
   errorCode: string | null;
   /** Per-column display metadata for the queried columns, carried in the SSE result payload. `undefined` when the server injected no metadata (dormant / unknown key). */
-  metadata: Record<string, MetricColumnMeta> | undefined;
+  metadata: Record<string, MetricViewColumnDisplay> | undefined;
 }
