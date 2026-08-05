@@ -13,13 +13,9 @@
         "description": "A Databricks Vector Search index to query. Index names configured via plugin config.",
         "permission": "SELECT",
         "fields": {
-          "indexName": {
+          "id": {
             "env": "DATABRICKS_VS_INDEX_NAME",
             "description": "Three-level UC name of the default index (catalog.schema.index_name)"
-          },
-          "endpointName": {
-            "env": "DATABRICKS_VS_ENDPOINT_NAME",
-            "description": "Vector Search endpoint name (required for pagination)"
           }
         }
       }
