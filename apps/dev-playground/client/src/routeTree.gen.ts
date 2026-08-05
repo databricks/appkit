@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.route'
 import { Route as UiVariantsRouteRouteImport } from './routes/ui-variants.route'
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
@@ -26,14 +25,10 @@ import { Route as DataVisualizationRouteRouteImport } from './routes/data-visual
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
+import { Route as AiSearchRouteRouteImport } from './routes/ai-search.route'
 import { Route as AgentRouteRouteImport } from './routes/agent.route'
 import { Route as IndexRouteImport } from './routes/index'
 
-const VectorSearchRouteRoute = VectorSearchRouteRouteImport.update({
-  id: '/vector-search',
-  path: '/vector-search',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const UiVariantsRouteRoute = UiVariantsRouteRouteImport.update({
   id: '/ui-variants',
   path: '/ui-variants',
@@ -114,6 +109,11 @@ const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
   path: '/analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AiSearchRouteRoute = AiSearchRouteRouteImport.update({
+  id: '/ai-search',
+  path: '/ai-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentRouteRoute = AgentRouteRouteImport.update({
   id: '/agent',
   path: '/agent',
@@ -128,6 +128,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -144,11 +145,11 @@ export interface FileRoutesByFullPath {
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
   '/ui-variants': typeof UiVariantsRouteRoute
-  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -165,12 +166,12 @@ export interface FileRoutesByTo {
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
   '/ui-variants': typeof UiVariantsRouteRoute
-  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -187,13 +188,13 @@ export interface FileRoutesById {
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
   '/ui-variants': typeof UiVariantsRouteRoute
-  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/agent'
+    | '/ai-search'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -210,11 +211,11 @@ export interface FileRouteTypes {
     | '/telemetry'
     | '/type-safety'
     | '/ui-variants'
-    | '/vector-search'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/agent'
+    | '/ai-search'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -231,11 +232,11 @@ export interface FileRouteTypes {
     | '/telemetry'
     | '/type-safety'
     | '/ui-variants'
-    | '/vector-search'
   id:
     | '__root__'
     | '/'
     | '/agent'
+    | '/ai-search'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -252,12 +253,12 @@ export interface FileRouteTypes {
     | '/telemetry'
     | '/type-safety'
     | '/ui-variants'
-    | '/vector-search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentRouteRoute: typeof AgentRouteRoute
+  AiSearchRouteRoute: typeof AiSearchRouteRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
@@ -274,18 +275,10 @@ export interface RootRouteChildren {
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
   UiVariantsRouteRoute: typeof UiVariantsRouteRoute
-  VectorSearchRouteRoute: typeof VectorSearchRouteRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/vector-search': {
-      id: '/vector-search'
-      path: '/vector-search'
-      fullPath: '/vector-search'
-      preLoaderRoute: typeof VectorSearchRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/ui-variants': {
       id: '/ui-variants'
       path: '/ui-variants'
@@ -398,6 +391,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AnalyticsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ai-search': {
+      id: '/ai-search'
+      path: '/ai-search'
+      fullPath: '/ai-search'
+      preLoaderRoute: typeof AiSearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agent': {
       id: '/agent'
       path: '/agent'
@@ -418,6 +418,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentRouteRoute: AgentRouteRoute,
+  AiSearchRouteRoute: AiSearchRouteRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
@@ -434,7 +435,6 @@ const rootRouteChildren: RootRouteChildren = {
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
   UiVariantsRouteRoute: UiVariantsRouteRoute,
-  VectorSearchRouteRoute: VectorSearchRouteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

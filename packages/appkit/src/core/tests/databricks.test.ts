@@ -472,7 +472,8 @@ describe("AppKit", () => {
         plugins: [{ plugin: NormalTestPlugin, config: {}, name: "normalTest" }],
       })) as any;
 
-      expect(instance["ui-variants"]).toBeDefined();
+      // Exposed under the camelCase handle key, not the kebab manifest name.
+      expect(instance.uiVariants).toBeDefined();
     });
 
     test("drops the default ui-variants in production", async () => {
@@ -484,7 +485,7 @@ describe("AppKit", () => {
 
       // The default is devOnly, so the same guard that skips user devOnly
       // plugins strips it from a deployed app.
-      expect(Object.keys(instance)).not.toContain("ui-variants");
+      expect(Object.keys(instance)).not.toContain("uiVariants");
       expect(instance.normalTest).toBeDefined();
     });
 
@@ -496,11 +497,29 @@ describe("AppKit", () => {
         plugins: [explicit],
       })) as any;
 
-      expect(instance["ui-variants"]).toBeDefined();
+      expect(instance.uiVariants).toBeDefined();
       // Only one instance was constructed for the single name.
       expect(
-        Object.keys(instance).filter((k) => k === "ui-variants"),
+        Object.keys(instance).filter((k) => k === "uiVariants"),
       ).toHaveLength(1);
+    });
+  });
+
+  describe("plugin accessor", () => {
+    class MultiWordPlugin extends NormalTestPlugin {
+      static manifest = createTestManifest("aiSearch");
+      name = "aiSearch";
+    }
+
+    test("exposes a plugin under its camelCase manifest name", async () => {
+      const instance = (await createApp({
+        plugins: [{ plugin: MultiWordPlugin, config: {}, name: "aiSearch" }],
+      })) as any;
+
+      // The camelCase name is the accessor key verbatim (no transform).
+      expect(instance.aiSearch).toBeDefined();
+      expect(instance.aiSearch.setupCalled).toBe(true);
+      expect(Object.keys(instance)).toContain("aiSearch");
     });
   });
 

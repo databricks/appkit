@@ -51,7 +51,9 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [GenerationParams](Interface.GenerationParams.md) | Optional generation parameters forwarded to the OpenAI-compatible serving request body. Names match the serving API wire keys. Only keys that are set are sent — undefined values are omitted so the endpoint applies its own defaults. Ranges are not validated here; the serving endpoint validates. |
 | [HostedSupervisorTool](Interface.HostedSupervisorTool.md) | Tagged record returned by every [supervisorTools](Variable.supervisorTools.md) factory. The `__kind` discriminator lets the agents plugin (and standalone `runAgent`) classify these tools without a structural match against the wire format — keeps the SA wire shape free to evolve and avoids namespace collisions with MCP hosted tools (which use `type: "genie-space"` hyphenated, vs SA's `type: "genie_space"` underscored). |
+| [IAiSearchConfig](Interface.IAiSearchConfig.md) | Base configuration interface for AppKit plugins |
 | [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
+| [IndexConfig](Interface.IndexConfig.md) | - |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [JobAPI](Interface.JobAPI.md) | User-facing API for a single configured job. |
 | [JobConfig](Interface.JobConfig.md) | Per-job configuration options. |
@@ -67,10 +69,14 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [RegisteredAgent](Interface.RegisteredAgent.md) | - |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
+| [RerankerConfig](Interface.RerankerConfig.md) | - |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [RunAgentInput](Interface.RunAgentInput.md) | - |
 | [RunAgentResult](Interface.RunAgentResult.md) | - |
+| [SearchRequest](Interface.SearchRequest.md) | - |
+| [SearchResponse](Interface.SearchResponse.md) | - |
+| [SearchResult](Interface.SearchResult.md) | - |
 | [ServingEndpointEntry](Interface.ServingEndpointEntry.md) | Shape of a single registry entry. |
 | [ServingEndpointRegistry](Interface.ServingEndpointRegistry.md) | Registry interface for serving endpoint type generation. Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation. When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
@@ -112,6 +118,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
+| [SearchFilters](TypeAlias.SearchFilters.md) | - |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
 | [SupervisorTool](TypeAlias.SupervisorTool.md) | Tools supported by the Databricks AI Gateway Responses API. The shapes match the wire format the endpoint expects, so the adapter passes the array straight into the request body. |
 | [ToolRegistry](TypeAlias.ToolRegistry.md) | - |
@@ -122,6 +129,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | Variable | Description |
 | ------ | ------ |
 | [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
+| [aiSearch](Variable.aiSearch.md) | - |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
 | [SUPERVISOR\_EXTENSION\_KEY](Variable.SUPERVISOR_EXTENSION_KEY.md) | Namespace key under which the adapter reads its hosted-tool payload from [AgentInput.extensions](Interface.AgentInput.md#extensions). Exported so the agents plugin and standalone `runAgent` (the producers) can write under the same key the adapter reads. |

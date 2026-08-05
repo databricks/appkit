@@ -90,6 +90,17 @@ if (fs.existsSync(sharedBin)) {
     fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
   }
 
+  // The CLI imports leaf modules that live outside dist/cli (e.g.
+  // `naming.ts`, referenced by the `plugin promote` command). Copy them to
+  // tmp/dist so the CLI's relative imports resolve in the published tarball.
+  const sharedNaming = path.join(
+    __dirname,
+    "../packages/shared/dist/naming.js",
+  );
+  if (fs.existsSync(sharedNaming)) {
+    fs.copyFileSync(sharedNaming, "tmp/dist/naming.js");
+  }
+
   // Copy JSON schemas so CLI (e.g. plugin validate/sync) can load them at runtime.
   // Place in both dist/schemas and dist/cli/schemas so resolution works whether
   // the running module's __dirname is under dist/ or dist/cli/ (e.g. after bundling).

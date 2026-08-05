@@ -11,6 +11,8 @@ import type {
 // Sourced from `./schemas/manifest` (the Zod canonical) so `DiscoveryDescriptor`
 // stays the discriminated union shape rather than the free-form predecessor.
 export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
+// Re-export the naming helpers so `shared` consumers import them from here.
+export { camelToKebab, kebabToCamel } from "./naming";
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -250,11 +252,13 @@ export type WithAsUser<SDK> = SDK extends (...args: any[]) => any
 
 /**
  * Maps plugin names to their exported types (with asUser automatically added).
- * Each plugin exposes its public API via the exports() method,
- * and AppKit wraps it with asUser() for user-scoped execution.
+ * Each plugin exposes its public API via the exports() method, and AppKit
+ * wraps it with asUser() for user-scoped execution. Callable exports
+ * (functions) are passed through without wrapping, as they manage their own
+ * `asUser` pattern (e.g. files plugin).
  *
- * Callable exports (functions) are passed through without wrapping,
- * as they manage their own `asUser` pattern (e.g. files plugin).
+ * The key is the plugin's manifest `name`, which is camelCase by convention
+ * (`appkit.aiSearch`), so it doubles as a valid JS accessor.
  */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],

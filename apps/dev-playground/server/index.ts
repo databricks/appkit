@@ -14,6 +14,7 @@ import {
 } from "@databricks/appkit";
 import {
   agents,
+  aiSearch,
   createAgent,
   DatabricksAdapter,
   supervisorTools,
@@ -429,17 +430,14 @@ createApp({
       // sense as the user-facing landing agent).
       defaultAgent: "helper",
     }),
-    // TODO: re-enable once vector-search is exported from @databricks/appkit
-    // vectorSearch({
-    //   indexes: {
-    //     demo: {
-    //       indexName:
-    //         process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
-    //       columns: ["id", "text", "title"],
-    //       queryType: "hybrid",
-    //     },
-    //   },
-    // }),
+    aiSearch({
+      indexes: {
+        demo: {
+          columns: ["id", "text", "title"],
+          queryType: "hybrid",
+        },
+      },
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
   async onPluginsReady(appkit) {

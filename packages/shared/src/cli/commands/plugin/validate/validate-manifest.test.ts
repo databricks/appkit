@@ -15,7 +15,7 @@ import {
 const VALID_MANIFEST = {
   $schema:
     "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
-  name: "test-plugin",
+  name: "testPlugin",
   displayName: "Test Plugin",
   description: "A test plugin",
   resources: {
@@ -90,7 +90,7 @@ describe("validate-manifest", () => {
       const result = validateManifest(VALID_MANIFEST);
       expect(result.valid).toBe(true);
       expect(result.manifest).toBeDefined();
-      expect(result.manifest?.name).toBe("test-plugin");
+      expect(result.manifest?.name).toBe("testPlugin");
     });
 
     it("validates a manifest with resources", () => {

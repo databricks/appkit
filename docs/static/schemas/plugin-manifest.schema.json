@@ -10,8 +10,8 @@
     },
     "name": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens."
+      "pattern": "^[a-z][a-zA-Z0-9]*$",
+      "description": "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch)."
     },
     "displayName": {
       "type": "string",

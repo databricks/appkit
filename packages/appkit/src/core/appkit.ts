@@ -107,6 +107,8 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const self = this;
 
+    // The manifest `name` is camelCase, so it doubles as the public handle key
+    // (`appkit.aiSearch`). The kebab HTTP route is derived separately.
     Object.defineProperty(this, name, {
       get() {
         const plugin = self.#pluginInstances[name];

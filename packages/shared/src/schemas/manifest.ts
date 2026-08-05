@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+import { PLUGIN_NAME_PATTERN } from "../naming";
 
 // ── Resource type + per-type permission enums ────────────────────────────
 
@@ -555,7 +556,7 @@ export const configSchemaPropertySchema: z.ZodType = z.lazy(() =>
       maxLength: z.number().int().min(0).optional(),
       required: z.array(z.string()).optional(),
       // `additionalProperties` is a standard JSON Schema keyword used by core
-      // plugin manifests (e.g., serving, vector-search, genie) to constrain
+      // plugin manifests (e.g., serving, ai-search, genie) to constrain
       // dictionary-shaped properties. Allowed on nested property entries as
       // either a boolean or a sub-schema, mirroring JSON Schema semantics.
       additionalProperties: z
@@ -672,9 +673,9 @@ export const pluginManifestSchema = z
       .describe("Reference to the JSON Schema for validation"),
     name: z
       .string()
-      .regex(/^[a-z][a-z0-9-]*$/)
+      .regex(PLUGIN_NAME_PATTERN)
       .describe(
-        "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+        "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
     displayName: z
       .string()
@@ -908,9 +909,9 @@ export const templatePluginSchema = z
   .object({
     name: z
       .string()
-      .regex(/^[a-z][a-z0-9-]*$/)
+      .regex(PLUGIN_NAME_PATTERN)
       .describe(
-        "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+        "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
     displayName: z
       .string()

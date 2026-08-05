@@ -1,8 +1,8 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
-  "name": "vector-search",
-  "displayName": "Vector Search Plugin",
-  "hidden": true,
+  "name": "aiSearch",
+  "displayName": "AI Search Plugin",
+  "stability": "beta",
   "description": "Query Databricks Vector Search indexes with built-in hybrid search, reranking, and pagination",
   "resources": {
     "required": [
@@ -13,18 +13,23 @@
         "description": "A Databricks Vector Search index to query. Index names configured via plugin config.",
         "permission": "SELECT",
         "fields": {
-          "indexName": {
+          "id": {
             "env": "DATABRICKS_VS_INDEX_NAME",
             "description": "Three-level UC name of the default index (catalog.schema.index_name)"
-          },
-          "endpointName": {
-            "env": "DATABRICKS_VS_ENDPOINT_NAME",
-            "description": "Vector Search endpoint name (required for pagination)"
           }
         }
       }
     ],
     "optional": []
+  },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "List the vector search index's source-table columns (unity-catalog tables API) so the user can pick which to return",
+        "Ask the user which of those columns the search should return",
+        "Write aiSearch({ indexes: { default: { columns: [...] } } }) in the server file; the client queries the 'default' alias"
+      ]
+    }
   },
   "config": {
     "schema": {
@@ -54,8 +59,7 @@
                 "type": "number",
                 "default": 20
               }
-            },
-            "required": ["indexName", "columns"]
+            }
           }
         },
         "timeout": {
