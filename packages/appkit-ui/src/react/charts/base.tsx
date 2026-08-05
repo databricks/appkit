@@ -360,8 +360,6 @@ export function BaseChart({
         smooth,
         showSymbol,
         symbolSize,
-        // A click handler turns on `triggerLineEvent` for line/area so the
-        // whole stroke is clickable, not just symbols.
         interactive,
       });
     }
