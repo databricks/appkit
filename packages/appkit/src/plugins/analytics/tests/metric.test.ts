@@ -816,8 +816,8 @@ describe("analytics metric route", () => {
       expect(first.metadata.arr.display_name).toBe("ARR (old)");
 
       // Second run: same body → SQL cache HIT (executeStatement not called
-      // again), but the app now injects NEW labels. The response must reflect
-      // the fresh metadata, not the stale copy from the cached message.
+      // again), but the injected metadata carries NEW labels. The response must
+      // reflect the fresh metadata, not the stale copy from the cached message.
       executeMock.mockClear();
       const newMeta: MetricViewsMetadata = {
         revenue: {

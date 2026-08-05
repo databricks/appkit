@@ -173,7 +173,7 @@ describe("syncMetricViewsTypes", () => {
     // The TIMESTAMP dimension carries inferred time grains in its @timeGrain tag.
     expect(declarations).toContain("@timeGrain");
     // The semantic metadata (format spec, SQL type) rides in the type-level
-    // `metadata` block — the sole carrier now the JSON is gone.
+    // `metadata` block — the sole carrier of semantic metadata.
     expect(declarations).toContain('"$#,##0.00"');
     // The file is a real `.ts`: it also carries the runtime `metricViewsMetadata`
     // const, and never a runtime side-effect import (only a type-only one).

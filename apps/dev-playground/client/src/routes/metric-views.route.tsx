@@ -195,31 +195,26 @@ function MetricViewsRoute() {
     () => buildFilter(selection, "segment"),
     [selection],
   );
-  // The trend and table group by created_at / region respectively; neither is a
-  // filterable dimension in its own right for the trend, so it applies the full
-  // selection. The table groups by region, so it excludes region (same filter
-  // as the region bar).
+  // The trend groups by created_at, which isn't a filterable dimension, so it
+  // applies the full selection with nothing excluded.
   const trendFilter = useMemo(() => buildFilter(selection), [selection]);
 
-  // Revenue by region — the filter excludes `region`, so this always lists
-  // every region available under the current segment selection. Doubles as the
-  // domain for the Region dropdown and the detail table below.
+  // Revenue by region — also supplies the Region dropdown's options and the
+  // detail table's rows.
   const region = useMetricView("revenue", {
     measures: ARR_MEASURE,
     dimensions: REGION_DIM,
     filter: regionFilter,
   });
 
-  // Revenue by segment — excludes `segment`, so every segment stays visible and
-  // this also feeds the Segment dropdown's options.
+  // Revenue by segment — also supplies the Segment dropdown's options.
   const segment = useMetricView("revenue", {
     measures: ARR_MEASURE,
     dimensions: SEGMENT_DIM,
     filter: segmentFilter,
   });
 
-  // ARR + MRR over time — the hero trend. Applies the full selection, so
-  // picking a region and/or segment visibly reshapes the line.
+  // ARR + MRR over time — the hero trend.
   const trend = useMetricView("revenue", {
     measures: TREND_MEASURES,
     dimensions: TIME_DIM,
@@ -228,18 +223,15 @@ function MetricViewsRoute() {
     filter: trendFilter,
   });
 
-  // Detail table, grouped by region. Same filter as the region bar (excludes
-  // region) so clicking a row narrows the other visuals without hiding the row
-  // you just clicked. This is the table cross-filter.
+  // Detail table, grouped by region. Shares the region bar's filter, so
+  // clicking a row narrows the other visuals without hiding the row you clicked.
   const table = useMetricView("revenue", {
     measures: TABLE_MEASURES,
     dimensions: REGION_DIM,
     filter: regionFilter,
   });
 
-  // Dropdown option domains, derived from the region/segment breakdowns. Because
-  // each breakdown excludes its own dimension's filter, the options reflect
-  // what's actually available under the *other* active filter.
+  // Dropdown option domains, derived from the region/segment breakdowns.
   const regionOptions = useMemo(
     () =>
       Array.from(
