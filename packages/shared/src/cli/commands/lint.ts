@@ -1,14 +1,99 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Lang, parse } from "@ast-grep/napi";
+import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 
-interface Rule {
+interface BaseRule {
   id: string;
-  pattern: string;
   message: string;
   includeTests?: boolean;
   filter?: (code: string) => boolean;
+}
+
+/**
+ * A rule matches via exactly one of `pattern` (an ast-grep pattern for
+ * `root.findAll`) or `find` (an escape hatch for checks a single pattern can't
+ * express). Discriminated union so a rule with neither or both fails to compile.
+ */
+type Rule =
+  | (BaseRule & { pattern: string; find?: never })
+  | (BaseRule & { find: (root: SgNode) => SgNode[]; pattern?: never });
+
+/** Value node of an object literal's `key: value` pair, or undefined. */
+function objectPropertyValue(obj: SgNode, key: string): SgNode | undefined {
+  for (const pair of obj.children()) {
+    if (pair.kind() !== "pair") continue;
+    const k = pair.field("key");
+    // Strip quotes so `columns` and `"columns"` are treated the same.
+    if (k && k.text().replace(/^["']|["']$/g, "") === key) {
+      return pair.field("value") ?? undefined;
+    }
+  }
+  return undefined;
+}
+
+/** True for `[]` / `[ ]` — an array literal with no elements. */
+function isEmptyArrayLiteral(node: SgNode): boolean {
+  return node.kind() === "array" && node.children().every((c) => !c.isNamed());
+}
+
+/**
+ * Flags `aiSearch(...)` configs whose indexes lack usable `columns`. Production
+ * does not auto-discover columns (dev-only), so a missing or empty `columns`
+ * fails at query time. Passes anything it can't statically prove bad (constant
+ * or dynamically-built columns/indexes) to avoid false positives.
+ */
+function findAiSearchIndexesMissingColumns(root: SgNode): SgNode[] {
+  const flagged: SgNode[] = [];
+
+  for (const call of root.findAll("aiSearch($$$ARGS)")) {
+    const argNodes =
+      call
+        .field("arguments")
+        ?.children()
+        .filter((c) => c.isNamed()) ?? [];
+
+    // Bare aiSearch(): relies on the env default index (no columns).
+    if (argNodes.length === 0) {
+      flagged.push(call);
+      continue;
+    }
+
+    // aiSearch(dynamicConfig) — not an object literal, can't inspect. Pass.
+    const configObj = argNodes[0].kind() === "object" ? argNodes[0] : undefined;
+    if (!configObj) continue;
+
+    const indexes = objectPropertyValue(configObj, "indexes");
+
+    // No `indexes` key => falls back to the env default index (no columns).
+    if (!indexes) {
+      flagged.push(call);
+      continue;
+    }
+    if (indexes.kind() !== "object") continue; // dynamic indexes: pass.
+
+    const indexPairs = indexes.children().filter((c) => c.kind() === "pair");
+
+    // Empty `indexes: {}` => no configured index, same as bare.
+    if (indexPairs.length === 0) {
+      flagged.push(call);
+      continue;
+    }
+
+    for (const pair of indexPairs) {
+      const idxObj = pair.field("value");
+      if (!idxObj || idxObj.kind() !== "object") continue; // dynamic: pass.
+      // A spread (`{ ...base }`) may carry `columns` we can't see: pass.
+      if (idxObj.children().some((c) => c.kind() === "spread_element"))
+        continue;
+      const columns = objectPropertyValue(idxObj, "columns");
+      if (!columns || isEmptyArrayLiteral(columns)) {
+        flagged.push(pair); // points at the offending index alias.
+      }
+    }
+  }
+
+  return flagged;
 }
 
 const rules: Rule[] = [
@@ -48,6 +133,13 @@ const rules: Rule[] = [
       "<Variants> is a development-only variant picker and must not be shipped. Finalize the chosen <Variant> before deploying.",
     includeTests: false,
   },
+  {
+    id: "ai-search-index-requires-columns",
+    message:
+      "AI Search index has no `columns`; it will fail in production (columns are auto-discovered only in dev). Set `columns` explicitly on each index.",
+    includeTests: false,
+    find: findAiSearchIndexesMissingColumns,
+  },
 ];
 
 function isTestFile(filePath: string, rootDir: string): boolean {
@@ -85,24 +177,25 @@ interface Violation {
   code: string;
 }
 
-function lintFile(
+/**
+ * Runs all applicable rules against a file's source. Exported so tests can lint
+ * an in-memory string without touching disk.
+ */
+export function lintSource(
+  content: string,
   filePath: string,
-  rules: Rule[],
-  rootDir: string,
+  activeRules: Rule[] = rules,
+  isTest = false,
 ): Violation[] {
   const violations: Violation[] = [];
-  const content = fs.readFileSync(filePath, "utf-8");
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
-  const testFile = isTestFile(filePath, rootDir);
+  const root = parse(lang, content).root();
 
-  const ast = parse(lang, content);
-  const root = ast.root();
-
-  for (const rule of rules) {
+  for (const rule of activeRules) {
     // skip rules that don't apply to test files
-    if (testFile && rule.includeTests === false) continue;
+    if (isTest && rule.includeTests === false) continue;
 
-    const matches = root.findAll(rule.pattern);
+    const matches = rule.find ? rule.find(root) : root.findAll(rule.pattern);
 
     for (const match of matches) {
       const code = match.text();
@@ -122,6 +215,20 @@ function lintFile(
   }
 
   return violations;
+}
+
+function lintFile(
+  filePath: string,
+  activeRules: Rule[],
+  rootDir: string,
+): Violation[] {
+  const content = fs.readFileSync(filePath, "utf-8");
+  return lintSource(
+    content,
+    filePath,
+    activeRules,
+    isTestFile(filePath, rootDir),
+  );
 }
 
 /**
