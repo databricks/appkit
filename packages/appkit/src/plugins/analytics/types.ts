@@ -22,9 +22,9 @@ export interface IAnalyticsConfig extends BasePluginConfig {
    * The metric route stamps the slice of this scoped to a request's requested
    * measures/dimensions into the SSE `result` message. It is **response
    * decoration only**: it never enters the cache key and never changes the SQL.
-   * Absent → the `result` message carries no `metadata` field and the route
-   * behaves exactly as before. Never read from disk / `DESCRIBE` at runtime —
-   * it comes only from this injected value.
+   * Absent → the `result` message carries no `metadata` field, leaving it
+   * envelope-identical to `/query`. Never read from disk / `DESCRIBE` at
+   * runtime — it comes only from this injected value.
    */
   metricViewsMetadata?: MetricViewsMetadata;
   /**
