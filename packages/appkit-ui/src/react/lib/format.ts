@@ -48,7 +48,10 @@ export function formatChartValue(value: number, fieldName: string): string {
  * formatFieldLabel("revenue") // "Revenue"
  */
 export function formatFieldLabel(field: string): string {
-  return formatLabel(field);
+  // Strip anything outside the identifier charset before humanizing. Table
+  // callers pass a raw `column.id` / `defaultFilterColumn` that has not been
+  // through `SAFE_KEY_REGEX`, so the label must not echo arbitrary input.
+  return formatLabel(field.replace(/[^a-zA-Z0-9_-]/g, ""));
 }
 
 /**

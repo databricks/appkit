@@ -9,7 +9,7 @@ describe("formatFieldLabel", () => {
     ["getHTTPUrl", "Get Http Url"],
     ["TOTAL_SPEND", "Total Spend"],
     ["", ""],
-    ['<script>alert("x")</script>', '<Script>Alert("X")</Script>'],
+    ['<script>alert("x")</script>', "Scriptalertxscript"],
   ])("formats %j as %j", (field, expected) => {
     expect(formatFieldLabel(field)).toBe(expected);
   });
