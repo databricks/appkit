@@ -869,14 +869,10 @@ export async function syncMetricViewsTypes(options: {
       "utf-8",
     );
   }
-  // Sweep a stale sibling `metric-views.d.ts` from a pre-`.ts` version. Older
-  // typegen emitted an ambient `.d.ts`; the current output is a real `.ts` at
-  // `metricOutFile`. Left behind, the old sibling would duplicate the
-  // `declare module` augmentation and re-introduce the bare side-effect import
-  // the new header deliberately drops. Best-effort: only removed when the new
-  // file is itself a `.ts` and exists (never delete the only committed metric
-  // types when a degraded blocking pass suppressed the replacement write),
-  // ENOENT-safe.
+  // Sweep the ambient `metric-views.d.ts` a pre-`.ts` version left behind,
+  // which would otherwise duplicate the augmentation the new `.ts` emits.
+  // Skipped unless the replacement was actually written, so a degraded
+  // blocking pass leaves an app's only committed metric types in place.
   if (
     metricOutFile.endsWith(".ts") &&
     !metricOutFile.endsWith(".d.ts") &&

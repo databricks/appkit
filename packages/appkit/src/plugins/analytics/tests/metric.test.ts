@@ -804,7 +804,7 @@ describe("analytics metric route", () => {
         return readResultPayload(mockRes);
       };
 
-      // First run fills the cache with the OLD labels.
+      // First run fills the cache with the old labels.
       const oldMeta: MetricViewsMetadata = {
         revenue: {
           measures: { arr: { type: "decimal", display_name: "ARR (old)" } },
