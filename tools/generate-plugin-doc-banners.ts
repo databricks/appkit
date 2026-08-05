@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { camelToKebab } from "../packages/shared/src/naming";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -28,11 +29,6 @@ const DOCS_DIR = path.join(REPO_ROOT, "docs/docs/plugins");
  * traversal in `name`).
  */
 const SCHEMA_NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
-
-/** camelCase manifest name -> kebab doc basename (e.g. aiSearch -> ai-search). */
-function camelToKebab(name: string): string {
-  return name.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
-}
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.

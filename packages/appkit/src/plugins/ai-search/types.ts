@@ -1,5 +1,8 @@
 import type { BasePluginConfig } from "shared";
 
+/** Vector Search query mode: semantic (`ann`), keyword+semantic (`hybrid`), or keyword-only (`full_text`). */
+export type SearchQueryType = "ann" | "hybrid" | "full_text";
+
 export interface IAiSearchConfig extends BasePluginConfig {
   timeout?: number;
   indexes?: Record<string, IndexConfig>;
@@ -20,7 +23,7 @@ export interface IndexConfig {
    */
   columns?: string[];
   /** Default search mode */
-  queryType?: "ann" | "hybrid" | "full_text";
+  queryType?: SearchQueryType;
   /** Max results per query */
   numResults?: number;
   /** Enable built-in reranker. Pass true to rerank all non-id columns, or an object for fine control. */
@@ -50,7 +53,7 @@ export interface RerankerConfig {
 /** Public summary of a configured index, exposed to the client via `clientConfig()`. */
 export interface IndexSummary {
   alias: string;
-  queryType: "ann" | "hybrid" | "full_text";
+  queryType: SearchQueryType;
   pagination: boolean;
 }
 
@@ -64,7 +67,7 @@ export interface SearchRequest {
   queryVector?: number[];
   columns?: string[];
   numResults?: number;
-  queryType?: "ann" | "hybrid" | "full_text";
+  queryType?: SearchQueryType;
   filters?: SearchFilters;
   reranker?: boolean;
 }
@@ -75,7 +78,7 @@ export interface SearchResponse<
   results: SearchResult<T>[];
   totalCount: number;
   queryTimeMs: number;
-  queryType: "ann" | "hybrid" | "full_text";
+  queryType: SearchQueryType;
   nextPageToken: string | null;
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AiSearchClientConfig,
   AiSearchIndexSummary,
@@ -47,24 +47,24 @@ export function useAiSearchQuery<
 
   const alias = options.alias ?? indexes[0]?.alias ?? null;
 
-  const aliasError = useMemo(() => {
-    if (!alias) return "No AI Search indexes are configured.";
-    if (options.alias && !indexes.some((i) => i.alias === options.alias)) {
-      const available = indexes.map((i) => i.alias).join(", ") || "none";
-      return `Unknown AI Search index "${options.alias}". Available: ${available}`;
-    }
-    return null;
-  }, [alias, options.alias, indexes]);
+  // Config validation error; null for a valid alias.
+  let aliasError: string | null = null;
+  if (!alias) {
+    aliasError = "No AI Search indexes are configured.";
+  } else if (options.alias && !indexes.some((i) => i.alias === options.alias)) {
+    const available = indexes.map((i) => i.alias).join(", ") || "none";
+    aliasError = `Unknown AI Search index "${options.alias}". Available: ${available}`;
+  }
 
   const [data, setData] = useState<AiSearchResponse<T> | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(aliasError);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const error = fetchError ?? aliasError;
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const search = useCallback(
     (query: string | AiSearchRequest): Promise<AiSearchResponse<T> | null> => {
       if (aliasError || !alias) {
-        setError(aliasError);
         return Promise.resolve(null);
       }
 
@@ -73,7 +73,7 @@ export function useAiSearchQuery<
       abortControllerRef.current = abortController;
 
       setLoading(true);
-      setError(null);
+      setFetchError(null);
       setData(null);
 
       const body: AiSearchRequest =
@@ -100,7 +100,7 @@ export function useAiSearchQuery<
         })
         .catch((err: Error) => {
           if (abortController.signal.aborted) return null;
-          setError(err.message || "Search failed");
+          setFetchError(err.message || "Search failed");
           setLoading(false);
           return null;
         });
@@ -109,15 +109,15 @@ export function useAiSearchQuery<
   );
 
   // Reset when the target alias changes: abort any in-flight request (its
-  // result would otherwise land under the new alias) and clear stale
-  // data/error, re-syncing error to the new alias's validation state.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `alias` is needed — switching between two valid aliases leaves `aliasError` null, so keying on it alone would skip the reset.
+  // result would otherwise land under the new alias) and clear stale data +
+  // fetch error. `error` re-derives from the new alias's validation state.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `alias` is the intended trigger — the effect runs to reset on every alias change, not because it reads alias.
   useEffect(() => {
     abortControllerRef.current?.abort();
     setData(null);
     setLoading(false);
-    setError(aliasError);
-  }, [alias, aliasError]);
+    setFetchError(null);
+  }, [alias]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 

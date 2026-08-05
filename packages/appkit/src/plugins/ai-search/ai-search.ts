@@ -9,12 +9,14 @@ import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { formatWarningBanner } from "../../utils/banner";
 import { aiSearchDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
   IAiSearchConfig,
   IndexConfig,
   IndexSummary,
+  SearchQueryType,
   SearchRequest,
   SearchResponse,
   SearchResult,
@@ -49,8 +51,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
 
   /**
    * Seeds a `default` index from `DATABRICKS_VS_INDEX_NAME` when no `indexes`
-   * are configured, so `aiSearch()` is usable with just the env var (columns
-   * are auto-discovered in dev). Mirrors the genie plugin's default space.
+   * are configured, so `aiSearch()` works with just the env var.
    */
   private _defaultIndexes(): Record<string, IndexConfig> {
     const indexName = process.env.DATABRICKS_VS_INDEX_NAME;
@@ -58,10 +59,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   async setup(): Promise<void> {
-    // A missing indexName is a missing-resource condition owned by the
-    // framework's resource validation (warn in dev, throw in prod). Only the
-    // pagination -> endpointName dependency is a config logic error the
-    // framework can't see, so it's the sole check here.
+    // pagination needs an endpointName the framework's resource validation
+    // can't see, so check it here.
     for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
       if (idx.pagination && !idx.endpointName) {
         throw new Error(
@@ -70,10 +69,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       }
     }
 
-    // Development convenience: fill in `columns` for any index that omits them
-    // by reading the index's source table. In production there's no discovery;
-    // an index with no columns can never query (the VS API requires `columns`),
-    // so fail fast at boot instead of 500ing every request.
+    // Dev fills in missing `columns` from the source table; prod can't query
+    // without them (VS requires `columns`), so fail fast at boot.
     if (process.env.NODE_ENV === "development") {
       await this._autoDiscoverColumns();
     } else {
@@ -88,16 +85,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   /**
-   * For each configured index missing `columns`, discover the returnable
-   * columns from its Delta-Sync source table and store them back on the config.
-   * Best-effort: any failure (no auth, index not ready, non-Delta-Sync index)
-   * is logged and skipped rather than thrown. Emits one warning banner listing
-   * what was auto-filled, since these must be set explicitly before production.
-   *
-   * Uses all source-table columns (minus embedding vectors). Indexes with a
-   * partial `columns_to_sync` may include columns the index can't return; since
-   * this is a dev-only convenience (prod requires explicit `columns`), the
-   * discovered list is a starting point to trim, not an authoritative set.
+   * For each configured index missing `columns`, fill them from its Delta-Sync
+   * source table (all source columns minus embedding vectors). Best-effort:
+   * failures are logged and skipped, never thrown. A partial `columns_to_sync`
+   * isn't honored, so the discovered list is a starting point to trim.
    */
   private async _autoDiscoverColumns(): Promise<void> {
     const discovered: Record<string, string[]> = {};
@@ -150,10 +141,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       "Set `columns` explicitly in the plugin config before deploying.",
     );
 
-    const maxLen = Math.max(...lines.map((l) => l.length));
-    const border = "=".repeat(maxLen + 4);
-    const boxed = lines.map((l) => `| ${l.padEnd(maxLen)} |`);
-    return [border, ...boxed, border].join("\n");
+    return formatWarningBanner(lines);
   }
 
   injectRoutes(router: IAppRouter) {
@@ -162,14 +150,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       method: "post",
       path: "/:alias/query",
       handler: async (req: express.Request, res: express.Response) => {
-        const indexConfig = this._resolveIndex(req.params.alias);
-        if (!indexConfig) {
-          res.status(404).json({
-            error: `No index configured with alias "${req.params.alias}"`,
-            plugin: this.name,
-          });
-          return;
-        }
+        const indexConfig = this._resolveOr404(req, res);
+        if (!indexConfig) return;
 
         const body: SearchRequest = req.body;
         if (!body.queryText && !body.queryVector) {
@@ -180,11 +162,9 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           return;
         }
 
-        // Configured `columns` are the projection allowlist over HTTP: drop
-        // any client-supplied `columns` so a caller can't read fields the app
-        // didn't opt to expose (routes run as the service principal by
-        // default). Programmatic `query()` callers are trusted and keep the
-        // override.
+        // Drop client-supplied `columns` so an HTTP caller can't widen the
+        // projection past what the app configured. (query() callers are
+        // trusted and keep the override.)
         const { columns: _clientColumns, ...safeBody } = body;
         const plugin =
           indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
@@ -192,9 +172,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           safeBody.queryType ?? indexConfig.queryType ?? "hybrid";
 
         try {
-          // Prepare inside execute so query preparation — notably a
-          // self-managed `embeddingFn` — runs in the same OBO context as the
-          // VS call, not as the service principal.
+          // Prepare inside execute so a self-managed embeddingFn runs in the
+          // same OBO context as the query, not as the service principal.
           const result = await plugin.execute(async (signal) => {
             const prepared = await this._prepareQuery(safeBody, indexConfig);
             return this.connector.query(
@@ -204,13 +183,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
             );
           }, querySettings);
 
-          if (!result.ok) {
-            res
-              .status(result.status)
-              .json({ error: result.message, plugin: this.name });
-            return;
-          }
-          res.json(this._parseResponse(result.data, queryType));
+          this._sendResult(res, result, queryType);
         } catch (error) {
           this._handleError(res, error, "Query failed");
         }
@@ -222,14 +195,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       method: "post",
       path: "/:alias/next-page",
       handler: async (req: express.Request, res: express.Response) => {
-        const indexConfig = this._resolveIndex(req.params.alias);
-        if (!indexConfig) {
-          res.status(404).json({
-            error: `No index configured with alias "${req.params.alias}"`,
-            plugin: this.name,
-          });
-          return;
-        }
+        const indexConfig = this._resolveOr404(req, res);
+        if (!indexConfig) return;
 
         if (!indexConfig.pagination) {
           res.status(400).json({
@@ -277,13 +244,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
             querySettings,
           );
 
-          if (!result.ok) {
-            res
-              .status(result.status)
-              .json({ error: result.message, plugin: this.name });
-            return;
-          }
-          res.json(this._parseResponse(result.data, pageQueryType));
+          this._sendResult(res, result, pageQueryType);
         } catch (error) {
           this._handleError(res, error, "Next-page query failed");
         }
@@ -295,17 +256,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       method: "get",
       path: "/:alias/config",
       handler: async (req: express.Request, res: express.Response) => {
-        const { alias } = req.params;
-        const indexConfig = this._resolveIndex(alias);
-        if (!indexConfig) {
-          res.status(404).json({
-            error: `No index configured with alias "${alias}"`,
-            plugin: this.name,
-          });
-          return;
-        }
+        const indexConfig = this._resolveOr404(req, res);
+        if (!indexConfig) return;
         res.json({
-          alias,
+          alias: req.params.alias,
           columns: indexConfig.columns,
           queryType: indexConfig.queryType ?? "hybrid",
           numResults: indexConfig.numResults ?? 20,
@@ -317,10 +271,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   }
 
   /**
-   * Configured index aliases + metadata, serialized to the browser at boot via
-   * `window.__appkit__` (read client-side with `usePluginClientConfig`). Lets the
-   * UI discover available indexes instead of hardcoding an alias. No secrets —
-   * only alias names and non-sensitive query metadata.
+   * Index aliases + non-sensitive query metadata, serialized to the client so
+   * the UI can discover available indexes instead of hardcoding an alias.
    */
   clientConfig(): { indexes: IndexSummary[] } {
     const indexes = Object.entries(this.config.indexes ?? {}).map(
@@ -337,9 +289,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
    * Programmatic query API — available as `appkit.aiSearch.query()`.
    * When called through `asUser(req)`, executes with the user's credentials.
    *
-   * @remarks `T` is an unchecked assertion on each result's `data`: rows are
-   * built from the index's returned columns and cast to `T` with no runtime
-   * validation, so a mismatched `T` won't be caught here.
+   * @remarks `T` types each result's `data` but is an unchecked cast — the row
+   * shape isn't validated at runtime.
    */
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     alias: string,
@@ -389,6 +340,37 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     const indexName = idx.indexName ?? process.env.DATABRICKS_VS_INDEX_NAME;
     if (!indexName) return undefined;
     return { ...idx, indexName };
+  }
+
+  /** Resolve an index by route alias, or send a 404 and return null. */
+  private _resolveOr404(
+    req: express.Request,
+    res: express.Response,
+  ): (IndexConfig & { indexName: string }) | null {
+    const indexConfig = this._resolveIndex(req.params.alias);
+    if (!indexConfig) {
+      res.status(404).json({
+        error: `No index configured with alias "${req.params.alias}"`,
+        plugin: this.name,
+      });
+      return null;
+    }
+    return indexConfig;
+  }
+
+  /** Send an execution result as JSON, or its error status/message. */
+  private _sendResult(
+    res: express.Response,
+    result: Awaited<ReturnType<typeof this.execute<VsRawResponse>>>,
+    queryType: SearchQueryType,
+  ): void {
+    if (!result.ok) {
+      res
+        .status(result.status)
+        .json({ error: result.message, plugin: this.name });
+      return;
+    }
+    res.json(this._parseResponse(result.data, queryType));
   }
 
   private async _prepareQuery(
@@ -447,14 +429,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
 
   private _parseResponse<
     T extends Record<string, unknown> = Record<string, unknown>,
-  >(
-    raw: VsRawResponse,
-    queryType: "ann" | "hybrid" | "full_text",
-  ): SearchResponse<T> {
+  >(raw: VsRawResponse, queryType: SearchQueryType): SearchResponse<T> {
     const columnNames = raw.manifest.columns.map((c) => c.name);
     const scoreIndex = columnNames.indexOf("score");
 
-    // `data` is built dynamically, so T is the caller's unchecked assertion.
     const results: SearchResult<T>[] = raw.result.data_array.map((row) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < columnNames.length; i++) {

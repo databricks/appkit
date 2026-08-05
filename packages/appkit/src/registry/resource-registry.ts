@@ -13,6 +13,7 @@
 import type { BasePluginConfig, PluginConstructor, PluginData } from "shared";
 import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
+import { formatWarningBanner } from "../utils/banner";
 import { getPluginManifest } from "./manifest-loader";
 import type {
   ResourceEntry,
@@ -477,11 +478,6 @@ export class ResourceRegistry {
       "Add these to your .env file or environment to suppress this warning.",
     );
 
-    const maxLen = Math.max(...contentLines.map((l) => l.length));
-    const border = "=".repeat(maxLen + 4);
-
-    const boxed = contentLines.map((line) => `| ${line.padEnd(maxLen)} |`);
-
-    return [border, ...boxed, border].join("\n");
+    return formatWarningBanner(contentLines);
   }
 }

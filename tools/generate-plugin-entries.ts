@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { kebabToCamel } from "../packages/shared/src/naming";
 import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,16 +56,6 @@ const FOLDER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
  * derived binding is safe to interpolate unescaped.
  */
 const JS_IDENTIFIER_PATTERN = /^[a-z][a-zA-Z0-9_]*$/;
-
-/**
- * Convert a kebab-case manifest name to its camelCase JS-identifier binding
- * (e.g. `vector-search` -> `vectorSearch`). Mirrors `manifestNameToBinding` in
- * the plugin `promote` command and the convention first-party plugin index
- * files follow, so the emitted binding matches the plugin's actual export.
- */
-function manifestNameToBinding(name: string): string {
-  return name.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-}
 
 function validateSchemaName(
   value: string,
@@ -117,7 +108,7 @@ function readPluginInfos(): PluginInfo[] {
 
     // The schema permits kebab-case names, but the barrel binding must be a
     // valid JS identifier, so derive it via kebab->camelCase and assert.
-    const binding = manifestNameToBinding(manifest.name);
+    const binding = kebabToCamel(manifest.name);
     if (!JS_IDENTIFIER_PATTERN.test(binding)) {
       throw new Error(
         `Manifest name "${manifest.name}" in ${manifestPath} does not convert to a valid JavaScript identifier (got "${binding}"). The generator emits \`export { ${binding} } from "./<folder>";\`, which would be invalid TypeScript. Rename the plugin so its name is kebab-case or camelCase, or set \`hidden: true\` to exclude it from the auto-generated barrels.`,
