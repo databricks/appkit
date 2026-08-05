@@ -95,7 +95,7 @@ async function runGenerateTypes(
         if (fs.existsSync(metricConfig)) {
           const typesDir = path.dirname(resolvedOutFile);
           console.log(
-            `Generated metric types: ${path.join(typesDir, "metric-views.d.ts")}`,
+            `Generated metric types: ${path.join(typesDir, "metric-views.ts")}`,
           );
         }
       }

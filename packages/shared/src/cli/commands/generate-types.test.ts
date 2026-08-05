@@ -235,7 +235,7 @@ describe("generate-types foreground spawn orchestration", () => {
   });
 
   test("reports the metric artifact when config/metric-views/definitions.json exists", async () => {
-    // The metric path is additive: generateFromEntryPoint emits metric-views.d.ts
+    // The metric path is additive: generateFromEntryPoint emits metric-views.ts
     // as a sibling of the query out file whenever the config is present. The CLI
     // announces it off the same dormancy signal.
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
@@ -249,7 +249,7 @@ describe("generate-types foreground spawn orchestration", () => {
     const logged = consoleLog.mock.calls.flat().map(String);
     expect(logged).toContain(`Generated query types: ${outFile}`);
     expect(logged).toContain(
-      `Generated metric types: ${path.join(path.dirname(outFile), "metric-views.d.ts")}`,
+      `Generated metric types: ${path.join(path.dirname(outFile), "metric-views.ts")}`,
     );
   });
 

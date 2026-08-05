@@ -2,20 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 
-/**
- * End-to-end coverage for the `--wait` has-types gate when query DESCRIBE
- * cannot produce a schema for environmental reasons.
- *
- * The sibling `index.test.ts` mocks `generateQueriesFromDescribe`, so its gate
- * tests hand the entry point a `hadEnvironmentalFailure: true` they wrote
- * themselves — they would still pass if the query path never set that flag.
- * That is exactly how the original bug survived: the query path reported
- * `false` for a connectivity failure and no test joined the two halves.
- *
- * Here only the client boundary is mocked. The real query path classifies the
- * failure and the real gate decides, so a regression in either half fails a
- * test.
- */
+/** Exercises the blocking fallback gate through the real query path. */
 
 const mocks = vi.hoisted(() => ({
   getWarehouse: vi.fn(),
@@ -57,7 +44,7 @@ const { generateFromEntryPoint, TypegenFatalError } = await import("../index");
 const testDir = path.join(__dirname, "__output_unreachable_gate__");
 const queryFolder = path.join(testDir, "queries");
 const outFile = path.join(testDir, "generated", "analytics.d.ts");
-const metricFile = path.join(testDir, "generated", "metric-views.d.ts");
+const metricFile = path.join(testDir, "generated", "metric-views.ts");
 
 /** DNS-style transport failure: what a CI runner without warehouse egress sees. */
 function unreachableError() {
@@ -94,12 +81,9 @@ describe("--wait gate: environmental query failures (real query path)", () => {
       (e: unknown) => e,
     );
 
-    // The regression this guards: the run used to resolve, write nothing, and
-    // exit 0 — leaving the build to fail later with no usable diagnostic.
     expect(err).toBeInstanceOf(TypegenFatalError);
     expect((err as Error).message).toContain("generate-types --wait");
     expect(fs.existsSync(outFile)).toBe(false);
-    // Preflight failed, so no DESCRIBE was attempted.
     expect(mocks.executeStatement).not.toHaveBeenCalled();
   });
 
@@ -125,10 +109,7 @@ describe("--wait gate: environmental query failures (real query path)", () => {
 
       expect(warnings).toContain("AppKit typegen: using committed types");
       expect(warnings).toContain("wh-unreachable");
-      // The label the query path now supplies; it was unreachable in practice
-      // while connectivity failures reported no cause at all.
       expect(warnings).toContain("warehouse unreachable");
-      // Anti-clobber: the degraded result must not overwrite what was committed.
       expect(fs.readFileSync(outFile, "utf-8")).toBe(committed);
     } finally {
       warnSpy.mockRestore();
@@ -210,7 +191,6 @@ describe("--wait gate: environmental query failures (real query path)", () => {
   test("non-blocking mode stays silent and writes degraded types", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      // Must not throw: the non-blocking default never fails on warehouse state.
       await generateFromEntryPoint({
         outFile,
         queryFolder,
@@ -224,7 +204,6 @@ describe("--wait gate: environmental query failures (real query path)", () => {
         .filter((s) => s.includes("using committed types"));
 
       expect(gateWarnings).toEqual([]);
-      // Degraded types are written here — the gate is blocking-only.
       expect(fs.existsSync(outFile)).toBe(true);
       expect(fs.readFileSync(outFile, "utf-8")).toContain("result: unknown");
     } finally {

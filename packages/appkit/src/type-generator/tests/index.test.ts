@@ -292,8 +292,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   // not passed explicitly, so these tests only pass `queryFolder` below.
   const metricViewsFolder = path.join(metricsDir, "metric-views");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
-  // Default: the metric .d.ts is a sibling of `outFile`.
-  const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
+  // Default: the metric .ts is a sibling of `outFile`.
+  const metricFile = path.join(metricsDir, "generated", "metric-views.ts");
 
   const describeResponse: DatabricksStatementExecutionResponse = {
     statement_id: "stmt-mock",
@@ -326,7 +326,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   };
 
   const writeCommittedMetricTypes = () => {
-    const committed = "// committed metric types\n";
+    // Mirrors a real committed metric-views.ts: the augmentation plus the
+    // runtime const, so a preserved fallback stays a loadable module.
+    const committed =
+      "// committed metric types\nexport const metricViewsMetadata = {};\n";
     fs.mkdirSync(path.dirname(metricFile), { recursive: true });
     fs.writeFileSync(metricFile, committed, "utf-8");
     return committed;
@@ -349,7 +352,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric-views.d.ts when definitions.json exists", async () => {
+  test("writes metric-views.ts when definitions.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -366,9 +369,18 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain('"total_revenue": number');
     expect(declarations).toContain('"region": string');
-    // Semantic metadata (SQL type) rides in the .d.ts type-level `metadata`
+    // Semantic metadata (SQL type) rides in the type-level `metadata`
     // block — the sole carrier now that the JSON bundle is gone.
     expect(declarations).toContain('"DECIMAL(38,2)"');
+    // The generated file is a real `.ts`, so it also carries the runtime
+    // `metricViewsMetadata` const (value twin of the type-level metadata).
+    expect(declarations).toContain("export const metricViewsMetadata");
+    expect(declarations).toContain("as const");
+    // ...and a type-only import, never a runtime side-effect one.
+    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
+    expect(declarations).toContain(
+      'import type {} from "@databricks/appkit-ui/react"',
+    );
   });
 
   test("emits no metric artifacts and no errors when definitions.json is absent", async () => {
@@ -471,7 +483,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(declarations).toContain("timeGrains: string");
   });
 
-  // ── Non-blocking warehouse gate: metric DESCRIBEs honor the #406 contract ──
+  // ── Non-blocking warehouse gate: metric DESCRIBEs are skipped when the
+  // warehouse isn't running (degraded types still emitted) ──
 
   test("non-blocking + warehouse not running: skips all DESCRIBEs but still emits degraded artifacts", async () => {
     fs.writeFileSync(
@@ -660,7 +673,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
 
     expect(error).toBeInstanceOf(TypegenFatalError);
-    expect((error as Error).message).toContain("metric-views.d.ts");
+    expect((error as Error).message).toContain("metric-views.ts");
     expect(fs.existsSync(outFile)).toBe(true);
     expect(fs.existsSync(metricFile)).toBe(false);
   });
@@ -1129,7 +1142,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
   // derives it from queryFolder when not passed explicitly.
   const metricViewsFolder = path.join(cacheTestDir, "metric-views");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
+  const metricFile = path.join(cacheTestDir, "generated", "metric-views.ts");
 
   const describeResponseFor = (
     measure: string,
@@ -1859,11 +1872,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
   const queryFolder = path.join(antiClobberDir, "queries");
   const metricViewsFolder = path.join(antiClobberDir, "metric-views");
   const outFile = path.join(antiClobberDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(
-    antiClobberDir,
-    "generated",
-    "metric-views.d.ts",
-  );
+  const metricFile = path.join(antiClobberDir, "generated", "metric-views.ts");
 
   const degradedQuerySchema = (name: string) => ({
     name,
@@ -1966,7 +1975,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(content).toContain("offline_query");
   });
 
-  test("blocking mode + degraded metric (no failures): no write to metric-views.d.ts", async () => {
+  test("blocking mode + degraded metric (no failures): no write to metric-views.ts", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2026,7 +2035,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(fs.existsSync(outFile)).toBe(false);
   });
 
-  test("blocking mode + non-degraded metric: writes to metric-views.d.ts normally", async () => {
+  test("blocking mode + non-degraded metric: writes to metric-views.ts normally", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2074,7 +2083,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(content).toContain('"total_revenue": number');
   });
 
-  test("non-blocking mode + degraded metric: writes to metric-views.d.ts anyway", async () => {
+  test("non-blocking mode + degraded metric: writes to metric-views.ts anyway", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2166,11 +2175,7 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
   const queryFolder = path.join(warningTestDir, "queries");
   const metricViewsFolder = path.join(warningTestDir, "metric-views");
   const outFile = path.join(warningTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(
-    warningTestDir,
-    "generated",
-    "metric-views.d.ts",
-  );
+  const metricFile = path.join(warningTestDir, "generated", "metric-views.ts");
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2390,6 +2395,55 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
     }
   });
 
+  test("metric config + missing metric-views.ts + environmental failure → crash", async () => {
+    fs.writeFileSync(
+      path.join(metricViewsFolder, "definitions.json"),
+      JSON.stringify({
+        metricViews: { revenue: { source: "demo.sales.revenue" } },
+      }),
+    );
+    expect(fs.existsSync(outFile)).toBe(true);
+    expect(fs.existsSync(metricFile)).toBe(false);
+
+    mocks.getWarehouseState.mockRejectedValue(
+      Object.assign(new Error("PERMISSION_DENIED: cannot read warehouse"), {
+        status: 403,
+      }),
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const error = await generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-metric-missing",
+        mode: "blocking",
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+
+      expect(error).toBeInstanceOf(TypegenFatalError);
+      const message = stripAnsi((error as Error).message);
+      // Per-surface gate: only the metric surface failed, so the remedy names
+      // metric-views.ts specifically rather than the whole artifact set.
+      expect(message).toContain(
+        "required committed type artifact is missing: metric-views.ts",
+      );
+      expect(message).toContain("commit the generated type files");
+      expect(
+        warnSpy.mock.calls
+          .flat()
+          .map(String)
+          .some((value) =>
+            value.includes("AppKit typegen: using committed types"),
+          ),
+      ).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test("warning output is ANSI-free (plain text for CI log parsing)", async () => {
     // Query path returns environmental failure
     mocks.generateQueriesFromDescribe.mockResolvedValue({
@@ -2489,7 +2543,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cacheFile.contents = undefined;
-    // Clean slate: no generated/ dir, so no committed analytics.d.ts / metric-views.d.ts.
+    // Clean slate: no generated/ dir, so no committed analytics.d.ts / metric-views.ts.
     fs.rmSync(gateDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
     // A degraded query in blocking mode → write suppressed → nothing on disk.
@@ -2517,7 +2571,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
       (e: unknown) => e,
     );
 
-    // Core safety path: no committed .d.ts to fall back on → build must fail.
+    // Core safety path: no committed type file to fall back on → build must fail.
     expect(err).toBeInstanceOf(TypegenFatalError);
     const message = stripAnsi((err as Error).message);
     expect(message).toContain("generate-types --wait");
@@ -2527,7 +2581,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
   });
 
   test("blocking + environmental failure + only serving.d.ts present → still crashes (serving excluded from gate)", async () => {
-    // Pre-create ONLY a serving.d.ts sibling. analytics.d.ts / metric-views.d.ts stay absent.
+    // Pre-create ONLY a serving.d.ts sibling. analytics.d.ts / metric-views.ts stay absent.
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(
       path.join(path.dirname(outFile), "serving.d.ts"),
