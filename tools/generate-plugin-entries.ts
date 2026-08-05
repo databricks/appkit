@@ -14,7 +14,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { kebabToCamel } from "../packages/shared/src/naming";
+import {
+  kebabToCamel,
+  PLUGIN_NAME_PATTERN,
+} from "../packages/shared/src/naming";
 import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,15 +48,14 @@ interface PluginInfo {
  * quotes, semicolons, braces, backslashes, and newlines, so neither can break
  * out of the string/identifier context it lands in.
  */
-const SCHEMA_NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
 const FOLDER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /**
  * The barrel exports each plugin under a JS-identifier binding
- * (`export { <binding> } from "./<folder>";`). A manifest `name` may be
- * kebab-case per the schema, but the binding must be a valid identifier, so it
- * is derived via kebab->camelCase. This pattern is the final assertion that the
- * derived binding is safe to interpolate unescaped.
+ * (`export { <binding> } from "./<folder>";`). The camelCase `name` is the
+ * binding; `kebabToCamel` is a no-op for it but normalizes the kebab folder
+ * name. This pattern is the final assertion that the derived binding is safe
+ * to interpolate unescaped.
  */
 const JS_IDENTIFIER_PATTERN = /^[a-z][a-zA-Z0-9_]*$/;
 
@@ -63,7 +65,7 @@ function validateSchemaName(
   manifestPath: string,
 ): void {
   const pattern =
-    kind === "manifest name" ? SCHEMA_NAME_PATTERN : FOLDER_NAME_PATTERN;
+    kind === "manifest name" ? PLUGIN_NAME_PATTERN : FOLDER_NAME_PATTERN;
   if (!pattern.test(value)) {
     throw new Error(
       `${kind} "${value}" in ${manifestPath} doesn't match ${pattern.source}. Run \`appkit plugin validate\` to catch this earlier.`,

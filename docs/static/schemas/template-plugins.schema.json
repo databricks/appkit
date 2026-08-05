@@ -23,7 +23,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "pattern": "^[a-z][a-zA-Z0-9-]*$",
+            "pattern": "^[a-z][a-zA-Z0-9]*$",
             "description": "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch)."
           },
           "displayName": {

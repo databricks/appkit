@@ -13,6 +13,7 @@ import {
   text,
 } from "@clack/prompts";
 import { Command, Option } from "commander";
+import { PLUGIN_NAME_PATTERN } from "../../../../naming";
 import { promptOneResource } from "./prompt-resource";
 import {
   DEFAULT_PERMISSION_BY_TYPE,
@@ -25,7 +26,6 @@ import {
 import { resolveTargetDir, scaffoldPlugin } from "./scaffold";
 import type { CreateAnswers, Placement, SelectedResource } from "./types";
 
-const NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
 const DEFAULT_VERSION = "0.1.0";
 const VALID_PLACEMENTS: Placement[] = ["in-repo", "isolated"];
 const REQUIRED_FLAGS = ["placement", "path", "name", "description"] as const;
@@ -194,9 +194,9 @@ function runNonInteractive(opts: CreateOptions): void {
   }
 
   const name = opts.name as string;
-  if (!NAME_PATTERN.test(name)) {
+  if (!PLUGIN_NAME_PATTERN.test(name)) {
     console.error(
-      "Error: --name must be lowercase, start with a letter, and use only letters, numbers, and hyphens.",
+      "Error: --name must start with a lowercase letter and be camelCase (letters and numbers only, e.g. aiSearch).",
     );
     process.exit(1);
   }
@@ -289,11 +289,11 @@ async function runInteractive(): Promise<void> {
 
     const name = await text({
       message: "Plugin name (id)",
-      placeholder: "my-plugin",
+      placeholder: "aiSearch",
       validate(value) {
         if (!value?.trim()) return "Name is required.";
-        if (!NAME_PATTERN.test(value as string)) {
-          return "Must be lowercase, start with a letter, and use only letters, numbers, and hyphens.";
+        if (!PLUGIN_NAME_PATTERN.test(value as string)) {
+          return "Must start with a lowercase letter and be camelCase (letters and numbers only, e.g. aiSearch).";
         }
         return undefined;
       },

@@ -46,7 +46,7 @@ const TEMPLATE_MANIFEST_JSON = {
 const PLUGIN_MANIFEST_JSON = {
   $schema:
     "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
-  name: "my-feature",
+  name: "myFeature",
   displayName: "My Feature",
   description: "A test plugin",
   resources: { required: [], optional: [] },
@@ -144,7 +144,7 @@ describe("list", () => {
         plugins: {
           ...TEMPLATE_MANIFEST_JSON.plugins,
           beta: {
-            name: "beta-plugin",
+            name: "betaPlugin",
             displayName: "Beta Plugin",
             package: "@databricks/appkit",
             stability: "beta",
@@ -156,7 +156,7 @@ describe("list", () => {
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
       const rows = listFromManifestFile(manifestPath);
-      const betaRow = rows.find((r) => r.name === "beta-plugin");
+      const betaRow = rows.find((r) => r.name === "betaPlugin");
       const gaRow = rows.find((r) => r.name === "server");
 
       expect(betaRow?.stability).toBe("beta");
@@ -178,7 +178,7 @@ describe("list", () => {
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
 
       expect(rows).toHaveLength(1);
-      expect(rows[0].name).toBe("my-feature");
+      expect(rows[0].name).toBe("myFeature");
       expect(rows[0].displayName).toBe("My Feature");
       expect(rows[0].package).toContain("my-feature");
       expect(rows[0].required).toBe(0);
@@ -212,7 +212,7 @@ describe("list", () => {
 
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
       expect(rows).toHaveLength(1);
-      expect(rows[0].name).toBe("my-feature");
+      expect(rows[0].name).toBe("myFeature");
     });
 
     it("reads stability from manifest in directory scan", async () => {
@@ -224,7 +224,7 @@ describe("list", () => {
         path.join(pluginDir, "manifest.json"),
         JSON.stringify({
           ...PLUGIN_MANIFEST_JSON,
-          name: "beta-feature",
+          name: "betaFeature",
           stability: "beta",
         }),
       );
@@ -277,7 +277,7 @@ describe("list", () => {
 
       const rows = await listFromDirectory(tmp, path.dirname(tmp), true);
       expect(rows).toHaveLength(1);
-      expect(rows[0].name).toBe("my-feature");
+      expect(rows[0].name).toBe("myFeature");
     });
 
     it("loads JS manifests from trusted node_modules packages by default", async () => {
@@ -298,7 +298,7 @@ describe("list", () => {
 
       const rows = await listFromDirectory(tmp, tmp);
       expect(rows).toHaveLength(1);
-      expect(rows[0].name).toBe("my-feature");
+      expect(rows[0].name).toBe("myFeature");
     });
 
     it("does not load JS manifests from untrusted node_modules packages by default", async () => {

@@ -16,19 +16,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { camelToKebab } from "../packages/shared/src/naming";
+import {
+  camelToKebab,
+  PLUGIN_NAME_PATTERN,
+} from "../packages/shared/src/naming";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
 const PLUGINS_DIR = path.join(REPO_ROOT, "packages/appkit/src/plugins");
 const DOCS_DIR = path.join(REPO_ROOT, "docs/docs/plugins");
-
-/**
- * Same as `plugin-manifest.schema.json` `name` pattern (camelCase); keeps
- * `path.join` targets under `docs/docs/plugins` (defense in depth vs path
- * traversal in `name`).
- */
-const SCHEMA_NAME_PATTERN = /^[a-z][a-zA-Z0-9-]*$/;
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.
@@ -116,9 +112,9 @@ function readPluginInfos(): PluginInfo[] {
       continue; // not a valid plugin manifest, skip silently
     }
 
-    if (!SCHEMA_NAME_PATTERN.test(manifest.name)) {
+    if (!PLUGIN_NAME_PATTERN.test(manifest.name)) {
       throw new Error(
-        `Manifest name "${manifest.name}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$.`,
+        `Manifest name "${manifest.name}" in ${manifestPath} doesn't match the plugin manifest schema pattern ${PLUGIN_NAME_PATTERN.source}.`,
       );
     }
 

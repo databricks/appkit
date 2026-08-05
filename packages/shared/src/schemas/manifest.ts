@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+import { PLUGIN_NAME_PATTERN } from "../naming";
 
 // ── Resource type + per-type permission enums ────────────────────────────
 
@@ -672,7 +673,7 @@ export const pluginManifestSchema = z
       .describe("Reference to the JSON Schema for validation"),
     name: z
       .string()
-      .regex(/^[a-z][a-zA-Z0-9-]*$/)
+      .regex(PLUGIN_NAME_PATTERN)
       .describe(
         "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
@@ -908,7 +909,7 @@ export const templatePluginSchema = z
   .object({
     name: z
       .string()
-      .regex(/^[a-z][a-zA-Z0-9-]*$/)
+      .regex(PLUGIN_NAME_PATTERN)
       .describe(
         "Plugin identifier and JS binding. Must start with a lowercase letter; camelCase for multi-word names (e.g. aiSearch).",
       ),
