@@ -71,11 +71,19 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     }
 
     // Development convenience: fill in `columns` for any index that omits them
-    // by reading the index's source table. Never runs in production, where a
-    // missing `columns` surfaces as a normal query error — so this can't mask a
-    // config gap that would fail once deployed.
+    // by reading the index's source table. In production there's no discovery;
+    // an index with no columns can never query (the VS API requires `columns`),
+    // so fail fast at boot instead of 500ing every request.
     if (process.env.NODE_ENV === "development") {
       await this._autoDiscoverColumns();
+    } else {
+      for (const [alias, idx] of Object.entries(this.config.indexes ?? {})) {
+        if (!idx.columns || idx.columns.length === 0) {
+          throw new Error(
+            `Index "${alias}" has no columns configured. Vector Search queries require "columns"; set them explicitly (auto-discovered only in development).`,
+          );
+        }
+      }
     }
   }
 
@@ -85,6 +93,11 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
    * Best-effort: any failure (no auth, index not ready, non-Delta-Sync index)
    * is logged and skipped rather than thrown. Emits one warning banner listing
    * what was auto-filled, since these must be set explicitly before production.
+   *
+   * Uses all source-table columns (minus embedding vectors). Indexes with a
+   * partial `columns_to_sync` may include columns the index can't return; since
+   * this is a dev-only convenience (prod requires explicit `columns`), the
+   * discovered list is a starting point to trim, not an authoritative set.
    */
   private async _autoDiscoverColumns(): Promise<void> {
     const discovered: Record<string, string[]> = {};
@@ -167,20 +180,29 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           return;
         }
 
-        try {
-          const prepared = await this._prepareQuery(body, indexConfig);
-          const plugin =
-            indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+        // Configured `columns` are the projection allowlist over HTTP: drop
+        // any client-supplied `columns` so a caller can't read fields the app
+        // didn't opt to expose (routes run as the service principal by
+        // default). Programmatic `query()` callers are trusted and keep the
+        // override.
+        const { columns: _clientColumns, ...safeBody } = body;
+        const plugin =
+          indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+        const queryType =
+          safeBody.queryType ?? indexConfig.queryType ?? "hybrid";
 
-          const result = await plugin.execute(
-            async (signal) =>
-              this.connector.query(
-                getWorkspaceClient(),
-                { indexName: indexConfig.indexName, ...prepared },
-                signal,
-              ),
-            querySettings,
-          );
+        try {
+          // Prepare inside execute so query preparation — notably a
+          // self-managed `embeddingFn` — runs in the same OBO context as the
+          // VS call, not as the service principal.
+          const result = await plugin.execute(async (signal) => {
+            const prepared = await this._prepareQuery(safeBody, indexConfig);
+            return this.connector.query(
+              getWorkspaceClient(),
+              { indexName: indexConfig.indexName, ...prepared },
+              signal,
+            );
+          }, querySettings);
 
           if (!result.ok) {
             res
@@ -188,7 +210,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
               .json({ error: result.message, plugin: this.name });
             return;
           }
-          res.json(this._parseResponse(result.data, prepared.queryType));
+          res.json(this._parseResponse(result.data, queryType));
         } catch (error) {
           this._handleError(res, error, "Query failed");
         }
@@ -225,7 +247,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           return;
         }
 
-        const { pageToken } = req.body;
+        const { pageToken, queryType } = req.body;
         if (!pageToken) {
           res.status(400).json({
             error: "pageToken is required",
@@ -233,6 +255,9 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           });
           return;
         }
+        // Echo the original query's queryType so paged responses stay
+        // consistent with page 1; fall back to the index default.
+        const pageQueryType = queryType ?? indexConfig.queryType ?? "hybrid";
 
         try {
           const plugin =
@@ -258,9 +283,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
               .json({ error: result.message, plugin: this.name });
             return;
           }
-          res.json(
-            this._parseResponse(result.data, indexConfig.queryType ?? "hybrid"),
-          );
+          res.json(this._parseResponse(result.data, pageQueryType));
         } catch (error) {
           this._handleError(res, error, "Next-page query failed");
         }
@@ -313,6 +336,10 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
   /**
    * Programmatic query API — available as `appkit.aiSearch.query()`.
    * When called through `asUser(req)`, executes with the user's credentials.
+   *
+   * @remarks `T` is an unchecked assertion on each result's `data`: rows are
+   * built from the index's returned columns and cast to `T` with no runtime
+   * validation, so a mismatched `T` won't be caught here.
    */
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     alias: string,

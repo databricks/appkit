@@ -108,6 +108,17 @@ export function useAiSearchQuery<
     [alias, aliasError],
   );
 
+  // Reset when the target alias changes: abort any in-flight request (its
+  // result would otherwise land under the new alias) and clear stale
+  // data/error, re-syncing error to the new alias's validation state.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `alias` is needed — switching between two valid aliases leaves `aliasError` null, so keying on it alone would skip the reset.
+  useEffect(() => {
+    abortControllerRef.current?.abort();
+    setData(null);
+    setLoading(false);
+    setError(aliasError);
+  }, [alias, aliasError]);
+
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
   return { search, data, loading, error, alias, indexes };

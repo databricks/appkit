@@ -8,7 +8,9 @@ export interface IAiSearchConfig extends BasePluginConfig {
 export interface IndexConfig {
   /**
    * Three-level UC name: catalog.schema.index_name. Defaults to the
-   * `DATABRICKS_VS_INDEX_NAME` env var when omitted.
+   * `DATABRICKS_VS_INDEX_NAME` env var when omitted — so multiple aliases that
+   * omit it all resolve to that same physical index. Set it explicitly per
+   * alias when they should point at distinct indexes.
    */
   indexName?: string;
   /**

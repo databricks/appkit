@@ -70,6 +70,13 @@ aiSearch({
 });
 ```
 
+:::note
+An alias without its own `indexName` falls back to the `DATABRICKS_VS_INDEX_NAME`
+env var. If several aliases omit `indexName`, they all resolve to that one
+physical index (with their own per-alias `columns`, `queryType`, etc.). Give
+each alias an explicit `indexName` when you mean distinct indexes.
+:::
+
 ## IndexConfig
 
 | Field | Type | Default | Description |

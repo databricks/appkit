@@ -154,4 +154,46 @@ describe("useAiSearchQuery", () => {
       expect(result.current.loading).toBe(false);
     });
   });
+
+  test("clears stale data when the alias changes", async () => {
+    mockUsePluginClientConfig.mockReturnValue({
+      indexes: [
+        { alias: "demo", queryType: "hybrid", pagination: false },
+        { alias: "docs", queryType: "ann", pagination: false },
+      ],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ alias }) => useAiSearchQuery({ alias }),
+      { initialProps: { alias: "demo" } },
+    );
+
+    act(() => {
+      void result.current.search("hello");
+    });
+    await waitFor(() => expect(result.current.data).toEqual(RESPONSE));
+
+    // Switch index: prior results must not linger under the new alias.
+    rerender({ alias: "docs" });
+    expect(result.current.alias).toBe("docs");
+    expect(result.current.data).toBeNull();
+  });
+
+  test("re-syncs the error when the alias becomes unknown", async () => {
+    mockUsePluginClientConfig.mockReturnValue({
+      indexes: [{ alias: "demo", queryType: "hybrid", pagination: false }],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ alias }) => useAiSearchQuery({ alias }),
+      { initialProps: { alias: "demo" } },
+    );
+
+    expect(result.current.error).toBeNull();
+
+    rerender({ alias: "nope" });
+    expect(result.current.error).toBe(
+      'Unknown AI Search index "nope". Available: demo',
+    );
+  });
 });

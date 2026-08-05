@@ -48,7 +48,9 @@ export class AiSearchConnector {
     if (params.queryText) body.query_text = params.queryText;
     if (params.queryVector) body.query_vector = params.queryVector;
     if (params.filters && Object.keys(params.filters).length > 0) {
-      body.filters = params.filters;
+      // The VS query API expects a JSON-encoded string under `filters_json`;
+      // an object under `filters` is silently ignored (query runs unfiltered).
+      body.filters_json = JSON.stringify(params.filters);
     }
     if (params.reranker) {
       body.reranker = {

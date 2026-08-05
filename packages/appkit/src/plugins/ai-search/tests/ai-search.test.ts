@@ -4,6 +4,7 @@ import {
   createMockRouter,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Context } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
@@ -171,6 +172,34 @@ describe("AiSearchPlugin", () => {
       });
       await expect(plugin.setup()).resolves.not.toThrow();
     });
+
+    it("throws outside development when an index has no columns", async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new AiSearchPlugin({
+          indexes: { docs: { indexName: "cat.sch.idx" } },
+        });
+        await expect(plugin.setup()).rejects.toThrow(
+          'Index "docs" has no columns configured',
+        );
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+
+    it("does not throw outside development when columns are configured", async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new AiSearchPlugin({
+          indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
+        });
+        await expect(plugin.setup()).resolves.not.toThrow();
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
   });
 
   describe("setup() column auto-discovery", () => {
@@ -220,8 +249,10 @@ describe("AiSearchPlugin", () => {
     it("does not discover columns outside development", async () => {
       process.env.NODE_ENV = "production";
       mockRequest.mockImplementation(routeByPath);
+      // Columns set so the prod no-columns guard doesn't fire; this test only
+      // asserts discovery doesn't run outside development.
       const plugin = new AiSearchPlugin({
-        indexes: { docs: { indexName: "cat.sch.idx" } },
+        indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
 
       await plugin.setup();
@@ -335,7 +366,7 @@ describe("AiSearchPlugin", () => {
           path: "/api/2.0/vector-search/indexes/cat.sch.idx/query",
         }),
         // 2nd arg is the SDK Context bridging the execution's abort signal.
-        expect.anything(),
+        expect.any(Context),
       );
 
       const callBody = mockRequest.mock.calls[0][0].payload;
@@ -374,7 +405,12 @@ describe("AiSearchPlugin", () => {
       });
 
       const callBody = mockRequest.mock.calls[0][0].payload;
-      expect(callBody.filters).toEqual({ category: ["books"] });
+      // VS expects a JSON-encoded string under `filters_json`; a raw object
+      // under `filters` is silently ignored by the API.
+      expect(callBody.filters).toBeUndefined();
+      expect(callBody.filters_json).toBe(
+        JSON.stringify({ category: ["books"] }),
+      );
     });
 
     it("includes reranker config when enabled on index", async () => {
@@ -604,10 +640,11 @@ describe("AiSearchPlugin", () => {
     });
 
     it("skips the reranker when enabled but no columns are resolved", async () => {
+      // Query-time behavior only; skip setup() (its prod guard rejects the
+      // deliberately column-less config used to exercise this path).
       const plugin = new AiSearchPlugin({
         indexes: { test: { indexName: "cat.sch.idx", reranker: true } },
       });
-      await plugin.setup();
       await plugin.query("test", { queryText: "q" });
 
       const callBody = mockRequest.mock.calls[0][0].payload;
@@ -715,9 +752,29 @@ describe("AiSearchPlugin", () => {
         );
       });
 
-      it("500s (via _handleError) when query preparation throws", async () => {
-        // A throw outside execute() (failing embeddingFn) hits _handleError;
-        // connector failures instead surface as a non-ok result.
+      it("ignores a client-supplied columns override and uses the configured projection", async () => {
+        const plugin = makePlugin();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const res = createMockResponse();
+        await getHandler("POST", "/:alias/query")(
+          createMockRequest({
+            params: { alias: "demo" },
+            body: { queryText: "hi", columns: ["ssn", "internal_notes"] },
+          }),
+          res,
+        );
+
+        // demo is configured with columns ["id", "title"]; the request's
+        // columns must not widen the projection.
+        const callBody = mockRequest.mock.calls[0][0].payload;
+        expect(callBody.columns).toEqual(["id", "title"]);
+      });
+
+      it("500s when query preparation throws", async () => {
+        // Query prep (embeddingFn) runs inside execute() so it shares the OBO
+        // context; a failure surfaces as a non-ok result → 500.
         const plugin = new AiSearchPlugin({
           indexes: {
             demo: {
@@ -795,7 +852,7 @@ describe("AiSearchPlugin", () => {
             path: "/api/2.0/vector-search/indexes/cat.sch.paged/query-next-page",
             payload: { endpoint_name: "ep", page_token: "t" },
           }),
-          expect.anything(),
+          expect.any(Context),
         );
         expect(res.json).toHaveBeenCalled();
       });
