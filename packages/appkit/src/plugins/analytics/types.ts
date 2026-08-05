@@ -1,6 +1,6 @@
 import type {
   BasePluginConfig,
-  MetricColumnMeta,
+  MetricViewColumnDisplay,
   MetricViewsMetadata,
 } from "shared";
 
@@ -76,7 +76,7 @@ export type AnalyticsStreamMessage =
       data?: unknown[];
       status?: unknown;
       statement_id?: string;
-      metadata?: Record<string, MetricColumnMeta>;
+      metadata?: Record<string, MetricViewColumnDisplay>;
     }
   | {
       type: "arrow";

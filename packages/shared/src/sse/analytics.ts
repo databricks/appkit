@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { MetricColumnMeta } from "../metric-metadata";
+import type { MetricViewColumnDisplay } from "../metric-metadata";
 
 /**
  * Wire protocol for analytics SSE messages emitted by `/api/analytics/query`.
@@ -54,15 +54,15 @@ export const AnalyticsResultMessage = z.object({
  * `z.record(z.string(), z.unknown())` for `metadata`) to keep client
  * validation cheap; this interface narrows `data` to
  * `Record<string, unknown>[]` and `metadata` to
- * `Record<string, MetricColumnMeta>` so consumers don't have to cast at every
- * call site. If you add a field to the Zod schema, add it here too.
+ * `Record<string, MetricViewColumnDisplay>` so consumers don't have to cast
+ * at every call site. If you add a field to the Zod schema, add it here too.
  */
 export interface AnalyticsResultMessage {
   type: "result";
   data?: Record<string, unknown>[];
   status?: unknown;
   statement_id?: string;
-  metadata?: Record<string, MetricColumnMeta>;
+  metadata?: Record<string, MetricViewColumnDisplay>;
 }
 
 /**
@@ -85,7 +85,7 @@ export function makeResultMessage(
   extras: {
     status?: unknown;
     statement_id?: string;
-    metadata?: Record<string, MetricColumnMeta>;
+    metadata?: Record<string, MetricViewColumnDisplay>;
   } = {},
 ): AnalyticsResultMessage {
   return { type: "result", data, ...extras };

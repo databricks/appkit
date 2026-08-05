@@ -3,7 +3,7 @@
  * YAML 1.1 `display_name`/`format` attributes plus the SQL type. Loose enough
  * that an `as const` generated literal assigns to it.
  */
-export interface MetricColumnMeta {
+export interface MetricViewColumnDisplay {
   type: string;
   display_name?: string;
   format?: string;
@@ -18,7 +18,7 @@ export interface MetricColumnMeta {
 export type MetricViewsMetadata = Record<
   string,
   {
-    measures: Record<string, MetricColumnMeta>;
-    dimensions: Record<string, MetricColumnMeta>;
+    measures: Record<string, MetricViewColumnDisplay>;
+    dimensions: Record<string, MetricViewColumnDisplay>;
   }
 >;

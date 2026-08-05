@@ -1,4 +1,4 @@
-import type { MetricColumnMeta, MetricViewsMetadata } from "shared";
+import type { MetricViewColumnDisplay, MetricViewsMetadata } from "shared";
 
 /**
  * Flatten the injected {@link MetricViewsMetadata} for `key` into a single
@@ -22,13 +22,13 @@ export function selectMetricMetadata(
   key: string,
   measures: string[],
   dimensions: string[] | undefined,
-): Record<string, MetricColumnMeta> | undefined {
+): Record<string, MetricViewColumnDisplay> | undefined {
   if (!all || !Object.hasOwn(all, key)) {
     return undefined;
   }
 
   const entry = all[key];
-  const slice: Record<string, MetricColumnMeta> = {};
+  const slice: Record<string, MetricViewColumnDisplay> = {};
 
   for (const measure of measures) {
     if (Object.hasOwn(entry.measures, measure)) {

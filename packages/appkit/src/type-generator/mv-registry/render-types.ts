@@ -171,8 +171,9 @@ ${inner};
 }
 
 // Render one column's runtime metadata literal — the value-side twin of a
-// `renderMetadataMap` entry, minus `time_grain` (not part of MetricColumnMeta).
-// Strings go through JSON.stringify to stay escape-safe.
+// `renderMetadataMap` entry, minus `time_grain` (not part of
+// MetricViewColumnDisplay). Strings go through JSON.stringify to stay
+// escape-safe.
 function renderMetadataValueField(col: MetricColumnMetadata): string {
   const fields = metadataFields(col).map(
     ([name, value]) => `${name}: ${value}`,
