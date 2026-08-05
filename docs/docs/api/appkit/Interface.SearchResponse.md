@@ -27,7 +27,7 @@ queryTimeMs: number;
 ### queryType
 
 ```ts
-queryType: "ann" | "hybrid" | "full_text";
+queryType: SearchQueryType;
 ```
 
 ***

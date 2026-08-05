@@ -94,7 +94,7 @@ Enable cursor pagination
 ### queryType?
 
 ```ts
-optional queryType: "ann" | "hybrid" | "full_text";
+optional queryType: SearchQueryType;
 ```
 
 Default search mode
