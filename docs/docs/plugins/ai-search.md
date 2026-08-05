@@ -259,7 +259,7 @@ Pass optional overrides as a second argument to `query` to adjust `numResults` o
 `useAiSearchQuery` reads the configured indexes from the plugin's client config and posts to the right `/:alias/query` route, so the UI never hardcodes an alias. With one index configured it needs no arguments; pass `{ alias }` to target a specific one.
 
 ```tsx
-import { useAiSearchQuery } from "@databricks/appkit-ui/react";
+import { useAiSearchQuery } from "@databricks/appkit-ui/react/beta";
 
 function Search() {
   const { search, data, loading, error } = useAiSearchQuery();

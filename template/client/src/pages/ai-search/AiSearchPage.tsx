@@ -7,8 +7,8 @@ import {
   CardTitle,
   Input,
   Skeleton,
-  useAiSearchQuery,
 } from '@databricks/appkit-ui/react';
+import { useAiSearchQuery } from '@databricks/appkit-ui/react/beta';
 import { Search } from 'lucide-react';
 import { useState } from 'react';
 
