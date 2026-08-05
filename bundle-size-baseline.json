@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 832477,
-        "unpacked": 2907016
+        "packed": 847586,
+        "unpacked": 2965411
       },
       "dist": {
         "total": {
-          "raw": 2893359,
-          "gzip": 969930
+          "raw": 2951754,
+          "gzip": 990708
         },
         "js": {
-          "raw": 855017,
-          "gzip": 297961
+          "raw": 875276,
+          "gzip": 305057
         },
         "types": {
-          "raw": 314869,
-          "gzip": 108257
+          "raw": 321428,
+          "gzip": 111102
         },
         "maps": {
-          "raw": 1712678,
-          "gzip": 559894
+          "raw": 1744255,
+          "gzip": 570731
         },
         "css": {
           "raw": 0,
@@ -31,22 +31,22 @@
           "raw": 10795,
           "gzip": 3818
         },
-        "fileCount": 579
+        "fileCount": 597
       },
       "entries": [
         {
           "id": ".",
-          "gzip": 91935,
+          "gzip": 91980,
           "composition": {
-            "initialGzip": 89361,
+            "initialGzip": 89406,
             "lazyGzip": 2574,
-            "totalGzip": 91935,
-            "own": 291901,
+            "totalGzip": 91980,
+            "own": 292023,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 85263,
+                "gzip": 85308,
                 "kind": "initial"
               },
               {
@@ -64,32 +64,32 @@
         },
         {
           "id": "./beta",
-          "gzip": 46071,
+          "gzip": 49175,
           "composition": {
-            "initialGzip": 45613,
-            "lazyGzip": 458,
-            "totalGzip": 46071,
-            "own": 132334,
+            "initialGzip": 48716,
+            "lazyGzip": 459,
+            "totalGzip": 49175,
+            "own": 143115,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 29242,
+                "gzip": 32333,
                 "kind": "initial"
               },
               {
                 "label": "stream-manager.js",
-                "gzip": 5932,
+                "gzip": 5933,
                 "kind": "initial"
               },
               {
                 "label": "wide-event-emitter.js",
-                "gzip": 3235,
+                "gzip": 3247,
                 "kind": "initial"
               },
               {
                 "label": "databricks.js",
-                "gzip": 3102,
+                "gzip": 3103,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1347,
+                "gzip": 1346,
                 "kind": "initial"
               },
               {
@@ -109,12 +109,12 @@
               },
               {
                 "label": "client-options.js",
-                "gzip": 220,
+                "gzip": 219,
                 "kind": "initial"
               },
               {
                 "label": "supervisor-api.js",
-                "gzip": 193,
+                "gzip": 194,
                 "kind": "lazy"
               },
               {
@@ -153,25 +153,25 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 312588,
-        "unpacked": 1301636
+        "packed": 316122,
+        "unpacked": 1314670
       },
       "dist": {
         "total": {
-          "raw": 1297690,
-          "gzip": 431770
+          "raw": 1310724,
+          "gzip": 436932
         },
         "js": {
-          "raw": 368202,
-          "gzip": 122338
+          "raw": 370879,
+          "gzip": 123476
         },
         "types": {
-          "raw": 210406,
-          "gzip": 76270
+          "raw": 213530,
+          "gzip": 77458
         },
         "maps": {
-          "raw": 702222,
-          "gzip": 229816
+          "raw": 709455,
+          "gzip": 232652
         },
         "css": {
           "raw": 16860,
@@ -181,7 +181,7 @@
           "raw": 0,
           "gzip": 0
         },
-        "fileCount": 472
+        "fileCount": 476
       },
       "entries": [
         {
@@ -260,17 +260,17 @@
         },
         {
           "id": "./react/beta",
-          "gzip": 20,
+          "gzip": 1035,
           "composition": {
-            "initialGzip": 20,
+            "initialGzip": 1035,
             "lazyGzip": 0,
-            "totalGzip": 20,
-            "own": 0,
+            "totalGzip": 1035,
+            "own": 1906,
             "nodeModules": 0,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 20,
+                "gzip": 1035,
                 "kind": "initial"
               }
             ]
