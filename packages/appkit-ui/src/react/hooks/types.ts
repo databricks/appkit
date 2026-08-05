@@ -414,7 +414,20 @@ import type { MetricFilter } from "@/js";
  * `timeGrain` is correlated to the grains valid for those dimensions — so
  * bucketing a non-temporal dimension is a type error.
  */
-export interface UseMetricViewOptions<
+type MetricViewTimeOptions<
+  K extends MetricKey,
+  D extends ReadonlyArray<InferDimensionKeys<K>>,
+> =
+  | {
+      timeGrain?: undefined;
+      timeDimension?: Extract<D[number], InferTimeDimensionKeys<K>>;
+    }
+  | {
+      timeGrain: GrainsForSelectedTimeDims<K, D>;
+      timeDimension: Extract<D[number], InferTimeDimensionKeys<K>>;
+    };
+
+export type UseMetricViewOptions<
   K extends MetricKey = MetricKey,
   M extends ReadonlyArray<InferMeasureKeys<K>> = ReadonlyArray<
     InferMeasureKeys<K>
@@ -422,14 +435,12 @@ export interface UseMetricViewOptions<
   D extends ReadonlyArray<InferDimensionKeys<K>> = ReadonlyArray<
     InferDimensionKeys<K>
   >,
-> {
+> = {
   measures: M;
   dimensions?: D;
   filter?: MetricFilter;
-  timeDimension?: Extract<D[number], InferTimeDimensionKeys<K>>;
-  timeGrain?: GrainsForSelectedTimeDims<K, D>;
   limit?: number;
-}
+} & MetricViewTimeOptions<K, D>;
 
 /** Result state returned by `useMetricView`. */
 export interface UseMetricViewResult<T = Record<string, unknown>[]> {

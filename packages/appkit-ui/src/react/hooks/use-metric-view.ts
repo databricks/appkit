@@ -72,9 +72,7 @@ export function useMetricView<
   const M extends ReadonlyArray<InferMeasureKeys<K>> = ReadonlyArray<
     InferMeasureKeys<K>
   >,
-  const D extends ReadonlyArray<InferDimensionKeys<K>> = ReadonlyArray<
-    InferDimensionKeys<K>
-  >,
+  const D extends ReadonlyArray<InferDimensionKeys<K>> = readonly [],
 >(
   key: K,
   options: UseMetricViewOptions<K, M, D>,
