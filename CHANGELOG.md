@@ -96,6 +96,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.53.1](https://github.com/databricks/appkit/compare/v0.53.0...v0.53.1) (2026-08-05)
+
+### appkit
+
+* **appkit:** gate typegen fallback per surface, not across surfaces ([#511](https://github.com/databricks/appkit/issues/511)) ([d55de0f](https://github.com/databricks/appkit/commit/d55de0fb58e546145da1bc573415a78d5b686b78))
+
+
 ## [0.53.0](https://github.com/databricks/appkit/compare/v0.52.0...v0.53.0) (2026-08-04)
 
 * CI-resilient `--wait` typegen with committed-types fallback ([#510](https://github.com/databricks/appkit/issues/510)) ([f90fa9b](https://github.com/databricks/appkit/commit/f90fa9bac76227afa3e655dd2cd5b0ef69104132)), closes [#475](https://github.com/databricks/appkit/issues/475)
