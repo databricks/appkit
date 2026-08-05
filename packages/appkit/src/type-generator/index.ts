@@ -80,23 +80,6 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
-/**
- * Check that every type artifact required by this run exists.
- * Serving types are excluded (gitignored, never part of the gate). When metric
- * views are configured, their `.ts` artifact is required in addition to the
- * analytics declarations because it also provides runtime metadata exports.
- */
-function hasRequiredCommittedTypes(
-  analyticsOutFile: string,
-  requiredMetricViewsOutFile: string | undefined,
-): boolean {
-  const hasAnalytics = existsSync(analyticsOutFile);
-  const hasRequiredMetrics =
-    requiredMetricViewsOutFile === undefined ||
-    existsSync(requiredMetricViewsOutFile);
-  return hasAnalytics && hasRequiredMetrics;
-}
-
 function isQueryDegraded(schema: QuerySchema): boolean {
   return schema.degraded === true;
 }
@@ -359,6 +342,8 @@ export async function generateFromEntryPoint(options: {
   const metricViewsFolder =
     options.metricViewsFolder ??
     (queryFolder ? path.resolve(queryFolder, "..", "metric-views") : undefined);
+  const resolvedMvFile =
+    mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
 
   const projectRoot = resolveProjectRoot(outFile);
 
@@ -368,12 +353,10 @@ export async function generateFromEntryPoint(options: {
   let syntaxErrors: QuerySyntaxError[] = [];
   // Deterministic fatal errors only (404/400).
   let fatalErrors: QueryFatalError[] = [];
-  // Track whether an environmental failure occurred in blocking mode.
-  let hadEnvironmentalFailure = false;
+  let queryHadEnvironmentalFailure = false;
+  let metricsHadEnvironmentalFailure = false;
   // Track the coarse cause of the environmental failure for the warning message.
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
-  // Set when definitions.json makes metric-views.ts a required build input.
-  let metricTypesRequired = false;
 
   if (queryFolder) {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
@@ -383,8 +366,7 @@ export async function generateFromEntryPoint(options: {
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];
     fatalErrors = result.fatalErrors ?? [];
-    hadEnvironmentalFailure =
-      hadEnvironmentalFailure || (result.hadEnvironmentalFailure ?? false);
+    queryHadEnvironmentalFailure = result.hadEnvironmentalFailure ?? false;
     environmentalCause =
       environmentalCause ?? result.environmentalCause ?? undefined;
   }
@@ -399,7 +381,7 @@ export async function generateFromEntryPoint(options: {
     // A degraded schema always participates in the committed-types gate. Keep
     // this invariant next to write suppression so a new producer cannot update
     // one decision without the other.
-    hadEnvironmentalFailure = true;
+    queryHadEnvironmentalFailure = true;
     environmentalCause = environmentalCause ?? "unavailable";
   }
   const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
@@ -414,15 +396,12 @@ export async function generateFromEntryPoint(options: {
   // metric views without any `.sql` queries). `syncMetricViewsTypes` still
   // returns `noConfig` when the folder holds no `definitions.json`.
   if (metricViewsFolder) {
-    const mvFile =
-      mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
-
     let mvResult: SyncMetricViewsTypesResult;
     try {
       mvResult = await syncMetricViewsTypes({
         metricViewsFolder,
         warehouseId,
-        metricOutFile: mvFile,
+        metricOutFile: resolvedMvFile,
         cache: !noCache,
         metricFetcher,
         mode,
@@ -444,8 +423,6 @@ export async function generateFromEntryPoint(options: {
       );
     }
 
-    metricTypesRequired = !mvResult.noConfig;
-
     // Deleted/deleting-warehouse fatal preflight (blocking mode only);
     // empty (no-op) when definitions.json is absent or in non-blocking mode.
     // Only deterministic fatals are recorded in fatalErrors.
@@ -453,9 +430,9 @@ export async function generateFromEntryPoint(options: {
       fatalErrors.push(fe);
     }
 
-    // Thread through the environmental failure flag and cause.
-    hadEnvironmentalFailure =
-      hadEnvironmentalFailure || (mvResult.hadEnvironmentalFailure ?? false);
+    metricsHadEnvironmentalFailure =
+      (mvResult.hadEnvironmentalFailure ?? false) ||
+      (mode === "blocking" && hasAnyDegradedMetrics(mvResult.schemas));
     environmentalCause =
       environmentalCause ?? mvResult.environmentalCause ?? undefined;
 
@@ -485,18 +462,19 @@ export async function generateFromEntryPoint(options: {
     throw new TypegenFatalError(fatalErrors, warehouseId);
   }
 
-  // Environmental failures (in blocking mode) trigger the has-types gate.
-  if (mode === "blocking" && hadEnvironmentalFailure) {
-    // Determine resolved metric-views file for the has-types check.
-    const resolvedMvFile =
-      options.mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
+  if (
+    mode === "blocking" &&
+    (queryHadEnvironmentalFailure || metricsHadEnvironmentalFailure)
+  ) {
+    const missingCommittedTypes: string[] = [];
+    if (queryHadEnvironmentalFailure && !existsSync(outFile)) {
+      missingCommittedTypes.push(path.basename(outFile));
+    }
+    if (metricsHadEnvironmentalFailure && !existsSync(resolvedMvFile)) {
+      missingCommittedTypes.push(path.basename(resolvedMvFile));
+    }
 
-    const hasTypes = hasRequiredCommittedTypes(
-      outFile,
-      metricTypesRequired ? resolvedMvFile : undefined,
-    );
-
-    if (hasTypes) {
+    if (missingCommittedTypes.length === 0) {
       // Committed types present: emit loud warning and exit 0.
       const warningMessage = determineWarningMessage(
         environmentalCause ?? "unavailable",
@@ -504,12 +482,11 @@ export async function generateFromEntryPoint(options: {
       );
       logger.warn(warningMessage);
     } else {
-      // A required committed type file is missing: crash with a generic message.
       throw new TypegenFatalError(
         [
           {
             name: "type-generator",
-            message: `Warehouse ${warehouseId} could not be reached and required committed type files are missing. Run 'npx @databricks/appkit generate-types --wait' locally and commit the generated type files.`,
+            message: `Warehouse ${warehouseId} could not provide schemas and the required committed type ${plural(missingCommittedTypes.length, "artifact is", "artifacts are")} missing: ${missingCommittedTypes.join(", ")}. Run 'npx @databricks/appkit generate-types --wait' locally and commit the generated type files.`,
           },
         ],
         warehouseId,
