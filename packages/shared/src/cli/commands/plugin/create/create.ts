@@ -42,17 +42,9 @@ interface CreateOptions {
 }
 
 function deriveDisplayName(name: string): string {
-  return name
-    .split("-")
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(" ");
-}
-
-function deriveExportName(name: string): string {
-  return name
-    .split("-")
-    .map((s, i) => (i === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)))
-    .join("");
+  // camelCase -> Title Case words (e.g. "myPlugin" -> "My Plugin").
+  const spaced = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function buildResourceFromType(type: string): SelectedResource {
@@ -138,7 +130,8 @@ function printNextSteps(answers: CreateAnswers, targetDir: string): void {
   const importPath = relativePath.startsWith(".")
     ? relativePath
     : `./${relativePath}`;
-  const exportName = deriveExportName(answers.name);
+  // The camelCase plugin name is already the JS binding.
+  const exportName = answers.name;
 
   console.log("\nNext steps:\n");
   if (answers.placement === "in-repo") {
@@ -169,7 +162,7 @@ function runNonInteractive(opts: CreateOptions): void {
     );
     console.error(`Missing: ${missing.map((f) => `--${f}`).join(", ")}`);
     console.error(
-      '  appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"',
+      '  appkit plugin create --placement in-repo --path plugins/my-plugin --name myPlugin --description "Does X"',
     );
     process.exit(1);
   }
@@ -196,7 +189,7 @@ function runNonInteractive(opts: CreateOptions): void {
   const name = opts.name as string;
   if (!PLUGIN_NAME_PATTERN.test(name)) {
     console.error(
-      "Error: --name must start with a lowercase letter and be camelCase (letters and numbers only, e.g. aiSearch).",
+      "Error: --name must start with a lowercase letter and be camelCase (letters and numbers only, e.g. myPlugin).",
     );
     process.exit(1);
   }
@@ -289,11 +282,11 @@ async function runInteractive(): Promise<void> {
 
     const name = await text({
       message: "Plugin name (id)",
-      placeholder: "aiSearch",
+      placeholder: "myPlugin",
       validate(value) {
         if (!value?.trim()) return "Name is required.";
         if (!PLUGIN_NAME_PATTERN.test(value as string)) {
-          return "Must start with a lowercase letter and be camelCase (letters and numbers only, e.g. aiSearch).";
+          return "Must start with a lowercase letter and be camelCase (letters and numbers only, e.g. myPlugin).";
         }
         return undefined;
       },
@@ -445,7 +438,7 @@ async function runPluginCreate(opts: CreateOptions): Promise<void> {
         `Error: Non-interactive mode requires: ${REQUIRED_FLAGS.map((f) => `--${f}`).join(", ")}`,
       );
       console.error(
-        '  appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"',
+        '  appkit plugin create --placement in-repo --path plugins/my-plugin --name myPlugin --description "Does X"',
       );
       process.exit(1);
     }
@@ -478,8 +471,8 @@ export const pluginCreateCommand = new Command("create")
     `
 Examples:
   $ appkit plugin create
-  $ appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"
-  $ appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X" --resources sql_warehouse,volume --force
+  $ appkit plugin create --placement in-repo --path plugins/my-plugin --name myPlugin --description "Does X"
+  $ appkit plugin create --placement in-repo --path plugins/my-plugin --name myPlugin --description "Does X" --resources sql_warehouse,volume --force
   $ appkit plugin create --placement isolated --path appkit-plugin-ml --name ml --description "ML" --resources-json '[{"type":"serving_endpoint"}]'`,
   )
   .action((opts) =>
