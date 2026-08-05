@@ -38,11 +38,8 @@ export const AnalyticsResultMessage = z.object({
   // `unknown` so we don't bake the SDK's detailed shape into the contract.
   status: z.unknown().optional(),
   statement_id: z.string().optional(),
-  // Per-column display metadata for a metric-view result (display_name /
-  // format / type). Kept loose (`z.record(z.string(), z.unknown())`) for the
-  // same "keep client validation cheap" reason as `data` — the server
-  // constructs it via the typed builder, so the per-column shape is enforced
-  // at the source. Absent for plain `/query` results.
+  // Per-column display metadata for a metric-view result; absent for plain
+  // `/query` results. Kept loose for the same reason as `data` above.
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 

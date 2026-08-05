@@ -707,10 +707,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           throw ExecutionError.statementFailed(inner);
         }
 
-        // Stamp the metadata onto the (possibly cached) result message. The
-        // cached message never carries it, so a hit after a redeploy that
-        // changed a column's display_name/format serves the current metadata
-        // rather than a stale copy.
+        // Stamp the metadata onto the (possibly cached) result message; the
+        // cached message never carries it.
         const resultMessage = sqlResult.data as AnalyticsSseMessage;
         yield (
           metadata !== undefined

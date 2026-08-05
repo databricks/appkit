@@ -170,10 +170,8 @@ ${inner};
     }`;
 }
 
-// Render one column's runtime metadata literal — the value-side twin of a
-// `renderMetadataMap` entry, minus `time_grain` (not part of
-// MetricViewColumnDisplay). Strings go through JSON.stringify to stay
-// escape-safe.
+// Value-side twin of a `renderMetadataMap` entry, minus `time_grain` (not part
+// of MetricViewColumnDisplay).
 function renderMetadataValueField(col: MetricColumnMetadata): string {
   const fields = metadataFields(col).map(
     ([name, value]) => `${name}: ${value}`,
@@ -182,7 +180,6 @@ function renderMetadataValueField(col: MetricColumnMetadata): string {
 }
 
 // Render one metric's runtime measures/dimensions map, keyed by column name.
-// Empty → `{}`, the value twin of the type-level `Record<string, never>`.
 function renderMetadataValueMap(
   cols: MetricColumnMetadata[],
   indent: string,
@@ -199,9 +196,8 @@ ${inner},
 ${indent}}`;
 }
 
-// Render the runtime `metricViewsMetadata` const — a value twin of the
-// type-level `metadata` blocks, conforming to MetricViewsMetadata from
-// "shared" and emitted `as const` in the same key order as the augmentation.
+// Render the runtime `metricViewsMetadata` const, emitted `as const` in the
+// same key order as the augmentation.
 function renderMetricViewsMetadata(schemas: MetricSchema[]): string {
   if (schemas.length === 0) {
     return "export const metricViewsMetadata = {} as const;\n";
@@ -242,12 +238,10 @@ ${entries};
 /**
  * Build the full metric-views.ts file from a list of metric schemas.
  *
- * A real `.ts` source file, not a `.d.ts`, because it carries the erasable
- * `declare module` augmentation alongside a runtime `metricViewsMetadata`
- * export. The header must therefore stay a type-only `import type {} from`:
- * it compiles to zero runtime code while still anchoring the module so the
- * augmentation resolves, whereas a bare `import "@databricks/appkit-ui/react"`
- * would execute the client package entry on the Node server.
+ * The header must stay a type-only `import type {} from`: it anchors the module
+ * so the augmentation resolves while compiling to zero runtime code, whereas a
+ * bare `import "@databricks/appkit-ui/react"` would execute the client package
+ * entry on the Node server.
  */
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
