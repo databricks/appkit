@@ -4,8 +4,17 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { DEFAULT_LIMIT, MAX_LIMIT, MAX_OFFSET } from "../../contract";
-import { boolean, defineSchema, fk, id, text } from "../../schema-builder";
-import { DataPathError, type Row } from "../data-path";
+import { DatabasePluginError } from "../../errors";
+import {
+  bigid,
+  boolean,
+  defineSchema,
+  fk,
+  id,
+  text,
+  uuid,
+} from "../../schema-builder";
+import type { Row } from "../data-path";
 import {
   createDrizzleDataPath,
   createDrizzleDb,
@@ -232,10 +241,10 @@ describe("createDrizzleDataPath reads", () => {
     });
     await expect(
       dataPath.select(users, { limit: MAX_LIMIT + 1 }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       dataPath.select(users, { offset: MAX_OFFSET + 1 }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
   });
 
   it("denies private read fields by default and requires trusted access", async () => {
@@ -243,18 +252,18 @@ describe("createDrizzleDataPath reads", () => {
     const publicDataPath = createDrizzleDataPath(fake.db, schema);
     await expect(
       publicDataPath.select(users, { select: ["secret"] }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       publicDataPath.select(users, { where: { secret: "hidden" } }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       publicDataPath.select(users, { order: { secret: "asc" } }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       publicDataPath.select(users, {
         include: { posts: { select: ["secret"] } },
       }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     expect(fake.calls.findMany).toHaveLength(0);
 
     const trustedOptions = {
@@ -286,9 +295,15 @@ describe("createDrizzleDataPath reads", () => {
     const fake = makeFakeDb({ findFirst: { id: 7, name: "Ada" }, count: 3 });
     const dataPath = createDrizzleDataPath(fake.db, schema);
     await expect(
-      dataPath.findOne(users, 7, { select: ["id", "name"] }),
+      dataPath.findOne(users, 7, {
+        where: { active: true },
+        select: ["id", "name"],
+      }),
     ).resolves.toEqual({ id: 7, name: "Ada" });
-    expect(render(fake.calls.findFirst[0].config.where).params).toEqual([7]);
+    expect(render(fake.calls.findFirst[0].config.where).params).toEqual([
+      7,
+      true,
+    ]);
     await expect(dataPath.count(users, { active: true })).resolves.toBe(3);
     expect(render(fake.calls.count[0].filter).params).toEqual([true]);
   });
@@ -302,8 +317,74 @@ describe("createDrizzleDataPath reads", () => {
         other.$tables.users,
         {},
       ),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
   });
+
+  it.each([
+    [
+      "number",
+      defineSchema(({ table }) => ({ users: table("users", { id: id() }) })),
+      7,
+      "7",
+    ],
+    [
+      "bigint",
+      defineSchema(({ table }) => ({ users: table("users", { id: bigid() }) })),
+      7n,
+      7,
+    ],
+    [
+      "uuid",
+      defineSchema(({ table }) => ({
+        users: table("users", { id: uuid().primaryKey() }),
+      })),
+      "123e4567-e89b-42d3-a456-426614174000",
+      "not-a-uuid",
+    ],
+    [
+      "custom string",
+      defineSchema(({ table }) => ({
+        users: table("users", { id: text().primaryKey() }),
+      })),
+      "user-key",
+      7,
+    ],
+  ] as const)(
+    "validates %s primary-key IDs before builders",
+    async (_kind, idSchema, valid, invalid) => {
+      const fake = makeFakeDb({
+        findFirst: { id: valid },
+        update: [{ id: valid }],
+        delete: [{ id: valid }],
+      });
+      const table = idSchema.$tables.users;
+      const dataPath = createDrizzleDataPath(fake.db, idSchema);
+      await expect(dataPath.findOne(table, valid, {})).resolves.toEqual({
+        id: valid,
+      });
+      await expect(dataPath.update(table, valid, {})).resolves.toEqual({
+        id: valid,
+      });
+      await expect(dataPath.delete(table, valid)).resolves.toBe(true);
+      const before = {
+        findFirst: fake.calls.findFirst.length,
+        update: fake.calls.update.length,
+        delete: fake.calls.delete.length,
+      };
+      await expect(
+        dataPath.findOne(table, invalid as never, {}),
+      ).rejects.toMatchObject({ category: "INVALID_REQUEST" });
+      await expect(
+        dataPath.update(table, invalid as never, {}),
+      ).rejects.toMatchObject({ category: "INVALID_REQUEST" });
+      await expect(
+        dataPath.delete(table, invalid as never),
+      ).rejects.toMatchObject({ category: "INVALID_REQUEST" });
+      expect(fake.calls.findFirst).toHaveLength(before.findFirst);
+      expect(fake.calls.update).toHaveLength(before.update);
+      expect(fake.calls.delete).toHaveLength(before.delete);
+    },
+  );
 });
 
 describe("Drizzle mutation cardinality", () => {
@@ -320,13 +401,13 @@ describe("Drizzle mutation cardinality", () => {
         users,
         {},
       ),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       createDrizzleDataPath(
         makeFakeDb({ insert: [row, row] }).db,
         schema,
       ).insert(users, {}),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
 
     const fake = makeFakeDb({ upsert: [row] });
     await expect(
@@ -344,20 +425,20 @@ describe("Drizzle mutation cardinality", () => {
     });
     await expect(
       createDrizzleDataPath(fake.db, schema).upsert(users, {}, "name"),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       createDrizzleDataPath(makeFakeDb({ upsert: [] }).db, schema).upsert(
         users,
         { email: "a@example.com" },
         "email",
       ),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       createDrizzleDataPath(
         makeFakeDb({ upsert: [row, row] }).db,
         schema,
       ).upsert(users, { email: "a@example.com" }, "email"),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
   });
 
   it("rejects unknown identifiers and structural Drizzle mutation values", async () => {
@@ -366,20 +447,20 @@ describe("Drizzle mutation cardinality", () => {
 
     await expect(
       dataPath.insert(users, { missing: "not a schema column" }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       dataPath.insert(users, { name: drizzleSql.raw("current_user") }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       dataPath.update(users, 1, { name: users.$columns.email.engineColumn }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       dataPath.upsert(
         users,
         { email: "a@example.com", name: drizzleSql.raw("current_user") },
         "email",
       ),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
 
     expect(fake.calls.insert).toHaveLength(0);
     expect(fake.calls.update).toHaveLength(0);
@@ -392,19 +473,19 @@ describe("Drizzle mutation cardinality", () => {
 
     await expect(
       dataPath.insert(users, { id: 10, email: "a@example.com" }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(dataPath.insert(users, { email: 42 })).rejects.toBeInstanceOf(
-      DataPathError,
+      DatabasePluginError,
     );
     await expect(dataPath.update(users, 1, { id: 2 })).rejects.toBeInstanceOf(
-      DataPathError,
+      DatabasePluginError,
     );
     await expect(
       dataPath.update(users, 1, { active: "yes" }),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     await expect(
       dataPath.upsert(users, { id: 10, email: "a@example.com" }, "email"),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
 
     expect(fake.calls.insert).toHaveLength(0);
     expect(fake.calls.update).toHaveLength(0);
@@ -452,7 +533,7 @@ describe("Drizzle mutation cardinality", () => {
         makeFakeDb({ update: [row, row] }).db,
         schema,
       ).update(users, 1, {}),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
   });
 
   it("omits private columns from mutation returning projections and results", async () => {
@@ -492,6 +573,20 @@ describe("Drizzle mutation cardinality", () => {
     expect(upsertFake.calls.upsert[0].returning).toEqual(
       returningColumns(users),
     );
+
+    const trustedFake = makeFakeDb({ insert: [leaked] });
+    await expect(
+      createDrizzleDataPath(trustedFake.db, schema, {
+        columnAccess: "trusted",
+      }).insert(users, {
+        email: "a@example.com",
+        secret: "hashed",
+      }),
+    ).resolves.toEqual(leaked);
+    expect(trustedFake.calls.insert[0].returning).toEqual(
+      returningColumns(users, "trusted"),
+    );
+    expect(trustedFake.calls.insert[0].returning).toHaveProperty("secret");
   });
 
   it("accepts zero or one delete row and rejects more", async () => {
@@ -512,7 +607,7 @@ describe("Drizzle mutation cardinality", () => {
         makeFakeDb({ delete: [{ id: 1 }, { id: 2 }] }).db,
         schema,
       ).delete(users, 1),
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
   });
 });
 
@@ -531,7 +626,7 @@ describe("tagged SQL and transactions", () => {
 
     await expect(
       dataPath.raw`select ${drizzleSql.raw("drop table users")}`,
-    ).rejects.toBeInstanceOf(DataPathError);
+    ).rejects.toBeInstanceOf(DatabasePluginError);
     expect(fake.calls.execute).toHaveLength(1);
   });
 
@@ -550,7 +645,10 @@ describe("tagged SQL and transactions", () => {
       }),
     ).rejects.toBe(callbackError);
 
-    const classifiedError = new DataPathError("Already classified");
+    const classifiedError = new DatabasePluginError(
+      "INVALID_REQUEST",
+      "runtime",
+    );
     await expect(
       dataPath.transaction(async () => {
         throw classifiedError;
@@ -588,7 +686,7 @@ describe("tagged SQL and transactions", () => {
         })
         .catch((caught) => caught);
 
-      expect(error).toBeInstanceOf(DataPathError);
+      expect(error).toBeInstanceOf(DatabasePluginError);
       expect(error.message).toBe("Database operation failed");
       expect(error.cause).toBeUndefined();
     },
@@ -609,8 +707,124 @@ describe("database failures", () => {
     const error = await createDrizzleDataPath(fake.db, schema)
       .select(users, {})
       .catch((caught) => caught);
-    expect(error).toBeInstanceOf(DataPathError);
+    expect(error).toBeInstanceOf(DatabasePluginError);
     expect(error.message).toBe("Database operation failed");
+    expect(error.cause).toBeUndefined();
+  });
+
+  it.each([
+    ["23505", "CONFLICT"],
+    ["23000", "CONFLICT"],
+    ["42501", "FORBIDDEN"],
+    ["XX000", "INTERNAL"],
+    [42, "INTERNAL"],
+  ] as const)(
+    "maps SQLSTATE %s without leaking driver fields",
+    async (code, category) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        throw {
+          code,
+          message: "password and SQL leaked",
+          constraint: "users_secret_key",
+          detail: "input secret",
+        };
+      };
+      const error = await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch((caught) => caught);
+      expect(error).toMatchObject({
+        category,
+      });
+      expect(error.cause).toBeUndefined();
+      expect(JSON.stringify(error)).not.toContain("secret");
+    },
+  );
+
+  // Drizzle never rethrows the raw driver error; it wraps it in
+  // DrizzleQueryError and moves the SQLSTATE onto `cause`.
+  it.each([
+    ["23503", "CONFLICT"],
+    ["42501", "FORBIDDEN"],
+    ["XX000", "INTERNAL"],
+  ] as const)(
+    "maps SQLSTATE %s carried on a wrapped driver cause",
+    async (code, category) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        const driver = Object.assign(new Error("secret constraint detail"), {
+          code,
+          constraint: "users_secret_key",
+        });
+        throw Object.assign(
+          new Error("Failed query: select secret from users"),
+          { cause: driver },
+        );
+      };
+      const error = await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch((caught) => caught);
+      expect(error).toMatchObject({ category });
+      expect(error.cause).toBeUndefined();
+      expect(JSON.stringify(error)).not.toContain("secret");
+    },
+  );
+
+  it("stops walking an error cause cycle", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      const cyclic: { cause?: unknown } = {};
+      cyclic.cause = cyclic;
+      throw cyclic;
+    };
+    const error = await createDrizzleDataPath(fake.db, schema)
+      .select(users, {})
+      .catch((caught) => caught);
+    expect(error).toMatchObject({ category: "INTERNAL" });
+  });
+
+  it.each([
+    Object.defineProperty({}, "code", {
+      get: () => {
+        throw new Error("getter secret");
+      },
+    }),
+    new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("proxy secret");
+        },
+      },
+    ),
+  ])("fails closed for hostile SQLSTATE access", async (hostile) => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      throw hostile;
+    };
+    const error = await createDrizzleDataPath(fake.db, schema)
+      .select(users, {})
+      .catch((caught) => caught);
+    expect(error).toMatchObject({
+      category: "INTERNAL",
+      message: "Database operation failed",
+    });
     expect(error.cause).toBeUndefined();
   });
 });

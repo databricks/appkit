@@ -18,8 +18,8 @@ Host resolution:
 
 | Parameter | Type |
 | ------ | ------ |
-| `opts` | [`WorkspaceClientOptions`](Interface.WorkspaceClientOptions.md) |
+| `opts` | `WorkspaceClientOptions` |
 
 ## Returns
 
-[`WorkspaceClient`](Interface.WorkspaceClient.md)
+`WorkspaceClient`
