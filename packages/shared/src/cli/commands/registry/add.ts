@@ -10,6 +10,12 @@ import {
   type RegistryItemFile,
   stripNamespace,
 } from "./client";
+import { buildConfigPlan, planHasContent } from "./config-plan";
+import {
+  reportConfigWrite,
+  validateBundle,
+  writeConfig,
+} from "./config-writer";
 import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
 import { reportEnvResolutions, syncEnv } from "./env-writer";
 import {
@@ -211,6 +217,8 @@ interface AddOptions {
   yes?: boolean;
   /** Pre-supplied env values from repeated --env KEY=VALUE flags. */
   env?: Record<string, string>;
+  /** Databricks profile passed to `bundle validate` after writing config. */
+  profile?: string;
 }
 
 async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
@@ -333,7 +341,61 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       values: opts.env,
     });
     reportEnvResolutions(resolutions);
+
+    // Deploy config (app.yaml + databricks.yml). Values come from what the
+    // user supplied for env fields (flags or prompts); other fields fall back
+    // to their manifest defaults inside buildConfigPlan.
+    const values: Record<string, string> = { ...(opts.env ?? {}) };
+    for (const r of resolutions) {
+      if (r.value !== undefined) values[r.env] = r.value;
+    }
+    const plan = buildConfigPlan(allRequirements, values);
+    if (planHasContent(plan)) {
+      const result = writeConfig(cwd, plan);
+      reportConfigWrite(result);
+      if (result.databricksYmlChanged) validateBundle(cwd, opts.profile);
+    }
+    warnScopeNeeding(allRequirements);
   }
+}
+
+/**
+ * v1 does not write `user_api_scopes` (deferred to the manifest scope
+ * extension). Warn when an added plugin's resource type is known to need one,
+ * so the user adds it before deploy.
+ */
+/** Resource types known to require a user_api_scope, and the scope each needs. */
+export const SCOPE_BY_RESOURCE_TYPE: Record<string, string> = {
+  genie_space: "dashboards.genie",
+  serving_endpoint: "serving.serving-endpoints",
+  // volumes/files-backed access uses files.files
+  volume: "files.files",
+};
+
+/** Returns the user_api_scopes implied by a set of resource rows (deduped). */
+export function scopesForResources(
+  rows: ResourceRequirementRow[],
+): Map<string, string> {
+  const needed = new Map<string, string>();
+  for (const row of rows) {
+    const scope = SCOPE_BY_RESOURCE_TYPE[row.type];
+    if (scope) needed.set(row.type, scope);
+  }
+  return needed;
+}
+
+function warnScopeNeeding(rows: ResourceRequirementRow[]): void {
+  const needed = scopesForResources(rows);
+  if (needed.size === 0) return;
+  const list = [...needed.entries()]
+    .map(([type, scope]) => `${type} → ${scope}`)
+    .join(", ");
+  console.warn(
+    pc.yellow(
+      `\n  Note: these resources may need a user_api_scope before deploy: ${list}.\n` +
+        "  Add it under resources.apps.app.user_api_scopes in databricks.yml.",
+    ),
+  );
 }
 
 /** Commander reducer for repeatable `--env KEY=VALUE` flags. */
@@ -366,6 +428,7 @@ export const addCommand = new Command("add")
     collectEnvFlag,
     {},
   )
+  .option("-p, --profile <name>", "Databricks profile for bundle validate")
   .addHelpText(
     "after",
     `
@@ -375,9 +438,11 @@ No components.json is required. Item type is detected automatically:
     them in your createApp call (use --no-register to skip the server edit)
 
 Server plugins declare Databricks resources. On add, their env vars are
-reconciled into .env (and names into .env.example). Interactive by default;
-pass --yes for agents/CI (uses --env values, leaves the rest unset) and
---env KEY=VALUE to supply values non-interactively.
+reconciled into .env (and names into .env.example), and the deploy config
+(app.yaml + databricks.yml resource bindings) is patched to match — existing
+entries are never clobbered. Interactive by default; pass --yes for agents/CI
+(uses --env values, leaves the rest unset) and --env KEY=VALUE to supply
+values non-interactively. Pass --profile to validate the bundle after writing.
 
 The frontend/server roots are detected from common layouts, so you can run
 this from the repo root. While the registry repo is private, a read token is

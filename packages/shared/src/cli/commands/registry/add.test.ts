@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveItems } from "./add";
+import { resolveItems, scopesForResources } from "./add";
 import type { RegistryItem } from "./client";
+import type { ResourceRequirementRow } from "./requirements";
 
 function item(name: string, extra: Partial<RegistryItem> = {}): RegistryItem {
   return { name, ...extra };
+}
+
+function resourceRow(type: string): ResourceRequirementRow {
+  return { type, required: true, fields: [] };
 }
 
 describe("resolveItems", () => {
@@ -57,5 +62,32 @@ describe("resolveItems", () => {
     const fetch = vi.fn(async (name: string) => graph[name]);
     const result = await resolveItems(["a"], null, fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
+  });
+});
+
+describe("scopesForResources", () => {
+  it("maps scope-needing resource types to their user_api_scope", () => {
+    const scopes = scopesForResources([
+      resourceRow("genie_space"),
+      resourceRow("serving_endpoint"),
+      resourceRow("volume"),
+    ]);
+    expect(Object.fromEntries(scopes)).toEqual({
+      genie_space: "dashboards.genie",
+      serving_endpoint: "serving.serving-endpoints",
+      volume: "files.files",
+    });
+  });
+
+  it("returns empty for resources that need no scope", () => {
+    expect(scopesForResources([resourceRow("sql_warehouse")]).size).toBe(0);
+  });
+
+  it("de-dupes repeated types", () => {
+    const scopes = scopesForResources([
+      resourceRow("genie_space"),
+      resourceRow("genie_space"),
+    ]);
+    expect(scopes.size).toBe(1);
   });
 });
