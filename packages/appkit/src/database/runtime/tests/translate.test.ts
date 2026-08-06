@@ -2,6 +2,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { IN_CAP, MAX_INCLUDES, MAX_LIMIT } from "../../contract";
+import { DatabasePluginError } from "../../errors";
 import {
   bigint,
   boolean,
@@ -16,7 +17,6 @@ import {
   uuid,
 } from "../../schema-builder";
 import { filterOperatorsForKind } from "../../schema-builder/types";
-import { DataPathError } from "../data-path";
 import {
   defaultColumns,
   selectToColumns,
@@ -85,7 +85,7 @@ describe("translateWhere", () => {
     expect(query.sql).not.toContain("drop table");
     expect(query.params).toEqual([injected]);
     expect(() => translateWhere(users, { missing: injected })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 
@@ -106,7 +106,7 @@ describe("translateWhere", () => {
     }
     expect(() =>
       translateWhere(users, { age: { between: [1, 2] } as never }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
   });
 
   it("bounds in lists and gives an empty list deterministic semantics", () => {
@@ -118,10 +118,10 @@ describe("translateWhere", () => {
       translateWhere(users, {
         id: { in: Array.from({ length: IN_CAP + 1 }, (_, index) => index) },
       }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() =>
       translateWhere(users, { name: { in: ["Ada", null] } }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
   });
 
   it("rejects operators and values that do not match column metadata", () => {
@@ -142,21 +142,21 @@ describe("translateWhere", () => {
 
     expect(() =>
       translateWhere(users, { age: { like: "1%" } as never }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() =>
       translateWhere(users, { active: { gt: true } as never }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() =>
       translateWhere(users, { metadata: { eq: { key: "value" } } as never }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() => translateWhere(users, { externalId: "not-a-uuid" })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
     expect(() =>
       translateWhere(users, { createdAt: { gt: "not-a-timestamp" } }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() => translateWhere(users, { status: "unknown" })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 
@@ -164,18 +164,24 @@ describe("translateWhere", () => {
     expect(render(translateWhere(users, { name: { is: null } })).sql).toBe(
       `"users"."name" is null`,
     );
-    expect(() => translateWhere(users, { name: null })).toThrow(DataPathError);
+    expect(() => translateWhere(users, { name: null })).toThrow(
+      DatabasePluginError,
+    );
     expect(() => translateWhere(users, { name: { eq: null } })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
     expect(() => translateWhere(users, { active: { is: null } })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 
   it("rejects empty logical groups instead of widening a query", () => {
-    expect(() => translateWhere(users, { or: [] })).toThrow(DataPathError);
-    expect(() => translateWhere(users, { and: [{}] })).toThrow(DataPathError);
+    expect(() => translateWhere(users, { or: [] })).toThrow(
+      DatabasePluginError,
+    );
+    expect(() => translateWhere(users, { and: [{}] })).toThrow(
+      DatabasePluginError,
+    );
   });
 
   it("combines and/or groups without relation predicates", () => {
@@ -216,11 +222,13 @@ describe("ordering and selection", () => {
       secret: true,
     });
     expect(() => translateOrder(users, { missing: "asc" })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
-    expect(() => selectToColumns(users, ["missing"])).toThrow(DataPathError);
+    expect(() => selectToColumns(users, ["missing"])).toThrow(
+      DatabasePluginError,
+    );
     expect(() => translateOrder(users, { age: "sideways" as "asc" })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 });
@@ -251,14 +259,14 @@ describe("translateInclude", () => {
 
   it("rejects unknown relations and invalid relation limits", () => {
     expect(() => translateInclude(users, schema, { missing: true })).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
     expect(() =>
       translateInclude(users, schema, { posts: { limit: MAX_LIMIT + 1 } }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
     expect(() =>
       translateInclude(schema.$tables.posts, schema, { users: { limit: 1 } }),
-    ).toThrow(DataPathError);
+    ).toThrow(DatabasePluginError);
 
     const tooMany = Object.fromEntries(
       Array.from({ length: MAX_INCLUDES + 1 }, (_, index) => [
@@ -267,7 +275,7 @@ describe("translateInclude", () => {
       ]),
     );
     expect(() => translateInclude(users, schema, tooMany)).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 });

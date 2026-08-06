@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../../contract";
+import { DatabasePluginError } from "../../errors";
 import { defineSchema, id, text } from "../../schema-builder";
 import {
   conflictTargetMeta,
@@ -8,13 +9,7 @@ import {
   validateLimit,
   validateOffset,
 } from "../data-path";
-import {
-  type DataPath,
-  DataPathError,
-  type IdValue,
-  type QuerySpec,
-  type Row,
-} from "../index";
+import type { DataPath, IdValue, QuerySpec, Row } from "../index";
 
 const schema = defineSchema((builder) => ({
   users: builder.table("users", {
@@ -58,8 +53,8 @@ describe("DataPath contract", () => {
     expectTypeOf(spec).toMatchTypeOf<QuerySpec>();
   });
 
-  it("publishes only the Phase 1 runtime values", async () => {
-    expect(Object.keys(await import("../index"))).toEqual(["DataPathError"]);
+  it("keeps the runtime barrel type-only", async () => {
+    expect(Object.keys(await import("../index"))).toEqual([]);
   });
 });
 
@@ -68,23 +63,25 @@ describe("runtime bounds and metadata", () => {
     expect(limitOrDefault()).toBe(DEFAULT_LIMIT);
     expect(validateLimit(0)).toBe(0);
     expect(validateLimit(MAX_LIMIT)).toBe(MAX_LIMIT);
-    expect(() => validateLimit(-1)).toThrow(DataPathError);
-    expect(() => validateLimit(MAX_LIMIT + 1)).toThrow(DataPathError);
+    expect(() => validateLimit(-1)).toThrow(DatabasePluginError);
+    expect(() => validateLimit(MAX_LIMIT + 1)).toThrow(DatabasePluginError);
   });
 
   it("accepts only non-negative safe offsets", () => {
     expect(validateOffset(0)).toBe(0);
     expect(validateOffset(10)).toBe(10);
-    expect(() => validateOffset(-1)).toThrow(DataPathError);
-    expect(() => validateOffset(Number.MAX_VALUE)).toThrow(DataPathError);
+    expect(() => validateOffset(-1)).toThrow(DatabasePluginError);
+    expect(() => validateOffset(Number.MAX_VALUE)).toThrow(DatabasePluginError);
   });
 
   it("resolves primary keys and explicit conflict targets from metadata", () => {
     expect(primaryKeyMeta(schema.$tables.users).columnName).toBe("id");
     expect(conflictTargetMeta(schema.$tables.users, "email").unique).toBe(true);
-    expect(() => primaryKeyMeta(schema.$tables.events)).toThrow(DataPathError);
+    expect(() => primaryKeyMeta(schema.$tables.events)).toThrow(
+      DatabasePluginError,
+    );
     expect(() => conflictTargetMeta(schema.$tables.users, "body")).toThrow(
-      DataPathError,
+      DatabasePluginError,
     );
   });
 });

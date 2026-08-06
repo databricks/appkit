@@ -44,6 +44,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
+| [DatabaseRegistry](Interface.DatabaseRegistry.md) | CANONICAL augmentation target. Empty by default; the generated `database.d.ts` augments it via `declare module "@databricks/appkit" { interface DatabaseRegistry { ... } }`. |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
@@ -74,6 +75,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [RunAgentInput](Interface.RunAgentInput.md) | - |
 | [RunAgentResult](Interface.RunAgentResult.md) | - |
+| [Schema](Interface.Schema.md) | - |
 | [SearchRequest](Interface.SearchRequest.md) | - |
 | [SearchResponse](Interface.SearchResponse.md) | - |
 | [SearchResult](Interface.SearchResult.md) | - |
@@ -106,11 +108,13 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
+| [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
 | [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
 | [HostedTool](TypeAlias.HostedTool.md) | - |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
+| [IDatabaseConfig](TypeAlias.IDatabaseConfig.md) | Configuration for one schema-bound DatabasePlugin instance. |
 | [JobsExport](TypeAlias.JobsExport.md) | Public API shape of the jobs plugin. Callable to select a job by key. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
@@ -142,15 +146,22 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [agentIdFromMarkdownPath](Function.agentIdFromMarkdownPath.md) | Derives the logical agent id from a markdown path. When the file is named `agent.md`, the id is the parent directory name (folder-based layout); otherwise the id is the file stem (e.g. legacy single-file paths). |
 | [appKitServingTypesPlugin](Function.appKitServingTypesPlugin.md) | Vite plugin to generate TypeScript types for AppKit serving endpoints. Fetches OpenAPI schemas from Databricks and generates a .d.ts with ServingEndpointRegistry module augmentation. |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
+| [bigid](Function.bigid.md) | - |
+| [bigint](Function.bigint.md) | - |
+| [boolean](Function.boolean.md) | - |
 | [createAgent](Function.createAgent.md) | Pure factory for agent definitions. Returns the passed-in definition after cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape and is safe to call at module top-level. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
+| [database](Function.database.md) | Create a typed database plugin registration for a finalized schema. |
+| [defineSchema](Function.defineSchema.md) | - |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
+| [enumColumn](Function.enumColumn.md) | - |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
+| [fk](Function.fk.md) | Declare foreign-key to another column. |
 | [fromSupervisorApi](Function.fromSupervisorApi.md) | Creates an [AgentAdapter](Interface.AgentAdapter.md) backed by the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
@@ -161,16 +172,23 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
+| [id](Function.id.md) | - |
+| [integer](Function.integer.md) | - |
 | [isFunctionTool](Function.isFunctionTool.md) | - |
 | [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |
 | [isSupervisorTool](Function.isSupervisorTool.md) | Type guard for [HostedSupervisorTool](Interface.HostedSupervisorTool.md). Used by the agents plugin (`buildToolIndex`) and standalone `runAgent` (`classifyTool`) to route supervisor-hosted tools to the extensions payload rather than the adapter's `tools` array. |
 | [isToolkitEntry](Function.isToolkitEntry.md) | Type guard for `ToolkitEntry` — used by the agents plugin to differentiate toolkit references from inline tools in a mixed `tools` record. |
+| [jsonb](Function.jsonb.md) | - |
 | [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
 | [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for one subdirectory per agent, each containing `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed by agent id (folder name). Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |
 | [mcpServer](Function.mcpServer.md) | Factory for declaring a custom MCP server tool. |
 | [parseTextToolCalls](Function.parseTextToolCalls.md) | Parses text-based tool calls from model output. |
 | [resolveHostedTools](Function.resolveHostedTools.md) | - |
 | [runAgent](Function.runAgent.md) | Standalone agent execution without `createApp`. Resolves the adapter, binds inline tools, and drives the adapter's `run()` loop to completion. |
+| [text](Function.text.md) | - |
+| [timestamp](Function.timestamp.md) | - |
 | [tool](Function.tool.md) | Factory for defining function tools with Zod schemas. |
 | [toolsFromRegistry](Function.toolsFromRegistry.md) | Produces the `AgentToolDefinition[]` a ToolProvider exposes to the LLM, deriving `parameters` JSON Schema from each entry's Zod schema. |
+| [uuid](Function.uuid.md) | - |
+| [varchar](Function.varchar.md) | - |

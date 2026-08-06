@@ -102,6 +102,100 @@
         }
       }
     },
+    "database": {
+      "name": "database",
+      "displayName": "Database (Beta)",
+      "description": "Schema-driven typed access to Databricks Lakebase PostgreSQL",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [
+          {
+            "type": "postgres",
+            "alias": "Postgres",
+            "resourceKey": "postgres",
+            "description": "Lakebase Postgres database for persistent storage",
+            "permission": "CAN_CONNECT_AND_CREATE",
+            "fields": {
+              "project": {
+                "description": "Lakebase project resource name",
+                "examples": [
+                  "projects/{project-id}"
+                ],
+                "discovery": {
+                  "type": "kind",
+                  "resourceKind": "postgres_project",
+                  "select": "name"
+                },
+                "origin": "user"
+              },
+              "branch": {
+                "description": "Lakebase branch resource name",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}"
+                ],
+                "discovery": {
+                  "type": "kind",
+                  "resourceKind": "postgres_branch",
+                  "select": "name",
+                  "dependsOn": "project"
+                },
+                "origin": "user"
+              },
+              "database": {
+                "description": "Lakebase database resource name",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
+                ],
+                "discovery": {
+                  "type": "kind",
+                  "resourceKind": "postgres_database",
+                  "select": "name",
+                  "dependsOn": "branch"
+                },
+                "origin": "user"
+              },
+              "host": {
+                "env": "PGHOST",
+                "description": "Postgres host",
+                "localOnly": true,
+                "resolve": "postgres:host",
+                "origin": "platform"
+              },
+              "databaseName": {
+                "env": "PGDATABASE",
+                "description": "Postgres database name",
+                "localOnly": true,
+                "resolve": "postgres:databaseName",
+                "origin": "platform"
+              },
+              "endpointPath": {
+                "env": "LAKEBASE_ENDPOINT",
+                "description": "Lakebase endpoint resource name",
+                "bundleIgnore": true,
+                "resolve": "postgres:endpointPath",
+                "origin": "cli"
+              },
+              "port": {
+                "env": "PGPORT",
+                "description": "Postgres port",
+                "localOnly": true,
+                "value": "5432",
+                "origin": "platform"
+              },
+              "sslmode": {
+                "env": "PGSSLMODE",
+                "description": "Postgres SSL mode",
+                "localOnly": true,
+                "value": "require",
+                "origin": "platform"
+              }
+            }
+          }
+        ],
+        "optional": []
+      },
+      "stability": "beta"
+    },
     "files": {
       "name": "files",
       "displayName": "Files Plugin",

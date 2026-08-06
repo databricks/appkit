@@ -2,12 +2,20 @@ import { eq, isSQLWrapper, type SQL, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Pool } from "pg";
-import type { AppKitTable, Schema } from "../../schema-builder";
-import { buildEngineRelations } from "../../schema-builder/engine/relations";
+import { createLogger } from "../../../logging/logger";
 import {
+  type DatabaseErrorCategory,
+  DatabasePluginError,
+  invalidDatabaseRequest,
+} from "../../errors";
+import type { AppKitTable, ColumnMeta, Schema } from "../../schema-builder";
+import { buildEngineRelations } from "../../schema-builder/engine/relations";
+import { columnValueSchema } from "../../schema-builder/validators";
+import {
+  andWhere,
   conflictTargetMeta,
   type DataPath,
-  DataPathError,
+  type IdValue,
   limitOrDefault,
   primaryKeyMeta,
   type Row,
@@ -22,6 +30,8 @@ import {
   translateOrder,
   translateWhere,
 } from "./translate";
+
+const logger = createLogger("database");
 
 /** Concrete Drizzle seam shared by the adapter and its focused tests. */
 export type DrizzleDb = NodePgDatabase<Record<string, never>>;
@@ -44,7 +54,7 @@ interface RelationalQueryBuilder {
 /** Reject same-name or forged tables by requiring finalized object identity. */
 function assertRegisteredTable(schema: Schema, table: AppKitTable): void {
   if (schema.$tables[table.$name] !== table) {
-    throw new DataPathError(`Table "${table.$name}" is not registered`);
+    throw invalidDatabaseRequest(`Table "${table.$name}" is not registered`);
   }
 }
 
@@ -58,7 +68,7 @@ function relationalQueryBuilder(
     table.$name
   ];
   if (!query) {
-    throw new DataPathError(`Table "${table.$name}" is not registered`);
+    throw invalidDatabaseRequest(`Table "${table.$name}" is not registered`);
   }
   return query;
 }
@@ -75,17 +85,59 @@ function selectedColumns(
 /** Keep mutation identifiers schema-owned and every supplied value parameterized. */
 function mutationValues(table: AppKitTable, values: Row): Row {
   if (values === null || typeof values !== "object" || Array.isArray(values)) {
-    throw new DataPathError("Database mutation values must be an object");
+    throw invalidDatabaseRequest("Database mutation values must be an object");
   }
   for (const [key, value] of Object.entries(values)) {
     if (!Object.hasOwn(table.$columns, key)) {
-      throw new DataPathError(`Unknown column "${table.$name}.${key}"`);
+      throw invalidDatabaseRequest(`Unknown column "${table.$name}.${key}"`);
     }
     if (isSQLWrapper(value)) {
-      throw new DataPathError("Database mutation values cannot contain SQL");
+      throw invalidDatabaseRequest(
+        "Database mutation values cannot contain SQL",
+      );
     }
   }
   return values;
+}
+
+// Drizzle wraps driver failures in DrizzleQueryError, so the SQLSTATE sits on a
+// nested `cause` rather than the thrown error. Walk a bounded chain to find it.
+const MAX_CAUSE_DEPTH = 5;
+
+function sqlStateOf(error: unknown): string | undefined {
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+    if (!current || typeof current !== "object") return undefined;
+    try {
+      const candidate = Reflect.get(current, "code");
+      // SQLSTATE is always a five-character alphanumeric class code.
+      if (typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate)) {
+        return candidate;
+      }
+      current = Reflect.get(current, "cause");
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Classify SQLSTATE without retaining the driver error or its properties. */
+function classifyDriverError(error: unknown): DatabasePluginError {
+  const code = sqlStateOf(error);
+  const category: DatabaseErrorCategory =
+    code === "42501"
+      ? "FORBIDDEN"
+      : code?.startsWith("23")
+        ? "CONFLICT"
+        : "INTERNAL";
+  logger.error(
+    "Database driver error classified as %s (SQLSTATE %s): %O",
+    category,
+    code ?? "unknown",
+    error,
+  );
+  return new DatabasePluginError(category, "runtime");
 }
 
 async function runDatabaseOperation<T>(
@@ -94,28 +146,42 @@ async function runDatabaseOperation<T>(
   try {
     return await operation();
   } catch (error) {
-    if (error instanceof DataPathError) throw error;
-    // Raw driver details stop at the adapter boundary.
-    throw new DataPathError("Database operation failed");
+    if (error instanceof DatabasePluginError) throw error;
+    throw classifyDriverError(error);
   }
+}
+
+/** Resolve and validate the sole key once before a keyed operation executes. */
+function validatedPrimaryKey(
+  table: AppKitTable,
+  id: unknown,
+): { readonly meta: ColumnMeta; readonly value: IdValue } {
+  const meta = primaryKeyMeta(table);
+  const result = columnValueSchema(meta).safeParse(id);
+  if (!result.success) {
+    throw invalidDatabaseRequest(
+      `Invalid primary-key value for "${table.$name}.${meta.columnName}"`,
+    );
+  }
+  return { meta, value: result.data as IdValue };
 }
 
 // Enforce the single-row DataPath contract before results reach callers.
 function expectExactlyOne(rows: Row[]): Row {
   if (rows.length !== 1) {
-    throw new DataPathError("Database mutation did not return exactly one row");
+    throw new DatabasePluginError("INTERNAL", "runtime");
   }
   return rows[0];
 }
 
 function expectZeroOrOne(rows: Row[]): Row | null {
   if (rows.length > 1) {
-    throw new DataPathError("Database mutation returned more than one row");
+    throw new DatabasePluginError("INTERNAL", "runtime");
   }
   return rows[0] ?? null;
 }
 
-/** Adapt a Drizzle database to the backend-neutral DataPath contract. */
+/** Adapt a Drizzle database to AppKit's internal execution port. */
 export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
   const pgTable = (table: AppKitTable): PgTable => {
     assertRegisteredTable(schema, table);
@@ -149,10 +215,22 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     },
 
     async findOne(table, id, spec) {
-      const primaryKey = primaryKeyMeta(table);
+      const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
+        table,
+        id,
+      );
       const row = await runDatabaseOperation(() =>
         relationalQueryBuilder(db, schema, table).findFirst({
-          where: eq(columnOf(table, primaryKey.columnName), id),
+          where:
+            spec?.where === undefined
+              ? eq(columnOf(table, primaryKey.columnName), validatedId)
+              : translateWhere(
+                  table,
+                  andWhere(
+                    { [primaryKey.columnName]: { eq: validatedId } },
+                    spec.where,
+                  ),
+                ),
           columns: selectedColumns(table, spec?.select),
           with:
             spec?.include === undefined
@@ -181,12 +259,15 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     async update(table, id, values) {
       const engineTable = pgTable(table);
       const parameters = mutationValues(table, values);
-      const primaryKey = primaryKeyMeta(table);
+      const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
+        table,
+        id,
+      );
       const rows = await runDatabaseOperation(() =>
         db
           .update(engineTable)
           .set(parameters)
-          .where(eq(columnOf(table, primaryKey.columnName), id))
+          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
           .returning(),
       );
       return expectZeroOrOne(rows as Row[]);
@@ -210,11 +291,14 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     },
 
     async delete(table, id) {
-      const primaryKey = primaryKeyMeta(table);
+      const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
+        table,
+        id,
+      );
       const rows = await runDatabaseOperation(() =>
         db
           .delete(pgTable(table))
-          .where(eq(columnOf(table, primaryKey.columnName), id))
+          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
           .returning({ id: columnOf(table, primaryKey.columnName) }),
       );
       return expectZeroOrOne(rows as Row[]) !== null;
@@ -226,7 +310,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     ): Promise<T[]> {
       // SQL wrappers carry structure; tagged interpolations may carry values only.
       if (values.some((value) => isSQLWrapper(value))) {
-        throw new DataPathError(
+        throw invalidDatabaseRequest(
           "Tagged SQL interpolations must be parameter values",
         );
       }
@@ -258,12 +342,13 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
         // Callback errors are application-owned; sanitize only tx lifecycle errors.
         if (
           callbackFailed &&
-          (error === callbackError || callbackError instanceof DataPathError)
+          (error === callbackError ||
+            callbackError instanceof DatabasePluginError)
         ) {
           throw callbackError;
         }
-        if (error instanceof DataPathError) throw error;
-        throw new DataPathError("Database operation failed");
+        if (error instanceof DatabasePluginError) throw error;
+        throw classifyDriverError(error);
       }
     },
   };

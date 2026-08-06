@@ -154,6 +154,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatabaseRegistry",
+          label: "DatabaseRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
         },
@@ -304,6 +309,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.Schema",
+          label: "Schema"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.SearchRequest",
           label: "SearchRequest"
         },
@@ -445,6 +455,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.DatabaseExports",
+          label: "DatabaseExports"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ExecutionResult",
           label: "ExecutionResult"
         },
@@ -467,6 +482,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.IDatabaseConfig",
+          label: "IDatabaseConfig"
         },
         {
           type: "doc",
@@ -587,6 +607,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.bigid",
+          label: "bigid"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.bigint",
+          label: "bigint"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.boolean",
+          label: "boolean"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.createAgent",
           label: "createAgent"
         },
@@ -612,8 +647,23 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.database",
+          label: "database"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineSchema",
+          label: "defineSchema"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.defineTool",
           label: "defineTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.enumColumn",
+          label: "enumColumn"
         },
         {
           type: "doc",
@@ -629,6 +679,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.findServerFile",
           label: "findServerFile"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.fk",
+          label: "fk"
         },
         {
           type: "doc",
@@ -682,6 +737,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.id",
+          label: "id"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.integer",
+          label: "integer"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isFunctionTool",
           label: "isFunctionTool"
         },
@@ -704,6 +769,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.isToolkitEntry",
           label: "isToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.jsonb",
+          label: "jsonb"
         },
         {
           type: "doc",
@@ -737,6 +807,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.text",
+          label: "text"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.timestamp",
+          label: "timestamp"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.tool",
           label: "tool"
         },
@@ -744,6 +824,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.toolsFromRegistry",
           label: "toolsFromRegistry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.uuid",
+          label: "uuid"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.varchar",
+          label: "varchar"
         }
       ]
     }

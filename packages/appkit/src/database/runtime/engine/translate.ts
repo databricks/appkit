@@ -24,11 +24,11 @@ import {
   isFilterOperator,
   MAX_INCLUDES,
 } from "../../contract";
+import { invalidDatabaseRequest } from "../../errors";
 import type { AppKitTable, ColumnMeta, Schema } from "../../schema-builder";
 import { filterOperatorsForKind } from "../../schema-builder/types";
 import { columnValueSchema } from "../../schema-builder/validators";
 import {
-  DataPathError,
   type FilterOps,
   type IncludeOptions,
   type IncludeSpec,
@@ -40,7 +40,7 @@ import {
 function columnMetaOf(table: AppKitTable, key: string): ColumnMeta {
   const column = table.$columns[key];
   if (!column) {
-    throw new DataPathError(`Unknown column "${table.$name}.${key}"`);
+    throw invalidDatabaseRequest(`Unknown column "${table.$name}.${key}"`);
   }
   return column;
 }
@@ -73,7 +73,7 @@ function assertColumnValue(
   value: unknown,
 ): void {
   if (!columnValueSchema(meta).safeParse(value).success) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `Invalid ${operator} operand for "${table.$name}.${meta.columnName}"`,
     );
   }
@@ -86,14 +86,14 @@ function inList(
   value: unknown,
 ): SQL {
   if (!Array.isArray(value)) {
-    throw new DataPathError('The "in" operator requires an array');
+    throw invalidDatabaseRequest('The "in" operator requires an array');
   }
   if (value.length > IN_CAP) {
-    throw new DataPathError(`in list exceeds the ${IN_CAP}-value limit`);
+    throw invalidDatabaseRequest(`in list exceeds the ${IN_CAP}-value limit`);
   }
   for (const item of value) {
     if (item === null) {
-      throw new DataPathError('The "in" operator does not accept null');
+      throw invalidDatabaseRequest('The "in" operator does not accept null');
     }
     assertColumnValue(table, meta, "in", item);
   }
@@ -108,13 +108,13 @@ function translateOperator(
   value: unknown,
 ): SQL {
   if (!supportsOperator(meta, operator)) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `Operator "${operator}" is not supported for "${table.$name}.${meta.columnName}"`,
     );
   }
   if (operator === "is") {
     if (value !== null) {
-      throw new DataPathError('The "is" operator accepts only null');
+      throw invalidDatabaseRequest('The "is" operator accepts only null');
     }
     return isNull(column);
   }
@@ -139,7 +139,7 @@ function translateOperator(
     case "ilike":
       return ilike(column, value as string);
     default:
-      throw new DataPathError(`Unsupported filter operator "${operator}"`);
+      throw invalidDatabaseRequest(`Unsupported filter operator "${operator}"`);
   }
 }
 
@@ -149,18 +149,20 @@ export function translateWhere(
   clause: WhereClause,
 ): SQL | undefined {
   if (clause === null || typeof clause !== "object" || Array.isArray(clause)) {
-    throw new DataPathError("where must be an object");
+    throw invalidDatabaseRequest("where must be an object");
   }
   const conditions: SQL[] = [];
   for (const [key, value] of Object.entries(clause)) {
     if (key === "and" || key === "or") {
       if (!Array.isArray(value) || value.length === 0) {
-        throw new DataPathError(`${key} requires a non-empty predicate array`);
+        throw invalidDatabaseRequest(
+          `${key} requires a non-empty predicate array`,
+        );
       }
       const groups = value.map((group) => {
         const translated = translateWhere(table, group as WhereClause);
         if (!translated) {
-          throw new DataPathError(`${key} predicates cannot be empty`);
+          throw invalidDatabaseRequest(`${key} predicates cannot be empty`);
         }
         return translated;
       });
@@ -182,13 +184,13 @@ export function translateWhere(
     ) {
       const operators = Object.entries(value as FilterOps);
       if (operators.length === 0) {
-        throw new DataPathError(
+        throw invalidDatabaseRequest(
           `Filter for "${table.$name}.${key}" cannot be empty`,
         );
       }
       for (const [operator, operand] of operators) {
         if (!isFilterOperator(operator)) {
-          throw new DataPathError(`Unknown filter operator "${operator}"`);
+          throw invalidDatabaseRequest(`Unknown filter operator "${operator}"`);
         }
         conditions.push(
           translateOperator(table, meta, column, operator, operand),
@@ -204,7 +206,7 @@ export function translateWhere(
 export function translateOrder(table: AppKitTable, order: OrderSpec): SQL[] {
   return Object.entries(order).map(([key, direction]) => {
     if (direction !== "asc" && direction !== "desc") {
-      throw new DataPathError(`Unknown order direction "${direction}"`);
+      throw invalidDatabaseRequest(`Unknown order direction "${direction}"`);
     }
     const column = columnOf(table, key);
     return direction === "desc" ? desc(column) : asc(column);
@@ -225,7 +227,7 @@ export function selectToColumns(
 
 function tableByName(schema: Schema, name: string): AppKitTable {
   const table = schema.$tables[name];
-  if (!table) throw new DataPathError(`Unknown table "${name}"`);
+  if (!table) throw invalidDatabaseRequest(`Unknown table "${name}"`);
   return table;
 }
 
@@ -237,7 +239,7 @@ export function translateInclude(
 ): Record<string, unknown> {
   const entries = Object.entries(include);
   if (entries.length > MAX_INCLUDES) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `include exceeds the ${MAX_INCLUDES}-relation limit`,
     );
   }
@@ -248,7 +250,7 @@ export function translateInclude(
       (candidate) => candidate.name === relationName,
     );
     if (!relation) {
-      throw new DataPathError(
+      throw invalidDatabaseRequest(
         `Unknown relation "${table.$name}.${relationName}"`,
       );
     }
@@ -278,7 +280,7 @@ export function translateInclude(
     }
     if (options.limit !== undefined) {
       if (relation.cardinality !== "toMany") {
-        throw new DataPathError("Only to-many relations accept a limit");
+        throw invalidDatabaseRequest("Only to-many relations accept a limit");
       }
       relationConfig.limit = validateLimit(options.limit);
     } else if (relation.cardinality === "toMany") {

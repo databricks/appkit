@@ -16,6 +16,7 @@ import {
 // created in a hoisted block too (plain top-level consts would be in the TDZ when
 // the hoisted factory runs).
 const {
+  generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
   unref,
@@ -30,6 +31,7 @@ const {
   const lockPathOf = (root: string) =>
     nodePath.join(root, "node_modules", ".databricks", "appkit", "worker.lock");
   return {
+    generateDatabaseTypes: vi.fn(async () => {}),
     generateFromEntryPoint: vi.fn(async () => {}),
     generateServingTypes: vi.fn(async () => {}),
     unref,
@@ -48,6 +50,8 @@ const {
 // command's `await import("@databricks/appkit/type-generator")` resolves to spies
 // and never touches a warehouse.
 vi.mock("@databricks/appkit/type-generator", () => ({
+  DATABASE_TYPES_FILE: "database.d.ts",
+  generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
 }));
@@ -143,6 +147,7 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "non-blocking" }),
     );
+    expect(generateDatabaseTypes).not.toHaveBeenCalled();
 
     // Exactly one detached worker, re-invoking this CLI with --wait and the
     // worker lock, forwarding the same positional targets.
@@ -168,6 +173,22 @@ describe("generate-types foreground spawn orchestration", () => {
     ]);
     expect(opts).toMatchObject({ detached: true, stdio: "ignore" });
     expect(unref).toHaveBeenCalledTimes(1);
+  });
+
+  test("generates database types without a warehouse", async () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    const schemaFile = path.join(tmpRoot, "config/database/schema.ts");
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
+    fs.writeFileSync(schemaFile, "export const schema = {};", "utf8");
+
+    await runCli([tmpRoot, outFile]);
+
+    expect(generateDatabaseTypes).toHaveBeenCalledWith({
+      schemaFile,
+      outFile: path.join(path.dirname(outFile), "database.d.ts"),
+    });
+    expect(generateFromEntryPoint).not.toHaveBeenCalled();
   });
 
   test("lock already held (fresh): does NOT spawn, foreground still resolves", async () => {

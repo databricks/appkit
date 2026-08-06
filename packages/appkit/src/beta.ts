@@ -66,6 +66,23 @@ export {
   toolsFromRegistry,
 } from "./core/agent/tools";
 
+export type { Schema } from "./database/schema-builder";
+export {
+  bigid,
+  bigint,
+  boolean,
+  defineSchema,
+  enumColumn,
+  fk,
+  id,
+  integer,
+  jsonb,
+  text,
+  timestamp,
+  uuid,
+  varchar,
+} from "./database/schema-builder";
+
 // Agent types
 export type {
   AgentDefinition,
@@ -101,3 +118,4 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
+export type { DatabaseExports, IDatabaseConfig } from "./plugins/database";

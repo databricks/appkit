@@ -44,11 +44,15 @@ describe("RegisteredEntity (declaration-merging behaviour)", () => {
 });
 
 describe("DatabaseRegistryEntry shape", () => {
-  it("exposes the five generated facets as records", () => {
+  it("exposes all generated entity facets and key capability", () => {
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("row");
+    expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("publicRow");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("insert");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("update");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("filters");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("includes");
+    expectTypeOf<
+      DatabaseRegistryEntry["hasPrimaryKey"]
+    >().toEqualTypeOf<boolean>();
   });
 });

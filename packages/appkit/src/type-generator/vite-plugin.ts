@@ -5,6 +5,11 @@ import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
 import { createWorkspaceClient } from "../workspace-client";
 import {
+  DATABASE_TYPES_FILE,
+  DatabaseTypegenError,
+  generateDatabaseTypes,
+} from "./database";
+import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
   TYPES_DIR,
@@ -45,6 +50,7 @@ interface AppKitTypesPluginOptions {
    * Folders to watch for changes. Defaults to `config/queries` and
    * `config/metric-views`. When overridden, include a `queries` folder and/or a
    * `metric-views` folder — they are resolved by their trailing path segment.
+   * Database schema sources are watched independently.
    */
   watchFolders?: string[];
 }
@@ -64,6 +70,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   // `watchFolders` ordering (which used to assume queries was `watchFolders[0]`).
   let queryFolder: string | undefined;
   let metricViewsFolder: string | undefined;
+  let databaseFolder: string;
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
   // currently-running drain (null when idle); `queued` records that a trigger
@@ -103,17 +110,23 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
       if (!warehouseId) {
         logger.debug("Warehouse ID not found. Skipping type generation.");
-        return;
+      } else if (hasAnalyticsSources()) {
+        await generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          metricViewsFolder,
+          warehouseId,
+          noCache: false,
+          mode,
+          mvOutFile,
+        });
       }
 
-      await generateFromEntryPoint({
-        outFile,
-        queryFolder,
-        metricViewsFolder,
-        warehouseId,
-        noCache: false,
-        mode,
-        mvOutFile,
+      // Database declarations need no warehouse. Generating them last keeps the
+      // query and metric-view outputs independent of a schema failure.
+      await generateDatabaseTypes({
+        schemaFile: path.join(databaseFolder, "schema.ts"),
+        outFile: path.join(path.dirname(outFile), DATABASE_TYPES_FILE),
       });
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
@@ -122,7 +135,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       // message — both when failing the prod build and when logging in dev.
       const isTypegenError =
         error instanceof TypegenSyntaxError ||
-        error instanceof TypegenFatalError;
+        error instanceof TypegenFatalError ||
+        error instanceof DatabaseTypegenError;
 
       // throw in production to fail the build
       if (process.env.NODE_ENV === "production") {
@@ -136,6 +150,18 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         logger.error("Error generating types: %O", error);
       }
     }
+  }
+
+  /**
+   * Whether this project has anything for the warehouse-backed passes to read.
+   * A database-only project activates the plugin without them, so the query and
+   * metric-view work — and the warehouse it would warm up — must stay dormant.
+   */
+  function hasAnalyticsSources(): boolean {
+    return (
+      (queryFolder !== undefined && existsSync(queryFolder)) ||
+      (metricViewsFolder !== undefined && existsSync(metricViewsFolder))
+    );
   }
 
   /**
@@ -224,6 +250,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
    */
   function armWarehouseWatch(): void {
     if (process.env.NODE_ENV === "production") return;
+    if (!hasAnalyticsSources()) return;
 
     const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
     if (!warehouseId) return;
@@ -297,8 +324,20 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     apply() {
       const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
+      const typesDir = path.dirname(
+        path.resolve(
+          process.cwd(),
+          options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
+        ),
+      );
+      // A declared schema needs no warehouse, and an already-generated
+      // declaration must still be neutralized after its schema is deleted.
+      const hasDatabase =
+        existsSync(
+          path.join(process.cwd(), "config", "database", "schema.ts"),
+        ) || existsSync(path.join(typesDir, DATABASE_TYPES_FILE));
 
-      if (!warehouseId) {
+      if (!warehouseId && !hasDatabase) {
         logger.debug("Warehouse ID not found. Skipping type generation.");
         return false;
       }
@@ -313,7 +352,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       const hasMetricViews = existsSync(
         path.join(process.cwd(), "config", "metric-views"),
       );
-      if (!hasQueries && !hasMetricViews) {
+      if (!hasQueries && !hasMetricViews && !hasDatabase) {
         return false;
       }
 
@@ -354,6 +393,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         "config",
         "metric-views",
       );
+      databaseFolder = path.join(process.cwd(), "config", "database");
       watchFolders = options?.watchFolders ?? [
         defaultQueryFolder,
         defaultMetricViewsFolder,
@@ -392,8 +432,24 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     configureServer(server) {
       server.watcher.add(watchFolders);
+      server.watcher.add(databaseFolder);
+
+      const isDatabaseSource = (changedFile: string): boolean => {
+        const normalizedFile = path.resolve(changedFile);
+        const relative = path.relative(databaseFolder, normalizedFile);
+        return (
+          !relative.startsWith("..") &&
+          !path.isAbsolute(relative) &&
+          /\.(?:[cm]?ts|tsx)$/.test(normalizedFile)
+        );
+      };
 
       server.watcher.on("change", (changedFile) => {
+        if (isDatabaseSource(changedFile)) {
+          void runGenerate("non-blocking");
+          return;
+        }
+
         const isWatchedFile = watchFolders.some((folder) =>
           changedFile.startsWith(folder),
         );
@@ -420,6 +476,14 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           void runGenerate("non-blocking");
           armWarehouseWatch();
         }
+      });
+      // Creation/deletion support is database-specific; query watchers retain
+      // their existing change-only behavior.
+      server.watcher.on("add", (file) => {
+        if (isDatabaseSource(file)) void runGenerate("non-blocking");
+      });
+      server.watcher.on("unlink", (file) => {
+        if (isDatabaseSource(file)) void runGenerate("non-blocking");
       });
 
       // Tear down any pending warehouse watch when the dev server closes so a

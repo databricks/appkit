@@ -905,3 +905,8 @@ export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
 export const METRIC_TYPES_FILE = "metric-views.ts";
+export {
+  DATABASE_TYPES_FILE,
+  DatabaseTypegenError,
+  generateDatabaseTypes,
+} from "./database";

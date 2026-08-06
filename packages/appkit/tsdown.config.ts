@@ -6,10 +6,9 @@ export default defineConfig([
     attw: {
       profile: "esm-only",
       level: "error",
-      excludeEntrypoints: ["./type-generator"],
     },
     name: "@databricks/appkit",
-    entry: ["src/index.ts", "src/beta.ts"],
+    entry: ["src/index.ts", "src/beta.ts", "src/type-generator/index.ts"],
     outDir: "dist",
     hash: false,
     format: "esm",

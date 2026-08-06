@@ -56,16 +56,14 @@ async function runGenerateTypes(
     const mode = resolveTypegenMode(options);
 
     const typeGen = await import("@databricks/appkit/type-generator");
+    const resolvedOutFile =
+      outFile || path.join(process.cwd(), "shared/appkit-types/analytics.d.ts");
 
     // Generate analytics query types (requires warehouse ID)
     const resolvedWarehouseId =
       warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
 
     if (resolvedWarehouseId) {
-      const resolvedOutFile =
-        outFile ||
-        path.join(process.cwd(), "shared/appkit-types/analytics.d.ts");
-
       const queryFolder = path.join(resolvedRootDir, "config/queries");
       const metricViewsFolder = path.join(
         resolvedRootDir,
@@ -115,6 +113,23 @@ async function runGenerateTypes(
       noCache,
     });
     console.log(`Generated serving types: ${servingOutFile}`);
+
+    // Generate database declarations.
+    const databaseSchemaFile = path.join(
+      resolvedRootDir,
+      "config/database/schema.ts",
+    );
+    const databaseOutFile = path.join(
+      path.dirname(resolvedOutFile),
+      typeGen.DATABASE_TYPES_FILE,
+    );
+    if (fs.existsSync(databaseSchemaFile) || fs.existsSync(databaseOutFile)) {
+      await typeGen.generateDatabaseTypes({
+        schemaFile: databaseSchemaFile,
+        outFile: databaseOutFile,
+      });
+      console.log(`Generated database types: ${databaseOutFile}`);
+    }
   } catch (error) {
     if (
       error instanceof Error &&
@@ -133,7 +148,8 @@ async function runGenerateTypes(
     if (
       error instanceof Error &&
       (error.name === "TypegenSyntaxError" ||
-        error.name === "TypegenFatalError")
+        error.name === "TypegenFatalError" ||
+        error.name === "DatabaseTypegenError")
     ) {
       console.error(error.message);
       process.exit(1);
@@ -267,7 +283,7 @@ async function generateTypesAction(
 }
 
 export const generateTypesCommand = new Command("generate-types")
-  .description("Generate TypeScript types from SQL queries")
+  .description("Generate TypeScript types from AppKit configuration")
   .argument("[rootDir]", "Root directory of the project", process.cwd())
   .argument(
     "[outFile]",
