@@ -391,6 +391,25 @@ export function BaseChart({
     interactive,
   ]);
 
+  // Category labels for index-addressed data. A heatmap datum is
+  // `[xIndex, yIndex, value]`, so `mapToDatum` needs the axis labels to report
+  // the clicked cell's categories instead of raw positions.
+  const axisLabels = useMemo(
+    () => ({
+      xLabels: normalized.xData,
+      yLabels:
+        "yAxisData" in normalized
+          ? (normalized.yAxisData as (string | number)[])
+          : undefined,
+    }),
+    [normalized],
+  );
+
+  // Keep the latest axis labels in a ref for the same reason as the handler:
+  // `onEvents` must not re-subscribe when the data changes (e.g. each SSE tick).
+  const axisLabelsRef = useRef(axisLabels);
+  axisLabelsRef.current = axisLabels;
+
   // Build the ECharts event map only when a click handler is provided. Memoized
   // on the `interactive` boolean (handler PRESENCE), NOT on `onDataClick`'s
   // identity: consumers pass an inline arrow whose identity changes every render,
@@ -409,7 +428,7 @@ export function BaseChart({
               // promise must not surface as an unhandled rejection. Swallow
               // rejections here.
               const result = onDataClickRef.current?.(
-                mapToDatum(params),
+                mapToDatum(params, axisLabelsRef.current),
               ) as void | Promise<void>;
               if (
                 result &&

@@ -391,6 +391,63 @@ describe("mapToDatum", () => {
     expect(mapToDatum(params).raw).toBe(params);
   });
 
+  // Heatmap data items are `[xIndex, yIndex, value]` INDEX triples, so the
+  // generic [x, y] tuple reading would report the y *index* as the cell value.
+  test("reads a heatmap triple's cell value, not an axis index", () => {
+    const d = mapToDatum(
+      {
+        seriesType: "heatmap",
+        value: [2, 1, 87],
+        dataIndex: 5,
+        seriesIndex: 0,
+      },
+      { xLabels: ["Jan", "Feb", "Mar"], yLabels: ["EMEA", "APAC"] },
+    );
+    expect(d.value).toBe(87);
+    expect(d.x).toBe("Mar");
+    expect(d.y).toBe("APAC");
+  });
+
+  test("falls back to raw heatmap indices when axis labels are absent", () => {
+    const d = mapToDatum({ seriesType: "heatmap", value: [2, 1, 87] });
+    expect(d.value).toBe(87);
+    expect(d.x).toBe(2);
+    expect(d.y).toBe(1);
+  });
+
+  test("uses an out-of-range heatmap index verbatim", () => {
+    const d = mapToDatum(
+      { seriesType: "heatmap", value: [9, 0, 3] },
+      { xLabels: ["Jan"], yLabels: ["EMEA"] },
+    );
+    expect(d.x).toBe(9);
+    expect(d.y).toBe("EMEA");
+    expect(d.value).toBe(3);
+  });
+
+  // A radar item holds one value per indicator; no single scalar is honest.
+  test("reports no scalar value for a radar multi-measure item", () => {
+    const d = mapToDatum({
+      seriesType: "radar",
+      name: "ACME",
+      value: [10, 20, 30],
+      seriesIndex: 0,
+    });
+    expect(d.name).toBe("ACME");
+    expect(d.value).toBeNull();
+    expect(d.x).toBeUndefined();
+    expect(d.y).toBeUndefined();
+    // The full vector stays reachable through `raw`.
+    expect((d.raw as { value: number[] }).value).toEqual([10, 20, 30]);
+  });
+
+  test("still splits [x, y] tuples for line/scatter series types", () => {
+    const d = mapToDatum({ seriesType: "line", value: [1704067200000, 5] });
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(5);
+    expect(d.value).toBe(5);
+  });
+
   test("tolerates a non-object payload", () => {
     const d = mapToDatum(null);
     expect(d.name).toBe("");

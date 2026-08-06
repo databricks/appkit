@@ -128,20 +128,30 @@ export interface ChartClickDatum {
   /** Category label of the clicked element — the dimension value in the common cross-filter case. */
   name: string;
   /**
-   * The datum's scalar value. For `[x, y]` tuple points (time-series / scatter)
-   * this is the y-component (see {@link ChartClickDatum.x} / {@link ChartClickDatum.y});
-   * `null` when there is no scalar value to surface.
+   * The datum's scalar value:
+   * - bar / pie — the datum itself.
+   * - time-series / scatter — the y-component of the `[x, y]` point (see
+   *   {@link ChartClickDatum.x} / {@link ChartClickDatum.y}).
+   * - heatmap — the cell value (the third entry of ECharts'
+   *   `[xIndex, yIndex, value]` triple), *not* an axis index.
+   * - radar — `null`; the item holds one value per indicator, so there is no
+   *   single scalar to report. Read the vector from {@link ChartClickDatum.raw}.
+   *
+   * `null` whenever there is no scalar value to surface.
    */
   value: number | string | null;
   /**
-   * The x-component of an `[x, y]` tuple datum (e.g. the timestamp of a
-   * time-series point, or the x of a scatter point). `undefined` for scalar
-   * (bar/pie) data that carries no separate x.
+   * The x-position of the clicked datum: the x-component of an `[x, y]` tuple
+   * (e.g. a time-series timestamp or scatter x), or — for a heatmap — the
+   * clicked cell's x-axis **category label** (the raw index if labels are
+   * unavailable). `undefined` for scalar (bar/pie) and radar data that carries
+   * no separate x.
    */
   x?: number | string;
   /**
-   * The y-component of an `[x, y]` tuple datum. Mirrors {@link ChartClickDatum.value}
-   * for tuple points; `undefined` for scalar data.
+   * The y-position of the clicked datum: the y-component of an `[x, y]` tuple
+   * (mirroring {@link ChartClickDatum.value}), or — for a heatmap — the clicked
+   * cell's y-axis **category label**. `undefined` for scalar and radar data.
    */
   y?: number | string;
   /** Series label, when present. */
