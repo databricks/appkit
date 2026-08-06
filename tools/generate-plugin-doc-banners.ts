@@ -16,17 +16,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  camelToKebab,
+  PLUGIN_NAME_PATTERN,
+} from "../packages/shared/src/naming";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
 const PLUGINS_DIR = path.join(REPO_ROOT, "packages/appkit/src/plugins");
 const DOCS_DIR = path.join(REPO_ROOT, "docs/docs/plugins");
-
-/**
- * Same as `plugin-manifest.schema.json` `name` pattern; keeps `path.join` targets
- * under `docs/docs/plugins` (defense in depth vs path traversal in `name`).
- */
-const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.
@@ -114,9 +112,9 @@ function readPluginInfos(): PluginInfo[] {
       continue; // not a valid plugin manifest, skip silently
     }
 
-    if (!SCHEMA_NAME_PATTERN.test(manifest.name)) {
+    if (!PLUGIN_NAME_PATTERN.test(manifest.name)) {
       throw new Error(
-        `Manifest name "${manifest.name}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$.`,
+        `Manifest name "${manifest.name}" in ${manifestPath} doesn't match the plugin manifest schema pattern ${PLUGIN_NAME_PATTERN.source}.`,
       );
     }
 
@@ -128,7 +126,7 @@ function readPluginInfos(): PluginInfo[] {
     }
 
     const docBasename =
-      DOC_FILE_OVERRIDES[manifest.name] ?? `${manifest.name}.md`;
+      DOC_FILE_OVERRIDES[manifest.name] ?? `${camelToKebab(manifest.name)}.md`;
     if (
       docBasename.includes("..") ||
       docBasename !== path.basename(docBasename) ||
@@ -191,7 +189,7 @@ function main(): void {
 
   for (const s of summary) {
     const rel = path.relative(REPO_ROOT, DOCS_DIR);
-    const docName = DOC_FILE_OVERRIDES[s.name] ?? `${s.name}.md`;
+    const docName = DOC_FILE_OVERRIDES[s.name] ?? `${camelToKebab(s.name)}.md`;
     if (s.action === "missing") {
       console.warn(
         `  warn: ${s.name} — no doc page at ${rel}/${docName} (skipping)`,

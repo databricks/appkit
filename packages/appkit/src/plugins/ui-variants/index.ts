@@ -25,7 +25,7 @@ interface ConfirmRequestBody {
  * per `<Variants>` id — and the plugin only records; it never edits source.
  */
 class UiVariantsPlugin extends Plugin<BasePluginConfig> {
-  static manifest = manifest as PluginManifest<"ui-variants">;
+  static manifest = manifest as PluginManifest<"uiVariants">;
 
   protected static description =
     "Dev-only recorder for the <Variants> UI picker";

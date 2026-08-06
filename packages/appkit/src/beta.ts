@@ -89,5 +89,15 @@ export {
   loadAgentFromFile,
   loadAgentsFromDir,
 } from "./plugins/agents";
-
+// AI Search plugin config and query types (the `aiSearch` binding
+// itself is exported via the generated barrel above).
+export type {
+  IAiSearchConfig,
+  IndexConfig,
+  RerankerConfig,
+  SearchFilters,
+  SearchRequest,
+  SearchResponse,
+  SearchResult,
+} from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";

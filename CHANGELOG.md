@@ -98,6 +98,24 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+## [0.55.0](https://github.com/databricks/appkit/compare/v0.54.0...v0.55.0) (2026-08-05)
+
+### appkit
+
+* **appkit:** ship the ai-search plugin at beta ([#508](https://github.com/databricks/appkit/issues/508)) ([bd70a1b](https://github.com/databricks/appkit/commit/bd70a1b78bbbd97a8432f11a44e9a65f1972b1c2))
+
+
+## [0.54.0](https://github.com/databricks/appkit/compare/v0.53.1...v0.54.0) (2026-08-05)
+
+### analytics
+
+* **analytics:** add Metric View metadata pipeline ([#512](https://github.com/databricks/appkit/issues/512)) ([ba3d3ed](https://github.com/databricks/appkit/commit/ba3d3ed32c918b2fdaf19ba0043c8e403835928b))
+
+
 ## [0.53.1](https://github.com/databricks/appkit/compare/v0.53.0...v0.53.1) (2026-08-05)
 
 ### appkit

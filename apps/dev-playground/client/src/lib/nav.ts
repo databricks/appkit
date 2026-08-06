@@ -122,8 +122,8 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: LineChartIcon,
       },
       {
-        to: "/vector-search",
-        label: "Vector Search",
+        to: "/ai-search",
+        label: "AI Search",
         description:
           "Semantic search backed by Databricks vector indexes, wired into AppKit's retrieval API.",
         icon: SearchIcon,

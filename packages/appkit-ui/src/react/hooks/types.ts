@@ -199,6 +199,51 @@ export interface ServingClientConfig {
 }
 
 // ============================================================================
+// AI Search
+// ============================================================================
+
+export type AiSearchQueryType = "ann" | "hybrid" | "full_text";
+
+/** One configured index, as exposed by the ai-search plugin's `clientConfig()`. */
+export interface AiSearchIndexSummary {
+  alias: string;
+  queryType: AiSearchQueryType;
+  pagination: boolean;
+}
+
+/** Shape of the ai-search plugin's client config on `window.__appkit__`. */
+export interface AiSearchClientConfig {
+  indexes: AiSearchIndexSummary[];
+}
+
+export interface AiSearchRequest {
+  queryText?: string;
+  queryVector?: number[];
+  columns?: string[];
+  numResults?: number;
+  queryType?: AiSearchQueryType;
+  filters?: Record<string, string | number | boolean | (string | number)[]>;
+  reranker?: boolean;
+}
+
+export interface AiSearchResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  score: number;
+  data: T;
+}
+
+export interface AiSearchResponse<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  results: AiSearchResult<T>[];
+  totalCount: number;
+  queryTimeMs: number;
+  queryType: AiSearchQueryType;
+  nextPageToken: string | null;
+}
+
+// ============================================================================
 // Serving Endpoint Registry
 // ============================================================================
 

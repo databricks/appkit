@@ -1,45 +1,8 @@
 import { createLogger } from "../../logging/logger";
-import {
-  type CancellationToken,
-  Context,
-  type serving,
-  type WorkspaceClient,
-} from "../../workspace-client";
+import type { serving, WorkspaceClient } from "../../workspace-client";
+import { contextFromAbortSignal } from "../context";
 
 const logger = createLogger("connectors:serving");
-
-/**
- * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
- * `apiClient.request` can abort the outbound HTTP request (and stop pulling
- * the SSE body) when the agent run is cancelled.
- */
-function cancellationTokenFromAbortSignal(
-  signal: AbortSignal,
-): CancellationToken {
-  const listeners = new Set<() => void>();
-  const fire = () => {
-    for (const cb of listeners) {
-      try {
-        cb();
-      } catch {
-        // ignore listener failures — abort must stay best-effort
-      }
-    }
-  };
-  signal.addEventListener("abort", fire, { passive: true });
-
-  return {
-    get isCancellationRequested() {
-      return signal.aborted;
-    },
-    onCancellationRequested(callback: (e?: unknown) => unknown) {
-      listeners.add(callback as () => void);
-      if (signal.aborted) {
-        void callback();
-      }
-    },
-  };
-}
 
 /**
  * Structural shape of a Databricks SDK client we need for the low-level
@@ -115,11 +78,7 @@ export async function streamPath(
 ): Promise<ReadableStream<Uint8Array>> {
   logger.debug("Streaming from path %s", path);
 
-  const context = signal
-    ? new Context({
-        cancellationToken: cancellationTokenFromAbortSignal(signal),
-      })
-    : undefined;
+  const context = contextFromAbortSignal(signal);
 
   const response = (await client.apiClient.request(
     {
