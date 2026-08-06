@@ -48,6 +48,34 @@ describe("js/format formatValue", () => {
     );
   });
 
+  // The JSON_ARRAY wire path delivers numeric cells as strings, so an int64 /
+  // large DECIMAL measure reaches the formatter as an integer-shaped string.
+  // Routing it through Number() would round it before formatting.
+  test("preserves precision for integer strings beyond 2^53", () => {
+    expect(formatValue("9007199254740993", "#,##0")).toBe(
+      "9,007,199,254,740,993",
+    );
+    expect(formatValue("9007199254740993", "$#,##0")).toBe(
+      "$9,007,199,254,740,993",
+    );
+    expect(formatValue("-9007199254740993", "$#,##0")).toBe(
+      "-$9,007,199,254,740,993",
+    );
+  });
+
+  test("formats safe-range integer strings unchanged", () => {
+    // Below the bigint threshold: the ordinary Number path still applies.
+    expect(formatValue("1234567", "#,##0")).toBe("1,234,567");
+    expect(formatValue("1234567", "#,##0.00")).toBe("1,234,567.00");
+  });
+
+  test("leaves fractional and exponent strings on the float path", () => {
+    // Only plain integer strings qualify for exact formatting; a fraction or
+    // exponent has no exact bigint reading.
+    expect(formatValue("1234.5", "#,##0.00")).toBe("1,234.50");
+    expect(formatValue("1e3", "#,##0")).toBe("1,000");
+  });
+
   test("no format falls back to toLocaleString for numbers", () => {
     expect(formatValue(1234.5)).toBe((1234.5).toLocaleString());
   });

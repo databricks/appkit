@@ -28,6 +28,50 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
+/**
+ * An integer-shaped string whose magnitude exceeds JS's safe-integer range, as
+ * a bigint — otherwise `null`.
+ *
+ * The JSON_ARRAY wire path delivers every numeric cell as a *string* (the SQL
+ * connector copies `data_array` cells verbatim), so a BIGINT / large DECIMAL
+ * arrives here as e.g. `"9007199254740993"`. Coercing that through `Number`
+ * silently rounds it, so an int64 id or a cents-denominated total renders as a
+ * neighbouring value. Detect the case up front and keep it exact.
+ *
+ * Deliberately narrow: only a plain optionally-signed digit string qualifies.
+ * Anything with a fraction, exponent, or other syntax stays on the `Number`
+ * path, where float semantics are the correct behaviour anyway.
+ */
+function asPreciseBigInt(value: string): bigint | null {
+  const trimmed = value.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) return null;
+  const asBig = BigInt(trimmed);
+  return asBig > BigInt(Number.MAX_SAFE_INTEGER) ||
+    asBig < -BigInt(Number.MAX_SAFE_INTEGER)
+    ? asBig
+    : null;
+}
+
+/**
+ * Format a bigint exactly, with fixed decimals + optional thousands grouping
+ * and a currency prefix inside the sign. `Intl.NumberFormat` accepts a bigint
+ * directly and formats it without float coercion, unlike `Number(value)`.
+ */
+function formatBigInt(
+  value: bigint,
+  decimals: number,
+  grouping: boolean,
+  prefix: string,
+): string {
+  const sign = value < 0n ? "-" : "";
+  const body = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+    useGrouping: grouping,
+  }).format(value < 0n ? -value : value);
+  return `${sign}${prefix}${body}`;
+}
+
 /** Format a number with fixed decimals + optional thousands grouping. */
 function formatNumber(
   value: number,
@@ -83,21 +127,21 @@ export function formatValue(value: unknown, format?: string): string {
   const decimals = countDecimals(format);
   const prefix = currencyPrefix(format);
 
-  // bigint fast path. A bigint is an exact integer, so `BigInt.toLocaleString`
-  // formats it losslessly — `Number(bigint)` would corrupt values beyond ±2^53
-  // (int64 counts / cents). The percent path multiplies by 100 (float math a
-  // large bigint can't survive), so refuse it rather than emit a wrong number.
-  if (typeof value === "bigint") {
-    if (isPercent) return String(value);
-    const sign = value < 0n ? "-" : "";
-    // `Intl.NumberFormat` accepts a bigint directly and formats it exactly (no
-    // float coercion), unlike `Number(value)`.
-    const body = new Intl.NumberFormat("en-US", {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-      useGrouping: grouping,
-    }).format(value < 0n ? -value : value);
-    return `${sign}${prefix}${body}`;
+  // Exact-integer path. A bigint formats losslessly via `Intl.NumberFormat`,
+  // whereas `Number(bigint)` corrupts values beyond ±2^53 (int64 counts /
+  // cents). Reached both by a genuine bigint and by an oversized integer-shaped
+  // *string* off the JSON_ARRAY wire — see `asPreciseBigInt`.
+  const big =
+    typeof value === "bigint"
+      ? value
+      : typeof value === "string"
+        ? asPreciseBigInt(value)
+        : null;
+  if (big !== null) {
+    // The percent path multiplies by 100 (float math a large bigint can't
+    // survive), so refuse it rather than emit a wrong number.
+    if (isPercent) return String(big);
+    return formatBigInt(big, decimals, grouping, prefix);
   }
 
   const num = coerceNumber(value);
