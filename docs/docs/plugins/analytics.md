@@ -530,7 +530,7 @@ When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view ty
   loading: boolean; // true while the metric query is executing
   error: string | null; // sanitized human-readable message, or null on success
   errorCode: string | null; // stable upstream code (branch on this, not the message)
-  metadata: Record<string, MetricColumnMeta> | undefined; // per-column display metadata (see below)
+  metadata: Record<string, MetricViewColumnDisplay> | undefined; // per-column display metadata (see below)
 }
 ```
 
@@ -562,7 +562,7 @@ This is **pure response decoration**: the injected metadata never enters the cac
 
 ### Format utilities
 
-`@databricks/appkit-ui/js` ships small, pure, tree-shakeable formatters that turn raw values + the metadata above into display strings. They take the format spec (or `MetricColumnMeta`) as **arguments** — no React, no chart-library coupling — so they work in tables, tooltips, and chart configs alike.
+`@databricks/appkit-ui/js` ships small, pure, tree-shakeable formatters that turn raw values + the metadata above into display strings. They take the format spec (or `MetricViewColumnDisplay`) as **arguments** — no React, no chart-library coupling — so they work in tables, tooltips, and chart configs alike.
 
 | Function                       | Purpose                                                                                                      |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
