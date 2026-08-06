@@ -11,6 +11,7 @@ import {
   stripNamespace,
 } from "./client";
 import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
+import { extractRequirements, renderRequirements } from "./requirements";
 import { registerPluginInServer } from "./server-register";
 
 /** Subdirectories that commonly hold the frontend / server in an AppKit app. */
@@ -271,6 +272,10 @@ async function runAdd(
           manifest = JSON.parse(file.content) as PluginManifestShape;
           pluginRel = path.dirname(target);
         }
+      }
+      const requirements = extractRequirements(item);
+      if (requirements.length > 0) {
+        console.log(`\n${renderRequirements(item, requirements)}`);
       }
       pluginSummaries.push({
         importPath: `./${pluginRel}`,
