@@ -59,11 +59,69 @@ const TABLE_COLUMNS = ["region", ...TABLE_MEASURES] as const;
 // into a `MetricFilter` the same way — one shared `selection` state drives them.
 const FILTER_DIMENSIONS = ["region", "segment"] as const;
 type FilterDimension = (typeof FILTER_DIMENSIONS)[number];
-type Selection = Partial<Record<FilterDimension, string>>;
+// `null` is a real selection — "the rows where this dimension IS NULL" — and is
+// distinct from a dimension being absent (no filter). `toMetricFilter` compiles
+// it to `notSet`; stringifying it to "null" would instead build `equals 'null'`
+// and match nothing.
+type Selection = Partial<Record<FilterDimension, string | null>>;
 
-// Radix `Select` forbids an empty-string item value, so an explicit sentinel
-// stands in for the "no filter on this dimension" choice.
+// Radix `Select` forbids an empty-string item value, so explicit sentinels stand
+// in for the "no filter on this dimension" choice and for a NULL group key
+// (which has no string form of its own that couldn't collide with real data).
 const ALL = "__all__";
+const NONE = "__none__";
+
+/** Label shown for a NULL group key. */
+const NONE_LABEL = "(none)";
+
+/**
+ * A dimension value as a `Select` item value: real values pass through, a NULL
+ * group key becomes the {@link NONE} sentinel.
+ */
+function toItemValue(value: string | null): string {
+  return value === null ? NONE : value;
+}
+
+/** Inverse of {@link toItemValue} — maps the sentinels back to a selection. */
+function fromItemValue(value: string): string | null | undefined {
+  if (value === ALL) return undefined;
+  return value === NONE ? null : value;
+}
+
+/** Display label for a selected dimension value, naming the NULL case. */
+function toDisplayLabel(value: string | null): string {
+  return value === null ? NONE_LABEL : value;
+}
+
+/**
+ * A clicked chart category as a selection value. Charts normalize a NULL
+ * category key to `""` (see `normalizeChartData`), so an empty name means "the
+ * NULL group" — map it back to `null` for an `IS NULL` filter rather than an
+ * `equals ''` that matches nothing.
+ */
+function fromChartName(name: string): string | null {
+  return name === "" ? null : name;
+}
+
+/**
+ * The distinct values of one dimension across a breakdown's rows, for a dropdown
+ * domain. A NULL group key is kept as `null` (never `String(null)`), sorted last.
+ */
+function toDimensionOptions(
+  rows: Array<Record<string, unknown>> | null,
+  dimension: FilterDimension,
+): (string | null)[] {
+  let hasNull = false;
+  const values = new Set<string>();
+  for (const row of rows ?? []) {
+    const value = row[dimension];
+    if (value === null || value === undefined) hasNull = true;
+    else values.add(String(value));
+  }
+  const sorted: (string | null)[] = Array.from(values).sort();
+  if (hasNull) sorted.push(null);
+  return sorted;
+}
 
 /**
  * Compose the active selection into a `MetricFilter`, optionally excluding one
@@ -80,7 +138,7 @@ function buildFilter(
   selection: Selection,
   exclude?: FilterDimension,
 ): MetricFilter | undefined {
-  const shorthand: Record<string, string> = {};
+  const shorthand: Record<string, string | null> = {};
   for (const dimension of FILTER_DIMENSIONS) {
     const value = selection[dimension];
     if (dimension === exclude || value === undefined) continue;
@@ -172,7 +230,7 @@ function MetricViewsRoute() {
   const [selection, setSelection] = useState<Selection>({});
 
   const setDimension = useCallback(
-    (dimension: FilterDimension, value: string | undefined) => {
+    (dimension: FilterDimension, value: string | null | undefined) => {
       setSelection((previous) => {
         const next = { ...previous };
         if (value === undefined) delete next[dimension];
@@ -231,19 +289,15 @@ function MetricViewsRoute() {
     filter: regionFilter,
   });
 
-  // Dropdown option domains, derived from the region/segment breakdowns.
+  // Dropdown option domains, derived from the region/segment breakdowns. A NULL
+  // group key is preserved as `null` (not stringified to "null") so selecting it
+  // compiles to `IS NULL` rather than an `equals 'null'` that matches nothing.
   const regionOptions = useMemo(
-    () =>
-      Array.from(
-        new Set((region.data ?? []).map((row) => String(row.region))),
-      ).sort(),
+    () => toDimensionOptions(region.data, "region"),
     [region.data],
   );
   const segmentOptions = useMemo(
-    () =>
-      Array.from(
-        new Set((segment.data ?? []).map((row) => String(row.segment))),
-      ).sort(),
+    () => toDimensionOptions(segment.data, "segment"),
     [segment.data],
   );
 
@@ -273,9 +327,13 @@ function MetricViewsRoute() {
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3">
               <Select
-                value={selection.region ?? ALL}
+                value={
+                  selection.region === undefined
+                    ? ALL
+                    : toItemValue(selection.region)
+                }
                 onValueChange={(value) =>
-                  setDimension("region", value === ALL ? undefined : value)
+                  setDimension("region", fromItemValue(value))
                 }
               >
                 <SelectTrigger className="w-[200px]">
@@ -284,17 +342,24 @@ function MetricViewsRoute() {
                 <SelectContent>
                   <SelectItem value={ALL}>All regions</SelectItem>
                   {regionOptions.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
+                    <SelectItem
+                      key={toItemValue(value)}
+                      value={toItemValue(value)}
+                    >
+                      {toDisplayLabel(value)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
               <Select
-                value={selection.segment ?? ALL}
+                value={
+                  selection.segment === undefined
+                    ? ALL
+                    : toItemValue(selection.segment)
+                }
                 onValueChange={(value) =>
-                  setDimension("segment", value === ALL ? undefined : value)
+                  setDimension("segment", fromItemValue(value))
                 }
               >
                 <SelectTrigger className="w-[200px]">
@@ -303,8 +368,11 @@ function MetricViewsRoute() {
                 <SelectContent>
                   <SelectItem value={ALL}>All segments</SelectItem>
                   {segmentOptions.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
+                    <SelectItem
+                      key={toItemValue(value)}
+                      value={toItemValue(value)}
+                    >
+                      {toDisplayLabel(value)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -325,7 +393,8 @@ function MetricViewsRoute() {
                       aria-label={`Remove ${formatLabel(dimension)} filter`}
                       onClick={() => setDimension(dimension, undefined)}
                     >
-                      {formatLabel(dimension)}: {selection[dimension]}
+                      {formatLabel(dimension)}:{" "}
+                      {toDisplayLabel(selection[dimension] ?? null)}
                       <span aria-hidden className="ml-1">
                         ✕
                       </span>
@@ -369,8 +438,10 @@ function MetricViewsRoute() {
                     xKey="region"
                     yKey="arr"
                     height={280}
-                    onDataClick={(d) => setDimension("region", d.name)}
-                    selected={selection.region}
+                    onDataClick={(d) =>
+                      setDimension("region", fromChartName(d.name))
+                    }
+                    selected={selection.region ?? undefined}
                   />
                 )}
             </CardContent>
@@ -404,8 +475,10 @@ function MetricViewsRoute() {
                     height={280}
                     innerRadius={55}
                     showLegend
-                    onDataClick={(d) => setDimension("segment", d.name)}
-                    selected={selection.segment}
+                    onDataClick={(d) =>
+                      setDimension("segment", fromChartName(d.name))
+                    }
+                    selected={selection.segment ?? undefined}
                   />
                 )}
             </CardContent>
@@ -485,7 +558,13 @@ function MetricViewsRoute() {
                       {/* One row per region — region is the GROUP BY key, so
                           it's unique per row and safe as the React key. */}
                       {table.data.map((row) => {
-                        const rowRegion = String(row.region);
+                        // Keep a NULL group key as `null` so selecting the row
+                        // filters on `IS NULL`; `String(row.region)` would build
+                        // an `equals 'null'` that matches no row.
+                        const rowRegion =
+                          row.region === null || row.region === undefined
+                            ? null
+                            : String(row.region);
                         const isSelected = selection.region === rowRegion;
                         const toggle = () =>
                           setDimension(
@@ -499,7 +578,7 @@ function MetricViewsRoute() {
                           // convenience. The real keyboard-accessible control is
                           // the button in the region cell below.
                           <TableRow
-                            key={rowRegion}
+                            key={toItemValue(rowRegion)}
                             data-state={isSelected ? "selected" : undefined}
                             className="cursor-pointer hover:bg-muted/50 data-[state=selected]:bg-muted"
                             onClick={toggle}

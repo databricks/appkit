@@ -11,17 +11,28 @@ export type {
  * compiles into a {@link MetricFilter}. A member is dropped when its value is
  * `undefined` or an empty array, so a partially-filled filter-bar selection maps
  * straight to "no predicate for that dimension".
+ *
+ * `null` is meaningful and distinct from `undefined`: it selects the rows whose
+ * dimension **is** NULL, compiling to the grammar's `notSet` (`IS NULL`). This
+ * matters because a NULL group key stringifies to the literal `"null"`, which as
+ * an `equals` value would match no row at all.
  */
 export type MetricFilterShorthand = Record<
   string,
-  string | number | ReadonlyArray<string | number> | undefined
+  string | number | null | ReadonlyArray<string | number> | undefined
 >;
 
 /**
  * Compile a `{ dimension -> value(s) }` shorthand into a {@link MetricFilter} —
  * the equality/membership case a filter bar, dropdown set, or clicked data point
  * produces. Scalar values become an `equals` predicate; array values become an
- * `in` predicate. Members with `undefined` or empty-array values are omitted.
+ * `in` predicate; `null` becomes a `notSet` (`IS NULL`) predicate. Members with
+ * `undefined` or empty-array values are omitted.
+ *
+ * Note the `null` / `undefined` asymmetry: `undefined` means "no filter on this
+ * dimension", while `null` means "filter to the rows where it IS NULL". Passing
+ * a stringified NULL (`String(null)` → `"null"`) instead would compile to
+ * `equals 'null'` and silently match nothing, so pass the real `null` through.
  *
  * Returns a bare {@link MetricPredicate} for a single member, an `and` group for
  * several, and `undefined` when nothing is selected (so the caller can pass it
@@ -41,6 +52,9 @@ export type MetricFilterShorthand = Record<
  * //   ] }
  *
  * toMetricFilter({ region: undefined }); // → undefined
+ *
+ * toMetricFilter({ region: null });
+ * // → { member: "region", operator: "notSet" }
  * ```
  */
 export function toMetricFilter(
@@ -50,7 +64,10 @@ export function toMetricFilter(
   for (const member of Object.keys(selection)) {
     const value = selection[member];
     if (value === undefined) continue;
-    if (Array.isArray(value)) {
+    if (value === null) {
+      // `notSet` renders `IS NULL` and takes no values.
+      predicates.push({ member, operator: "notSet" });
+    } else if (Array.isArray(value)) {
       if (value.length === 0) continue;
       predicates.push({ member, operator: "in", values: [...value] });
     } else {

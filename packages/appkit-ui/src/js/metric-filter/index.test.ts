@@ -35,6 +35,35 @@ describe("toMetricFilter", () => {
     expect(toMetricFilter({ region: [] })).toBeUndefined();
   });
 
+  test("compiles a null value to notSet (IS NULL), not equals 'null'", () => {
+    expect(toMetricFilter({ region: null })).toEqual({
+      member: "region",
+      operator: "notSet",
+    });
+  });
+
+  test("distinguishes null (IS NULL) from undefined (no filter)", () => {
+    expect(toMetricFilter({ region: null, segment: undefined })).toEqual({
+      member: "region",
+      operator: "notSet",
+    });
+  });
+
+  test("omits `values` entirely for a null member", () => {
+    // `notSet` rejects `values` server-side, so the key must be absent rather
+    // than present-and-empty.
+    expect(toMetricFilter({ region: null })).not.toHaveProperty("values");
+  });
+
+  test("combines a null member with a scalar member under and", () => {
+    expect(toMetricFilter({ region: null, segment: "SMB" })).toEqual({
+      and: [
+        { member: "region", operator: "notSet" },
+        { member: "segment", operator: "equals", values: ["SMB"] },
+      ],
+    });
+  });
+
   test("compiles a single scalar member to a bare equals predicate", () => {
     expect(toMetricFilter({ region: "EMEA" })).toEqual({
       member: "region",
