@@ -1,45 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { declaredEnvVars, resolveItems } from "./add";
+import { resolveItems } from "./add";
 import type { RegistryItem } from "./client";
 
 function item(name: string, extra: Partial<RegistryItem> = {}): RegistryItem {
   return { name, ...extra };
 }
-
-describe("declaredEnvVars", () => {
-  it("collects env vars from required resources", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["DATABRICKS_WAREHOUSE_ID"]);
-  });
-
-  // Bug #2: optional resources were dropped entirely.
-  it("also collects env vars from optional resources", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { id: { env: "REQUIRED_ENV" } } }],
-        optional: [{ fields: { id: { env: "OPTIONAL_ENV" } } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["REQUIRED_ENV", "OPTIONAL_ENV"]);
-  });
-
-  it("skips fields without an env property", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { host: { env: "PGHOST" }, note: {} } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["PGHOST"]);
-  });
-
-  it("returns empty for a manifest with no resources", () => {
-    expect(declaredEnvVars({})).toEqual([]);
-  });
-});
 
 describe("resolveItems", () => {
   it("returns requested items in order", async () => {

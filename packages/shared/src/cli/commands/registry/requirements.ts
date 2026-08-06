@@ -12,6 +12,10 @@ export interface RequirementField {
   env?: string;
   origin?: string;
   description?: string;
+  /** Default literal value (static origin); pre-filled without prompting. */
+  value?: string;
+  /** Local-dev-only field; platform-injected at deploy time. */
+  localOnly?: boolean;
 }
 
 /** A resource requirement flattened for display. */
@@ -28,6 +32,8 @@ interface ManifestFieldShape {
   env?: string;
   origin?: string;
   description?: string;
+  value?: string;
+  localOnly?: boolean;
 }
 interface ManifestResourceShape {
   type?: string;
@@ -51,6 +57,8 @@ function toFields(
     env: f.env,
     origin: f.origin,
     description: f.description,
+    value: f.value,
+    localOnly: f.localOnly,
   }));
 }
 
