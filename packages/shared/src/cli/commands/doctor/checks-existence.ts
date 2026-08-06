@@ -102,14 +102,17 @@ function classifyError(err: unknown, target: ResourceTarget): LayerResult {
         : `invalid id/name: ${message}`,
     };
   }
+  // A 403 is genuinely ambiguous: several APIs (jobs, warehouses) return it for a
+  // resource that doesn't exist as well as for one you can't read, so claiming
+  // "no permission" outright would misdiagnose a wrong id. Say both.
   if (status === 403 || errorCode === "PERMISSION_DENIED") {
     return {
       layer: "existence",
       status: "error",
       code: "ACCESS_DENIED",
       detail: quoted
-        ? `no permission to read ${quoted}`
-        : "no permission to read it",
+        ? `${quoted} not found, or you don't have access to it`
+        : "not found, or you don't have access to it",
     };
   }
   return {

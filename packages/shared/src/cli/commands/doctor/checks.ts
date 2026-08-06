@@ -3,7 +3,11 @@
  * probes live in `checks-existence.ts`.)
  */
 
-import { getServiceClient, SdkNotInstalledError } from "./databricks-client";
+import {
+  getProfileHost,
+  getServiceClient,
+  SdkNotInstalledError,
+} from "./databricks-client";
 import type {
   AuthCheckResult,
   DoctorOptions,
@@ -22,6 +26,69 @@ interface CurrentUserClient {
   currentUser: {
     me: () => Promise<{ id?: string; userName?: string }>;
   };
+}
+
+/** Just the resolved config off a WorkspaceClient, read structurally to keep
+ * `shared` SDK-free. */
+interface ConfiguredClient {
+  config?: { host?: unknown };
+}
+
+/**
+ * The host the SDK actually resolved. This is the authority for what was
+ * contacted: `DATABRICKS_HOST` wins the host when set, but a profile supplies it
+ * otherwise, so the env var alone can't tell you the workspace in play.
+ *
+ * Only populated once the SDK has resolved its config, which it does lazily on
+ * the first API call — reading it right after construction yields undefined.
+ */
+function resolvedHostOf(client: unknown): string | undefined {
+  const host = (client as ConfiguredClient | undefined)?.config?.host;
+  return typeof host === "string" && host.length > 0 ? host : undefined;
+}
+
+/** Compares hosts ignoring scheme, trailing slash, and case, so
+ * `https://foo.com/` and `foo.com` count as the same workspace. */
+function sameHost(a: string, b: string): boolean {
+  const normalize = (h: string) =>
+    h
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/+$/, "");
+  return normalize(a) === normalize(b);
+}
+
+/**
+ * Warns when `DATABRICKS_HOST` and the named profile point at different
+ * workspaces. The SDK resolves these per-field — env wins the host while the
+ * profile still supplies the credentials — so this combination silently
+ * authenticates with one workspace's token against another's URL. Almost always
+ * a mistake, and the resulting 401/403 gives no hint of the split.
+ */
+async function hostProfileConflict(
+  envHost: string | undefined,
+  profile: string | undefined,
+): Promise<string | undefined> {
+  if (!envHost || !profile) return undefined;
+  const profileHost = await getProfileHost(profile);
+  if (!profileHost || sameHost(envHost, profileHost)) return undefined;
+  return (
+    `DATABRICKS_HOST (${envHost}) and profile "${profile}" ` +
+    `(${profileHost}) point at different workspaces. DATABRICKS_HOST wins the ` +
+    `host while the profile still supplies credentials — unset one of them.`
+  );
+}
+
+/**
+ * Last-resort host recovery for when the client never got built: the SDK's
+ * ConfigError appends the resolved config as `host=<url>, profile=…`.
+ */
+function hostFromError(message: string): string | undefined {
+  const match = message.match(/host=([^\s,]+)/);
+  // The config list is prose-terminated ("…databricks.com."), so drop trailing
+  // punctuation the capture picked up.
+  return match ? match[1].replace(/[.,]+$/, "") : undefined;
 }
 
 /**
@@ -96,14 +163,41 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
     };
   }
 
+  // An env/profile split is a config problem, so it's worth reporting whether or
+  // not the credentials happen to work. Resolved offline from ~/.databrickscfg.
+  const conflict = await hostProfileConflict(host, profile);
+
+  // Holds the client so the catch block can read the host the SDK resolved
+  // (which may have come from the profile, not env).
+  let built: unknown;
   try {
     const { client } = await getServiceClient(options.profile);
+    built = client;
     // Bound the live call so an unresponsive workspace can't hang the CLI; a
     // timeout throws and is reported as an auth failure below.
     const me = await withTimeout(
       (client as CurrentUserClient).currentUser.me(),
     );
     const who = me.userName ?? me.id ?? "unknown";
+    // Read only now: the SDK resolves its config lazily on the first call, so
+    // before me() the host is still undefined.
+    const resolvedHost = sanitizeHost(resolvedHostOf(client)) ?? host;
+
+    // Credentials work, but the env/profile split still needs fixing — surface
+    // it as a warning rather than letting a green tick imply all is well.
+    if (conflict) {
+      return {
+        client,
+        result: {
+          status: "warn",
+          code: "HOST_PROFILE_CONFLICT",
+          detail: `authenticated as ${who}`,
+          hint: conflict,
+          host: resolvedHost,
+          profile,
+        },
+      };
+    }
 
     return {
       client,
@@ -111,7 +205,7 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
         status: "ok",
         code: "AUTH_OK",
         detail: `authenticated as ${who}`,
-        host,
+        host: resolvedHost,
         profile,
       },
     };
@@ -133,13 +227,18 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
     const usedProfile = profile ?? sdkProfile;
     const shownProfile =
       profile ?? (sdkProfile ? `${sdkProfile} (resolved)` : undefined);
+    // Prefer the host the SDK resolved (covers a profile-supplied host), then
+    // the one embedded in its error, then the raw env var.
+    const shownHost =
+      sanitizeHost(resolvedHostOf(built) ?? hostFromError(raw)) ?? host;
     return {
       result: {
         status: "error",
         code: "AUTH_FAILED",
         detail: "authentication failed",
-        hint: authFailureHint(raw, usedProfile),
-        host,
+        // A conflict explains the failure better than a generic login hint.
+        hint: conflict ?? authFailureHint(raw, usedProfile),
+        host: shownHost,
         profile: shownProfile,
         raw,
       },
@@ -189,11 +288,33 @@ function authFailureHint(
   return undefined;
 }
 
+/** The default local env file, matching the `.env` the CLI auto-loads. */
+export const DEFAULT_ENV_FILE = ".env";
+
+/** What the config layer needs beyond the target to name the *right* file and
+ * give advice that fits the app's actual deploy wiring. */
+export interface ConfigCheckContext {
+  /** Where local values were loaded from: `.env`, or `--env-file`'s path. Named
+   * in the message so it's clear this is the local env file, not `app.yaml` /
+   * `databricks.yml`. */
+  envFile: string;
+  /** Env vars `app.yaml` already wires. Lets the hint be dropped entirely for a
+   * var whose deploy wiring is already correct. */
+  wiredEnvVars: ReadonlySet<string>;
+}
+
 /**
  * Layer: config. Offline presence check of each declared env var; whether a set
  * value points at a real resource is the existence layer's job.
+ *
+ * The message names the env file explicitly, because "not set" alone reads as
+ * ambiguous between the three files a var can be declared in — the local env
+ * file, `app.yaml`, and `databricks.yml`. This layer only ever means the first.
  */
-export function checkConfig(target: ResourceTarget): LayerResult {
+export function checkConfig(
+  target: ResourceTarget,
+  ctx: ConfigCheckContext,
+): LayerResult {
   const missing: string[] = [];
 
   for (const envVar of target.envVars) {
@@ -206,14 +327,21 @@ export function checkConfig(target: ResourceTarget): LayerResult {
   if (missing.length > 0) {
     const plural = missing.length > 1;
     const names = missing.join(", ");
+    const them = plural ? "them" : "it";
+    // Deploy reads app.yaml, never the env file. When wiring is already correct
+    // there's nothing to add beyond "set it", which the detail line just said —
+    // so no hint at all. Only genuinely-missing wiring earns one.
+    const allWired = missing.every((name) => ctx.wiredEnvVars.has(name));
     return {
       layer: "config",
       status: target.required ? "error" : "warn",
       code: target.required ? "ENV_MISSING" : "ENV_MISSING_OPTIONAL",
-      detail: target.required
-        ? `${names} ${plural ? "are" : "is"} not set`
-        : `${names} ${plural ? "are" : "is"} not set (optional)`,
-      hint: `Set ${plural ? "them" : "it"} in your .env (local) and wire ${plural ? "them" : "it"} through app.yaml + databricks.yml for deploy.`,
+      detail: `${names} ${plural ? "are" : "is"} not set in \`${ctx.envFile}\`${
+        target.required ? "" : " (optional)"
+      }`,
+      hint: allWired
+        ? undefined
+        : `Add ${them} to \`${ctx.envFile}\` to run locally, and wire ${them} through app.yaml + databricks.yml for deploy.`,
     };
   }
 

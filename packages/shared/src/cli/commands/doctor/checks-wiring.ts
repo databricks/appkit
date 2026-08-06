@@ -52,10 +52,11 @@ export function checkWiring(
   }
 
   // 3. A used plugin's env var with no app.yaml entry: set locally via .env, but
-  // .env isn't uploaded, so it's unset in the deployed container — the headline
-  // "works locally, breaks on deploy" case. For a *required* resource this
-  // guarantees a broken deploy, so it's an error that gates the exit code; for
-  // an optional one it's a warning.
+  // .env isn't uploaded and the platform injects only what app.yaml maps, so the
+  // var is absent from the deployed app's environment — the headline "works
+  // locally, breaks on deploy" case. For a *required* resource this guarantees a
+  // broken deploy, so it's an error that gates the exit code; for an optional one
+  // it's a warning.
   for (const target of targets) {
     for (const envVar of target.envVars) {
       if (!info.envToBinding.has(envVar)) {
@@ -64,8 +65,8 @@ export function checkWiring(
           code: "ENV_UNWIRED",
           label: envVar,
           detail: target.required
-            ? "has no app.yaml entry — it will be unset in the deployed app"
-            : "has no app.yaml entry — the optional resource will be unset in the deployed app",
+            ? "has no app.yaml entry — it won't be set in the environment of the deployed app"
+            : "has no app.yaml entry — it won't be set in the environment of the deployed app (optional)",
           hint: `Add to app.yaml: \`{ name: ${envVar}, valueFrom: <binding> }\`, and declare that binding in databricks.yml.`,
         });
       }

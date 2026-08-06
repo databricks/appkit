@@ -99,6 +99,20 @@ describe("runExistenceProbe — sql_warehouse", () => {
     expect(r.code).toBe("ACCESS_DENIED");
   });
 
+  it("hedges on a 403, which several APIs also return for a missing resource", async () => {
+    const client = {
+      warehouses: {
+        get: async () => {
+          throw apiError(403);
+        },
+      },
+    };
+    const r = await runExistenceProbe(client, target());
+    // Asserting "no permission" outright would misdiagnose a simple typo'd id.
+    expect(r.detail).toMatch(/not found, or you don't have access to it/i);
+    expect(r.detail).toContain("wh-1");
+  });
+
   it("skips when the id field is missing", async () => {
     const client = { warehouses: { get: async () => ({}) } };
     const r = await runExistenceProbe(client, target({ fieldValues: {} }));

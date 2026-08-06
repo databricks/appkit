@@ -85,10 +85,20 @@ export interface WiringFinding {
   hint?: string;
 }
 
+/**
+ * A finding about doctor's own inputs rather than a resource — e.g. no `.env`
+ * where one was expected. Shares {@link WiringFinding}'s shape so the report can
+ * render both with one code path.
+ */
+export type SetupFinding = WiringFinding;
+
 export interface DoctorReport {
   auth: AuthCheckResult;
   resources: ResourceCheckResult[];
   wiring: WiringFinding[];
+  /** Findings about doctor's own inputs (e.g. a missing `.env`), which explain
+   * an otherwise-empty or misleading report. */
+  setup: SetupFinding[];
   /**
    * Authoritative counts across *everything* that has a status — resources,
    * the auth check, and wiring findings — not just resources. A `--json`

@@ -109,12 +109,19 @@ function summaryLine(counts: {
 }
 
 /** Prints the leading `Auth` check row (always first). On failure, appends the
- * target profile, a hint, and — with `--detail` — the raw SDK error. */
+ * workspace and profile in play, a hint, and — with `--detail` — the raw SDK
+ * error. The host matters as much as the profile: `DATABRICKS_HOST` overrides a
+ * profile's host, so the two can come from different places. */
 function printAuthRow(report: DoctorReport, detail: boolean): void {
   const { auth } = report;
   console.log(`  ${glyph(auth.status)}  Auth — ${auth.detail ?? auth.status}`);
-  if (auth.status !== "error") return;
+  // A warn carries a config problem (e.g. a host/profile split) whose hint needs
+  // the same host/profile context as an outright failure.
+  if (auth.status !== "error" && auth.status !== "warn") return;
 
+  if (auth.host) {
+    subLine(`${pc.dim("host:")}    ${pc.cyan(auth.host)}`);
+  }
   if (auth.profile) {
     subLine(`${pc.dim("profile:")} ${pc.cyan(auth.profile)}`);
   }
@@ -168,13 +175,13 @@ interface Row {
 }
 
 export function printReport(report: DoctorReport, detail = false): void {
-  const { resources, wiring, summary, auth } = report;
+  const { resources, wiring, setup, summary, auth } = report;
 
   // One flat, severity-sorted list. Auth leads and never sorts.
   const rows: Row[] = [];
   rows.push({
     status: auth.status,
-    expanded: auth.status === "error",
+    expanded: auth.status === "error" || auth.status === "warn",
     print: () => printAuthRow(report, detail),
   });
 
@@ -206,6 +213,14 @@ export function printReport(report: DoctorReport, detail = false): void {
     });
   }
   for (const f of wiring) {
+    checked.push({
+      status: f.status,
+      expanded: true,
+      print: () => printWiringRow(f),
+    });
+  }
+  // Setup notices share the wiring row shape (same `label`/`detail`/`hint`).
+  for (const f of setup) {
     checked.push({
       status: f.status,
       expanded: true,

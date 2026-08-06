@@ -129,6 +129,21 @@ describe("checkWiring", () => {
     const unwired = findings.find((f) => f.code === "ENV_UNWIRED");
     expect(unwired?.status).toBe("error");
     expect(unwired?.label).toBe("DATABRICKS_WAREHOUSE_ID");
-    expect(unwired?.detail).toMatch(/unset in the deployed app/i);
+    // Names the concrete consequence — the var is absent from the deployed app's
+    // environment — rather than the vaguer "unset in the deployed app".
+    expect(unwired?.detail).toMatch(
+      /won't be set in the environment of the deployed app/i,
+    );
+  });
+
+  it("marks an optional resource's unwired var as optional in the detail", () => {
+    const findings = checkWiring(info({ present: true }), [
+      target({ required: false, envVars: ["DATABRICKS_MISSING"] }),
+    ]);
+    const unwired = findings.find((f) => f.code === "ENV_UNWIRED");
+    expect(unwired?.status).toBe("warn");
+    expect(unwired?.detail).toMatch(
+      /won't be set in the environment of the deployed app \(optional\)/i,
+    );
   });
 });

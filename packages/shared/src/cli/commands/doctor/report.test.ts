@@ -7,6 +7,7 @@ function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
     auth: { status: "ok" },
     resources: [],
     wiring: [],
+    setup: [],
     summary: { ok: 0, warn: 0, error: 0, skipped: 0 },
     exitCode: 0,
     ...overrides,
@@ -71,6 +72,7 @@ describe("printReport ordering", () => {
         res("skipped", "skip"),
       ],
       wiring: [],
+      setup: [],
       summary: { ok: 1, warn: 1, error: 1, skipped: 1 },
       exitCode: 1,
     };
@@ -108,6 +110,79 @@ describe("printReport ordering", () => {
     expect(detailed.some((l) => l.includes("Details:"))).toBe(true);
     expect(detailed.some((l) => l.includes("<long blob>"))).toBe(true);
     expect(detailed.some((l) => /Run with --detail/.test(l))).toBe(false);
+  });
+
+  it("shows the host and profile under a failed auth row", () => {
+    const lines = capture(() =>
+      printReport(
+        report({
+          auth: {
+            status: "error",
+            detail: "authentication failed",
+            host: "https://foo.cloud.databricks.com",
+            profile: "prod",
+          },
+        }),
+      ),
+    );
+    const host = lines.find((l) => l.includes("host:"));
+    expect(host).toContain("https://foo.cloud.databricks.com");
+    // The host is the workspace actually contacted, so it leads the profile.
+    expect(lines.indexOf(host as string)).toBeLessThan(
+      lines.findIndex((l) => l.includes("profile:")),
+    );
+  });
+
+  it("stays quiet about the host when auth succeeded", () => {
+    const lines = capture(() =>
+      printReport(
+        report({
+          auth: {
+            status: "ok",
+            detail: "authenticated as u",
+            host: "https://foo.cloud.databricks.com",
+          },
+        }),
+      ),
+    );
+    expect(lines.some((l) => l.includes("host:"))).toBe(false);
+  });
+
+  it("omits the host line when no host could be resolved", () => {
+    const lines = capture(() =>
+      printReport(
+        report({
+          auth: { status: "error", detail: "authentication failed" },
+        }),
+      ),
+    );
+    expect(lines.some((l) => l.includes("host:"))).toBe(false);
+  });
+
+  it("renders setup notices in the flat list", () => {
+    const lines = capture(() =>
+      printReport(
+        report({
+          setup: [
+            {
+              status: "warn",
+              code: "ENV_FILE_MISSING",
+              label: ".env",
+              detail: "no .env found in /some/dir",
+              hint: "Run doctor from the app root.",
+            },
+          ],
+          summary: { ok: 1, warn: 1, error: 0, skipped: 0 },
+        }),
+      ),
+    );
+    expect(lines.some((l) => l.includes(".env"))).toBe(true);
+    expect(lines.some((l) => l.includes("no .env found in /some/dir"))).toBe(
+      true,
+    );
+    expect(lines.some((l) => l.includes("Run doctor from the app root."))).toBe(
+      true,
+    );
   });
 
   it("summary shows only non-zero categories", () => {

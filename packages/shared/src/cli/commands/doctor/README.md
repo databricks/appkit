@@ -20,6 +20,18 @@ so the reported problem is the *root* cause, not a symptom.
 is the `existence` layer's job. (`DATABRICKS_HOST` is the exception — `auth`
 validates it structurally, since a bad host means no client can be built.)
 
+An env var can be declared in three places — the local env file, `app.yaml`, and
+`databricks.yml` — so a bare "X is not set" is ambiguous about which one is
+meant. This layer only ever means the **local env file**, and says so by name:
+`X is not set in .env` (or the `--env-file` path when one was passed). The
+complementary deploy-side finding is the wiring layer's `ENV_UNWIRED`, below.
+
+The hint appears only when it has something to add. When `app.yaml` already
+wires the var, deploy is fine and "set it locally" is just the detail line again,
+so there's **no hint at all** — the row stays one line. Only a var that's *also*
+unwired earns the "wire it through app.yaml + databricks.yml" advice, and then
+`app.yaml` is named because it's genuinely the thing to fix.
+
 Every live call (`auth`'s `currentUser.me()` and each `existence` probe) is
 bounded by a 10s wall-clock deadline (`withTimeout`). A reachable-but-unresponsive
 endpoint must never hang doctor — it's a CI gate that has to return — so a
@@ -69,10 +81,63 @@ wiring):
   `databricks.yml` binding (the env var would never be injected).
 - `BUNDLE_REF_MISSING` — a `${resources.<type>.<key>.*}` binding references a
   resource not declared in the bundle (deploy would fail).
-- `ENV_UNWIRED` (warn) — a plugin needs an env var no `app.yaml` entry provides.
+- `ENV_UNWIRED` — a plugin needs an env var no `app.yaml` entry provides, so it
+  won't be set in the environment of the deployed app. Error for a required
+  resource (a guaranteed break), warning for an optional one.
 
 A wiring `error` gates the exit code, so `appkit doctor` catches deploy-breaking
 misconfiguration pre-deploy.
+
+### Setup notices (`checkSetup` in `run.ts`)
+
+A warning about doctor's *own inputs*, which otherwise produce a misleading
+report. `appkit.plugins.json` is the signal for "this is an app root", and the
+two notices are **mutually exclusive** — at most one is emitted:
+
+- `NO_RESOURCES_CHECKED` — no `appkit.plugins.json`, so zero resources were
+  checked. This is the wrong-directory case: `cd server && appkit doctor`
+  previously printed a bare green tick and exited **0** having checked nothing,
+  which is worse than a failure — a CI gate passing an app it never looked at.
+  Keyed off the file's *presence*, not the target count, since a manifest
+  declaring no resources is legitimate.
+- `ENV_FILE_MISSING` — a manifest exists (so this *is* an app root) but there's no
+  `./.env`. The CLI's `import "dotenv/config"` reads only the cwd's `.env`
+  (dotenv does no upward search), so local values could only have come from the
+  shell. Suppressed when `--env-file` is passed, since a missing explicit file
+  already throws in the CLI.
+
+Without a manifest there's one cause worth reporting — you're in the wrong
+directory — so the `.env` notice is withheld as noise on top of it. With a
+manifest present it earns its place: it explains every `is not set in .env` error
+beneath it.
+
+**Warnings, not errors**: an app may legitimately have no `.env` (values exported
+in the shell, or running inside a deployed container), so this must not fail a
+build on its own.
+
+`SetupFinding` is an alias of `WiringFinding`, so `report.ts` renders both with
+one code path.
+
+## 403 is ambiguous, and the copy says so
+
+Several APIs — jobs and warehouses among them — return **403 for a resource that
+doesn't exist**, not just for one you can't read. Verified against a live
+workspace: `jobs.get` on a nonexistent id returns 403 identically to a job you
+lack access to. So `ACCESS_DENIED` reports both possibilities:
+
+```
+"12345" not found, or you don't have access to it
+```
+
+The alternative — asserting "no permission" — sends you to request access to a
+resource that may simply be a typo.
+
+> A more precise split is *possible*: `permissions.get` returns 404 for an absent
+> job and 403 for one that exists but you can't read (reading an ACL needs
+> `CAN_MANAGE`). It's deliberately **not** used here — that behaviour was
+> confirmed on a single identity in one workspace, and a workspace that returns
+> 404-for-unauthorized would make doctor assert a resource doesn't exist when it
+> does. Not a claim worth risking in a CI gate without broader verification.
 
 ## Report rendering (`report.ts`)
 
@@ -85,9 +150,9 @@ deploy* rather than a probe result.
 Optimised for a quiet happy path: a healthy resource is just a green tick and
 its name — no plugin/type attribution, no per-layer output. Detail (and a
 `Hint:`, offset by a blank line so it sits apart from the error) appears only
-beneath rows that aren't `ok`. There's no header block; the profile in play is
-shown only when auth *fails* (attached under the auth row, where it's the first
-thing to sanity-check).
+beneath rows that aren't `ok`. There's no header block; the host and profile in
+play are shown only when auth *fails or warns* (attached under the auth row,
+where they're the first thing to sanity-check).
 
 Colour (via `picocolors`) uses one tight palette:
 
@@ -106,15 +171,42 @@ piped/CI output is plain text.
 Host and credentials aren't resolved by doctor — an empty `WorkspaceClient({})`
 defers to the SDK's unified-auth chain (explicit env, then the selected
 `~/.databrickscfg` profile, then OAuth). `--profile` is forwarded via
-`DATABRICKS_CONFIG_PROFILE`; with neither host nor profile set, the SDK falls
-back to the default profile. Doctor emits:
+`Config.profile`; with neither host nor profile set, the SDK falls back to the
+default profile. Doctor emits:
 
 | Code | When | Detected |
 | ---- | ---- | -------- |
 | `HOST_INVALID` | `DATABRICKS_HOST` set but malformed / placeholder | offline, before any network |
 | `SDK_NOT_INSTALLED` | Databricks SDK not resolvable | client build |
 | `AUTH_OK` | `currentUser.me()` succeeded | live |
+| `HOST_PROFILE_CONFLICT` (warn) | `me()` succeeded, but env host ≠ profile host | offline + live |
 | `AUTH_FAILED` | `me()` threw | live |
+
+#### Host/profile resolution — why both are reported
+
+The SDK resolves auth **per field**, not per source: `EnvironmentLoader` runs
+first, then `KnownConfigLoader` fills only attributes the environment left unset
+(it explicitly won't overwrite a value already set). So `DATABRICKS_HOST` always
+wins the host, while a named profile can still supply the credentials — a silent
+mix where you authenticate with one workspace's token against another's URL.
+(With no profile named *and* a host already configured, the config file is
+skipped outright, not merged.)
+
+Because of that, a failed or conflicted auth row reports **both** `host:` and
+`profile:`. The host shown is the one the SDK actually resolved, read from
+`client.config.host` — which the SDK populates lazily on the first API call, so
+it's read *after* `me()`, not at construction. When the client never got built,
+the host is recovered from the `host=…` fragment the SDK appends to its
+`ConfigError`; failing that, it falls back to `DATABRICKS_HOST`. Every path is
+passed through `sanitizeHost`, so embedded `user:pass@` credentials can't leak.
+
+`HOST_PROFILE_CONFLICT` compares `DATABRICKS_HOST` against the profile's own
+declared host, read offline from `~/.databrickscfg` via the SDK's exported
+`loadConfigFile` (the resolved config is useless here — env has already won).
+Comparison ignores scheme, case, and trailing slash. It's a **warning**, not an
+error: the credentials do work, so it must not gate CI, but a green tick would
+hide a real misconfiguration. When auth *also* fails, the conflict replaces the
+generic login hint, since it's the better explanation.
 
 `AUTH_FAILED` carries an action-first `hint` inferred from the SDK message
 (workspace unreachable, profile not found, expired login / no credentials). Each
@@ -134,13 +226,17 @@ The report labels hints `Hint:`.
 - `bundle.ts` — reads `databricks.yml` + `app.yaml` for binding provenance
   (external vs bundle-managed) and the env↔binding wiring map.
 - `databricks-client.ts` — the sole SDK seam: dynamic `import()` of the SDK /
-  `@databricks/appkit`, builds a `WorkspaceClient` and Lakebase pool, graceful
-  fallback when uninstalled.
-- `checks.ts` — `checkAuth`, `checkConfig`.
+  `@databricks/appkit`, builds a `WorkspaceClient` and Lakebase pool, reads a
+  profile's declared host for the conflict check, graceful fallback when
+  uninstalled.
+- `checks.ts` — `checkAuth`, `checkConfig` (the latter takes a
+  `ConfigCheckContext` carrying the env-file name and the wired env vars, so its
+  message names the right file and it only hints when wiring is actually wrong).
 - `checks-existence.ts` — per-type existence probe dispatch + error classifier.
 - `checks-wiring.ts` — offline three-file join / bundle-ref consistency check.
 - `run.ts` — orchestration: auth once → overlay origin → per resource
-  (config → existence, skipping bundle-managed) → wiring check.
+  (config → existence, skipping bundle-managed) → wiring check → setup notices
+  (`checkSetup`: missing manifest, else missing `.env`).
 - `report.ts` — runtime / deploy sections, `--json`, exit code.
 - `index.ts` — the Commander command + flags.
 
@@ -155,10 +251,12 @@ Exit code is non-zero if auth, any resource, or any wiring finding is in an
 `error` state, so `appkit doctor` can gate CI / pre-deploy.
 
 The report's `summary` counts *everything* with a status — resources, the auth
-check, and wiring findings — so a `--json` consumer can trust
+check, wiring findings, and setup notices — so a `--json` consumer can trust
 `summary.error === 0` to mean "nothing failed". The report also carries a
 top-level `exitCode` (0/1) as the single unambiguous pass/fail signal. Both are
 computed once in `runDoctor`, so `--json` and the human report never disagree.
+A `--json` consumer that needs to know whether doctor actually *looked* at
+anything should check `setup` (or `resources.length`), not just `summary.error`.
 
 Checks run as the identity that runs doctor (the developer locally, the app in
 deployment).

@@ -37,10 +37,60 @@ describe("runDoctor", () => {
     const spy = vi.spyOn(process, "cwd").mockReturnValue("/nonexistent-doctor");
     const report = await runDoctor({});
     expect(report.resources).toEqual([]);
-    // Auth ok, no resources/wiring → summary reflects the auth check alone.
-    expect(report.summary).toEqual({ ok: 1, warn: 0, error: 0, skipped: 0 });
+    // Auth ok and nothing else *checked*; the two warnings are the setup notices
+    // saying why (no .env, no manifest), which is the point of that directory.
+    expect(report.summary.ok).toBe(1);
+    expect(report.summary.error).toBe(0);
+    expect(report.summary.skipped).toBe(0);
     expect(report.exitCode).toBe(0);
     spy.mockRestore();
+  });
+
+  it("warns instead of reporting a silent all-clear when run outside the app root", async () => {
+    // The trap: a missing manifest yields zero targets, so `cd server &&
+    // appkit doctor` used to print a bare green tick and exit 0 having checked
+    // nothing at all.
+    const spy = vi.spyOn(process, "cwd").mockReturnValue("/nonexistent-doctor");
+    const report = await runDoctor({});
+
+    // Only the manifest notice: without an app root, a missing .env is noise on
+    // top of the one cause that matters (wrong directory).
+    expect(report.setup.map((f) => f.code)).toEqual(["NO_RESOURCES_CHECKED"]);
+    expect(report.setup[0].status).toBe("warn");
+    // Advisory only — a shell-exported env is legitimate, so it can't fail CI.
+    expect(report.exitCode).toBe(0);
+    spy.mockRestore();
+  });
+
+  it("warns about a missing .env only once a manifest proves this is an app root", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-setup-"));
+    const spy = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    try {
+      fs.writeFileSync(path.join(dir, "appkit.plugins.json"), "{}");
+      const report = await runDoctor({});
+      expect(report.setup.map((f) => f.code)).toEqual(["ENV_FILE_MISSING"]);
+
+      // With both present there's nothing to say.
+      fs.writeFileSync(path.join(dir, ".env"), "FOO=bar\n");
+      const clean = await runDoctor({});
+      expect(clean.setup).toEqual([]);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("doesn't warn about a missing .env when --env-file was passed", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-envfile-"));
+    const spy = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    try {
+      fs.writeFileSync(path.join(dir, "appkit.plugins.json"), "{}");
+      const report = await runDoctor({ envFile: "/tmp/whatever.env" });
+      expect(report.setup).toEqual([]);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("folds an auth failure into summary.error and exitCode (the --json gap)", async () => {

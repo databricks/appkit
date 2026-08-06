@@ -48,6 +48,32 @@ export async function getServiceClient(
   return { client };
 }
 
+/**
+ * The host a named profile declares in `~/.databrickscfg`, read offline. Doctor
+ * uses it to detect a profile/host conflict, so it must not depend on the
+ * resolved config (where `DATABRICKS_HOST` has already won). Returns undefined
+ * for any unreadable file, missing profile, or hostless profile — a conflict we
+ * can't prove isn't worth reporting.
+ */
+export async function getProfileHost(
+  profile: string,
+): Promise<string | undefined> {
+  try {
+    const sdk = (await import("@databricks/sdk-experimental")) as {
+      loadConfigFile: (
+        file?: string,
+      ) => Promise<{ iniFile: Record<string, { host?: string }> }>;
+    };
+    const { iniFile } = await sdk.loadConfigFile(
+      process.env.DATABRICKS_CONFIG_FILE,
+    );
+    const host = iniFile?.[profile]?.host;
+    return typeof host === "string" && host.length > 0 ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Raised when `@databricks/appkit` (needed for the Lakebase probe) is absent. */
 export class AppkitNotInstalledError extends Error {
   constructor() {

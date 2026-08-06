@@ -1,13 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkAuth, checkConfig, sanitizeHost, validateHost } from "./checks";
+import {
+  type ConfigCheckContext,
+  checkAuth,
+  checkConfig,
+  sanitizeHost,
+  validateHost,
+} from "./checks";
 import type { ResourceTarget } from "./types";
 
-const { mockGetServiceClient } = vi.hoisted(() => ({
+const { mockGetServiceClient, mockGetProfileHost } = vi.hoisted(() => ({
   mockGetServiceClient: vi.fn(),
+  // Defaults to "profile declares no host", so the conflict check stays inert
+  // unless a test opts in.
+  mockGetProfileHost: vi.fn(async () => undefined as string | undefined),
 }));
 vi.mock("./databricks-client", () => ({
   SdkNotInstalledError: class SdkNotInstalledError extends Error {},
   getServiceClient: mockGetServiceClient,
+  getProfileHost: mockGetProfileHost,
 }));
 
 function target(overrides: Partial<ResourceTarget> = {}): ResourceTarget {
@@ -27,6 +37,15 @@ function target(overrides: Partial<ResourceTarget> = {}): ResourceTarget {
 describe("checkConfig", () => {
   const saved = { ...process.env };
 
+  /** Default context: `.env`, with no deploy wiring declared. */
+  function ctx(overrides: Partial<ConfigCheckContext> = {}) {
+    return {
+      envFile: ".env",
+      wiredEnvVars: new Set<string>(),
+      ...overrides,
+    };
+  }
+
   beforeEach(() => {
     delete process.env.DOCTOR_TEST_ENV;
     delete process.env.DOCTOR_TEST_ENV_2;
@@ -37,26 +56,26 @@ describe("checkConfig", () => {
   });
 
   it("errors when a required resource's env var is unset", async () => {
-    const result = await checkConfig(target());
+    const result = await checkConfig(target(), ctx());
     expect(result.status).toBe("error");
     expect(result.code).toBe("ENV_MISSING");
   });
 
   it("warns (not errors) when an optional resource's env var is unset", async () => {
-    const result = await checkConfig(target({ required: false }));
+    const result = await checkConfig(target({ required: false }), ctx());
     expect(result.status).toBe("warn");
     expect(result.code).toBe("ENV_MISSING_OPTIONAL");
   });
 
   it("passes an unfilled-looking value (existence check is the authority)", async () => {
     process.env.DOCTOR_TEST_ENV = "your_sql_warehouse_id";
-    const result = await checkConfig(target());
+    const result = await checkConfig(target(), ctx());
     expect(result.status).toBe("ok");
   });
 
   it("treats an empty string as missing", async () => {
     process.env.DOCTOR_TEST_ENV = "   ";
-    const result = await checkConfig(target());
+    const result = await checkConfig(target(), ctx());
     expect(result.status).toBe("error");
     expect(result.code).toBe("ENV_MISSING");
   });
@@ -64,10 +83,53 @@ describe("checkConfig", () => {
   it("reports all missing env vars when several are unset", async () => {
     const result = await checkConfig(
       target({ envVars: ["DOCTOR_TEST_ENV", "DOCTOR_TEST_ENV_2"] }),
+      ctx(),
     );
     expect(result.status).toBe("error");
     expect(result.detail).toContain("DOCTOR_TEST_ENV");
     expect(result.detail).toContain("DOCTOR_TEST_ENV_2");
+  });
+
+  it("names the env file, so it can't be read as app.yaml/databricks.yml", async () => {
+    const result = await checkConfig(target(), ctx());
+    expect(result.detail).toBe("DOCTOR_TEST_ENV is not set in `.env`");
+  });
+
+  it("names the --env-file path when one was used", async () => {
+    const result = await checkConfig(target(), ctx({ envFile: ".env.local" }));
+    expect(result.detail).toContain("`.env.local`");
+    expect(result.detail).not.toContain("`.env`");
+  });
+
+  it("names the --env-file path in the hint too", async () => {
+    // Unwired, so a hint is produced and should point at the same file.
+    const result = await checkConfig(target(), ctx({ envFile: ".env.local" }));
+    expect(result.hint).toContain("`.env.local`");
+  });
+
+  it("keeps the optional marker alongside the file name", async () => {
+    const result = await checkConfig(target({ required: false }), ctx());
+    expect(result.detail).toBe(
+      "DOCTOR_TEST_ENV is not set in `.env` (optional)",
+    );
+  });
+
+  it("gives no hint at all when app.yaml already wires the var", async () => {
+    const result = await checkConfig(
+      target(),
+      ctx({ wiredEnvVars: new Set(["DOCTOR_TEST_ENV"]) }),
+    );
+    // Nothing to add: deploy wiring is correct, and "set it" is already the
+    // detail line, so a hint would only restate it.
+    expect(result.hint).toBeUndefined();
+  });
+
+  it("still advises wiring when app.yaml doesn't cover every missing var", async () => {
+    const result = await checkConfig(
+      target({ envVars: ["DOCTOR_TEST_ENV", "DOCTOR_TEST_ENV_2"] }),
+      ctx({ wiredEnvVars: new Set(["DOCTOR_TEST_ENV"]) }),
+    );
+    expect(result.hint).toContain("app.yaml + databricks.yml");
   });
 });
 
@@ -122,6 +184,8 @@ describe("checkAuth", () => {
 
   afterEach(() => {
     mockGetServiceClient.mockReset();
+    mockGetProfileHost.mockReset();
+    mockGetProfileHost.mockResolvedValue(undefined);
     if (savedHost === undefined) delete process.env.DATABRICKS_HOST;
     else process.env.DATABRICKS_HOST = savedHost;
   });
@@ -273,6 +337,169 @@ describe("checkAuth", () => {
     expect(result.hint).toMatch(
       /confirm the profile\/host is the one you intend/i,
     );
+  });
+
+  it("reports the host the SDK resolved, not just DATABRICKS_HOST", async () => {
+    // The headline mixed-source case: env wins the host, the profile supplies
+    // the credentials, so the env var alone doesn't say what was contacted.
+    delete process.env.DATABRICKS_HOST;
+    mockGetServiceClient.mockResolvedValue({
+      client: {
+        config: { host: "https://from-profile.cloud.databricks.com" },
+        currentUser: { me: async () => ({ userName: "u" }) },
+      },
+    });
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.host).toBe("https://from-profile.cloud.databricks.com");
+  });
+
+  it("reads the resolved host only after me(), which is when the SDK resolves", async () => {
+    // The SDK populates config.host lazily on the first API call, so reading it
+    // at construction time would always yield undefined.
+    delete process.env.DATABRICKS_HOST;
+    const client: {
+      config: { host?: string };
+      currentUser: { me: () => Promise<{ userName: string }> };
+    } = {
+      config: {},
+      currentUser: {
+        me: async () => {
+          client.config.host = "https://resolved-late.cloud.databricks.com";
+          return { userName: "u" };
+        },
+      },
+    };
+    mockGetServiceClient.mockResolvedValue({ client });
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.host).toBe("https://resolved-late.cloud.databricks.com");
+  });
+
+  it("keeps the resolved host on a failure after the client was built", async () => {
+    delete process.env.DATABRICKS_HOST;
+    mockGetServiceClient.mockResolvedValue({
+      client: {
+        config: { host: "https://from-profile.cloud.databricks.com" },
+        currentUser: {
+          me: async () => {
+            throw new Error("boom");
+          },
+        },
+      },
+    });
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.status).toBe("error");
+    expect(result.host).toBe("https://from-profile.cloud.databricks.com");
+  });
+
+  it("recovers the host from the SDK error when no client was built", async () => {
+    delete process.env.DATABRICKS_HOST;
+    mockGetServiceClient.mockRejectedValue(
+      new Error(
+        "default auth: cannot configure default credentials. Config: host=https://dbc-abc123.cloud.databricks.com, profile=DEFAULT",
+      ),
+    );
+
+    const { result } = await checkAuth({});
+    expect(result.host).toBe("https://dbc-abc123.cloud.databricks.com");
+  });
+
+  it("strips prose punctuation off a host recovered from an error", async () => {
+    delete process.env.DATABRICKS_HOST;
+    mockGetServiceClient.mockRejectedValue(
+      new Error(
+        "cannot configure default credentials. host=https://foo.cloud.databricks.com.",
+      ),
+    );
+
+    const { result } = await checkAuth({});
+    expect(result.host).toBe("https://foo.cloud.databricks.com");
+  });
+
+  it("never leaks credentials embedded in a resolved host", async () => {
+    delete process.env.DATABRICKS_HOST;
+    mockGetServiceClient.mockResolvedValue({
+      client: {
+        config: { host: "https://user:secret@foo.cloud.databricks.com" },
+        currentUser: { me: async () => ({ userName: "u" }) },
+      },
+    });
+
+    const { result } = await checkAuth({});
+    expect(result.host).not.toContain("secret");
+    expect(result.host).toContain("foo.cloud.databricks.com");
+  });
+
+  it("warns when DATABRICKS_HOST and the profile target different workspaces", async () => {
+    // Credentials work, but env won the host while the profile supplied the
+    // token — a silent split that a green tick would hide.
+    process.env.DATABRICKS_HOST = "https://env-ws.cloud.databricks.com";
+    mockGetProfileHost.mockResolvedValue(
+      "https://profile-ws.cloud.databricks.com",
+    );
+    mockGetServiceClient.mockResolvedValue({
+      client: { currentUser: { me: async () => ({ userName: "u" }) } },
+    });
+
+    const { result, client } = await checkAuth({ profile: "prod" });
+    expect(result.status).toBe("warn");
+    expect(result.code).toBe("HOST_PROFILE_CONFLICT");
+    expect(result.hint).toContain("env-ws.cloud.databricks.com");
+    expect(result.hint).toContain("profile-ws.cloud.databricks.com");
+    // Auth did succeed, so the live layers still get their client.
+    expect(client).toBeDefined();
+  });
+
+  it("stays ok when the env host and profile host agree", async () => {
+    process.env.DATABRICKS_HOST = "https://same.cloud.databricks.com";
+    mockGetProfileHost.mockResolvedValue("https://same.cloud.databricks.com");
+    mockGetServiceClient.mockResolvedValue({
+      client: { currentUser: { me: async () => ({ userName: "u" }) } },
+    });
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.status).toBe("ok");
+    expect(result.code).toBe("AUTH_OK");
+  });
+
+  it("treats hosts differing only by scheme, slash, or case as the same", async () => {
+    process.env.DATABRICKS_HOST = "https://Same.Cloud.Databricks.com/";
+    mockGetProfileHost.mockResolvedValue("same.cloud.databricks.com");
+    mockGetServiceClient.mockResolvedValue({
+      client: { currentUser: { me: async () => ({ userName: "u" }) } },
+    });
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.status).toBe("ok");
+  });
+
+  it("doesn't guess at a conflict when no profile is named", async () => {
+    process.env.DATABRICKS_HOST = "https://env-ws.cloud.databricks.com";
+    delete process.env.DATABRICKS_CONFIG_PROFILE;
+    mockGetServiceClient.mockResolvedValue({
+      client: { currentUser: { me: async () => ({ userName: "u" }) } },
+    });
+
+    const { result } = await checkAuth({});
+    expect(result.status).toBe("ok");
+    expect(mockGetProfileHost).not.toHaveBeenCalled();
+  });
+
+  it("prefers the conflict over a generic login hint when auth also failed", async () => {
+    process.env.DATABRICKS_HOST = "https://env-ws.cloud.databricks.com";
+    mockGetProfileHost.mockResolvedValue(
+      "https://profile-ws.cloud.databricks.com",
+    );
+    mockGetServiceClient.mockRejectedValue(
+      new Error("default auth: cannot configure default credentials"),
+    );
+
+    const { result } = await checkAuth({ profile: "prod" });
+    expect(result.status).toBe("error");
+    expect(result.hint).toMatch(/different workspaces/i);
+    expect(result.hint).not.toMatch(/^Run `databricks auth login`/);
   });
 
   it("keeps detail short and carries the full message in raw for --detail/--json", async () => {
