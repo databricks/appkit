@@ -2,6 +2,13 @@
  * The single seam where `appkit doctor` crosses into the Databricks SDK. The
  * SDK-free `shared` package reaches it via a runtime `import(...)`, degrading
  * gracefully when it's absent.
+ *
+ * `noRestrictedImports` normally routes SDK access through
+ * `packages/appkit/src/workspace-client`, but that isn't available here: `appkit`
+ * depends on `shared`, so importing it back would be a dependency cycle. `shared`
+ * also can't depend on the SDK directly — hence the dynamic `import(...)` and the
+ * per-call suppressions below. This file *is* the wrapper for this package, and
+ * every SDK reference in the doctor command is confined to it.
  */
 
 /** Raised when `@databricks/sdk-experimental` is not resolvable at runtime. */
@@ -36,6 +43,7 @@ export async function getServiceClient(
 ): Promise<ServiceClientHandle> {
   let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
   try {
+    // biome-ignore lint/style/noRestrictedImports: shared can't reach appkit's workspace-client wrapper (appkit depends on shared); this file is the SDK seam
     sdk = (await import("@databricks/sdk-experimental")) as typeof sdk;
   } catch (err) {
     if (isModuleNotFound(err)) {
@@ -59,6 +67,7 @@ export async function getProfileHost(
   profile: string,
 ): Promise<string | undefined> {
   try {
+    // biome-ignore lint/style/noRestrictedImports: see the note at the top of this file — shared can't import appkit's wrapper
     const sdk = (await import("@databricks/sdk-experimental")) as {
       loadConfigFile: (
         file?: string,
