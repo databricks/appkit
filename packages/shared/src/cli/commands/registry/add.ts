@@ -10,7 +10,7 @@ import {
   type RegistryItemFile,
   stripNamespace,
 } from "./client";
-import { REGISTRY_REPO, resolveToken } from "./constants";
+import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
 import { registerPluginInServer } from "./server-register";
 
 /** Subdirectories that commonly hold the frontend / server in an AppKit app. */
@@ -25,7 +25,7 @@ interface ManifestResource {
 }
 interface PluginManifestShape {
   name?: string;
-  resources?: { required?: ManifestResource[] };
+  resources?: { required?: ManifestResource[]; optional?: ManifestResource[] };
 }
 
 function isDir(p: string): boolean {
@@ -86,9 +86,14 @@ function resolveUiTarget(base: string, file: RegistryItemFile): string {
   return path.join(base, target);
 }
 
-function requiredEnvVars(manifest: PluginManifestShape): string[] {
+/** Env var names declared by a manifest's resources (required and optional). */
+export function declaredEnvVars(manifest: PluginManifestShape): string[] {
   const envs: string[] = [];
-  for (const res of manifest.resources?.required ?? []) {
+  const resources = [
+    ...(manifest.resources?.required ?? []),
+    ...(manifest.resources?.optional ?? []),
+  ];
+  for (const res of resources) {
     for (const field of Object.values(res.fields ?? {})) {
       if (field.env) envs.push(field.env);
     }
@@ -184,6 +189,39 @@ interface PluginSummary {
   envs: string[];
 }
 
+/**
+ * Fetches the requested items plus their transitive registryDependencies.
+ * Dependencies are resolved breadth-first and de-duplicated by name, so a
+ * plugin that depends on another registry item pulls the whole graph in one
+ * `add`. Explicitly-requested items keep their request order and come first.
+ */
+export async function resolveItems(
+  names: string[],
+  token: RegistryToken | null,
+  fetchItem: (
+    name: string,
+    token: RegistryToken | null,
+  ) => Promise<RegistryItem> = fetchRegistryItem,
+): Promise<RegistryItem[]> {
+  const seen = new Set<string>();
+  const ordered: RegistryItem[] = [];
+  const queue = [...names];
+
+  while (queue.length > 0) {
+    const name = stripNamespace(queue.shift() as string);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const item = await fetchItem(name, token);
+    ordered.push(item);
+    for (const dep of item.registryDependencies ?? []) {
+      const depName = stripNamespace(dep);
+      if (!seen.has(depName)) queue.push(depName);
+    }
+  }
+
+  return ordered;
+}
+
 async function runAdd(
   refs: string[],
   opts: { force?: boolean; cwd?: string; register?: boolean },
@@ -196,11 +234,7 @@ async function runAdd(
     );
   }
 
-  const names = refs.map(stripNamespace);
-  const items: RegistryItem[] = [];
-  for (const name of names) {
-    items.push(await fetchRegistryItem(name, token));
-  }
+  const items = await resolveItems(refs, token);
 
   const hasUi = items.some((i) => !isPluginItem(i));
   const hasPlugin = items.some(isPluginItem);
@@ -241,16 +275,10 @@ async function runAdd(
       pluginSummaries.push({
         importPath: `./${pluginRel}`,
         exportName: pluginExportName(item),
-        envs: requiredEnvVars(manifest),
+        envs: declaredEnvVars(manifest),
       });
     } else {
       for (const file of item.files ?? []) {
-        // UI (Option A) items have no registry deps; warn on any a future item adds.
-        for (const rd of item.registryDependencies ?? []) {
-          console.warn(
-            `  Note: "${item.name}" declares registryDependency "${rd}" — add it separately if needed.`,
-          );
-        }
         writeItemFile(
           resolveUiTarget(frontendRoot, file),
           file.content,
