@@ -419,9 +419,9 @@ export function BaseChart({
     () =>
       interactive
         ? {
-            click: (params: unknown) => {
+            click: (params: unknown, instance: ECharts) => {
               const result = onDataClickRef.current?.(
-                mapToDatum(params, axisLabelsRef.current),
+                mapToDatum(params, axisLabelsRef.current, instance),
               ) as void | Promise<void>;
               if (
                 result &&

@@ -448,6 +448,75 @@ describe("mapToDatum", () => {
     expect(d.value).toBe(5);
   });
 
+  test("resolves a series-level line stroke click to the nearest point", () => {
+    const params = {
+      seriesType: "line",
+      seriesName: "ARR",
+      seriesIndex: 0,
+      event: { offsetX: 218, offsetY: 75 },
+    };
+    const instance = {
+      getOption: () => ({
+        series: [
+          {
+            data: [
+              [1000, 10],
+              [2000, 20],
+              [3000, 30],
+            ],
+          },
+        ],
+      }),
+      convertToPixel: (
+        _finder: { seriesIndex: number },
+        value: (string | number)[],
+      ) => [Number(value[0]) / 10, Number(value[1])],
+    };
+
+    const d = mapToDatum(params, {}, instance);
+
+    expect(d).toMatchObject({
+      name: "2000",
+      value: 20,
+      x: 2000,
+      y: 20,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d.raw).toBe(params);
+  });
+
+  test("resolves a categorical line stroke using axis labels", () => {
+    const labels = ["Jan", "Feb", "Mar"];
+    const instance = {
+      getOption: () => ({ series: [{ data: [10, 20, 30] }] }),
+      convertToPixel: (
+        _finder: { seriesIndex: number },
+        value: (string | number)[],
+      ) => [labels.indexOf(String(value[0])) * 100, Number(value[1])],
+    };
+
+    const d = mapToDatum(
+      {
+        seriesType: "line",
+        seriesIndex: 0,
+        event: { offsetX: 185, offsetY: 25 },
+      },
+      { xLabels: labels },
+      instance,
+    );
+
+    expect(d).toMatchObject({
+      name: "Mar",
+      value: 30,
+      x: "Mar",
+      y: 30,
+      dataIndex: 2,
+      seriesIndex: 0,
+    });
+  });
+
   test("tolerates a non-object payload", () => {
     const d = mapToDatum(null);
     expect(d.name).toBe("");

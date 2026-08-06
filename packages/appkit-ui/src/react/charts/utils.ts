@@ -114,17 +114,128 @@ interface DatumAxisContext {
   yLabels?: (string | number)[];
 }
 
+interface ChartEventInstance {
+  getOption(): unknown;
+  convertToPixel(
+    finder: { seriesIndex: number },
+    value: (string | number)[],
+  ): unknown;
+}
+
+interface ResolvedLinePoint {
+  name: string;
+  value: [string | number, string | number];
+  dataIndex: number;
+}
+
+function resolveLineStrokePoint(
+  params: Record<string, unknown>,
+  axes: DatumAxisContext,
+  instance?: ChartEventInstance,
+): ResolvedLinePoint | null {
+  if (
+    params.seriesType !== "line" ||
+    params.value !== undefined ||
+    !instance ||
+    typeof params.seriesIndex !== "number"
+  ) {
+    return null;
+  }
+
+  const event =
+    params.event !== null && typeof params.event === "object"
+      ? (params.event as Record<string, unknown>)
+      : null;
+  const clickX = event?.offsetX;
+  if (typeof clickX !== "number") return null;
+
+  try {
+    const option = instance.getOption();
+    if (option === null || typeof option !== "object") return null;
+
+    const series = (option as Record<string, unknown>).series;
+    if (!Array.isArray(series)) return null;
+
+    const seriesOption = series[params.seriesIndex];
+    if (
+      seriesOption === null ||
+      typeof seriesOption !== "object" ||
+      Array.isArray(seriesOption)
+    ) {
+      return null;
+    }
+
+    const data = (seriesOption as Record<string, unknown>).data;
+    if (!Array.isArray(data)) return null;
+
+    let nearest: ResolvedLinePoint | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (let dataIndex = 0; dataIndex < data.length; dataIndex++) {
+      const item = data[dataIndex];
+      const itemRecord =
+        item !== null && typeof item === "object" && !Array.isArray(item)
+          ? (item as Record<string, unknown>)
+          : null;
+      const rawValue = itemRecord ? itemRecord.value : item;
+
+      let x: string | number | undefined;
+      let y: string | number | undefined;
+      if (Array.isArray(rawValue)) {
+        if (
+          (typeof rawValue[0] === "string" ||
+            typeof rawValue[0] === "number") &&
+          (typeof rawValue[1] === "string" || typeof rawValue[1] === "number")
+        ) {
+          x = rawValue[0];
+          y = rawValue[1];
+        }
+      } else if (
+        (typeof rawValue === "string" || typeof rawValue === "number") &&
+        axes.xLabels?.[dataIndex] !== undefined
+      ) {
+        x = axes.xLabels[dataIndex];
+        y = rawValue;
+      }
+      if (x === undefined || y === undefined) continue;
+
+      const pixel = instance.convertToPixel(
+        { seriesIndex: params.seriesIndex },
+        [x, y],
+      );
+      if (!Array.isArray(pixel) || typeof pixel[0] !== "number") continue;
+
+      const distance = Math.abs(pixel[0] - clickX);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = {
+          name:
+            typeof itemRecord?.name === "string" ? itemRecord.name : String(x),
+          value: [x, y],
+          dataIndex,
+        };
+      }
+    }
+
+    return nearest;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Maps a raw ECharts click-event `params` object into a public
  * {@link ChartClickDatum}.
  *
  * @param params - The raw ECharts click-event payload (untyped at our boundary).
  * @param axes - Category labels used to resolve index-addressed heatmap data.
+ * @param instance - The chart instance used to resolve series-level line clicks.
  * @returns A normalized, ECharts-free {@link ChartClickDatum}.
  */
 export function mapToDatum(
   params: unknown,
   axes: DatumAxisContext = {},
+  instance?: ChartEventInstance,
 ): ChartClickDatum {
   const p = (
     params !== null && typeof params === "object" ? params : {}
@@ -133,7 +244,8 @@ export function mapToDatum(
   const isScalar = (v: unknown): v is number | string =>
     typeof v === "number" || typeof v === "string";
 
-  const rawValue = p.value;
+  const linePoint = resolveLineStrokePoint(p, axes, instance);
+  const rawValue = linePoint?.value ?? p.value;
   const seriesType =
     typeof p.seriesType === "string" ? p.seriesType : undefined;
 
@@ -169,12 +281,17 @@ export function mapToDatum(
   }
 
   const name =
-    typeof p.name === "string" ? p.name : x !== undefined ? String(x) : "";
+    typeof p.name === "string"
+      ? p.name
+      : (linePoint?.name ?? (x !== undefined ? String(x) : ""));
 
   const seriesName =
     typeof p.seriesName === "string" ? p.seriesName : undefined;
 
-  const dataIndex = typeof p.dataIndex === "number" ? p.dataIndex : -1;
+  const dataIndex =
+    typeof p.dataIndex === "number"
+      ? p.dataIndex
+      : (linePoint?.dataIndex ?? -1);
   const seriesIndex = typeof p.seriesIndex === "number" ? p.seriesIndex : -1;
 
   return {

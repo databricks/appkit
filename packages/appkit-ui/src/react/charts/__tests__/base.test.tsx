@@ -10,6 +10,7 @@
  * producing blank charts.
  */
 import { cleanup, render, waitFor } from "@testing-library/react";
+import * as echarts from "echarts/core";
 import {
   afterEach,
   beforeAll,
@@ -221,6 +222,65 @@ describe("BaseChart ECharts registration", () => {
       expect(container.querySelector("canvas")).not.toBeNull(),
     );
     expect(registrationErrors).toEqual([]);
+  });
+
+  test("passes the chart instance when normalizing a line stroke click", async () => {
+    const onDataClick = vi.fn();
+    const { container } = render(
+      <BaseChart
+        data={cartesianData}
+        chartType="line"
+        xKey="month"
+        yKey="revenue"
+        onDataClick={onDataClick}
+      />,
+    );
+
+    const chartElement = await waitFor(() => {
+      const element =
+        container.querySelector<HTMLElement>(".echarts-for-react");
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+    type TestChartInstance = {
+      convertToPixel(
+        finder: { seriesIndex: number },
+        value: (string | number)[],
+      ): unknown;
+      isSilent(eventName: string): boolean;
+      trigger(eventName: string, params: unknown): void;
+    };
+    const instance = await waitFor(() => {
+      const current = echarts.getInstanceByDom(chartElement) as
+        | (ReturnType<typeof echarts.getInstanceByDom> & TestChartInstance)
+        | undefined;
+      expect(current).toBeDefined();
+      expect(current?.isSilent("click")).toBe(false);
+      return current as TestChartInstance;
+    });
+
+    instance.convertToPixel = vi.fn((_finder, point) => [
+      cartesianData.findIndex((row) => row.month === point[0]) * 100,
+      point[1],
+    ]);
+
+    instance.trigger("click", {
+      seriesType: "line",
+      seriesName: "Revenue",
+      seriesIndex: 0,
+      event: { offsetX: 185, offsetY: 90 },
+    });
+
+    expect(onDataClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Mar",
+        value: 90,
+        x: "Mar",
+        y: 90,
+        dataIndex: 2,
+        seriesIndex: 0,
+      }),
+    );
   });
 
   test("renders the no-data fallback for empty data without mounting ECharts", () => {

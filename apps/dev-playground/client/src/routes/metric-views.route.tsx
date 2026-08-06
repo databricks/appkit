@@ -514,6 +514,9 @@ function MetricViewsRoute() {
                   yKey={[...TREND_MEASURES]}
                   height={320}
                   showLegend
+                  onDataClick={(datum) => {
+                    console.log("[Metric Views] Line chart clicked", datum);
+                  }}
                 />
               )}
           </CardContent>
