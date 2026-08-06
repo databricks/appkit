@@ -12,7 +12,13 @@ import {
   type ValueProvider,
 } from "./env-reconcile";
 import type { ResourceRequirementRow } from "./requirements";
-import { isFlatListable, listWorkspaceResources } from "./workspace-picker";
+import {
+  isFlatListable,
+  isParentContext,
+  listParentContextStep,
+  listWorkspaceResources,
+  parentContextDepth,
+} from "./workspace-picker";
 
 export interface EnvSyncOptions {
   /** Directory holding `.env` / `.env.example` (the app root). */
@@ -58,11 +64,61 @@ async function promptText(need: EnvNeed): Promise<string | undefined> {
   return value === "" ? undefined : value;
 }
 
+/** Presents one workspace list as a select; MANUAL/cancel handled by caller. */
+async function selectFrom(
+  message: string,
+  choices: { value: string; label: string }[],
+): Promise<string | typeof MANUAL | null> {
+  const picked = await select({
+    message,
+    options: [
+      ...choices.map((c) => ({ value: c.value, label: c.label })),
+      { value: MANUAL, label: "Enter manually / skip" },
+    ],
+  });
+  if (isCancel(picked)) return null;
+  return String(picked) as string | typeof MANUAL;
+}
+
 /**
- * Builds the value provider. Precedence: --env flag, then (interactive only)
- * a workspace picker for flat-listable resource types, else a free-text
- * prompt. The picker degrades to free-text whenever the workspace can't be
- * listed (no profile, offline, auth error, empty) so it never hard-fails.
+ * Drill-down picker for parent-context types (volume→catalog/schema,
+ * secret→scope, vector_search_index→endpoint). Walks each step, listing the
+ * next level from the prior pick. Returns the final resource id, or undefined
+ * to fall back to free-text (on cancel, empty level, or MANUAL at any step).
+ */
+async function pickParentContext(
+  need: EnvNeed,
+  profile: string | undefined,
+): Promise<string | undefined> {
+  const depth = parentContextDepth(need.resourceType);
+  const picks: string[] = [];
+  for (let i = 0; i < depth; i++) {
+    const step = listParentContextStep(need.resourceType, i, picks, profile);
+    if (!step || step.choices.length === 0) {
+      console.log(
+        pc.dim(
+          `  No ${step?.key ?? need.resourceType} found — enter the id manually.`,
+        ),
+      );
+      return undefined;
+    }
+    const picked = await selectFrom(
+      `${need.env} — pick a ${step.key}`,
+      step.choices,
+    );
+    if (picked === null || picked === MANUAL) return undefined;
+    picks.push(picked);
+  }
+  // Last pick is the resource id itself.
+  return picks[picks.length - 1];
+}
+
+/**
+ * Builds the value provider. Precedence: --env flag, then (interactive only) a
+ * workspace picker — flat select for flat-listable types, drill-down for
+ * parent-context types — else a free-text prompt. The picker degrades to
+ * free-text whenever the workspace can't be listed (no profile, offline, auth
+ * error, empty) so it never hard-fails.
  */
 function makeProvider(opts: EnvSyncOptions): ValueProvider {
   return async (need: EnvNeed) => {
@@ -73,15 +129,12 @@ function makeProvider(opts: EnvSyncOptions): ValueProvider {
     if (isFlatListable(need.resourceType)) {
       const choices = listWorkspaceResources(need.resourceType, opts.profile);
       if (choices.length > 0) {
-        const picked = await select({
-          message: `${need.env} — pick a ${need.resourceType}`,
-          options: [
-            ...choices.map((c) => ({ value: c.value, label: c.label })),
-            { value: MANUAL, label: "Enter manually / skip" },
-          ],
-        });
-        if (isCancel(picked)) return undefined;
-        if (picked !== MANUAL) return String(picked);
+        const picked = await selectFrom(
+          `${need.env} — pick a ${need.resourceType}`,
+          choices,
+        );
+        if (picked === null) return undefined;
+        if (picked !== MANUAL) return picked;
         // fall through to free-text
       } else {
         console.log(
@@ -90,6 +143,10 @@ function makeProvider(opts: EnvSyncOptions): ValueProvider {
           ),
         );
       }
+    } else if (isParentContext(need.resourceType)) {
+      const picked = await pickParentContext(need, opts.profile);
+      if (picked !== undefined) return picked;
+      // fall through to free-text
     }
 
     return promptText(need);

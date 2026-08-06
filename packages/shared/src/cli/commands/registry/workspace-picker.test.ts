@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type CliRunner,
   isFlatListable,
+  isParentContext,
+  listParentContextStep,
   listWorkspaceResources,
+  parentContextDepth,
   toChoices,
 } from "./workspace-picker";
 
@@ -94,5 +97,106 @@ describe("listWorkspaceResources", () => {
     expect(
       listWorkspaceResources("sql_warehouse", undefined, throwing),
     ).toEqual([]);
+  });
+});
+
+describe("isParentContext / parentContextDepth", () => {
+  it("identifies the four parent-context types and their depth", () => {
+    expect(isParentContext("volume")).toBe(true);
+    expect(isParentContext("uc_function")).toBe(true);
+    expect(isParentContext("secret")).toBe(true);
+    expect(isParentContext("vector_search_index")).toBe(true);
+    // flat types are not parent-context
+    expect(isParentContext("sql_warehouse")).toBe(false);
+
+    expect(parentContextDepth("volume")).toBe(3); // catalog → schema → volume
+    expect(parentContextDepth("secret")).toBe(2); // scope → key
+    expect(parentContextDepth("vector_search_index")).toBe(2);
+    expect(parentContextDepth("sql_warehouse")).toBe(0);
+  });
+});
+
+describe("listParentContextStep", () => {
+  it("lists catalogs at step 0 for volume", () => {
+    const run = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify([{ name: "main" }]),
+    }));
+    const step = listParentContextStep("volume", 0, [], "dogfood", run);
+    expect(step?.key).toBe("catalog");
+    expect(step?.choices).toEqual([{ value: "main", label: "main (main)" }]);
+    expect(run).toHaveBeenCalledWith([
+      "catalogs",
+      "list",
+      "-o",
+      "json",
+      "-p",
+      "dogfood",
+    ]);
+  });
+
+  it("passes the picked catalog+schema as positional args at step 2", () => {
+    const run = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify([
+        { full_name: "main.sales.events", name: "events" },
+      ]),
+    }));
+    const step = listParentContextStep(
+      "volume",
+      2,
+      ["main", "sales"],
+      undefined,
+      run,
+    );
+    expect(step?.key).toBe("volume");
+    // positional args, not flags
+    expect(run).toHaveBeenCalledWith([
+      "volumes",
+      "list",
+      "main",
+      "sales",
+      "-o",
+      "json",
+    ]);
+    expect(step?.choices).toEqual([
+      { value: "main.sales.events", label: "events (main.sales.events)" },
+    ]);
+  });
+
+  it("drills scope → key for secret", () => {
+    const run = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify([{ key: "api-token" }]),
+    }));
+    const step = listParentContextStep(
+      "secret",
+      1,
+      ["my-scope"],
+      undefined,
+      run,
+    );
+    expect(step?.key).toBe("key");
+    expect(run).toHaveBeenCalledWith([
+      "secrets",
+      "list-secrets",
+      "my-scope",
+      "-o",
+      "json",
+    ]);
+    expect(step?.choices).toEqual([
+      { value: "api-token", label: "api-token (api-token)" },
+    ]);
+  });
+
+  it("returns null past the end of the chain", () => {
+    const run = vi.fn(() => ({ status: 0, stdout: "[]" }));
+    expect(listParentContextStep("secret", 5, [], undefined, run)).toBeNull();
+  });
+
+  it("returns empty choices (not null) when a level lists nothing", () => {
+    const run = vi.fn(() => ({ status: 0, stdout: "[]" }));
+    const step = listParentContextStep("volume", 0, [], undefined, run);
+    expect(step?.choices).toEqual([]);
   });
 });
