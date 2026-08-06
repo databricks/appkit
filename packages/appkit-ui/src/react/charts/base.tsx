@@ -405,7 +405,6 @@ export function BaseChart({
     [normalized],
   );
 
-  // Keep the latest axis labels in a ref for the same reason as the handler:
   // `onEvents` must not re-subscribe when the data changes (e.g. each SSE tick).
   const axisLabelsRef = useRef(axisLabels);
   axisLabelsRef.current = axisLabels;
@@ -415,18 +414,12 @@ export function BaseChart({
   // identity: consumers pass an inline arrow whose identity changes every render,
   // and echarts-for-react re-subscribes whenever `onEvents` identity changes — so
   // keying on the reference would tear down and re-attach the click listener on
-  // every parent re-render (e.g. each SSE tick). The handler is invoked through
-  // `onDataClickRef` so it always calls the latest closure. When no handler is
-  // set this is `undefined` and no idle click listener is attached. `onEvents`
-  // is an internal implementation detail, intentionally not a public prop.
+  // every parent re-render (e.g. each SSE tick).
   const onEvents = useMemo(
     () =>
       interactive
         ? {
             click: (params: unknown) => {
-              // Fire-and-forget: the datum callback may be async, and a rejected
-              // promise must not surface as an unhandled rejection. Swallow
-              // rejections here.
               const result = onDataClickRef.current?.(
                 mapToDatum(params, axisLabelsRef.current),
               ) as void | Promise<void>;

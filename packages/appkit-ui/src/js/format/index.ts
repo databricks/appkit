@@ -13,9 +13,8 @@ function countDecimals(format: string): number {
 }
 
 /**
- * Best-effort coercion of an arbitrary value to a finite number. Handles the
- * common wire shapes (number, bigint, numeric string). Returns null when the
- * value cannot be meaningfully treated as a number.
+ * Best-effort coercion of an arbitrary value to a finite number.
+ * Returns null when the value cannot be meaningfully treated as a number.
  */
 function coerceNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -37,10 +36,6 @@ function coerceNumber(value: unknown): number | null {
  * arrives here as e.g. `"9007199254740993"`. Coercing that through `Number`
  * silently rounds it, so an int64 id or a cents-denominated total renders as a
  * neighbouring value. Detect the case up front and keep it exact.
- *
- * Deliberately narrow: only a plain optionally-signed digit string qualifies.
- * Anything with a fraction, exponent, or other syntax stays on the `Number`
- * path, where float semantics are the correct behaviour anyway.
  */
 function asPreciseBigInt(value: string): bigint | null {
   const trimmed = value.trim();
@@ -160,11 +155,7 @@ export function formatValue(value: unknown, format?: string): string {
   return formatNumber(num, decimals, grouping);
 }
 
-/**
- * Turns a raw column name into a human-readable label.
- * Handles camelCase, snake_case, acronyms, and ALL_CAPS.
- * E.g., "totalSpend" -> "Total Spend", "avg_ltv" -> "Avg Ltv".
- */
+// Turns a raw column name into a human-readable label.
 function humanize(name: string): string {
   return (
     name
@@ -183,10 +174,6 @@ function humanize(name: string): string {
   );
 }
 
-/**
- * Human label for a column: prefers `columnMeta.display_name`, else humanizes
- * the raw column name (camelCase / snake_case / CAPS -> Title Case).
- */
 export function formatLabel(
   name: string,
   columnMeta?: MetricViewColumnDisplay,

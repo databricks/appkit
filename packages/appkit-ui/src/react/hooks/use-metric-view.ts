@@ -25,12 +25,6 @@ import type {
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
 
-/**
- * Narrow the wire `metadata` field to a per-column map. The value is only a
- * meaningful metadata map when it is a plain object; a `null`, array, or scalar
- * is treated as absent (`undefined`). Per-column shapes are not validated —
- * the server constructs them via the typed builder.
- */
 function asMetricMetadata(
   value: unknown,
 ): Record<string, MetricViewColumnDisplay> | undefined {
@@ -41,16 +35,7 @@ function asMetricMetadata(
 }
 
 /**
- * Subscribe to a Unity Catalog metric view and return its latest result.
- * POSTs the structured `{ measures, dimensions, filter, timeGrain,
- * timeDimension, limit }` body to `POST /api/analytics/metric/:key` and
- * streams the row result back over SSE (with warehouse-readiness progress),
- * mirroring {@link useAnalyticsQuery}'s JSON_ARRAY path.
- *
- * The measure/dimension names, time grain, and row shape are inferred from the
- * `MetricRegistry` module augmentation when `key` is a known metric key. The
- * returned rows are narrowed to exactly the SELECTED measures/dimensions (not
- * every column the metric exposes).
+ * Subscribe to a Unity Catalog Metric View and return its latest result.
  *
  * @param key - Metric view identifier
  * @param options - Measures (required) plus optional dimensions, filter,
@@ -90,7 +75,6 @@ export function useMetricView<
   >(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Warehouse-readiness status
   const publisherId = useId();
   const {
     publish: publishWarehouseStatus,
@@ -101,13 +85,8 @@ export function useMetricView<
     throw new Error("useMetricView: 'key' must be a non-empty string.");
   }
 
-  // Serialize the request body from only the defined fields. A JSON string is
-  // a primitive, so a body that serializes identically across renders stays
-  // referentially stable for the `start` callback's dependency check even
-  // though the caller passes fresh `measures`/`filter` object literals each
-  // render — no manual deep-equality/ref juggling required. (Reordering keys
-  // changes the serialization and does re-fire, but the field order here is
-  // fixed and the caller does not control it.)
+  // Serialize the request body from only the defined fields.
+  // enforces referencial equality before payloads
   const payload = useMemo(() => {
     const body: {
       measures: ReadonlyArray<unknown>;
@@ -158,11 +137,8 @@ export function useMetricView<
       setLoading,
       setError,
       setErrorCode,
-      // Metric results expose warehouse readiness only through the shared
-      // resource-status publisher, not through UseMetricViewResult.
       onWarehouseStatus: publishWarehouseStatus,
       onResult: (message) => {
-        // A successful result supersedes a prior retried error.
         setError(null);
         setErrorCode(null);
         setData(message.data as Rows);

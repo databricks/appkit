@@ -253,50 +253,26 @@ export type InferServingRequest<K> =
 // Metric View Registry
 // ============================================================================
 
-/**
- * Metric view registry for type-safe metric keys, measure/dimension names,
- * time grains, and row shapes. Extend this interface via module augmentation
- * to get autocomplete for `useMetricView`:
- *
- * @example
- * ```typescript
- * // Auto-generated (generated metric-views.ts)
- * declare module "@databricks/appkit-ui/react" {
- *   interface MetricRegistry {
- *     orders: {
- *       measureKeys: "revenue" | "order_count";
- *       dimensionKeys: "region" | "order_date";
- *       timeGrains: "day" | "month";
- *       measures: { revenue: number; order_count: number };
- *       dimensions: { region: string; order_date: string };
- *     };
- *   }
- * }
- * ```
- */
+/** Metric view registry for type-safe metric keys */
 // biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation (generated metric-views.ts)
 export interface MetricRegistry {}
 
-/** Resolves to registry keys if populated, otherwise string */
 export type MetricKey = AugmentedRegistry<MetricRegistry> extends never
   ? string
   : AugmentedRegistry<MetricRegistry>;
 
-/** Infers measure key names from the registry when K is a known key */
 export type InferMeasureKeys<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends { measureKeys: infer M }
     ? M
     : string
   : string;
 
-/** Infers dimension key names from the registry when K is a known key */
 export type InferDimensionKeys<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends { dimensionKeys: infer D }
     ? D
     : string
   : string;
 
-/** Infers time-grain names from the registry when K is a known key */
 export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends { timeGrains: infer G }
     ? G
@@ -304,13 +280,8 @@ export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
   : string;
 
 /**
- * Infers the full row shape (every measure + dimension) from the registry when
- * K is a known key, otherwise a total `Record<string, unknown>`. Never resolves
- * to `never` — always assignable to `Record<string, unknown>`.
- *
- * This types EVERY column as present. `useMetricView` instead returns
- * {@link PickMetricRow}, which narrows to only the selected measures/dimensions;
- * this remains exported as a convenience for the "all columns" case.
+ * Infers the full row shape (every measure + dimension) from registry
+ * otherwise a total `Record<string, unknown>`.
  */
 export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends {
@@ -321,17 +292,6 @@ export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
     : Record<string, unknown>
   : Record<string, unknown>;
 
-/**
- * The row shape for a query that selected exactly the measures in `M` and the
- * dimensions in `D` — a `Pick` over the registry's measure/dimension shapes
- * rather than the whole metric. This is what keeps `data` honest: a query
- * selecting `["arr"] + ["region"]` types `row.arr`/`row.region` but not the
- * unselected `mrr`/`segment`.
- *
- * When `M`/`D` are the wide default (caller passed a non-literal array, or K is
- * an unknown/degraded key), this degrades to the full row / a total
- * `Record<string, unknown>` — it never resolves to `never`.
- */
 export type PickMetricRow<
   K,
   M extends ReadonlyArray<PropertyKey>,
@@ -346,7 +306,6 @@ export type PickMetricRow<
     : Record<string, unknown>
   : Record<string, unknown>;
 
-/** The per-dimension metadata map for K (carries `time_grain` on temporal dims). */
 type MetricDimensionMeta<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends { metadata: { dimensions: infer DM } }
     ? DM
@@ -355,8 +314,7 @@ type MetricDimensionMeta<K> = K extends AugmentedRegistry<MetricRegistry>
 
 /**
  * The dimension keys of K that are TEMPORAL — i.e. carry a `time_grain` tuple in
- * the generated metadata. Only these can be a `timeDimension`; grouping a
- * non-temporal dimension by a grain (`date_trunc` over a string) is nonsense.
+ * the generated metadata. Only these can be a `timeDimension`.
  * Degrades to `string` for an unknown key.
  */
 export type InferTimeDimensionKeys<K> =
@@ -393,10 +351,6 @@ export type GrainsForSelectedTimeDims<
     }[Extract<D[number], keyof MetricDimensionMeta<K>>]
   : string;
 
-// The metric-filter vocabulary is pure data (no React), so it lives canonically
-// on the `/js` axis. Re-export it here so the `/react` public surface — and
-// `UseMetricViewOptions.filter` below — is unchanged. The runtime builder
-// `toMetricFilter` is available from `@databricks/appkit-ui/js`.
 export type {
   MetricFilter,
   MetricFilterOperatorName,
@@ -442,7 +396,6 @@ export type UseMetricViewOptions<
   limit?: number;
 } & MetricViewTimeOptions<K, D>;
 
-/** Result state returned by `useMetricView`. */
 export interface UseMetricViewResult<T = Record<string, unknown>[]> {
   data: T | null;
   loading: boolean;

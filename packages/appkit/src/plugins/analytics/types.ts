@@ -14,46 +14,27 @@ export type {
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
   /**
-   * Build-generated per-metric column metadata (`display_name` / `format` /
-   * `type` / `description`), keyed by metric key. The app injects the constant
-   * emitted by the metric-views type generator via
-   * `analytics({ metricViewsMetadata })`.
-   *
-   * The metric route stamps the slice of this scoped to a request's requested
-   * measures/dimensions into the SSE `result` message. It is **response
-   * decoration only**: it never enters the cache key and never changes the SQL.
+   * The metric route stamps the slice of this scoped to a request's
+   * measures/dimensions into the SSE `result` message.
    * Absent → the `result` message carries no `metadata` field, leaving it
-   * envelope-identical to `/query`. Never read from disk / `DESCRIBE` at
-   * runtime — it comes only from this injected value.
+   * envelope-identical to `/query`.
    */
   metricViewsMetadata?: MetricViewsMetadata;
-  /**
-   * Maximum time (ms) the analytics route waits for a STOPPED/STARTING SQL
-   * warehouse to reach RUNNING before failing the request. Defaults to 5 min.
-   */
   warehouseStartupTimeoutMs?: number;
   /**
-   * When `true` (default), a `STOPPED` SQL warehouse is auto-started on the
-   * first analytics request that reaches it. Set to `false` for cost-
-   * controlled deployments where billable warehouse starts must not be
-   * triggered by user requests; in that case `STOPPED` surfaces as a
-   * `ConfigurationError`.
+   * @default true
    */
   autoStartWarehouse?: boolean;
   /**
    * Fail-fast ceiling (ms) for an `ARROW_STREAM` query to produce its first
    * byte (warehouse readiness + execute + first chunk). Past this, a stuck or
    * overloaded warehouse returns a `503` (`WAREHOUSE_UNAVAILABLE`) instead of
-   * hanging until the client disconnects. Defaults to 2 min. Once the first
-   * byte arrives the stream is not time-bounded.
+   * hanging until the client disconnects.
+   * Defaults to 2 min.
    */
   arrowFirstByteTimeoutMs?: number;
 }
 
-/**
- * SQL warehouse lifecycle states surfaced by the analytics route.
- * Mirrors the states emitted by the Databricks SQL SDK (`sql.State`).
- */
 export type WarehouseState =
   | "RUNNING"
   | "STARTING"
@@ -81,14 +62,7 @@ export interface WarehouseStatus {
 /**
  * Discriminated union of every SSE message shape emitted by the analytics
  * routes (`POST /api/analytics/query/:query_key` and
- * `POST /api/analytics/metric/:key`). Useful for typing the client-side
- * `onMessage` handler (and is the source of truth re-mirrored in
- * `appkit-ui` since that package can't depend on `appkit`).
- *
- * The `result` message carries an optional `metadata` map (per-column display
- * metadata) — present on the metric route, absent on plain `/query`. The
- * `error` message carries an optional structured `errorCode` (a stable upstream
- * identifier) alongside the legacy `code`.
+ * `POST /api/analytics/metric/:key`).
  */
 export type AnalyticsStreamMessage =
   | { type: "warehouse_status"; status: WarehouseStatus }

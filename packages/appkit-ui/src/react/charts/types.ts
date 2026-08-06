@@ -91,10 +91,6 @@ export interface ChartBaseProps {
   options?: Record<string, unknown>;
 
   /**
-   * Fired when a data element (bar, slice, point) is clicked. Fire-and-forget:
-   * the return value is ignored (async handlers are fine — the chart never awaits).
-   * The handler receives a normalized {@link ChartClickDatum}.
-   *
    * Pointer-only: charts render to <canvas>, so this does not fire for keyboard
    * users. Provide a keyboard-accessible equivalent (e.g. a table row action) for
    * the same action.
@@ -117,10 +113,6 @@ export interface ChartBaseProps {
 /**
  * A normalized description of a clicked chart element.
  *
- * Consumers should read the strongly-typed fields below and reach for
- * {@link ChartClickDatum.raw} only when they knowingly opt into unsupported
- * internals.
- *
  * In the common cross-filter case, {@link ChartClickDatum.name} carries the
  * dimension value of the clicked element.
  */
@@ -140,27 +132,12 @@ export interface ChartClickDatum {
    * `null` whenever there is no scalar value to surface.
    */
   value: number | string | null;
-  /**
-   * The x-position of the clicked datum: the x-component of an `[x, y]` tuple
-   * (e.g. a time-series timestamp or scatter x), or — for a heatmap — the
-   * clicked cell's x-axis **category label** (the raw index if labels are
-   * unavailable). `undefined` for scalar (bar/pie) and radar data that carries
-   * no separate x.
-   */
   x?: number | string;
-  /**
-   * The y-position of the clicked datum: the y-component of an `[x, y]` tuple
-   * (mirroring {@link ChartClickDatum.value}), or — for a heatmap — the clicked
-   * cell's y-axis **category label**. `undefined` for scalar and radar data.
-   */
   y?: number | string;
-  /** Series label, when present. */
   seriesName?: string;
-  /** Index of the datum within its series. */
   dataIndex: number;
-  /** Which series was clicked. */
   seriesIndex: number;
-  /** Untouched ECharts event params. Typed `unknown` — cast at your own risk; not part of the supported surface. */
+  // Untouched ECharts event params.
   raw: unknown;
 }
 
