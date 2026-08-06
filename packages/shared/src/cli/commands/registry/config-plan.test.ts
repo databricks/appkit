@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildConfigPlan } from "./config-plan";
 import type { ResourceRequirementRow } from "./requirements";
 
-/** A DABs `${var.<name>}` reference, built to avoid a JS-template literal. */
+/** A DABs `${var.<name>}` reference (literal bundle syntax, not JS interp). */
 function varRef(name: string): string {
+  // biome-ignore lint/style/useTemplate: template literal would trip noTemplateCurlyInString on literal DABs ${var.…} syntax
   return "${var." + name + "}";
 }
 

@@ -339,6 +339,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       cwd,
       nonInteractive: Boolean(opts.yes),
       values: opts.env,
+      profile: opts.profile,
     });
     reportEnvResolutions(resolutions);
 

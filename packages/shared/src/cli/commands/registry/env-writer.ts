@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isCancel, text } from "@clack/prompts";
+import { isCancel, select, text } from "@clack/prompts";
 import pc from "picocolors";
 import {
   collectEnvNeeds,
@@ -12,6 +12,7 @@ import {
   type ValueProvider,
 } from "./env-reconcile";
 import type { ResourceRequirementRow } from "./requirements";
+import { isFlatListable, listWorkspaceResources } from "./workspace-picker";
 
 export interface EnvSyncOptions {
   /** Directory holding `.env` / `.env.example` (the app root). */
@@ -20,7 +21,12 @@ export interface EnvSyncOptions {
   nonInteractive: boolean;
   /** Pre-supplied env values from flags, e.g. { DATABRICKS_WAREHOUSE_ID: "abc" }. */
   values?: Record<string, string>;
+  /** Databricks profile for the workspace picker (else the CLI default). */
+  profile?: string;
 }
+
+/** Sentinel select value meaning "let me type the id myself". */
+const MANUAL = "__manual__";
 
 /** Reads a `.env`-style file into a map; empty when the file is absent. */
 function readEnvFile(file: string): Record<string, string> {
@@ -40,23 +46,53 @@ function appendToFile(file: string, text: string): void {
   }
 }
 
-/** Builds the value provider: flags first, then clack prompt (unless CI). */
+/** Free-text prompt for one env need; undefined to skip. */
+async function promptText(need: EnvNeed): Promise<string | undefined> {
+  const tag = need.required ? "required" : "optional";
+  const answer = await text({
+    message: `${need.env} (${need.resourceType}, ${tag})`,
+    placeholder: need.description ?? "leave blank to skip",
+  });
+  if (isCancel(answer)) return undefined;
+  const value = (answer ?? "").trim();
+  return value === "" ? undefined : value;
+}
+
+/**
+ * Builds the value provider. Precedence: --env flag, then (interactive only)
+ * a workspace picker for flat-listable resource types, else a free-text
+ * prompt. The picker degrades to free-text whenever the workspace can't be
+ * listed (no profile, offline, auth error, empty) so it never hard-fails.
+ */
 function makeProvider(opts: EnvSyncOptions): ValueProvider {
   return async (need: EnvNeed) => {
     const fromFlag = opts.values?.[need.env];
     if (fromFlag !== undefined) return fromFlag;
     if (opts.nonInteractive) return undefined;
 
-    const label = need.required
-      ? `${need.env} (${need.resourceType}, required)`
-      : `${need.env} (${need.resourceType}, optional)`;
-    const answer = await text({
-      message: label,
-      placeholder: need.description ?? "leave blank to skip",
-    });
-    if (isCancel(answer)) return undefined;
-    const value = (answer ?? "").trim();
-    return value === "" ? undefined : value;
+    if (isFlatListable(need.resourceType)) {
+      const choices = listWorkspaceResources(need.resourceType, opts.profile);
+      if (choices.length > 0) {
+        const picked = await select({
+          message: `${need.env} — pick a ${need.resourceType}`,
+          options: [
+            ...choices.map((c) => ({ value: c.value, label: c.label })),
+            { value: MANUAL, label: "Enter manually / skip" },
+          ],
+        });
+        if (isCancel(picked)) return undefined;
+        if (picked !== MANUAL) return String(picked);
+        // fall through to free-text
+      } else {
+        console.log(
+          pc.dim(
+            `  No ${need.resourceType} found in the workspace — enter an id manually.`,
+          ),
+        );
+      }
+    }
+
+    return promptText(need);
   };
 }
 
