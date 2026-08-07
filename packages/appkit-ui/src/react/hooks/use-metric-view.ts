@@ -85,8 +85,10 @@ export function useMetricView<
     throw new Error("useMetricView: 'key' must be a non-empty string.");
   }
 
-  // Serialize the request body from only the defined fields.
-  // enforces referencial equality before payloads
+  // Serialize the request body from only the defined fields. Keeping it a string
+  // makes `start`'s dependency check compare the request by value, so callers
+  // passing inline `measures`/`filter` literals don't re-fire the query on every
+  // render just because the object identity changed.
   const payload = useMemo(() => {
     const body: {
       measures: ReadonlyArray<unknown>;
