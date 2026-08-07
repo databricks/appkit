@@ -16,6 +16,7 @@ import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as SmartDashboardRouteRouteImport } from './routes/smart-dashboard.route'
 import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+import { Route as QueryDedupRouteRouteImport } from './routes/query-dedup.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
 import { Route as MetricViewsRouteRouteImport } from './routes/metric-views.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
@@ -63,6 +64,11 @@ const ServingRouteRoute = ServingRouteRouteImport.update({
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   id: '/reconnect',
   path: '/reconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueryDedupRouteRoute = QueryDedupRouteRouteImport.update({
+  id: '/query-dedup',
+  path: '/query-dedup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PolicyMatrixRouteRoute = PolicyMatrixRouteRouteImport.update({
@@ -145,6 +151,7 @@ export interface FileRoutesByFullPath {
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
+  '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
   '/smart-dashboard': typeof SmartDashboardRouteRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByTo {
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
+  '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
   '/smart-dashboard': typeof SmartDashboardRouteRoute
@@ -190,6 +198,7 @@ export interface FileRoutesById {
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
+  '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
   '/smart-dashboard': typeof SmartDashboardRouteRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/lakebase'
     | '/metric-views'
     | '/policy-matrix'
+    | '/query-dedup'
     | '/reconnect'
     | '/serving'
     | '/smart-dashboard'
@@ -236,6 +246,7 @@ export interface FileRouteTypes {
     | '/lakebase'
     | '/metric-views'
     | '/policy-matrix'
+    | '/query-dedup'
     | '/reconnect'
     | '/serving'
     | '/smart-dashboard'
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | '/lakebase'
     | '/metric-views'
     | '/policy-matrix'
+    | '/query-dedup'
     | '/reconnect'
     | '/serving'
     | '/smart-dashboard'
@@ -281,6 +293,7 @@ export interface RootRouteChildren {
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   MetricViewsRouteRoute: typeof MetricViewsRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
+  QueryDedupRouteRoute: typeof QueryDedupRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   ServingRouteRoute: typeof ServingRouteRoute
   SmartDashboardRouteRoute: typeof SmartDashboardRouteRoute
@@ -339,6 +352,13 @@ declare module '@tanstack/react-router' {
       path: '/reconnect'
       fullPath: '/reconnect'
       preLoaderRoute: typeof ReconnectRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/query-dedup': {
+      id: '/query-dedup'
+      path: '/query-dedup'
+      fullPath: '/query-dedup'
+      preLoaderRoute: typeof QueryDedupRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/policy-matrix': {
@@ -449,6 +469,7 @@ const rootRouteChildren: RootRouteChildren = {
   LakebaseRouteRoute: LakebaseRouteRoute,
   MetricViewsRouteRoute: MetricViewsRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
+  QueryDedupRouteRoute: QueryDedupRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   ServingRouteRoute: ServingRouteRoute,
   SmartDashboardRouteRoute: SmartDashboardRouteRoute,
