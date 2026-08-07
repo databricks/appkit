@@ -22,6 +22,8 @@ import {
   type FilterOperator,
   IN_CAP,
   isFilterOperator,
+  MAX_INCLUDE_DEPTH,
+  MAX_INCLUDE_NODES,
   MAX_INCLUDES,
 } from "../../contract";
 import { invalidDatabaseRequest } from "../../errors";
@@ -231,12 +233,27 @@ function tableByName(schema: Schema, name: string): AppKitTable {
   return table;
 }
 
-/** Translate one relation edge into Drizzle's relational `with` config. */
+/** Translate relation edges into Drizzle's relational `with` config. */
 export function translateInclude(
   table: AppKitTable,
   schema: Schema,
   include: IncludeSpec,
 ): Record<string, unknown> {
+  return translateIncludeTree(table, schema, include, 1, { nodes: 0 });
+}
+
+function translateIncludeTree(
+  table: AppKitTable,
+  schema: Schema,
+  include: IncludeSpec,
+  depth: number,
+  budget: { nodes: number },
+): Record<string, unknown> {
+  if (depth > MAX_INCLUDE_DEPTH) {
+    throw invalidDatabaseRequest(
+      `include exceeds the ${MAX_INCLUDE_DEPTH}-edge depth limit`,
+    );
+  }
   const entries = Object.entries(include);
   if (entries.length > MAX_INCLUDES) {
     throw invalidDatabaseRequest(
@@ -255,6 +272,13 @@ export function translateInclude(
       );
     }
     if (rawOptions === false) continue;
+
+    budget.nodes += 1;
+    if (budget.nodes > MAX_INCLUDE_NODES) {
+      throw invalidDatabaseRequest(
+        `include exceeds the ${MAX_INCLUDE_NODES}-node limit`,
+      );
+    }
 
     const target = tableByName(schema, relation.targetTable);
     if (rawOptions === true) {
@@ -285,6 +309,15 @@ export function translateInclude(
       relationConfig.limit = validateLimit(options.limit);
     } else if (relation.cardinality === "toMany") {
       relationConfig.limit = DEFAULT_LIMIT;
+    }
+    if (options.include !== undefined) {
+      relationConfig.with = translateIncludeTree(
+        target,
+        schema,
+        options.include,
+        depth + 1,
+        budget,
+      );
     }
     config[relationName] = relationConfig;
   }

@@ -5,10 +5,18 @@ const logger = createLogger("database");
 
 export type DatabaseErrorCategory =
   | "INVALID_REQUEST"
+  | "NOT_FOUND"
   | "CONFLICT"
   | "FORBIDDEN"
+  | "PAYLOAD_TOO_LARGE"
   | "INTERNAL"
   | "SETUP_FAILED";
+
+/** Which request field a rejection concerns; it never carries caller values. */
+export interface DatabaseErrorDetail {
+  readonly path: readonly string[];
+  readonly message: string;
+}
 
 type DatabaseErrorPhase =
   | "setup"
@@ -23,8 +31,13 @@ const definitions: Record<
   { readonly message: string; readonly statusCode: number }
 > = {
   INVALID_REQUEST: { message: "Invalid database request", statusCode: 400 },
+  NOT_FOUND: { message: "Database record not found", statusCode: 404 },
   CONFLICT: { message: "Database conflict", statusCode: 409 },
   FORBIDDEN: { message: "Database operation forbidden", statusCode: 403 },
+  PAYLOAD_TOO_LARGE: {
+    message: "Database response is too large",
+    statusCode: 413,
+  },
   INTERNAL: { message: "Database operation failed", statusCode: 500 },
   SETUP_FAILED: { message: "Database setup failed", statusCode: 500 },
 };
@@ -45,6 +58,7 @@ export class DatabasePluginError extends AppKitError {
     readonly category: DatabaseErrorCategory,
     readonly phase: DatabaseErrorPhase,
     runtimeMessage?: string,
+    readonly details?: readonly DatabaseErrorDetail[],
   ) {
     const definition = definitions[category];
     // Plugin boundaries replace runtime diagnostics with the stable message.
@@ -66,6 +80,21 @@ export function invalidDatabaseRequest(
   runtimeMessage?: string,
 ): DatabasePluginError {
   return new DatabasePluginError("INVALID_REQUEST", "runtime", runtimeMessage);
+}
+
+/** Refuse to publish a plugin whose configuration cannot be honored. */
+export function databaseSetupFailed(): DatabasePluginError {
+  return new DatabasePluginError("SETUP_FAILED", "setup");
+}
+
+/** Reject untrusted request input, naming the field but never its value. */
+export function invalidDatabaseInput(
+  path: readonly string[],
+  message: string,
+): DatabasePluginError {
+  return new DatabasePluginError("INVALID_REQUEST", "read", undefined, [
+    { path, message },
+  ]);
 }
 
 /** Add operation context without retaining an unknown error's details. */

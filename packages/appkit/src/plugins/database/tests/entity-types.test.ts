@@ -73,7 +73,7 @@ interface TestRegistry {
     insert: { text: string; internal: string };
     update: { text?: string; internal?: string };
     filters: { text?: TextFilter };
-    includes: Record<never, never>;
+    includes: { author: { to: "users"; many: false } };
     hasPrimaryKey: true;
   };
   events: {
@@ -167,6 +167,12 @@ describe("typed database entity contract", () => {
       TestRegistry["notes"]["publicRow"],
       { author: { select: readonly ["token"] } }
     >;
+    type NestedAuthor = EntityResultFor<
+      TestRegistry,
+      "notes",
+      TestRegistry["notes"]["publicRow"],
+      { comments: { include: { author: true } } }
+    >;
 
     expectTypeOf<NonNullable<PublicAuthor["author"]>>().toEqualTypeOf<
       TestRegistry["users"]["publicRow"]
@@ -180,6 +186,9 @@ describe("typed database entity contract", () => {
     expectTypeOf<NonNullable<PrivateAuthor["author"]>>().toEqualTypeOf<{
       token: string;
     }>();
+    expectTypeOf<
+      NonNullable<NestedAuthor["comments"][number]["author"]>
+    >().toEqualTypeOf<TestRegistry["users"]["publicRow"]>();
   });
 
   it("omits false relations and replaces successive include configurations", () => {
@@ -206,6 +215,7 @@ describe("typed database entity contract", () => {
         author: { where: { name: "Ada" }, order: { name: "asc" } },
       });
       notes.include({ comments: { limit: 5 } });
+      notes.include({ comments: { include: { author: true } } });
 
       // @ts-expect-error direct null is not a filter shorthand
       notes.where({ body: null });
@@ -215,14 +225,16 @@ describe("typed database entity contract", () => {
       notes.where({ rank: { like: "1" } });
       // @ts-expect-error JSON and unknown fields are not filterable
       notes.where({ payload: { eq: {} } });
+      // @ts-expect-error a filter names columns on this entity, never relations
+      notes.where({ comments: { some: { text: "a" } } });
       // @ts-expect-error unknown relations fail closed
       notes.include({ unknown: true });
       // @ts-expect-error unknown relation options fail closed
       notes.include({ author: { offset: 1 } });
       // @ts-expect-error to-one includes cannot be limited
       notes.include({ author: { limit: 1 } });
-      // @ts-expect-error nested includes are not part of one-edge options
-      notes.include({ comments: { include: { author: true } } });
+      // @ts-expect-error includes stop after the second relation edge
+      notes.include({ comments: { include: { author: { include: {} } } } });
     }
   });
 

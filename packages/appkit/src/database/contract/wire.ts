@@ -6,6 +6,10 @@ export const MAX_LIMIT = 500;
 export const DEFAULT_LIMIT = 50;
 /** Max number of relations resolvable in a single `.include()`. */
 export const MAX_INCLUDES = 10;
+/** Max number of relation edges one include path may traverse. */
+export const MAX_INCLUDE_DEPTH = 2;
+/** Max number of relation nodes across a complete include tree. */
+export const MAX_INCLUDE_NODES = 25;
 
 /** Scalar values accepted by primary-key operations. */
 export type IdValue = string | number | bigint;

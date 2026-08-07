@@ -75,7 +75,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [RunAgentInput](Interface.RunAgentInput.md) | - |
 | [RunAgentResult](Interface.RunAgentResult.md) | - |
-| [Schema](Interface.Schema.md) | - |
+| [Schema](Interface.Schema.md) | One finalized schema. `TTableName` keeps the declared names in the type, so configuration that addresses a table by name is checked against the schema it was written for. Code that accepts any schema uses the default. |
 | [SearchRequest](Interface.SearchRequest.md) | - |
 | [SearchResponse](Interface.SearchResponse.md) | - |
 | [SearchResult](Interface.SearchResult.md) | - |
@@ -155,7 +155,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
 | [database](Function.database.md) | Create a typed database plugin registration for a finalized schema. |
-| [defineSchema](Function.defineSchema.md) | - |
+| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `crudRoutes` and `hooks` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [enumColumn](Function.enumColumn.md) | - |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |

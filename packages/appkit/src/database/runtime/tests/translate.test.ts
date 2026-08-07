@@ -257,6 +257,23 @@ describe("translateInclude", () => {
     expect(render(config.posts.where as SQL).params).toEqual(["a%"]);
   });
 
+  it("resolves a second relation edge with the target's own defaults", () => {
+    const config = translateInclude(users, schema, {
+      posts: { include: { users: true } },
+    }) as { posts: { with: Record<string, unknown> } };
+    expect(config.posts.with).toEqual({
+      users: { columns: defaultColumns(users) },
+    });
+  });
+
+  it("stops after the second relation edge", () => {
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { include: { users: { include: { posts: true } } } },
+      }),
+    ).toThrow(DatabasePluginError);
+  });
+
   it("rejects unknown relations and invalid relation limits", () => {
     expect(() => translateInclude(users, schema, { missing: true })).toThrow(
       DatabasePluginError,

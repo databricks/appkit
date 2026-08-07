@@ -57,10 +57,14 @@ type RelationTargetFor<
   ? Target
   : never;
 
+/** How many further relation edges may nest inside one include level. */
+type RemainingEdges = 0 | 1;
+
 export type IncludeOptionsFor<
   Registry extends RegistryShape<Registry>,
   K extends EntityNameFor<Registry>,
   Many extends boolean,
+  Remaining extends RemainingEdges = 0,
 > = {
   readonly select?: readonly (keyof RowOfFor<Registry, K> & string)[];
   readonly where?: FiltersOfFor<Registry, K>;
@@ -69,11 +73,15 @@ export type IncludeOptionsFor<
   >;
 } & (Many extends true
   ? { readonly limit?: number }
-  : { readonly limit?: never });
+  : { readonly limit?: never }) &
+  (Remaining extends 1
+    ? { readonly include?: IncludeArgFor<Registry, K, 0> }
+    : { readonly include?: never });
 
 export type IncludeArgFor<
   Registry extends RegistryShape<Registry>,
   K extends EntityNameFor<Registry>,
+  Remaining extends RemainingEdges = 1,
 > = {
   readonly [Relation in keyof IncludesOfFor<Registry, K>]?:
     | boolean
@@ -84,12 +92,13 @@ export type IncludeArgFor<
           many: infer Many extends boolean;
         }
           ? Many
-          : false
+          : false,
+        Remaining
       >;
 };
 
 // Explicit relation projections use trusted rows; implicit projections stay public.
-type IncludedRowFor<
+type SelectedRowFor<
   Registry extends RegistryShape<Registry>,
   K extends EntityNameFor<Registry>,
   Config,
@@ -99,6 +108,14 @@ type IncludedRowFor<
 }
   ? Pick<RowOfFor<Registry, K>, Columns[number]>
   : PublicRowOfFor<Registry, K>;
+
+type IncludedRowFor<
+  Registry extends RegistryShape<Registry>,
+  K extends EntityNameFor<Registry>,
+  Config,
+> = Config extends { readonly include: infer Nested }
+  ? SelectedRowFor<Registry, K, Config> & IncludedResultFor<Registry, K, Nested>
+  : SelectedRowFor<Registry, K, Config>;
 
 type IncludedResultFor<
   Registry extends RegistryShape<Registry>,

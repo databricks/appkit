@@ -1,5 +1,6 @@
+import type express from "express";
 import { beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
-import { defineSchema } from "../../../database/schema-builder";
+import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 
 const mocks = vi.hoisted(() => ({ createDatabaseState: vi.fn() }));
 vi.mock("../lifecycle", () => ({
@@ -19,6 +20,46 @@ function deferred<T>() {
 }
 
 const schema = defineSchema(() => ({}));
+const routedSchema = defineSchema((builder) => {
+  const users = builder.table("users", { id: id(), name: text() });
+  const notes = builder.table("notes", {
+    id: id(),
+    authorId: fk(() => users.id),
+  });
+  const events = builder.table("events", { message: text() });
+  return { users, notes, events };
+});
+
+function fakeRouter() {
+  const routes: string[] = [];
+  const record =
+    (method: string) =>
+    (path: string): void => {
+      routes.push(`${method} ${path}`);
+    };
+  return {
+    routes,
+    router: {
+      get: record("get"),
+      post: record("post"),
+      patch: record("patch"),
+      delete: record("delete"),
+      put: record("put"),
+    } as unknown as express.Router,
+  };
+}
+
+async function registerRoutes(
+  config: ConstructorParameters<typeof DatabasePlugin<typeof routedSchema>>[0],
+) {
+  mocks.createDatabaseState.mockResolvedValue(candidate());
+  const plugin = new DatabasePlugin(config);
+  await plugin.setup();
+  const { router, routes } = fakeRouter();
+  plugin.injectRoutes(router);
+  return { plugin, routes };
+}
+
 function candidate(marker = "one") {
   let active = true;
   const end = vi.fn<() => Promise<void>>(async () => undefined);
@@ -137,6 +178,95 @@ describe("DatabasePlugin", () => {
     });
     expect(error.message).toBe("Database operation failed");
     await expect(plugin.shutdown()).rejects.toBe(error);
+  });
+
+  test("registers no generated routes unless they are turned on", async () => {
+    for (const crudRoutes of [undefined, false] as const) {
+      const { routes } = await registerRoutes({
+        schema: routedSchema,
+        crudRoutes,
+      });
+      expect(routes).toEqual([]);
+    }
+  });
+
+  test("registers reads for every table or an explicit subset", async () => {
+    const assertNames = () => {
+      database({ schema: routedSchema, crudRoutes: { tables: ["notes"] } });
+      database({
+        schema: routedSchema,
+        hooks: { notes: { serialize: (row) => row } },
+      });
+      database({
+        schema: routedSchema,
+        // @ts-expect-error only a declared table can be exposed
+        crudRoutes: { tables: ["missing"] },
+      });
+      database({
+        schema: routedSchema,
+        // @ts-expect-error only a declared table can shape its own responses
+        hooks: { missing: { serialize: (row) => row } },
+      });
+    };
+    void assertNames;
+
+    const all = await registerRoutes({
+      schema: routedSchema,
+      crudRoutes: true,
+    });
+    expect(all.routes).toEqual([
+      "get /users",
+      "get /users/:id",
+      "get /notes",
+      "get /notes/:id",
+      // A table without a primary key cannot address a single row.
+      "get /events",
+    ]);
+    expect(all.plugin.getEndpoints()).toMatchObject({
+      "users.list": "/api/database/users",
+      "users.detail": "/api/database/users/:id",
+    });
+
+    const subset = await registerRoutes({
+      schema: routedSchema,
+      crudRoutes: { tables: ["notes"] },
+    });
+    expect(subset.routes).toEqual(["get /notes", "get /notes/:id"]);
+  });
+
+  test("fails setup on an exposure list it cannot honor", async () => {
+    for (const tables of [["missing"], ["users", "users"], "users"]) {
+      mocks.createDatabaseState.mockResolvedValue(candidate());
+      const plugin = new DatabasePlugin({
+        schema: routedSchema,
+        crudRoutes: { tables } as unknown as { tables: ["users"] },
+      });
+      await expect(plugin.setup()).rejects.toMatchObject({
+        category: "SETUP_FAILED",
+      });
+    }
+  });
+
+  test("refuses to route names it cannot serve unambiguously", async () => {
+    const unsafe = [
+      defineSchema((builder) => ({
+        users: builder.table("users", { id: id() }),
+        Users: builder.table("Users", { id: id() }),
+      })),
+      defineSchema((builder) => ({
+        _hidden: builder.table("_hidden", { id: id() }),
+      })),
+    ];
+    for (const unsafeSchema of unsafe) {
+      mocks.createDatabaseState.mockResolvedValue(candidate());
+      const plugin = new DatabasePlugin({
+        schema: unsafeSchema,
+        crudRoutes: true,
+      });
+      await expect(plugin.setup()).rejects.toMatchObject({
+        category: "SETUP_FAILED",
+      });
+    }
   });
 
   test("isolates plugin instances and drains their exports independently", async () => {
