@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 847586,
-        "unpacked": 2965411
+        "packed": 847337,
+        "unpacked": 2964421
       },
       "dist": {
         "total": {
-          "raw": 2951754,
-          "gzip": 990708
+          "raw": 2950764,
+          "gzip": 990364
         },
         "js": {
-          "raw": 875276,
-          "gzip": 305057
+          "raw": 875181,
+          "gzip": 305032
         },
         "types": {
-          "raw": 321428,
-          "gzip": 111102
+          "raw": 321123,
+          "gzip": 110996
         },
         "maps": {
-          "raw": 1744255,
-          "gzip": 570731
+          "raw": 1743665,
+          "gzip": 570518
         },
         "css": {
           "raw": 0,
@@ -36,17 +36,17 @@
       "entries": [
         {
           "id": ".",
-          "gzip": 91980,
+          "gzip": 91966,
           "composition": {
-            "initialGzip": 89406,
+            "initialGzip": 89392,
             "lazyGzip": 2574,
-            "totalGzip": 91980,
-            "own": 292023,
+            "totalGzip": 91966,
+            "own": 291978,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 85308,
+                "gzip": 85294,
                 "kind": "initial"
               },
               {
@@ -64,11 +64,11 @@
         },
         {
           "id": "./beta",
-          "gzip": 49175,
+          "gzip": 49176,
           "composition": {
-            "initialGzip": 48716,
+            "initialGzip": 48717,
             "lazyGzip": 459,
-            "totalGzip": 49175,
+            "totalGzip": 49176,
             "own": 143115,
             "nodeModules": null,
             "chunks": [
@@ -109,7 +109,7 @@
               },
               {
                 "label": "client-options.js",
-                "gzip": 219,
+                "gzip": 220,
                 "kind": "initial"
               },
               {
@@ -153,7 +153,7 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 316122,
+        "packed": 316123,
         "unpacked": 1314670
       },
       "dist": {

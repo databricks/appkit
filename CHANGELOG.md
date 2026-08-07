@@ -102,6 +102,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.55.1](https://github.com/databricks/appkit/compare/v0.55.0...v0.55.1) (2026-08-07)
+
+### jobs
+
+* **jobs:** remove non-functional OBO (.asUser) support ([#523](https://github.com/databricks/appkit/issues/523)) ([06cd992](https://github.com/databricks/appkit/commit/06cd992f5683bf9e901a8599197f9e65bf995937)), closes [#515](https://github.com/databricks/appkit/issues/515)
+
+
 ## [0.55.0](https://github.com/databricks/appkit/compare/v0.54.0...v0.55.0) (2026-08-05)
 
 ### appkit
