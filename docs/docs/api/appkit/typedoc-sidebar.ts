@@ -470,11 +470,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.JobHandle",
-          label: "JobHandle"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.JobsExport",
           label: "JobsExport"
         },
