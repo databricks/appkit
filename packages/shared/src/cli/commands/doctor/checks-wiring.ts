@@ -64,9 +64,9 @@ export function checkWiring(
           status: target.required ? "error" : "warn",
           code: "ENV_UNWIRED",
           label: envVar,
-          detail: target.required
-            ? "has no app.yaml entry — it won't be set in the environment of the deployed app"
-            : "has no app.yaml entry — it won't be set in the environment of the deployed app (optional)",
+          detail: `has no app.yaml entry — it won't be set in the environment of the deployed app${
+            target.required ? "" : " (optional)"
+          }`,
           hint: `Add to app.yaml: \`{ name: ${envVar}, valueFrom: <binding> }\`, and declare that binding in databricks.yml.`,
         });
       }

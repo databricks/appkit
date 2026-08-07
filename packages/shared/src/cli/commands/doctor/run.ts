@@ -17,6 +17,7 @@ import {
 } from "./resolve-targets";
 import {
   AUTH_UNAVAILABLE_CODE,
+  BUNDLE_MANAGED_CODE,
   type CheckStatus,
   type DoctorOptions,
   type DoctorReport,
@@ -60,7 +61,7 @@ async function checkResource(
         {
           layer: "existence",
           status: "skipped",
-          code: "BUNDLE_MANAGED",
+          code: BUNDLE_MANAGED_CODE,
           detail: "created by this bundle on deploy — not probed",
         },
       ],

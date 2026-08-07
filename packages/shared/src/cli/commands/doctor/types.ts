@@ -13,6 +13,13 @@ export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 export const AUTH_UNAVAILABLE_CODE = "AUTH_UNAVAILABLE";
 
 /**
+ * The existence-layer `code` marking a resource created by this bundle on
+ * deploy. Set in `run.ts` and matched in `report.ts` to keep the expected skip
+ * quiet; shared so the two sides can't drift.
+ */
+export const BUNDLE_MANAGED_CODE = "BUNDLE_MANAGED";
+
+/**
  * Severity ranking for a status. Used both to roll up the worst status across
  * layers and to sort report rows most-severe-first (descending severity).
  */

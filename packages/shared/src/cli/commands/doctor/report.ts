@@ -6,6 +6,7 @@
 import pc from "picocolors";
 import {
   AUTH_UNAVAILABLE_CODE,
+  BUNDLE_MANAGED_CODE,
   type CheckStatus,
   type DoctorReport,
   type ResourceCheckResult,
@@ -158,7 +159,7 @@ function printResourceRow(r: ResourceCheckResult): void {
   // error counted in the summary had no visible cause. `BUNDLE_MANAGED` is the
   // expected skip and would just restate the row, so it alone stays quiet.
   const problems = r.layers.filter(
-    (l) => l.status !== "ok" && l.code !== "BUNDLE_MANAGED",
+    (l) => l.status !== "ok" && l.code !== BUNDLE_MANAGED_CODE,
   );
   if (problems.length > 0) {
     printRowBody(
@@ -209,7 +210,9 @@ export function printReport(report: DoctorReport, detail = false): void {
       // which case it needs the spacing every expanded row gets.
       expanded:
         r.status !== "ok" &&
-        r.layers.some((l) => l.status !== "ok" && l.code !== "BUNDLE_MANAGED"),
+        r.layers.some(
+          (l) => l.status !== "ok" && l.code !== BUNDLE_MANAGED_CODE,
+        ),
       print: () => printResourceRow(r),
     });
   }

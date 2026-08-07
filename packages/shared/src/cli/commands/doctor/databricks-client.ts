@@ -21,7 +21,7 @@ export class SdkNotInstalledError extends Error {
   }
 }
 
-export interface ServiceClientHandle {
+interface ServiceClientHandle {
   /** WorkspaceClient, typed as unknown to keep `shared` SDK-free. */
   client: unknown;
 }

@@ -103,9 +103,15 @@ function classifyBinding(block: AppResourceBlock): {
  * ignoring it would let doctor report a false all-clear.
  */
 function readYaml<T>(filePath: string): T | null {
-  if (!fs.existsSync(filePath)) return null;
+  let raw: string;
   try {
-    return (yaml.load(fs.readFileSync(filePath, "utf-8")) ?? {}) as T;
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  try {
+    return (yaml.load(raw) ?? {}) as T;
   } catch (err) {
     throw new Error(
       `Failed to parse ${path.basename(filePath)}: ${errorMessage(err)}`,
