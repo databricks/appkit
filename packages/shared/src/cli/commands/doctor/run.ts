@@ -41,24 +41,38 @@ async function checkResource(
   const layers: LayerResult[] = [];
   let rolled: CheckStatus = "ok";
 
+  // A bundle-managed resource is checked before anything else, because neither
+  // remaining layer can say anything true about it: its value comes from
+  // `${resources.*}` at deploy time, so an unset env var locally is the *normal*
+  // state (not a config error), and probing would be a false NOT_FOUND. A
+  // mismatch between the three files is the wiring layer's job, and problems
+  // inside databricks.yml are `databricks bundle validate`'s.
+  //
+  // This must run first: checking config here used to error on the unset var and
+  // return early, never reaching this branch — which failed CI for a correctly
+  // configured app while the report collapsed the row to a green-looking
+  // "will be created on deploy" with the error hidden.
+  if (target.origin === "bundle-managed") {
+    return {
+      target,
+      status: "skipped",
+      layers: [
+        {
+          layer: "existence",
+          status: "skipped",
+          code: "BUNDLE_MANAGED",
+          detail: "created by this bundle on deploy — not probed",
+        },
+      ],
+    };
+  }
+
   const configResult = checkConfig(target, configCtx);
   layers.push(configResult);
   rolled = worst(rolled, configResult.status);
   // A hard config failure makes the existence probe meaningless.
   if (configResult.status === "error") {
     return { target, status: rolled, layers };
-  }
-
-  // A bundle-managed resource doesn't exist until deploy, so probing would be a
-  // false NOT_FOUND.
-  if (target.origin === "bundle-managed") {
-    layers.push({
-      layer: "existence",
-      status: "skipped",
-      code: "BUNDLE_MANAGED",
-      detail: "created by this bundle on deploy — not probed",
-    });
-    return { target, status: worst(rolled, "skipped"), layers };
   }
 
   if (client === undefined) {

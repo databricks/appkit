@@ -93,6 +93,79 @@ describe("runDoctor", () => {
     }
   });
 
+  it("doesn't error on a bundle-managed resource whose env var is unset locally", async () => {
+    // The value comes from ${resources.*} at deploy time, so an unset var is the
+    // normal pre-deploy state. This used to config-error and return before the
+    // bundle-managed branch, failing CI for a correct app while the report
+    // collapsed the row to "will be created on deploy" and hid the cause.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-bm-"));
+    const spy = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    try {
+      fs.writeFileSync(
+        path.join(dir, "appkit.plugins.json"),
+        JSON.stringify({
+          plugins: {
+            analytics: {
+              requiredByTemplate: true,
+              resources: {
+                required: [
+                  {
+                    type: "sql_warehouse",
+                    alias: "SQL Warehouse",
+                    resourceKey: "sql-warehouse",
+                    permission: "CAN_USE",
+                    fields: {
+                      id: { env: "DOCTOR_BM_WAREHOUSE", origin: "user" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      );
+      fs.writeFileSync(
+        path.join(dir, "databricks.yml"),
+        `bundle:
+  name: bm
+resources:
+  sql_warehouses:
+    wh:
+      name: created-by-bundle
+  apps:
+    app:
+      name: bm
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: \${resources.sql_warehouses.wh.id}
+            permission: CAN_USE
+`,
+      );
+      fs.writeFileSync(
+        path.join(dir, "app.yaml"),
+        "env:\n  - name: DOCTOR_BM_WAREHOUSE\n    valueFrom: sql-warehouse\n",
+      );
+      fs.writeFileSync(path.join(dir, ".env"), "");
+      delete process.env.DOCTOR_BM_WAREHOUSE;
+
+      const report = await runDoctor({});
+
+      expect(report.resources).toHaveLength(1);
+      const [resource] = report.resources;
+      expect(resource.status).toBe("skipped");
+      // A --json consumer (or an agent) should see the deploy-created fact, and
+      // no config error at all.
+      expect(resource.layers.map((l) => l.code)).toEqual(["BUNDLE_MANAGED"]);
+      expect(resource.layers.some((l) => l.status === "error")).toBe(false);
+      expect(report.summary.error).toBe(0);
+      expect(report.exitCode).toBe(0);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("folds an auth failure into summary.error and exitCode (the --json gap)", async () => {
     const { getServiceClient } = await import("./databricks-client");
     vi.mocked(getServiceClient).mockRejectedValueOnce(new Error("no creds"));

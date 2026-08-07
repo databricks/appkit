@@ -66,6 +66,24 @@ Each resource is one of two kinds, which changes what doctor does with it:
   probing it would be a false `NOT_FOUND`; doctor reports it as *will be created
   on deploy* instead.
 
+A bundle-managed resource short-circuits **before** the config and existence
+layers, because neither can say anything true about it: the value arrives from
+`${resources.*}` at deploy time, so an unset env var locally is the *normal*
+pre-deploy state rather than a config error. Its only layer is the
+`BUNDLE_MANAGED` skip — which is also the fact a `--json` consumer or agent wants:
+this resource is created on deploy.
+
+Nothing is lost by skipping those layers. A mismatch across
+`appkit.plugins.json` ↔ `app.yaml` ↔ `databricks.yml` is caught by the wiring
+layer, and problems *inside* `databricks.yml` are `databricks bundle validate`'s
+job.
+
+> This ordering is load-bearing. Running `checkConfig` first meant an unset var
+> errored and returned early, never reaching the bundle-managed branch — so a
+> correctly configured app exited 1 while the report collapsed the row to a
+> green-looking *will be created on deploy* and dropped the error layer, leaving
+> `1 error` in the summary with no visible cause.
+
 Provenance comes from `bundle.ts`, which reads `databricks.yml` + `app.yaml` and
 classifies each binding, then overlays `origin` onto the manifest-sourced
 targets. Apps with no `databricks.yml` behave exactly as before (everything
@@ -145,7 +163,10 @@ One flat, severity-sorted checklist — no titled sub-sections (which read as
 inconsistent next to the header-less `Auth` row). `Auth` is always the first
 row; every resource and wiring finding follows in the same list, sorted
 most-severe first. Bundle-managed resources appear as *will be created on
-deploy* rather than a probe result.
+deploy* rather than a probe result — but any non-`ok` layer they *do* carry is
+still printed beneath them, so a row can never show a clean glyph while
+contributing an invisible error to the summary. (`BUNDLE_MANAGED` itself is the
+one code held back, since it would only restate the row's own label.)
 
 Optimised for a quiet happy path: a healthy resource is just a green tick and
 its name — no plugin/type attribution, no per-layer output. Detail (and a
@@ -160,7 +181,9 @@ Colour (via `picocolors`) uses one tight palette:
 - **cyan** marks a literal token you'd type or reference — a `"quoted"` id or
   binding name, or a `` `backticked` `` code/command span;
 - **bold** marks a `SCREAMING_SNAKE` env-var name (bold + cyan when it sits
-  inside a code span);
+  inside a code span — the bold pass must run *before* the cyan ones, or the
+  inserted ANSI escapes break the `\b` anchor and the nesting silently stops
+  working);
 - resource *names* are left unstyled — only the id/code you'd act on is coloured.
 
 `picocolors` auto-disables for non-TTY output and honours `NO_COLOR`, so
@@ -215,9 +238,24 @@ failure can mean the wrong target, not just a stale token. `detail` is the short
 headline `authentication failed`; the full SDK message is kept in `raw` and shown
 only with `--detail` — in both the human report and `--json` (i.e. `--json`
 alone omits `raw`, since it can carry sensitive detail and CI often captures it;
-`--json --detail` opts back in). `DATABRICKS_HOST` is stored with any embedded
-`user:pass@` userinfo stripped, so credentials never reach the report or JSON.
-The report labels hints `Hint:`.
+`--json --detail` opts back in). The report labels hints `Hint:`.
+
+### Never echo the raw host
+
+`DATABRICKS_HOST` is stored with any embedded `user:pass@` userinfo stripped, so
+credentials never reach the report or JSON. Two rules keep that true:
+
+- `sanitizeHost` strips userinfo via `URL` when the value parses, and textually
+  when it doesn't — a typo'd scheme (`ht!tp://user:pass@x`) skips the URL path
+  entirely and would otherwise be echoed verbatim.
+- `validateHost` quotes the **sanitized** value in all three of its messages.
+  `detail` prints unconditionally in both the human report and `--json` (only
+  `raw` is `--detail`-gated), so a raw echo there lands in CI logs.
+
+`HOST_INVALID` rejects only a hostname with no alphanumeric character at all
+(the template's unfilled `https://...`). It deliberately does *not* require a
+dotted label — that rejected `localhost`, tunnels, and internal DNS names, all of
+which are legitimate.
 
 ## Files
 

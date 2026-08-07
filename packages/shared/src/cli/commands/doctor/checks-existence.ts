@@ -203,8 +203,12 @@ const probeGenie: ExistenceProbe = async (client, target) => {
 const probeJob: ExistenceProbe = async (client, target) => {
   const raw = field(target, "id");
   if (!raw) return missingField("id");
-  const jobId = Number(raw);
-  if (!Number.isInteger(jobId)) {
+  const id = raw.trim();
+  // Validate the digits directly rather than via Number(): job ids are int64, so
+  // past 2^53 Number() silently rounds (and Number.isInteger still passes),
+  // which would probe a *different* job and report a false not-found. A string
+  // check also rejects "1e3" and "0x10", both of which Number() would accept.
+  if (!/^\d+$/.test(id)) {
     return {
       layer: "existence",
       status: "error",
@@ -213,7 +217,10 @@ const probeJob: ExistenceProbe = async (client, target) => {
     };
   }
   try {
-    await client.jobs.get({ job_id: jobId });
+    // Pass the digits through unconverted to preserve int64 precision; the SDK
+    // serialises them straight into the request, so a string works even though
+    // the type says number.
+    await client.jobs.get({ job_id: id as unknown as number });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);

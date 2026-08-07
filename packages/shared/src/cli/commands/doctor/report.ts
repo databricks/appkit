@@ -60,12 +60,17 @@ function glyph(status: CheckStatus): string {
  * Highlights actionable tokens in a detail/hint line: cyan for a "quoted" id or
  * `backticked` code span (delimiters stripped), bold for a SCREAMING_SNAKE env
  * var. Nesting is safe — bold's reset (22) doesn't clear the cyan (39).
+ *
+ * Bold runs *first*: the cyan passes wrap their match in ANSI escapes, which
+ * would put a `\x1b[36m` between the word boundary and the env-var name and stop
+ * the `\b` anchor matching — so an env var inside a code span or quotes would
+ * never get bold.
  */
 function highlight(text: string): string {
   return text
+    .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (id) => pc.bold(id))
     .replace(/`([^`]+)`/g, (_, code) => pc.cyan(code))
-    .replace(/"([^"]+)"/g, (_, id) => pc.cyan(id))
-    .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (id) => pc.bold(id));
+    .replace(/"([^"]+)"/g, (_, id) => pc.cyan(id));
 }
 
 /** A sub-line beneath a row (detail or hint), consistently indented. */
@@ -143,14 +148,18 @@ function printAuthRow(report: DoctorReport, detail: boolean): void {
  */
 function printResourceRow(r: ResourceCheckResult): void {
   const { target } = r;
-  if (target.origin === "bundle-managed") {
-    console.log(
-      `  ${pc.dim("⧗")}  ${target.alias}  ${pc.dim("will be created on deploy")}`,
-    );
-    return;
-  }
-  console.log(`  ${glyph(r.status)}  ${target.alias}`);
-  const problems = r.layers.filter((l) => l.status !== "ok");
+  const bundleManaged = target.origin === "bundle-managed";
+  console.log(
+    bundleManaged
+      ? `  ${pc.dim("⧗")}  ${target.alias}  ${pc.dim("will be created on deploy")}`
+      : `  ${glyph(r.status)}  ${target.alias}`,
+  );
+  // Never swallow a finding: a bundle-managed row used to drop its layers, so an
+  // error counted in the summary had no visible cause. `BUNDLE_MANAGED` is the
+  // expected skip and would just restate the row, so it alone stays quiet.
+  const problems = r.layers.filter(
+    (l) => l.status !== "ok" && l.code !== "BUNDLE_MANAGED",
+  );
   if (problems.length > 0) {
     printRowBody(
       problems.map((l) => l.detail),
@@ -196,7 +205,11 @@ export function printReport(report: DoctorReport, detail = false): void {
     }
     checked.push({
       status: r.status,
-      expanded: r.status !== "ok" && r.target.origin !== "bundle-managed",
+      // A bundle-managed row is a one-liner unless it carries a real finding, in
+      // which case it needs the spacing every expanded row gets.
+      expanded:
+        r.status !== "ok" &&
+        r.layers.some((l) => l.status !== "ok" && l.code !== "BUNDLE_MANAGED"),
       print: () => printResourceRow(r),
     });
   }

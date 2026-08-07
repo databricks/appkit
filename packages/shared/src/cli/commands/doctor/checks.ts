@@ -105,7 +105,11 @@ export function sanitizeHost(host: string | undefined): string | undefined {
     url.password = "";
     return url.toString();
   } catch {
-    return host;
+    // An unparseable host still can't be echoed verbatim — a typo'd scheme
+    // (`ht!tp://user:pass@x`) keeps its credentials otherwise. Strip any
+    // `userinfo@` span textually, since URL parsing is unavailable here. Covers
+    // both a scheme-prefixed host and a bare `user:pass@host`.
+    return host.replace(/^([^/@]*\/\/)?[^/@]*@/, (_, scheme) => scheme ?? "");
   }
 }
 
@@ -113,26 +117,32 @@ export function sanitizeHost(host: string | undefined): string | undefined {
  * Validates `DATABRICKS_HOST` before the SDK sees it, so an unfilled placeholder
  * gets a clear message instead of the SDK's opaque credentials error. Returns an
  * error message, or null when the host is acceptable or unset.
+ *
+ * Every message quotes the **sanitized** host: `detail` prints unconditionally in
+ * both the human report and `--json` (only `raw` is `--detail`-gated), so echoing
+ * the raw value would leak `user:pass@` credentials into CI logs.
  */
 export function validateHost(host: string | undefined): string | null {
   if (host === undefined || host.trim().length === 0) return null;
+  const shown = sanitizeHost(host);
 
   let url: URL;
   try {
     url = new URL(host);
   } catch {
-    return `DATABRICKS_HOST is not a valid URL: "${host}"`;
+    return `DATABRICKS_HOST is not a valid URL: "${shown}"`;
   }
 
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    return `DATABRICKS_HOST must be an http(s) URL: "${host}"`;
+    return `DATABRICKS_HOST must be an http(s) URL: "${shown}"`;
   }
 
-  // Placeholders like "https://..." parse but have no real dotted label.
-  const hostname = url.hostname;
-  const hasRealLabel = /[a-z0-9]/i.test(hostname) && hostname.includes(".");
-  if (!hasRealLabel) {
-    return `DATABRICKS_HOST looks like an unfilled placeholder: "${host}"`;
+  // Reject only what can't name a host at all: a hostname with no alphanumeric
+  // character, e.g. the template's unfilled "https://...". Requiring a dotted
+  // label instead would reject legitimate single-label hosts — `localhost`, a
+  // tunnel, or an internal DNS name.
+  if (!/[a-z0-9]/i.test(url.hostname)) {
+    return `DATABRICKS_HOST looks like an unfilled placeholder: "${shown}"`;
   }
 
   return null;

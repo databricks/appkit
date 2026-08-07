@@ -146,6 +146,27 @@ describe("validateHost", () => {
 
   it("rejects the unfilled template placeholder https://...", () => {
     expect(validateHost("https://...")).toMatch(/placeholder/i);
+    expect(validateHost("https://.")).toMatch(/placeholder/i);
+  });
+
+  it("accepts single-label hosts (localhost, tunnels, internal DNS)", () => {
+    // Requiring a dotted label rejected every legitimate local/tunnel host.
+    expect(validateHost("https://localhost:8080")).toBeNull();
+    expect(validateHost("http://localhost")).toBeNull();
+    expect(validateHost("https://127.0.0.1:8080")).toBeNull();
+    expect(validateHost("http://[::1]:9000")).toBeNull();
+    expect(validateHost("https://my-tunnel:3000")).toBeNull();
+  });
+
+  it("never echoes credentials from the raw host into its messages", () => {
+    // `detail` prints unconditionally in both the report and --json (only `raw`
+    // is --detail-gated), so a raw echo here would leak into CI logs.
+    const scheme = validateHost("ftp://user:s3cr3t@secret.example.com");
+    expect(scheme).not.toContain("s3cr3t");
+    expect(scheme).toContain("secret.example.com");
+
+    const unparseable = validateHost("ht!tp://user:s3cr3t@x");
+    expect(unparseable).not.toContain("s3cr3t");
   });
 
   it("rejects a non-URL value", () => {
@@ -176,6 +197,14 @@ describe("sanitizeHost", () => {
 
   it("leaves a non-URL value as-is (nothing to strip)", () => {
     expect(sanitizeHost("not-a-url")).toBe("not-a-url");
+    expect(sanitizeHost("ht!tp://x")).toBe("ht!tp://x");
+  });
+
+  it("strips userinfo even when the host doesn't parse as a URL", () => {
+    // A typo'd scheme skips the URL path entirely, so it needs textual stripping.
+    const cleaned = sanitizeHost("ht!tp://user:s3cr3t@x");
+    expect(cleaned).not.toContain("s3cr3t");
+    expect(cleaned).toBe("ht!tp://x");
   });
 });
 

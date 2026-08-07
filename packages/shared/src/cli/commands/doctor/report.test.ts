@@ -159,6 +159,55 @@ describe("printReport ordering", () => {
     expect(lines.some((l) => l.includes("host:"))).toBe(false);
   });
 
+  it("never hides a finding on a bundle-managed row", () => {
+    // The row used to drop its layers entirely, so an error counted in the
+    // summary had no visible cause anywhere in the output.
+    const managed = res("error", "sql_warehouse");
+    managed.target.origin = "bundle-managed";
+    managed.target.alias = "Managed WH";
+    managed.layers = [
+      { layer: "existence", status: "skipped", code: "BUNDLE_MANAGED" },
+      {
+        layer: "config",
+        status: "error",
+        code: "SOMETHING_REAL",
+        detail: "a genuine problem worth seeing",
+      },
+    ];
+    const lines = capture(() =>
+      printReport(
+        report({
+          resources: [managed],
+          summary: { ok: 0, warn: 0, error: 1, skipped: 0 },
+          exitCode: 1,
+        }),
+      ),
+    );
+    expect(lines.some((l) => l.includes("will be created on deploy"))).toBe(
+      true,
+    );
+    expect(
+      lines.some((l) => l.includes("a genuine problem worth seeing")),
+    ).toBe(true);
+  });
+
+  it("keeps a clean bundle-managed row to a single line", () => {
+    const managed = res("skipped", "job");
+    managed.target.origin = "bundle-managed";
+    managed.target.alias = "Managed Job";
+    managed.layers = [
+      {
+        layer: "existence",
+        status: "skipped",
+        code: "BUNDLE_MANAGED",
+        detail: "created by this bundle on deploy — not probed",
+      },
+    ];
+    const lines = capture(() => printReport(report({ resources: [managed] })));
+    // The BUNDLE_MANAGED detail would only restate the row's own label.
+    expect(lines.some((l) => l.includes("not probed"))).toBe(false);
+  });
+
   it("renders setup notices in the flat list", () => {
     const lines = capture(() =>
       printReport(

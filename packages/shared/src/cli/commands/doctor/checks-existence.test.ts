@@ -140,6 +140,38 @@ describe("runExistenceProbe — job", () => {
     );
     expect(r.status).toBe("ok");
   });
+
+  it("probes an int64 job id without losing precision", async () => {
+    // Number() rounds past 2^53 while Number.isInteger still passes, so the old
+    // guard would silently probe a *different* job and report a false not-found.
+    const big = "9007199254740993"; // 2^53 + 1
+    let seen: unknown;
+    const client = {
+      jobs: {
+        get: async (req: { job_id: unknown }) => {
+          seen = req.job_id;
+          return {};
+        },
+      },
+    };
+    const r = await runExistenceProbe(
+      client,
+      target({ type: "job", fieldValues: { id: big } }),
+    );
+    expect(r.status).toBe("ok");
+    expect(String(seen)).toBe(big);
+  });
+
+  it("rejects numeric forms the API can't take (1e3, 0x10)", async () => {
+    const client = { jobs: { get: async () => ({}) } };
+    for (const id of ["1e3", "0x10", "4.5", "-1"]) {
+      const r = await runExistenceProbe(
+        client,
+        target({ type: "job", fieldValues: { id } }),
+      );
+      expect(r.code, `id=${id}`).toBe("INVALID_ID");
+    }
+  });
 });
 
 describe("runExistenceProbe — unsupported type", () => {
