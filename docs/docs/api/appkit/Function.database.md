@@ -14,7 +14,7 @@ Create a typed database plugin registration for a finalized schema.
 
 | Type Parameter |
 | ------ |
-| `TSchema` *extends* [`Schema`](Interface.Schema.md) |
+| `TSchema` *extends* [`Schema`](Interface.Schema.md)\<`string`\> |
 
 ## Parameters
 
