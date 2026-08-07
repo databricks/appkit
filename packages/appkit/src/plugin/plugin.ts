@@ -12,6 +12,7 @@ import type {
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
+import { camelToKebab } from "shared";
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
@@ -669,7 +670,7 @@ export abstract class Plugin<
 
     router[method](path, forwardAsyncErrors(handler));
 
-    const fullPath = `/api/${this.name}${path}`;
+    const fullPath = `/api/${camelToKebab(this.name)}${path}`;
     this.registerEndpoint(name, fullPath);
 
     if (config.skipBodyParsing) {

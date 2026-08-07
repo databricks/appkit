@@ -1,5 +1,5 @@
-import { ApiError } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { ApiError } from "../../../workspace-client";
 import { fetchOpenApiSchema } from "../fetcher";
 
 function makeValidSpec(

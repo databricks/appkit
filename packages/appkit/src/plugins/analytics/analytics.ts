@@ -27,6 +27,7 @@ import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import {
@@ -34,6 +35,7 @@ import {
   composeMetricCacheKey,
   deriveMetricExecutorKey,
   loadMetricRegistry,
+  selectMetricMetadata,
   validateMetricRequest,
 } from "./metric";
 import { QueryProcessor } from "./query";
@@ -556,6 +558,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
+    // Computed here, outside the cached execute below, so a cache hit still
+    // serves the current metadata. Absent config → `undefined` → the `result`
+    // message omits the field (envelope-identical to `/query`).
+    const metadata = selectMetricMetadata(
+      this.config.metricViewsMetadata,
+      key,
+      request.measures,
+      request.dimensions,
+    );
+
     // Cache key. Composed over the canonicalized args (sorted measures/
     // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
     // the `executorKey` — `"sp"` shares the cache across all users, a per-user
@@ -695,7 +707,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           throw ExecutionError.statementFailed(inner);
         }
 
-        yield sqlResult.data as AnalyticsStreamMessage;
+        // Stamp the metadata onto the (possibly cached) result message; the
+        // cached message never carries it.
+        const resultMessage = sqlResult.data as AnalyticsSseMessage;
+        yield (
+          metadata !== undefined
+            ? { ...resultMessage, metadata }
+            : resultMessage
+        ) as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,

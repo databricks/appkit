@@ -1,9 +1,13 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import dotenv from "dotenv";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
+import {
+  createWorkspaceClient,
+  type WorkspaceClient,
+} from "../workspace-client";
 import {
   isRevivableMetricCacheEntry,
   loadCache,
@@ -11,7 +15,12 @@ import {
   metricCacheHash,
   saveCache,
 } from "./cache";
-import { getErrorDiagnostic, isConnectivityError } from "./errors";
+import {
+  classifyBlockingFailure,
+  classifyEnvironmentalCause,
+  getErrorDiagnostic,
+  isConnectivityError,
+} from "./errors";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
@@ -51,10 +60,32 @@ const logger = createLogger("type-generator");
  */
 const MV_PREFLIGHT_WAIT_MAX_MS = 300_000;
 
+function determineWarningMessage(
+  cause: "auth" | "unreachable" | "unavailable",
+  warehouseId: string,
+): string {
+  const causeLabel =
+    cause === "auth"
+      ? "auth blocked"
+      : cause === "unreachable"
+        ? "warehouse unreachable"
+        : "warehouse unavailable";
+  // Use a stable prefix for greppability and CI log matching.
+  return `AppKit typegen: using committed types — warehouse ${warehouseId} ${causeLabel}; please check warehouse status and retry`;
+}
+
 type TypegenFailure = QuerySyntaxError | QueryFatalError;
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
+}
+
+function isQueryDegraded(schema: QuerySchema): boolean {
+  return schema.degraded === true;
+}
+
+function hasAnyDegradedMetrics(schemas: MetricSchema[]): boolean {
+  return schemas.some((s) => s.degraded === true);
 }
 
 function formatFailureRows(
@@ -276,7 +307,7 @@ async function probeWarehouseState(
  *   `metric-views` directory of `queryFolder` (so query-only callers keep
  *   working); when neither is given, the metric path is skipped.
  * @param options.mvOutFile - optional output file for the MetricRegistry
- *   augmentation. Defaults to a sibling `metric-views.d.ts` file under the same
+ *   augmentation. Defaults to a sibling `metric-views.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `definitions.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics} (tests inject a mock; production lazily builds a
@@ -311,6 +342,8 @@ export async function generateFromEntryPoint(options: {
   const metricViewsFolder =
     options.metricViewsFolder ??
     (queryFolder ? path.resolve(queryFolder, "..", "metric-views") : undefined);
+  const resolvedMvFile =
+    mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
 
   const projectRoot = resolveProjectRoot(outFile);
 
@@ -318,7 +351,13 @@ export async function generateFromEntryPoint(options: {
 
   let queryRegistry: QuerySchema[] = [];
   let syntaxErrors: QuerySyntaxError[] = [];
+  // Deterministic fatal errors only (404/400).
   let fatalErrors: QueryFatalError[] = [];
+  let queryHadEnvironmentalFailure = false;
+  let metricsHadEnvironmentalFailure = false;
+  // Track the coarse cause of the environmental failure for the warning message.
+  let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
+
   if (queryFolder) {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
@@ -327,30 +366,49 @@ export async function generateFromEntryPoint(options: {
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];
     fatalErrors = result.fatalErrors ?? [];
+    queryHadEnvironmentalFailure = result.hadEnvironmentalFailure ?? false;
+    environmentalCause =
+      environmentalCause ?? result.environmentalCause ?? undefined;
   }
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  await fs.mkdir(path.dirname(outFile), { recursive: true });
-  await fs.writeFile(outFile, typeDeclarations, "utf-8");
+  // In blocking mode, never overwrite committed types with a schema explicitly
+  // marked degraded. Leave the committed .d.ts as the fallback of record.
+  // Non-blocking mode always writes.
+  const hasAnyDegradedQuery = queryRegistry.some(isQueryDegraded);
+  if (mode === "blocking" && hasAnyDegradedQuery) {
+    // A degraded schema always participates in the committed-types gate. Keep
+    // this invariant next to write suppression so a new producer cannot update
+    // one decision without the other.
+    queryHadEnvironmentalFailure = true;
+    environmentalCause = environmentalCause ?? "unavailable";
+  }
+  const shouldWriteQueries = mode !== "blocking" || !hasAnyDegradedQuery;
+
+  if (shouldWriteQueries) {
+    await fs.mkdir(path.dirname(outFile), { recursive: true });
+    await fs.writeFile(outFile, typeDeclarations, "utf-8");
+  }
 
   // Metric-view types: emit whenever a metric-views folder is resolved (gated
   // on the metric config's own dir, NOT the queries folder — an app can declare
   // metric views without any `.sql` queries). `syncMetricViewsTypes` still
   // returns `noConfig` when the folder holds no `definitions.json`.
   if (metricViewsFolder) {
-    const mvFile =
-      mvOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
-
     let mvResult: SyncMetricViewsTypesResult;
     try {
       mvResult = await syncMetricViewsTypes({
         metricViewsFolder,
         warehouseId,
-        metricOutFile: mvFile,
+        metricOutFile: resolvedMvFile,
         cache: !noCache,
         metricFetcher,
         mode,
+        // In blocking mode, never overwrite committed metric types with a
+        // degraded result — including on runs that go on to throw, so a failing
+        // build leaves the committed type file intact. Non-blocking always writes.
+        suppressDegradedWrite: mode === "blocking",
       });
     } catch (configError) {
       // syncMetricViewsTypes only throws for a malformed definitions.json — re-throw as a message-only TypegenFatalError.
@@ -367,14 +425,24 @@ export async function generateFromEntryPoint(options: {
 
     // Deleted/deleting-warehouse fatal preflight (blocking mode only);
     // empty (no-op) when definitions.json is absent or in non-blocking mode.
+    // Only deterministic fatals are recorded in fatalErrors.
     for (const fe of mvResult.fatalErrors) {
       fatalErrors.push(fe);
     }
 
-    // Blocking (`--wait` / prod Vite) escalates per-key DESCRIBE failures — a bad or unreachable source, i.e. a config error
-    // to build failures so the end-of-run throw fails after the writes.
+    metricsHadEnvironmentalFailure =
+      (mvResult.hadEnvironmentalFailure ?? false) ||
+      (mode === "blocking" && hasAnyDegradedMetrics(mvResult.schemas));
+    environmentalCause =
+      environmentalCause ?? mvResult.environmentalCause ?? undefined;
+
+    // Blocking (`--wait` / prod Vite) escalates only deterministic per-key
+    // DESCRIBE failures. Transient connectivity failures are already recorded
+    // as environmental by syncMetricViewsTypes and fall through to the
+    // committed-types gate below.
     if (mode === "blocking") {
       for (const failure of mvResult.failures) {
+        if (failure.transient) continue;
         fatalErrors.push({
           name: failure.key,
           message: `metric view ${failure.key} (${failure.source}) could not be described: ${failure.reason}`,
@@ -386,12 +454,44 @@ export async function generateFromEntryPoint(options: {
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
 
-  // Types are always written above — including `result: unknown` for any Metric View that could not be described.
+  // Deterministic failures (SQL syntax errors or 404/400 HTTP) always crash regardless of mode.
   if (syntaxErrors.length > 0) {
     throw new TypegenSyntaxError(syntaxErrors, warehouseId, fatalErrors);
   }
   if (fatalErrors.length > 0) {
     throw new TypegenFatalError(fatalErrors, warehouseId);
+  }
+
+  if (
+    mode === "blocking" &&
+    (queryHadEnvironmentalFailure || metricsHadEnvironmentalFailure)
+  ) {
+    const missingCommittedTypes: string[] = [];
+    if (queryHadEnvironmentalFailure && !existsSync(outFile)) {
+      missingCommittedTypes.push(path.basename(outFile));
+    }
+    if (metricsHadEnvironmentalFailure && !existsSync(resolvedMvFile)) {
+      missingCommittedTypes.push(path.basename(resolvedMvFile));
+    }
+
+    if (missingCommittedTypes.length === 0) {
+      // Committed types present: emit loud warning and exit 0.
+      const warningMessage = determineWarningMessage(
+        environmentalCause ?? "unavailable",
+        warehouseId,
+      );
+      logger.warn(warningMessage);
+    } else {
+      throw new TypegenFatalError(
+        [
+          {
+            name: "type-generator",
+            message: `Warehouse ${warehouseId} could not provide schemas and the required committed type ${plural(missingCommittedTypes.length, "artifact is", "artifacts are")} missing: ${missingCommittedTypes.join(", ")}. Run 'npx @databricks/appkit generate-types --wait' locally and commit the generated type files.`,
+          },
+        ],
+        warehouseId,
+      );
+    }
   }
 
   logger.debug("Type generation complete!");
@@ -413,12 +513,28 @@ export interface SyncMetricViewsTypesResult {
   noConfig: boolean;
   /**
    * Per-key fatal preflight errors (empty except in the `blocking`-mode
-   * deleted/deleting-warehouse and deterministic-preflight-failure cases). The
-   * artifacts are still written; {@link generateFromEntryPoint} surfaces these
-   * by throwing {@link TypegenFatalError} after the writes. A `"describe-now"`
+   * deleted/deleting-warehouse and deterministic-preflight-failure cases).
+   * {@link generateFromEntryPoint} surfaces these by throwing
+   * {@link TypegenFatalError}; when the run also degraded, `suppressDegradedWrite`
+   * means no artifact was written and the committed types stand. A `"describe-now"`
    * run sets no blocking preflight, so for that mode this is always empty.
+   * ONLY contains deterministic failures (404/400).
    */
   fatalErrors: Array<{ name: string; message: string }>;
+  /**
+   * `true` when an environmental failure occurred in blocking mode (auth, connectivity,
+   * DELETED/DELETING, wait-timeout, or other unrecognized failures). Used by
+   * {@link generateFromEntryPoint} to decide whether to apply the has-types gate.
+   * Does not directly cause a throw — the gate decides that. Always false in
+   * non-blocking or describe-now mode.
+   */
+  hadEnvironmentalFailure?: boolean;
+  /**
+   * Coarse cause label for the environmental failure, one of "auth" (401/403),
+   * "unreachable" (connectivity), or "unavailable" (other). Only set when
+   * hadEnvironmentalFailure is true; used by the warning message.
+   */
+  environmentalCause?: "auth" | "unreachable" | "unavailable";
 }
 
 /**
@@ -430,10 +546,16 @@ export interface SyncMetricViewsTypesResult {
  *
  * @param options.metricViewsFolder - folder that holds `definitions.json` (`<root>/config/metric-views`).
  * @param options.warehouseId - SQL warehouse used for `DESCRIBE TABLE EXTENDED`.
- * @param options.metricOutFile - output path for the MetricRegistry `.d.ts`.
+ * @param options.metricOutFile - output path for the MetricRegistry `.ts` (the
+ *   generated source carries both the `declare module` augmentation and the
+ *   runtime `metricViewsMetadata` const).
  * @param options.cache - cache toggle, default ON. Only `cache === false` disables it (so `undefined`/`true` keep caching).
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
- * @param options.mode - preflight/gate policy, default `"describe-now"`.
+ * @param options.mode - preflight/gate policy, default `"describe-now"`. When set to `"blocking"`,
+ *   metric-view `.ts` writes are suppressed if any metric is degraded (to preserve committed files).
+ * @param options.suppressDegradedWrite - when true (only in `mode === "blocking"` context), skip
+ *   the metricOutFile write if any metric schema has `degraded === true`. Used to prevent
+ *   overwriting committed type files with degraded types in blocking mode.
  */
 export async function syncMetricViewsTypes(options: {
   metricViewsFolder: string;
@@ -442,6 +564,7 @@ export async function syncMetricViewsTypes(options: {
   cache?: boolean;
   metricFetcher?: DescribeFetcher;
   mode?: "describe-now" | "non-blocking" | "blocking";
+  suppressDegradedWrite?: boolean;
 }): Promise<SyncMetricViewsTypesResult> {
   const {
     metricViewsFolder,
@@ -450,6 +573,7 @@ export async function syncMetricViewsTypes(options: {
     cache: cacheEnabled,
     metricFetcher,
     mode = "describe-now",
+    suppressDegradedWrite,
   } = options;
 
   // Only `cache === false` disables caching; `undefined`/`true` keep it on.
@@ -503,13 +627,15 @@ export async function syncMetricViewsTypes(options: {
 
   let mvClient: WorkspaceClient | undefined;
   const getMvClient = (): WorkspaceClient => {
-    mvClient ??= new WorkspaceClient({});
+    mvClient ??= createWorkspaceClient();
     return mvClient;
   };
 
   // Blocking-mode preflight: ensure the warehouse is running before the MV DESCRIBE
   // batch (probe → decide → wait / start+wait; only DELETED/DELETING is fatal). Two softenings vs the query preflight: a failed probe and a timed-out wait are NOT fatal here — we fall through to syncMetrics, which classifies a still-not-ready warehouse as degraded rather than failing the build. Skipped for `describe-now`/`non-blocking` (only `mode === "blocking"` enters here).
   let preflightFatalMessage: string | undefined;
+  let hadEnvironmentalFailure = false;
+  let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
   if (
     mode === "blocking" &&
     metricFetcher === undefined &&
@@ -520,6 +646,9 @@ export async function syncMetricViewsTypes(options: {
       const decision = decidePreflight(state, mode);
       if (decision === "fatal") {
         preflightFatalMessage = `warehouse ${warehouseId} is ${state}`;
+        // State-based DELETED/DELETING is environmental, not deterministic.
+        hadEnvironmentalFailure = true;
+        environmentalCause = "unavailable";
       } else if (decision === "startWaitProceed") {
         // treatStoppedAsTransient rides out the stale pre-start STOPPED/STOPPING
         // reading, same as the query preflight.
@@ -532,21 +661,32 @@ export async function syncMetricViewsTypes(options: {
           // With treatStoppedAsTransient, a non-RUNNING resolve is exactly
           // DELETED/DELETING — the warehouse was deleted while we waited.
           preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
+          hadEnvironmentalFailure = true;
         }
       } else if (decision === "waitThenProceed") {
         const settled = await waitUntilRunning(getMvClient(), warehouseId, {
           maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
         });
         if (settled === "DELETED" || settled === "DELETING") {
-          // Deleted mid-wait: fatal.
+          // Deleted mid-wait: fatal. Environmental (state-based).
           preflightFatalMessage = `warehouse ${warehouseId} is ${settled}`;
+          hadEnvironmentalFailure = true;
         }
       }
     } catch (err) {
       // Connectivity blip: fall through to syncMetrics, whose DESCRIBEs degrade
       // a not-ready / unreachable warehouse rather than throwing.
       if (!isConnectivityError(err)) {
-        preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+        // Deterministic failures become fatal errors; environmental failures
+        // degrade for the committed-types gate.
+        const classification = classifyBlockingFailure(err);
+        if (classification === "deterministic") {
+          preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+        } else {
+          preflightFatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          hadEnvironmentalFailure = true;
+          environmentalCause = classifyEnvironmentalCause(err);
+        }
       }
     }
   }
@@ -568,14 +708,13 @@ export async function syncMetricViewsTypes(options: {
   let described: MetricSchema[];
   let failures: MetricSyncFailure[] = [];
   if (preflightFatalMessage !== undefined) {
-    // Fatal preflight (deleted/deleting warehouse): fail like the query path —
-    // skip DESCRIBE, emit degraded schemas so both artifacts are still written,
-    // and record one fatal error per describe-needed key (cache hits are
-    // unaffected). The caller surfaces them after the writes. The degraded
-    // schemas are not cached (see the write block), so a later pass re-probes.
+    // Environmental failures degrade for the committed-types gate; deterministic
+    // failures record one fatal error per key. Degraded schemas are not cached.
     described = describeNeeded.map(emptyMetricSchema);
-    for (const entry of describeNeeded) {
-      fatalErrors.push({ name: entry.key, message: preflightFatalMessage });
+    if (!hadEnvironmentalFailure) {
+      for (const entry of describeNeeded) {
+        fatalErrors.push({ name: entry.key, message: preflightFatalMessage });
+      }
     }
   } else if (describeNeeded.length === 0) {
     // Nothing left to describe — every configured key was a cache hit.
@@ -606,6 +745,14 @@ export async function syncMetricViewsTypes(options: {
       }
     }
 
+    // A rejected DESCRIBE with a connectivity signal is expected to recover on
+    // a later pass. In blocking mode, route it through the same committed-types
+    // gate as preflight outages instead of treating it as a configuration error.
+    if (mode === "blocking" && failures.some((failure) => failure.transient)) {
+      hadEnvironmentalFailure = true;
+      environmentalCause = environmentalCause ?? "unreachable";
+    }
+
     // Degraded-but-not-failed keys: the warehouse answered with a non-terminal
     // state (stopped / cold-starting), so their schemas are unknown.
     const failedKeys = new Set(failures.map((f) => f.key));
@@ -619,11 +766,11 @@ export async function syncMetricViewsTypes(options: {
         degradedKeys.length,
         degradedKeys.join(", "),
       );
+      hadEnvironmentalFailure = true;
+      environmentalCause = environmentalCause ?? "unavailable";
     }
   } else {
-    // Un-probed DESCRIBEs deliberately skipped, not failures: emit each
-    // describe-needed key as a degraded schema so both artifacts exist; cache
-    // hits keep serving last-known-good.
+    // Un-probed DESCRIBEs emit degraded schemas; cache hits remain last-known-good.
     described = describeNeeded.map(emptyMetricSchema);
     logger.info(
       "Warehouse %s is not running — wrote degraded metric types (permissive) for %d metric view(s) (%s); they will refresh once the warehouse is available.",
@@ -631,6 +778,8 @@ export async function syncMetricViewsTypes(options: {
       describeNeeded.length,
       describeNeeded.map((e) => e.key).join(", "),
     );
+    hadEnvironmentalFailure = true;
+    environmentalCause = environmentalCause ?? "unavailable";
   }
 
   // Cache only successful schema results for describe-needed keys; remove stale cache for degraded ones.
@@ -683,12 +832,37 @@ export async function syncMetricViewsTypes(options: {
     return emptyMetricSchema(entry);
   });
 
-  await fs.mkdir(path.dirname(metricOutFile), { recursive: true });
-  await fs.writeFile(
-    metricOutFile,
-    generateMetricTypeDeclarations(schemas),
-    "utf-8",
-  );
+  // Same anti-clobber rule as the query path: when suppressDegradedWrite is set
+  // (blocking mode), skip the write if any metric degraded, preserving the
+  // committed metric-views.ts. Non-blocking mode always writes.
+  const shouldWriteMetrics =
+    !suppressDegradedWrite || !hasAnyDegradedMetrics(schemas);
+
+  if (shouldWriteMetrics) {
+    await fs.mkdir(path.dirname(metricOutFile), { recursive: true });
+    await fs.writeFile(
+      metricOutFile,
+      generateMetricTypeDeclarations(schemas),
+      "utf-8",
+    );
+  }
+  // Sweep the ambient `metric-views.d.ts` a pre-`.ts` version left behind,
+  // which would otherwise duplicate the augmentation the new `.ts` emits.
+  // Skipped unless the replacement was actually written, so a degraded
+  // blocking pass leaves an app's only committed metric types in place.
+  if (
+    metricOutFile.endsWith(".ts") &&
+    !metricOutFile.endsWith(".d.ts") &&
+    existsSync(metricOutFile)
+  ) {
+    const staleDts = `${metricOutFile.slice(0, -".ts".length)}.d.ts`;
+    try {
+      await fs.unlink(staleDts);
+      logger.debug("Removed stale generated types at %s", staleDts);
+    } catch {
+      // No stale sibling — nothing to clean up.
+    }
+  }
 
   logger.debug(
     "Wrote MetricRegistry augmentation for %d metric(s)%s",
@@ -702,6 +876,12 @@ export async function syncMetricViewsTypes(options: {
     failures,
     fatalErrors,
     noConfig: false,
+    hadEnvironmentalFailure:
+      mode === "blocking" ? hadEnvironmentalFailure : undefined,
+    environmentalCause:
+      mode === "blocking" && hadEnvironmentalFailure
+        ? environmentalCause
+        : undefined,
   };
 }
 
@@ -724,4 +904,4 @@ export type {
 export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
-export const METRIC_TYPES_FILE = "metric-views.d.ts";
+export const METRIC_TYPES_FILE = "metric-views.ts";

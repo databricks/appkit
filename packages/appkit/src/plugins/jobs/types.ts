@@ -1,7 +1,7 @@
-import type { jobs } from "@databricks/sdk-experimental";
-import type { BasePluginConfig, IAppRequest } from "shared";
+import type { BasePluginConfig } from "shared";
 import type { z } from "zod";
 import type { ExecutionResult } from "../../plugin";
+import type { jobs } from "../../workspace-client";
 
 /** Supported task types for job parameter mapping. */
 export type TaskType =
@@ -67,14 +67,6 @@ export interface IJobsConfig extends BasePluginConfig {
 }
 
 /**
- * Job handle returned by `appkit.jobs("etl")`.
- * Supports OBO access via `.asUser(req)`.
- */
-export type JobHandle = JobAPI & {
-  asUser: (req: IAppRequest) => JobAPI;
-};
-
-/**
  * Public API shape of the jobs plugin.
  * Callable to select a job by key.
  *
@@ -87,9 +79,6 @@ export type JobHandle = JobAPI & {
  * for await (const status of appkit.jobs("etl").runAndWait()) {
  *   console.log(status.status, status.run);
  * }
- *
- * // OBO access
- * await appkit.jobs("etl").asUser(req).runNow();
  * ```
  */
-export type JobsExport = (jobKey: string) => JobHandle;
+export type JobsExport = (jobKey: string) => JobAPI;

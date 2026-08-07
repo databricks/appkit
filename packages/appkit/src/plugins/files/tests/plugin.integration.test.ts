@@ -48,9 +48,9 @@ const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
   return { mockFilesApi, mockSdkClient, MockApiError };
 });
 
-vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
+vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@databricks/sdk-experimental")>();
+    await importOriginal<typeof import("../../../workspace-client")>();
   return {
     ...actual,
     ApiError: MockApiError,

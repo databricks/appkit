@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -7,21 +6,25 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import type { WorkspaceClient } from "../../workspace-client";
+import { contextFromAbortSignal } from "../context";
 import type {
-  VectorSearchConnectorConfig,
+  AiSearchConnectorConfig,
+  UcTableInfo,
+  VsIndexInfo,
   VsNextPageParams,
   VsQueryParams,
   VsRawResponse,
 } from "./types";
 
-const logger = createLogger("connectors:vector-search");
+const logger = createLogger("connectors:ai-search");
 
-export class VectorSearchConnector {
+export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
 
-  constructor(config: VectorSearchConnectorConfig = {}) {
+  constructor(config: AiSearchConnectorConfig = {}) {
     this.telemetry = TelemetryManager.getProvider(
-      "vector-search",
+      "ai-search",
       config.telemetry,
     );
   }
@@ -45,7 +48,8 @@ export class VectorSearchConnector {
     if (params.queryText) body.query_text = params.queryText;
     if (params.queryVector) body.query_vector = params.queryVector;
     if (params.filters && Object.keys(params.filters).length > 0) {
-      body.filters = params.filters;
+      // VS silently ignores an object under `filters`; it wants a JSON string.
+      body.filters_json = JSON.stringify(params.filters);
     }
     if (params.reranker) {
       body.reranker = {
@@ -62,7 +66,7 @@ export class VectorSearchConnector {
     );
 
     return this.telemetry.startActiveSpan(
-      "vector-search.query",
+      "ai-search.query",
       {
         kind: SpanKind.CLIENT,
         attributes: {
@@ -79,14 +83,17 @@ export class VectorSearchConnector {
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = (await workspaceClient.apiClient.request({
-            method: "POST",
-            path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-            payload: body,
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
-          })) as VsRawResponse;
+          const response = (await workspaceClient.apiClient.request(
+            {
+              method: "POST",
+              path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
+              payload: body,
+              headers: new Headers({ "Content-Type": "application/json" }),
+              raw: false,
+              query: {},
+            },
+            contextFromAbortSignal(signal),
+          )) as VsRawResponse;
 
           const duration = Date.now() - startTime;
           span.setAttribute("vs.result_count", response.result.row_count);
@@ -97,7 +104,7 @@ export class VectorSearchConnector {
           span.setAttribute("vs.duration_ms", duration);
           span.setStatus({ code: SpanStatusCode.OK });
 
-          logger.event()?.setContext("vector-search", {
+          logger.event()?.setContext("ai-search", {
             index_name: params.indexName,
             query_type: params.queryType,
             result_count: response.result.row_count,
@@ -115,7 +122,7 @@ export class VectorSearchConnector {
           throw error;
         }
       },
-      { name: "vector-search", includePrefix: true },
+      { name: "ai-search", includePrefix: true },
     );
   }
 
@@ -135,7 +142,7 @@ export class VectorSearchConnector {
     );
 
     return this.telemetry.startActiveSpan(
-      "vector-search.queryNextPage",
+      "ai-search.queryNextPage",
       {
         kind: SpanKind.CLIENT,
         attributes: {
@@ -146,17 +153,20 @@ export class VectorSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = (await workspaceClient.apiClient.request({
-            method: "POST",
-            path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-            payload: {
-              endpoint_name: params.endpointName,
-              page_token: params.pageToken,
+          const response = (await workspaceClient.apiClient.request(
+            {
+              method: "POST",
+              path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
+              payload: {
+                endpoint_name: params.endpointName,
+                page_token: params.pageToken,
+              },
+              headers: new Headers({ "Content-Type": "application/json" }),
+              raw: false,
+              query: {},
             },
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
-          })) as VsRawResponse;
+            contextFromAbortSignal(signal),
+          )) as VsRawResponse;
 
           span.setAttribute("vs.result_count", response.result.row_count);
           span.setStatus({ code: SpanStatusCode.OK });
@@ -170,7 +180,50 @@ export class VectorSearchConnector {
           throw error;
         }
       },
-      { name: "vector-search", includePrefix: true },
+      { name: "ai-search", includePrefix: true },
     );
+  }
+
+  /**
+   * Fetches index metadata (index type, source table). Used to auto-discover
+   * returnable columns when they aren't configured. No warehouse required.
+   */
+  async getIndex(
+    workspaceClient: WorkspaceClient,
+    indexName: string,
+    signal?: AbortSignal,
+  ): Promise<VsIndexInfo> {
+    return (await workspaceClient.apiClient.request(
+      {
+        method: "GET",
+        path: `/api/2.0/vector-search/indexes/${indexName}`,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        raw: false,
+        query: {},
+      },
+      contextFromAbortSignal(signal),
+    )) as VsIndexInfo;
+  }
+
+  /**
+   * Lists a Unity Catalog table's column names via the tables REST API
+   * (no warehouse required).
+   */
+  async getSourceColumns(
+    workspaceClient: WorkspaceClient,
+    sourceTable: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const table = (await workspaceClient.apiClient.request(
+      {
+        method: "GET",
+        path: `/api/2.1/unity-catalog/tables/${sourceTable}`,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        raw: false,
+        query: {},
+      },
+      contextFromAbortSignal(signal),
+    )) as UcTableInfo;
+    return (table.columns ?? []).map((c) => c.name);
   }
 }

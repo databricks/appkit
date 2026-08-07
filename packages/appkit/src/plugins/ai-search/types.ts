@@ -1,22 +1,38 @@
 import type { BasePluginConfig } from "shared";
 
-export interface IVectorSearchConfig extends BasePluginConfig {
+/** Vector Search query mode: semantic (`ann`), keyword+semantic (`hybrid`), or keyword-only (`full_text`). */
+export type SearchQueryType = "ann" | "hybrid" | "full_text";
+
+export interface IAiSearchConfig extends BasePluginConfig {
   timeout?: number;
   indexes?: Record<string, IndexConfig>;
 }
 
 export interface IndexConfig {
-  /** Three-level UC name: catalog.schema.index_name */
-  indexName: string;
-  /** Columns to return in results */
-  columns: string[];
+  /**
+   * Three-level UC name: catalog.schema.index_name. Defaults to the
+   * `DATABRICKS_VS_INDEX_NAME` env var when omitted — so multiple aliases that
+   * omit it all resolve to that same physical index. Set it explicitly per
+   * alias when they should point at distinct indexes.
+   */
+  indexName?: string;
+  /**
+   * Columns to return in results. Optional: in development the plugin
+   * auto-discovers them from the index's source table when omitted (and warns
+   * that they should be set explicitly for production).
+   */
+  columns?: string[];
   /** Default search mode */
-  queryType?: "ann" | "hybrid" | "full_text";
+  queryType?: SearchQueryType;
   /** Max results per query */
   numResults?: number;
   /** Enable built-in reranker. Pass true to rerank all non-id columns, or an object for fine control. */
   reranker?: boolean | RerankerConfig;
-  /** Auth mode — "service-principal" uses the app's SP, "on-behalf-of-user" proxies the logged-in user's token */
+  /**
+   * Auth mode for the built-in HTTP routes — "service-principal" (default)
+   * uses the app's SP, "on-behalf-of-user" proxies the logged-in user's token.
+   * Programmatic callers select per call via `appkit.aiSearch.asUser(req)`.
+   */
   auth?: "service-principal" | "on-behalf-of-user";
   /** Enable cursor pagination */
   pagination?: boolean;
@@ -34,6 +50,13 @@ export interface RerankerConfig {
   columnsToRerank: string[];
 }
 
+/** Public summary of a configured index, exposed to the client via `clientConfig()`. */
+export interface IndexSummary {
+  alias: string;
+  queryType: SearchQueryType;
+  pagination: boolean;
+}
+
 export type SearchFilters = Record<
   string,
   string | number | boolean | (string | number)[]
@@ -44,7 +67,7 @@ export interface SearchRequest {
   queryVector?: number[];
   columns?: string[];
   numResults?: number;
-  queryType?: "ann" | "hybrid" | "full_text";
+  queryType?: SearchQueryType;
   filters?: SearchFilters;
   reranker?: boolean;
 }
@@ -55,7 +78,7 @@ export interface SearchResponse<
   results: SearchResult<T>[];
   totalCount: number;
   queryTimeMs: number;
-  queryType: "ann" | "hybrid" | "full_text";
+  queryType: SearchQueryType;
   nextPageToken: string | null;
 }
 

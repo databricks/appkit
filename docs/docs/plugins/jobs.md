@@ -12,7 +12,6 @@ Trigger and monitor [Databricks Lakeflow Jobs](https://docs.databricks.com/en/jo
 - Run-and-wait with SSE streaming status updates
 - Parameter validation with Zod schemas
 - Task-type-aware parameter mapping (notebook, python_wheel, sql, etc.)
-- Optional on-behalf-of (OBO) user execution via `.asUser(req)`
 
 ## Basic usage
 
@@ -123,18 +122,7 @@ When `taskType` is omitted, parameters are passed through to the SDK as-is.
 
 ## Execution context
 
-HTTP routes run as the **app's service principal** by default. Jobs are typically shared infrastructure, and the app's resource binding (`databricks.yml`) grants `CAN_MANAGE_RUN` to the SP — so users trigger runs without needing individual grants.
-
-Per-run attribution in the Jobs UI will show the app's SP, not the human user. If you need user-level attribution (or want the Databricks permission check to use the user's grants), opt in to OBO explicitly in a custom handler via `.asUser(req)`:
-
-```ts
-// Default: runs as the app's service principal
-const result = await AppKit.jobs("etl").runNow({ startDate: "2025-01-01" });
-
-// Opt-in: runs as the logged-in user (requires `jobs.jobs` in
-// `databricks.yml` user_api_scopes AND the user's own CAN_MANAGE_RUN grant)
-const result = await AppKit.jobs("etl").asUser(req).runNow({ startDate: "2025-01-01" });
-```
+Jobs always run as the **app's service principal**. The app's resource binding (`databricks.yml`) grants `CAN_MANAGE_RUN` to the SP, so users trigger runs without needing individual grants. Per-run attribution in the Jobs UI shows the app's SP, not the human user.
 
 ## HTTP endpoints
 

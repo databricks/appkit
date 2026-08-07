@@ -49,9 +49,14 @@ const { MockApiError } = vi.hoisted(() => {
   return { MockApiError };
 });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  ApiError: MockApiError,
-}));
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    ApiError: MockApiError,
+  };
+});
 
 // Mock all dependencies
 vi.mock("../../app");

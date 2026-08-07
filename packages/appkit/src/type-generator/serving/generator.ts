@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
+import {
+  createWorkspaceClient,
+  type WorkspaceClient,
+} from "../../workspace-client";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
@@ -81,7 +84,7 @@ export async function generateServingTypes(
   }> = [];
 
   for (const [alias, config] of Object.entries(endpoints)) {
-    client ??= new WorkspaceClient({});
+    client ??= createWorkspaceClient();
     const result = await processEndpoint(alias, config, client, cache);
     if (result.cacheUpdated) updated = true;
     registryEntries.push(result.entry);

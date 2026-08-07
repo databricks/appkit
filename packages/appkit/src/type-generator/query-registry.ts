@@ -1,11 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
+import { createWorkspaceClient } from "../workspace-client";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
-import { getErrorDiagnostic, isConnectivityError } from "./errors";
+import {
+  classifyBlockingFailure,
+  classifyEnvironmentalCause,
+  getErrorDiagnostic,
+  isConnectivityError,
+} from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
@@ -272,12 +277,15 @@ function degradedType(
   queryName: string,
   sql: string,
   sqlHash: string,
-): string {
+): Pick<QuerySchema, "type" | "degraded"> {
   const prior = cache.queries[queryName];
   const canReusePrior = prior?.hash === sqlHash && !prior.retry;
   return canReusePrior
-    ? prior.type
-    : generateUnknownResultQuery(sql, queryName);
+    ? { type: prior.type }
+    : {
+        type: generateUnknownResultQuery(sql, queryName),
+        degraded: true,
+      };
 }
 
 // Single source of truth for the `@param` type alternation, shared by
@@ -564,7 +572,7 @@ export async function generateQueriesFromDescribe(
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
   logger.debug("Found %d SQL queries", queryFiles.length);
 
-  const client = new WorkspaceClient({});
+  const client = createWorkspaceClient();
   const spinner = new Spinner();
 
   // Read all SQL files in parallel
@@ -675,7 +683,14 @@ export async function generateQueriesFromDescribe(
   // Genuine SQL errors (reachable warehouse). Connectivity failures are NOT
   // recorded here — they degrade silently so a transient outage isn't fatal.
   const syntaxErrors: QuerySyntaxError[] = [];
+  // Deterministic fatal errors only (404/400). Environmental failures are
+  // tracked separately below.
   const fatalErrors: QueryFatalError[] = [];
+  // Track whether an environmental failure occurred in blocking mode (for the
+  // has-types gate in generateFromEntryPoint), plus its coarse cause so the
+  // gate's warning can say why generation fell back to committed types.
+  let hadEnvironmentalFailure = false;
+  let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
 
   if (uncachedQueries.length > 0) {
     // One-time warehouse preflight (before issuing any DESCRIBE). A single
@@ -685,6 +700,9 @@ export async function generateQueriesFromDescribe(
     // not-ready warehouse degrades exactly like a per-query outage.
     let decision: ReturnType<typeof decidePreflight> = "proceed";
     let fatalMessage = "";
+    // Track whether an environmental failure occurred so the caller's has-types
+    // gate can decide crash-vs-fall-back.
+    let isEnvironmental = false;
     if (mode === "non-blocking") {
       // `non-blocking` never describes and must make ZERO warehouse round-trips:
       // skip the probe entirely (no getWarehouseState) and go straight to
@@ -697,7 +715,10 @@ export async function generateQueriesFromDescribe(
         const state = await getWarehouseState(client, warehouseId);
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
+          // DELETED/DELETING is state-based and environmental.
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
+          isEnvironmental = true;
+          environmentalCause = "unavailable";
         }
         if (decision === "startWaitProceed") {
           // Stopped/stopping warehouse: nudge it out of the stopped state, then
@@ -714,6 +735,8 @@ export async function generateQueriesFromDescribe(
           } else {
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+            isEnvironmental = true; // DELETED/DELETING or timeout is environmental
+            environmentalCause = "unavailable";
           }
         }
         if (decision === "waitThenProceed") {
@@ -725,35 +748,56 @@ export async function generateQueriesFromDescribe(
           } else {
             decision = "fatal";
             fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+            isEnvironmental = true; // DELETED/DELETING or timeout is environmental
+            environmentalCause = "unavailable";
           }
         }
       } catch (err) {
         if (isConnectivityError(err)) {
-          // Warehouse unreachable (transient outage): degrade silently like a
-          // per-query connectivity failure — never fail a build on a blip.
+          // Warehouse unreachable (transient outage): degrade rather than fail —
+          // never fail a build on a blip. Still environmental, so the caller's
+          // has-types gate decides warn-and-fall-back (committed types present)
+          // vs crash (fresh checkout with nothing to fall back to).
           decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unreachable";
         } else {
-          // Auth, bad warehouse id, malformed config, or a timed-out wait: fatal.
-          decision = "fatal";
-          fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          const classification = classifyBlockingFailure(err);
+          if (classification === "deterministic") {
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          } else {
+            decision = "degradeAll";
+            isEnvironmental = true;
+            environmentalCause = classifyEnvironmentalCause(err);
+          }
         }
       }
+    }
+
+    if (mode === "blocking" && decision !== "proceed" && isEnvironmental) {
+      hadEnvironmentalFailure = true;
     }
 
     if (decision !== "proceed") {
       // degradeAll or fatal: skip DESCRIBE entirely. Every uncached query gets a
       // degraded schema (reused cache or `unknown`); fatal additionally records
-      // a fatalError per query so the caller fails the build after writing.
-      const kind = decision === "fatal" ? "fatal" : "connectivity";
+      // a fatalError per query so the caller fails the build after writing. Only
+      // deterministic fatals are recorded; environmental degradations go silent
+      // so the has-types gate can decide.
+      const kind =
+        decision === "fatal" && !isEnvironmental ? "fatal" : "connectivity";
       for (const { index, queryName, sql, sqlHash } of uncachedQueries) {
         freshResults.push({
           index,
           schema: {
             name: queryName,
-            type: degradedType(cache, queryName, sql, sqlHash),
+            ...degradedType(cache, queryName, sql, sqlHash),
           },
         });
-        if (decision === "fatal") {
+        if (decision === "fatal" && !isEnvironmental) {
+          // Only deterministic fatals record an error; environmental failures
+          // degrade silently for the has-types gate.
           fatalErrors.push({ name: queryName, message: fatalMessage });
           logEntries.push({
             queryName,
@@ -819,7 +863,7 @@ export async function generateQueriesFromDescribe(
           return {
             status: "syntax",
             index,
-            schema: { name: queryName, type },
+            schema: { name: queryName, type, degraded: true },
             error: withIdentifierHint(parseError(sqlError), sql),
           };
         }
@@ -836,7 +880,7 @@ export async function generateQueriesFromDescribe(
             index,
             schema: {
               name: queryName,
-              type: degradedType(cache, queryName, sql, sqlHash),
+              ...degradedType(cache, queryName, sql, sqlHash),
             },
           };
         }
@@ -845,7 +889,11 @@ export async function generateQueriesFromDescribe(
         if (!hasResults) {
           // Described, but no result columns. Emit `unknown` and retry next run;
           // do not cache (we never persist `result: unknown`).
-          return { status: "empty", index, schema: { name: queryName, type } };
+          return {
+            status: "empty",
+            index,
+            schema: { name: queryName, type, degraded: true },
+          };
         }
         return {
           status: "ok",
@@ -892,6 +940,10 @@ export async function generateQueriesFromDescribe(
               // status === "unavailable": non-terminal DESCRIBE (warehouse
               // stopped/cold-starting/busy). Degrade like a transient outage:
               // tag OFFLINE, count as degraded, never cache.
+              if (mode === "blocking") {
+                hadEnvironmentalFailure = true;
+                environmentalCause = environmentalCause ?? "unavailable";
+              }
               logEntries.push({
                 queryName,
                 status: "MISS",
@@ -914,8 +966,11 @@ export async function generateQueriesFromDescribe(
             const priorEntry = cache.queries[queryName];
             const canReusePrior =
               priorEntry?.hash === sqlHash && !priorEntry.retry;
-            const type = degradedType(cache, queryName, sql, sqlHash);
-            freshResults.push({ index, schema: { name: queryName, type } });
+            const degraded = degradedType(cache, queryName, sql, sqlHash);
+            freshResults.push({
+              index,
+              schema: { name: queryName, ...degraded },
+            });
 
             if (!isConnectivityError(entry.reason)) {
               fatalErrors.push({ name: queryName, message: error.message });
@@ -926,6 +981,13 @@ export async function generateQueriesFromDescribe(
                 error,
               });
               continue;
+            }
+
+            // Environmental for the same reason as the preflight connectivity
+            // branch above, so the has-types gate still sees it.
+            if (mode === "blocking") {
+              hadEnvironmentalFailure = true;
+              environmentalCause = environmentalCause ?? "unreachable";
             }
 
             logger.warn(
@@ -1039,7 +1101,15 @@ export async function generateQueriesFromDescribe(
     .sort((a, b) => a.index - b.index)
     .map((r) => r.schema);
 
-  return { schemas, syntaxErrors, fatalErrors };
+  return {
+    schemas,
+    syntaxErrors,
+    fatalErrors,
+    hadEnvironmentalFailure,
+    environmentalCause: hadEnvironmentalFailure
+      ? environmentalCause
+      : undefined,
+  };
 }
 
 /**

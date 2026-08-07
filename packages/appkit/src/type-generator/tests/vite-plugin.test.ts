@@ -30,11 +30,16 @@ vi.mock("../warehouse-status", () => ({
   waitUntilRunning: mocks.waitUntilRunning,
 }));
 
-// armWarehouseWatch constructs `new WorkspaceClient({})`. Stub the SDK so that
-// constructor is inert in unit tests.
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: class {},
-}));
+// armWarehouseWatch constructs a client via createWorkspaceClient(). Stub the
+// wrapper so that factory is inert in unit tests.
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => ({}),
+  };
+});
 
 const { appKitTypesPlugin } = await import("../vite-plugin");
 // Real constant values: the "../index" mock spreads the actual module, so these
@@ -387,7 +392,7 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
   test("a custom mvOutFile reaches generateFromEntryPoint", async () => {
     const plugin = appKitTypesPlugin({
-      mvOutFile: "custom/types/metric-views.d.ts",
+      mvOutFile: "custom/types/metric-views.ts",
     });
     getHook<ConfigResolvedHook>(
       plugin,
@@ -400,12 +405,22 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
 
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        mvOutFile: path.resolve(
-          process.cwd(),
-          "custom/types/metric-views.d.ts",
-        ),
+        mvOutFile: path.resolve(process.cwd(), "custom/types/metric-views.ts"),
       }),
     );
+  });
+
+  test("rejects a .d.ts custom mvOutFile up front (it would emit a runtime const into an ambient decl → TS1039)", () => {
+    const plugin = appKitTypesPlugin({
+      mvOutFile: "custom/types/metric-views.d.ts",
+    });
+    const configResolved = getHook<ConfigResolvedHook>(
+      plugin,
+      "configResolved",
+    );
+    expect(() =>
+      configResolved({ root: path.join(process.cwd(), "client") }),
+    ).toThrow(/must be a \.ts file, not a \.d\.ts/);
   });
 });
 

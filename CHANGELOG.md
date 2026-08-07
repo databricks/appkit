@@ -92,6 +92,58 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.55.1](https://github.com/databricks/appkit/compare/v0.55.0...v0.55.1) (2026-08-07)
+
+### jobs
+
+* **jobs:** remove non-functional OBO (.asUser) support ([#523](https://github.com/databricks/appkit/issues/523)) ([06cd992](https://github.com/databricks/appkit/commit/06cd992f5683bf9e901a8599197f9e65bf995937)), closes [#515](https://github.com/databricks/appkit/issues/515)
+
+
+## [0.55.0](https://github.com/databricks/appkit/compare/v0.54.0...v0.55.0) (2026-08-05)
+
+### appkit
+
+* **appkit:** ship the ai-search plugin at beta ([#508](https://github.com/databricks/appkit/issues/508)) ([bd70a1b](https://github.com/databricks/appkit/commit/bd70a1b78bbbd97a8432f11a44e9a65f1972b1c2))
+
+
+## [0.54.0](https://github.com/databricks/appkit/compare/v0.53.1...v0.54.0) (2026-08-05)
+
+### analytics
+
+* **analytics:** add Metric View metadata pipeline ([#512](https://github.com/databricks/appkit/issues/512)) ([ba3d3ed](https://github.com/databricks/appkit/commit/ba3d3ed32c918b2fdaf19ba0043c8e403835928b))
+
+
+## [0.53.1](https://github.com/databricks/appkit/compare/v0.53.0...v0.53.1) (2026-08-05)
+
+### appkit
+
+* **appkit:** gate typegen fallback per surface, not across surfaces ([#511](https://github.com/databricks/appkit/issues/511)) ([d55de0f](https://github.com/databricks/appkit/commit/d55de0fb58e546145da1bc573415a78d5b686b78))
+
+
+## [0.53.0](https://github.com/databricks/appkit/compare/v0.52.0...v0.53.0) (2026-08-04)
+
+* CI-resilient `--wait` typegen with committed-types fallback ([#510](https://github.com/databricks/appkit/issues/510)) ([f90fa9b](https://github.com/databricks/appkit/commit/f90fa9bac76227afa3e655dd2cd5b0ef69104132)), closes [#475](https://github.com/databricks/appkit/issues/475)
+
+
+## [0.52.0](https://github.com/databricks/appkit/compare/v0.51.0...v0.52.0) (2026-08-04)
+
+### appkit
+
+* **appkit:** introduce workspace-client wrapper over the Databricks SDK ([#475](https://github.com/databricks/appkit/issues/475)) ([f6e81eb](https://github.com/databricks/appkit/commit/f6e81ebbc0c0e939123252cbf2c8833a252e1747))
+
+
 ## [0.51.0](https://github.com/databricks/appkit/compare/v0.50.0...v0.51.0) (2026-08-03)
 
 * relocate typegen cache to committed .appkit/ dir ([#502](https://github.com/databricks/appkit/issues/502)) ([#509](https://github.com/databricks/appkit/issues/509)) ([9497431](https://github.com/databricks/appkit/commit/94974317cb67506477169328039c6e14e81c2a1e))

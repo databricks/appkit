@@ -74,7 +74,6 @@ export type {
   IJobsConfig,
   JobAPI,
   JobConfig,
-  JobHandle,
   JobsExport,
 } from "./plugins/jobs";
 export type {
@@ -116,3 +115,11 @@ export {
 export { appKitServingTypesPlugin } from "./type-generator/serving/vite-plugin";
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
+// Workspace client wrapper (facade over the Databricks SDK). Consumers pass a
+// `createWorkspaceClient()` instance to `createApp({ client })`.
+export {
+  ApiError,
+  createWorkspaceClient,
+  type WorkspaceClient,
+  type WorkspaceClientOptions,
+} from "./workspace-client";

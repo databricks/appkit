@@ -1,4 +1,3 @@
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { QueryResult, QueryResultRow } from "pg";
 import type { AgentToolDefinition, ToolProvider } from "shared";
 import { z } from "zod";
@@ -24,6 +23,7 @@ import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { createWorkspaceClient } from "../../workspace-client";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
 
@@ -84,7 +84,9 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       ...this.config.pool,
       workspaceClient:
         this.config.pool?.workspaceClient ??
-        new WorkspaceClient({}, getClientOptions()),
+        createWorkspaceClient({
+          clientOptions: getClientOptions(),
+        }).toLegacyWorkspaceClient(),
     };
     const user = await getUsernameWithApiLookup(poolConfig);
 
@@ -105,7 +107,10 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       const isNew = !oboManager.hasPool(userKey);
       const pool = oboManager.getPool(
         userKey,
-        { workspaceClient: ctx.client, user: userKey },
+        {
+          workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+          user: userKey,
+        },
         ctx.tokenFingerprint,
       );
       if (isNew) {
@@ -296,7 +301,11 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     const ctx = getUserContext();
     if (ctx) {
       const user = ctx.userEmail ?? ctx.userId;
-      return { ...this.config.pool, workspaceClient: ctx.client, user };
+      return {
+        ...this.config.pool,
+        workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+        user,
+      };
     }
     return this.config.pool;
   }

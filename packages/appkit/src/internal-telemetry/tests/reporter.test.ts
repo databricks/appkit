@@ -1,5 +1,5 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { WorkspaceClient } from "../../workspace-client";
 import { TelemetryReporter } from "../reporter";
 
 type RequestSpy = ReturnType<typeof vi.fn>;

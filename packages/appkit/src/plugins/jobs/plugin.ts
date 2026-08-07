@@ -1,8 +1,6 @@
 import { STATUS_CODES } from "node:http";
-import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
-  IAppRequest,
   IAppRouter,
   PluginExecutionSettings,
   StreamExecutionSettings,
@@ -16,6 +14,7 @@ import type { ExecutionResult } from "../../plugin";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import type { jobs as jobsTypes } from "../../workspace-client";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,
@@ -27,7 +26,6 @@ import type {
   IJobsConfig,
   JobAPI,
   JobConfig,
-  JobHandle,
   JobRunStatus,
   JobsExport,
 } from "./types";
@@ -256,10 +254,7 @@ class JobsPlugin extends Plugin {
     const jobConfig = this.jobConfigs[jobKey];
     // Capture `this` for use in the async generator
     const self = this;
-    // Eagerly capture the client and userId so that when createJobAPI is
-    // called inside an asUser() proxy (which runs in user context), the
-    // closures below use the user-scoped client instead of falling back
-    // to the service principal when the ALS context has already exited.
+    // Capture client and userId eagerly: the closures below run later, after the ALS context may have exited.
     const client = this.client;
     const userKey = getCurrentUserId();
 
@@ -728,22 +723,14 @@ class JobsPlugin extends Plugin {
   }
 
   exports(): JobsExport {
-    const resolveJob = (jobKey: string): JobHandle => {
+    const resolveJob = (jobKey: string): JobAPI => {
       if (!this.jobKeys.includes(jobKey)) {
         throw new Error(
           `Unknown job "${jobKey}". Available jobs: ${this.jobKeys.join(", ")}`,
         );
       }
 
-      const spApi = this.createJobAPI(jobKey);
-
-      return {
-        ...spApi,
-        asUser: (req: IAppRequest) => {
-          const userPlugin = this.asUser(req) as JobsPlugin;
-          return userPlugin.createJobAPI(jobKey);
-        },
-      };
+      return this.createJobAPI(jobKey);
     };
 
     return resolveJob as JobsExport;

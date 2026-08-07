@@ -189,8 +189,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.IAiSearchConfig",
+          label: "IAiSearchConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.IJobsConfig",
           label: "IJobsConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.IndexConfig",
+          label: "IndexConfig"
         },
         {
           type: "doc",
@@ -269,6 +279,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RerankerConfig",
+          label: "RerankerConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ResourceEntry",
           label: "ResourceEntry"
         },
@@ -286,6 +301,21 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RunAgentResult",
           label: "RunAgentResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchRequest",
+          label: "SearchRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchResponse",
+          label: "SearchResponse"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.SearchResult",
+          label: "SearchResult"
         },
         {
           type: "doc",
@@ -364,8 +394,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.WorkspaceClient",
+          label: "WorkspaceClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.WorkspaceClientLike",
           label: "WorkspaceClientLike"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClientOptions",
+          label: "WorkspaceClientOptions"
         }
       ]
     },
@@ -430,11 +470,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.JobHandle",
-          label: "JobHandle"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.JobsExport",
           label: "JobsExport"
         },
@@ -462,6 +497,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.SearchFilters",
+          label: "SearchFilters"
         },
         {
           type: "doc",
@@ -493,6 +533,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Variable.agents",
           label: "agents"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.aiSearch",
+          label: "aiSearch"
         },
         {
           type: "doc",
@@ -559,6 +604,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createLakebasePoolManager",
           label: "createLakebasePoolManager"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createWorkspaceClient",
+          label: "createWorkspaceClient"
         },
         {
           type: "doc",

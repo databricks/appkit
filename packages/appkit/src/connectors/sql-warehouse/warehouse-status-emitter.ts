@@ -1,5 +1,5 @@
-import type { sql } from "@databricks/sdk-experimental";
 import type { Span } from "../../telemetry";
+import type { sql } from "../../workspace-client";
 import type { WarehouseStatusUpdate } from "./client";
 
 /**

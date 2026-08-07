@@ -2,7 +2,6 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { ServiceContext } from "../../../context/service-context";
-import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
 import {
   JOBS_READ_DEFAULTS,
@@ -45,10 +44,15 @@ const { mockClient, mockCacheInstance } = vi.hoisted(() => {
   return { mockJobsApi, mockClient, mockCacheInstance };
 });
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => mockClient),
-  Context: vi.fn(),
-}));
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => mockClient,
+    Context: vi.fn(),
+  };
+});
 
 vi.mock("../../../context", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../context")>();
@@ -243,14 +247,13 @@ describe("JobsPlugin", () => {
       expect(typeof exported).toBe("function");
     });
 
-    test("returns job handle with asUser and direct JobAPI methods", () => {
+    test("returns job handle with direct JobAPI methods", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
 
       const handle = exported("etl");
-      expect(typeof handle.asUser).toBe("function");
       expect(typeof handle.runNow).toBe("function");
       expect(typeof handle.runAndWait).toBe("function");
       expect(typeof handle.lastRun).toBe("function");
@@ -685,7 +688,7 @@ describe("JobsPlugin", () => {
     test("connector's cancellation token reflects signal state live", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const { Context } = await import("@databricks/sdk-experimental");
+      const { Context } = await import("../../../workspace-client");
       const mockContext = Context as unknown as ReturnType<typeof vi.fn>;
       mockContext.mockClear();
 
@@ -733,76 +736,6 @@ describe("JobsPlugin", () => {
       const second = await gen.next();
       expect(second.done).toBe(true);
       expect(statuses).toHaveLength(1);
-    });
-  });
-
-  describe("OBO and service principal access", () => {
-    test("job handle exposes asUser and all JobAPI methods", () => {
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      const plugin = new JobsPlugin({});
-      const handle = plugin.exports()("etl");
-
-      expect(typeof handle.asUser).toBe("function");
-
-      const jobMethods = [
-        "runNow",
-        "runAndWait",
-        "lastRun",
-        "listRuns",
-        "getRun",
-        "getRunOutput",
-        "cancelRun",
-        "getJob",
-      ];
-      for (const method of jobMethods) {
-        expect(typeof (handle as any)[method]).toBe("function");
-      }
-    });
-
-    test("asUser throws AuthenticationError without token in production", () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      try {
-        const plugin = new JobsPlugin({});
-        const handle = plugin.exports()("etl");
-        const mockReq = { header: () => undefined } as any;
-
-        expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-      }
-    });
-
-    test("asUser in dev mode returns JobAPI with all methods", () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      try {
-        const plugin = new JobsPlugin({});
-        const handle = plugin.exports()("etl");
-        const mockReq = { header: () => undefined } as any;
-        const api = handle.asUser(mockReq);
-
-        const jobMethods = [
-          "runNow",
-          "runAndWait",
-          "lastRun",
-          "listRuns",
-          "getRun",
-          "getRunOutput",
-          "cancelRun",
-          "getJob",
-        ];
-        for (const method of jobMethods) {
-          expect(typeof (api as any)[method]).toBe("function");
-        }
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-      }
     });
   });
 
@@ -1983,59 +1916,6 @@ describe("injectRoutes", () => {
       expect(mockRes.status).toHaveBeenCalledWith(403);
       // Should NOT fall through to 204
       expect(mockRes.end).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("execution context", () => {
-    test("HTTP routes run as service principal by default (no asUser)", async () => {
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
-
-      const plugin = new JobsPlugin({});
-      const asUserSpy = vi.spyOn(plugin, "asUser");
-      const routeSpy = vi.spyOn(plugin as any, "route");
-
-      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
-      plugin.injectRoutes(mockRouter as any);
-
-      const runsRoute = routeSpy.mock.calls.find(
-        (call) => (call[1] as any).name === "runs",
-      );
-      const handler = (runsRoute?.[1] as any).handler;
-
-      const mockReq = {
-        params: { jobKey: "etl" },
-        query: {},
-        header: vi.fn().mockReturnValue("test-token"),
-      } as any;
-
-      const mockRes = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn(),
-      } as any;
-
-      await handler(mockReq, mockRes);
-
-      // Route handlers should not implicitly call asUser — callers opt into
-      // OBO via the programmatic `exports().asUser(req)` surface.
-      expect(asUserSpy).not.toHaveBeenCalled();
-    });
-
-    test("programmatic exports().asUser(req) still delegates through asUser", () => {
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      const plugin = new JobsPlugin({});
-      const asUserSpy = vi.spyOn(plugin, "asUser");
-      const handle = plugin.exports()("etl");
-
-      const mockReq = {
-        header: vi.fn().mockReturnValue("test-token"),
-      } as any;
-
-      handle.asUser(mockReq);
-
-      expect(asUserSpy).toHaveBeenCalledWith(mockReq);
     });
   });
 });

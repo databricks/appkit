@@ -1,4 +1,4 @@
-{{if .plugins.vectorSearch -}}
+{{if .plugins.aiSearch -}}
 import {
   Button,
   Card,
@@ -8,66 +8,29 @@ import {
   Input,
   Skeleton,
 } from '@databricks/appkit-ui/react';
+import { useAiSearchQuery } from '@databricks/appkit-ui/react/beta';
 import { Search } from 'lucide-react';
 import { useState } from 'react';
 
-interface SearchResult {
-  score: number;
-  data: Record<string, unknown>;
-}
-
-interface SearchResponse {
-  results: SearchResult[];
-  totalCount: number;
-  queryTimeMs: number;
-  queryType: string;
-}
-
-export function VectorSearchPage() {
+export function AiSearchPage() {
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<SearchResponse | null>(null);
+  // Queries the first configured index. Pass `{ alias }` to target another.
+  const { search, data, loading, error } = useAiSearchQuery();
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResponse(null);
-
-    try {
-      const res = await fetch('/api/vector-search/default/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queryText: query }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const data: SearchResponse = await res.json();
-      setResponse(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+  const handleSearch = () => {
+    if (query.trim()) void search(query);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      void handleSearch();
-    }
+    if (e.key === 'Enter') handleSearch();
   };
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto">
       <div>
-        <h2 className="text-2xl font-bold text-foreground">Vector Search</h2>
+        <h2 className="text-2xl font-bold text-foreground">AI Search</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Query a Databricks Vector Search index using natural language.
+          Query a Databricks AI Search index using natural language.
         </p>
       </div>
 
@@ -79,7 +42,7 @@ export function VectorSearchPage() {
           onKeyDown={handleKeyDown}
           className="flex-1"
         />
-        <Button onClick={() => void handleSearch()} disabled={loading || !query.trim()}>
+        <Button onClick={handleSearch} disabled={loading || !query.trim()}>
           {loading ? (
             'Searching...'
           ) : (
@@ -110,17 +73,17 @@ export function VectorSearchPage() {
         </div>
       )}
 
-      {response && !loading && (
+      {data && !loading && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {response.totalCount} result{response.totalCount !== 1 ? 's' : ''} &middot;{' '}
-            {response.queryTimeMs}ms &middot; {response.queryType}
+            {data.totalCount} result{data.totalCount !== 1 ? 's' : ''} &middot;{' '}
+            {data.queryTimeMs}ms &middot; {data.queryType}
           </p>
 
-          {response.results.length === 0 ? (
+          {data.results.length === 0 ? (
             <p className="text-sm text-muted-foreground">No results found.</p>
           ) : (
-            response.results.map((result, index) => (
+            data.results.map((result, index) => (
               <Card key={index} className="shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium flex items-center justify-between">

@@ -1,6 +1,6 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { WorkspaceClient } from "../../../workspace-client";
 import { FilesConnector } from "../client";
 import { streamFromChunks, streamFromString } from "./utils";
 
@@ -50,10 +50,15 @@ const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
   },
 );
 
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => mockClient),
-  ApiError: MockApiError,
-}));
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  return {
+    ...actual,
+    createWorkspaceClient: () => mockClient,
+    ApiError: MockApiError,
+  };
+});
 
 const mockTelemetry = createMockTelemetry();
 

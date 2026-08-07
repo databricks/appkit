@@ -2,6 +2,7 @@ import "reflect-metadata";
 import {
   analytics,
   createApp,
+  createWorkspaceClient,
   type FilePolicy,
   files,
   genie,
@@ -13,19 +14,19 @@ import {
 } from "@databricks/appkit";
 import {
   agents,
+  aiSearch,
   createAgent,
   DatabricksAdapter,
   supervisorTools,
   tool,
 } from "@databricks/appkit/beta";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
 
 function createMockClient() {
-  const client = new WorkspaceClient({
+  const client = createWorkspaceClient({
     host: "http://localhost",
     token: "e2e",
     authType: "pat",
@@ -429,17 +430,14 @@ createApp({
       // sense as the user-facing landing agent).
       defaultAgent: "helper",
     }),
-    // TODO: re-enable once vector-search is exported from @databricks/appkit
-    // vectorSearch({
-    //   indexes: {
-    //     demo: {
-    //       indexName:
-    //         process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
-    //       columns: ["id", "text", "title"],
-    //       queryType: "hybrid",
-    //     },
-    //   },
-    // }),
+    aiSearch({
+      indexes: {
+        demo: {
+          columns: ["id", "text", "title"],
+          queryType: "hybrid",
+        },
+      },
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
   async onPluginsReady(appkit) {

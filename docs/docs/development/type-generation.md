@@ -10,7 +10,7 @@ AppKit can automatically generate TypeScript types for your SQL queries, providi
 
 Generate type-safe TypeScript declarations for query keys, parameters, and result rows.
 
-All generated files live in `shared/appkit-types/`, one per concern: `analytics.d.ts` (SQL query types), `serving.d.ts` (model-serving endpoint types), and `metric-views.d.ts`. A single command (and the Vite plugin) produces them all in one pass; see [Metric-view types](#metric-view-types). The `.d.ts` files use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["shared/appkit-types"]` in your tsconfig.
+All generated files live in `shared/appkit-types/`, one per concern: `analytics.d.ts` (SQL query types), `serving.d.ts` (model-serving endpoint types), and `metric-views.ts` — a real source file rather than a `.d.ts` because it also carries a runtime `metricViewsMetadata` constant alongside the augmentation. A single command (and the Vite plugin) produces them all in one pass; see [Metric-view types](#metric-view-types). The files use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["shared/appkit-types"]` in your tsconfig.
 
 ## Vite plugin: `appKitTypesPlugin`
 
@@ -82,15 +82,30 @@ Pass `--wait` for CI and production builds, where accurate types must be present
 npx @databricks/appkit generate-types --wait
 ```
 
-In blocking mode the generator starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes your queries. It fails only when the configured warehouse no longer exists (deleted/deleting), so a transient outage or a cold warehouse degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
+#### CI resilience: committed types as fallback
+
+In blocking mode (`--wait`), the generator attempts to fetch real types from your warehouse, but delegates to **committed type files** (`shared/appkit-types/analytics.d.ts` and, when Metric Views are configured, `shared/appkit-types/metric-views.ts`) as the fallback when the warehouse is unreachable. These generated files should be part of your repository. On a fresh CI checkout, every build attempts to DESCRIBE against the warehouse; the committed types are used only when that cannot complete.
+
+The generator **never overwrites committed types with degraded (`result: unknown`) types** — it writes real types, or it does not write at all.
+
+A **two-bucket failure taxonomy** determines whether the build crashes or falls back to committed types:
+
+- **Deterministic failures (always crash):** SQL syntax errors in your queries (genuine DESCRIBE failure against a reachable warehouse), HTTP 404 (bad or unknown warehouse ID), HTTP 400 (malformed request). These are developer or configuration errors that committed types must not hide.
+- **Environmental failures (gate on committed types):** Authentication failures (401/403), network unreachability, warehouse unavailability (cold, deleting, or deleted), wait timeout on `RUNNING`, or any unrecognized failure. If every type file required by the app exists, the build **keeps them, emits a loud warning to stderr, and succeeds (exit 0)**. If a required file is missing, the build **crashes** with a message instructing you to run `npx @databricks/appkit generate-types --wait` locally (against a reachable warehouse) and commit the generated type files.
+
+The loud warning is a single greppable stderr line naming the coarse cause (auth blocked / warehouse unreachable / warehouse unavailable) and the warehouse ID, so CI logs surface that the build fell back to committed types.
+
+For a Metric Views app, `metric-views.ts` must already exist before an environmental failure can fall back successfully. Unlike a declaration-only artifact, this file also exports the runtime `metricViewsMetadata` value consumed by the server, so `analytics.d.ts` alone cannot satisfy the gate.
+
+The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
 
 ## Metric-view types
 
-`generate-types` (and the Vite plugin) emit metric-view types **additively** — there is no separate command. When a `config/metric-views/definitions.json` file is present, the same run that generates your query types also DESCRIBEs each declared [UC Metric View](../plugins/analytics.md) and writes `metric-views.d.ts` into `shared/appkit-types/`:
+`generate-types` (and the Vite plugin) emit metric-view types **additively** — there is no separate command. When a `config/metric-views/definitions.json` file is present, the same run that generates your query types also DESCRIBEs each declared [UC Metric View](../plugins/analytics.md) and writes `metric-views.ts` into `shared/appkit-types/`:
 
-- `metric-views.d.ts` — augments the `MetricRegistry` interface so `useMetricView('<key>', …)` is autocompleted and type-checked. Each view's measures, dimensions, and their semantic metadata (SQL type, display name, format, time grains) are encoded at the type level.
+- `metric-views.ts` — augments the `MetricRegistry` interface so `useMetricView('<key>', …)` is autocompleted and type-checked. Each view's measures, dimensions, and their semantic metadata (SQL type, display name, format, time grains) are encoded at the type level. The same file also exports a runtime `metricViewsMetadata` constant carrying that metadata as a value — inject it via `analytics({ metricViewsMetadata })` so the [metric route](../plugins/analytics.md#metric-views) can attach per-column display metadata to its response payload.
 
-If `config/metric-views/definitions.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` that same situation fails the build so CI never ships incomplete metric types. A malformed `definitions.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
+If `config/metric-views/definitions.json` is absent the metric path stays dormant (nothing is emitted). When present it follows the **same** warehouse-readiness contract as query types: in the default non-blocking run a view that can't be described yet — a cold warehouse, or a bad/unreachable source — is written with permissive types and a warning, while under `--wait` metric views obey the [two-bucket taxonomy](#ci-resilience-committed-types-as-fallback) (environmental failures gate to committed `metric-views.ts` + warn; deterministic failures like malformed definitions crash the build). A malformed `definitions.json` (invalid JSON, or a source that isn't a three-part UC FQN) fails fast in every mode.
 
 `definitions.json` is keyed by metric key; each entry names the three-part UC FQN of the view and, optionally, the executor it runs as (`app_service_principal`, the default, or `user`):
 

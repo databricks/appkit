@@ -1,6 +1,6 @@
 import type { TelemetryOptions } from "shared";
 
-export interface VectorSearchConnectorConfig {
+export interface AiSearchConnectorConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
 }
@@ -20,6 +20,20 @@ export interface VsNextPageParams {
   indexName: string;
   endpointName: string;
   pageToken: string;
+}
+
+/** Subset of the get-index response used for column auto-discovery. */
+export interface VsIndexInfo {
+  index_type?: "DELTA_SYNC" | "DIRECT_ACCESS";
+  delta_sync_index_spec?: {
+    source_table?: string;
+    embedding_vector_columns?: Array<{ name: string }>;
+  };
+}
+
+/** Subset of the Unity Catalog get-table response used for column discovery. */
+export interface UcTableInfo {
+  columns?: Array<{ name: string }>;
 }
 
 export interface VsRawResponse {

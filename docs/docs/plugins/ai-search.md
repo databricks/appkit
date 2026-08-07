@@ -2,7 +2,13 @@
 sidebar_position: 9
 ---
 
-# Vector Search plugin
+# AI Search plugin
+
+<!-- AUTO-GENERATED: stability-banner-start -->
+:::warning Beta plugin
+This plugin is currently **beta**. APIs may change between minor releases. Import from `@databricks/appkit/beta`. See [Plugin Stability Tiers](./stability.md).
+:::
+<!-- AUTO-GENERATED: stability-banner-end -->
 
 Query Databricks Vector Search indexes with hybrid search, reranking, and cursor pagination from your AppKit application.
 
@@ -17,12 +23,13 @@ Query Databricks Vector Search indexes with hybrid search, reranking, and cursor
 ## Basic usage
 
 ```ts
-import { createApp, vectorSearch, server } from "@databricks/appkit";
+import { createApp, server } from "@databricks/appkit";
+import { aiSearch } from "@databricks/appkit/beta";
 
 await createApp({
   plugins: [
     server(),
-    vectorSearch({
+    aiSearch({
       indexes: {
         products: {
           indexName: "catalog.schema.products_idx",
@@ -48,7 +55,7 @@ await createApp({
 Index aliases let you reference multiple Vector Search indexes by name. The alias is used in API routes and programmatic calls:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -63,12 +70,19 @@ vectorSearch({
 });
 ```
 
+:::note
+An alias without its own `indexName` falls back to the `DATABRICKS_VS_INDEX_NAME`
+env var. If several aliases omit `indexName`, they all resolve to that one
+physical index (with their own per-alias `columns`, `queryType`, etc.). Give
+each alias an explicit `indexName` when you mean distinct indexes.
+:::
+
 ## IndexConfig
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `indexName` | `string` | — | **Required.** Three-level Unity Catalog name (`catalog.schema.index`) |
-| `columns` | `string[]` | — | **Required.** Columns to return in query results |
+| `indexName` | `string` | `DATABRICKS_VS_INDEX_NAME` | Three-level Unity Catalog name (`catalog.schema.index`). Defaults to the `DATABRICKS_VS_INDEX_NAME` env var when omitted. |
+| `columns` | `string[]` | auto-discovered in dev | Columns to return in query results. Optional in development — when omitted, the plugin reads them from the index's source table and warns. **Set explicitly for production**, where a missing value is not auto-filled. |
 | `queryType` | `"ann" \| "hybrid" \| "full_text"` | `"hybrid"` | Search mode |
 | `numResults` | `number` | `20` | Maximum results per query |
 | `reranker` | `boolean \| { columnsToRerank: string[] }` | — | Enable reranking. Pass `true` to rerank all result columns, or specify a subset |
@@ -88,7 +102,7 @@ vectorSearch({
 Reranking improves result relevance by running a second-stage model over the initial candidates:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -106,7 +120,7 @@ Pass `reranker: true` to rerank across all returned columns.
 By default, queries run as the app's service principal. Set `auth: "on-behalf-of-user"` to execute queries as the signed-in user instead:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     documents: {
       indexName: "catalog.schema.documents_idx",
@@ -122,7 +136,7 @@ vectorSearch({
 Enable cursor pagination to page through large result sets:
 
 ```ts
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -143,7 +157,7 @@ For indexes that manage their own embeddings, provide an `embeddingFn` that take
 ```ts
 import { embed } from "./my-embedding-client";
 
-vectorSearch({
+aiSearch({
   indexes: {
     products: {
       indexName: "catalog.schema.products_idx",
@@ -157,7 +171,7 @@ vectorSearch({
 
 ## HTTP routes
 
-Routes are mounted at `/api/vector-search`.
+Routes are mounted at `/api/ai-search`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -168,7 +182,7 @@ Routes are mounted at `/api/vector-search`.
 ### Query an index
 
 ```
-POST /api/vector-search/:alias/query
+POST /api/ai-search/:alias/query
 Content-Type: application/json
 
 {
@@ -182,18 +196,24 @@ Response:
 ```json
 {
   "results": [
-    { "id": "42", "name": "Intro to ML", "description": "..." }
+    {
+      "score": 0.87,
+      "data": { "id": "42", "name": "Intro to ML", "description": "..." }
+    }
   ],
+  "totalCount": 1,
+  "queryTimeMs": 35,
+  "queryType": "hybrid",
   "nextPageToken": "eyJvZmZzZXQiOjEwfQ=="
 }
 ```
 
-`nextPageToken` is only present when `pagination` is enabled and more results are available.
+Each result carries its relevance `score` and the returned columns under `data`. `nextPageToken` is `null` unless `pagination` is enabled and more results are available.
 
 ### Fetch the next page
 
 ```
-POST /api/vector-search/:alias/next-page
+POST /api/ai-search/:alias/next-page
 Content-Type: application/json
 
 {
@@ -205,7 +225,7 @@ Content-Type: application/json
 ### Get index config
 
 ```
-GET /api/vector-search/:alias/config
+GET /api/ai-search/:alias/config
 ```
 
 Returns the resolved `IndexConfig` for the alias (excluding `embeddingFn`).
@@ -215,10 +235,13 @@ Returns the resolved `IndexConfig` for the alias (excluding `embeddingFn`).
 The plugin exposes a `query` method for server-side use:
 
 ```ts
+import { createApp, server } from "@databricks/appkit";
+import { aiSearch } from "@databricks/appkit/beta";
+
 const AppKit = await createApp({
   plugins: [
     server(),
-    vectorSearch({
+    aiSearch({
       indexes: {
         products: {
           indexName: "catalog.schema.products_idx",
@@ -229,7 +252,7 @@ const AppKit = await createApp({
   ],
 });
 
-const result = await AppKit.vectorSearch.query("products", {
+const result = await AppKit.aiSearch.query("products", {
   queryText: "machine learning guide",
 });
 
@@ -237,3 +260,27 @@ console.log(result.results);
 ```
 
 Pass optional overrides as a second argument to `query` to adjust `numResults` or other per-call settings.
+
+## React hook
+
+`useAiSearchQuery` reads the configured indexes from the plugin's client config and posts to the right `/:alias/query` route, so the UI never hardcodes an alias. With one index configured it needs no arguments; pass `{ alias }` to target a specific one.
+
+```tsx
+import { useAiSearchQuery } from "@databricks/appkit-ui/react/beta";
+
+function Search() {
+  const { search, data, loading, error } = useAiSearchQuery();
+
+  return (
+    <>
+      <input onKeyDown={(e) => e.key === "Enter" && search(e.currentTarget.value)} />
+      {error && <p>{error}</p>}
+      {data?.results.map((r, i) => (
+        <div key={i}>{JSON.stringify(r.data)}</div>
+      ))}
+    </>
+  );
+}
+```
+
+`search` also accepts a full request object (`{ queryText, numResults, filters, ... }`) for per-call control. The hook's `indexes` field lists every configured index, which you can use to build an index picker.

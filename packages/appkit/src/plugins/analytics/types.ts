@@ -1,7 +1,17 @@
-import type { BasePluginConfig } from "shared";
+import type {
+  BasePluginConfig,
+  MetricViewColumnDisplay,
+  MetricViewsMetadata,
+} from "shared";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
+  /**
+   * Build-generated per-metric column metadata, keyed by metric key. The
+   * metric route scopes this to the requested measures and dimensions before
+   * attaching it to the SSE result.
+   */
+  metricViewsMetadata?: MetricViewsMetadata;
   /**
    * Maximum time (ms) the analytics route waits for a STOPPED/STARTING SQL
    * warehouse to reach RUNNING before failing the request. Defaults to 5 min.
@@ -61,7 +71,13 @@ export interface WarehouseStatus {
  */
 export type AnalyticsStreamMessage =
   | { type: "warehouse_status"; status: WarehouseStatus }
-  | { type: "result"; data: unknown[] }
+  | {
+      type: "result";
+      data?: unknown[];
+      status?: unknown;
+      statement_id?: string;
+      metadata?: Record<string, MetricViewColumnDisplay>;
+    }
   | {
       type: "arrow";
       statement_id: string;
