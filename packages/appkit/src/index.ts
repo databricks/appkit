@@ -74,7 +74,6 @@ export type {
   IJobsConfig,
   JobAPI,
   JobConfig,
-  JobHandle,
   JobsExport,
 } from "./plugins/jobs";
 export type {
