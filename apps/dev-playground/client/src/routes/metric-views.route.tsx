@@ -65,32 +65,42 @@ type FilterDimension = (typeof FILTER_DIMENSIONS)[number];
 // and match nothing.
 type Selection = Partial<Record<FilterDimension, string | null>>;
 
-// Radix `Select` forbids an empty-string item value, so explicit sentinels stand
-// in for the "no filter on this dimension" choice and for a NULL group key
-// (which has no string form of its own that couldn't collide with real data).
+// Radix `Select` *throws* on an empty-string item value (it reserves "" for
+// clearing the selection), so explicit sentinels stand in for the three values
+// that have no usable string form of their own: the "no filter on this
+// dimension" choice, a NULL group key, and a genuine empty-string value.
 const ALL = "__all__";
 const NONE = "__none__";
+const EMPTY = "__empty__";
 
-/** Label shown for a NULL group key. */
+/** Labels for the group keys that would otherwise render as nothing. */
 const NONE_LABEL = "(none)";
+const EMPTY_LABEL = "(empty)";
 
 /**
  * A dimension value as a `Select` item value: real values pass through, a NULL
- * group key becomes the {@link NONE} sentinel.
+ * group key becomes the {@link NONE} sentinel, and `""` becomes {@link EMPTY}.
  */
 function toItemValue(value: string | null): string {
-  return value === null ? NONE : value;
+  if (value === null) return NONE;
+  return value === "" ? EMPTY : value;
 }
 
 /** Inverse of {@link toItemValue} — maps the sentinels back to a selection. */
 function fromItemValue(value: string): string | null | undefined {
   if (value === ALL) return undefined;
-  return value === NONE ? null : value;
+  if (value === NONE) return null;
+  return value === EMPTY ? "" : value;
 }
 
-/** Display label for a selected dimension value, naming the NULL case. */
+/**
+ * Display label for a selected dimension value, naming the cases that render as
+ * nothing. `""` is a real value that filters on `equals ''` — distinct from the
+ * NULL group — so it gets its own label rather than sharing "(none)".
+ */
 function toDisplayLabel(value: string | null): string {
-  return value === null ? NONE_LABEL : value;
+  if (value === null) return NONE_LABEL;
+  return value === "" ? EMPTY_LABEL : value;
 }
 
 /**
@@ -181,7 +191,10 @@ function FilterBadge({
       <FilterIcon className="size-3" aria-hidden />
       {applied
         .map(
-          (dimension) => `${formatLabel(dimension)}: ${selection[dimension]}`,
+          (dimension) =>
+            `${formatLabel(dimension)}: ${toDisplayLabel(
+              selection[dimension] ?? null,
+            )}`,
         )
         .join(" · ")}
     </Badge>
