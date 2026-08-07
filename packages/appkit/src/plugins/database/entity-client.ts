@@ -4,6 +4,7 @@ import {
   classifyDatabaseError,
   DatabasePluginError,
   databaseErrorFromStatus,
+  invalidDatabaseRequest,
 } from "../../database/errors";
 import type {
   DataPath,
@@ -20,8 +21,12 @@ import {
   validateOffset,
 } from "../../database/runtime/data-path";
 import type { AppKitTable } from "../../database/schema-builder";
+import { DatabaseValidationError } from "../../errors";
 import type { ExecutionResult } from "../../plugin/execution-result";
 import { databaseReadDefaults, databaseWriteDefaults } from "./defaults";
+import type { HookContext, MutationOperation } from "./hooks";
+import type { MutationScope } from "./scope";
+import type { EntityHooks } from "./types";
 
 /** Apply AppKit execution policy to an entity operation. */
 export type EntityExecute = <T>(
@@ -35,6 +40,14 @@ export interface EntityClientContext {
   readonly getDataPath: () => DataPath;
   readonly execute: EntityExecute;
   readonly assertActive: () => void;
+  readonly scope: MutationScope;
+  readonly hooks?: EntityHooks;
+  /** True once this client is bound to an already open transaction. */
+  readonly transactionBound: boolean;
+  /** Continue on the same table's client inside a new or reused transaction. */
+  readonly runInTransaction: <T>(
+    run: (entity: EntityClient) => Promise<T>,
+  ) => Promise<T>;
 }
 
 /** Clone plain acyclic input so caller mutation cannot change a built query. */
@@ -79,6 +92,11 @@ function validateReadInput<T>(validate: () => T): T {
   } catch (error) {
     throw classifyDatabaseError(error, "read");
   }
+}
+
+/** A hook replaced the payload only if it returned an object to persist. */
+function isReplacement(value: unknown): value is Row {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -165,31 +183,195 @@ export class EntityClient {
     );
   }
 
-  create(values: Row): Promise<Row> {
-    return this.write("create", values, (dataPath, payload) =>
-      dataPath.insert(this.ctx.table, payload),
+  async create(values: Row): Promise<Row> {
+    this.assertUnfiltered("create");
+    const hooks = this.ctx.hooks;
+    const insert = (payload: Row, byHook = false) =>
+      this.write(
+        "create",
+        payload,
+        (dataPath, parsed) => dataPath.insert(this.ctx.table, parsed),
+        byHook,
+      );
+    if (this.isDirect("create")) return insert(values);
+    return this.mutate(
+      "create",
+      (entity) => entity.create(values),
+      async (context) => {
+        const payload = await this.runBefore(
+          () => hooks?.beforeCreate?.(values, context),
+          values,
+        );
+        const row = await insert(payload, payload !== values);
+        await this.runHook(() => hooks?.afterCreate?.(row, context));
+        return row;
+      },
     );
   }
 
   update(id: IdValue, values: Row): Promise<Row | null> {
-    return this.write("update", values, (dataPath, payload) =>
-      dataPath.update(this.ctx.table, id, payload),
+    const hooks = this.ctx.hooks;
+    const apply = (payload: Row, byHook = false) =>
+      this.write(
+        "update",
+        payload,
+        (dataPath, parsed) =>
+          dataPath.update(this.ctx.table, id, parsed, this.state.where),
+        byHook,
+      );
+    if (this.isDirect("update")) return apply(values);
+    return this.mutate(
+      "update",
+      (entity) => entity.update(id, values),
+      async (context) => {
+        const payload = await this.runBefore(
+          () => hooks?.beforeUpdate?.(id, values, context),
+          values,
+        );
+        const row = await apply(payload, payload !== values);
+        // Matching no row is an ordinary outcome, not something to react to.
+        if (row) await this.runHook(() => hooks?.afterUpdate?.(row, context));
+        return row;
+      },
     );
   }
 
-  upsert(values: Row, options: { onConflict: string }): Promise<Row> {
+  async upsert(values: Row, options: { onConflict: string }): Promise<Row> {
+    this.assertUnfiltered("upsert");
+    const hooks = this.ctx.hooks;
     const onConflict = options.onConflict;
-    return this.write("create", values, (dataPath, payload) =>
-      dataPath.upsert(this.ctx.table, payload, onConflict),
+    const apply = (payload: Row, byHook = false) =>
+      this.write(
+        "create",
+        payload,
+        (dataPath, parsed) =>
+          dataPath.upsert(this.ctx.table, parsed, onConflict),
+        byHook,
+      );
+    if (this.isDirect("upsert")) return apply(values);
+    return this.mutate(
+      "upsert",
+      (entity) => entity.upsert(values, { onConflict }),
+      async (context) => {
+        const payload = await this.runBefore(
+          () => hooks?.beforeUpsert?.(values, context),
+          values,
+        );
+        // Which branch the database took stays invisible to the hook.
+        const row = await apply(payload, payload !== values);
+        await this.runHook(() => hooks?.afterUpsert?.(row, context));
+        return row;
+      },
     );
   }
 
   delete(id: IdValue): Promise<boolean> {
-    return this.run(
-      "write",
-      (dataPath) => dataPath.delete(this.ctx.table, id),
-      databaseWriteDefaults,
+    const hooks = this.ctx.hooks;
+    const remove = () =>
+      this.run(
+        "write",
+        (dataPath) => dataPath.delete(this.ctx.table, id, this.state.where),
+        databaseWriteDefaults,
+      );
+    if (this.isDirect("delete")) return remove();
+    return this.mutate(
+      "delete",
+      (entity) => entity.delete(id),
+      async (context) => {
+        await this.runHook(() => hooks?.beforeDelete?.(id, context));
+        const deleted = await remove();
+        if (deleted) {
+          await this.runHook(() => hooks?.afterDelete?.(id, context));
+        }
+        return deleted;
+      },
     );
+  }
+
+  /** An insert matches no existing row, so a predicate could only be dropped. */
+  private assertUnfiltered(operation: "create" | "upsert"): void {
+    if (this.state.where !== undefined) {
+      throw invalidDatabaseRequest(
+        `${operation}() cannot follow where(); it does not select rows to change`,
+      );
+    }
+  }
+
+  /**
+   * Go straight to the DataPath only when there is nothing to sequence and no
+   * open transaction to join. A root client that skipped the second check would
+   * commit on the pool while a transaction it cannot see is still open.
+   */
+  private isDirect(operation: MutationOperation): boolean {
+    if (this.hasHooks(operation)) return false;
+    return this.ctx.transactionBound || !this.ctx.scope.activeTransaction();
+  }
+
+  private hasHooks(operation: MutationOperation): boolean {
+    const hooks = this.ctx.hooks;
+    if (!hooks) return false;
+    switch (operation) {
+      case "create":
+        return Boolean(hooks.beforeCreate ?? hooks.afterCreate);
+      case "update":
+        return Boolean(hooks.beforeUpdate ?? hooks.afterUpdate);
+      case "upsert":
+        return Boolean(hooks.beforeUpsert ?? hooks.afterUpsert);
+      case "delete":
+        return Boolean(hooks.beforeDelete ?? hooks.afterDelete);
+    }
+  }
+
+  /**
+   * Run one mutation atomically. A top-level call restarts itself on the
+   * transaction-bound client, so hooks, validation, the mutation, and its after
+   * hook commit or roll back together. An unhooked mutation reaches this only to
+   * join an open transaction, and then runs without a frame or a hook context.
+   */
+  private async mutate<T>(
+    operation: MutationOperation,
+    restart: (entity: EntityClient) => Promise<T>,
+    body: (context: HookContext) => Promise<T>,
+  ): Promise<T> {
+    if (this.ctx.transactionBound) {
+      return this.ctx.scope.runMutation(this.ctx.table.$name, operation, () =>
+        body(this.hookContext()),
+      );
+    }
+    try {
+      return await this.ctx.runInTransaction(restart);
+    } catch (error) {
+      if (error instanceof DatabaseValidationError) throw error;
+      // BEGIN and COMMIT fail outside the inner classification boundary.
+      throw classifyDatabaseError(error, "write");
+    }
+  }
+
+  /** Resolve the surface at hook time so it cannot outlive its transaction. */
+  private hookContext(): HookContext {
+    const database = this.ctx.scope.activeTransaction();
+    if (!database) throw new DatabasePluginError("INTERNAL", "write");
+    return { entity: this.ctx.table.$name, app: { database } };
+  }
+
+  /** Substitute the payload a before hook returned, if it returned one. */
+  private async runBefore(invoke: () => unknown, values: Row): Promise<Row> {
+    const replacement = await this.runHook(invoke);
+    if (replacement === undefined || replacement === null) return values;
+    if (!isReplacement(replacement)) {
+      throw new DatabasePluginError("INTERNAL", "write");
+    }
+    return replacement;
+  }
+
+  /** Keep a deliberate validation signal; collapse every other hook failure. */
+  private async runHook(invoke: () => unknown): Promise<unknown> {
+    try {
+      return await invoke();
+    } catch (error) {
+      if (error instanceof DatabaseValidationError) throw error;
+      throw classifyDatabaseError(error, "write");
+    }
   }
 
   /** Validate caller values against the finalized trusted-write schema. */
@@ -197,9 +379,12 @@ export class EntityClient {
     kind: "create" | "update",
     values: Row,
     operation: (dataPath: DataPath, values: Row) => Promise<T>,
+    // A payload a hook replaced is server-authored, so blaming the caller lies.
+    byHook = false,
   ): Promise<T> {
+    const rejection = byHook ? "INTERNAL" : "INVALID_REQUEST";
     if (kind === "update" && Object.keys(values).length === 0) {
-      throw new DatabasePluginError("INVALID_REQUEST", "write");
+      throw new DatabasePluginError(rejection, "write");
     }
     let parsed: Row;
     try {
@@ -210,7 +395,7 @@ export class EntityClient {
       ) as { parse(value: unknown): Row };
       parsed = validator.parse(values);
     } catch {
-      throw new DatabasePluginError("INVALID_REQUEST", "write");
+      throw new DatabasePluginError(rejection, "write");
     }
     return this.run(
       "write",

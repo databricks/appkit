@@ -1,8 +1,5 @@
-import {
-  DatabasePluginError,
-  invalidDatabaseInput,
-} from "../../../database/errors";
-import type { IdValue, Row } from "../../../database/runtime";
+import { DatabasePluginError } from "../../../database/errors";
+import type { Row } from "../../../database/runtime";
 import type { AppKitTable } from "../../../database/schema-builder";
 import { filterOperatorsForKind } from "../../../database/schema-builder/types";
 import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../defaults";
@@ -23,8 +20,11 @@ export interface CrudTable {
   readonly selectable: ReadonlySet<string>;
   /** Public columns a request may filter or order by. */
   readonly queryable: ReadonlySet<string>;
+  /** Public columns a create body may set, including a caller-chosen key. */
+  readonly creatable: ReadonlySet<string>;
+  /** Public columns an update body may set; a key or a stamp is never one. */
+  readonly updatable: ReadonlySet<string>;
   readonly relations: ReadonlyMap<string, CrudRelation>;
-  decodeId(raw: string): IdValue;
   projectPublicRow(row: Row): JsonValue;
   sanitizeSerializedRow(row: unknown): JsonValue;
 }
@@ -39,7 +39,9 @@ interface SanitizeState {
 }
 
 /** A bare object literal; a `Date`, class instance, or `Map` is not JSON. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -148,6 +150,11 @@ function sanitizeRow(
   });
 }
 
+/** The budget a caller's own JSON has to fit, same as the one going back out. */
+export function boundedJson(value: unknown): JsonValue {
+  return sanitizeJson(value, 0, { nodes: 0, ancestors: new Set() });
+}
+
 /** Project an included row through its own table; absent to-one reads null. */
 function projectRelation(target: CrudTable, value: unknown): JsonValue {
   if (value === null || value === undefined) return null;
@@ -177,6 +184,8 @@ function compileTable(table: AppKitTable): MutableCrudTable {
   const columns = new Map<string, CompiledColumn>();
   const selectable = new Set<string>();
   const queryable = new Set<string>();
+  const creatable = new Set<string>();
+  const updatable = new Set<string>();
   let primaryKey: CompiledColumn | undefined;
 
   for (const meta of Object.values(table.$columns)) {
@@ -191,6 +200,13 @@ function compileTable(table: AppKitTable): MutableCrudTable {
     if (filterOperatorsForKind(meta.kind).length > 0) {
       queryable.add(meta.columnName);
     }
+    // A generated identity belongs to the server, never the caller.
+    if (meta.serverGenerated) continue;
+    creatable.add(meta.columnName);
+    // Rewriting a key would move a row out from under every existing reference,
+    // and rewriting a database-materialized stamp would rewrite history.
+    if (meta.primaryKey || meta.defaultNow || meta.defaultRandom) continue;
+    updatable.add(meta.columnName);
   }
 
   const compiled: MutableCrudTable = {
@@ -199,19 +215,9 @@ function compileTable(table: AppKitTable): MutableCrudTable {
     columns,
     selectable,
     queryable,
+    creatable,
+    updatable,
     relations: new Map(),
-    decodeId: (raw) => {
-      if (!primaryKey) throw new DatabasePluginError("INTERNAL", "read");
-      const value = primaryKey.decode(raw);
-      if (
-        typeof value !== "string" &&
-        typeof value !== "number" &&
-        typeof value !== "bigint"
-      ) {
-        throw invalidDatabaseInput(["id"], "Not a valid identifier");
-      }
-      return value;
-    },
     projectPublicRow: (row) => projectRow(compiled, row),
     sanitizeSerializedRow: (row) =>
       sanitizeRow(compiled, row, 0, { nodes: 0, ancestors: new Set() }),

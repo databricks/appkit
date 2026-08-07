@@ -5,10 +5,12 @@ const logger = createLogger("database");
 
 export type DatabaseErrorCategory =
   | "INVALID_REQUEST"
+  | "VALIDATION_FAILED"
   | "NOT_FOUND"
   | "CONFLICT"
   | "FORBIDDEN"
   | "TRANSIENT"
+  | "UNSUPPORTED_MEDIA_TYPE"
   | "PAYLOAD_TOO_LARGE"
   | "INTERNAL"
   | "SETUP_FAILED";
@@ -32,12 +34,20 @@ const definitions: Record<
   { readonly message: string; readonly statusCode: number }
 > = {
   INVALID_REQUEST: { message: "Invalid database request", statusCode: 400 },
+  VALIDATION_FAILED: {
+    message: "Database request failed validation",
+    statusCode: 422,
+  },
   NOT_FOUND: { message: "Database record not found", statusCode: 404 },
   CONFLICT: { message: "Database conflict", statusCode: 409 },
   FORBIDDEN: { message: "Database operation forbidden", statusCode: 403 },
   TRANSIENT: {
     message: "Database operation temporarily unavailable",
     statusCode: 503,
+  },
+  UNSUPPORTED_MEDIA_TYPE: {
+    message: "Database request body must be JSON",
+    statusCode: 415,
   },
   PAYLOAD_TOO_LARGE: {
     message: "Database response is too large",
@@ -53,6 +63,8 @@ const categoryByStatus: Readonly<Record<number, DatabaseErrorCategory>> = {
   404: "NOT_FOUND",
   409: "CONFLICT",
   413: "PAYLOAD_TOO_LARGE",
+  415: "UNSUPPORTED_MEDIA_TYPE",
+  422: "VALIDATION_FAILED",
   503: "TRANSIENT",
 };
 
@@ -127,9 +139,15 @@ export function classifyDatabaseError(
   phase: DatabaseErrorPhase,
 ): DatabasePluginError {
   if (error instanceof DatabasePluginError) {
+    // Details name request fields only, so they survive a change of phase.
     return error.phase === phase
       ? error
-      : new DatabasePluginError(error.category, phase);
+      : new DatabasePluginError(
+          error.category,
+          phase,
+          undefined,
+          error.details,
+        );
   }
   logger.error(
     "Unclassified database error during %s (%s)",

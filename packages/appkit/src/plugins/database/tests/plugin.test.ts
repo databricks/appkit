@@ -217,22 +217,40 @@ describe("DatabasePlugin", () => {
     });
     expect(all.routes).toEqual([
       "get /users",
+      "post /users",
       "get /users/:id",
+      "patch /users/:id",
+      "delete /users/:id",
       "get /notes",
+      "post /notes",
       "get /notes/:id",
+      "patch /notes/:id",
+      "delete /notes/:id",
       // A table without a primary key cannot address a single row.
       "get /events",
+      "post /events",
     ]);
+    // Upsert stays programmatic; no generated route ever performs one.
+    expect(all.routes.join()).not.toContain("upsert");
     expect(all.plugin.getEndpoints()).toMatchObject({
       "users.list": "/api/database/users",
       "users.detail": "/api/database/users/:id",
+      "users.create": "/api/database/users",
+      "users.update": "/api/database/users/:id",
+      "users.delete": "/api/database/users/:id",
     });
 
     const subset = await registerRoutes({
       schema: routedSchema,
       crudRoutes: { tables: ["notes"] },
     });
-    expect(subset.routes).toEqual(["get /notes", "get /notes/:id"]);
+    expect(subset.routes).toEqual([
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+      "delete /notes/:id",
+    ]);
   });
 
   test("fails setup on an exposure list it cannot honor", async () => {
@@ -246,6 +264,17 @@ describe("DatabasePlugin", () => {
         category: "SETUP_FAILED",
       });
     }
+  });
+
+  test("fails setup on a hook key that names no declared table", async () => {
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin({
+      schema: routedSchema,
+      hooks: { missing: { beforeCreate: () => undefined } } as never,
+    });
+    await expect(plugin.setup()).rejects.toMatchObject({
+      category: "SETUP_FAILED",
+    });
   });
 
   test("refuses to route names it cannot serve unambiguously", async () => {

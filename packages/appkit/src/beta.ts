@@ -118,4 +118,14 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
-export type { DatabaseExports, IDatabaseConfig } from "./plugins/database";
+export type {
+  DatabaseExports,
+  EntityHooks,
+  EntityMutationHooks,
+  HookApp,
+  HookContext,
+  IDatabaseConfig,
+  ReadSerializer,
+  ReadSerializerContext,
+  TransactionClient,
+} from "./plugins/database";

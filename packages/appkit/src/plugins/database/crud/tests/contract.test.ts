@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { DatabasePluginError } from "../../../../database/errors";
 import {
-  bigid,
   defineSchema,
   fk,
   id,
   jsonb,
   text,
+  timestamp,
 } from "../../../../database/schema-builder";
 import { MAX_SERIALIZED_DEPTH } from "../../defaults";
 import { compileCrudTables } from "../contract";
@@ -25,14 +24,19 @@ const schema = defineSchema((builder) => {
     body: text(),
     draft: text().private(),
   });
-  const ledger = builder.table("ledger", { id: bigid(), memo: text() });
-  return { users, notes, ledger };
+  const invites = builder.table("invites", {
+    code: text().primaryKey(),
+    email: text().notNull(),
+    label: text().default("guest"),
+    createdAt: timestamp().defaultNow(),
+  });
+  return { users, notes, invites };
 });
 
 const tables = compileCrudTables(schema.$tables);
 const users = tables.get("users") as NonNullable<ReturnType<typeof tables.get>>;
 const notes = tables.get("notes") as NonNullable<ReturnType<typeof tables.get>>;
-const ledger = tables.get("ledger") as NonNullable<
+const invites = tables.get("invites") as NonNullable<
   ReturnType<typeof tables.get>
 >;
 
@@ -69,19 +73,22 @@ describe("compileCrudTables", () => {
     expect(audits?.primaryKey).toBeUndefined();
     expect(audits?.columns.has("id")).toBe(true);
     expect([...(audits?.selectable ?? [])]).toEqual(["action"]);
-    expect(() => audits?.decodeId("7")).toThrow(DatabasePluginError);
   });
+});
 
-  it("decodes identifiers against the declared key type", () => {
-    expect(users.decodeId("42")).toBe(42);
-    expect(ledger.decodeId("9007199254740993")).toBe(9007199254740993n);
-    expect(() => users.decodeId("abc")).toThrow(DatabasePluginError);
-    expect(() => users.decodeId("abc")).toThrow(
-      expect.objectContaining({
-        category: "INVALID_REQUEST",
-        details: [{ path: ["id"], message: expect.any(String) }],
-      }),
-    );
+describe("write allowlists", () => {
+  it("allows a caller-chosen key on create but never a generated one", () => {
+    expect([...users.creatable]).toEqual(["name", "profile"]);
+    expect([...users.updatable]).toEqual(["name", "profile"]);
+    expect([...invites.creatable]).toEqual([
+      "code",
+      "email",
+      "label",
+      "createdAt",
+    ]);
+    // A key rewrite would move the row out from under every reference to it,
+    // and a caller who could rewrite `createdAt` could rewrite history.
+    expect([...invites.updatable]).toEqual(["email", "label"]);
   });
 });
 

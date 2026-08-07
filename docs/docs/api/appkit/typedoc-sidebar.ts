@@ -48,6 +48,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.DatabaseValidationError",
+          label: "DatabaseValidationError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.DatabricksAdapter",
           label: "DatabricksAdapter"
         },
@@ -159,8 +164,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatabaseValidationIssue",
+          label: "DatabaseValidationIssue"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.EntityMutationHooks",
+          label: "EntityMutationHooks"
         },
         {
           type: "doc",
@@ -186,6 +201,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerationParams",
           label: "GenerationParams"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.HookApp",
+          label: "HookApp"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.HookContext",
+          label: "HookContext"
         },
         {
           type: "doc",
@@ -266,6 +291,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.PromptContext",
           label: "PromptContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ReadSerializerContext",
+          label: "ReadSerializerContext"
         },
         {
           type: "doc",
@@ -460,6 +490,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.EntityHooks",
+          label: "EntityHooks"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ExecutionResult",
           label: "ExecutionResult"
         },
@@ -505,6 +540,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ReadSerializer",
+          label: "ReadSerializer"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ResolvedToolEntry",
           label: "ResolvedToolEntry"
         },
@@ -542,6 +582,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ToPlugin",
           label: "ToPlugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.TransactionClient",
+          label: "TransactionClient"
         }
       ]
     },
