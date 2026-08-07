@@ -104,6 +104,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.56.0](https://github.com/databricks/appkit/compare/v0.55.1...v0.56.0) (2026-08-07)
+
+### shared
+
+* **shared:** lint rule flags aiSearch indexes missing columns ([#513](https://github.com/databricks/appkit/issues/513)) ([00866fa](https://github.com/databricks/appkit/commit/00866fa3d68b14eae140c4ddc37d3e6faf6e7b2e))
+
+
 ## [0.55.1](https://github.com/databricks/appkit/compare/v0.55.0...v0.55.1) (2026-08-07)
 
 ### jobs
