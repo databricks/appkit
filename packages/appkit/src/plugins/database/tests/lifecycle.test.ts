@@ -55,13 +55,19 @@ type TestEntity = {
   create(values: Row): Promise<Row>;
   toArray(): Promise<Row[]>;
 };
-type TestExports = {
+type TestTransaction = {
   notes: TestEntity;
+  tags: TestEntity;
   sql: DataPath["raw"];
-  transaction<T>(
-    callback: (tx: { notes: TestEntity; sql: DataPath["raw"] }) => Promise<T>,
-  ): Promise<T>;
 };
+type TestExports = TestTransaction & {
+  transaction<T>(callback: (tx: TestTransaction) => Promise<T>): Promise<T>;
+};
+
+// The registry is empty until typegen runs, so entities are reached by name.
+const surface = (state: { exports: unknown }) =>
+  state.exports as unknown as TestExports;
+const txSurface = (tx: unknown) => tx as TestTransaction;
 
 function arrange(path = fakePath()) {
   const pool = { end: vi.fn(async () => undefined) };
@@ -210,8 +216,8 @@ describe("createDatabaseState", () => {
     });
     const { execute } = arrange(rootPath);
     const state = await createDatabaseState(schema, execute);
-    const exports = state.exports as unknown as TestExports;
-    let captured!: Parameters<Parameters<TestExports["transaction"]>[0]>[0];
+    const exports = surface(state);
+    let captured!: TestTransaction;
     await expect(
       exports.transaction(async (tx) => {
         captured = tx;
@@ -248,5 +254,121 @@ describe("createDatabaseState", () => {
     stateOne.deactivate();
     await expect(stateOne.exports.sql`select 1`).rejects.toBeDefined();
     await expect(stateTwo.exports.sql`select 1`).resolves.toEqual([]);
+  });
+
+  test("runs a hooked mutation in one transaction that hook writes reuse", async () => {
+    const txPath = fakePath();
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => callback(txPath)),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute, {
+      notes: {
+        afterCreate: async (_row, context) => {
+          await txSurface(context.app.database).tags.create({ label: "audit" });
+        },
+      },
+    });
+
+    await surface(state).notes.create({ body: "hooked" });
+
+    expect(rootPath.transaction).toHaveBeenCalledTimes(1);
+    expect(rootPath.insert).not.toHaveBeenCalled();
+    expect(txPath.insert).toHaveBeenCalledTimes(2);
+    // Reuse means the related write never opens a nested transaction.
+    expect(txPath.transaction).not.toHaveBeenCalled();
+  });
+
+  test("keeps an unhooked mutation off the transaction path", async () => {
+    const rootPath = fakePath();
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute, {
+      notes: { serialize: (row) => row },
+    });
+    await surface(state).notes.create({ body: "direct" });
+    expect(rootPath.transaction).not.toHaveBeenCalled();
+    expect(rootPath.insert).toHaveBeenCalledTimes(1);
+  });
+
+  test("makes an unhooked root mutation join an open transaction", async () => {
+    const txPath = fakePath();
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => callback(txPath)),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute);
+    const exports = surface(state);
+
+    await exports.transaction(async () => {
+      // Reaching past `tx` for the root surface must not commit on the pool.
+      await exports.tags.create({ label: "joined" });
+    });
+
+    expect(rootPath.transaction).toHaveBeenCalledTimes(1);
+    expect(rootPath.insert).not.toHaveBeenCalled();
+    expect(txPath.insert).toHaveBeenCalledTimes(1);
+    expect(txPath.transaction).not.toHaveBeenCalled();
+  });
+
+  test("rolls the hook's related write back with the primary mutation", async () => {
+    let rolledBack = false;
+    const txPath = fakePath({
+      insert: vi.fn(async (table, values) => {
+        if (table.$name === "tags") throw new Error("audit trail is full");
+        return { id: 1, ...values };
+      }),
+    });
+    const rootPath = fakePath({
+      // A real driver rolls back and rethrows whatever the callback raised.
+      transaction: vi.fn(async (callback) => {
+        try {
+          return await callback(txPath);
+        } catch (error) {
+          rolledBack = true;
+          throw error;
+        }
+      }),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute, {
+      notes: {
+        afterCreate: async (_row, context) => {
+          await txSurface(context.app.database).tags.create({ label: "audit" });
+        },
+      },
+    });
+
+    const error = await surface(state)
+      .notes.create({ body: "hooked" })
+      .catch((caught) => caught);
+
+    expect(rolledBack).toBe(true);
+    expect(error).toMatchObject({ category: "INTERNAL", phase: "write" });
+    expect(error.message).not.toContain("audit trail is full");
+  });
+
+  test("gives each instance a scope the other cannot join", async () => {
+    const first = arrange(
+      fakePath({
+        transaction: vi.fn(async (callback) => callback(fakePath())),
+      }),
+    );
+    const stateOne = await createDatabaseState(schema, first.execute);
+    const second = arrange(
+      fakePath({
+        transaction: vi.fn(async (callback) => callback(fakePath())),
+      }),
+    );
+    const stateTwo = await createDatabaseState(schema, second.execute, {
+      notes: { afterCreate: vi.fn() },
+    });
+
+    await surface(stateOne).transaction(async () => {
+      await surface(stateTwo).notes.create({ body: "independent" });
+    });
+
+    // The second instance opened its own transaction instead of joining.
+    expect(second.path.transaction).toHaveBeenCalledTimes(1);
+    expect(first.path.insert).not.toHaveBeenCalled();
   });
 });

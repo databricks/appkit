@@ -3,7 +3,7 @@
 ```ts
 type IDatabaseConfig<TSchema> = {
   crudRoutes?: CrudRoutesConfig<TSchema>;
-  hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: { serialize?: ReadSerializer } };
+  hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
   schema: TSchema;
 };
 ```
@@ -29,7 +29,7 @@ readonly optional crudRoutes: CrudRoutesConfig<TSchema>;
 ### hooks?
 
 ```ts
-readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: { serialize?: ReadSerializer } };
+readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
 ```
 
 ***

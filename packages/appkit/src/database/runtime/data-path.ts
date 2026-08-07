@@ -67,11 +67,20 @@ export interface DataPath {
   /** Return exactly one inserted row; zero or many is an invariant failure. */
   insert(table: AppKitTable, values: Row): Promise<Row>;
   /** Return null for zero updated rows and reject more than one. */
-  update(table: AppKitTable, id: IdValue, values: Row): Promise<Row | null>;
+  update(
+    table: AppKitTable,
+    id: IdValue,
+    values: Row,
+    where?: WhereClause,
+  ): Promise<Row | null>;
   /** Return exactly one row for a validated primary-key or unique conflict. */
   upsert(table: AppKitTable, values: Row, onConflict: string): Promise<Row>;
   /** Return false for zero deleted rows, true for one, and reject many. */
-  delete(table: AppKitTable, id: IdValue): Promise<boolean>;
+  delete(
+    table: AppKitTable,
+    id: IdValue,
+    where?: WhereClause,
+  ): Promise<boolean>;
   /** Execute tagged SQL whose interpolations are parameter values, not SQL. */
   raw<T = Row>(
     strings: TemplateStringsArray,

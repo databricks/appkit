@@ -4,6 +4,7 @@ import {
   AuthenticationError,
   ConfigurationError,
   ConnectionError,
+  DatabaseValidationError,
   ExecutionError,
   InitializationError,
   ServerError,
@@ -402,6 +403,41 @@ describe("TunnelError", () => {
   });
 });
 
+describe("DatabaseValidationError", () => {
+  test("carries a fixed safe message and a 422", () => {
+    const error = new DatabaseValidationError(
+      "note body 'top secret' violates rule #4",
+      [{ path: ["body"], message: "must not be empty" }],
+    );
+    expect(error.code).toBe("DATABASE_VALIDATION_ERROR");
+    expect(error.statusCode).toBe(422);
+    expect(error.isRetryable).toBe(false);
+    expect(error.clientMessage).toBe("Database request failed validation");
+    expect(error.clientMessage).not.toContain("top secret");
+    expect(error.issues).toEqual([
+      { path: ["body"], message: "must not be empty" },
+    ]);
+  });
+
+  test("defaults to no issues and bounds how many it keeps", () => {
+    expect(new DatabaseValidationError("invalid").issues).toEqual([]);
+    const many = Array.from({ length: 200 }, (_, index) => ({
+      path: [`field${index}`],
+      message: "invalid",
+    }));
+    expect(new DatabaseValidationError("invalid", many).issues).toHaveLength(
+      50,
+    );
+  });
+
+  test("keeps its issue list detached from the caller's array", () => {
+    const issues = [{ path: ["body"], message: "must not be empty" }];
+    const error = new DatabaseValidationError("invalid", issues);
+    issues.push({ path: ["token"], message: "leaked" });
+    expect(error.issues).toHaveLength(1);
+  });
+});
+
 describe("Error hierarchy", () => {
   test("all errors should extend AppKitError", () => {
     expect(new ValidationError("test")).toBeInstanceOf(AppKitError);
@@ -412,6 +448,7 @@ describe("Error hierarchy", () => {
     expect(new InitializationError("test")).toBeInstanceOf(AppKitError);
     expect(new ServerError("test")).toBeInstanceOf(AppKitError);
     expect(new TunnelError("test")).toBeInstanceOf(AppKitError);
+    expect(new DatabaseValidationError("test")).toBeInstanceOf(AppKitError);
   });
 
   test("errors can be caught by base class", () => {

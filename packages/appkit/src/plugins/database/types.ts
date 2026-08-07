@@ -1,4 +1,5 @@
 import type { Schema } from "../../database/schema-builder";
+import type { EntityMutationHooks } from "./hooks";
 
 /** Table names declared by one finalized schema. */
 export type SchemaTableName<TSchema extends Schema> = Extract<
@@ -7,12 +8,13 @@ export type SchemaTableName<TSchema extends Schema> = Extract<
 >;
 
 /**
- * Generated read exposure: off by default, every table, or an explicit list.
+ * Generated CRUD exposure: off by default, every table, or an explicit list.
  *
- * Reads run as the app's service principal and apply no per-user filter, so an
- * enabled table is readable by anyone the app admits. Enabling a table also
- * makes it includable from its neighbours; a relation whose target stays off
- * cannot be included, which keeps one table's data behind one decision.
+ * Routes run as the app's service principal and apply no per-user filter, so an
+ * enabled table is readable and writable by anyone the app admits. Enabling a
+ * table also makes it includable from its neighbours; a relation whose target
+ * stays off cannot be included, which keeps one table's data behind one
+ * decision.
  *
  * Text filters accept caller-supplied `like`/`ilike` patterns, and this beta
  * adds no statement cancellation below the connector, so an expensive pattern
@@ -38,13 +40,20 @@ export type ReadSerializer = (
   context: ReadSerializerContext,
 ) => Record<string, unknown>;
 
+/** Response shaping and mutation lifecycle declared for one table. */
+export type EntityHooks<TTable extends string = string> =
+  EntityMutationHooks<TTable> & {
+    readonly serialize?: ReadSerializer;
+  };
+
+/** Hooks addressed by runtime table name, once the typed keys are erased. */
+export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
+
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema> = {
   readonly schema: TSchema;
   readonly crudRoutes?: CrudRoutesConfig<TSchema>;
   readonly hooks?: {
-    readonly [TTable in SchemaTableName<TSchema>]?: {
-      readonly serialize?: ReadSerializer;
-    };
+    readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
   };
 };

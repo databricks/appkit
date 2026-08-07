@@ -192,6 +192,19 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     where?: WhereClause,
   ): SQL | undefined =>
     where === undefined ? undefined : translateWhere(table, where);
+  /** Narrow by the primary key while preserving an accumulated predicate. */
+  const keyedWhere = (
+    table: AppKitTable,
+    primaryKey: ColumnMeta,
+    id: IdValue,
+    where?: WhereClause,
+  ): SQL | undefined =>
+    where === undefined
+      ? eq(columnOf(table, primaryKey.columnName), id)
+      : translateWhere(
+          table,
+          andWhere({ [primaryKey.columnName]: { eq: id } }, where),
+        );
 
   return {
     async select(table, spec) {
@@ -256,7 +269,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
       return expectExactlyOne(rows as Row[]);
     },
 
-    async update(table, id, values) {
+    async update(table, id, values, where) {
       const engineTable = pgTable(table);
       const parameters = mutationValues(table, values);
       const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
@@ -267,7 +280,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
         db
           .update(engineTable)
           .set(parameters)
-          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
+          .where(keyedWhere(table, primaryKey, validatedId, where))
           .returning(),
       );
       return expectZeroOrOne(rows as Row[]);
@@ -290,7 +303,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
       return expectExactlyOne(rows as Row[]);
     },
 
-    async delete(table, id) {
+    async delete(table, id, where) {
       const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
         table,
         id,
@@ -298,7 +311,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
       const rows = await runDatabaseOperation(() =>
         db
           .delete(pgTable(table))
-          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
+          .where(keyedWhere(table, primaryKey, validatedId, where))
           .returning({ id: columnOf(table, primaryKey.columnName) }),
       );
       return expectZeroOrOne(rows as Row[]) !== null;
