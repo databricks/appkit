@@ -49,7 +49,8 @@ function asMetricMetadata(
  *   dimensions: ["region"],
  *   filter: { member: "region", operator: "in", values: ["EMEA", "APAC"] },
  * });
- * // data: Array<{ revenue: number; region: string }> | null
+ * // JSON_ARRAY preserves SQL scalar cells as strings and nullable columns as null:
+ * // data: Array<{ revenue: string | null; region: string | null }> | null
  * ```
  */
 export function useMetricView<

@@ -182,23 +182,30 @@ export function formatLabel(
   return humanize(name);
 }
 
+export interface D3FormatParts {
+  /** Numeric d3-format specifier, without a currency symbol. */
+  specifier: string;
+  /** Literal currency prefix from the UC format, when present. */
+  prefix?: string;
+}
+
 /**
- * Maps a UC/spreadsheet-style format spec to a
- * [d3-format](https://d3js.org/d3-format) specifier string, for charts that
- * consume d3 format strings.
+ * Maps a UC/spreadsheet-style format spec to the pieces consumed by
+ * [d3-format](https://d3js.org/d3-format)-based charts.
  *
  * Best-effort mapping for the common specs:
- * - `"$#,##0.00"` -> `"$,.2f"`
- * - `"€#,##0.00"` -> `"$,.2f"` (currency), `"#,##0"` -> `",.0f"`, `"0.0%"` -> `".1%"`
+ * - `"$#,##0.00"` -> `{ specifier: ",.2f", prefix: "$" }`
+ * - `"€#,##0.00"` -> `{ specifier: ",.2f", prefix: "€" }`
+ * - `"#,##0"` -> `{ specifier: ",.0f" }`, `"0.0%"` -> `{ specifier: ".1%" }`
  *
- * A d3 specifier's currency marker is the single `$` symbol; the actual glyph
- * ($, €, R$, …) is supplied by the d3 *locale*, not the specifier string — so a
- * non-USD currency spec still maps to the `$` currency type here (it is not
- * rejected as unrecognized), and the caller's d3 locale renders the right glyph.
+ * A d3 specifier cannot encode an arbitrary currency symbol: its `$` marker is
+ * resolved through global locale configuration. Returning the literal prefix
+ * separately lets consumers such as Plotly pass it as `tickprefix` instead of
+ * silently rendering every currency as `$`.
  *
  * No spec, or a spec that is not a recognizable numeric pattern -> `undefined`.
  */
-export function toD3Format(format?: string): string | undefined {
+export function toD3Format(format?: string): D3FormatParts | undefined {
   if (!format) return undefined;
 
   // Strip any leading currency prefix first, then require the remainder to be
@@ -213,10 +220,14 @@ export function toD3Format(format?: string): string | undefined {
   const decimals = countDecimals(format);
 
   if (format.includes("%")) {
-    return `${group}.${decimals}%`;
+    return {
+      specifier: `${group}.${decimals}%`,
+      ...(prefix ? { prefix } : {}),
+    };
   }
 
-  // `$` is d3's currency marker (glyph comes from the locale); emit it for any
-  // currency prefix, USD or otherwise.
-  return `${prefix ? "$" : ""}${group}.${decimals}f`;
+  return {
+    specifier: `${group}.${decimals}f`,
+    ...(prefix ? { prefix } : {}),
+  };
 }

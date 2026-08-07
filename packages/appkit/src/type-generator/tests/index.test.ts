@@ -367,8 +367,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     const declarations = fs.readFileSync(metricFile, "utf-8");
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"region": string');
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"region": string | null');
     // Semantic metadata (SQL type) rides in the type-level `metadata`
     // block — the sole carrier now that the JSON bundle is gone.
     expect(declarations).toContain('"DECIMAL(38,2)"');
@@ -564,7 +564,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       }),
     );
     const declarations = fs.readFileSync(metricFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
     // The SQL type rides in the .d.ts type-level `metadata` block.
     expect(declarations).toContain('"DECIMAL(38,2)"');
   });
@@ -590,7 +590,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -783,7 +783,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
 
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -996,7 +996,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(vi.mocked(createWorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1068,7 +1068,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1289,7 +1289,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
     // Artifacts mix the cached real schema with the degraded newcomer.
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
 
     // Pass 2: blocking with the warehouse RUNNING. churn is uncached, so it is
@@ -1311,8 +1311,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.churn.schema.degraded).not.toBe(true);
 
     const refreshed = fs.readFileSync(metricFile, "utf-8");
-    expect(refreshed).toContain('"monthly_churn": number');
-    expect(refreshed).toContain('"total_revenue": number');
+    expect(refreshed).toContain('"monthly_churn": string | null');
+    expect(refreshed).toContain('"total_revenue": string | null');
     expect(refreshed).not.toContain("measureKeys: string");
   });
 
@@ -1335,7 +1335,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     // The .d.ts carries the cached REAL unions — not degraded-open types —
     // and its type-level `metadata` block still carries the SQL type.
     const declarations = fs.readFileSync(metricFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
     expect(declarations).not.toContain("measureKeys: string");
     expect(declarations).toContain('"DECIMAL(38,2)"');
     // The good entry survived the warehouse-down pass un-overwritten.
@@ -1591,7 +1591,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.revenue.retry).toBe(false);
     expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1689,7 +1689,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(metrics.revenue.retry).toBe(false);
     expect(metrics.revenue.schema.degraded).toBeUndefined();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1804,7 +1804,9 @@ describe("generateFromEntryPoint — metric cache section", () => {
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain('"m": number');
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      '"m": string | null',
+    );
   });
 
   test.each<[string, Record<string, unknown>]>([
@@ -1860,7 +1862,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
       );
       // The artifacts render the fresh schema — never the revived garbage.
       expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-        '"total_revenue": number',
+        '"total_revenue": string | null',
       );
     },
   );
@@ -2080,7 +2082,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     const content = fs.readFileSync(metricFile, "utf-8");
     expect(content).toContain("interface MetricRegistry");
     expect(content).toContain("revenue");
-    expect(content).toContain('"total_revenue": number');
+    expect(content).toContain('"total_revenue": string | null');
   });
 
   test("non-blocking mode + degraded metric: writes to metric-views.ts anyway", async () => {

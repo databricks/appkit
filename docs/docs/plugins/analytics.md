@@ -496,7 +496,7 @@ const { data } = useAnalyticsQuery("users", { status: sql.string("active") });
 
 ### useMetricView
 
-React hook that measures a [metric view](#metric-views) over SSE — the client twin of `POST /api/analytics/metric/:key`. Instead of writing SQL, you pass the measures, dimensions, and filter as a structured request; the hook streams back the typed rows plus per-column display metadata.
+React hook that measures a [metric view](#metric-views) over SSE — the client twin of `POST /api/analytics/metric/:key`. Instead of writing SQL, you pass the measures, dimensions, and filter as a structured request; the hook streams back rows with typed column names plus per-column display metadata.
 
 ```ts
 import { useMetricView } from "@databricks/appkit-ui/react";
@@ -509,7 +509,7 @@ const { data, loading, error, errorCode, metadata } = useMetricView("revenue", {
 });
 ```
 
-When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view types](../development/type-generation.md#metric-view-types)), the measure/dimension names, the allowed `timeGrain` values, and the row shape are all inferred — passing an unknown measure is a type error, and `data` is typed as `Array<{ arr: number; mrr: number; created_at: string }> | null`.
+When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view types](../development/type-generation.md#metric-view-types)), the measure/dimension names, the allowed `timeGrain` values, and the selected row keys are all inferred — passing an unknown measure is a type error. JSON_ARRAY preserves SQL scalar cells as strings and allows SQL NULL for every column, so `data` is typed as `Array<{ arr: string | null; mrr: string | null; created_at: string | null }> | null`; use `metadata[col].type` when intentionally parsing a value.
 
 **Options:**
 
@@ -526,7 +526,7 @@ When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view ty
 
 ```ts
 {
-  data: T | null; // typed rows (measures & dimensions), or null before the first result
+  data: T | null; // selected row keys with JSON_ARRAY string | null values
   loading: boolean; // true while the metric query is executing
   error: string | null; // sanitized human-readable message, or null on success
   errorCode: string | null; // stable upstream code (branch on this, not the message)
@@ -568,7 +568,7 @@ This is **pure response decoration**: the injected metadata never enters the cac
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `formatValue(value, format?)`  | Format a raw value with a UC/spreadsheet format spec (`"$#,##0.00"`, `"#,##0"`, `"0.0%"`). No spec → sensible default. |
 | `formatLabel(name, columnMeta?)` | Human label for a column: prefers `columnMeta.display_name`, else humanizes the raw name.                    |
-| `toD3Format(format?)`          | Map a UC format spec to a [d3-format](https://d3js.org/d3-format) specifier (for charts that consume d3 strings). |
+| `toD3Format(format?)`          | Split a UC format into a [d3-format](https://d3js.org/d3-format) `specifier` and literal currency `prefix`. |
 
 The golden rule: **source the format from `metadata`, never hand-type it.** When `metadata` is `undefined`, `metadata?.[col]?.format` is `undefined` and `formatValue` degrades gracefully to a default:
 
@@ -614,7 +614,7 @@ function RevenueTable() {
 
 Because `metadata[col].format` is just a string on the payload, the same spec drives axis ticks and tooltips in any chart library.
 
-**[Plotly](https://plotly.com/javascript/)** — pass the spec straight through as a d3 `tickformat` / `hovertemplate` (Plotly axes speak d3-format):
+**[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
 
 ```tsx
 import Plot from "react-plotly.js";
@@ -628,7 +628,8 @@ function RevenuePlot() {
     timeGrain: "month",
     timeDimension: "created_at",
   });
-  const arrFormat = toD3Format(metadata?.arr?.format); // "$#,##0.00" → "$,.2f"
+  const arrFormat = toD3Format(metadata?.arr?.format);
+  // "€#,##0.00" → { specifier: ",.2f", prefix: "€" }
 
   return (
     <Plot
@@ -642,7 +643,10 @@ function RevenuePlot() {
         },
       ]}
       layout={{
-        yaxis: { tickformat: arrFormat },
+        yaxis: {
+          tickformat: arrFormat?.specifier,
+          tickprefix: arrFormat?.prefix,
+        },
         hoverlabel: { namelength: -1 },
       }}
     />

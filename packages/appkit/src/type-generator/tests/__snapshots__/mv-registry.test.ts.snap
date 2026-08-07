@@ -12,15 +12,15 @@ declare module "@databricks/appkit-ui/react" {
       lane: "sp";
       measures: {
       /** @sqlType DECIMAL(38,2) */
-      "arr": number;
+      "arr": string | null;
     };
       dimensions: {
       /** @sqlType TIMESTAMP @timeGrain day|hour|minute|month|quarter|week|year */
-      "created_at": string;
+      "created_at": string | null;
       /** @sqlType STRING */
-      "region": string;
+      "region": string | null;
       /** @sqlType STRING */
-      "segment": string;
+      "segment": string | null;
     };
       measureKeys: "arr";
       dimensionKeys: "created_at" | "region" | "segment";
@@ -76,13 +76,13 @@ declare module "@databricks/appkit-ui/react" {
       lane: "obo";
       measures: {
       /** @sqlType DOUBLE */
-      "churn_rate": number;
+      "churn_rate": string | null;
     };
       dimensions: {
       /** @sqlType STRING */
-      "csm_email": string;
+      "csm_email": string | null;
       /** @sqlType DATE @timeGrain day|month|quarter|week|year */
-      "billing_date": string;
+      "billing_date": string | null;
     };
       measureKeys: "churn_rate";
       dimensionKeys: "csm_email" | "billing_date";
@@ -112,15 +112,15 @@ declare module "@databricks/appkit-ui/react" {
       lane: "sp";
       measures: {
       /** @sqlType DECIMAL(38,2) */
-      "arr": number;
+      "arr": string | null;
       /** @sqlType DECIMAL(38,2) */
-      "mrr": number;
+      "mrr": string | null;
     };
       dimensions: {
       /** @sqlType STRING */
-      "region": string;
+      "region": string | null;
       /** @sqlType TIMESTAMP @timeGrain day|hour|minute|month|quarter|week|year */
-      "created_at": string;
+      "created_at": string | null;
     };
       measureKeys: "arr" | "mrr";
       dimensionKeys: "region" | "created_at";
@@ -216,7 +216,7 @@ declare module "@databricks/appkit-ui/react" {
       measures: Record<string, never>;
       dimensions: {
       /** @sqlType STRING */
-      "region": string;
+      "region": string | null;
     };
       measureKeys: never;
       dimensionKeys: "region";

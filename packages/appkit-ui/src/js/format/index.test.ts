@@ -142,10 +142,13 @@ describe("js/format formatLabel", () => {
 
 describe("js/format toD3Format", () => {
   test("maps the common numeric specs", () => {
-    expect(toD3Format("$#,##0.00")).toBe("$,.2f");
-    expect(toD3Format("#,##0")).toBe(",.0f");
-    expect(toD3Format("#,##0.00")).toBe(",.2f");
-    expect(toD3Format("0.0%")).toBe(".1%");
+    expect(toD3Format("$#,##0.00")).toEqual({
+      specifier: ",.2f",
+      prefix: "$",
+    });
+    expect(toD3Format("#,##0")).toEqual({ specifier: ",.0f" });
+    expect(toD3Format("#,##0.00")).toEqual({ specifier: ",.2f" });
+    expect(toD3Format("0.0%")).toEqual({ specifier: ".1%" });
   });
 
   test("no spec returns undefined", () => {
@@ -158,18 +161,21 @@ describe("js/format toD3Format", () => {
     expect(toD3Format("abc")).toBeUndefined();
   });
 
-  // Every currency spec the generator emits maps to d3's `$` currency type
-  // (the actual glyph is supplied by the consuming d3 locale, not the
-  // specifier) — none of them are dropped as unrecognized.
+  // Currency stays separate from the d3 specifier because d3's `$` marker is
+  // locale-driven and cannot encode arbitrary symbols. Consumers such as
+  // Plotly can pass these through as `tickformat` + `tickprefix`.
   test.each([
-    ["$#,##0.00", "$,.2f"],
-    ["€#,##0.00", "$,.2f"],
-    ["£#,##0.00", "$,.2f"],
-    ["¥#,##0", "$,.0f"],
-    ["₹#,##0.00", "$,.2f"],
-    ["R$#,##0.00", "$,.2f"],
-    ["XYZ #,##0.00", "$,.2f"],
-  ])("maps currency spec %s to a $-typed d3 specifier", (spec, expected) => {
-    expect(toD3Format(spec)).toBe(expected);
-  });
+    ["$#,##0.00", ",.2f", "$"],
+    ["€#,##0.00", ",.2f", "€"],
+    ["£#,##0.00", ",.2f", "£"],
+    ["¥#,##0", ",.0f", "¥"],
+    ["₹#,##0.00", ",.2f", "₹"],
+    ["R$#,##0.00", ",.2f", "R$"],
+    ["XYZ #,##0.00", ",.2f", "XYZ "],
+  ])(
+    "maps currency spec %s without replacing its prefix",
+    (spec, specifier, prefix) => {
+      expect(toD3Format(spec)).toEqual({ specifier, prefix });
+    },
+  );
 });

@@ -47,8 +47,8 @@ test("useMetricView keeps omitted dimensions out of rows and requires a grain ta
     declare module "../src/react/hooks/types" {
       interface MetricRegistry {
         revenue: {
-          measures: { arr: number; mrr: number };
-          dimensions: { region: string; created_at: string };
+          measures: { arr: string | null; mrr: string | null };
+          dimensions: { region: string | null; created_at: string | null };
           measureKeys: "arr" | "mrr";
           dimensionKeys: "region" | "created_at";
           timeGrains: "day" | "month";
@@ -70,7 +70,7 @@ test("useMetricView keeps omitted dimensions out of rows and requires a grain ta
       typeof useMetricView<"revenue", readonly ["arr"]>
     >;
     declare const result: MeasureOnlyResult;
-    const expected: UseMetricViewResult<Array<{ arr: number }>> = result;
+    const expected: UseMetricViewResult<Array<{ arr: string | null }>> = result;
     void expected;
     // @ts-expect-error region was not selected
     result.data?.[0]?.region;

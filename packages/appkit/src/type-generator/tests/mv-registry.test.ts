@@ -1531,6 +1531,12 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain('lane: "obo"');
     expect(output).toContain('format: "$#,##0.00"');
     expect(output).toContain('format: "0.0%"');
+    // Metric queries use the JSON_ARRAY wire contract: scalar cells arrive as
+    // strings and every selected column may be SQL NULL. Generated row values
+    // must describe that runtime shape rather than claiming JS numbers.
+    expect(output).toContain('"arr": string | null');
+    expect(output).toContain('"churn_rate": string | null');
+    expect(output).not.toContain('"arr": number');
   });
 
   test("emits an empty MetricRegistry interface when no metrics are registered", () => {
@@ -1617,8 +1623,8 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain(
       "@timeGrain day|hour|minute|month|quarter|week|year",
     );
-    expect(output).toContain('"created_at": string');
-    expect(output).toContain('"region": string');
+    expect(output).toContain('"created_at": string | null');
+    expect(output).toContain('"region": string | null');
   });
 });
 

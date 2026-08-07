@@ -1,35 +1,13 @@
 import type { MetricColumnMetadata, MetricSchema } from "./types";
 
 /**
- * @todo unify with query-registry.ts
- * Map a Databricks SQL type to a TypeScript primitive.
- * Centralized here (not imported from query-registry) so this module
- * stays self-contained.
+ * Metric results use Databricks' JSON_ARRAY delivery, whose scalar cells are
+ * strings regardless of their SQL type. Every selected column can also be SQL
+ * NULL. Keep the generated row contract faithful to that wire shape; callers
+ * can use the generated SQL-type metadata when they intentionally need to
+ * parse a value.
  */
-function tsTypeFor(sqlType: string): string {
-  const normalized = sqlType
-    .toUpperCase()
-    .replace(/\(.*\)$/, "")
-    .replace(/<.*>$/, "")
-    .split(" ")[0];
-
-  switch (normalized) {
-    case "BOOLEAN":
-      return "boolean";
-    case "TINYINT":
-    case "SMALLINT":
-    case "INT":
-    case "INTEGER":
-    case "BIGINT":
-    case "FLOAT":
-    case "DOUBLE":
-    case "DECIMAL":
-    case "NUMERIC":
-      return "number";
-    default:
-      return "string";
-  }
-}
+const JSON_ARRAY_WIRE_TYPE = "string | null";
 
 // Render a MetricRegistry interface entry from a MetricSchema.
 function renderMetricEntry(schema: MetricSchema): string {
@@ -45,7 +23,7 @@ function renderMetricEntry(schema: MetricSchema): string {
           ? ` @timeGrain ${col.timeGrains.join("|")}`
           : "";
         return `${indent}/** @sqlType ${col.type.replace(/\*\//g, "* /")}${grainComment} */
-${indent}${JSON.stringify(col.name)}: ${tsTypeFor(col.type)}`;
+${indent}${JSON.stringify(col.name)}: ${JSON_ARRAY_WIRE_TYPE}`;
       })
       .join(";\n");
     return `{

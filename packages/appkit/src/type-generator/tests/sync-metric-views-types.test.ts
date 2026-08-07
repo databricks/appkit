@@ -163,10 +163,10 @@ describe("syncMetricViewsTypes", () => {
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain('"churn"');
-    // Measure + dimension column types render as TS primitives.
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"region": string');
-    expect(declarations).toContain('"churn_rate": number');
+    // Measure + dimension columns reflect nullable JSON_ARRAY wire values.
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"region": string | null');
+    expect(declarations).toContain('"churn_rate": string | null');
     // The OBO metric's lane is captured in its entry.
     expect(declarations).toContain('lane: "obo"');
     expect(declarations).toContain('lane: "sp"');
@@ -295,8 +295,8 @@ describe("syncMetricViewsTypes", () => {
     ]);
     // Cached schemas still render the real (non-degraded) types.
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"churn_rate": number');
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"churn_rate": string | null');
   });
 
   test("cache: false (--no-cache) re-describes every key even when a warm cache exists", async () => {
@@ -359,7 +359,7 @@ describe("syncMetricViewsTypes", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(second.failures).toEqual([]);
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
   });
 
   test("a removed metric key is pruned from the cache section", async () => {

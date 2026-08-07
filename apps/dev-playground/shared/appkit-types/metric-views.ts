@@ -9,19 +9,19 @@ declare module "@databricks/appkit-ui/react" {
       lane: "obo";
       measures: {
       /** @sqlType bigint */
-      "active_accounts": number;
+      "active_accounts": string | null;
       /** @sqlType decimal */
-      "churn_rate": number;
+      "churn_rate": string | null;
       /** @sqlType double */
-      "avg_ltv": number;
+      "avg_ltv": string | null;
     };
       dimensions: {
       /** @sqlType string */
-      "segment": string;
+      "segment": string | null;
       /** @sqlType string */
-      "region": string;
+      "region": string | null;
       /** @sqlType string */
-      "csm_email": string;
+      "csm_email": string | null;
     };
       measureKeys: "active_accounts" | "churn_rate" | "avg_ltv";
       dimensionKeys: "segment" | "region" | "csm_email";
@@ -65,21 +65,21 @@ declare module "@databricks/appkit-ui/react" {
       lane: "sp";
       measures: {
       /** @sqlType double */
-      "mrr": number;
+      "mrr": string | null;
       /** @sqlType double */
-      "arr": number;
+      "arr": string | null;
       /** @sqlType double */
-      "new_arr": number;
+      "new_arr": string | null;
       /** @sqlType double */
-      "churned_arr": number;
+      "churned_arr": string | null;
     };
       dimensions: {
       /** @sqlType string */
-      "region": string;
+      "region": string | null;
       /** @sqlType string */
-      "segment": string;
+      "segment": string | null;
       /** @sqlType timestamp_ltz @timeGrain day|hour|minute|month|quarter|week|year */
-      "created_at": string;
+      "created_at": string | null;
     };
       measureKeys: "mrr" | "arr" | "new_arr" | "churned_arr";
       dimensionKeys: "region" | "segment" | "created_at";
