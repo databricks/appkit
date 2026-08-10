@@ -48,19 +48,6 @@ declare module "@databricks/appkit-ui/react" {
     };
   }
 }
-
-export const metricViewsMetadata = {
-  "revenue": {
-    measures: {
-      "arr": { type: "DECIMAL(38,2)", description: "Annual recurring revenue" },
-    },
-    dimensions: {
-      "created_at": { type: "TIMESTAMP" },
-      "region": { type: "STRING" },
-      "segment": { type: "STRING" },
-    },
-  },
-} as const;
 "
 `;
 
@@ -151,28 +138,6 @@ declare module "@databricks/appkit-ui/react" {
     };
   }
 }
-
-export const metricViewsMetadata = {
-  "customer_metrics": {
-    measures: {
-      "churn_rate": { type: "DOUBLE", display_name: "Churn Rate", format: "0.0%" },
-    },
-    dimensions: {
-      "csm_email": { type: "STRING" },
-      "billing_date": { type: "DATE" },
-    },
-  },
-  "revenue": {
-    measures: {
-      "arr": { type: "DECIMAL(38,2)", display_name: "Annual Recurring Revenue", format: "$#,##0.00", description: "Annual recurring revenue" },
-      "mrr": { type: "DECIMAL(38,2)", description: "Monthly recurring revenue" },
-    },
-    dimensions: {
-      "region": { type: "STRING" },
-      "created_at": { type: "TIMESTAMP" },
-    },
-  },
-} as const;
 "
 `;
 
@@ -183,8 +148,6 @@ import type {} from "@databricks/appkit-ui/react";
 declare module "@databricks/appkit-ui/react" {
   interface MetricRegistry {}
 }
-
-export const metricViewsMetadata = {} as const;
 "
 `;
 
@@ -232,18 +195,5 @@ declare module "@databricks/appkit-ui/react" {
     };
   }
 }
-
-export const metricViewsMetadata = {
-  "cold_metric": {
-    measures: {},
-    dimensions: {},
-  },
-  "dims_only": {
-    measures: {},
-    dimensions: {
-      "region": { type: "STRING" },
-    },
-  },
-} as const;
 "
 `;

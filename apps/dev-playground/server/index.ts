@@ -21,12 +21,6 @@ import {
   tool,
 } from "@databricks/appkit/beta";
 import { z } from "zod";
-// Build-generated per-metric column metadata (display_name / format / type /
-// description), emitted by the metric-views type generator alongside the
-// MetricRegistry augmentation. Injecting it into `analytics({ metricViewsMetadata })`
-// lets the metric route stamp per-column display metadata into the SSE result
-// so the client can label/format columns without hard-coding format strings.
-import { metricViewsMetadata } from "../shared/appkit-types/metric-views";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -384,7 +378,7 @@ createApp({
     server(),
     reconnect(),
     telemetryExamples(),
-    analytics({ metricViewsMetadata }),
+    analytics({}),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),

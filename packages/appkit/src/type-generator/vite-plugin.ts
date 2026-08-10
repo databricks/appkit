@@ -332,17 +332,6 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       // final path is identical (the default outFile above lives in
       // shared/<TYPES_DIR>/), and a customized outFile now keeps its metric
       // sibling next to it instead of pinning it under shared/.
-      //
-      // Reject a `.d.ts` metric out-path up front: the metric file is a real
-      // `.ts` source carrying a runtime `const` (metricViewsMetadata), which is
-      // illegal inside an ambient declaration file (TS1039). Fail fast with a
-      // clear message rather than emitting a file that won't compile.
-      if (options?.mvOutFile?.endsWith(".d.ts")) {
-        throw new Error(
-          `appKitTypesPlugin: mvOutFile must be a .ts file, not a .d.ts (got "${options.mvOutFile}"). ` +
-            "The metric-views file carries a runtime const, which cannot live in an ambient .d.ts.",
-        );
-      }
       mvOutFile =
         options?.mvOutFile !== undefined
           ? path.resolve(projectRoot, options.mvOutFile)

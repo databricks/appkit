@@ -34,7 +34,9 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
+  loadMetricMetadata,
   loadMetricRegistry,
+  METRIC_METADATA_FILE,
   selectMetricMetadata,
   validateMetricRequest,
 } from "./metric";
@@ -558,11 +560,31 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
+    // Discovered from `config/metric-views/metadata.generated.json` unless the
+    // app injected a value explicitly. Injection wins so an app that builds its
+    // metadata some other way (or pins it deliberately) keeps working, but the
+    // generated bundle means the common case needs no wiring at all.
+    const allMetadata =
+      this.config.metricViewsMetadata ??
+      (await loadMetricMetadata(this.app, req, this.devFileReader));
+
+    if (allMetadata !== undefined && !Object.hasOwn(allMetadata, key)) {
+      // The view is registered (we got past the 404) but carries no metadata:
+      // the bundle predates this key. Worth a warning — the query still
+      // succeeds, just with unlabeled columns, which is otherwise silent.
+      logger.warn(
+        req,
+        "No display metadata for metric key %s — regenerate types to refresh %s",
+        key,
+        METRIC_METADATA_FILE,
+      );
+    }
+
     // Computed here, outside the cached execute below, so a cache hit still
     // serves the current metadata. Absent config → `undefined` → the `result`
     // message omits the field (envelope-identical to `/query`).
     const metadata = selectMetricMetadata(
-      this.config.metricViewsMetadata,
+      allMetadata,
       key,
       request.measures,
       request.dimensions,

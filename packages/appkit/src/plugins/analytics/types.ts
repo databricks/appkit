@@ -16,10 +16,15 @@ export type {
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
   /**
-   * The metric route stamps the slice of this scoped to a request's
-   * measures/dimensions into the SSE `result` message.
-   * Absent → the `result` message carries no `metadata` field, leaving it
-   * envelope-identical to `/query`.
+   * Per-column display metadata. The metric route stamps the slice scoped to a
+   * request's measures/dimensions into the SSE `result` message.
+   *
+   * Optional override: by default the route discovers this from the generated
+   * `config/metric-views/metadata.generated.json`, so most apps never set it.
+   * Provide it to bypass that file — a value here always wins.
+   *
+   * Neither present → the `result` message carries no `metadata` field, leaving
+   * it envelope-identical to `/query`.
    */
   metricViewsMetadata?: MetricViewsMetadata;
   /**

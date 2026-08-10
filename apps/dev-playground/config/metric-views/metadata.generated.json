@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "metricViews": {
+    "customers": {
+      "measures": {
+        "active_accounts": {
+          "type": "bigint",
+          "display_name": "Active Accounts",
+          "format": "#,##0"
+        },
+        "churn_rate": {
+          "type": "decimal",
+          "display_name": "Churn Rate"
+        },
+        "avg_ltv": {
+          "type": "double",
+          "display_name": "Average LTV",
+          "format": "$#,##0.00"
+        }
+      },
+      "dimensions": {
+        "segment": {
+          "type": "string",
+          "display_name": "Customer Segment"
+        },
+        "region": {
+          "type": "string",
+          "display_name": "Region"
+        },
+        "csm_email": {
+          "type": "string",
+          "display_name": "CSM Email"
+        }
+      }
+    },
+    "revenue": {
+      "measures": {
+        "mrr": {
+          "type": "double",
+          "display_name": "Monthly Recurring Revenue",
+          "format": "$#,##0.00"
+        },
+        "arr": {
+          "type": "double",
+          "display_name": "Annual Recurring Revenue",
+          "format": "$#,##0.00",
+          "description": "Annualized contract value across all active subscriptions"
+        },
+        "new_arr": {
+          "type": "double",
+          "display_name": "New ARR",
+          "format": "$#,##0.00"
+        },
+        "churned_arr": {
+          "type": "double",
+          "display_name": "Churned ARR",
+          "format": "$#,##0.00"
+        }
+      },
+      "dimensions": {
+        "region": {
+          "type": "string",
+          "display_name": "Region"
+        },
+        "segment": {
+          "type": "string",
+          "display_name": "Customer Segment"
+        },
+        "created_at": {
+          "type": "timestamp_ltz",
+          "display_name": "Subscription Start"
+        }
+      }
+    }
+  }
+}

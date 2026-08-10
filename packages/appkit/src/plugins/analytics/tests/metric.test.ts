@@ -18,6 +18,7 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
+  loadMetricMetadata,
   loadMetricRegistry,
   selectMetricMetadata,
   validateMetricRequest,
@@ -1357,6 +1358,111 @@ describe("loadMetricRegistry", () => {
   test("malformed JSON throws", async () => {
     writeFileSync(path.join(dir, "definitions.json"), "{ not json");
     await expect(loadMetricRegistry(app)).rejects.toThrow(/Failed to parse/);
+  });
+
+  // ── The generated metadata bundle. Unlike definitions.json, every failure
+  // mode here degrades to `undefined` instead of throwing: metadata is pure
+  // response decoration, so a bad bundle must never fail a working query.
+  describe("loadMetricMetadata", () => {
+    const bundle = (extra?: Record<string, unknown>) =>
+      JSON.stringify({
+        version: 1,
+        metricViews: {
+          revenue: {
+            measures: { arr: { type: "double", format: "$#,##0.00" } },
+            dimensions: { region: { type: "string", display_name: "Region" } },
+          },
+        },
+        ...extra,
+      });
+
+    test("absent bundle → undefined (dormancy)", async () => {
+      expect(await loadMetricMetadata(app)).toBeUndefined();
+    });
+
+    test("reads per-column metadata for a valid bundle", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), bundle());
+      const metadata = await loadMetricMetadata(app);
+      expect(metadata?.revenue).toEqual({
+        measures: { arr: { type: "double", format: "$#,##0.00" } },
+        dimensions: { region: { type: "string", display_name: "Region" } },
+      });
+    });
+
+    test("result has a null prototype (no inherited-property lookups)", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), bundle());
+      const metadata = await loadMetricMetadata(app);
+      expect(Object.getPrototypeOf(metadata)).toBeNull();
+      expect(
+        (metadata as unknown as Record<string, unknown>).toString,
+      ).toBeUndefined();
+    });
+
+    test("malformed JSON → undefined, never throws", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), "{ not json");
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("schema-invalid bundle → undefined, never throws", async () => {
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({ version: 1, metricViews: { revenue: "nope" } }),
+      );
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("a future bundle version is ignored rather than mis-parsed", async () => {
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({ version: 99, metricViews: {} }),
+      );
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("tolerates unknown per-column fields from a newer generator", async () => {
+      // Non-strict per-column schema: an older runtime keeps serving the fields
+      // it understands instead of rejecting the whole bundle.
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double", unit_of_measure: "USD" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      const metadata = await loadMetricMetadata(app);
+      expect(metadata?.revenue.measures.arr.type).toBe("double");
+    });
+
+    test("picks up an edited bundle rather than serving a stale parse", async () => {
+      const file = path.join(dir, "metadata.generated.json");
+      writeFileSync(file, bundle());
+      expect((await loadMetricMetadata(app))?.revenue.measures.arr.format).toBe(
+        "$#,##0.00",
+      );
+
+      // The parse cache is keyed on raw contents, so a regenerated bundle is
+      // reflected without a restart (matters for the dev-tunnel path).
+      writeFileSync(
+        file,
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double", format: "€#,##0" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      expect((await loadMetricMetadata(app))?.revenue.measures.arr.format).toBe(
+        "€#,##0",
+      );
+    });
   });
 
   test("schema-invalid config throws", async () => {
