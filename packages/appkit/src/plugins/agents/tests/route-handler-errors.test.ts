@@ -1,6 +1,7 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
+import { mockPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -396,27 +397,22 @@ describe("POST /invocations & /responses — successful invoke", () => {
 describe("/invocations and /responses are aliases", () => {
   test("both routes are registered and bound to the same handler", () => {
     const plugin = new AgentsPlugin({ dir: false });
-    const addRoute = vi.fn();
-    // biome-ignore lint/suspicious/noExplicitAny: inject minimal fake context
-    (plugin as any).context = { addRoute };
+    // Attach the real PluginContext via the testing kit. Its route recorder
+    // captures the RAW handlers passed to addRoute — the aliasing assertion
+    // needs the original references, which the context's forwardAsyncErrors
+    // wrapping would otherwise break.
+    const mock = mockPluginContext();
+    // biome-ignore lint/suspicious/noExplicitAny: attach the real context
+    (plugin as any).context = mock.ctx;
     // biome-ignore lint/suspicious/noExplicitAny: invoke private mounter
     (plugin as any).mountInvokeRoutes();
 
-    expect(addRoute).toHaveBeenCalledTimes(2);
-    const calls = addRoute.mock.calls.map((c: unknown[]) => ({
-      method: c[0],
-      path: c[1],
-      handler: c[2],
-    }));
-    const invocations = calls.find(
-      (c: { path: unknown }) => c.path === "/invocations",
-    );
-    const responses = calls.find(
-      (c: { path: unknown }) => c.path === "/responses",
-    );
+    expect(mock.routes).toHaveLength(2);
+    const invocations = mock.routes.find((r) => r.path === "/invocations");
+    const responses = mock.routes.find((r) => r.path === "/responses");
     expect(invocations?.method).toBe("post");
     expect(responses?.method).toBe("post");
     // The two routes are aliases — same handler reference is mounted on both.
-    expect(invocations?.handler).toBe(responses?.handler);
+    expect(invocations?.handlers[0]).toBe(responses?.handlers[0]);
   });
 });
