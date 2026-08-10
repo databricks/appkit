@@ -111,36 +111,68 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 
 ## Full example
 
+Instantiate the plugin **class** directly with `new`. The `analytics()` / `agents()` factory functions you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance itself.
+
 ```ts
+import { Plugin, type PluginManifest } from "@databricks/appkit";
+import { expectStream, mockPluginContext } from "@databricks/appkit/testing";
 import { describe, expect, test } from "vitest";
-import { analytics } from "@databricks/appkit";
-import {
-  createMockRequest,
-  createMockResponse,
-  mockPluginContext,
-} from "@databricks/appkit/testing";
 
-describe("analytics query route", () => {
-  test("streams warehouse status then the result", async () => {
-    const mock = mockPluginContext({
-      analytics: { top_users: [{ user: "alice", events: 42 }] },
-    });
-    const plugin = analytics({});
+// A small plugin that registers a route and streams two events.
+class GreeterPlugin extends Plugin {
+  static manifest = {
+    name: "greeter",
+    displayName: "Greeter",
+    description: "Example plugin",
+    resources: { required: [], optional: [] },
+  } as PluginManifest<"greeter">;
+
+  async setup() {
+    this.context?.addRoute("get", "/hello", (_req, res) => res.end());
+  }
+
+  async *greet(name: string) {
+    yield { type: "greeting_start", name };
+    yield { type: "greeting_end", message: `Hello, ${name}!` };
+  }
+}
+
+describe("greeter plugin", () => {
+  test("registers its route through the context", async () => {
+    const mock = mockPluginContext();
+    const plugin = new GreeterPlugin({});
+
     await mock.attach(plugin);
+    await plugin.setup();
 
-    const req = createMockRequest({
-      params: { query_key: "top_users" },
-      body: { format: "JSON_ARRAY" },
-    });
-    const res = createMockResponse();
-
-    await plugin._handleQueryRoute(
-      req as never,
-      res as never,
+    expect(mock.routes).toContainEqual(
+      expect.objectContaining({ method: "get", path: "/hello" }),
     );
-
-    expect(res.status).not.toHaveBeenCalledWith(500);
   });
+
+  test("streams events in order", async () => {
+    const plugin = new GreeterPlugin({});
+    await expectStream(plugin.greet("world")).toEmit(
+      "greeting_start",
+      "greeting_end",
+    );
+  });
+});
+```
+
+To test a plugin that dispatches cross-plugin tool calls, register fake providers and assert on `mock.toolCalls` — including `asUser`, which confirms the on-behalf-of path ran:
+
+```ts
+const mock = mockPluginContext({ analytics: { query: [{ n: 1 }] } });
+const plugin = new MyAgentPlugin({ dir: false });
+await mock.attach(plugin);
+
+await plugin.runSomethingThatCallsAnalytics(req);
+
+expect(mock.toolCalls[0]).toMatchObject({
+  plugin: "analytics",
+  tool: "query",
+  asUser: true,
 });
 ```
 

@@ -1,4 +1,4 @@
-import { Plugin, type PluginManifest, toPlugin } from '@databricks/appkit';
+import { Plugin, type PluginManifest } from '@databricks/appkit';
 import {
   expectStream,
   mockPluginContext,
@@ -18,6 +18,11 @@ import { describe, expect, test } from 'vitest';
  *    run under test.
  *  - `expectStream(...).toEmit(...)` — assert the ordered event types a
  *    streaming handler emits.
+ *
+ * Note: tests instantiate the plugin CLASS directly (`new GreeterPlugin()`).
+ * The `analytics()` / `agents()` factory functions you pass to `createApp`
+ * return a descriptor for the app to construct — for a unit test you want the
+ * instance itself.
  */
 
 // A tiny example plugin: it registers one route and streams two events.
@@ -43,12 +48,10 @@ class GreeterPlugin extends Plugin {
   }
 }
 
-const greeter = toPlugin(GreeterPlugin);
-
 describe('testing kit example', () => {
   test('attaches a real PluginContext and records registered routes', async () => {
     const mock = mockPluginContext();
-    const plugin = greeter();
+    const plugin = new GreeterPlugin({});
 
     await mock.attach(plugin);
     await plugin.setup();
@@ -59,7 +62,7 @@ describe('testing kit example', () => {
   });
 
   test('asserts the ordered events a stream emits', async () => {
-    const plugin = greeter();
+    const plugin = new GreeterPlugin({});
 
     await expectStream(plugin.greet('world')).toEmit(
       'greeting_start',
