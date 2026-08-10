@@ -2,6 +2,7 @@ import {
   BarChart3Icon,
   BotIcon,
   DatabaseIcon,
+  DatabaseZapIcon,
   FileCode2Icon,
   FolderIcon,
   GaugeIcon,
@@ -56,6 +57,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Query execution, charts, and interactive components against live SQL.",
         icon: BarChart3Icon,
+      },
+      {
+        to: "/database",
+        label: "Database",
+        description:
+          "Declare a Postgres schema and get typed entities, generated CRUD routes, and transactional hooks.",
+        icon: DatabaseZapIcon,
       },
       {
         to: "/arrow-analytics",
