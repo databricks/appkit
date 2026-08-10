@@ -284,18 +284,50 @@ describe("sortTimeSeriesAscending", () => {
     expect(result.yDataMap.val).toEqual([30, 10, 20]);
   });
 
-  test("does not sort partially unsorted data where first <= last", () => {
-    // Documents current behavior: only sorts when first > last (fully reversed)
-    // Partially unsorted data like [1, 3, 2] is NOT sorted because first (1) <= last (2)
+  test("sorts partially shuffled timestamps where first <= last", () => {
     const xData = [1, 3, 2];
     const yDataMap = { val: [10, 30, 20] };
     const yFields = ["val"];
 
     const result = sortTimeSeriesAscending(xData, yDataMap, yFields);
 
-    // Returns unsorted - this is the current behavior
-    expect(result.xData).toEqual([1, 3, 2]);
-    expect(result.yDataMap.val).toEqual([10, 30, 20]);
+    expect(result.xData).toEqual([1, 2, 3]);
+    expect(result.yDataMap.val).toEqual([10, 20, 30]);
+  });
+
+  test("sorts shuffled ISO date strings and keeps series correlated", () => {
+    const xData = ["2025-01-01", "2025-03-01", "2025-02-01"];
+    const yDataMap = {
+      sales: [10, 30, 20],
+      profit: [1, 3, 2],
+    };
+
+    const result = sortTimeSeriesAscending(xData, yDataMap, [
+      "sales",
+      "profit",
+    ]);
+
+    expect(result.xData).toEqual(["2025-01-01", "2025-02-01", "2025-03-01"]);
+    expect(result.yDataMap.sales).toEqual([10, 20, 30]);
+    expect(result.yDataMap.profit).toEqual([1, 2, 3]);
+  });
+
+  test("sorts SQL timestamp strings returned by JSON_ARRAY", () => {
+    const xData = [
+      "2025-02-01 12:00:00",
+      "2025-01-01 12:00:00",
+      "2025-03-01 12:00:00",
+    ];
+    const yDataMap = { val: [20, 10, 30] };
+
+    const result = sortTimeSeriesAscending(xData, yDataMap, ["val"]);
+
+    expect(result.xData).toEqual([
+      "2025-01-01 12:00:00",
+      "2025-02-01 12:00:00",
+      "2025-03-01 12:00:00",
+    ]);
+    expect(result.yDataMap.val).toEqual([10, 20, 30]);
   });
 });
 

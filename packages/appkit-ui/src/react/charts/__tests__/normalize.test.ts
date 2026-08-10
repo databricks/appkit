@@ -142,16 +142,13 @@ describe("normalizeChartData", () => {
     });
 
     test("sorts time-series data in ascending order", () => {
-      // The current implementation uses sortTimeSeriesAscending which only
-      // sorts if first > last (fully reversed), not partially unsorted data
-      // So we test with fully reversed data
-      const reversedData = [
+      const shuffledData = [
+        { date: "2025-01-01", value: 100 },
         { date: "2025-01-03", value: 300 },
         { date: "2025-01-02", value: 200 },
-        { date: "2025-01-01", value: 100 },
       ];
 
-      const result = normalizeChartData(reversedData);
+      const result = normalizeChartData(shuffledData);
 
       // First timestamp should be earliest after sorting
       expect(result.xData[0]).toBeLessThan(result.xData[1] as number);

@@ -50,6 +50,7 @@ const SEGMENT_DIM = ["segment"] as const;
 const TIME_DIM = ["created_at"] as const;
 const ARR_MEASURE = ["arr"] as const;
 const TREND_MEASURES = ["arr", "mrr"] as const;
+const TREND_ORDER_BY = [{ field: "created_at", direction: "ASC" }] as const;
 const TABLE_MEASURES = ["arr", "mrr", "new_arr", "churned_arr"] as const;
 const TABLE_COLUMNS = ["region", ...TABLE_MEASURES] as const;
 // Top-N needs an explicit `orderBy`: the route appends the grouped dimensions as
@@ -324,6 +325,7 @@ function MetricViewsRoute() {
     timeGrain: "month",
     timeDimension: "created_at",
     filter: trendFilter,
+    orderBy: TREND_ORDER_BY,
   });
 
   // Detail table, grouped by region. Shares the region bar's filter, so

@@ -525,10 +525,13 @@ const { data, loading, error, errorCode, metadata } = useMetricView("revenue", {
   dimensions: ["created_at"],
   timeGrain: "month",
   timeDimension: "created_at",
+  orderBy: [{ field: "created_at", direction: "ASC" }],
 });
 ```
 
 When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view types](../development/type-generation.md#metric-view-types)), the measure/dimension names, the allowed `timeGrain` values, and the selected row keys are all inferred — passing an unknown measure is a type error. JSON_ARRAY preserves SQL scalar cells as strings and allows SQL NULL for every column, so `data` is typed as `Array<{ arr: string | null; mrr: string | null; created_at: string | null }> | null`; use `metadata[col].type` when intentionally parsing a value.
+
+Time-series queries should explicitly order their selected time dimension ascending, as above. SQL result order is otherwise unspecified; chart helpers may normalize chronological data defensively, but consumers should not rely on that for query ordering.
 
 **Options:**
 
@@ -602,6 +605,7 @@ function RevenueTable() {
     dimensions: ["created_at"],
     timeGrain: "month",
     timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
   });
   const columns = ["created_at", "arr", "mrr"] as const;
 
@@ -647,6 +651,7 @@ function RevenuePlot() {
     dimensions: ["created_at"],
     timeGrain: "month",
     timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
   });
   const arrFormat = toD3Format(metadata?.arr?.format);
   // "€#,##0.00" → { specifier: ",.2f", prefix: "€" }
@@ -687,6 +692,7 @@ function RevenueECharts() {
     dimensions: ["created_at"],
     timeGrain: "month",
     timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
   });
   const arrFormat = metadata?.arr?.format;
 

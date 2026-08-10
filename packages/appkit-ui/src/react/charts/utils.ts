@@ -306,8 +306,25 @@ export function mapToDatum(
   };
 }
 
+const DATE_STRING_PATTERN = /^\d{4}-\d{2}-\d{2}(?:$|[T\s])/;
+
+function toChronologicalValue(value: string | number): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (!DATE_STRING_PATTERN.test(value)) return null;
+
+  // Spark JSON_ARRAY timestamps commonly use a space between the date and
+  // time. Normalize that separator to the ISO form before parsing.
+  const timestamp = Date.parse(value.replace(" ", "T"));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 /**
- * Sorts time-series data in ascending chronological order.
+ * Sorts time-series data in ascending chronological order while preserving
+ * the correlation between each x value and its y values. Non-date category
+ * strings are intentionally left in their source order.
  */
 export function sortTimeSeriesAscending(
   xData: (string | number)[],
@@ -321,22 +338,29 @@ export function sortTimeSeriesAscending(
     return { xData, yDataMap };
   }
 
-  const first = xData[0];
-  const last = xData[xData.length - 1];
-
-  if (typeof first === "number" && typeof last === "number" && first > last) {
-    const indices = xData.map((_, i) => i);
-    indices.sort((a, b) => (xData[a] as number) - (xData[b] as number));
-
-    const sortedXData = indices.map((i) => xData[i]);
-    const sortedYDataMap: Record<string, (string | number)[]> = {};
-    for (const key of yFields) {
-      const original = yDataMap[key];
-      sortedYDataMap[key] = indices.map((i) => original[i]);
-    }
-
-    return { xData: sortedXData, yDataMap: sortedYDataMap };
+  const chronologicalValues = xData.map(toChronologicalValue);
+  if (chronologicalValues.some((value) => value === null)) {
+    return { xData, yDataMap };
   }
 
-  return { xData, yDataMap };
+  const indices = xData.map((_, i) => i);
+  indices.sort(
+    (a, b) =>
+      (chronologicalValues[a] as number) - (chronologicalValues[b] as number),
+  );
+
+  if (indices.every((originalIndex, index) => originalIndex === index)) {
+    return { xData, yDataMap };
+  }
+
+  const sortedXData = indices.map((i) => xData[i]);
+  const sortedYDataMap: Record<string, (string | number)[]> = {
+    ...yDataMap,
+  };
+  for (const key of yFields) {
+    const original = yDataMap[key];
+    sortedYDataMap[key] = indices.map((i) => original[i]);
+  }
+
+  return { xData: sortedXData, yDataMap: sortedYDataMap };
 }
