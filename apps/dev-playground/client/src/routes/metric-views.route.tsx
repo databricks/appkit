@@ -235,8 +235,10 @@ function FilterBadge({
 }
 
 /**
- * Loading / error / empty state shared by every visual card. Returns `null`
- * once data has rows so the caller renders the visual.
+ * Initial / error / empty state shared by every visual card. Returns `null`
+ * once data has rows so the caller renders the visual. During a same-shape
+ * refetch, `useMetricView` keeps the previous rows available, so this leaves
+ * the existing visual mounted while the replacement query is loading.
  *
  * `data === null` means the query hasn't produced a result yet — on first mount
  * `useMetricView` is `loading=false, data=null` for a frame before its effect
@@ -245,11 +247,9 @@ function FilterBadge({
  * so a failed query still surfaces its message rather than a skeleton.
  */
 function VisualStatus({
-  loading,
   error,
   data,
 }: {
-  loading: boolean;
   error: string | null;
   data: readonly unknown[] | null;
 }) {
@@ -259,7 +259,7 @@ function VisualStatus({
         {error}
       </div>
     );
-  if (loading || data === null) return <Skeleton className="h-64 w-full" />;
+  if (data === null) return <Skeleton className="h-64 w-full" />;
   if (data.length === 0)
     return (
       <div className="text-muted-foreground text-sm">
@@ -475,33 +475,29 @@ function MetricViewsRoute() {
               </CardAction>
             </CardHeader>
             <CardContent>
-              <VisualStatus
-                loading={region.loading}
-                error={region.error}
-                data={region.data}
-              />
-              {!region.loading &&
-                !region.error &&
-                region.data &&
-                region.data.length > 0 && (
-                  <BarChart
-                    data={normalizeChartDataForChart(region.data, "region")}
-                    xKey="region"
-                    yKey="arr"
-                    height={280}
-                    onDataClick={(d) =>
-                      setDimension("region", fromChartName(d.name))
-                    }
-                    selected={
-                      // `undefined` (no filter on this dimension) must stay
-                      // undefined — mapping it through `toItemValue` would emit
-                      // the NONE sentinel and emphasize the NULL bar.
-                      selection.region === undefined
-                        ? undefined
-                        : toItemValue(selection.region)
-                    }
-                  />
-                )}
+              <VisualStatus error={region.error} data={region.data} />
+              {!region.error && region.data && region.data.length > 0 && (
+                <BarChart
+                  data={normalizeChartDataForChart(region.data, "region")}
+                  xKey="region"
+                  yKey="arr"
+                  height={280}
+                  valueFormatter={(value, field) =>
+                    formatValue(value, region.metadata?.[field]?.format)
+                  }
+                  onDataClick={(d) =>
+                    setDimension("region", fromChartName(d.name))
+                  }
+                  selected={
+                    // `undefined` (no filter on this dimension) must stay
+                    // undefined — mapping it through `toItemValue` would emit
+                    // the NONE sentinel and emphasize the NULL bar.
+                    selection.region === undefined
+                      ? undefined
+                      : toItemValue(selection.region)
+                  }
+                />
+              )}
             </CardContent>
           </Card>
 
@@ -517,32 +513,28 @@ function MetricViewsRoute() {
               </CardAction>
             </CardHeader>
             <CardContent>
-              <VisualStatus
-                loading={segment.loading}
-                error={segment.error}
-                data={segment.data}
-              />
-              {!segment.loading &&
-                !segment.error &&
-                segment.data &&
-                segment.data.length > 0 && (
-                  <DonutChart
-                    data={normalizeChartDataForChart(segment.data, "segment")}
-                    xKey="segment"
-                    yKey="arr"
-                    height={280}
-                    innerRadius={55}
-                    showLegend
-                    onDataClick={(d) =>
-                      setDimension("segment", fromChartName(d.name))
-                    }
-                    selected={
-                      selection.segment === undefined
-                        ? undefined
-                        : toItemValue(selection.segment)
-                    }
-                  />
-                )}
+              <VisualStatus error={segment.error} data={segment.data} />
+              {!segment.error && segment.data && segment.data.length > 0 && (
+                <DonutChart
+                  data={normalizeChartDataForChart(segment.data, "segment")}
+                  xKey="segment"
+                  yKey="arr"
+                  height={280}
+                  innerRadius={55}
+                  showLegend
+                  valueFormatter={(value, field) =>
+                    formatValue(value, segment.metadata?.[field]?.format)
+                  }
+                  onDataClick={(d) =>
+                    setDimension("segment", fromChartName(d.name))
+                  }
+                  selected={
+                    selection.segment === undefined
+                      ? undefined
+                      : toItemValue(selection.segment)
+                  }
+                />
+              )}
             </CardContent>
           </Card>
         </div>
@@ -561,26 +553,22 @@ function MetricViewsRoute() {
             </CardAction>
           </CardHeader>
           <CardContent>
-            <VisualStatus
-              loading={trend.loading}
-              error={trend.error}
-              data={trend.data}
-            />
-            {!trend.loading &&
-              !trend.error &&
-              trend.data &&
-              trend.data.length > 0 && (
-                <LineChart
-                  data={trend.data}
-                  xKey="created_at"
-                  yKey={[...TREND_MEASURES]}
-                  height={320}
-                  showLegend
-                  onDataClick={(datum) => {
-                    console.log("[Metric Views] Line chart clicked", datum);
-                  }}
-                />
-              )}
+            <VisualStatus error={trend.error} data={trend.data} />
+            {!trend.error && trend.data && trend.data.length > 0 && (
+              <LineChart
+                data={trend.data}
+                xKey="created_at"
+                yKey={[...TREND_MEASURES]}
+                height={320}
+                showLegend
+                valueFormatter={(value, field) =>
+                  formatValue(value, trend.metadata?.[field]?.format)
+                }
+                onDataClick={(datum) => {
+                  console.log("[Metric Views] Line chart clicked", datum);
+                }}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -599,92 +587,85 @@ function MetricViewsRoute() {
             </CardAction>
           </CardHeader>
           <CardContent>
-            <VisualStatus
-              loading={table.loading}
-              error={table.error}
-              data={table.data}
-            />
-            {!table.loading &&
-              !table.error &&
-              table.data &&
-              table.data.length > 0 && (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {TABLE_COLUMNS.map((column) => (
-                          <TableHead key={column}>
-                            {formatLabel(column, table.metadata?.[column])}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {/* One row per region — region is the GROUP BY key, so
+            <VisualStatus error={table.error} data={table.data} />
+            {!table.error && table.data && table.data.length > 0 && (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {TABLE_COLUMNS.map((column) => (
+                        <TableHead key={column}>
+                          {formatLabel(column, table.metadata?.[column])}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {/* One row per region — region is the GROUP BY key, so
                           it's unique per row and safe as the React key. */}
-                      {table.data.map((row) => {
-                        // Keep a NULL group key as `null` so selecting the row
-                        // filters on `IS NULL`; `String(row.region)` would build
-                        // an `equals 'null'` that matches no row.
-                        const rowRegion =
-                          row.region === null || row.region === undefined
-                            ? null
-                            : String(row.region);
-                        const isSelected = selection.region === rowRegion;
-                        const toggle = () =>
-                          setDimension(
-                            "region",
-                            isSelected ? undefined : rowRegion,
-                          );
-                        return (
-                          // The <tr> keeps its native `row` role (no role
-                          // override — that would break table semantics for
-                          // screen readers); its onClick is a mouse-only
-                          // convenience. The real keyboard-accessible control is
-                          // the button in the region cell below.
-                          <TableRow
-                            key={toItemValue(rowRegion)}
-                            data-state={isSelected ? "selected" : undefined}
-                            className="cursor-pointer hover:bg-muted/50 data-[state=selected]:bg-muted"
-                            onClick={toggle}
-                          >
-                            {TABLE_COLUMNS.map((column) =>
-                              column === "region" ? (
-                                <TableCell key={column}>
-                                  <button
-                                    type="button"
-                                    aria-pressed={isSelected}
-                                    className="text-left underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-                                    // Stop propagation so activating the button
-                                    // doesn't also fire the row's onClick and
-                                    // toggle twice (net no-op).
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      toggle();
-                                    }}
-                                  >
-                                    {formatValue(
-                                      row[column],
-                                      table.metadata?.[column]?.format,
-                                    )}
-                                  </button>
-                                </TableCell>
-                              ) : (
-                                <TableCell key={column}>
+                    {table.data.map((row) => {
+                      // Keep a NULL group key as `null` so selecting the row
+                      // filters on `IS NULL`; `String(row.region)` would build
+                      // an `equals 'null'` that matches no row.
+                      const rowRegion =
+                        row.region === null || row.region === undefined
+                          ? null
+                          : String(row.region);
+                      const isSelected = selection.region === rowRegion;
+                      const toggle = () =>
+                        setDimension(
+                          "region",
+                          isSelected ? undefined : rowRegion,
+                        );
+                      return (
+                        // The <tr> keeps its native `row` role (no role
+                        // override — that would break table semantics for
+                        // screen readers); its onClick is a mouse-only
+                        // convenience. The real keyboard-accessible control is
+                        // the button in the region cell below.
+                        <TableRow
+                          key={toItemValue(rowRegion)}
+                          data-state={isSelected ? "selected" : undefined}
+                          className="cursor-pointer hover:bg-muted/50 data-[state=selected]:bg-muted"
+                          onClick={toggle}
+                        >
+                          {TABLE_COLUMNS.map((column) =>
+                            column === "region" ? (
+                              <TableCell key={column}>
+                                <button
+                                  type="button"
+                                  aria-pressed={isSelected}
+                                  className="text-left underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                                  // Stop propagation so activating the button
+                                  // doesn't also fire the row's onClick and
+                                  // toggle twice (net no-op).
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggle();
+                                  }}
+                                >
                                   {formatValue(
                                     row[column],
                                     table.metadata?.[column]?.format,
                                   )}
-                                </TableCell>
-                              ),
-                            )}
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+                                </button>
+                              </TableCell>
+                            ) : (
+                              <TableCell key={column}>
+                                {formatValue(
+                                  row[column],
+                                  table.metadata?.[column]?.format,
+                                )}
+                              </TableCell>
+                            ),
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

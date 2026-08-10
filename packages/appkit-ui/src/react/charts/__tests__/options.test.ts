@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { FALLBACK_UI_TOKENS } from "../constants";
 import {
   applySelectionEmphasis,
@@ -20,8 +20,22 @@ interface EChartsOption {
     borderColor?: string;
     textStyle?: { color: string };
   };
-  xAxis: { type: string; data?: unknown[] };
-  yAxis: { type: string; data?: unknown[] };
+  xAxis: {
+    type: string;
+    data?: unknown[];
+    axisLabel?: {
+      color?: string;
+      formatter?: (value: string | number) => string;
+    };
+  };
+  yAxis: {
+    type: string;
+    data?: unknown[];
+    axisLabel?: {
+      color?: string;
+      formatter?: (value: string | number) => string;
+    };
+  };
   series: Array<{
     type: string;
     data: unknown[];
@@ -34,7 +48,12 @@ interface EChartsOption {
     stack?: string;
     itemStyle?: { borderRadius?: number[] };
     color?: string;
-    label?: { show: boolean; position: string };
+    label?: {
+      show: boolean;
+      position: string;
+      formatter?: (params: { data: [number, number, number] }) => string;
+    };
+    tooltip?: { valueFormatter?: (value: unknown) => string };
     radius?: string | string[];
   }>;
   radar?: {
@@ -43,6 +62,7 @@ interface EChartsOption {
   visualMap?: {
     min: number;
     max: number;
+    formatter?: (value: number) => string;
     inRange: { color: string[] };
   };
 }
@@ -50,7 +70,11 @@ interface EChartsOption {
 interface RadarOption {
   series: Array<{
     type: string;
-    data: Array<{ value: number[]; areaStyle?: { opacity: number } }>;
+    data: Array<{
+      value: number[];
+      areaStyle?: { opacity: number };
+      tooltip?: { valueFormatter: (value: unknown) => string };
+    }>;
   }>;
 }
 
@@ -106,6 +130,31 @@ describe("buildCartesianOption", () => {
       expect(opt.xAxis.type).toBe("category");
       expect(opt.xAxis.data).toEqual(["A", "B", "C"]);
       expect(opt.yAxis.type).toBe("value");
+    });
+
+    test("formats value-axis ticks and series tooltips without replacing defaults", () => {
+      const valueFormatter = vi.fn(
+        (value: string | number, field: string) => `${field}: ${value}`,
+      );
+      const ctx = createBaseContext({ valueFormatter });
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "bar",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: false,
+          showSymbol: false,
+          symbolSize: 8,
+        }),
+      );
+
+      expect(opt.yAxis.axisLabel?.formatter?.(1234)).toBe("value: 1234");
+      expect(opt.series[0].tooltip?.valueFormatter?.(["Jan", 1234])).toBe(
+        "value: 1234",
+      );
+      expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+      expect(opt.yAxis.axisLabel).toMatchObject({ color: TEST_UI.axisLabel });
     });
 
     test("applies border radius to bars", () => {
@@ -541,6 +590,16 @@ describe("buildHorizontalBarOption", () => {
 
     expect(opt.legend).toBeDefined();
   });
+
+  test("formats the horizontal value axis", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: ${value}`,
+    });
+    const opt = asOption(buildHorizontalBarOption(ctx, false));
+
+    expect(opt.xAxis.axisLabel?.formatter?.(42)).toBe("value: 42");
+    expect(opt.series[0].tooltip?.valueFormatter?.(42)).toBe("value: 42");
+  });
 });
 
 describe("buildPieOption", () => {
@@ -608,6 +667,23 @@ describe("buildPieOption", () => {
     const center = asOption(buildPieOption(ctx, "pie", 0, true, "center"));
     expect(center.series[0].label?.position).toBe("center");
   });
+
+  test("formats tooltip values and preserves tooltip theming", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: $${value}`,
+    });
+    const opt = asOption(buildPieOption(ctx, "pie", 0, true, "outside"));
+    const formatter = opt.tooltip?.formatter as unknown as (params: {
+      name: string;
+      value: number;
+      percent: number;
+    }) => string;
+
+    expect(formatter({ name: "A", value: 10, percent: 25 })).toBe(
+      "A: value: $10 (25%)",
+    );
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+  });
 });
 
 describe("buildRadarOption", () => {
@@ -652,13 +728,22 @@ describe("buildRadarOption", () => {
     expect(opt.series[0].type).toBe("radar");
     expect(opt.series[0].data[0].value).toEqual([10, 20, 30]);
   });
+
+  test("formats radar tooltip values with the matching series field", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: ${value}`,
+    });
+    const opt = asRadarOption(buildRadarOption(ctx, true));
+
+    expect(opt.series[0].data[0].tooltip?.valueFormatter(10)).toBe("value: 10");
+  });
 });
 
 describe("buildHeatmapOption", () => {
   const createHeatmapContext = (): HeatmapContext => ({
     xData: ["9AM", "10AM", "11AM"],
     yDataMap: {},
-    yFields: [],
+    yFields: ["value"],
     colors: ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
     title: "Activity Heatmap",
     showLegend: false,
@@ -747,6 +832,24 @@ describe("buildHeatmapOption", () => {
     expect(output).toBe(
       "&lt;img src=x onerror=alert(1)&gt;, &lt;script&gt;alert(2)&lt;/script&gt;: 10",
     );
+  });
+
+  test("formats tooltips, labels, and the visual scale", () => {
+    const ctx = {
+      ...createHeatmapContext(),
+      showLabels: true,
+      valueFormatter: (value: string | number, field: string) =>
+        `${field}: ${value}%`,
+    };
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    expect(opt.tooltip?.formatter?.({ data: [1, 2, 25] })).toBe(
+      "10AM, Wed: value: 25%",
+    );
+    expect(opt.series[0].label?.formatter?.({ data: [1, 2, 25] })).toBe(
+      "value: 25%",
+    );
+    expect(opt.visualMap?.formatter?.(25)).toBe("value: 25%");
   });
 });
 

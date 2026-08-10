@@ -114,6 +114,7 @@ export type {
   ChartData,
   ChartType,
   ChartUITokens,
+  ChartValueFormatter,
   // Data formats
   DataFormat,
   DataProps,

@@ -44,6 +44,7 @@ import type {
   ChartColorPalette,
   ChartData,
   ChartType,
+  ChartValueFormatter,
   Orientation,
 } from "./types";
 import { mapToDatum } from "./utils";
@@ -170,6 +171,8 @@ export interface BaseChartProps {
    * duplicate echarts copies won't share registrations).
    */
   options?: Record<string, unknown>;
+  /** Formats measure values. See {@link ChartBaseProps.valueFormatter}. */
+  valueFormatter?: ChartValueFormatter;
   /** Additional CSS classes */
   className?: string;
   /**
@@ -217,6 +220,7 @@ export function BaseChart({
   min,
   max,
   options: customOptions,
+  valueFormatter,
   className,
   onDataClick,
   selected,
@@ -228,11 +232,8 @@ export function BaseChart({
 
   const ui = useChartUITokens();
 
-  // Only the *presence* of a click handler shapes the option (it flips
-  // `triggerLineEvent`/`symbolSize` on line/area) AND gates the `onEvents` map
-  // below. Depend on this boolean, not the handler reference, so an inline
-  // `onDataClick` (new identity every render) doesn't rebuild the option object
-  // each render — see `onEvents` for the matching subscription rationale.
+  // Handler presence enables line interaction and gates events. Tracking the
+  // boolean keeps inline handler identities from rebuilding chart options.
   const interactive = !!onDataClick;
 
   // Keep the latest handler in a ref so `onEvents` can call the current
@@ -300,6 +301,7 @@ export function BaseChart({
       showLegend,
       xField,
       ui,
+      valueFormatter,
     };
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";
@@ -360,8 +362,7 @@ export function BaseChart({
       });
     }
 
-    // Merge custom options, then apply declarative selection emphasis. When
-    // `selected` is undefined/empty, applySelectionEmphasis is a no-op.
+    // Apply selection after custom options; empty selection is a no-op.
     const merged = customOptions ? { ...opt, ...customOptions } : opt;
     return applySelectionEmphasis(merged, selected);
   }, [
@@ -383,13 +384,13 @@ export function BaseChart({
     min,
     max,
     customOptions,
+    valueFormatter,
     selected,
     interactive,
   ]);
 
-  // Category labels for index-addressed data. A heatmap datum is
-  // `[xIndex, yIndex, value]`, so `mapToDatum` needs the axis labels to report
-  // the clicked cell's categories instead of raw positions.
+  // Heatmap data uses axis indexes; preserve labels for click results instead
+  // of exposing those raw positions.
   const axisLabels = useMemo(
     () => ({
       xLabels: normalized.xData,
@@ -405,12 +406,10 @@ export function BaseChart({
   const axisLabelsRef = useRef(axisLabels);
   axisLabelsRef.current = axisLabels;
 
-  // Build the ECharts event map only when a click handler is provided. Memoized
-  // on the `interactive` boolean (handler PRESENCE), NOT on `onDataClick`'s
-  // identity: consumers pass an inline arrow whose identity changes every render,
-  // and echarts-for-react re-subscribes whenever `onEvents` identity changes — so
-  // keying on the reference would tear down and re-attach the click listener on
-  // every parent re-render (e.g. each SSE tick).
+  // Memoize by handler presence because echarts-for-react re-subscribes whenever
+  // `onEvents` changes, while callers commonly pass a new inline callback on
+  // every render. This also avoids churn during frequently changing data such
+  // as SSE ticks.
   const onEvents = useMemo(
     () =>
       interactive

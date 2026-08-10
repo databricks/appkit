@@ -308,11 +308,19 @@ export function mapToDatum(
 
 const DATE_STRING_PATTERN = /^\d{4}-\d{2}-\d{2}(?:$|[T\s])/;
 
-function toChronologicalValue(value: string | number): number | null {
+/**
+ * Converts a value to a number that can be compared chronologically, or null
+ * when it is not a date. This is the single definition of "chartable date"
+ * shared by field detection, value conversion and sorting: a shape-only check
+ * would classify "2025-01-01 nonsense" as a date field and then fail to place
+ * it on a time axis.
+ */
+export function toChronologicalValue(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
 
+  if (typeof value !== "string") return null;
   if (!DATE_STRING_PATTERN.test(value)) return null;
 
   // Spark JSON_ARRAY timestamps commonly use a space between the date and

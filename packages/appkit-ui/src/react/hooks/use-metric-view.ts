@@ -21,6 +21,7 @@ import type {
   PickMetricRow,
   UseMetricViewOptions,
   UseMetricViewResult,
+  WarehouseStatus,
 } from "./types";
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
@@ -40,7 +41,7 @@ function asMetricMetadata(
  * @param key - Metric view identifier
  * @param options - Measures (required) plus optional dimensions, filter,
  *   orderBy, timeGrain/timeDimension, and limit
- * @returns Metric result state with typed rows and per-column display metadata
+ * @returns Metric result state with typed rows, display metadata, and warehouse readiness
  *
  * @remarks
  * `orderBy` and `limit` interact. With `limit`, the route completes the ordering
@@ -48,6 +49,10 @@ function asMetricMetadata(
  * run — pass `orderBy` to choose WHICH rows (top-N), since the completion only
  * makes the result stable, not ranked. Without `limit`, `orderBy` is presentation
  * ordering over the full result and gets no completion.
+ *
+ * When a request refetches with the same metric key, measures, and dimensions,
+ * the previous `data` and `metadata` remain available while `loading` is true.
+ * Changing any of those result-shaping fields clears the previous result.
  *
  * @example
  * ```typescript
@@ -72,18 +77,23 @@ export function useMetricView<
   key: K,
   options: UseMetricViewOptions<K, M, D>,
 ): UseMetricViewResult<PickMetricRow<K, M, D>[]> {
+  const autoStart = options.autoStart ?? true;
   const devMode = getDevMode();
   const urlSuffix = `/api/analytics/metric/${encodeURIComponent(key)}${devMode}`;
 
   type Rows = PickMetricRow<K, M, D>[];
-  const [data, setData] = useState<Rows | null>(null);
+  const [result, setResult] = useState<{
+    shape: string;
+    data: Rows;
+    metadata: Record<string, MetricViewColumnDisplay> | undefined;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
-  const [metadata, setMetadata] = useState<
-    Record<string, MetricViewColumnDisplay> | undefined
-  >(undefined);
+  const [warehouseStatus, setWarehouseStatus] =
+    useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const requestedShapeRef = useRef<string | null>(null);
 
   const publisherId = useId();
   const {
@@ -95,10 +105,8 @@ export function useMetricView<
     throw new Error("useMetricView: 'key' must be a non-empty string.");
   }
 
-  // Serialize the request body from only the defined fields. Keeping it a string
-  // makes `start`'s dependency check compare the request by value, so callers
-  // passing inline `measures`/`filter` literals don't re-fire the query on every
-  // render just because the object identity changed.
+  // Stringify defined fields so `start` compares the request by value and inline
+  // arrays or filter literals do not re-fire the query on every render.
   const payload = useMemo(() => {
     const body: {
       measures: ReadonlyArray<unknown>;
@@ -127,16 +135,34 @@ export function useMetricView<
     options.limit,
   ]);
 
+  // Filters, ordering, limits, and time bucketing change which rows or values
+  // are returned without changing their fields. Keep the last result visible
+  // for those revalidations, but never expose rows from another metric/column
+  // selection under the new result type.
+  const resultShape = JSON.stringify({
+    key,
+    measures: options.measures,
+    dimensions: options.dimensions ?? [],
+  });
+
+  // Hide stale rows during the render that changes shape, before the effect
+  // below has had a chance to start the replacement request and clear state.
+  const isCurrentShape = result?.shape === resultShape;
+  const data = isCurrentShape ? result.data : null;
+  const metadata = isCurrentShape ? result.metadata : undefined;
+
   const start = useCallback(() => {
     abortControllerRef.current?.abort();
 
     setLoading(true);
     setError(null);
     setErrorCode(null);
-    setData(null);
-    setMetadata(undefined);
-    // Register this hook's slot (null = registered, not contributing) so a
-    // re-query clears any stale warehouse status from the prior run.
+    setWarehouseStatus(null);
+    if (requestedShapeRef.current !== resultShape) {
+      requestedShapeRef.current = resultShape;
+      setResult(null);
+    }
+    // Register an empty slot to clear stale status from the prior run.
     publishWarehouseStatus(null);
 
     const abortController = new AbortController();
@@ -152,12 +178,18 @@ export function useMetricView<
       setLoading,
       setError,
       setErrorCode,
-      onWarehouseStatus: publishWarehouseStatus,
+      onWarehouseStatus: (status) => {
+        setWarehouseStatus(status);
+        publishWarehouseStatus(status);
+      },
       onResult: (message) => {
         setError(null);
         setErrorCode(null);
-        setData(message.data as Rows);
-        setMetadata(asMetricMetadata(message.payload.metadata));
+        setResult({
+          shape: resultShape,
+          data: message.data as Rows,
+          metadata: asMetricMetadata(message.payload.metadata),
+        });
       },
       unpublishWarehouseStatus,
     };
@@ -173,21 +205,24 @@ export function useMetricView<
   }, [
     key,
     payload,
+    resultShape,
     urlSuffix,
     publishWarehouseStatus,
     unpublishWarehouseStatus,
   ]);
 
   useEffect(() => {
-    start();
+    if (autoStart) {
+      start();
+    }
 
     return () => {
       abortControllerRef.current?.abort();
       unpublishWarehouseStatus();
     };
-  }, [start, unpublishWarehouseStatus]);
+  }, [start, autoStart, unpublishWarehouseStatus]);
 
   useQueryHMR(key, start);
 
-  return { data, loading, error, errorCode, metadata };
+  return { data, loading, error, errorCode, metadata, warehouseStatus };
 }

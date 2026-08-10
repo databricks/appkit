@@ -1,5 +1,5 @@
 import { FALLBACK_UI_TOKENS } from "./constants";
-import type { ChartType, ChartUITokens } from "./types";
+import type { ChartType, ChartUITokens, ChartValueFormatter } from "./types";
 import {
   createTimeSeriesData,
   escapeHtml,
@@ -20,6 +20,7 @@ export interface OptionBuilderContext {
   showLegend: boolean;
   xField?: string;
   ui?: ChartUITokens;
+  valueFormatter?: ChartValueFormatter;
 }
 
 export interface CartesianContext extends OptionBuilderContext {
@@ -87,6 +88,28 @@ function tooltipTokens(ui: ChartUITokens) {
   };
 }
 
+/**
+ * ECharts passes tuple-backed series (time-series, scatter, heatmap) to tooltip
+ * value formatters as the whole tuple. The measure is always the final entry.
+ */
+function toMeasureValue(value: unknown): string | number {
+  const scalar = Array.isArray(value) ? value[value.length - 1] : value;
+  if (typeof scalar === "string" || typeof scalar === "number") return scalar;
+  return scalar == null ? "" : String(scalar);
+}
+
+function tooltipValueFormatter(formatter: ChartValueFormatter, field: string) {
+  return (value: unknown) => formatter(toMeasureValue(value), field);
+}
+
+function valueAxisLabel(ctx: OptionBuilderContext) {
+  const field = ctx.yFields[0];
+  const formatter = ctx.valueFormatter;
+  return formatter && field
+    ? { formatter: (value: string | number) => formatter(value, field) }
+    : {};
+}
+
 // ============================================================================
 // Radar Chart Option
 // ============================================================================
@@ -96,6 +119,7 @@ export function buildRadarOption(
   showArea = true,
 ): Record<string, unknown> {
   const ui = ctx.ui ?? FALLBACK_UI_TOKENS;
+  const formatter = ctx.valueFormatter;
   const maxValue = Math.max(
     ...ctx.yFields.flatMap((f) => ctx.yDataMap[f].map((v) => Number(v) || 0)),
   );
@@ -123,6 +147,16 @@ export function buildRadarOption(
         data: ctx.yFields.map((key, idx) => ({
           name: formatLabel(key),
           value: ctx.yDataMap[key],
+          tooltip: formatter
+            ? {
+                valueFormatter: (value: unknown) => {
+                  const values = Array.isArray(value) ? value : [value];
+                  return values
+                    .map((item) => formatter(toMeasureValue(item), key))
+                    .join(", ");
+                },
+              }
+            : undefined,
           itemStyle: { color: ctx.colors[idx % ctx.colors.length] },
           areaStyle: showArea ? { opacity: 0.3 } : undefined,
         })),
@@ -149,13 +183,25 @@ export function buildPieOption(
   }));
 
   const isDonut = chartType === "donut" || innerRadius > 0;
+  const valueField = ctx.yFields[0];
+  const formatter = ctx.valueFormatter;
 
   return {
     ...buildBaseOption(ctx),
     tooltip: {
       ...tooltipTokens(ui),
       trigger: "item",
-      formatter: "{b}: {c} ({d}%)",
+      formatter:
+        formatter && valueField
+          ? (params: {
+              name: string;
+              value: string | number;
+              percent: number;
+            }) =>
+              `${escapeHtml(String(params.name))}: ${escapeHtml(
+                formatter(params.value, valueField),
+              )} (${params.percent}%)`
+          : "{b}: {c} ({d}%)",
     },
     legend: ctx.showLegend
       ? {
@@ -218,7 +264,7 @@ export function buildHorizontalBarOption(
       top: ctx.title ? "15%" : "5%",
       bottom: ctx.showLegend && hasMultipleSeries ? "15%" : "5%",
     },
-    xAxis: { type: "value", ...axisCommon(ui) },
+    xAxis: { type: "value", ...mergeAxisLabel(ui, valueAxisLabel(ctx)) },
     yAxis: {
       type: "category",
       data: ctx.xData,
@@ -235,6 +281,11 @@ export function buildHorizontalBarOption(
       stack: stacked ? "total" : undefined,
       itemStyle: { borderRadius: [0, 4, 4, 0] },
       color: ctx.colors[idx % ctx.colors.length],
+      tooltip: ctx.valueFormatter
+        ? {
+            valueFormatter: tooltipValueFormatter(ctx.valueFormatter, key),
+          }
+        : undefined,
     })),
   };
 }
@@ -260,6 +311,10 @@ export function buildHeatmapOption(
   ctx: HeatmapContext,
 ): Record<string, unknown> {
   const ui = ctx.ui ?? FALLBACK_UI_TOKENS;
+  const valueField = ctx.yFields[0];
+  const formatter = ctx.valueFormatter;
+  const formatHeatmapValue = (value: number) =>
+    formatter && valueField ? formatter(value, valueField) : String(value);
   return {
     ...buildBaseOption(ctx),
     tooltip: {
@@ -271,7 +326,7 @@ export function buildHeatmapOption(
         // tooltip DOM, so data-derived labels must be escaped.
         const xLabel = escapeHtml(String(ctx.xData[xIdx] ?? xIdx));
         const yLabel = escapeHtml(String(ctx.yAxisData[yIdx] ?? yIdx));
-        return `${xLabel}, ${yLabel}: ${escapeHtml(String(value))}`;
+        return `${xLabel}, ${yLabel}: ${escapeHtml(formatHeatmapValue(value))}`;
       },
     },
     grid: {
@@ -305,6 +360,10 @@ export function buildHeatmapOption(
       right: "2%",
       top: "center",
       textStyle: { color: ui.axisTitle },
+      formatter:
+        formatter && valueField
+          ? (value: number) => formatter(value, valueField)
+          : undefined,
       inRange: {
         // A visualMap gradient needs at least two stops; with a single-color
         // palette, ramp from a light grey to that color instead of passing a
@@ -319,7 +378,7 @@ export function buildHeatmapOption(
         label: {
           show: ctx.showLabels,
           formatter: (params: { data: [number, number, number] }) =>
-            String(params.data[2]),
+            formatHeatmapValue(params.data[2]),
         },
         emphasis: {
           itemStyle: {
@@ -385,7 +444,7 @@ export function buildCartesianOption(
     yAxis: {
       type: "value",
       name: ctx.yFields.length === 1 ? formatLabel(ctx.yFields[0]) : undefined,
-      ...axisCommon(ui),
+      ...mergeAxisLabel(ui, valueAxisLabel(ctx)),
     },
     series: ctx.yFields.map((key, idx) => ({
       name: formatLabel(key),
@@ -409,6 +468,11 @@ export function buildCartesianOption(
       itemStyle:
         chartType === "bar" ? { borderRadius: [4, 4, 0, 0] } : undefined,
       color: ctx.colors[idx % ctx.colors.length],
+      tooltip: ctx.valueFormatter
+        ? {
+            valueFormatter: tooltipValueFormatter(ctx.valueFormatter, key),
+          }
+        : undefined,
     })),
   };
 }
@@ -418,9 +482,7 @@ export function buildCartesianOption(
 // ============================================================================
 
 /**
- * Opacity applied to data elements that are NOT part of the current selection.
- * Kept local to the option builder since it only describes selection styling and
- * is not a themeable UI token.
+ * Selection opacity stays local because it is not a theme token.
  */
 const DIMMED_OPACITY = 0.3;
 
@@ -436,15 +498,9 @@ interface SelectionEmphasisOptions {
 }
 
 /**
- * Normalizes the `selected` input into a lookup set of category names.
- * Returns `null` when there is nothing selected (undefined, or an empty
- * string/array), which callers treat as "no emphasis".
+ * Returns selected category names, or `null` when empty.
  *
- * Falsy entries (`""`, and after stringify anything empty) are dropped BEFORE
- * the size check: an empty-string selection would otherwise survive as
- * `Set{""}`, match no category, and dim every element — the opposite of the
- * "empty = no-op" contract. A mixed array like `["EMEA","","APAC"]` likewise
- * sheds its dead `""` member.
+ * Drop empty strings before the size check so they cannot dim every element.
  */
 function toSelectionSet(
   selected: string | string[] | undefined,
@@ -458,14 +514,9 @@ function toSelectionSet(
 }
 
 /**
- * Finds the category-axis label array (`xAxis`/`yAxis` with `type: "category"`),
- * used to map a bar datum's position to its category name. Returns `null` when
- * no category axis is present (e.g. time-series or value axes).
- *
- * Assumes exactly one category axis (the first of x/y wins) — true for the
- * builders here: vertical bars carry a category `xAxis` + value `yAxis`,
- * horizontal bars the reverse. A chart with two category axes is not a shape
- * these builders produce.
+ * Finds category-axis labels used to map bar positions to names.
+ * Built-in chart options expose at most one category axis.
+ * Horizontal and vertical bars put that category on different axes.
  */
 function categoryNamesFromAxes(
   option: Record<string, unknown>,
@@ -505,12 +556,8 @@ function withDatumOpacity(datum: unknown, opacity: number): unknown {
 }
 
 /**
- * Applies per-datum opacity to a single series based on the selection set.
- * Only categorical series carry a resolvable category name:
- * - `pie` — the name is read from each datum's `name` field.
- * - `bar` — the name is read from the category axis at the datum's index.
- * All other series types (line, area, scatter, radar, heatmap) are returned
- * unchanged, as is any series lacking a resolvable category name.
+ * Applies opacity to pie/bar categories. Other chart types stay unchanged
+ * because they do not expose an unambiguous category name here.
  */
 function emphasizeSeries(
   series: unknown,

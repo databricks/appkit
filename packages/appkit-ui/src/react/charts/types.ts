@@ -38,6 +38,12 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
+/** Formats a measure value for chart axes, tooltips, and value labels. */
+export type ChartValueFormatter = (
+  value: string | number,
+  field: string,
+) => string;
+
 // ============================================================================
 // Base Props (shared by all charts)
 // ============================================================================
@@ -89,6 +95,16 @@ export interface ChartBaseProps {
 
   /** Additional ECharts options to merge */
   options?: Record<string, unknown>;
+
+  /**
+   * Formats measure values in the chart's built-in value axes, tooltips, and
+   * value labels. `field` is the corresponding `yKey`, so one formatter can
+   * select a different format for each series.
+   *
+   * For charts with multiple series on one value axis, axis ticks use the
+   * first `yKey`; each tooltip uses its own series field.
+   */
+  valueFormatter?: ChartValueFormatter;
 
   /**
    * Pointer-only: charts render to <canvas>, so this does not fire for keyboard

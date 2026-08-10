@@ -309,7 +309,7 @@ If the configured SQL warehouse is `STOPPED` or `STARTING` when a query is reque
 2. Poll the warehouse state and stream `warehouse_status` events over SSE until it reaches `RUNNING`.
 3. Execute the SQL statement.
 
-This means a cold start no longer freezes the UI on a stalled spinner. Render the new `warehouseStatus` field to give users feedback:
+This means a cold start no longer freezes the UI on a stalled spinner. Both `useAnalyticsQuery` and `useMetricView` expose the latest status for their current request through `warehouseStatus`; render it to give users feedback:
 
 ```tsx
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
@@ -329,7 +329,7 @@ function SpendTable() {
 }
 ```
 
-`warehouseStatus` is `null` until the first status event arrives. After the server has observed the warehouse `RUNNING` once, subsequent requests within ~30s skip the readiness check entirely and `warehouseStatus` stays `null`, so the steady-state hot path isn't taxed any extra round-trips.
+For both hooks, `warehouseStatus` resets to `null` when a request starts and remains there until the first status event arrives. After the server has observed the warehouse `RUNNING` once, subsequent requests within ~30s skip the readiness check entirely and `warehouseStatus` stays `null`, so the steady-state hot path isn't taxed any extra round-trips.
 
 If the warehouse is `DELETED`/`DELETING` or fails to reach `RUNNING` within the configured timeout, the route emits an `error` event (surfaced via the `error` field).
 
@@ -355,7 +355,7 @@ export function AppShell({ children }) {
 }
 ```
 
-`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders only the `<Toaster />` mount point while every resource is healthy; it pops a single sticky toast — `toast.loading` for cold starts, `toast.error` for unrecoverable states — keyed by the worst kind, and dismisses it when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
+`useAnalyticsQuery` and `useMetricView` register themselves with the nearest provider, so no per-chart wiring is needed. The indicator renders only the `<Toaster />` mount point while every resource is healthy; it pops a single sticky toast — `toast.loading` for cold starts, `toast.error` for unrecoverable states — keyed by the worst kind, and dismisses it when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
 
 If you already render your own `<Toaster />` for unrelated app toasts, drop the indicator and call `useResourceStatusToaster()` instead so resource-status toasts share that single Toaster:
 
@@ -520,13 +520,14 @@ React hook that measures a [metric view](#metric-views) over SSE — the client 
 ```ts
 import { useMetricView } from "@databricks/appkit-ui/react";
 
-const { data, loading, error, errorCode, metadata } = useMetricView("revenue", {
-  measures: ["arr", "mrr"],
-  dimensions: ["created_at"],
-  timeGrain: "month",
-  timeDimension: "created_at",
-  orderBy: [{ field: "created_at", direction: "ASC" }],
-});
+const { data, loading, error, errorCode, metadata, warehouseStatus } =
+  useMetricView("revenue", {
+    measures: ["arr", "mrr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
 ```
 
 When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view types](../development/type-generation.md#metric-view-types)), the measure/dimension names, the allowed `timeGrain` values, and the selected row keys are all inferred — passing an unknown measure is a type error. JSON_ARRAY preserves SQL scalar cells as strings and allows SQL NULL for every column, so `data` is typed as `Array<{ arr: string | null; mrr: string | null; created_at: string | null }> | null`; use `metadata[col].type` when intentionally parsing a value.
@@ -544,6 +545,7 @@ Time-series queries should explicitly order their selected time dimension ascend
 | `timeDimension` | `string`                    | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`.                           |
 | `orderBy`       | `{field, direction?}[]`     | no       | Sort keys. `field` is narrowed to the measures/dimensions this call selected, so ordering by an unselected column is a type error. See [Deterministic results with `limit`](#deterministic-results-with-limit). |
 | `limit`         | `number`                    | no       | Positive integer row cap.                                                                        |
+| `autoStart`     | `boolean`                   | no       | Start the metric query automatically. Defaults to `true`; set to `false` to defer it until the option becomes `true`. |
 
 **Return type:**
 
@@ -554,6 +556,7 @@ Time-series queries should explicitly order their selected time dimension ascend
   error: string | null; // sanitized human-readable message, or null on success
   errorCode: string | null; // stable upstream code (branch on this, not the message)
   metadata: Record<string, MetricViewColumnDisplay> | undefined; // per-column display metadata (see below)
+  warehouseStatus: WarehouseStatus | null; // latest readiness status for the current request
 }
 ```
 
@@ -637,6 +640,40 @@ function RevenueTable() {
 #### Feeding the format into charts
 
 Because `metadata[col].format` is just a string on the payload, the same spec drives axis ticks and tooltips in any chart library.
+
+**AppKit charts** — pass a `valueFormatter` to the built-in chart. The second argument is the measure field, so one callback can select the catalog format for each series. The chart applies it to its built-in value axis and per-series tooltips without replacing the internal ECharts `yAxis` or `tooltip` defaults:
+
+```tsx
+import { formatValue } from "@databricks/appkit-ui/js";
+import { LineChart, useMetricView } from "@databricks/appkit-ui/react";
+
+function RevenueChart() {
+  const { data, metadata } = useMetricView("revenue", {
+    measures: ["arr", "mrr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+
+  if (!data) return null;
+
+  return (
+    <LineChart
+      data={data}
+      xKey="created_at"
+      yKey={["arr", "mrr"]}
+      valueFormatter={(value, field) =>
+        formatValue(value, metadata?.[field]?.format)
+      }
+    />
+  );
+}
+```
+
+When multiple series share one value axis, its ticks use the first `yKey`; each tooltip uses the matching series field.
+
+The `selected` prop adds declarative emphasis only to bar, pie, and donut charts. Line, area, scatter, heatmap, and radar charts ignore it because category-selection semantics are not defined for those chart types.
 
 **[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
 

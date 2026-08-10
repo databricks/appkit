@@ -12,18 +12,11 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
   // `timeDimension` only changes the SQL when `timeGrain` is set (see renderDimensionClause)
   const timeDimensionPart =
     input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
-  // `orderBy` is NOT sorted (unlike measures/dimensions) because the sequence is
-  // semantic: `ORDER BY a, b` returns different rows under LIMIT than `ORDER BY b, a`.
-  // Sorting it would incorrectly collapse two genuinely different queries onto the same
-  // cache key. We still normalize absent directions to "ASC" for cache key equality.
-  //
-  // Known, accepted over-splitting: a request whose `orderBy` merely restates the
-  // dimensions the `limit` tie-breaker would have appended renders SQL identical to
-  // one that omits `orderBy`, yet keys differently. Collapsing those would mean
-  // replicating `renderOrderByClause`'s completion logic here — two copies of the
-  // rule to keep in sync, where drift produces a key COLLISION (wrong order served
-  // from cache). An extra cache entry is the safe side of that trade; do not "fix"
-  // this by canonicalizing.
+  // Preserve `orderBy` sequence: under LIMIT, `a, b` and `b, a` can return
+  // different rows and must not share a key. Directions still default to ASC.
+  // We accept extra entries when an explicit order matches the generated
+  // tie-breaker rather than duplicate `renderOrderByClause` here: rule drift
+  // could create a collision and serve incorrectly ordered cached results.
   const orderByPart =
     input.orderBy !== undefined && input.orderBy.length > 0
       ? JSON.stringify(
@@ -35,12 +28,8 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
     input.metricKey,
     input.source,
     input.format,
-    // JSON-encode (not raw `.join(",")`): a comma is a legal identifier
-    // character (`isValidColumnName` rejects only control chars / newlines), so
-    // joining on `,` would collapse `["a,b"]` and `["a","b"]` to the same key
-    // element despite rendering different SQL. JSON quoting keeps the key
-    // one-to-one with the generated SQL — the same encoding `canonicalizeFilter`
-    // uses for predicate members below.
+    // JSON encoding keeps `["a,b"]` distinct from `["a","b"]`; commas are
+    // valid identifier characters, so joining would create a cache collision.
     JSON.stringify(sortedMeasures),
     JSON.stringify(sortedDimensions),
     input.timeGrain ?? "_",

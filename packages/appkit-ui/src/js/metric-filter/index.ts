@@ -67,7 +67,6 @@ export function toMetricFilter(
     const value = selection[member];
     if (value === undefined) continue;
     if (value === null) {
-      // `notSet` renders `IS NULL` and takes no values.
       predicates.push({ member, operator: "notSet" });
     } else if (Array.isArray(value)) {
       if (value.length === 0) continue;

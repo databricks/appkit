@@ -88,6 +88,46 @@ describe("useMetricView", () => {
     });
   });
 
+  test("does not start until autoStart becomes true and keeps it out of the request body", () => {
+    const { rerender } = renderHook(
+      ({ autoStart }: { autoStart: boolean }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          autoStart,
+        }),
+      { initialProps: { autoStart: false } },
+    );
+
+    expect(mockConnectSSE).not.toHaveBeenCalled();
+
+    rerender({ autoStart: true });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+      measures: ["revenue"],
+    });
+    expect(JSON.parse(lastConnectArgs.payload)).not.toHaveProperty("autoStart");
+  });
+
+  test("aborts an active request when autoStart becomes false", () => {
+    const { rerender } = renderHook(
+      ({ autoStart }: { autoStart: boolean }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          autoStart,
+        }),
+      { initialProps: { autoStart: true } },
+    );
+    const signal = mockConnectSSE.mock.calls[0][0].signal as AbortSignal;
+
+    expect(signal.aborted).toBe(false);
+
+    rerender({ autoStart: false });
+
+    expect(signal.aborted).toBe(true);
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
   test("serializes orderBy into the POST body when provided", () => {
     renderHook(() =>
       useMetricView("orders", {
@@ -282,15 +322,48 @@ describe("useMetricView", () => {
     expect(result.current.error).toBeNull();
   });
 
-  test("publishes warehouse_status to the resource provider without exposing it on the result", async () => {
+  test("exposes the latest warehouse_status locally and publishes every status", async () => {
     const { result } = renderHook(() =>
       useMetricView("orders", { measures: ["revenue"] }),
     );
 
     expect(result.current.loading).toBe(true);
+    expect(result.current.warehouseStatus).toBeNull();
     // start() registers the slot with a null status (see the publish-only
     // side-channel) before any event arrives.
     expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(null);
+
+    const stopped = { state: "STOPPED", elapsedMs: 200 };
+    const starting = { state: "STARTING", elapsedMs: 1200 };
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "warehouse_status", status: stopped }),
+      });
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "warehouse_status", status: starting }),
+      });
+    });
+
+    // The same event drives both per-hook feedback and the optional shared
+    // provider's global "warehouse starting…" indicator.
+    expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(stopped);
+    expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(starting);
+    expect(mockUnpublishWarehouseStatus).not.toHaveBeenCalled();
+    expect(result.current.warehouseStatus).toEqual(starting);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  test("resets local warehouse status when a new request starts", () => {
+    const { result, rerender } = renderHook(
+      ({ region }: { region: string }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          filter: { member: "region", operator: "equals", values: [region] },
+        }),
+      { initialProps: { region: "EMEA" } },
+    );
 
     const status = { state: "STARTING", elapsedMs: 1200 };
     act(() => {
@@ -298,16 +371,13 @@ describe("useMetricView", () => {
         data: JSON.stringify({ type: "warehouse_status", status }),
       });
     });
+    expect(result.current.warehouseStatus).toEqual(status);
 
-    // The event is published to the shared provider (driving a global
-    // "warehouse starting…" indicator) but the metric result shape does NOT
-    // expose warehouseStatus and the hook stays loading.
-    expect(mockPublishWarehouseStatus).toHaveBeenCalledWith(status);
-    expect(mockUnpublishWarehouseStatus).not.toHaveBeenCalled();
-    expect(result.current).not.toHaveProperty("warehouseStatus");
+    rerender({ region: "APAC" });
+
+    expect(result.current.warehouseStatus).toBeNull();
     expect(result.current.loading).toBe(true);
-    expect(result.current.data).toBeNull();
-    expect(result.current.error).toBeNull();
+    expect(mockPublishWarehouseStatus).toHaveBeenLastCalledWith(null);
   });
 
   test("unpublishes warehouse status once the result arrives", async () => {
@@ -490,6 +560,91 @@ describe("useMetricView", () => {
     expect(mockConnectSSE).toHaveBeenCalledTimes(2);
   });
 
+  test("preserves data and metadata while a filter change revalidates", async () => {
+    const { result, rerender } = renderHook(
+      ({ region }: { region: string }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          dimensions: ["region"],
+          filter: { member: "region", operator: "equals", values: [region] },
+        }),
+      { initialProps: { region: "EMEA" } },
+    );
+    const metadata = {
+      revenue: { type: "DECIMAL", display_name: "Revenue" },
+      region: { type: "STRING", display_name: "Region" },
+    };
+
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({
+          type: "result",
+          data: [{ revenue: 100, region: "EMEA" }],
+          metadata,
+        }),
+      });
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ region: "APAC" });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toEqual([{ revenue: 100, region: "EMEA" }]);
+    expect(result.current.metadata).toEqual(metadata);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("clears data and metadata when selected columns change", async () => {
+    const { result, rerender } = renderHook(
+      ({ measure }: { measure: string }) =>
+        useMetricView("orders", { measures: [measure] }),
+      { initialProps: { measure: "revenue" } },
+    );
+
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({
+          type: "result",
+          data: [{ revenue: 100 }],
+          metadata: { revenue: { type: "DECIMAL" } },
+        }),
+      });
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ measure: "order_count" });
+
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.metadata).toBeUndefined();
+  });
+
+  test("clears data and metadata when the metric key changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ metricKey }: { metricKey: string }) =>
+        useMetricView(metricKey, { measures: ["revenue"] }),
+      { initialProps: { metricKey: "orders" } },
+    );
+
+    act(() => {
+      lastConnectArgs.onMessage({
+        data: JSON.stringify({
+          type: "result",
+          data: [{ revenue: 100 }],
+          metadata: { revenue: { type: "DECIMAL" } },
+        }),
+      });
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ metricKey: "customers" });
+
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.metadata).toBeUndefined();
+  });
+
   test("refetches when the timeGrain changes", () => {
     const { rerender } = renderHook(
       ({ grain }: { grain: string }) =>
@@ -520,6 +675,31 @@ describe("useMetricView", () => {
   });
 
   describe("aborted controller", () => {
+    test("ignores a late warehouse_status envelope after the controller was aborted", async () => {
+      const { result } = renderHook(() =>
+        useMetricView("orders", { measures: ["revenue"] }),
+      );
+
+      await waitFor(() => expect(capturedCallbacks.signal).toBeDefined());
+      const publishCallsBefore = mockPublishWarehouseStatus.mock.calls.length;
+
+      markAborted();
+
+      act(() => {
+        capturedCallbacks.onMessage?.({
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "STARTING", elapsedMs: 1200 },
+          }),
+        });
+      });
+
+      expect(result.current.warehouseStatus).toBeNull();
+      expect(mockPublishWarehouseStatus).toHaveBeenCalledTimes(
+        publishCallsBefore,
+      );
+    });
+
     test("ignores a late result envelope after the controller was aborted", async () => {
       const { result } = renderHook(() =>
         useMetricView("orders", { measures: ["revenue"] }),

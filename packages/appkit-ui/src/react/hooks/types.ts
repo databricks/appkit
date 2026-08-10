@@ -444,6 +444,8 @@ export type UseMetricViewOptions<
   filter?: MetricFilter;
   orderBy?: ReadonlyArray<MetricOrderBy<M[number] | D[number]>>;
   limit?: number;
+  /** Whether to automatically start the metric query. Default is true. */
+  autoStart?: boolean;
 } & MetricViewTimeOptions<K, D>;
 
 export interface UseMetricViewResult<T = Record<string, unknown>[]> {
@@ -454,4 +456,9 @@ export interface UseMetricViewResult<T = Record<string, unknown>[]> {
   errorCode: string | null;
   /** Per-column display metadata for the queried columns, carried in the SSE result payload. `undefined` when the server injected no metadata (dormant / unknown key). */
   metadata: Record<string, MetricViewColumnDisplay> | undefined;
+  /**
+   * Latest warehouse status emitted while waiting for the SQL warehouse to
+   * reach RUNNING. `null` until the current request receives a status event.
+   */
+  warehouseStatus: WarehouseStatus | null;
 }
