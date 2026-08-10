@@ -39,8 +39,15 @@ function asMetricMetadata(
  *
  * @param key - Metric view identifier
  * @param options - Measures (required) plus optional dimensions, filter,
- *   timeGrain/timeDimension, and limit
+ *   orderBy, timeGrain/timeDimension, and limit
  * @returns Metric result state with typed rows and per-column display metadata
+ *
+ * @remarks
+ * `orderBy` and `limit` interact. With `limit`, the route completes the ordering
+ * with the remaining dimensions so the capped rows are the *same* rows on every
+ * run — pass `orderBy` to choose WHICH rows (top-N), since the completion only
+ * makes the result stable, not ranked. Without `limit`, `orderBy` is presentation
+ * ordering over the full result and gets no completion.
  *
  * @example
  * ```typescript
@@ -48,6 +55,8 @@ function asMetricMetadata(
  *   measures: ["revenue"],
  *   dimensions: ["region"],
  *   filter: { member: "region", operator: "in", values: ["EMEA", "APAC"] },
+ *   orderBy: [{ field: "revenue", direction: "DESC" }],
+ *   limit: 10,
  * });
  * // JSON_ARRAY preserves SQL scalar cells as strings and nullable columns as null:
  * // data: Array<{ revenue: string | null; region: string | null }> | null
@@ -97,6 +106,7 @@ export function useMetricView<
       filter?: unknown;
       timeGrain?: unknown;
       timeDimension?: unknown;
+      orderBy?: ReadonlyArray<unknown>;
       limit?: number;
     } = { measures: options.measures };
     if (options.dimensions !== undefined) body.dimensions = options.dimensions;
@@ -104,6 +114,7 @@ export function useMetricView<
     if (options.timeGrain !== undefined) body.timeGrain = options.timeGrain;
     if (options.timeDimension !== undefined)
       body.timeDimension = options.timeDimension;
+    if (options.orderBy !== undefined) body.orderBy = options.orderBy;
     if (options.limit !== undefined) body.limit = options.limit;
     return JSON.stringify(body);
   }, [
@@ -112,6 +123,7 @@ export function useMetricView<
     options.filter,
     options.timeGrain,
     options.timeDimension,
+    options.orderBy,
     options.limit,
   ]);
 

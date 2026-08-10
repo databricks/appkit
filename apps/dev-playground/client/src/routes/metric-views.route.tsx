@@ -52,6 +52,10 @@ const ARR_MEASURE = ["arr"] as const;
 const TREND_MEASURES = ["arr", "mrr"] as const;
 const TABLE_MEASURES = ["arr", "mrr", "new_arr", "churned_arr"] as const;
 const TABLE_COLUMNS = ["region", ...TABLE_MEASURES] as const;
+// Top-N needs an explicit `orderBy`: the route appends the grouped dimensions as
+// tie-breakers whenever `limit` is set, which makes the page stable across
+// reloads but not *ranked* — only ordering by the measure does that.
+const TABLE_ORDER_BY = [{ field: "arr", direction: "DESC" }] as const;
 
 // The dimensions the page lets you slice by. The filter-bar dropdowns, the
 // detail-table row click, AND the chart clicks (region bar / segment donut)
@@ -296,10 +300,14 @@ function MetricViewsRoute() {
 
   // Detail table, grouped by region. Shares the region bar's filter, so
   // clicking a row narrows the other visuals without hiding the row you clicked.
+  // Ranked by ARR and capped, so the table shows the same top regions on every
+  // load instead of an arbitrary slice.
   const table = useMetricView("revenue", {
     measures: TABLE_MEASURES,
     dimensions: REGION_DIM,
     filter: regionFilter,
+    orderBy: TABLE_ORDER_BY,
+    limit: 10,
   });
 
   // Dropdown option domains, derived from the region/segment breakdowns. A NULL

@@ -13,6 +13,7 @@ export { METRIC_CONFIG_FILE };
 export {
   LIST_VALUE_OPERATORS,
   METRIC_FILTER_OPERATORS,
+  METRIC_ORDER_DIRECTIONS,
   NULL_OPERATORS,
   SINGLE_VALUE_OPERATORS,
   STRING_OPERATORS,
@@ -46,6 +47,12 @@ export const METRIC_MEASURES_MAX = 50;
 export const METRIC_DIMENSIONS_MAX = 20;
 export const METRIC_FILTER_VALUES_MAX = 1000;
 export const METRIC_LIMIT_MAX = 100_000;
+/**
+ * Cap on the request's `orderBy` array. The rendered clause can exceed this,
+ * since a `limit`ed query also appends the unnamed dimensions as tie-breakers —
+ * the cap bounds what a caller sends, not the emitted key count.
+ */
+export const METRIC_ORDER_BY_MAX = 20;
 
 /**
  * Maximum number of children per AND/OR group node.

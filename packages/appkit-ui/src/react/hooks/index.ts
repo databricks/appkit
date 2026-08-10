@@ -21,6 +21,8 @@ export type {
   MetricFilter,
   MetricFilterOperatorName,
   MetricKey,
+  MetricOrderBy,
+  MetricOrderDirection,
   MetricPredicate,
   MetricRegistry,
   PickMetricRow,

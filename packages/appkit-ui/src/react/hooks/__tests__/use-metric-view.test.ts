@@ -80,12 +80,90 @@ describe("useMetricView", () => {
       "/api/analytics/metric/orders",
     );
     // Only defined fields are serialized — undefined filter/timeGrain/
-    // timeDimension are omitted from the body.
+    // timeDimension/orderBy are omitted from the body.
     expect(JSON.parse(lastConnectArgs.payload)).toEqual({
       measures: ["revenue"],
       dimensions: ["region"],
       limit: 100,
     });
+  });
+
+  test("serializes orderBy into the POST body when provided", () => {
+    renderHook(() =>
+      useMetricView("orders", {
+        measures: ["revenue"],
+        dimensions: ["region"],
+        orderBy: [
+          { field: "revenue", direction: "DESC" },
+          { field: "region", direction: "ASC" },
+        ],
+      }),
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+      measures: ["revenue"],
+      dimensions: ["region"],
+      orderBy: [
+        { field: "revenue", direction: "DESC" },
+        { field: "region", direction: "ASC" },
+      ],
+    });
+  });
+
+  test("omits orderBy from the body when undefined", () => {
+    renderHook(() =>
+      useMetricView("orders", {
+        measures: ["revenue"],
+        dimensions: ["region"],
+        orderBy: undefined,
+      }),
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    // orderBy must be absent from the body, not present-and-empty.
+    expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+      measures: ["revenue"],
+      dimensions: ["region"],
+    });
+    expect(JSON.parse(lastConnectArgs.payload)).not.toHaveProperty("orderBy");
+  });
+
+  test("refetches when orderBy changes", () => {
+    const { rerender } = renderHook(
+      ({ orderDir }: { orderDir: "ASC" | "DESC" }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          orderBy: [{ field: "revenue", direction: orderDir }],
+        }),
+      { initialProps: { orderDir: "DESC" } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ orderDir: "ASC" });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not refetch when orderBy array is equal by value across renders", () => {
+    const { rerender } = renderHook(
+      ({ orderDir }: { orderDir: "DESC" }) =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          orderBy: [{ field: "revenue", direction: orderDir }],
+        }),
+      { initialProps: { orderDir: "DESC" } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ orderDir: "DESC" });
+    rerender({ orderDir: "DESC" });
+
+    // Structurally equal orderBy should not trigger a refetch because
+    // the memo compares by JSON.stringify value, not object identity.
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
   });
 
   test("surfaces a type:result payload as data and reads its per-column metadata", async () => {

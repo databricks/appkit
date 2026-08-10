@@ -399,10 +399,12 @@ export type GrainsForSelectedTimeDims<
 export type {
   MetricFilter,
   MetricFilterOperatorName,
+  MetricOrderBy,
+  MetricOrderDirection,
   MetricPredicate,
 } from "@/js";
 
-import type { MetricFilter } from "@/js";
+import type { MetricFilter, MetricOrderDirection } from "@/js";
 
 /**
  * Options for configuring a `useMetricView` query.
@@ -411,7 +413,9 @@ import type { MetricFilter } from "@/js";
  * returned row shape ({@link PickMetricRow}) narrows to exactly the columns the
  * query asked for. `timeDimension` must be a SELECTED, TEMPORAL dimension, and
  * `timeGrain` is correlated to the grains valid for those dimensions — so
- * bucketing a non-temporal dimension is a type error.
+ * bucketing a non-temporal dimension is a type error. `orderBy` is constrained
+ * to SELECTED measures and dimensions, so ordering by an unselected column is a
+ * compile-time error.
  */
 type MetricViewTimeOptions<
   K extends MetricKey,
@@ -438,6 +442,10 @@ export type UseMetricViewOptions<
   measures: M;
   dimensions?: D;
   filter?: MetricFilter;
+  orderBy?: ReadonlyArray<{
+    field: M[number] | D[number];
+    direction?: MetricOrderDirection;
+  }>;
   limit?: number;
 } & MetricViewTimeOptions<K, D>;
 

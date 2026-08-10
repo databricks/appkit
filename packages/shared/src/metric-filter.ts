@@ -47,6 +47,24 @@ export interface MetricPredicate {
   values?: ReadonlyArray<string | number>;
 }
 
+export const METRIC_ORDER_DIRECTIONS = ["ASC", "DESC"] as const;
+
+export type MetricOrderDirection = (typeof METRIC_ORDER_DIRECTIONS)[number];
+
+/**
+ * A single `ORDER BY` key for the metric-view request.
+ *
+ * `field` must be one of the request's own `measures` or `dimensions` — a
+ * measure is ordered by its SELECT **alias**, because `ORDER BY MEASURE(...)` is
+ * rejected by Spark (`METRIC_VIEW_INVALID_MEASURE_FUNCTION_INPUT`). `direction`
+ * is a closed vocabulary so nothing free-form reaches the SQL string; omitting
+ * it means `ASC` (the SQL default).
+ */
+export interface MetricOrderBy {
+  field: string;
+  direction?: MetricOrderDirection;
+}
+
 /**
  * Recursive filter expression for the metric-view request body: a leaf
  * {@link MetricPredicate} or an `{ and: [...] }` / `{ or: [...] }` group.

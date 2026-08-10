@@ -17,6 +17,8 @@ import {
   METRIC_FILTER_VALUES_MAX,
   METRIC_LIMIT_MAX,
   METRIC_MEASURES_MAX,
+  METRIC_ORDER_BY_MAX,
+  METRIC_ORDER_DIRECTIONS,
   NULL_OPERATORS,
   SINGLE_VALUE_OPERATORS,
   STRING_OPERATORS,
@@ -120,6 +122,26 @@ const metricRequestSchema = z
           "timeDimension contains a character that cannot be used in a SQL identifier (control character or newline)",
       })
       .optional(),
+    orderBy: z
+      .array(
+        z
+          .object({
+            field: z
+              .string()
+              .min(1, "orderBy field cannot be empty")
+              .refine(isValidColumnName, {
+                message:
+                  "orderBy field contains a character that cannot be used in a SQL identifier (control character or newline)",
+              }),
+            direction: z.enum(METRIC_ORDER_DIRECTIONS).optional(),
+          })
+          .strict(),
+      )
+      .min(1, "orderBy cannot be an empty array")
+      .max(METRIC_ORDER_BY_MAX, {
+        message: `orderBy length exceeds the maximum of ${METRIC_ORDER_BY_MAX}`,
+      })
+      .optional(),
     limit: z
       .number()
       .int({ message: "limit must be an integer" })
@@ -181,6 +203,42 @@ const metricRequestSchema = z
         message: "timeDimension must be one of dimensions",
         path: ["timeDimension"],
       });
+    }
+
+    if (value.orderBy != null) {
+      const selectedNames = new Set([
+        ...value.measures,
+        ...(value.dimensions ?? []),
+      ]);
+
+      // Rule A: each orderBy[i].field must be in measures or dimensions
+      for (let i = 0; i < value.orderBy.length; i++) {
+        if (!selectedNames.has(value.orderBy[i].field)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "orderBy field must be one of measures or dimensions",
+            path: ["orderBy", i, "field"],
+          });
+        }
+      }
+
+      // Rule B: no duplicate fields
+      const seenFields = new Set<string>();
+      let hasDuplicate = false;
+      for (const entry of value.orderBy) {
+        if (seenFields.has(entry.field)) {
+          hasDuplicate = true;
+          break;
+        }
+        seenFields.add(entry.field);
+      }
+      if (hasDuplicate) {
+        ctx.addIssue({
+          code: "custom",
+          message: "orderBy fields must be unique",
+          path: ["orderBy"],
+        });
+      }
     }
   }) as z.ZodType<IAnalyticsMetricRequest>;
 

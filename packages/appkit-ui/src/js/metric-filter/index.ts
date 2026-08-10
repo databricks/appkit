@@ -3,6 +3,8 @@ import type { MetricFilter, MetricPredicate } from "shared";
 export type {
   MetricFilter,
   MetricFilterOperatorName,
+  MetricOrderBy,
+  MetricOrderDirection,
   MetricPredicate,
 } from "shared";
 

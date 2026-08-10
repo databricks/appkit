@@ -62,14 +62,14 @@ export function buildMetricSql(
     .sort()
     .map((m) => `MEASURE(${quoteIdentifier(m)}) AS ${quoteIdentifier(m)}`);
 
-  const dimensionClauses = [...dimensions]
-    .sort()
-    .map((d) =>
-      renderDimensionClause(d, request.timeGrain, request.timeDimension),
-    );
+  const sortedDimensions = [...dimensions].sort();
+  const dimensionClauses = sortedDimensions.map((d) =>
+    renderDimensionClause(d, request.timeGrain, request.timeDimension),
+  );
 
   const selectList = [...measureClauses, ...dimensionClauses].join(", ");
   const groupByClause = dimensions.length > 0 ? " GROUP BY ALL" : "";
+  const orderByClause = renderOrderByClause(request, sortedDimensions);
 
   const limitClause =
     typeof request.limit === "number" && request.limit > 0
@@ -88,7 +88,7 @@ export function buildMetricSql(
     }
   }
 
-  const statement = `SELECT ${selectList} FROM ${quotedSource}${whereClause}${groupByClause}${limitClause}`;
+  const statement = `SELECT ${selectList} FROM ${quotedSource}${whereClause}${groupByClause}${orderByClause}${limitClause}`;
   return { statement, parameters };
 }
 
@@ -321,4 +321,46 @@ function renderDimensionClause(
     return `date_trunc('${timeGrain}', ${quoted}) AS ${quoted}`;
   }
   return quoteIdentifier(dim);
+}
+
+function renderOrderByClause(
+  request: IAnalyticsMetricRequest,
+  sortedDimensions: string[],
+): string {
+  const keyList: string[] = [];
+
+  // Start from the explicit orderBy entries (in caller's order).
+  if (request.orderBy != null && request.orderBy.length > 0) {
+    for (const entry of request.orderBy) {
+      if (!isValidColumnName(entry.field)) {
+        throw new Error(
+          `Refusing to build SQL: orderBy field "${entry.field}" is not a valid identifier.`,
+        );
+      }
+      const direction = entry.direction === "DESC" ? " DESC" : "";
+      keyList.push(`${quoteIdentifier(entry.field)}${direction}`);
+    }
+  }
+
+  // Tie-breaker completion: when limit is set, append all dimensions not
+  // already named in orderBy. Under GROUP BY ALL the full dimension tuple is
+  // unique per row, so ordering by all dimensions gives a TOTAL order. A
+  // partial ordering still leaves ties, and ties + LIMIT = non-determinism.
+  if (typeof request.limit === "number" && request.limit > 0) {
+    const orderByFields = new Set(request.orderBy?.map((e) => e.field) ?? []);
+    for (const dim of sortedDimensions) {
+      if (!orderByFields.has(dim)) {
+        keyList.push(quoteIdentifier(dim));
+      }
+    }
+  }
+
+  // Return empty string when there is nothing to order by. This covers:
+  // no orderBy + no limit; and no orderBy + limit but zero dimensions
+  // (a pure aggregate returns exactly one row, ordering is pointless).
+  if (keyList.length === 0) {
+    return "";
+  }
+
+  return ` ORDER BY ${keyList.join(", ")}`;
 }

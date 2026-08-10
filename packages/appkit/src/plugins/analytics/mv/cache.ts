@@ -12,6 +12,24 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
   // `timeDimension` only changes the SQL when `timeGrain` is set (see renderDimensionClause)
   const timeDimensionPart =
     input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
+  // `orderBy` is NOT sorted (unlike measures/dimensions) because the sequence is
+  // semantic: `ORDER BY a, b` returns different rows under LIMIT than `ORDER BY b, a`.
+  // Sorting it would incorrectly collapse two genuinely different queries onto the same
+  // cache key. We still normalize absent directions to "ASC" for cache key equality.
+  //
+  // Known, accepted over-splitting: a request whose `orderBy` merely restates the
+  // dimensions the `limit` tie-breaker would have appended renders SQL identical to
+  // one that omits `orderBy`, yet keys differently. Collapsing those would mean
+  // replicating `renderOrderByClause`'s completion logic here — two copies of the
+  // rule to keep in sync, where drift produces a key COLLISION (wrong order served
+  // from cache). An extra cache entry is the safe side of that trade; do not "fix"
+  // this by canonicalizing.
+  const orderByPart =
+    input.orderBy !== undefined && input.orderBy.length > 0
+      ? JSON.stringify(
+          input.orderBy.map((o) => [o.field, o.direction ?? "ASC"]),
+        )
+      : "_";
   return [
     "metric",
     input.metricKey,
@@ -29,6 +47,7 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
     timeDimensionPart,
     filterFingerprint,
     typeof input.limit === "number" ? String(input.limit) : "_",
+    orderByPart,
     input.executorKey,
   ];
 }

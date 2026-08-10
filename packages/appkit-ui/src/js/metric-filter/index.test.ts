@@ -1,12 +1,16 @@
 import type {
   MetricFilter as SharedMetricFilter,
   MetricFilterOperatorName as SharedMetricFilterOperatorName,
+  MetricOrderBy as SharedMetricOrderBy,
+  MetricOrderDirection as SharedMetricOrderDirection,
   MetricPredicate as SharedMetricPredicate,
 } from "shared";
 import { describe, expect, expectTypeOf, test } from "vitest";
 import {
   type MetricFilter,
   type MetricFilterOperatorName,
+  type MetricOrderBy,
+  type MetricOrderDirection,
   type MetricPredicate,
   toMetricFilter,
 } from "./index";
@@ -15,6 +19,8 @@ describe("toMetricFilter", () => {
   test("re-exports the shared metric-filter AST types", () => {
     expectTypeOf<MetricFilter>().toEqualTypeOf<SharedMetricFilter>();
     expectTypeOf<MetricFilterOperatorName>().toEqualTypeOf<SharedMetricFilterOperatorName>();
+    expectTypeOf<MetricOrderBy>().toEqualTypeOf<SharedMetricOrderBy>();
+    expectTypeOf<MetricOrderDirection>().toEqualTypeOf<SharedMetricOrderDirection>();
     expectTypeOf<MetricPredicate>().toEqualTypeOf<SharedMetricPredicate>();
   });
 

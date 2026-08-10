@@ -1,6 +1,7 @@
 import type {
   BasePluginConfig,
   MetricFilter,
+  MetricOrderBy,
   MetricViewColumnDisplay,
   MetricViewsMetadata,
 } from "shared";
@@ -8,6 +9,7 @@ import type {
 export type {
   MetricFilter,
   MetricFilterOperatorName,
+  MetricOrderBy,
   MetricPredicate,
 } from "shared";
 
@@ -161,7 +163,9 @@ export interface MetricRegistration {
  * clause. `timeGrain` buckets the single dimension named by `timeDimension`
  * via `date_trunc`; it requires `timeDimension`, and `timeDimension` must be
  * one of `dimensions` so it is selected and in `GROUP BY ALL`. Both tokens are
- * grammar-gated before they reach SQL.
+ * grammar-gated before they reach SQL. `orderBy` controls row ordering; when
+ * `limit` is set, any dimensions not named in `orderBy` are appended as
+ * tie-breakers so the ordering is total and `LIMIT` is deterministic.
  */
 export interface IAnalyticsMetricRequest {
   measures: string[];
@@ -174,6 +178,7 @@ export interface IAnalyticsMetricRequest {
    * required whenever `timeGrain` is set. Grammar-gated as a SQL identifier.
    */
   timeDimension?: string;
+  orderBy?: MetricOrderBy[];
   limit?: number;
   format?: AnalyticsFormat;
 }

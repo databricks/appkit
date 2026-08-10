@@ -129,6 +129,7 @@ Content-Type: application/json
   "timeGrain": "month",
   "timeDimension": "order_date",
   "filter": { "member": "region", "operator": "in", "values": ["EMEA", "APAC"] },
+  "orderBy": [{ "field": "revenue", "direction": "DESC" }],
   "limit": 100
 }
 ```
@@ -142,6 +143,7 @@ Content-Type: application/json
 | `filter`        | object     | no       | Structured predicate tree translated into a parameterized `WHERE` clause (see [Filters](#filters)).          |
 | `timeGrain`     | `string`   | no       | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`.      |
 | `timeDimension` | `string`   | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
+| `orderBy`       | array      | no       | Array of `{field, direction}` sort keys (max 20). `field` must be a selected measure or dimension. `direction` is `"ASC"` (default, omitted from SQL) or `"DESC"`. Order measures by their SELECT alias. |
 | `limit`         | `number`   | no       | Positive integer row cap (max 100000).                                                                       |
 | `format`        | `string`   | no       | `JSON_ARRAY` (default). `JSON` is accepted as a deprecated alias for it; Arrow formats (`ARROW`, `ARROW_STREAM`) are rejected on this route. |
 
@@ -157,10 +159,27 @@ SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`,
 FROM `catalog`.`schema`.`revenue_metrics`
 WHERE `region` IN (:f_0, :f_1)
 GROUP BY ALL
+ORDER BY `revenue` DESC, `order_date`, `region`
 LIMIT 100
 ```
 
 The metric view's FQN and every measure/dimension identifier are backtick-quoted; filter values are bound as parameters (`:f_0`, `:f_1`, …), never interpolated into the SQL string.
+
+### Deterministic results with `limit`
+
+When `limit` is set, the route automatically appends all grouped dimensions to the `ORDER BY` clause as tie-breakers (unless they are already named in `orderBy`). Under `GROUP BY ALL`, the full dimension tuple is unique per row, so ordering by all dimensions produces a **TOTAL order** — every run returns the same rows, not an arbitrary sample.
+
+This matters because `LIMIT` without `ORDER BY` is a row *sample*, not "the top n": Spark returns whichever rows it produced first, which varies with partitioning, parallelism and cache state. A card built on such a request can show a different number run to run with nothing erroring. The tie-breakers close that gap — over unchanged data, the same request now returns the same rows.
+
+If you want **top-N by a measure**, order that measure explicitly and provide `limit`:
+
+```json
+{ "orderBy": [{ "field": "revenue", "direction": "DESC" }], "limit": 100 }
+```
+
+The route adds the remaining dimensions (`order_date`, `region` in the example above) after your explicit entry, so the result is stable across runs.
+
+**Important:** order measures by their **SELECT alias**. Spark rejects `ORDER BY MEASURE(\`revenue\`)` with `METRIC_VIEW_INVALID_MEASURE_FUNCTION_INPUT`. The generated SQL aliases every measure (e.g. `MEASURE(\`revenue\`) AS \`revenue\``), so always reference the alias — in this case, just `"revenue"`.
 
 ### Filters
 
@@ -520,6 +539,7 @@ When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view ty
 | `filter`        | `MetricFilter`              | no       | Recursive predicate tree (same grammar as the route — see [Filters](#filters)).                  |
 | `timeGrain`     | `string`                    | no       | Bucket a time dimension (`day`, `month`, …). Requires `timeDimension`. Inferred `timeGrains`.    |
 | `timeDimension` | `string`                    | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`.                           |
+| `orderBy`       | `{field, direction?}[]`     | no       | Sort keys. `field` is narrowed to the measures/dimensions this call selected, so ordering by an unselected column is a type error. See [Deterministic results with `limit`](#deterministic-results-with-limit). |
 | `limit`         | `number`                    | no       | Positive integer row cap.                                                                        |
 
 **Return type:**
