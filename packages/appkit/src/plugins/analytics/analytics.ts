@@ -571,8 +571,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // Cache key. Composed over the canonicalized args (sorted measures/
     // dimensions, stable-sorted predicates, grain, timeDimension, limit, orderBy) plus
     // the `executorKey` — `"sp"` shares the cache across all users, a per-user
-    // identity hash isolates OBO callers. orderBy is NOT sorted because its sequence
-    // is semantic: different orderings produce different rows under LIMIT.
+    // identity hash isolates OBO callers.
     const cacheConfig = {
       ...queryDefaults.cache,
       cacheKey: composeMetricCacheKey({

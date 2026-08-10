@@ -22,8 +22,18 @@ export interface IAnalyticsConfig extends BasePluginConfig {
    * envelope-identical to `/query`.
    */
   metricViewsMetadata?: MetricViewsMetadata;
+  /**
+   * Maximum time (ms) the analytics route waits for a STOPPED/STARTING SQL
+   * warehouse to reach RUNNING before failing the request. Defaults to 5 min.
+   */
   warehouseStartupTimeoutMs?: number;
   /**
+   * When `true` (default), a `STOPPED` SQL warehouse is auto-started on the
+   * first analytics request that reaches it. Set to `false` for cost-
+   * controlled deployments where billable warehouse starts must not be
+   * triggered by user requests; in that case `STOPPED` surfaces as a
+   * `ConfigurationError`.
+   *
    * @default true
    */
   autoStartWarehouse?: boolean;

@@ -39,6 +39,7 @@ import {
 } from "./options";
 import { useChartUITokens, useThemeColors } from "./theme";
 import type {
+  ChartBaseProps,
   ChartClickDatum,
   ChartColorPalette,
   ChartData,
@@ -181,12 +182,7 @@ export interface BaseChartProps {
    * the same action.
    */
   onDataClick?: (datum: ChartClickDatum) => void;
-  /**
-   * Controlled selection by category name. Matching data element(s) render at full
-   * prominence while the rest are dimmed. Drive it from your own state to reflect a
-   * cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis;
-   * other chart types ignore it.
-   */
+  /** Controlled selection by category name. See {@link ChartBaseProps.selected}. */
   selected?: string | string[];
 }
 

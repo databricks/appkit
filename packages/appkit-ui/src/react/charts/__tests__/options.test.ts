@@ -1012,7 +1012,7 @@ describe("applySelectionEmphasis", () => {
       expect(applySelectionEmphasis(opt, undefined)).toBe(opt);
     });
 
-    test("empty-string selection is a no-op — does NOT dim everything (guards #4)", () => {
+    test("empty-string selection is a no-op — does NOT dim everything", () => {
       const opt = barOption(["EMEA", "APAC"], [10, 20]);
       // The bug being guarded: "" would match no category and dim all bars.
       expect(applySelectionEmphasis(opt, "")).toBe(opt);
