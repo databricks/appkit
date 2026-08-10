@@ -1,6 +1,23 @@
 import type { MetricViewColumnDisplay } from "shared";
 
 /**
+ * Parsed format specs, memoized so a table does not re-parse the same spec for
+ * every cell it renders. The realistic key space is metric-view catalog
+ * metadata, so it is tiny; the cap stops inserting once full to keep a caller
+ * generating arbitrary specs in a loop from growing this without bound.
+ */
+const SPEC_CACHE_MAX = 256;
+const specCache = new Map<
+  string,
+  {
+    isPercent: boolean;
+    grouping: boolean;
+    decimals: number;
+    prefix: string;
+  }
+>();
+
+/**
  * Counts the number of fractional digits declared by a numeric format spec.
  * E.g. "#,##0.00" -> 2, "#,##0" -> 0, "0.0%" -> 1.
  */
@@ -119,6 +136,26 @@ function currencyPrefix(format: string): string {
   return match ? match[0] : "";
 }
 
+/** The spec's `{ isPercent, grouping, decimals, prefix }`, parsed at most once. */
+function getOrParseSpec(format: string) {
+  const cached = specCache.get(format);
+  if (cached !== undefined) return cached;
+
+  // Cache miss: parse now and store if under the limit.
+  const parsed = {
+    isPercent: format.includes("%"),
+    grouping: format.includes(","),
+    decimals: countDecimals(format),
+    prefix: currencyPrefix(format),
+  };
+
+  if (specCache.size < SPEC_CACHE_MAX) {
+    specCache.set(format, parsed);
+  }
+
+  return parsed;
+}
+
 /**
  * Format a raw value using a UC/YAML printf-style format spec.
  *
@@ -146,10 +183,7 @@ export function formatValue(value: unknown, format?: string): string {
     return String(value);
   }
 
-  const isPercent = format.includes("%");
-  const grouping = format.includes(",");
-  const decimals = countDecimals(format);
-  const prefix = currencyPrefix(format);
+  const { isPercent, grouping, decimals, prefix } = getOrParseSpec(format);
 
   // JSON_ARRAY delivers SQL scalar cells as strings. Parse plain integer and
   // fractional forms as fixed-point values so DECIMAL precision is never lost
@@ -246,15 +280,14 @@ export function toD3Format(format?: string): D3FormatParts | undefined {
   // Strip any leading currency prefix first, then require the remainder to be
   // built purely from numeric-format characters; anything else (date patterns,
   // free text, ...) is left unrecognized.
-  const prefix = currencyPrefix(format);
+  const { prefix, grouping, decimals, isPercent } = getOrParseSpec(format);
   const numeric = format.slice(prefix.length);
   if (numeric.replace(/[#0,.%\s]/g, "") !== "") return undefined;
   if (!/[0#]/.test(numeric)) return undefined;
 
-  const group = format.includes(",") ? "," : "";
-  const decimals = countDecimals(format);
+  const group = grouping ? "," : "";
 
-  if (format.includes("%")) {
+  if (isPercent) {
     return {
       specifier: `${group}.${decimals}%`,
       ...(prefix ? { prefix } : {}),

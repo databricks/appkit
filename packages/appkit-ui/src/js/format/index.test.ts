@@ -210,3 +210,68 @@ describe("js/format toD3Format", () => {
     },
   );
 });
+
+describe("js/format spec caching", () => {
+  test("repeated formatting with same spec produces identical string", () => {
+    const spec = "$#,##0.00";
+    const value = 1234.5;
+    const result1 = formatValue(value, spec);
+    const result2 = formatValue(value, spec);
+    expect(result1).toBe(result2);
+    expect(result1).toBe("$1,234.50");
+  });
+
+  test("different specs applied to same value still produce correct outputs", () => {
+    const value = 1234.5;
+    const result1 = formatValue(value, "$#,##0.00");
+    const result2 = formatValue(value, "€#,##0");
+    const result3 = formatValue(value, "#,##0.00");
+    expect(result1).toBe("$1,234.50");
+    expect(result2).toBe("€1,235");
+    expect(result3).toBe("1,234.50");
+  });
+
+  test("cache does not corrupt currency prefix on repeated specs", () => {
+    const value = 5000;
+    // Format with USD, then EUR, then USD again to verify cache hit doesn't
+    // bleed currency prefix across specs.
+    expect(formatValue(value, "$#,##0.00")).toBe("$5,000.00");
+    expect(formatValue(value, "€#,##0")).toBe("€5,000");
+    expect(formatValue(value, "$#,##0.00")).toBe("$5,000.00");
+  });
+
+  test("cache does not corrupt decimal places on repeated specs", () => {
+    const value = 1234.5678;
+    // Format with 2 decimals, then 0, then 2 again to verify cache hit
+    // doesn't bleed decimal count across specs.
+    expect(formatValue(value, "#,##0.00")).toBe("1,234.57");
+    expect(formatValue(value, "#,##0")).toBe("1,235");
+    expect(formatValue(value, "#,##0.00")).toBe("1,234.57");
+  });
+
+  test("toD3Format reuses same cache for repeated specs", () => {
+    const spec = "$#,##0.00";
+    const result1 = toD3Format(spec);
+    const result2 = toD3Format(spec);
+    expect(result1).toEqual({ specifier: ",.2f", prefix: "$" });
+    expect(result2).toEqual({ specifier: ",.2f", prefix: "$" });
+  });
+
+  test("cache preserves precision for large integer strings on repeated specs", () => {
+    const spec = "#,##0";
+    const value = "9007199254740993";
+    const result1 = formatValue(value, spec);
+    const result2 = formatValue(value, spec);
+    expect(result1).toBe("9,007,199,254,740,993");
+    expect(result2).toBe("9,007,199,254,740,993");
+  });
+
+  test("cache preserves currency on large values", () => {
+    const spec = "$#,##0.00";
+    const value = "12345678901234567.89";
+    const result1 = formatValue(value, spec);
+    const result2 = formatValue(value, spec);
+    expect(result1).toBe("$12,345,678,901,234,567.89");
+    expect(result2).toBe("$12,345,678,901,234,567.89");
+  });
+});
