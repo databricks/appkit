@@ -1,10 +1,5 @@
 import { expect, test } from "@playwright/test";
-
-import {
-  STRICT_MODE_MULTIPLIER,
-  setupMockAPI,
-  trackApiCalls,
-} from "./utils/test-utils";
+import { setupMockAPI, trackApiCalls } from "./utils/test-utils";
 
 test.describe("Data Visualization Route Tests", () => {
   test.beforeEach(async ({ page }) => {
@@ -65,9 +60,15 @@ test.describe("Data Visualization Route Tests", () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForLoadState("networkidle");
 
-    expect(untaggedAppsCalls.length).toBe(2 * STRICT_MODE_MULTIPLIER);
-    expect(spendDataCalls.length).toBe(6 * STRICT_MODE_MULTIPLIER);
-    expect(topContributorsCalls.length).toBe(4 * STRICT_MODE_MULTIPLIER);
+    // Requests are deduplicated by (queryKey, parameters, format): the many
+    // charts sharing a query + params + resolved format collapse to a single
+    // in-flight request, and StrictMode remounts reuse it rather than refiring.
+    // Every chart here uses the same params per key, so each key settles at
+    // one request (the two untagged_apps DataTables share one; the six
+    // spend_data and four top_contributors charts each share one).
+    expect(untaggedAppsCalls.length).toBe(1);
+    expect(spendDataCalls.length).toBe(1);
+    expect(topContributorsCalls.length).toBe(1);
   });
 
   test("can toggle code visibility", async ({ page }) => {

@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 import {
-  STRICT_MODE_MULTIPLIER,
   setupMockAPI,
   trackApiCalls,
   waitForChartsToLoad,
@@ -28,10 +27,16 @@ test.describe("Arrow Analytics", () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await waitForChartsToLoad(page);
 
-    expect(appsListCalls.length).toBe(5 * STRICT_MODE_MULTIPLIER);
-    expect(spendDataCalls.length).toBe(5 * STRICT_MODE_MULTIPLIER);
-    expect(topContributorsCalls.length).toBe(2 * STRICT_MODE_MULTIPLIER);
-    expect(heatmapCalls.length).toBe(2 * STRICT_MODE_MULTIPLIER);
+    // Requests are deduplicated by (queryKey, parameters, format): components
+    // sharing a signature share one in-flight request, and StrictMode
+    // remounts reuse it rather than refiring. So each key collapses to one
+    // request per distinct format it's rendered in — here every query appears
+    // in both a JSON and an Arrow chart (auto-format resolves to one of the
+    // two), so each settles at 2.
+    expect(appsListCalls.length).toBe(2);
+    expect(spendDataCalls.length).toBe(2);
+    expect(topContributorsCalls.length).toBe(2);
+    expect(heatmapCalls.length).toBe(2);
   });
 
   test("charts render with mock data (no empty states)", async ({ page }) => {
