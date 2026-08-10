@@ -42,6 +42,7 @@ function compileTypeProbe(source: string): readonly ts.Diagnostic[] {
 test("useMetricView keeps omitted dimensions out of rows and requires a grain target", () => {
   const diagnostics = compileTypeProbe(`
     import { useMetricView } from "../src/react/hooks/use-metric-view";
+    import type { MetricOrderBy } from "../src/react";
     import type { UseMetricViewOptions, UseMetricViewResult } from "../src/react/hooks/types";
 
     declare module "../src/react/hooks/types" {
@@ -87,6 +88,27 @@ test("useMetricView keeps omitted dimensions out of rows and requires a grain ta
       timeGrain: "month",
     };
     void valid;
+
+    const reusableOrderBy: ReadonlyArray<MetricOrderBy<"arr" | "created_at">> = [
+      { field: "arr", direction: "DESC" },
+      { field: "created_at" },
+    ];
+    const ordered: TimeOptions = {
+      measures: ["arr"],
+      dimensions: ["created_at"],
+      orderBy: reusableOrderBy,
+    };
+    void ordered;
+
+    const unselectedOrderBy: ReadonlyArray<MetricOrderBy<"mrr">> = [{ field: "mrr" }];
+    // @ts-expect-error mrr was not selected
+    const invalidOrder: TimeOptions = { measures: ["arr"], dimensions: ["created_at"], orderBy: unselectedOrderBy };
+    void invalidOrder;
+
+    const broadOrderBy: MetricOrderBy[] = [{ field: "arr", direction: "DESC" }];
+    // @ts-expect-error MetricOrderBy<string> does not prove that its fields were selected
+    const broadOrder: TimeOptions = { measures: ["arr"], dimensions: ["created_at"], orderBy: broadOrderBy };
+    void broadOrder;
 
     // @ts-expect-error timeGrain requires timeDimension
     const missingTarget: TimeOptions = { measures: ["arr"], dimensions: ["created_at"], timeGrain: "month" };

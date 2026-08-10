@@ -404,7 +404,7 @@ export type {
   MetricPredicate,
 } from "@/js";
 
-import type { MetricFilter, MetricOrderDirection } from "@/js";
+import type { MetricFilter, MetricOrderBy } from "@/js";
 
 /**
  * Options for configuring a `useMetricView` query.
@@ -442,10 +442,7 @@ export type UseMetricViewOptions<
   measures: M;
   dimensions?: D;
   filter?: MetricFilter;
-  orderBy?: ReadonlyArray<{
-    field: M[number] | D[number];
-    direction?: MetricOrderDirection;
-  }>;
+  orderBy?: ReadonlyArray<MetricOrderBy<M[number] | D[number]>>;
   limit?: number;
 } & MetricViewTimeOptions<K, D>;
 

@@ -59,9 +59,14 @@ export type MetricOrderDirection = (typeof METRIC_ORDER_DIRECTIONS)[number];
  * rejected by Spark (`METRIC_VIEW_INVALID_MEASURE_FUNCTION_INPUT`). `direction`
  * is a closed vocabulary so nothing free-form reaches the SQL string; omitting
  * it means `ASC` (the SQL default).
+ *
+ * The default `MetricOrderBy` (equivalent to `MetricOrderBy<string>`) is the
+ * broad wire/server form. When extracting a reusable `orderBy` array for
+ * `useMetricView`, parameterize it with the selected field literals so the hook
+ * can verify that every ordering field was selected.
  */
-export interface MetricOrderBy {
-  field: string;
+export interface MetricOrderBy<Field extends string = string> {
+  field: Field;
   direction?: MetricOrderDirection;
 }
 
