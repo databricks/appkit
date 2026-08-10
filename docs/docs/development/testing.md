@@ -52,9 +52,13 @@ const mock = mockPluginContext({
 `attach()` wires the context to a plugin the production way: it seeds an in-memory cache (if AppKit hasn't already initialized one), then calls the plugin's `attachContext`, which rebuilds telemetry and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
 
 ```ts
-const plugin = agents({ dir: false });
+const plugin = new MyAgentPlugin({ dir: false });
 await mock.attach(plugin);
 ```
+
+Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
+
+The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, reset between tests (e.g. clear the cache in `beforeEach`).
 
 ### Inspecting what happened
 

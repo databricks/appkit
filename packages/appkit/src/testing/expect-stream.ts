@@ -55,14 +55,15 @@ function eventType(event: StreamEvent): string {
  */
 function parseSSEBody(text: string): StreamEvent[] {
   const events: StreamEvent[] = [];
-  const blocks = text.split(/\n\n/);
+  // Normalize CRLF to LF first so frames delimited by `\r\n\r\n` (spec-compliant
+  // SSE from a real server) split the same as AppKit's own `\n\n` writer.
+  const blocks = text.replace(/\r\n/g, "\n").split("\n\n");
 
   for (const block of blocks) {
     let name: string | undefined;
     const dataLines: string[] = [];
 
-    for (const rawLine of block.split("\n")) {
-      const line = rawLine.replace(/\r$/, "");
+    for (const line of block.split("\n")) {
       if (line.startsWith("event:")) {
         name = line.slice("event:".length).trim();
       } else if (line.startsWith("data:")) {

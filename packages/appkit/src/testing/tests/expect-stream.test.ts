@@ -115,6 +115,18 @@ describe("expectStream — SSE Response", () => {
       "result",
     ]);
   });
+
+  test("parses CRLF-delimited frames from a spec-compliant SSE stream", async () => {
+    // A real server may use \r\n\r\n between frames; AppKit's own writer uses
+    // \n\n. Both must parse to distinct events, not one collapsed block.
+    const body =
+      'event: warehouse_status\r\ndata: {"state":"RUNNING"}\r\n\r\n' +
+      'event: result\r\ndata: {"rows":[]}\r\n\r\n';
+    const res = new Response(body);
+    await expect(
+      expectStream(res).toEmitExactly("warehouse_status", "result"),
+    ).resolves.toEqual(["warehouse_status", "result"]);
+  });
 });
 
 describe("expectStream — invalid source", () => {
