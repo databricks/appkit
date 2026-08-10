@@ -564,9 +564,11 @@ function MetricViewsRoute() {
                 valueFormatter={(value, field) =>
                   formatValue(value, trend.metadata?.[field]?.format)
                 }
-                onDataClick={(datum) => {
-                  console.log("[Metric Views] Line chart clicked", datum);
-                }}
+                // Seam for write-back: `datum` carries the clicked point's
+                // measure, x value and series, which is what an edit dialog
+                // would need to write a correction to the source table.
+                // TODO: build the write-back flow on top of this handler.
+                onDataClick={() => {}}
               />
             )}
           </CardContent>
