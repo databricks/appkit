@@ -12,8 +12,15 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch } from "@databricks/appkit/beta";
+import {
+  agents,
+  aiSearch,
+  createAgent,
+  database,
+  runAgent,
+} from "@databricks/appkit/beta";
 
+import { schema } from "../config/database/schema";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -58,6 +65,14 @@ const usersOnly: FilePolicy = (_action, _resource, user) => {
   return user.isServicePrincipal !== true;
 };
 
+// Run by the notes beforeCreate hook, not by the agents plugin: an agent is a
+// definition, so anything holding it can call runAgent.
+const redactor = createAgent({
+  instructions:
+    "Replace every personal name and email address in the user's text with [redacted]. " +
+    "Return only the rewritten text, nothing else.",
+});
+
 createApp({
   plugins: [
     server(),
@@ -69,6 +84,54 @@ createApp({
     }),
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
+    // Setup queries the database before publishing anything, so the plugin
+    // only joins the app once an instance is actually configured.
+    ...(process.env.LAKEBASE_ENDPOINT
+      ? [
+          database({
+            schema,
+            // Boards and their annotations are client-facing; the audit trail
+            // is written by the hook below and stays server-only.
+            api: { tables: ["boards", "notes"] },
+            hooks: {
+              notes: {
+                // An agent is a plain definition, so a hook runs one by
+                // importing it. This has to happen before the insert: the
+                // unredacted body must never reach the table. It also holds
+                // the transaction open while the model answers, which is the
+                // trade being made here.
+                //
+                // author_email is a private column: refused on the wire but
+                // writable here. A real app takes it from the session.
+                beforeCreate: async (values) => {
+                  const answer = await runAgent(redactor, {
+                    messages: String(values.body),
+                  });
+                  return {
+                    ...values,
+                    body: answer.text || values.body,
+                    author_email: `${values.author}@example.com`,
+                  };
+                },
+                // A board page lists many notes, so the list route ships a
+                // preview and the detail route ships the whole body.
+                serialize: (row, { operation }) =>
+                  operation === "list"
+                    ? { ...row, body: String(row.body).slice(0, 120) }
+                    : row,
+                // Runs inside the insert's own transaction: a note and the
+                // event describing it commit together or not at all.
+                afterCreate: async (row, ctx) => {
+                  await ctx.app.database.note_events.create({
+                    note_id: row.id,
+                    action: "created",
+                  });
+                },
+              },
+            },
+          }),
+        ]
+      : []),
     files({
       volumes: {
         // Smart Dashboard saved views land here. Backed by
@@ -167,6 +230,46 @@ createApp({
               error: "Failed to create product",
               message: err.message,
             });
+          }
+        });
+      }
+
+      // ── Database routes (what a generated route cannot do) ──────────
+
+      if ("database" in appkit) {
+        const db = appkit.database;
+
+        // Aggregates: a generated read shapes rows, it does not group them.
+        app.get("/api/boards/stats", async (_req, res) => {
+          try {
+            const rows = await db.sql<{ slug: string; notes: string }>`
+              select b.slug, count(n.id)::text as notes
+              from boards b left join notes n on n.board_id = b.id
+              group by b.slug order by b.slug
+            `;
+            res.json(rows);
+          } catch (error: unknown) {
+            res.status(500).json({ error: (error as Error).message });
+          }
+        });
+
+        // Two bounded relation edges in one read: a board, its notes, and
+        // the audit trail of each note.
+        app.get("/api/boards/:slug/timeline", async (req, res) => {
+          try {
+            const board = await db.boards
+              .where({ slug: req.params.slug })
+              .include({
+                notes: { limit: 20, include: { note_events: { limit: 5 } } },
+              })
+              .first();
+            if (!board) {
+              res.status(404).json({ error: "No such board" });
+              return;
+            }
+            res.json(board);
+          } catch (error: unknown) {
+            res.status(500).json({ error: (error as Error).message });
           }
         });
       }
