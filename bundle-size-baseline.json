@@ -3,7 +3,7 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 847337,
+        "packed": 847335,
         "unpacked": 2964421
       },
       "dist": {
@@ -64,11 +64,11 @@
         },
         {
           "id": "./beta",
-          "gzip": 49176,
+          "gzip": 49171,
           "composition": {
-            "initialGzip": 48717,
-            "lazyGzip": 459,
-            "totalGzip": 49176,
+            "initialGzip": 48714,
+            "lazyGzip": 457,
+            "totalGzip": 49171,
             "own": 143115,
             "nodeModules": null,
             "chunks": [
@@ -89,7 +89,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 3103,
+                "gzip": 3102,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1346,
+                "gzip": 1344,
                 "kind": "initial"
               },
               {
@@ -119,12 +119,12 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 142,
+                "gzip": 141,
                 "kind": "lazy"
               },
               {
                 "label": "index.js",
-                "gzip": 123,
+                "gzip": 122,
                 "kind": "lazy"
               }
             ]
