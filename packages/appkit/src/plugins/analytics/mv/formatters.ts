@@ -329,7 +329,6 @@ function renderOrderByClause(
 ): string {
   const keyList: string[] = [];
 
-  // Start from the explicit orderBy entries (in caller's order).
   if (request.orderBy != null && request.orderBy.length > 0) {
     for (const entry of request.orderBy) {
       if (!isValidColumnName(entry.field)) {

@@ -211,7 +211,6 @@ const metricRequestSchema = z
         ...(value.dimensions ?? []),
       ]);
 
-      // Rule A: each orderBy[i].field must be in measures or dimensions
       for (let i = 0; i < value.orderBy.length; i++) {
         if (!selectedNames.has(value.orderBy[i].field)) {
           ctx.addIssue({
@@ -222,7 +221,6 @@ const metricRequestSchema = z
         }
       }
 
-      // Rule B: no duplicate fields
       const seenFields = new Set<string>();
       let hasDuplicate = false;
       for (const entry of value.orderBy) {
