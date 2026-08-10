@@ -64,15 +64,46 @@ describe("js/format formatValue", () => {
   });
 
   test("formats safe-range integer strings unchanged", () => {
-    // Below the bigint threshold: the ordinary Number path still applies.
     expect(formatValue("1234567", "#,##0")).toBe("1,234,567");
     expect(formatValue("1234567", "#,##0.00")).toBe("1,234,567.00");
   });
 
-  test("leaves fractional and exponent strings on the float path", () => {
-    // Only plain integer strings qualify for exact formatting; a fraction or
-    // exponent has no exact bigint reading.
-    expect(formatValue("1234.5", "#,##0.00")).toBe("1,234.50");
+  test("preserves precision for fractional strings beyond 2^53", () => {
+    expect(formatValue("12345678901234567.89", "$#,##0.00")).toBe(
+      "$12,345,678,901,234,567.89",
+    );
+    expect(formatValue("-12345678901234567.89", "R$#,##0.00")).toBe(
+      "-R$12,345,678,901,234,567.89",
+    );
+    // Fixed-scale DECIMAL values must stay exact even when the display format
+    // omits their zero fractional digits.
+    expect(formatValue("12345678901234567.00", "¥#,##0")).toBe(
+      "¥12,345,678,901,234,567",
+    );
+  });
+
+  test("rounds exact decimal strings to the requested display scale", () => {
+    expect(formatValue("12345678901234567.894", "$#,##0.00")).toBe(
+      "$12,345,678,901,234,567.89",
+    );
+    expect(formatValue("12345678901234567.895", "$#,##0.00")).toBe(
+      "$12,345,678,901,234,567.90",
+    );
+    expect(formatValue("-12345678901234567.895", "$#,##0.00")).toBe(
+      "-$12,345,678,901,234,567.90",
+    );
+    expect(formatValue("9999999999999999.995", "$#,##0.00")).toBe(
+      "$10,000,000,000,000,000.00",
+    );
+  });
+
+  test("multiplies decimal-string percentages without losing precision", () => {
+    expect(formatValue("12345678901234567.891", "0.00%")).toBe(
+      "1234567890123456789.10%",
+    );
+  });
+
+  test("leaves exponent strings on the float path", () => {
     expect(formatValue("1e3", "#,##0")).toBe("1,000");
   });
 

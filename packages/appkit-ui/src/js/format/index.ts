@@ -27,44 +27,71 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
-/**
- * An integer-shaped string whose magnitude exceeds JS's safe-integer range, as
- * a bigint — otherwise `null`.
- *
- * The JSON_ARRAY wire path delivers every numeric cell as a *string* (the SQL
- * connector copies `data_array` cells verbatim), so a BIGINT / large DECIMAL
- * arrives here as e.g. `"9007199254740993"`. Coercing that through `Number`
- * silently rounds it, so an int64 id or a cents-denominated total renders as a
- * neighbouring value. Detect the case up front and keep it exact.
- */
-function asPreciseBigInt(value: string): bigint | null {
-  const trimmed = value.trim();
-  if (!/^[+-]?\d+$/.test(trimmed)) return null;
-  const asBig = BigInt(trimmed);
-  return asBig > BigInt(Number.MAX_SAFE_INTEGER) ||
-    asBig < -BigInt(Number.MAX_SAFE_INTEGER)
-    ? asBig
-    : null;
+interface ExactDecimal {
+  coefficient: bigint;
+  negative: boolean;
+  scale: number;
+}
+
+/** Parse a plain decimal string without passing through a JS number. */
+function parseExactDecimal(value: string): ExactDecimal | null {
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return null;
+
+  const fraction = match[3] ?? "";
+  const coefficient = BigInt(`${match[2]}${fraction}`);
+  return {
+    coefficient,
+    negative: match[1] === "-" && coefficient !== 0n,
+    scale: fraction.length,
+  };
+}
+
+function powerOfTen(exponent: number): bigint {
+  return 10n ** BigInt(exponent);
+}
+
+/** Round an unsigned fixed-point coefficient to the requested display scale. */
+function quantizeDecimal(
+  coefficient: bigint,
+  sourceScale: number,
+  targetScale: number,
+): bigint {
+  if (sourceScale <= targetScale) {
+    return coefficient * powerOfTen(targetScale - sourceScale);
+  }
+
+  const divisor = powerOfTen(sourceScale - targetScale);
+  const quotient = coefficient / divisor;
+  const remainder = coefficient % divisor;
+  return remainder * 2n >= divisor ? quotient + 1n : quotient;
+}
+
+function groupInteger(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 /**
- * Format a bigint exactly, with fixed decimals + optional thousands grouping
- * and a currency prefix inside the sign. `Intl.NumberFormat` accepts a bigint
- * directly and formats it without float coercion, unlike `Number(value)`.
+ * Format an exact fixed-point value without ever coercing it to `Number`.
+ * Rounding is half-away-from-zero, matching Intl.NumberFormat's default.
  */
-function formatBigInt(
-  value: bigint,
+function formatExactDecimal(
+  value: ExactDecimal,
   decimals: number,
   grouping: boolean,
   prefix: string,
+  percent: boolean,
 ): string {
-  const sign = value < 0n ? "-" : "";
-  const body = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-    useGrouping: grouping,
-  }).format(value < 0n ? -value : value);
-  return `${sign}${prefix}${body}`;
+  const coefficient = percent ? value.coefficient * 100n : value.coefficient;
+  const quantized = quantizeDecimal(coefficient, value.scale, decimals);
+  const digits = quantized.toString().padStart(decimals + 1, "0");
+  const split = digits.length - decimals;
+  const integer = grouping
+    ? groupInteger(digits.slice(0, split))
+    : digits.slice(0, split);
+  const fraction = decimals > 0 ? `.${digits.slice(split)}` : "";
+  const sign = value.negative ? "-" : "";
+  return `${sign}${prefix}${integer}${fraction}${percent ? "%" : ""}`;
 }
 
 /** Format a number with fixed decimals + optional thousands grouping. */
@@ -101,6 +128,8 @@ function currencyPrefix(format: string): string {
  * - thousands grouping + N decimals, e.g. `"#,##0"` (1234567 -> "1,234,567")
  *   or `"#,##0.00"` (1234.5 -> "1,234.50")
  * - percent, e.g. `"0.0%"` (0.1234 -> "12.3%") — the value is multiplied by 100
+ * - JSON_ARRAY integer/decimal strings are formatted as exact fixed-point
+ *   values, without a precision-losing conversion through `Number`
  *
  * No format spec -> sensible default: numbers via `toLocaleString`, everything
  * else via `String()`. `null`/`undefined` -> `""`. Unrecognized specs fall back
@@ -122,21 +151,27 @@ export function formatValue(value: unknown, format?: string): string {
   const decimals = countDecimals(format);
   const prefix = currencyPrefix(format);
 
-  // Exact-integer path. A bigint formats losslessly via `Intl.NumberFormat`,
-  // whereas `Number(bigint)` corrupts values beyond ±2^53 (int64 counts /
-  // cents). Reached both by a genuine bigint and by an oversized integer-shaped
-  // *string* off the JSON_ARRAY wire — see `asPreciseBigInt`.
-  const big =
+  // JSON_ARRAY delivers SQL scalar cells as strings. Parse plain integer and
+  // fractional forms as fixed-point values so DECIMAL precision is never lost
+  // through Number(), even when the magnitude exceeds ±2^53.
+  const exact =
     typeof value === "bigint"
-      ? value
+      ? {
+          coefficient: value < 0n ? -value : value,
+          negative: value < 0n,
+          scale: 0,
+        }
       : typeof value === "string"
-        ? asPreciseBigInt(value)
+        ? parseExactDecimal(value)
         : null;
-  if (big !== null) {
-    // The percent path multiplies by 100 (float math a large bigint can't
-    // survive), so refuse it rather than emit a wrong number.
-    if (isPercent) return String(big);
-    return formatBigInt(big, decimals, grouping, prefix);
+  if (exact !== null) {
+    return formatExactDecimal(
+      exact,
+      decimals,
+      grouping,
+      isPercent ? "" : prefix,
+      isPercent,
+    );
   }
 
   const num = coerceNumber(value);
