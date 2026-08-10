@@ -1,6 +1,7 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
+import { mockPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -289,16 +290,8 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
    * `runState.limits.toolCallTimeoutMs` through to `PluginContext` so the
    * agents plugin owns the cap and the default (5 minutes) is generous.
    */
-  test("forwards runState.limits.toolCallTimeoutMs to PluginContext.executeTool", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
-    const { runState } = makeRunState(plugin);
-    runState.limits.toolCallTimeoutMs = 90_000;
-
-    const executeTool = vi.fn().mockResolvedValue("rows");
-    // biome-ignore lint/suspicious/noExplicitAny: stub PluginContext shape
-    (plugin as any).context = { executeTool };
-
-    const toolIndex = new Map<string, unknown>([
+  const toolkitToolIndex = () =>
+    new Map<string, unknown>([
       [
         "analytics.query",
         {
@@ -314,19 +307,76 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
       ],
     ]);
 
-    await callDispatch(plugin, {
+  test("forwards runState.limits.toolCallTimeoutMs to PluginContext.executeTool", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    runState.limits.toolCallTimeoutMs = 90_000;
+
+    // Use the real PluginContext via the testing kit rather than a bare
+    // `{ executeTool }` stub. `executeTool` here is the real method, so the
+    // forwarded timeout is exercised through actual signal composition — and
+    // spying on it lets us keep asserting the exact call signature the agents
+    // plugin passes.
+    const mock = mockPluginContext({ analytics: { query: "rows" } });
+    const executeToolSpy = vi.spyOn(mock.ctx, "executeTool");
+    // biome-ignore lint/suspicious/noExplicitAny: attach the real context to the plugin
+    (plugin as any).context = mock.ctx;
+
+    const result = await callDispatch(plugin, {
       runState,
-      toolIndex,
+      toolIndex: toolkitToolIndex(),
       name: "analytics.query",
       args: { sql: "SELECT 1" },
     });
 
-    expect(executeTool).toHaveBeenCalledTimes(1);
-    const call = executeTool.mock.calls[0];
+    expect(result).toBe("rows");
+    expect(executeToolSpy).toHaveBeenCalledTimes(1);
+    const call = executeToolSpy.mock.calls[0];
     // (req, pluginName, toolName, args, signal, timeoutMs)
     expect(call[1]).toBe("analytics");
     expect(call[2]).toBe("query");
     expect(call[5]).toBe(90_000);
+
+    // The stub could never prove this: the real executeTool routed the call
+    // through the analytics provider's on-behalf-of (asUser) path.
+    expect(mock.toolCalls).toHaveLength(1);
+    expect(mock.toolCalls[0]).toMatchObject({
+      plugin: "analytics",
+      tool: "query",
+      args: { sql: "SELECT 1" },
+      asUser: true,
+    });
+  });
+
+  test("the forwarded timeout actually aborts a slow toolkit tool", async () => {
+    // End-to-end proof that the timeout value the agents plugin forwards
+    // reaches real AbortSignal composition inside PluginContext.executeTool —
+    // a stubbed executeTool would silently ignore the timeout.
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    runState.limits.toolCallTimeoutMs = 5;
+
+    const mock = mockPluginContext({
+      analytics: {
+        query: (_args, signal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () =>
+              reject(new Error("aborted by toolkit timeout")),
+            );
+          }),
+      },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: attach the real context
+    (plugin as any).context = mock.ctx;
+
+    await expect(
+      callDispatch(plugin, {
+        runState,
+        toolIndex: toolkitToolIndex(),
+        name: "analytics.query",
+        args: { sql: "SELECT 1" },
+      }),
+    ).rejects.toThrow(/aborted by toolkit timeout/);
   });
 
   test("resolvedLimits exposes the documented 5-minute default", () => {
