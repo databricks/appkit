@@ -1179,4 +1179,62 @@ describe("applySelectionEmphasis", () => {
       expect(out.series[0].data).toEqual([10, 20]);
     });
   });
+
+  describe("sentinel-based category emphasis (chart click round-trip)", () => {
+    // When chart data is pre-normalized with sentinels (e.g., __empty__ for "",
+    // __none__ for NULL), toSelectionSet accepts these non-empty sentinels and
+    // can emphasize them. This tests that the appkit-ui layer supports the
+    // pattern without breaking the documented "empty string = no-op" guard.
+
+    test("emphasizes a sentinel category name (__empty__ for an empty-string value)", () => {
+      // Chart data has been pre-normalized: a row with "" becomes __empty__
+      const EMPTY = "__empty__";
+      const opt = barOption(["EMEA", EMPTY, "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, EMPTY));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // __empty__ selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("emphasizes a sentinel category name (__none__ for a NULL value)", () => {
+      // Chart data has been pre-normalized: a row with NULL becomes __none__
+      const NONE = "__none__";
+      const opt = barOption(["EMEA", NONE, "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, NONE));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // __none__ selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("still guards against an actual empty-string category (no pre-normalization)", () => {
+      // If data were NOT pre-normalized and somehow had a literal "", the guard
+      // still prevents it from dimming everything.
+      const opt = barOption(["EMEA", "", "AMER"], [10, 20, 30]);
+      expect(applySelectionEmphasis(opt, "")).toBe(opt);
+    });
+
+    test("pie series with sentinel categories work the same way", () => {
+      const EMPTY = "__empty__";
+      const NONE = "__none__";
+      const ctx = createBaseContext({
+        xData: ["EMEA", EMPTY, NONE],
+        yDataMap: { value: [10, 20, 30] },
+        yFields: ["value"],
+      });
+      const built = buildPieOption(ctx, "pie", 0, true, "outside");
+      const out = asOption(applySelectionEmphasis(built, EMPTY));
+
+      const data = out.series[0].data as Array<{
+        name: string;
+        itemStyle?: { opacity?: number };
+      }>;
+      expect(data[0].itemStyle?.opacity).toBe(0.3); // EMEA dimmed
+      expect(data[1].itemStyle?.opacity).toBe(1); // __empty__ selected
+      expect(data[2].itemStyle?.opacity).toBe(0.3); // __none__ dimmed
+    });
+  });
 });

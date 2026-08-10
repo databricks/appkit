@@ -523,4 +523,52 @@ describe("mapToDatum", () => {
     expect(d.value).toBeNull();
     expect(d.raw).toBeNull();
   });
+
+  describe("sentinel-based category clicks (round-trip)", () => {
+    // When chart data is pre-normalized with sentinels (e.g., __empty__ for "",
+    // __none__ for NULL), a click on that sentinel bar/pie slice emits the sentinel
+    // name, which can then be decoded back to the original value. These tests
+    // verify mapToDatum round-trips sentinel names correctly.
+
+    test("preserves __empty__ sentinel in a bar click (pre-normalized empty string)", () => {
+      // A bar chart with pre-normalized data: "" became __empty__
+      const EMPTY = "__empty__";
+      const d = mapToDatum({
+        name: EMPTY,
+        value: 42,
+        seriesName: "ARR",
+        dataIndex: 1,
+        seriesIndex: 0,
+      });
+      expect(d.name).toBe(EMPTY);
+      expect(d.value).toBe(42);
+    });
+
+    test("preserves __none__ sentinel in a pie click (pre-normalized NULL)", () => {
+      // A pie chart with pre-normalized data: NULL became __none__
+      const NONE = "__none__";
+      const d = mapToDatum({
+        name: NONE,
+        value: 20,
+        seriesName: "ARR",
+        dataIndex: 0,
+        seriesIndex: 0,
+      });
+      expect(d.name).toBe(NONE);
+      expect(d.value).toBe(20);
+    });
+
+    test("distinguishes sentinels: __empty__ vs __none__ vs regular values", () => {
+      const EMPTY = "__empty__";
+      const NONE = "__none__";
+
+      const empty = mapToDatum({ name: EMPTY, value: 100 });
+      const none = mapToDatum({ name: NONE, value: 200 });
+      const regular = mapToDatum({ name: "EMEA", value: 300 });
+
+      expect(empty.name).toBe(EMPTY);
+      expect(none.name).toBe(NONE);
+      expect(regular.name).toBe("EMEA");
+    });
+  });
 });

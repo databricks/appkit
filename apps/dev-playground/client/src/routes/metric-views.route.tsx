@@ -108,13 +108,15 @@ function toDisplayLabel(value: string | null): string {
 }
 
 /**
- * A clicked chart category as a selection value. Charts normalize a NULL
- * category key to `""` (see `normalizeChartData`), so an empty name means "the
- * NULL group" — map it back to `null` for an `IS NULL` filter rather than an
- * `equals ''` that matches nothing.
+ * A clicked chart category as a selection value. The chart data is pre-normalized
+ * by `normalizeChartDataForChart`, so category names are already sentinels:
+ * `NONE` means NULL, `EMPTY` means `""`, and other strings are literal values.
+ * Map sentinels back to a selection (`null` or real value), leaving literals as-is.
  */
 function fromChartName(name: string): string | null {
-  return name === "" ? null : name;
+  if (name === NONE) return null;
+  if (name === EMPTY) return "";
+  return name;
 }
 
 /**
@@ -135,6 +137,32 @@ function toDimensionOptions(
   const sorted: (string | null)[] = Array.from(values).sort();
   if (hasNull) sorted.push(null);
   return sorted;
+}
+
+/**
+ * Transforms chart data by replacing the dimension field with sentinels so
+ * chart-click round-trips match the dropdown path. Replaces the dimension value
+ * with {@link NONE} for NULL, {@link EMPTY} for `""`, leaving other strings
+ * unchanged. Called before chart rendering; the chart then emits sentinel names
+ * in clicks, which `fromChartName` decodes back to selections.
+ */
+function normalizeChartDataForChart(
+  rows: Array<Record<string, unknown>> | null,
+  dimension: FilterDimension,
+): Array<Record<string, unknown>> | null {
+  if (!rows) return rows;
+  return rows.map((row) => {
+    const value = row[dimension];
+    let normalized: string;
+    if (value === null || value === undefined) {
+      normalized = NONE;
+    } else if (value === "") {
+      normalized = EMPTY;
+    } else {
+      normalized = String(value);
+    }
+    return { ...row, [dimension]: normalized };
+  });
 }
 
 /**
@@ -455,14 +483,21 @@ function MetricViewsRoute() {
                 region.data &&
                 region.data.length > 0 && (
                   <BarChart
-                    data={region.data}
+                    data={normalizeChartDataForChart(region.data, "region")}
                     xKey="region"
                     yKey="arr"
                     height={280}
                     onDataClick={(d) =>
                       setDimension("region", fromChartName(d.name))
                     }
-                    selected={selection.region ?? undefined}
+                    selected={
+                      // `undefined` (no filter on this dimension) must stay
+                      // undefined — mapping it through `toItemValue` would emit
+                      // the NONE sentinel and emphasize the NULL bar.
+                      selection.region === undefined
+                        ? undefined
+                        : toItemValue(selection.region)
+                    }
                   />
                 )}
             </CardContent>
@@ -490,7 +525,7 @@ function MetricViewsRoute() {
                 segment.data &&
                 segment.data.length > 0 && (
                   <DonutChart
-                    data={segment.data}
+                    data={normalizeChartDataForChart(segment.data, "segment")}
                     xKey="segment"
                     yKey="arr"
                     height={280}
@@ -499,7 +534,11 @@ function MetricViewsRoute() {
                     onDataClick={(d) =>
                       setDimension("segment", fromChartName(d.name))
                     }
-                    selected={selection.segment ?? undefined}
+                    selected={
+                      selection.segment === undefined
+                        ? undefined
+                        : toItemValue(selection.segment)
+                    }
                   />
                 )}
             </CardContent>
