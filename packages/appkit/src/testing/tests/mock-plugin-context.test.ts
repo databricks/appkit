@@ -109,6 +109,19 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
       mock.ctx.executeTool(mockReq(), "analytics", "missing", {}),
     ).rejects.toThrow(/no fake tool "missing"/);
   });
+
+  test("returns a null response as a value rather than treating it as missing", async () => {
+    // `resolve` distinguishes a null fake response (valid) from undefined
+    // (unregistered tool), so a tool can model an empty/absent result.
+    const mock = mockPluginContext({ analytics: { lookup: null } });
+    const result = await mock.ctx.executeTool(
+      mockReq(),
+      "analytics",
+      "lookup",
+      {},
+    );
+    expect(result).toBeNull();
+  });
 });
 
 describe("mockPluginContext — telemetry seam", () => {

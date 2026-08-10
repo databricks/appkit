@@ -25,8 +25,7 @@ type FakeToolValue =
   | string
   | number
   | boolean
-  | null
-  | undefined;
+  | null;
 
 /**
  * A canned tool response. Either a static {@link FakeToolValue} returned
