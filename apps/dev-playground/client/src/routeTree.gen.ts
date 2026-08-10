@@ -21,6 +21,7 @@ import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as FilesRouteRouteImport } from './routes/files.route'
+import { Route as DatabaseRouteRouteImport } from './routes/database.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
@@ -89,6 +90,11 @@ const FilesRouteRoute = FilesRouteRouteImport.update({
   path: '/files',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DatabaseRouteRoute = DatabaseRouteRouteImport.update({
+  id: '/database',
+  path: '/database',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
   id: '/data-visualization',
   path: '/data-visualization',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/database': typeof DatabaseRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/database': typeof DatabaseRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -176,6 +184,7 @@ export interface FileRoutesById {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/database': typeof DatabaseRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/database'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/database'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/database'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -263,6 +275,7 @@ export interface RootRouteChildren {
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
+  DatabaseRouteRoute: typeof DatabaseRouteRoute
   FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
   JobsRouteRoute: typeof JobsRouteRoute
@@ -363,6 +376,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FilesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/database': {
+      id: '/database'
+      path: '/database'
+      fullPath: '/database'
+      preLoaderRoute: typeof DatabaseRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/data-visualization': {
       id: '/data-visualization'
       path: '/data-visualization'
@@ -423,6 +443,7 @@ const rootRouteChildren: RootRouteChildren = {
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
+  DatabaseRouteRoute: DatabaseRouteRoute,
   FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
   JobsRouteRoute: JobsRouteRoute,
