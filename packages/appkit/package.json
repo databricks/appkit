@@ -96,6 +96,7 @@
     "semver": "7.7.3",
     "shared": "workspace:*",
     "vite": "npm:rolldown-vite@7.1.14",
+    "vitest": "3.2.4",
     "ws": "8.21.0",
     "zod": "4.3.6"
   },
@@ -107,9 +108,6 @@
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "5.1.1"
-  },
-  "peerDependencies": {
-    "vitest": ">=1.0.0"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

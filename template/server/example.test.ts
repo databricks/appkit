@@ -1,8 +1,5 @@
 import { Plugin, type PluginManifest } from '@databricks/appkit';
-import {
-  expectStream,
-  mockPluginContext,
-} from '@databricks/appkit/testing';
+import { expectStream, mockPluginContext } from '@databricks/appkit/testing';
 import { describe, expect, test } from 'vitest';
 
 /**
@@ -56,17 +53,12 @@ describe('testing kit example', () => {
     await mock.attach(plugin);
     await plugin.setup();
 
-    expect(mock.routes).toContainEqual(
-      expect.objectContaining({ method: 'get', path: '/hello' }),
-    );
+    expect(mock.routes).toContainEqual(expect.objectContaining({ method: 'get', path: '/hello' }));
   });
 
   test('asserts the ordered events a stream emits', async () => {
     const plugin = new GreeterPlugin({});
 
-    await expectStream(plugin.greet('world')).toEmit(
-      'greeting_start',
-      'greeting_end',
-    );
+    await expectStream(plugin.greet('world')).toEmit('greeting_start', 'greeting_end');
   });
 });
