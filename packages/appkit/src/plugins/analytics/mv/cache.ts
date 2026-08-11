@@ -12,11 +12,7 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
   // `timeDimension` only changes the SQL when `timeGrain` is set (see renderDimensionClause)
   const timeDimensionPart =
     input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
-  // Preserve `orderBy` sequence: under LIMIT, `a, b` and `b, a` can return
-  // different rows and must not share a key. Directions still default to ASC.
-  // We accept extra entries when an explicit order matches the generated
-  // tie-breaker rather than duplicate `renderOrderByClause` here: rule drift
-  // could create a collision and serve incorrectly ordered cached results.
+  // Preserve `orderBy` sequence: under LIMIT, `a, b` and `b, a` return different rows.
   const orderByPart =
     input.orderBy !== undefined && input.orderBy.length > 0
       ? JSON.stringify(
@@ -28,8 +24,8 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
     input.metricKey,
     input.source,
     input.format,
-    // JSON encoding keeps `["a,b"]` distinct from `["a","b"]`; commas are
-    // valid identifier characters, so joining would create a cache collision.
+    // Commas are valid in identifiers, so JSON-encode: `["a,b"]` must not
+    // collide with `["a","b"]`.
     JSON.stringify(sortedMeasures),
     JSON.stringify(sortedDimensions),
     input.timeGrain ?? "_",

@@ -105,8 +105,7 @@ export function useMetricView<
     throw new Error("useMetricView: 'key' must be a non-empty string.");
   }
 
-  // Stringify defined fields so `start` compares the request by value and inline
-  // arrays or filter literals do not re-fire the query on every render.
+  // Stringify to compare request by value; prevent re-firing on every render.
   const payload = useMemo(() => {
     const body: {
       measures: ReadonlyArray<unknown>;
@@ -135,18 +134,15 @@ export function useMetricView<
     options.limit,
   ]);
 
-  // Filters, ordering, limits, and time bucketing change which rows or values
-  // are returned without changing their fields. Keep the last result visible
-  // for those revalidations, but never expose rows from another metric/column
-  // selection under the new result type.
+  // Detect shape changes: clear rows when metric/measures/dimensions change,
+  // but keep stale rows during filter/order/limit/time-grain revalidations.
   const resultShape = JSON.stringify({
     key,
     measures: options.measures,
     dimensions: options.dimensions ?? [],
   });
 
-  // Hide stale rows during the render that changes shape, before the effect
-  // below has had a chance to start the replacement request and clear state.
+  // Return stale rows only if shape is current; hide during shape transitions.
   const isCurrentShape = result?.shape === resultShape;
   const data = isCurrentShape ? result.data : null;
   const metadata = isCurrentShape ? result.metadata : undefined;
