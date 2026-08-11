@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { trace } from "@opentelemetry/api";
 import type {
   AgentAdapter,
   AgentEvent,
   AgentToolDefinition,
+  AgentUsage,
   Message,
   PluginConstructor,
   PluginData,
@@ -47,6 +49,10 @@ export interface RunAgentInput {
    * there is no HTTP request in standalone mode).
    */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
+  sessionId?: string;
+  userId?: string;
+  requestId?: string;
+  appName?: string;
 }
 
 export interface RunAgentResult {
@@ -54,6 +60,8 @@ export interface RunAgentResult {
   text: string;
   /** Every event the adapter yielded, in order. Useful for inspection/tests. */
   events: AgentEvent[];
+  traceId: string;
+  usage: AgentUsage;
 }
 
 /**
@@ -103,6 +111,9 @@ async function runAgentInternal(
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
 ): Promise<RunAgentResult> {
+  const traceId =
+    trace.getActiveSpan()?.spanContext().traceId ??
+    randomUUID().replaceAll("-", "");
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
@@ -143,6 +154,10 @@ async function runAgentInternal(
             : JSON.stringify(args),
         signal,
         plugins: input.plugins,
+        sessionId: input.sessionId,
+        userId: input.userId,
+        requestId: input.requestId,
+        appName: input.appName,
       };
       // Reuse the same `providerCache` so sub-agent plugin tools dispatch
       // through the same instances the parent constructed.
@@ -184,14 +199,19 @@ async function runAgentInternal(
   // Shared accumulation rule (deltas append, `message` replaces). The
   // `events` array is filled via the `onEvent` side effect so callers that
   // inspect the raw stream still get the full record.
-  const text = await consumeAdapterStream(stream, {
+  const consumed = await consumeAdapterStream(stream, {
     signal,
     onEvent: (event) => {
       events.push(event);
     },
   });
 
-  return { text, events };
+  return {
+    text: consumed.text,
+    events,
+    traceId,
+    usage: consumed.usage,
+  };
 }
 
 /**

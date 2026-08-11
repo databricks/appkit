@@ -1,3 +1,4 @@
+import { type Span, trace } from "@opentelemetry/api";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -40,6 +41,61 @@ describe("runAgent", () => {
     const result = await runAgent(def, { messages: "hi" });
     expect(result.text).toBe("Hello world");
     expect(result.events).toHaveLength(3);
+  });
+
+  test("returns the active trace and aggregate usage for identified runs", async () => {
+    const traceId = "0123456789abcdef0123456789abcdef";
+    const activeSpan = {
+      spanContext: () => ({
+        traceId,
+        spanId: "0123456789abcdef",
+        traceFlags: 1,
+      }),
+    } as unknown as Span;
+    const activeSpanSpy = vi
+      .spyOn(trace, "getActiveSpan")
+      .mockReturnValue(activeSpan);
+    const events: AgentEvent[] = [
+      { type: "message_delta", content: "done" },
+      {
+        type: "model_end",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        output: { text: "done" },
+        usage: {
+          inputTokens: 7,
+          outputTokens: 2,
+          totalTokens: 9,
+          costUsd: 0.01,
+          costAvailable: true,
+        },
+        streamDurationMs: 10,
+        endedAt: 110,
+      },
+    ];
+    const def = createAgent({
+      instructions: "x",
+      model: scriptedAdapter(events),
+    });
+
+    const result = await runAgent(def, {
+      messages: "hi",
+      sessionId: "session-1",
+      userId: "user-1",
+      requestId: "request-1",
+      appName: "test-app",
+    });
+    activeSpanSpy.mockRestore();
+
+    expect(result.traceId).toBe(traceId);
+    expect(result.usage).toEqual({
+      inputTokens: 7,
+      outputTokens: 2,
+      totalTokens: 9,
+      costUsd: 0.01,
+      costAvailable: true,
+    });
   });
 
   test("prefers terminal 'message' event over deltas when present", async () => {

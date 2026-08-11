@@ -1,4 +1,8 @@
 import type { AgentEvent } from "shared";
+import {
+  AgentUsageAccumulator,
+  type ConsumedAgentStream,
+} from "../../telemetry/agent-tracing";
 
 interface ConsumeAdapterStreamOptions {
   /**
@@ -37,16 +41,26 @@ interface ConsumeAdapterStreamOptions {
 export async function consumeAdapterStream(
   stream: AsyncIterable<AgentEvent>,
   opts: ConsumeAdapterStreamOptions = {},
-): Promise<string> {
+): Promise<ConsumedAgentStream> {
   let text = "";
+  const usage = new AgentUsageAccumulator();
+  let remoteTrace: ConsumedAgentStream["remoteTrace"];
   for await (const event of stream) {
     if (opts.signal?.aborted) break;
     if (event.type === "message_delta") {
       text += event.content;
     } else if (event.type === "message") {
       text = event.content;
+    } else if (event.type === "model_end") {
+      usage.add(event.usage);
+    } else if (event.type === "remote_trace") {
+      remoteTrace = event;
     }
     opts.onEvent?.(event);
   }
-  return text;
+  return {
+    text,
+    usage: usage.snapshot(),
+    ...(remoteTrace ? { remoteTrace } : {}),
+  };
 }

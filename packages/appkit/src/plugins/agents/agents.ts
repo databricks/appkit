@@ -1145,7 +1145,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // The accumulation rule (deltas append, `message` replaces) is shared
         // with `runAgent` and `runSubAgent`; see `consumeAdapterStream` for
         // the rationale.
-        const fullContent = await consumeAdapterStream(stream, {
+        const { text: fullContent } = await consumeAdapterStream(stream, {
           signal,
           onEvent: (event) => {
             for (const translated of translator.translate(event)) {
@@ -1308,7 +1308,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         { executeTool, signal },
       );
 
-      fullContent = await consumeAdapterStream(stream, { signal });
+      ({ text: fullContent } = await consumeAdapterStream(stream, { signal }));
 
       if (fullContent) {
         await this.threadStore.addMessage(thread.id, userId, {
@@ -1563,7 +1563,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       },
     ];
 
-    return consumeAdapterStream(
+    const consumed = await consumeAdapterStream(
       child.adapter.run(
         {
           messages,
@@ -1594,6 +1594,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         },
       },
     );
+    return consumed.text;
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
