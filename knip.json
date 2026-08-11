@@ -9,9 +9,6 @@
   "workspaces": {
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
-    },
-    "packages/appkit": {
-      "ignoreDependencies": ["vitest"]
     }
   },
   "ignore": [
