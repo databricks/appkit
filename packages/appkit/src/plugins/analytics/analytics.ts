@@ -564,20 +564,30 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // app injected a value explicitly. Injection wins so an app that builds its
     // metadata some other way (or pins it deliberately) keeps working, but the
     // generated bundle means the common case needs no wiring at all.
+    const injectedMetadata = this.config.metricViewsMetadata;
     const allMetadata =
-      this.config.metricViewsMetadata ??
+      injectedMetadata ??
       (await loadMetricMetadata(this.app, req, this.devFileReader));
 
+    // The view is registered (we got past the 404) but carries no metadata, so
+    // the query succeeds with unlabeled columns — otherwise silent. The remedy
+    // depends on where the metadata came from: regenerating types cannot fix an
+    // injected value, and the bundle is not even read on that path.
     if (allMetadata !== undefined && !Object.hasOwn(allMetadata, key)) {
-      // The view is registered (we got past the 404) but carries no metadata:
-      // the bundle predates this key. Worth a warning — the query still
-      // succeeds, just with unlabeled columns, which is otherwise silent.
-      logger.warn(
-        req,
-        "No display metadata for metric key %s — regenerate types to refresh %s",
-        key,
-        METRIC_METADATA_FILE,
-      );
+      if (injectedMetadata !== undefined) {
+        logger.warn(
+          req,
+          "No display metadata for metric key %s in the injected metricViewsMetadata",
+          key,
+        );
+      } else {
+        logger.warn(
+          req,
+          "No display metadata for metric key %s — regenerate types to refresh %s",
+          key,
+          METRIC_METADATA_FILE,
+        );
+      }
     }
 
     // Computed here, outside the cached execute below, so a cache hit still

@@ -885,6 +885,95 @@ describe("analytics metric route", () => {
       });
     });
 
+    // ── The "no metadata for this key" warning names a remedy, so it must know
+    // which source it is talking about: regenerating types cannot fix an
+    // injected value, and the bundle is not read at all on that path.
+    test("a key missing from the injected metadata does not advise regenerating types", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const plugin = pluginForDir(
+        // Injected metadata that covers `revenue` but not `costs`.
+        { ...config, metricViewsMetadata: REVENUE_METADATA },
+        registryDir({
+          costs: { key: "costs", source: "cat.sch.cost_metrics", lane: "sp" },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ spend: 1 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      await handler(
+        createMockRequest({
+          params: { key: "costs" },
+          body: { measures: ["spend"] },
+        }),
+        createMockResponse(),
+      );
+
+      const warnings = warnSpy.mock.calls.map((c) => c.join(" "));
+      const missing = warnings.filter((w) =>
+        w.includes("No display metadata for metric key"),
+      );
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing.join(" ")).toContain("injected metricViewsMetadata");
+      // The generated bundle is never consulted on the injected path, so
+      // naming it here would send the operator after the wrong file.
+      expect(missing.join(" ")).not.toContain("regenerate types");
+      expect(missing.join(" ")).not.toContain("metadata.generated.json");
+      warnSpy.mockRestore();
+    });
+
+    test("a key missing from the discovered bundle advises regenerating types", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const dir = registryDir({
+        costs: { key: "costs", source: "cat.sch.cost_metrics", lane: "sp" },
+      });
+      // A bundle must exist for this branch to be reachable: an absent bundle
+      // resolves to `undefined`, which is dormancy rather than a stale bundle.
+      // It covers `revenue` but not the `costs` key being queried.
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      const plugin = pluginForDir(config, dir); // no injection → discovery path
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ spend: 1 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      await handler(
+        createMockRequest({
+          params: { key: "costs" },
+          body: { measures: ["spend"] },
+        }),
+        createMockResponse(),
+      );
+
+      const warnings = warnSpy.mock.calls.map((c) => c.join(" "));
+      const missing = warnings.filter((w) =>
+        w.includes("No display metadata for metric key"),
+      );
+      expect(missing.length).toBeGreaterThan(0);
+      // Regenerating types is the correct remedy here, and it names the file to
+      // regenerate — the opposite of the injected path above.
+      expect(missing.join(" ")).toContain("regenerate types");
+      expect(missing.join(" ")).toContain("metadata.generated.json");
+      expect(missing.join(" ")).not.toContain("injected metricViewsMetadata");
+      warnSpy.mockRestore();
+    });
+
     test("omits the metadata field entirely when no metadata is injected (envelope parity with /query)", async () => {
       const plugin = pluginForDir(
         config, // no metricViewsMetadata
