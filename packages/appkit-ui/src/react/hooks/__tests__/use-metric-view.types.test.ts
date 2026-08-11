@@ -42,8 +42,11 @@ function compileTypeProbe(source: string): readonly ts.Diagnostic[] {
 test("useMetricView keeps omitted dimensions out of rows and requires a grain target", () => {
   const diagnostics = compileTypeProbe(`
     import { useMetricView } from "../src/react/hooks/use-metric-view";
-    import type { MetricOrderBy } from "../src/react";
-    import type { UseMetricViewOptions, UseMetricViewResult } from "../src/react/hooks/types";
+    import type {
+      MetricOrderBy,
+      UseMetricViewOptions,
+      UseMetricViewResult,
+    } from "../src/react/hooks/types";
 
     declare module "../src/react/hooks/types" {
       interface MetricRegistry {

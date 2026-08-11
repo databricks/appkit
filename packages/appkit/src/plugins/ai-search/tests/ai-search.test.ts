@@ -9,6 +9,15 @@ import { Context } from "../../../workspace-client";
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
   getCurrentUserId: vi.fn(() => "test-user"),
+  // OBO plumbing so asUser() runs its non-dev path. getCurrentUserId stays
+  // constant, so per-user scoping is driven by executorKey in the cacheKey.
+  runInUserContext: <T>(_ctx: unknown, fn: () => T): T => fn(),
+  ServiceContext: {
+    createUserContext: (_token: string, userId: string) => ({
+      userId,
+      isUserContext: true,
+    }),
+  },
 }));
 
 vi.mock("../../../logging/logger", () => ({
@@ -53,16 +62,37 @@ vi.mock("../../../telemetry", () => ({
   normalizeTelemetryOptions: () => ({ traces: false, metrics: false }),
 }));
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: () => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      generateKey: vi.fn(() => "test-key"),
-    }),
-  },
+// In-memory cache keyed like the real CacheManager.generateKey, so tests
+// exercise real key composition. Never stores rejections.
+const { mockCacheStore } = vi.hoisted(() => ({
+  mockCacheStore: new Map<string, unknown>(),
 }));
+
+vi.mock("../../../cache", () => {
+  const keyOf = (parts: unknown[], userKey: string) =>
+    JSON.stringify([userKey, ...parts]);
+  return {
+    CacheManager: {
+      getInstanceSync: () => ({
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        generateKey: keyOf,
+        getOrExecute: async (
+          key: unknown[],
+          fn: (signal?: AbortSignal) => Promise<unknown>,
+          userKey: string,
+        ) => {
+          const k = keyOf(key, userKey);
+          if (mockCacheStore.has(k)) return mockCacheStore.get(k);
+          const result = await fn();
+          mockCacheStore.set(k, result);
+          return result;
+        },
+      }),
+    },
+  };
+});
 
 vi.mock("../../../app", () => ({
   AppManager: vi.fn().mockImplementation(() => ({})),
@@ -108,6 +138,7 @@ describe("AiSearchPlugin", () => {
   beforeEach(() => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValue(validVsResponse);
+    mockCacheStore.clear();
   });
 
   describe("setup()", () => {
@@ -664,6 +695,236 @@ describe("AiSearchPlugin", () => {
       await expect(
         plugin.query("products", { queryText: "q" }),
       ).rejects.toThrow(/Vector search query failed for index "products"/);
+    });
+  });
+
+  describe("caching", () => {
+    const makePlugin = () =>
+      new AiSearchPlugin({
+        indexes: {
+          products: {
+            indexName: "cat.sch.products",
+            columns: ["id", "title"],
+            queryType: "hybrid",
+            numResults: 10,
+          },
+        },
+      });
+
+    it("serves an identical query from cache (connector called once)", async () => {
+      const plugin = makePlugin();
+      await plugin.setup();
+
+      await plugin.query("products", { queryText: "machine learning" });
+      await plugin.query("products", { queryText: "machine learning" });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["queryText", { queryText: "different" }],
+      ["numResults", { queryText: "q", numResults: 5 }],
+      ["queryType", { queryText: "q", queryType: "ann" as const }],
+      ["columns", { queryText: "q", columns: ["id"] }],
+      ["filters", { queryText: "q", filters: { category: ["books"] } }],
+      ["reranker", { queryText: "q", reranker: true }],
+    ])(
+      "does not share cache entries when %s differs (2 connector calls)",
+      async (_field, second) => {
+        const plugin = makePlugin();
+        await plugin.setup();
+
+        await plugin.query("products", { queryText: "q" });
+        await plugin.query("products", second);
+
+        expect(mockRequest).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it("shares a cache entry for filters that differ only in key order", async () => {
+      const plugin = makePlugin();
+      await plugin.setup();
+
+      // Same filter semantics, different key insertion order — must hit the
+      // same entry (the key stable-stringifies object keys).
+      await plugin.query("products", {
+        queryText: "q",
+        filters: { category: ["books"], inStock: true },
+      });
+      await plugin.query("products", {
+        queryText: "q",
+        filters: { inStock: true, category: ["books"] },
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it("still splits entries when filter values differ", async () => {
+      const plugin = makePlugin();
+      await plugin.setup();
+
+      // Guard against over-merging: only key ORDER is normalized, not values.
+      await plugin.query("products", {
+        queryText: "q",
+        filters: { category: ["books"] },
+      });
+      await plugin.query("products", {
+        queryText: "q",
+        filters: { category: ["films"] },
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(2);
+    });
+
+    it("shares a cache entry for the same columns in a different order", async () => {
+      const plugin = makePlugin();
+      await plugin.setup();
+
+      // columns is a projection list — order doesn't change results, so a
+      // reordered projection must reuse the entry (key sorts a copy).
+      await plugin.query("products", {
+        queryText: "q",
+        columns: ["id", "title"],
+      });
+      await plugin.query("products", {
+        queryText: "q",
+        columns: ["title", "id"],
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it("keys managed-embedding queries by queryText, skipping embedding on a route cache hit", async () => {
+      // Keyed by queryText, not the derived vector; the hit skips embeddingFn.
+      const embeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          docs: {
+            indexName: "cat.sch.docs",
+            columns: ["id", "title"],
+            queryType: "ann",
+            embeddingFn,
+          },
+        },
+      });
+      await plugin.setup();
+
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/:alias/query");
+      const run = () =>
+        handler(
+          createMockRequest({
+            params: { alias: "docs" },
+            body: { queryText: "same" },
+          }),
+          createMockResponse(),
+        );
+
+      await run();
+      await run();
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(embeddingFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips embedding on a programmatic query() cache hit too", async () => {
+      const embeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          docs: {
+            indexName: "cat.sch.docs",
+            columns: ["id", "title"],
+            queryType: "ann",
+            embeddingFn,
+          },
+        },
+      });
+      await plugin.setup();
+
+      await plugin.query("docs", { queryText: "same" });
+      await plugin.query("docs", { queryText: "same" });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(embeddingFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not share cache across OBO users (per-user cache key)", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          docs: {
+            indexName: "cat.sch.docs",
+            columns: ["id", "title"],
+            auth: "on-behalf-of-user",
+          },
+        },
+      });
+      await plugin.setup();
+
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/:alias/query");
+
+      const runAs = async (user: string) => {
+        const res = createMockResponse();
+        await handler(
+          createMockRequest({
+            params: { alias: "docs" },
+            body: { queryText: "shared question" },
+            headers: {
+              "x-forwarded-user": user,
+              "x-forwarded-access-token": "tok",
+            },
+          }),
+          res,
+        );
+        return res;
+      };
+
+      const resA = await runAs("alice");
+      const resB = await runAs("bob");
+
+      // Same query text, different users → distinct keys → both hit the
+      // connector. A shared entry would collapse this to one call and leak
+      // alice's results to bob.
+      expect(mockRequest).toHaveBeenCalledTimes(2);
+      expect(resA.json).toHaveBeenCalled();
+      expect(resB.json).toHaveBeenCalled();
+    });
+
+    it("re-serves the same OBO user from cache (connector called once)", async () => {
+      const plugin = new AiSearchPlugin({
+        indexes: {
+          docs: {
+            indexName: "cat.sch.docs",
+            columns: ["id", "title"],
+            auth: "on-behalf-of-user",
+          },
+        },
+      });
+      await plugin.setup();
+
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/:alias/query");
+
+      const runAsAlice = () =>
+        handler(
+          createMockRequest({
+            params: { alias: "docs" },
+            body: { queryText: "shared question" },
+            headers: {
+              "x-forwarded-user": "alice",
+              "x-forwarded-access-token": "tok",
+            },
+          }),
+          createMockResponse(),
+        );
+
+      await runAsAlice();
+      await runAsAlice();
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
     });
   });
 

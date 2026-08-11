@@ -1,8 +1,2 @@
 export { jobs } from "./plugin";
-export type {
-  IJobsConfig,
-  JobAPI,
-  JobConfig,
-  JobHandle,
-  JobsExport,
-} from "./types";
+export type { IJobsConfig, JobAPI, JobConfig, JobsExport } from "./types";
