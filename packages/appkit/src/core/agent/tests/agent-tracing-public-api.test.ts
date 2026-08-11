@@ -9,6 +9,18 @@ import {
 } from "../../../beta";
 
 describe("agent tracing public API", () => {
+  test("requires spanId for linked remote traces", () => {
+    // @ts-expect-error linked remote traces require a spanId
+    const invalidLinkedTrace: AgentRemoteTraceEvent = {
+      type: "remote_trace",
+      traceId: "abcdef0123456789abcdef0123456789",
+      source: "model-serving",
+      relation: "linked",
+    };
+
+    expect(invalidLinkedTrace.relation).toBe("linked");
+  });
+
   test("exposes lifecycle, capture, and usage primitives from the beta entrypoint", () => {
     const usage: AgentUsage = {
       inputTokens: 1,

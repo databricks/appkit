@@ -145,14 +145,21 @@ export interface AgentModelEndEvent {
   error?: string;
 }
 
-export interface AgentRemoteTraceEvent {
-  type: "remote_trace";
-  traceId: string;
-  /** Required when relation is "linked"; omitted only for continued context. */
-  spanId?: string;
-  source: "model-serving" | "supervisor" | "remote-agent";
-  relation: "continued" | "linked";
-}
+export type AgentRemoteTraceEvent =
+  | {
+      type: "remote_trace";
+      traceId: string;
+      spanId?: string;
+      source: "model-serving" | "supervisor" | "remote-agent";
+      relation: "continued";
+    }
+  | {
+      type: "remote_trace";
+      traceId: string;
+      spanId: string;
+      source: "model-serving" | "supervisor" | "remote-agent";
+      relation: "linked";
+    };
 
 export type AgentEvent =
   | { type: "message_delta"; content: string }
