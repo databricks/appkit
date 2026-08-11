@@ -87,7 +87,7 @@ export type {
 // named 'Time'" at ESM link time. `Time` is only reachable via the module
 // object, so we fall back to `SDK.default.Time` (matching the original genie
 // connector's `SDK.Time ?? SDK.default.Time` guard).
-export const { ConfigError, Context, TimeUnits } = SDK;
+export const { ConfigError, Context, TimeUnits, loadConfigFile } = SDK;
 export const Time =
   SDK.Time ?? (SDK as unknown as { default: typeof SDK }).default.Time;
 
