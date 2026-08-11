@@ -176,12 +176,9 @@ describe("syncMetricViewsTypes", () => {
     // `metadata` block — the sole carrier now the JSON is gone.
     expect(declarations).toContain('"$#,##0.00"');
     // Declaration-only: the runtime metadata twin lives in the JSON bundle, so
-    // nothing here compiles to a value. The anchoring import stays type-only.
+    // nothing here compiles to a value. The import anchors the augmentation.
     expect(declarations).not.toContain("export const");
-    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(declarations).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
-    );
+    expect(declarations).toContain('import "@databricks/appkit-ui/react";');
   });
 
   test("removes a stale sibling metric-views.ts left by the interim .ts version on upgrade", async () => {

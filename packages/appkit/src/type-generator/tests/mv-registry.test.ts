@@ -1703,13 +1703,14 @@ describe("metric metadata bundle", () => {
     });
   });
 
-  test("uses a zero-runtime type-only import, never a side-effect import", () => {
+  test("anchors the augmentation with an import of the module it augments", () => {
     const output = generateMetricTypeDeclarations([]);
-    // A bare `import "..."` would execute the client entry on the Node server.
-    expect(output).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(output).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
-    );
+    // Load-bearing: the import marks the file a module, which is what makes
+    // `declare module` merge into the real one. Drop it and the block becomes an
+    // ambient declaration that shadows the module, hiding its real exports.
+    // Matches the sibling analytics.d.ts / serving.d.ts header form.
+    expect(output).toContain('import "@databricks/appkit-ui/react";');
+    expect(output).toContain('declare module "@databricks/appkit-ui/react"');
   });
 
   test("bundles no metric views for no registered metrics", () => {

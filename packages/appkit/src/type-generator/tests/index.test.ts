@@ -329,7 +329,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // Mirrors a real committed metric-views.d.ts: augmentation only, since the
     // runtime metadata twin ships as the JSON bundle.
     const committed =
-      '// committed metric types\nimport type {} from "@databricks/appkit-ui/react";\n';
+      '// committed metric types\nimport "@databricks/appkit-ui/react";\n';
     fs.mkdirSync(path.dirname(metricFile), { recursive: true });
     fs.writeFileSync(metricFile, committed, "utf-8");
     return committed;
@@ -374,10 +374,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // Declaration-only: the value twin lives in the JSON bundle beside
     // definitions.json, so nothing here compiles to runtime code.
     expect(declarations).not.toContain("export const");
-    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(declarations).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
-    );
+    expect(declarations).toContain('import "@databricks/appkit-ui/react";');
 
     const bundle = JSON.parse(
       fs.readFileSync(
