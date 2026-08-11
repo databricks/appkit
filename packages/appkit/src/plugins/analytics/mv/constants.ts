@@ -1,3 +1,4 @@
+import type { MetricFilterOperatorName, MetricOrderDirection } from "shared";
 import { METRIC_CONFIG_FILE } from "../../../../../shared/src/schemas/metric-fqn";
 import type { MetricLane } from "../types";
 
@@ -6,18 +7,56 @@ import type { MetricLane } from "../types";
 // from this barrel.
 export { METRIC_CONFIG_FILE };
 
-// The filter-operator vocabulary lives canonically in the shared zod-free
-// module (single source of truth for both the runtime tuple and the derived
-// type union). Re-exported here so analytics-local callers (`schemas.ts`,
-// `formatters.ts`) keep importing operators + subsets from this barrel.
-export {
-  LIST_VALUE_OPERATORS,
-  METRIC_FILTER_OPERATORS,
-  METRIC_ORDER_DIRECTIONS,
-  NULL_OPERATORS,
-  SINGLE_VALUE_OPERATORS,
-  STRING_OPERATORS,
-} from "shared";
+/** Runtime vocabulary accepted by the analytics metric-view validator. */
+export const METRIC_FILTER_OPERATORS = [
+  "equals",
+  "notEquals",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "notContains",
+  "in",
+  "notIn",
+  "set",
+  "notSet",
+] as const satisfies readonly MetricFilterOperatorName[];
+
+/** Operators that require at least one value. */
+export const LIST_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
+  "in",
+  "notIn",
+]);
+
+/** Operators that reject `values` entirely. */
+export const NULL_OPERATORS = new Set<MetricFilterOperatorName>([
+  "set",
+  "notSet",
+]);
+
+/** Operators that emit `LIKE` / `NOT LIKE` and require a string value. */
+export const STRING_OPERATORS = new Set<MetricFilterOperatorName>([
+  "contains",
+  "notContains",
+]);
+
+/** Operators that require exactly one value. */
+export const SINGLE_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
+  "equals",
+  "notEquals",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  ...STRING_OPERATORS,
+]);
+
+/** Runtime vocabulary accepted by the metric-view `orderBy` validator. */
+export const METRIC_ORDER_DIRECTIONS = [
+  "ASC",
+  "DESC",
+] as const satisfies readonly MetricOrderDirection[];
 
 /**
  * Measure, dimension, and filter-member names are **column identifiers**: they

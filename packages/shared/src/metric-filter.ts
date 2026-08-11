@@ -1,44 +1,17 @@
-export const METRIC_FILTER_OPERATORS = [
-  "equals",
-  "notEquals",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "contains",
-  "notContains",
-  "in",
-  "notIn",
-  "set",
-  "notSet",
-] as const;
-
-export type MetricFilterOperatorName = (typeof METRIC_FILTER_OPERATORS)[number];
-
-export const LIST_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
-  "in",
-  "notIn",
-]);
-
-export const NULL_OPERATORS = new Set<MetricFilterOperatorName>([
-  "set",
-  "notSet",
-]);
-
-export const STRING_OPERATORS = new Set<MetricFilterOperatorName>([
-  "contains",
-  "notContains",
-]);
-
-export const SINGLE_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
-  "equals",
-  "notEquals",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  ...STRING_OPERATORS,
-]);
+/** The filter-operator vocabulary accepted by the metric-view wire contract. */
+export type MetricFilterOperatorName =
+  | "equals"
+  | "notEquals"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "in"
+  | "notIn"
+  | "set"
+  | "notSet";
 
 /** A single filter predicate — the leaf node of the recursive {@link MetricFilter} tree. */
 export interface MetricPredicate {
@@ -47,9 +20,7 @@ export interface MetricPredicate {
   values?: ReadonlyArray<string | number>;
 }
 
-export const METRIC_ORDER_DIRECTIONS = ["ASC", "DESC"] as const;
-
-export type MetricOrderDirection = (typeof METRIC_ORDER_DIRECTIONS)[number];
+export type MetricOrderDirection = "ASC" | "DESC";
 
 /**
  * A single `ORDER BY` key for the metric-view request.
