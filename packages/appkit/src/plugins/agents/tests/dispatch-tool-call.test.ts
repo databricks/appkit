@@ -37,10 +37,16 @@ beforeEach(() => {
 });
 
 function mockReq(): express.Request {
+  // Carry OBO headers so PluginContext.executeTool's asUser(req) resolves a
+  // user scope (the mock context enforces the real token precondition).
+  const headers: Record<string, string> = {
+    "x-forwarded-access-token": "user-token",
+    "x-forwarded-user": "alice",
+  };
   return {
     body: {},
-    headers: {},
-    header: () => undefined,
+    headers,
+    header: (name: string) => headers[name.toLowerCase()],
   } as unknown as express.Request;
 }
 

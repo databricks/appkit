@@ -116,6 +116,28 @@ describe("expectStream — SSE Response", () => {
     ]);
   });
 
+  test("the wire event: name wins over a type field inside the data payload", async () => {
+    // Regression: object spread must not let a `data` payload carrying its own
+    // `type` override the frame's real event name. Here the wire says `error`
+    // but the payload says `result`; the emitted event must be `error`.
+    const body = `event: error\ndata: {"type":"result","message":"boom"}\n\n`;
+    const res = new Response(body);
+    const events = await expectStream(res).collect();
+    expect(events[0]?.type).toBe("error");
+    // A stream that actually errored must NOT satisfy an assertion for result.
+    await expect(
+      expectStream(new Response(body)).toEmitExactly("result"),
+    ).rejects.toThrow(/exactly/);
+  });
+
+  test("drops a data-less named frame (real clients ignore it)", async () => {
+    const body = `event: ping\n\nevent: result\ndata: {"ok":true}\n\n`;
+    const res = new Response(body);
+    await expect(expectStream(res).toEmitExactly("result")).resolves.toEqual([
+      "result",
+    ]);
+  });
+
   test("parses CRLF-delimited frames from a spec-compliant SSE stream", async () => {
     // A real server may use \r\n\r\n between frames; AppKit's own writer uses
     // \n\n. Both must parse to distinct events, not one collapsed block.

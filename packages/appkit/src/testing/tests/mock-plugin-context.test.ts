@@ -1,7 +1,28 @@
 import type express from "express";
 import { describe, expect, test } from "vitest";
 import { PluginContext } from "../../core/plugin-context";
+import { Plugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { mockPluginContext } from "../mock-plugin-context";
+
+// A minimal real plugin for exercising attach() end-to-end.
+class ProbePlugin extends Plugin {
+  static manifest = {
+    name: "probe",
+    displayName: "Probe",
+    description: "attach() probe",
+    resources: { required: [], optional: [] },
+  } as PluginManifest<"probe">;
+
+  ready() {
+    // `isReady` is protected; expose it for the attach() assertion.
+    return (this as unknown as { isReady: boolean }).isReady;
+  }
+
+  register() {
+    this.context?.addRoute("get", "/probe", (_req, res) => res.end());
+  }
+}
 
 /**
  * Contract for `mockPluginContext`. The point of the kit is that it wraps the
@@ -10,7 +31,14 @@ import { mockPluginContext } from "../mock-plugin-context";
  * timeout, route recording) rather than a reimplementation.
  */
 
-function mockReq(headers: Record<string, string> = {}): express.Request {
+// Default to a well-formed OBO request (user token + user id) so executeTool's
+// asUser path resolves. Pass `{}` explicitly to model a token-less request.
+function mockReq(
+  headers: Record<string, string> = {
+    "x-forwarded-access-token": "user-token",
+    "x-forwarded-user": "alice",
+  },
+): express.Request {
   return {
     body: {},
     headers,
@@ -48,16 +76,59 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
     );
 
     expect(result).toEqual(rows);
-    // executeTool always resolves the user scope via provider.asUser(req).
+    // executeTool resolves the user scope via provider.asUser(req), and the
+    // fake resolves the user id from the request headers.
     expect(mock.toolCalls).toHaveLength(1);
     expect(mock.toolCalls[0]).toMatchObject({
       plugin: "analytics",
       tool: "top_users",
       args: { limit: 10 },
       asUser: true,
+      userId: "alice",
     });
     // The OBO request object is the one we passed in.
     expect(mock.providers.get("analytics")?.asUserRequests).toHaveLength(1);
+  });
+
+  test("rejects a token-less request the way the real asUser does", async () => {
+    // The fake asUser enforces the same token precondition as Plugin.asUser,
+    // so a header-less request must reject rather than silently record
+    // asUser: true — this is what makes the OBO assertion meaningful.
+    const mock = mockPluginContext({ analytics: { top_users: [] } });
+
+    await expect(
+      mock.ctx.executeTool(mockReq({}), "analytics", "top_users", {}),
+    ).rejects.toThrow(/Missing user token/);
+    // The dispatch never reached the tool.
+    expect(mock.toolCalls).toHaveLength(0);
+  });
+
+  test("rejects a request with a token but no user id", async () => {
+    const mock = mockPluginContext({ analytics: { top_users: [] } });
+
+    await expect(
+      mock.ctx.executeTool(
+        mockReq({ "x-forwarded-access-token": "tok" }),
+        "analytics",
+        "top_users",
+        {},
+      ),
+    ).rejects.toThrow(/Missing user id|user id/i);
+    expect(mock.toolCalls).toHaveLength(0);
+  });
+
+  test("records the resolved user id so a test can assert who the tool ran as", async () => {
+    const mock = mockPluginContext({ analytics: { top_users: [] } });
+    await mock.ctx.executeTool(
+      mockReq({
+        "x-forwarded-access-token": "tok",
+        "x-forwarded-user": "bob",
+      }),
+      "analytics",
+      "top_users",
+      {},
+    );
+    expect(mock.toolCalls[0]).toMatchObject({ asUser: true, userId: "bob" });
   });
 
   test("invokes a function response with the args and the composed signal", async () => {
@@ -173,5 +244,38 @@ describe("mockPluginContext — registerProvider after construction", () => {
     mock.registerProvider("late", { ping: "pong" });
     const result = await mock.ctx.executeTool(mockReq(), "late", "ping", {});
     expect(result).toBe("pong");
+  });
+});
+
+describe("mockPluginContext — attach()", () => {
+  test("seeds the cache, flips isReady, and registers the plugin", async () => {
+    const mock = mockPluginContext();
+    const plugin = new ProbePlugin({});
+
+    // Before attach the plugin may not be ready (no cache seeded yet in a
+    // fresh process); after attach it is, and it is in the context registry.
+    const returned = await mock.attach(plugin);
+
+    expect(returned).toBe(plugin);
+    expect(plugin.ready()).toBe(true);
+    expect(mock.ctx.getPluginNames()).toContain("probe");
+    expect(mock.ctx.hasPlugin("probe")).toBe(true);
+
+    // A route the plugin registers post-attach is captured through the context.
+    plugin.register();
+    expect(mock.routes).toContainEqual(
+      expect.objectContaining({ method: "get", path: "/probe" }),
+    );
+  });
+
+  test("does not overwrite an injected fake provider of the same name", async () => {
+    // If the plugin under test shares a name with an injected fake, the fake
+    // (the authored double) must win — attach must not clobber it.
+    const mock = mockPluginContext({ probe: { canned: "fake" } });
+    const plugin = new ProbePlugin({});
+    await mock.attach(plugin);
+
+    const result = await mock.ctx.executeTool(mockReq(), "probe", "canned", {});
+    expect(result).toBe("fake");
   });
 });

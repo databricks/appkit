@@ -72,7 +72,10 @@ function parseSSEBody(text: string): StreamEvent[] {
       // `id:` and comment (`:`) lines carry no event type/data we assert on.
     }
 
-    if (name === undefined && dataLines.length === 0) continue;
+    // A frame with no data line is bookkeeping (a bare `event:`, an `id:`, or a
+    // `:` comment/heartbeat) that a real SSE client does not surface as an
+    // event — skip it whether or not it carried an `event:` name.
+    if (dataLines.length === 0) continue;
 
     const data = dataLines.join("\n");
     let parsed: Record<string, unknown> = {};
@@ -89,9 +92,13 @@ function parseSSEBody(text: string): StreamEvent[] {
       }
     }
 
+    // The wire `event:` name is authoritative. Spread the payload FIRST, then
+    // set `type`, so a `data` payload that happens to carry its own `type`
+    // field (e.g. `event: error` + `data: {"type":"result"}`) cannot override
+    // the frame's real event name.
     events.push({
-      type: name ?? (parsed.type as string | undefined),
       ...parsed,
+      type: name ?? (parsed.type as string | undefined),
     });
   }
 
@@ -189,36 +196,31 @@ export function expectStream(source: StreamSource): StreamAssertion {
 }
 
 /**
- * Parse a single-event SSE `Response` into `{ eventType, ...data }`.
+ * Parse an SSE `Response` and return its **last** event flattened to
+ * `{ eventType, ...data }`.
  *
- * Retained for tests that assert on a one-shot SSE reply; prefer
- * {@link expectStream} for multi-event ordering assertions.
+ * A convenience for one-shot assertions on a reply's final event; prefer
+ * {@link expectStream} for multi-event ordering. It shares {@link parseSSEBody}
+ * with `expectStream`, so the two never diverge on CRLF handling, comment
+ * lines, or field parsing.
+ *
+ * @throws if the response carries no data-bearing event.
  */
 export async function parseSSEResponse(response: Response): Promise<{
   eventType: string | null;
   [key: string]: unknown;
 }> {
   const text = await response.text();
-  const lines = text.split("\n");
+  const events = parseSSEBody(text);
+  const last = events.at(-1);
 
-  let eventType: string | null = null;
-  let dataLine: string | null = null;
-
-  for (const line of lines) {
-    if (line.startsWith("event: ")) {
-      eventType = line.substring(7).trim();
-    } else if (line.startsWith("data: ")) {
-      dataLine = line.substring(6);
-    }
-  }
-
-  if (!dataLine) {
+  if (!last) {
     throw new Error(`No data found in SSE response: ${text}`);
   }
 
-  const parsed = JSON.parse(dataLine);
-  return {
-    eventType,
-    ...parsed,
-  };
+  // `parseSSEBody` already spread the JSON payload's fields onto the event and
+  // set `type` from the wire name. Re-key `type` -> `eventType` for this
+  // helper's historical shape, dropping the internal `type` alias.
+  const { type, ...rest } = last;
+  return { eventType: type ?? null, ...rest };
 }

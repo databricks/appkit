@@ -21,9 +21,14 @@
  * ```ts
  * import { mockPluginContext, expectStream } from "@databricks/appkit/testing";
  *
+ * // Attach a real PluginContext (with faked edges) to your plugin instance,
+ * // then assert on what a streaming source emits. `expectStream` consumes an
+ * // async event stream, a plain array, or an SSE `Response`.
  * const mock = mockPluginContext({ analytics: { query: fixtureRows } });
- * await mock.attach(agentsPlugin);
- * await expectStream(agentsPlugin._handleStream(req, res)).toEmit(
+ * const plugin = new MyPlugin({});
+ * await mock.attach(plugin);
+ *
+ * await expectStream(plugin.streamSomething(input)).toEmit(
  *   "tool_call",
  *   "message_delta",
  * );
@@ -32,6 +37,10 @@
  * @module
  */
 
+// Re-export the PluginContext type so `MockPluginContext.ctx` is nameable
+// through this entry point — the class is otherwise reachable only via a deep
+// path (../core/plugin-context) that is not part of the package's exports map.
+export type { PluginContext } from "../core/plugin-context";
 export {
   expectStream,
   parseSSEResponse,

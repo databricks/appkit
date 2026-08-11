@@ -7,7 +7,8 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { InMemoryStorage } from "../cache/storage";
-import { PluginContext } from "../core/plugin-context";
+import { isToolProvider, PluginContext } from "../core/plugin-context";
+import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
 import { createMockTelemetry } from "./fixtures";
@@ -61,11 +62,22 @@ export interface RecordedToolCall {
   /** The abort signal `executeTool` composed (timeout ∘ caller). */
   signal?: AbortSignal;
   /**
-   * Whether the call went through the on-behalf-of (`asUser`) path. `true`
-   * proves `PluginContext.executeTool` resolved the user scope rather than
-   * running as the service principal.
+   * Whether the dispatch was resolved through the on-behalf-of (`asUser`)
+   * path. `PluginContext.executeTool` always calls `provider.asUser(req)`, so
+   * for a tool reached through `executeTool` this is `true` — and, because the
+   * fake `asUser` enforces the same token precondition as the real
+   * {@link Plugin.asUser}, a request with no `x-forwarded-access-token` makes
+   * that call **throw** rather than record `asUser: true`. The meaningful
+   * assertions are therefore: a well-formed request records `asUser: true`
+   * with {@link userId} set, and a token-less request rejects.
    */
   asUser: boolean;
+  /**
+   * The user the on-behalf-of scope resolved to (from `x-forwarded-user`), or
+   * `undefined` for a service-principal call (`asUser: false`). Lets a test
+   * assert the tool ran as the expected end user, not just that OBO was used.
+   */
+  userId?: string;
 }
 
 /** A single route registered through the context's `addRoute`/`addMiddleware`. */
@@ -199,15 +211,26 @@ export function mockPluginContext(
       args: unknown,
       signal: AbortSignal | undefined,
       asUser: boolean,
+      userId: string | undefined,
     ): Promise<unknown> => {
-      toolCalls.push({ plugin: name, tool: toolName, args, signal, asUser });
-      const response = tools[toolName];
-      if (response === undefined) {
+      toolCalls.push({
+        plugin: name,
+        tool: toolName,
+        args,
+        signal,
+        asUser,
+        userId,
+      });
+      // `Object.hasOwn`, not `tools[toolName] === undefined`: a tool named
+      // "constructor"/"toString"/etc. would otherwise resolve to an inherited
+      // Object.prototype method and be invoked instead of reported missing.
+      if (!Object.hasOwn(tools, toolName)) {
         throw new Error(
           `mockPluginContext: plugin "${name}" has no fake tool "${toolName}". ` +
             `Available: ${Object.keys(tools).join(", ") || "(none)"}`,
         );
       }
+      const response = tools[toolName];
       return typeof response === "function"
         ? await (response as (a: unknown, s?: AbortSignal) => unknown)(
             args,
@@ -219,18 +242,36 @@ export function mockPluginContext(
     const base: ToolProvider = {
       getAgentTools: () => record.tools,
       executeAgentTool: (toolName, args, signal) =>
-        resolve(toolName, args, signal, false),
+        resolve(toolName, args, signal, false, undefined),
     };
 
-    // `asUser(req)` returns a user-scoped view whose executeAgentTool records
-    // that the OBO path ran — this is how executeTool's user scoping becomes
-    // observable without a real user token.
+    // Mirror the real `Plugin.asUser` token precondition (plugin.ts) so the
+    // recorded `asUser` flag reflects genuine user-scope resolution rather than
+    // being unconditionally true: a request with no `x-forwarded-access-token`
+    // throws `missingToken` (production behavior), except in development where
+    // the real code skips impersonation. This is edge-faking of asUser's
+    // *contract*, not a reimplementation of `runInUserContext`/`ServiceContext`.
     const asUser = (req: IAppRequest): ToolProvider => {
       record.asUserRequests.push(req as express.Request);
+      const token = (req as express.Request)
+        .header?.("x-forwarded-access-token")
+        ?.trim();
+      const userId = (req as express.Request)
+        .header?.("x-forwarded-user")
+        ?.trim();
+      const isDev = process.env.NODE_ENV === "development";
+
+      if (!token && !isDev) {
+        throw AuthenticationError.missingToken("user token");
+      }
+      if (token && !userId && !isDev) {
+        throw AuthenticationError.missingUserId();
+      }
+
       return {
         getAgentTools: () => record.tools,
         executeAgentTool: (toolName, args, signal) =>
-          resolve(toolName, args, signal, true),
+          resolve(toolName, args, signal, true, userId),
       };
     };
 
@@ -266,6 +307,20 @@ export function mockPluginContext(
       await CacheManager.getInstance({ storage: new InMemoryStorage({}) });
     }
     plugin.attachContext({ context: ctx });
+
+    // Mirror what AppKit core does after attachContext (core/appkit.ts): put
+    // the plugin in the registry so `getPlugins()`/`getPluginNames()`/
+    // `hasPlugin()` and any sibling-plugin lookup behave as in production. Only
+    // register it as a tool provider when it actually is one AND its name does
+    // not collide with an injected fake — the fakes are the authored test
+    // doubles and must not be overwritten by the plugin under test.
+    ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
+    if (isToolProvider(plugin) && !providers.has(plugin.name)) {
+      ctx.registerToolProvider(
+        plugin.name,
+        plugin as unknown as Parameters<typeof ctx.registerToolProvider>[1],
+      );
+    }
     return plugin;
   }
 

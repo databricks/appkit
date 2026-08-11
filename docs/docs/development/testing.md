@@ -16,7 +16,7 @@ The kit has two entry points plus a set of fixture helpers:
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
 - **Fixtures** — `createMockRequest`, `createMockResponse`, `mockServiceContext`, and SQL response builders.
 
-The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so it is declared as an optional peer dependency. Any project that runs Vitest already satisfies it; there is nothing extra to install.
+The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is a peer dependency and must be installed to import from this subpath. Any project that runs Vitest as its test runner already has it — AppKit apps scaffolded from the template do — so in practice there is nothing extra to add.
 
 ## `mockPluginContext()`
 
@@ -79,11 +79,14 @@ expect(mock.routes).toContainEqual(
   expect.objectContaining({ method: "post", path: "/invocations" }),
 );
 
-// The injected telemetry provider, for span assertions.
+// The injected telemetry provider records the context's own spans — i.e. the
+// span PluginContext.executeTool opens around each cross-plugin tool call.
 expect(mock.telemetry.getTracer().startActiveSpan).toHaveBeenCalled();
 ```
 
-`RecordedToolCall.asUser` is the high-value signal: it confirms the context routed the call through the user's identity rather than the service principal — a distinction that silent stubs cannot verify.
+`mock.telemetry` is injected into the `PluginContext`, so it captures the spans the *context* opens (notably `executeTool`). It is **not** the plugin's own telemetry: `attachContext` rebuilds `this.telemetry` from the real `TelemetryManager`, so spans a plugin opens internally do not land on `mock.telemetry`.
+
+`RecordedToolCall.asUser` is the high-value signal for cross-plugin calls: because the fake `asUser` enforces the same token precondition as the real `Plugin.asUser`, a dispatch that records `asUser: true` (with `userId` set) genuinely resolved the caller's user scope, and a request missing `x-forwarded-access-token` **rejects** instead — the OBO distinction that silent `{ executeTool }` stubs cannot verify. Assert both directions: a well-formed request records the expected `userId`, and a token-less one throws.
 
 ## `expectStream(...)`
 

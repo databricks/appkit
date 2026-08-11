@@ -111,11 +111,6 @@
   "peerDependencies": {
     "vitest": ">=1.0.0"
   },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"
   },
