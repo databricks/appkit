@@ -38,6 +38,7 @@ describe("RemoteTunnelController", () => {
 
   afterEach(() => {
     process.env = originalEnv;
+    consoleLogSpy.mockClear();
   });
 
   test("middleware hard-blocks in local dev (never initializes manager)", async () => {
@@ -167,9 +168,5 @@ describe("RemoteTunnelController", () => {
     ctrl.cleanup();
     expect(mockManagerInstance.cleanup).toHaveBeenCalledTimes(1);
     expect(ctrl.isActive()).toBe(false);
-  });
-
-  afterEach(() => {
-    consoleLogSpy.mockClear();
   });
 });

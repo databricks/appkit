@@ -6,7 +6,8 @@ import { ServiceContext } from "../context/service-context";
 import type { UserContext } from "../context/user-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 
-// biome-ignore lint/suspicious/noExplicitAny: test fixtures intentionally use loose shapes
+// Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
+// repo-wide (see biome.json), so a local alias keeps the intent readable.
 type Any = any;
 
 /**

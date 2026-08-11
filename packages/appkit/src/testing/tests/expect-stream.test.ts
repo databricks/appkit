@@ -132,8 +132,8 @@ describe("expectStream — SSE Response", () => {
 describe("expectStream — invalid source", () => {
   test("throws for a non-stream value", async () => {
     await expect(
-      // biome-ignore lint/suspicious/noExplicitAny: intentionally wrong type
-      expectStream(42 as any).collect(),
+      // Intentionally wrong type to exercise the runtime guard.
+      expectStream(42 as unknown as never).collect(),
     ).rejects.toThrow(/async iterable, an iterable, or a Response/);
   });
 });
