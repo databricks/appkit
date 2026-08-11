@@ -1,11 +1,5 @@
 import type { MetricViewColumnDisplay } from "shared";
 
-/**
- * Parsed format specs, memoized so a table does not re-parse the same spec for
- * every cell it renders. The realistic key space is metric-view catalog
- * metadata, so it is tiny; the cap stops inserting once full to keep a caller
- * generating arbitrary specs in a loop from growing this without bound.
- */
 const SPEC_CACHE_MAX = 256;
 const specCache = new Map<
   string,
@@ -17,10 +11,6 @@ const specCache = new Map<
   }
 >();
 
-/**
- * Counts the number of fractional digits declared by a numeric format spec.
- * E.g. "#,##0.00" -> 2, "#,##0" -> 0, "0.0%" -> 1.
- */
 function countDecimals(format: string): number {
   const dotIndex = format.indexOf(".");
   if (dotIndex === -1) return 0;
@@ -159,14 +149,6 @@ function getOrParseSpec(format: string) {
 /**
  * Format a raw value using a UC/YAML printf-style format spec.
  *
- * Recognizes the common spreadsheet-style specs:
- * - currency prefix, e.g. `"$#,##0.00"` (1234.5 -> "$1,234.50"); the prefix is
- *   emitted verbatim, so `"€#,##0"`, `"R$#,##0.00"`, etc. survive end-to-end
- * - thousands grouping + N decimals, e.g. `"#,##0"` (1234567 -> "1,234,567")
- *   or `"#,##0.00"` (1234.5 -> "1,234.50")
- * - percent, e.g. `"0.0%"` (0.1234 -> "12.3%") — the value is multiplied by 100
- * - JSON_ARRAY integer/decimal strings are formatted as exact fixed-point
- *   values, without a precision-losing conversion through `Number`
  *
  * No format spec -> sensible default: numbers via `toLocaleString`, everything
  * else via `String()`. `null`/`undefined` -> `""`. Unrecognized specs fall back
@@ -271,8 +253,6 @@ export interface D3FormatParts {
  * resolved through global locale configuration. Returning the literal prefix
  * separately lets consumers such as Plotly pass it as `tickprefix` instead of
  * silently rendering every currency as `$`.
- *
- * No spec, or a spec that is not a recognizable numeric pattern -> `undefined`.
  */
 export function toD3Format(format?: string): D3FormatParts | undefined {
   if (!format) return undefined;

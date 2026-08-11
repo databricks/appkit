@@ -1,4 +1,3 @@
-/** The filter-operator vocabulary accepted by the metric-view wire contract. */
 export type MetricFilterOperatorName =
   | "equals"
   | "notEquals"
@@ -13,7 +12,6 @@ export type MetricFilterOperatorName =
   | "set"
   | "notSet";
 
-/** A single filter predicate — the leaf node of the recursive {@link MetricFilter} tree. */
 export interface MetricPredicate {
   member: string;
   operator: MetricFilterOperatorName;
@@ -23,8 +21,6 @@ export interface MetricPredicate {
 export type MetricOrderDirection = "ASC" | "DESC";
 
 /**
- * A single `ORDER BY` key for the metric-view request.
- *
  * `field` must be one of the request's own `measures` or `dimensions` — a
  * measure is ordered by its SELECT **alias**, because `ORDER BY MEASURE(...)` is
  * rejected by Spark (`METRIC_VIEW_INVALID_MEASURE_FUNCTION_INPUT`). `direction`

@@ -1,31 +1,8 @@
-/**
- * AppKit metric-metadata bundle schema.
- *
- * Single source of truth for `config/metric-views/metadata.generated.json` —
- * the build-generated companion to the hand-authored `definitions.json`.
- *
- * The type generator derives per-column display metadata (`display_name`,
- * `format`, SQL `type`, `description`) from `DESCRIBE TABLE EXTENDED` and writes
- * it here as a value the server can read at runtime. It lives in a separate file
- * from `definitions.json` because that file is user-authored: a generator that
- * wrote into it would clobber hand edits on every regeneration.
- *
- * Validated at both ends — the generator serializes against this schema and the
- * analytics plugin parses with it — so a bundle the generator can write is a
- * bundle the runtime can read.
- */
-
 import { z } from "zod";
 import { metricKeySchema } from "./metric-source";
 
-/**
- * Bundle format version. Bumped only for a breaking shape change, so a runtime
- * reading a bundle from a newer generator can say so instead of silently
- * mis-parsing a shape it does not understand.
- */
+// Bundle format version.
 export const METRIC_METADATA_BUNDLE_VERSION = 1;
-
-/** Basename of the generated bundle inside `config/metric-views/`. */
 export const METRIC_METADATA_FILE = "metadata.generated.json";
 
 const columnDisplaySchema = z

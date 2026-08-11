@@ -8,9 +8,7 @@ import type { MetricColumnMetadata, MetricSchema } from "./types";
 /**
  * Metric results use Databricks' JSON_ARRAY delivery, whose scalar cells are
  * strings regardless of their SQL type. Every selected column can also be SQL
- * NULL. Keep the generated row contract faithful to that wire shape; callers
- * can use the generated SQL-type metadata when they intentionally need to
- * parse a value.
+ * NULL.
  */
 const JSON_ARRAY_WIRE_TYPE = "string | null";
 
@@ -174,15 +172,6 @@ function metadataValueMap(
 }
 
 /**
- * Build the runtime metadata bundle written to
- * `config/metric-views/metadata.generated.json`.
- *
- * The value twin of the augmentation's `metadata` field, carried in JSON rather
- * than as a TypeScript `const` so the analytics plugin can read it from disk
- * without the app importing and injecting it. Keeping it out of the type
- * artifact is also what lets that artifact stay a declaration-only `.d.ts`: an
- * object-literal `const` in an ambient context is a TS1254 error.
- *
  * Entries keep the same key order as the augmentation. Degraded schemas
  * contribute empty maps — the warehouse could not describe their columns, so
  * there is no display metadata to stamp.
@@ -217,21 +206,6 @@ ${entries};
 `;
 }
 
-/**
- * Build the full metric-views.d.ts file from a list of metric schemas.
- *
- * Declaration-only: the runtime metadata twin ships as a JSON bundle (see
- * {@link buildMetricMetadataBundle}), so nothing here compiles to a value and
- * the file can be ambient.
- *
- * The header import is required and must not be dropped: it marks this file a
- * module, which is what makes `declare module` an *augmentation* that merges
- * into the real one. Without it the block is an ambient declaration that
- * SHADOWS `@databricks/appkit-ui/react`, and every genuine export of that
- * module (`useMetricView`, the components) disappears. The form matches the
- * sibling `analytics.d.ts` / `serving.d.ts` headers; a `.d.ts` never emits JS,
- * so it costs nothing at runtime.
- */
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
 ): string {

@@ -9,37 +9,21 @@ import { createLogger } from "../../../logging/logger";
 
 const logger = createLogger("analytics:metric-views");
 
-// Re-exported so analytics-local callers name the bundle through this module
-// rather than reaching into `shared` for the basename.
 export { METRIC_METADATA_FILE };
 
 /**
- * Parsed-bundle cache, keyed on the raw file contents. Validation is the
- * expensive half of the load (the read is a small local file, and going through
- * {@link AppManager.readMetricViewsConfig} is what keeps it dev-tunnel-aware),
- * so re-reading per request while reusing the parse both stays correct when a
- * developer edits the bundle and avoids re-validating on every metric query.
+ * Parsed-bundle cache, keyed on the raw file contents.
  */
 let parsedBundleCache: { raw: string; metadata: MetricViewsMetadata } | null =
   null;
 
 /**
- * Read `config/metric-views/metadata.generated.json` into per-column display
- * metadata, or `undefined` when there is none to stamp.
- *
  * The runtime twin of the generated `MetricRegistry` augmentation: the type
  * generator emits both from one `DESCRIBE` pass, this side being JSON so the
  * plugin can discover it instead of the app importing and injecting it.
  *
  * Read through {@link AppManager.readMetricViewsConfig} for the same reasons as
  * {@link loadMetricRegistry} — dev-tunnel awareness and the traversal guard.
- *
- * **Never throws.** Unlike `definitions.json`, whose absence or corruption must
- * fail the request (no source means no query), this bundle is pure response
- * decoration. A missing or malformed file degrades to unlabeled columns, which
- * is strictly better than failing a query that would otherwise have succeeded.
- * Absent → silent (the metric path is simply un-generated); malformed or
- * version-mismatched → warn, so the cause is visible in logs.
  */
 export async function loadMetricMetadata(
   app: AppManager,
@@ -122,14 +106,6 @@ export async function loadMetricMetadata(
  * Flatten the resolved {@link MetricViewsMetadata} for `key` into a single
  * `Record<column, meta>` covering only the requested measures and dimensions,
  * so the client can label/format just the columns it queried.
- *
- * Pure response decoration: it never touches the cache key or the SQL, and
- * reads only from the already-resolved value (never DESCRIBE at runtime).
- *
- * Lookups go through {@link Object.hasOwn}, so neither an inherited metric key
- * nor an inherited column name (`toString`, `__proto__`, …) can resolve to a
- * bogus entry. Requested columns absent from the metadata are omitted rather
- * than placeheld.
  *
  * Returns `undefined` rather than an empty object when there is nothing to
  * stamp, so the caller can omit the field and keep the message byte-identical

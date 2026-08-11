@@ -850,10 +850,6 @@ export async function syncMetricViewsTypes(options: {
       "utf-8",
     );
 
-    // The runtime half of the same generation pass. Written under the same gate
-    // as the types so the two artifacts never disagree: a degraded blocking
-    // pass leaves BOTH the committed types and the committed metadata in place,
-    // rather than pairing good types with emptied-out metadata.
     const bundlePath = path.join(metricViewsFolder, METRIC_METADATA_FILE);
     await fs.writeFile(
       bundlePath,

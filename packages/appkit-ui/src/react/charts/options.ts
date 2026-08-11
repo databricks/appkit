@@ -481,9 +481,7 @@ export function buildCartesianOption(
 // Selection Emphasis (declarative cross-filter highlighting)
 // ============================================================================
 
-/**
- * Selection opacity stays local because it is not a theme token.
- */
+// Selection opacity stays local because it is not a theme token.
 const DIMMED_OPACITY = 0.3;
 
 /** Opacity applied to selected (emphasized) data elements. */
@@ -499,8 +497,6 @@ interface SelectionEmphasisOptions {
 
 /**
  * Returns selected category names, or `null` when empty.
- *
- * Drop empty strings before the size check so they cannot dim every element.
  */
 function toSelectionSet(
   selected: string | string[] | undefined,
@@ -537,7 +533,7 @@ function categoryNamesFromAxes(
  * Returns a copy of a single data item with its `itemStyle.opacity` set.
  * Object data items (e.g. pie `{ name, value }`) are spread and their existing
  * `itemStyle` preserved; primitive data items (e.g. raw bar values) are wrapped
- * into `{ value, itemStyle }` — the equivalent ECharts data-item form. The
+ * into `{ value, itemStyle }`.
  * per-datum `itemStyle` merges over the series-level `itemStyle` in ECharts, so
  * styling such as bar `borderRadius` is retained.
  */
@@ -556,8 +552,7 @@ function withDatumOpacity(datum: unknown, opacity: number): unknown {
 }
 
 /**
- * Applies opacity to pie/bar categories. Other chart types stay unchanged
- * because they do not expose an unambiguous category name here.
+ * Applies opacity to pie/bar categories.
  */
 function emphasizeSeries(
   series: unknown,
@@ -606,12 +601,6 @@ function emphasizeSeries(
  * matching data element(s) render at full prominence while the rest are dimmed
  * via `itemStyle.opacity`. It is a **no-op** (returns the input unchanged) when
  * `selected` is `undefined` or empty.
- *
- * This function never touches an ECharts instance or calls `dispatchAction` — it
- * only shapes the option object, so it can be composed into the option-building
- * pipeline. It meaningfully affects the categorical chart types (`bar`, `pie`,
- * `donut`) where a data point maps to a category name; other chart types are
- * left untouched.
  *
  * @typeParam T - The option object type (typically `Record<string, unknown>`).
  * @param option - The ECharts option produced by one of the `build*Option` helpers.

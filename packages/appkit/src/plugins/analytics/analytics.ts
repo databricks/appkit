@@ -560,19 +560,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
-    // Discovered from `config/metric-views/metadata.generated.json` unless the
-    // app injected a value explicitly. Injection wins so an app that builds its
-    // metadata some other way (or pins it deliberately) keeps working, but the
-    // generated bundle means the common case needs no wiring at all.
     const injectedMetadata = this.config.metricViewsMetadata;
     const allMetadata =
       injectedMetadata ??
       (await loadMetricMetadata(this.app, req, this.devFileReader));
 
-    // The view is registered (we got past the 404) but carries no metadata, so
-    // the query succeeds with unlabeled columns — otherwise silent. The remedy
-    // depends on where the metadata came from: regenerating types cannot fix an
-    // injected value, and the bundle is not even read on that path.
     if (allMetadata !== undefined && !Object.hasOwn(allMetadata, key)) {
       if (injectedMetadata !== undefined) {
         logger.warn(

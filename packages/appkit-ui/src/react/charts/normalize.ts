@@ -20,10 +20,7 @@ import {
 // ============================================================================
 
 /**
- * Checks if a value is a date string a time axis can plot. Accepts both the
- * ISO "T" separator and the space separator Spark JSON_ARRAY emits; the two
- * must agree with the sorter, or a format is detected as a date field here
- * and then silently left unsorted.
+ * Checks if a value is a date string a time axis can plot.
  */
 function isDateString(value: unknown): boolean {
   if (typeof value !== "string") return false;
