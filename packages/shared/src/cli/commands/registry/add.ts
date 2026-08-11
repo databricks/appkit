@@ -10,23 +10,24 @@ import {
   type RegistryItemFile,
   stripNamespace,
 } from "./client";
+import { buildConfigPlan, planHasContent } from "./config-plan";
+import {
+  reportConfigWrite,
+  validateBundle,
+  writeConfig,
+} from "./config-writer";
 import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
+import { reportEnvResolutions, syncEnv } from "./env-writer";
+import {
+  extractRequirements,
+  type ResourceRequirementRow,
+  renderRequirements,
+} from "./requirements";
 import { registerPluginInServer } from "./server-register";
 
 /** Subdirectories that commonly hold the frontend / server in an AppKit app. */
 const FRONTEND_SUBDIRS = ["client", "frontend", "web", "app"];
 const SERVER_SUBDIRS = ["server", "api", "backend"];
-
-interface ManifestField {
-  env?: string;
-}
-interface ManifestResource {
-  fields?: Record<string, ManifestField>;
-}
-interface PluginManifestShape {
-  name?: string;
-  resources?: { required?: ManifestResource[]; optional?: ManifestResource[] };
-}
 
 function isDir(p: string): boolean {
   return fs.existsSync(p) && fs.statSync(p).isDirectory();
@@ -84,21 +85,6 @@ function resolveUiTarget(base: string, file: RegistryItemFile): string {
     target = path.join("src", target);
   }
   return path.join(base, target);
-}
-
-/** Env var names declared by a manifest's resources (required and optional). */
-export function declaredEnvVars(manifest: PluginManifestShape): string[] {
-  const envs: string[] = [];
-  const resources = [
-    ...(manifest.resources?.required ?? []),
-    ...(manifest.resources?.optional ?? []),
-  ];
-  for (const res of resources) {
-    for (const field of Object.values(res.fields ?? {})) {
-      if (field.env) envs.push(field.env);
-    }
-  }
-  return envs;
 }
 
 /** Best-effort: the `toPlugin` export name from the item's index.ts. */
@@ -186,7 +172,6 @@ function writeItemFile(
 interface PluginSummary {
   importPath: string;
   exportName: string | null;
-  envs: string[];
 }
 
 /**
@@ -222,10 +207,21 @@ export async function resolveItems(
   return ordered;
 }
 
-async function runAdd(
-  refs: string[],
-  opts: { force?: boolean; cwd?: string; register?: boolean },
-): Promise<void> {
+interface AddOptions {
+  force?: boolean;
+  cwd?: string;
+  register?: boolean;
+  /** false = don't reconcile resource env vars into .env. */
+  resources?: boolean;
+  /** true = never prompt; use --env flags or leave unset (agent/CI). */
+  yes?: boolean;
+  /** Pre-supplied env values from repeated --env KEY=VALUE flags. */
+  env?: Record<string, string>;
+  /** Databricks profile passed to `bundle validate` after writing config. */
+  profile?: string;
+}
+
+async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   const token = resolveToken();
   if (token) {
@@ -250,12 +246,12 @@ async function runAdd(
   const deps = new Set<string>();
   let wroteUi = false;
   const pluginSummaries: PluginSummary[] = [];
+  const allRequirements: ResourceRequirementRow[] = [];
 
   for (const item of items) {
     for (const dep of item.dependencies ?? []) deps.add(dep);
 
     if (isPluginItem(item)) {
-      let manifest: PluginManifestShape = {};
       let pluginRel = path.join("plugins", item.name);
       for (const file of item.files ?? []) {
         const target =
@@ -268,14 +264,17 @@ async function runAdd(
           cwd,
         );
         if (path.basename(target) === "manifest.json") {
-          manifest = JSON.parse(file.content) as PluginManifestShape;
           pluginRel = path.dirname(target);
         }
+      }
+      const requirements = extractRequirements(item);
+      if (requirements.length > 0) {
+        console.log(`\n${renderRequirements(item, requirements)}`);
+        allRequirements.push(...requirements);
       }
       pluginSummaries.push({
         importPath: `./${pluginRel}`,
         exportName: pluginExportName(item),
-        envs: declaredEnvVars(manifest),
       });
     } else {
       for (const file of item.files ?? []) {
@@ -332,12 +331,88 @@ async function runAdd(
           ),
       );
     }
-    if (s.envs.length > 0) {
-      console.log(
-        `  ${pc.yellow("Required env var(s):")} ${s.envs.join(", ")}`,
-      );
-    }
   }
+
+  if (opts.resources !== false && allRequirements.length > 0) {
+    console.log(pc.dim("\nReconciling resource env vars into .env..."));
+    const resolutions = await syncEnv(allRequirements, {
+      cwd,
+      nonInteractive: Boolean(opts.yes),
+      values: opts.env,
+      profile: opts.profile,
+    });
+    reportEnvResolutions(resolutions);
+
+    // Deploy config (app.yaml + databricks.yml). Values come from what the
+    // user supplied for env fields (flags or prompts); other fields fall back
+    // to their manifest defaults inside buildConfigPlan.
+    const values: Record<string, string> = { ...(opts.env ?? {}) };
+    for (const r of resolutions) {
+      if (r.value !== undefined) values[r.env] = r.value;
+    }
+    const plan = buildConfigPlan(allRequirements, values);
+    if (planHasContent(plan)) {
+      const result = writeConfig(cwd, plan);
+      reportConfigWrite(result);
+      if (result.databricksYmlChanged) validateBundle(cwd, opts.profile);
+    }
+    warnScopeNeeding(allRequirements);
+  }
+}
+
+/**
+ * v1 does not write `user_api_scopes` (deferred to the manifest scope
+ * extension). Warn when an added plugin's resource type is known to need one,
+ * so the user adds it before deploy.
+ */
+/** Resource types known to require a user_api_scope, and the scope each needs. */
+export const SCOPE_BY_RESOURCE_TYPE: Record<string, string> = {
+  genie_space: "dashboards.genie",
+  serving_endpoint: "serving.serving-endpoints",
+  // volumes/files-backed access uses files.files
+  volume: "files.files",
+};
+
+/** Returns the user_api_scopes implied by a set of resource rows (deduped). */
+export function scopesForResources(
+  rows: ResourceRequirementRow[],
+): Map<string, string> {
+  const needed = new Map<string, string>();
+  for (const row of rows) {
+    const scope = SCOPE_BY_RESOURCE_TYPE[row.type];
+    if (scope) needed.set(row.type, scope);
+  }
+  return needed;
+}
+
+function warnScopeNeeding(rows: ResourceRequirementRow[]): void {
+  const needed = scopesForResources(rows);
+  if (needed.size === 0) return;
+  const list = [...needed.entries()]
+    .map(([type, scope]) => `${type} → ${scope}`)
+    .join(", ");
+  console.warn(
+    pc.yellow(
+      `\n  Note: these resources may need a user_api_scope before deploy: ${list}.\n` +
+        "  Add it under resources.apps.app.user_api_scopes in databricks.yml.",
+    ),
+  );
+}
+
+/** Commander reducer for repeatable `--env KEY=VALUE` flags. */
+function collectEnvFlag(
+  raw: string,
+  acc: Record<string, string>,
+): Record<string, string> {
+  const eq = raw.indexOf("=");
+  if (eq === -1) {
+    console.error(`Ignoring --env "${raw}" (expected KEY=VALUE).`);
+    return acc;
+  }
+  const key = raw.slice(0, eq).trim();
+  const value = raw.slice(eq + 1);
+  if (key) acc[key] = value;
+  return acc;
 }
 
 export const addCommand = new Command("add")
@@ -346,6 +421,15 @@ export const addCommand = new Command("add")
   .option("-f, --force", "Overwrite existing files")
   .option("-C, --cwd <dir>", "Run as if started in <dir>")
   .option("--no-register", "Don't edit the server entry to register plugins")
+  .option("--no-resources", "Don't reconcile resource env vars into .env")
+  .option("-y, --yes", "Don't prompt; use --env values or leave vars unset")
+  .option(
+    "--env <KEY=VALUE>",
+    "Pre-set a resource env var (repeatable)",
+    collectEnvFlag,
+    {},
+  )
+  .option("-p, --profile <name>", "Databricks profile for bundle validate")
   .addHelpText(
     "after",
     `
@@ -354,6 +438,13 @@ No components.json is required. Item type is detected automatically:
   • Server plugins → <server>/plugins/<name>/, runs plugin sync, and registers
     them in your createApp call (use --no-register to skip the server edit)
 
+Server plugins declare Databricks resources. On add, their env vars are
+reconciled into .env (and names into .env.example), and the deploy config
+(app.yaml + databricks.yml resource bindings) is patched to match — existing
+entries are never clobbered. Interactive by default; pass --yes for agents/CI
+(uses --env values, leaves the rest unset) and --env KEY=VALUE to supply
+values non-interactively. Pass --profile to validate the bundle after writing.
+
 The frontend/server roots are detected from common layouts, so you can run
 this from the repo root. While the registry repo is private, a read token is
 resolved from \`gh auth token\` or APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOKEN.
@@ -361,15 +452,12 @@ resolved from \`gh auth token\` or APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOK
 Examples:
   $ appkit add metric-card           # UI component
   $ appkit add hello                 # server plugin
-  $ appkit add metric-card hello     # mix in one call`,
+  $ appkit add metric-card hello     # mix in one call
+  $ appkit add analytics --yes --env DATABRICKS_WAREHOUSE_ID=abc123`,
   )
-  .action(
-    (
-      items: string[],
-      opts: { force?: boolean; cwd?: string; register?: boolean },
-    ) =>
-      runAdd(items, opts).catch((err) => {
-        console.error(err);
-        process.exit(1);
-      }),
+  .action((items: string[], opts: AddOptions) =>
+    runAdd(items, opts).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
   );

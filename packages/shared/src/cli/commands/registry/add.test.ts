@@ -1,45 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { declaredEnvVars, resolveItems } from "./add";
+import { resolveItems, scopesForResources } from "./add";
 import type { RegistryItem } from "./client";
+import type { ResourceRequirementRow } from "./requirements";
 
 function item(name: string, extra: Partial<RegistryItem> = {}): RegistryItem {
   return { name, ...extra };
 }
 
-describe("declaredEnvVars", () => {
-  it("collects env vars from required resources", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["DATABRICKS_WAREHOUSE_ID"]);
-  });
-
-  // Bug #2: optional resources were dropped entirely.
-  it("also collects env vars from optional resources", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { id: { env: "REQUIRED_ENV" } } }],
-        optional: [{ fields: { id: { env: "OPTIONAL_ENV" } } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["REQUIRED_ENV", "OPTIONAL_ENV"]);
-  });
-
-  it("skips fields without an env property", () => {
-    const manifest = {
-      resources: {
-        required: [{ fields: { host: { env: "PGHOST" }, note: {} } }],
-      },
-    };
-    expect(declaredEnvVars(manifest)).toEqual(["PGHOST"]);
-  });
-
-  it("returns empty for a manifest with no resources", () => {
-    expect(declaredEnvVars({})).toEqual([]);
-  });
-});
+function resourceRow(type: string): ResourceRequirementRow {
+  return { type, required: true, fields: [] };
+}
 
 describe("resolveItems", () => {
   it("returns requested items in order", async () => {
@@ -92,5 +62,32 @@ describe("resolveItems", () => {
     const fetch = vi.fn(async (name: string) => graph[name]);
     const result = await resolveItems(["a"], null, fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
+  });
+});
+
+describe("scopesForResources", () => {
+  it("maps scope-needing resource types to their user_api_scope", () => {
+    const scopes = scopesForResources([
+      resourceRow("genie_space"),
+      resourceRow("serving_endpoint"),
+      resourceRow("volume"),
+    ]);
+    expect(Object.fromEntries(scopes)).toEqual({
+      genie_space: "dashboards.genie",
+      serving_endpoint: "serving.serving-endpoints",
+      volume: "files.files",
+    });
+  });
+
+  it("returns empty for resources that need no scope", () => {
+    expect(scopesForResources([resourceRow("sql_warehouse")]).size).toBe(0);
+  });
+
+  it("de-dupes repeated types", () => {
+    const scopes = scopesForResources([
+      resourceRow("genie_space"),
+      resourceRow("genie_space"),
+    ]);
+    expect(scopes.size).toBe(1);
   });
 });
