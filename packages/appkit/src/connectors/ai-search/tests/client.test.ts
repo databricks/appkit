@@ -1,11 +1,13 @@
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
   type ReadableSpan,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { runWithAgentTrace } from "../../../telemetry/agent-tracing";
 import type { WorkspaceClient } from "../../../workspace-client";
 import { AiSearchConnector } from "../client";
 import type { VsRawResponse } from "../types";
@@ -55,6 +57,17 @@ function retrieverSpan(spans: ReadableSpan[]): ReadableSpan {
   expect(span, "missing RETRIEVER span").toBeDefined();
   return span as ReadableSpan;
 }
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+});
+
+afterAll(() => {
+  context.disable();
+});
 
 describe("AiSearchConnector semantic retrieval spans", () => {
   test("exports complete query inputs, documents, stable IDs, scores, and diagnostics", async () => {
@@ -282,5 +295,216 @@ describe("AiSearchConnector semantic retrieval spans", () => {
     expect(
       JSON.stringify({ attributes: span.attributes, events: span.events }),
     ).not.toContain("hunter2");
+  });
+
+  test("inherits active agent identity and parentage for query and next-page spans", async () => {
+    const response: VsRawResponse = {
+      manifest: {
+        column_count: 2,
+        columns: [{ name: "id" }, { name: "text" }],
+      },
+      result: { row_count: 1, data_array: [["doc-1", "content"]] },
+      next_page_token: null,
+    };
+    const connector = new AiSearchConnector();
+    const client = workspaceClient(response);
+
+    const observed = await captureSpans(() =>
+      runWithAgentTrace(
+        {
+          appName: "test-app",
+          agentName: "planner",
+          route: "chat",
+          sessionId: "session-1",
+          userId: "user-1",
+          requestId: "request-1",
+          threadId: "thread-1",
+        },
+        { message: "retrieve" },
+        async (observer) => {
+          observer.updateIdentity({
+            agentName: "resolved-agent",
+            appName: "resolved-app",
+            requestId: "resolved-request",
+            sessionId: "resolved-session",
+            threadId: "resolved-thread",
+            userId: "resolved-user",
+          });
+          await connector.query(client, {
+            columns: ["id", "text"],
+            indexName: "catalog.schema.docs",
+            numResults: 1,
+            queryText: "find it",
+            queryType: "ann",
+          });
+          await connector.queryNextPage(client, {
+            endpointName: "endpoint-a",
+            indexName: "catalog.schema.docs",
+            pageToken: "page-2",
+          });
+          return "done";
+        },
+      ),
+    );
+
+    expect(observed.error).toBeUndefined();
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const retrievers = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "RETRIEVER",
+    );
+    expect(retrievers).toHaveLength(2);
+    for (const span of retrievers) {
+      expect(span.parentSpanContext?.spanId).toBe(root?.spanContext().spanId);
+      expect(span.attributes).toMatchObject({
+        "appkit.agent.name": "resolved-agent",
+        "appkit.app.name": "resolved-app",
+        "appkit.request.id": "resolved-request",
+        "appkit.thread.id": "resolved-thread",
+        "mlflow.trace.session": "resolved-session",
+        "mlflow.trace.user": "resolved-user",
+      });
+    }
+  });
+
+  test("exports a safe failed query span when the signal is already aborted", async () => {
+    const request = vi.fn();
+    const client = { apiClient: { request } } as unknown as WorkspaceClient;
+    const controller = new AbortController();
+    controller.abort();
+    const connector = new AiSearchConnector();
+
+    const observed = await captureSpans(() =>
+      connector.query(
+        client,
+        {
+          columns: ["id", "text"],
+          indexName: "catalog.schema.docs",
+          numResults: 2,
+          queryText: "cancelled query",
+          queryType: "ann",
+        },
+        controller.signal,
+      ),
+    );
+
+    expect(observed.error).toMatchObject({
+      message: "Query cancelled before execution",
+    });
+    expect(request).not.toHaveBeenCalled();
+    const span = retrieverSpan(observed.spans);
+    expect(span.status).toEqual({
+      code: SpanStatusCode.ERROR,
+      message: "Retriever operation failed",
+    });
+    expect(span.attributes).toMatchObject({
+      "appkit.retriever.latency_ms": expect.any(Number),
+      "vs.duration_ms": expect.any(Number),
+    });
+    expect(JSON.parse(String(span.attributes["mlflow.spanInputs"]))).toEqual({
+      columns: ["id", "text"],
+      filters: {},
+      indexName: "catalog.schema.docs",
+      numResults: 2,
+      queryText: "cancelled query",
+      queryType: "ann",
+      queryVector: null,
+      reranker: null,
+    });
+    expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
+      error: "[REDACTED]",
+    });
+    expect(span.events).toEqual([
+      expect.objectContaining({ name: "exception" }),
+    ]);
+  });
+
+  test("exports a safe failed next-page span when the signal is already aborted", async () => {
+    const request = vi.fn();
+    const client = { apiClient: { request } } as unknown as WorkspaceClient;
+    const controller = new AbortController();
+    controller.abort();
+    const connector = new AiSearchConnector();
+
+    const observed = await captureSpans(() =>
+      connector.queryNextPage(
+        client,
+        {
+          endpointName: "endpoint-a",
+          indexName: "catalog.schema.docs",
+          pageToken: "page-2",
+        },
+        controller.signal,
+      ),
+    );
+
+    expect(observed.error).toMatchObject({
+      message: "Query cancelled before execution",
+    });
+    expect(request).not.toHaveBeenCalled();
+    const span = retrieverSpan(observed.spans);
+    expect(span.status).toEqual({
+      code: SpanStatusCode.ERROR,
+      message: "Retriever operation failed",
+    });
+    expect(span.attributes).toMatchObject({
+      "appkit.retriever.latency_ms": expect.any(Number),
+      "vs.duration_ms": expect.any(Number),
+    });
+    expect(JSON.parse(String(span.attributes["mlflow.spanInputs"]))).toEqual({
+      endpointName: "endpoint-a",
+      indexName: "catalog.schema.docs",
+      pageToken: "page-2",
+      queryType: "next_page",
+    });
+    expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
+      error: "[REDACTED]",
+    });
+    expect(span.events).toEqual([
+      expect.objectContaining({ name: "exception" }),
+    ]);
+  });
+
+  test("prefers a returned manifest ID even when requested columns omit it", async () => {
+    const response: VsRawResponse = {
+      manifest: {
+        column_count: 2,
+        columns: [{ name: "text" }, { name: "id" }],
+      },
+      result: {
+        row_count: 1,
+        data_array: [["Complete row", "manifest-doc-id"]],
+      },
+      next_page_token: null,
+    };
+    const connector = new AiSearchConnector();
+
+    const observed = await captureSpans(() =>
+      connector.query(workspaceClient(response), {
+        columns: ["text"],
+        indexName: "catalog.schema.docs",
+        numResults: 1,
+        queryText: "find it",
+        queryType: "ann",
+      }),
+    );
+
+    expect(observed.error).toBeUndefined();
+    const span = retrieverSpan(observed.spans);
+    expect(span.attributes["appkit.retriever.document_ids"]).toEqual([
+      "manifest-doc-id",
+    ]);
+    expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
+      documents: [
+        {
+          content: { id: "manifest-doc-id", text: "Complete row" },
+          documentId: "manifest-doc-id",
+          score: null,
+        },
+      ],
+      nextPageToken: null,
+      resultCount: 1,
+    });
   });
 });

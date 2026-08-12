@@ -32,6 +32,61 @@ describe("captureTraceValue", () => {
     });
   });
 
+  test("redacts credential keys across camelCase, separator, and case variants", () => {
+    const captured = captureTraceValue({
+      accessToken: "camel-access",
+      "ACCESS.TOKEN": "dot-access",
+      access_token: "snake-access",
+      refreshToken: "camel-refresh",
+      "refresh token": "space-refresh",
+      clientSecret: "camel-client",
+      "CLIENT-SECRET": "kebab-client",
+      sdkToken: "camel-sdk",
+      SDK_TOKEN: "snake-sdk",
+    });
+
+    expect(JSON.parse(captured.value)).toEqual({
+      "ACCESS.TOKEN": "[REDACTED]",
+      "CLIENT-SECRET": "[REDACTED]",
+      SDK_TOKEN: "[REDACTED]",
+      accessToken: "[REDACTED]",
+      access_token: "[REDACTED]",
+      clientSecret: "[REDACTED]",
+      refreshToken: "[REDACTED]",
+      "refresh token": "[REDACTED]",
+      sdkToken: "[REDACTED]",
+    });
+    expect(captured.value).not.toContain("camel-access");
+    expect(captured.value).not.toContain("camel-refresh");
+    expect(captured.value).not.toContain("camel-client");
+    expect(captured.value).not.toContain("camel-sdk");
+  });
+
+  test("normalizes custom redaction keys without redacting benign supersets", () => {
+    const captured = captureTraceValue(
+      {
+        customSecret: "private",
+        CUSTOM_SECRET: "also-private",
+        accessTokenCount: 4,
+        clientSecretName: "display-name",
+        refreshTokenizedAt: "2026-08-11",
+        sdkTokenizer: "sentencepiece",
+        secretSauce: "benign",
+      },
+      { redactKeys: ["custom-secret"] },
+    );
+
+    expect(JSON.parse(captured.value)).toEqual({
+      CUSTOM_SECRET: "[REDACTED]",
+      accessTokenCount: 4,
+      clientSecretName: "display-name",
+      customSecret: "[REDACTED]",
+      refreshTokenizedAt: "2026-08-11",
+      sdkTokenizer: "sentencepiece",
+      secretSauce: "benign",
+    });
+  });
+
   test("hashes the complete value and truncates only at UTF-8 boundaries", () => {
     expect(captureTraceValue("😀a", { maxBytes: 5 })).toEqual({
       value: '"😀',

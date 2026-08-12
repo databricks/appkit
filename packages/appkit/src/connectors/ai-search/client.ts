@@ -6,7 +6,10 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import { captureTraceValue } from "../../telemetry/agent-tracing";
+import {
+  captureTraceValue,
+  getActiveAgentTraceIdentity,
+} from "../../telemetry/agent-tracing";
 import type { WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 import type {
@@ -50,10 +53,6 @@ export class AiSearchConnector {
     params: VsQueryParams,
     signal?: AbortSignal,
   ): Promise<VsRawResponse> {
-    if (signal?.aborted) {
-      throw new Error("Query cancelled before execution");
-    }
-
     const body: Record<string, unknown> = {
       columns: params.columns,
       num_results: params.numResults,
@@ -98,6 +97,7 @@ export class AiSearchConnector {
             params.filters && Object.keys(params.filters).length > 0
           ),
           "vs.has_reranker": !!params.reranker,
+          ...activeAgentIdentityAttributes(),
         },
       },
       async (span: Span) => {
@@ -113,6 +113,9 @@ export class AiSearchConnector {
           reranker: params.reranker ?? null,
         });
         try {
+          if (signal?.aborted) {
+            throw new Error("Query cancelled before execution");
+          }
           const response = (await workspaceClient.apiClient.request(
             {
               method: "POST",
@@ -126,7 +129,7 @@ export class AiSearchConnector {
           )) as VsRawResponse;
 
           const duration = Date.now() - startTime;
-          const outputs = retrieverOutputs(response, params.columns);
+          const outputs = retrieverOutputs(response);
           setRetrieverOutputs(span, outputs);
           span.setAttribute("vs.result_count", response.result.row_count);
           span.setAttribute(
@@ -163,10 +166,6 @@ export class AiSearchConnector {
     params: VsNextPageParams,
     signal?: AbortSignal,
   ): Promise<VsRawResponse> {
-    if (signal?.aborted) {
-      throw new Error("Query cancelled before execution");
-    }
-
     logger.debug(
       "Fetching next page for index %s (endpoint=%s)",
       params.indexName,
@@ -185,6 +184,7 @@ export class AiSearchConnector {
           "db.system": "databricks",
           "vs.index_name": params.indexName,
           "vs.endpoint_name": params.endpointName,
+          ...activeAgentIdentityAttributes(),
         },
       },
       async (span: Span) => {
@@ -196,6 +196,9 @@ export class AiSearchConnector {
           queryType: "next_page",
         });
         try {
+          if (signal?.aborted) {
+            throw new Error("Query cancelled before execution");
+          }
           const response = (await workspaceClient.apiClient.request(
             {
               method: "POST",
@@ -286,20 +289,11 @@ function summarizeVector(
   return { dimensions: vector.length, sha256: captured.sha256 };
 }
 
-function retrieverOutputs(
-  response: VsRawResponse,
-  configuredColumns?: readonly string[],
-): RetrieverOutputs {
+function retrieverOutputs(response: VsRawResponse): RetrieverOutputs {
   const columnNames = response.manifest.columns.map((column) => column.name);
-  const configured = configuredColumns
-    ? new Set(configuredColumns.map((column) => column.toLowerCase()))
-    : undefined;
   const documentIdIndex = columnNames.findIndex((column) => {
     const normalized = column.toLowerCase();
-    return (
-      DOCUMENT_ID_COLUMNS.has(normalized) &&
-      (configured === undefined || configured.has(normalized))
-    );
+    return DOCUMENT_ID_COLUMNS.has(normalized);
   });
   const scoreIndex = columnNames.findIndex(
     (column) => column.toLowerCase() === "score",
@@ -325,6 +319,20 @@ function retrieverOutputs(
     nextPageToken: response.next_page_token ?? null,
     resultCount: response.result.row_count,
   };
+}
+
+function activeAgentIdentityAttributes(): Record<string, string> {
+  const identity = getActiveAgentTraceIdentity();
+  return identity
+    ? {
+        "appkit.agent.name": identity.agentName,
+        "appkit.app.name": identity.appName,
+        "appkit.request.id": identity.requestId,
+        "appkit.thread.id": identity.threadId,
+        "mlflow.trace.session": identity.sessionId,
+        "mlflow.trace.user": identity.userId,
+      }
+    : {};
 }
 
 function setRetrieverOutputs(span: Span, outputs: RetrieverOutputs): void {

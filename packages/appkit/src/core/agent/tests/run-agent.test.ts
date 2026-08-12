@@ -69,6 +69,33 @@ async function captureAgentSpans<T>(
   return { result, spans };
 }
 
+async function captureFailedAgentSpans(
+  operation: () => Promise<unknown>,
+): Promise<{ error: unknown; spans: ReadableSpan[] }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { error, spans };
+}
+
 describe("runAgent", () => {
   test("drives the adapter and returns aggregated text", async () => {
     const events: AgentEvent[] = [
@@ -538,6 +565,95 @@ describe("runAgent", () => {
     });
     expect(helperSpan?.attributes["appkit.thread.id"]).not.toBe(
       "planner-thread",
+    );
+    expect(plannerSpan?.attributes["mlflow.trace.tokenUsage"]).toBe(
+      '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',
+    );
+    expect(plannerSpan?.attributes["appkit.cost.available"]).toBe(false);
+    expect(plannerSpan?.attributes["mlflow.llm.cost"]).toBeUndefined();
+  });
+
+  test("rolls failed unpriced child usage into the planner once and rethrows the original error", async () => {
+    const failure = new Error("helper failed after model usage");
+    const plannerStartedAt = Date.now();
+    const helperStartedAt = plannerStartedAt + 10;
+    const helperAdapter: AgentAdapter = {
+      async *run() {
+        yield {
+          type: "model_start",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "research" }] },
+          startedAt: helperStartedAt,
+        } satisfies AgentEvent;
+        yield {
+          type: "model_end",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          output: { text: "partial research" },
+          usage: {
+            inputTokens: 6,
+            outputTokens: 3,
+            totalTokens: 9,
+            costAvailable: false,
+          },
+          streamDurationMs: 5,
+          endedAt: helperStartedAt + 5,
+        } satisfies AgentEvent;
+        throw failure;
+      },
+    };
+    const plannerAdapter: AgentAdapter = {
+      async *run(_input, runContext) {
+        yield {
+          type: "model_start",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "plan" }] },
+          startedAt: plannerStartedAt,
+        } satisfies AgentEvent;
+        yield {
+          type: "model_end",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          output: { text: "delegating" },
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            totalTokens: 14,
+            costUsd: 0.04,
+            costAvailable: true,
+          },
+          streamDurationMs: 8,
+          endedAt: plannerStartedAt + 8,
+        } satisfies AgentEvent;
+        await runContext.executeTool("agent-helper", { input: "research" });
+      },
+    };
+    const planner = createAgent({
+      name: "planner",
+      instructions: "plan",
+      model: plannerAdapter,
+      agents: {
+        helper: createAgent({
+          name: "helper",
+          instructions: "research",
+          model: helperAdapter,
+        }),
+      },
+    });
+
+    const observed = await captureFailedAgentSpans(() =>
+      runAgent(planner, { messages: "plan" }),
+    );
+
+    expect(observed.error).toBe(failure);
+    const plannerSpan = observed.spans.find(
+      (span) => span.attributes["appkit.agent.name"] === "planner",
     );
     expect(plannerSpan?.attributes["mlflow.trace.tokenUsage"]).toBe(
       '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',

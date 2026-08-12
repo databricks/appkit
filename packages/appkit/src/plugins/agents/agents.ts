@@ -1625,7 +1625,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             args,
             depth + 1,
           );
-          runState.traceObserver?.addChildUsage(childResult.usage);
           result = childResult.text;
         } else if (entry.source === "hosted-supervisor") {
           // Defense-in-depth: should never fire. Hosted-supervisor entries are
@@ -1778,6 +1777,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         );
         return consumed.text;
       },
+      (childUsage) => runState.traceObserver?.addChildUsage(childUsage),
     );
     return { text: traced.value, usage: traced.usage };
   }

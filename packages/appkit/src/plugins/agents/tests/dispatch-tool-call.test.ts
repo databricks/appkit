@@ -1127,4 +1127,118 @@ describe("runSubAgent — sub-agent event forwarding", () => {
       JSON.parse(String(delegation?.attributes["mlflow.spanOutputs"])),
     ).toBe("helper:fact:tracing");
   });
+
+  test("adds failed unpriced child usage once and rethrows the original error", async () => {
+    const plugin = new AgentsPlugin({ dir: false, agents: {} });
+    const { runState } = makeRunState(plugin);
+    const failure = new Error("helper failed after model usage");
+    const startedAt = Date.now();
+    const helper = {
+      name: "helper",
+      instructions: "research",
+      adapter: {
+        // biome-ignore lint/suspicious/noExplicitAny: stub adapter shape
+        async *run(): any {
+          yield {
+            type: "model_start",
+            stepId: "helper-step",
+            model: "helper.model",
+            provider: "databricks",
+            input: { messages: [{ role: "user", content: "research" }] },
+            startedAt,
+          };
+          yield {
+            type: "model_end",
+            stepId: "helper-step",
+            model: "helper.model",
+            provider: "databricks",
+            output: { text: "partial research" },
+            usage: {
+              inputTokens: 6,
+              outputTokens: 3,
+              totalTokens: 9,
+              costAvailable: false,
+            },
+            streamDurationMs: 5,
+            endedAt: startedAt + 5,
+          };
+          throw failure;
+        },
+      },
+      toolIndex: new Map(),
+    };
+    (plugin as any).agents.set("helper", helper);
+    const plannerToolIndex = new Map<string, unknown>([
+      [
+        "agent-helper",
+        {
+          source: "subagent",
+          agentName: "helper",
+          def: {
+            name: "agent-helper",
+            description: "delegate",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+
+    const observed = await captureSpans(() =>
+      runWithAgentTrace(
+        {
+          appName: "test-app",
+          agentName: "planner",
+          route: "chat",
+          sessionId: "session-1",
+          userId: "alice",
+          requestId: "request-1",
+          threadId: "planner-thread",
+        },
+        { message: "plan" },
+        async (observer) => {
+          Object.assign(runState, { traceObserver: observer });
+          observer.onEvent({
+            type: "model_start",
+            stepId: "planner-step",
+            model: "planner.model",
+            provider: "databricks",
+            input: { messages: [{ role: "user", content: "plan" }] },
+            startedAt,
+          });
+          observer.onEvent({
+            type: "model_end",
+            stepId: "planner-step",
+            model: "planner.model",
+            provider: "databricks",
+            output: { text: "delegating" },
+            usage: {
+              inputTokens: 10,
+              outputTokens: 4,
+              totalTokens: 14,
+              costUsd: 0.04,
+              costAvailable: true,
+            },
+            streamDurationMs: 8,
+            endedAt: startedAt + 8,
+          });
+          return callDispatch(plugin, {
+            runState,
+            toolIndex: plannerToolIndex,
+            name: "agent-helper",
+            args: { input: "research" },
+          });
+        },
+      ),
+    );
+
+    expect(observed.error).toBe(failure);
+    const plannerSpan = observed.spans.find(
+      (span) => span.attributes["appkit.agent.name"] === "planner",
+    );
+    expect(plannerSpan?.attributes["mlflow.trace.tokenUsage"]).toBe(
+      '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',
+    );
+    expect(plannerSpan?.attributes["appkit.cost.available"]).toBe(false);
+    expect(plannerSpan?.attributes["mlflow.llm.cost"]).toBeUndefined();
+  });
 });

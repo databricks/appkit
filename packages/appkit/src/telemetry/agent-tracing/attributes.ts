@@ -17,6 +17,7 @@ export const DEFAULT_TRACE_REDACT_KEYS = [
   "refresh_token",
   "databricks-token",
   "databricks_token",
+  "sdk-token",
   "password",
   "secret",
   "client-secret",

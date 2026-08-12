@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   context,
+  createContextKey,
   isSpanContextValid,
   type Span,
   SpanStatusCode,
@@ -21,6 +22,9 @@ import type {
 import { AgentUsageAccumulator } from "./usage";
 
 const tracer = () => trace.getTracer("@databricks/appkit-agent-tracing");
+const ACTIVE_AGENT_TRACE_IDENTITY = createContextKey(
+  "@databricks/appkit-agent-trace-identity",
+);
 
 interface ActiveModelStep {
   event: AgentModelStartEvent;
@@ -37,23 +41,35 @@ export function resolveAgentTraceAppName(appName?: string): string {
   );
 }
 
+export function getActiveAgentTraceIdentity(): AgentTraceIdentity | undefined {
+  const identity = context.active().getValue(ACTIVE_AGENT_TRACE_IDENTITY) as
+    | AgentTraceIdentity
+    | undefined;
+  return identity ? { ...identity } : undefined;
+}
+
 export async function runWithAgentTrace<T>(
   identity: AgentTraceIdentity,
   inputs: unknown,
   operation: (observer: AgentTraceObserver) => Promise<T>,
+  onCompleteUsage?: (usage: AgentUsage) => void,
 ): Promise<AgentTraceResult<T>> {
+  const activeIdentity: AgentTraceIdentity = {
+    ...identity,
+    appName: resolveAgentTraceAppName(identity.appName),
+  };
   return tracer().startActiveSpan(
     `${identity.agentName} agent`,
     {
       attributes: {
         "mlflow.spanType": "AGENT",
-        "mlflow.trace.session": identity.sessionId,
-        "mlflow.trace.user": identity.userId,
-        "appkit.app.name": resolveAgentTraceAppName(identity.appName),
-        "appkit.request.id": identity.requestId,
-        "appkit.thread.id": identity.threadId,
-        "appkit.agent.name": identity.agentName,
-        "appkit.route": identity.route,
+        "mlflow.trace.session": activeIdentity.sessionId,
+        "mlflow.trace.user": activeIdentity.userId,
+        "appkit.app.name": activeIdentity.appName,
+        "appkit.request.id": activeIdentity.requestId,
+        "appkit.thread.id": activeIdentity.threadId,
+        "appkit.agent.name": activeIdentity.agentName,
+        "appkit.route": activeIdentity.route,
       },
     },
     async (root) => {
@@ -63,16 +79,18 @@ export async function runWithAgentTrace<T>(
       const otelTraceId = hasValidRootContext
         ? rootSpanContext.traceId
         : randomUUID().replaceAll("-", "");
-      const rootContext = trace.setSpan(
-        context.active(),
-        hasValidRootContext
-          ? root
-          : trace.wrapSpanContext({
-              traceId: otelTraceId,
-              spanId: randomUUID().replaceAll("-", "").slice(0, 16),
-              traceFlags: 0,
-            }),
-      );
+      const rootContext = trace
+        .setSpan(
+          context.active(),
+          hasValidRootContext
+            ? root
+            : trace.wrapSpanContext({
+                traceId: otelTraceId,
+                spanId: randomUUID().replaceAll("-", "").slice(0, 16),
+                traceFlags: 0,
+              }),
+        )
+        .setValue(ACTIVE_AGENT_TRACE_IDENTITY, activeIdentity);
       const traceId = getMlflowUcTraceId(otelTraceId) ?? otelTraceId;
       const usage = new AgentUsageAccumulator();
       const activeModels = new Map<string, ActiveModelStep>();
@@ -141,6 +159,7 @@ export async function runWithAgentTrace<T>(
           usage.add(normalizeUsage(childUsage));
         },
         updateIdentity(next) {
+          updateActiveIdentity(activeIdentity, next);
           setIdentityAttributes(root, next);
         },
         setOutput(output) {
@@ -207,6 +226,7 @@ export async function runWithAgentTrace<T>(
 
         const finalUsage = usage.snapshot();
         setRootUsageAttributes(root, finalUsage);
+        onCompleteUsage?.(finalUsage);
         const finalOutputText = outputText || textFromValue(value);
         const finalOutput = hasExplicitOutput
           ? explicitOutput
@@ -235,6 +255,16 @@ export async function runWithAgentTrace<T>(
       return { value, traceId, usage: usage.snapshot() };
     },
   );
+}
+
+function updateActiveIdentity(
+  identity: AgentTraceIdentity,
+  next: Partial<Omit<AgentTraceIdentity, "route">>,
+): void {
+  Object.assign(identity, next);
+  if (next.appName !== undefined) {
+    identity.appName = resolveAgentTraceAppName(next.appName);
+  }
 }
 
 function modelStartAttributes(event: AgentModelStartEvent) {

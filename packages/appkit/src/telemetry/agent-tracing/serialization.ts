@@ -12,12 +12,12 @@ export function captureTraceValue(
 ): CapturedTraceValue {
   const redactKeys = new Set(
     [...DEFAULT_TRACE_REDACT_KEYS, ...(options.redactKeys ?? [])].map((key) =>
-      key.toLowerCase(),
+      normalizeRedactKey(key),
     ),
   );
   const serialized =
     JSON.stringify(value, (key, current) => {
-      if (redactKeys.has(key.toLowerCase())) return REDACTED_TRACE_VALUE;
+      if (redactKeys.has(normalizeRedactKey(key))) return REDACTED_TRACE_VALUE;
       if (
         current !== null &&
         typeof current === "object" &&
@@ -45,6 +45,10 @@ export function captureTraceValue(
     sha256: createHash("sha256").update(encoded).digest("hex"),
     truncated: retained.length < encoded.length,
   };
+}
+
+function normalizeRedactKey(value: string): string {
+  return value.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
 }
 
 function normalizeMaxBytes(value: number | undefined): number {

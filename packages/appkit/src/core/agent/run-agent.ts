@@ -235,12 +235,12 @@ async function runAgentInternal(
                 providerCache,
                 childObserver,
               ),
+            (childUsage) => observer.addChildUsage(childUsage),
           );
           const childResult = {
             text: childTrace.value.text,
             usage: childTrace.usage,
           };
-          observer.addChildUsage(childResult.usage);
           return childResult.text;
         }
         if (entry.kind === "hosted-supervisor") {
