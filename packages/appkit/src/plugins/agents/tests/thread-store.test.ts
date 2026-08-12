@@ -222,14 +222,16 @@ describe("TracedThreadStore", () => {
       spans.map((span) => [
         span.attributes["appkit.memory.operation"],
         span.attributes["appkit.memory.state"],
+        span.attributes["appkit.memory.store"],
+        span.attributes["appkit.memory.key"],
       ]),
     ).toEqual([
-      ["create", "created"],
-      ["get", "hit"],
-      ["get", "miss"],
-      ["list", "completed"],
-      ["addMessage", "completed"],
-      ["delete", "deleted"],
+      ["create", "created", "thread", "user-7"],
+      ["get", "hit", "thread", created?.id],
+      ["get", "miss", "thread", "thread-missing"],
+      ["list", "completed", "thread", "user-7"],
+      ["addMessage", "completed", "thread", created?.id],
+      ["delete", "deleted", "thread", created?.id],
     ]);
     expect(
       spans.every(

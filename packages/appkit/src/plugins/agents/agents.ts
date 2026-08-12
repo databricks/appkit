@@ -93,6 +93,8 @@ export async function traceToolCall<T>(
     {
       attributes: {
         "mlflow.spanType": "TOOL",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": input.name,
         "appkit.tool.name": input.name,
         "appkit.tool.source": input.source,
         ...(input.effect ? { "appkit.tool.effect": input.effect } : {}),

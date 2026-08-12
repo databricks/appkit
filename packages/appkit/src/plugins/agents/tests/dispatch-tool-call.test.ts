@@ -291,6 +291,17 @@ describe("dispatchToolCall — semantic TOOL spans", () => {
     expect(tools).toHaveLength(4);
     expect(
       tools.map((span) => [
+        span.attributes["gen_ai.operation.name"],
+        span.attributes["gen_ai.tool.name"],
+      ]),
+    ).toEqual([
+      ["execute_tool", "inline"],
+      ["execute_tool", "analytics.query"],
+      ["execute_tool", "remote_lookup"],
+      ["execute_tool", "agent-researcher"],
+    ]);
+    expect(
+      tools.map((span) => [
         span.attributes["appkit.tool.name"],
         span.attributes["appkit.tool.source"],
         span.attributes["appkit.tool.effect"],
@@ -538,7 +549,7 @@ describe("dispatchToolCall — semantic approval descendants", () => {
     expect(approval.attributes).toMatchObject({
       "appkit.approval.decision": "approve",
       "appkit.approval.state": "approved",
-      "appkit.approval.tool_name": "delete_user",
+      "appkit.tool.name": "delete_user",
       "appkit.approval.duration_ms": expect.any(Number),
     });
     expect(

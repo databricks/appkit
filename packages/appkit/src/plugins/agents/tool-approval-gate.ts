@@ -26,7 +26,7 @@ export async function traceApprovalWait<T>(
       attributes: {
         "mlflow.spanType": "CHAIN",
         "appkit.approval.id": input.approvalId,
-        "appkit.approval.tool_name": input.toolName,
+        "appkit.tool.name": input.toolName,
         ...(input.effect ? { "appkit.approval.effect": input.effect } : {}),
       },
     },

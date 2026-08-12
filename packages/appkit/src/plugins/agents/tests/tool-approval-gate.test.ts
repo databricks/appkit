@@ -251,7 +251,7 @@ describe("ToolApprovalGate", () => {
         const span = approvalSpan(observed.spans);
         expect(span.attributes).toMatchObject({
           "appkit.approval.id": `explicit-${decision}`,
-          "appkit.approval.tool_name": "users.update",
+          "appkit.tool.name": "users.update",
           "appkit.approval.effect": "update",
           "appkit.approval.decision": decision,
           "appkit.approval.state": expectedState,

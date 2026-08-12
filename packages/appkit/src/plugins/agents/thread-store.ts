@@ -9,6 +9,7 @@ type MemoryOperation = "create" | "get" | "list" | "addMessage" | "delete";
 
 async function traceMemoryOperation<T>(
   operationName: MemoryOperation,
+  key: string,
   inputs: unknown,
   operation: (span: Span) => Promise<T>,
 ): Promise<T> {
@@ -18,6 +19,8 @@ async function traceMemoryOperation<T>(
       attributes: {
         "mlflow.spanType": "MEMORY",
         "appkit.memory.operation": operationName,
+        "appkit.memory.store": "thread",
+        "appkit.memory.key": key,
       },
     },
     async (span) => {
@@ -149,7 +152,7 @@ export class TracedThreadStore implements ThreadStore {
   constructor(private readonly backing: ThreadStore) {}
 
   create(userId: string): Promise<Thread> {
-    return traceMemoryOperation("create", { userId }, async (span) => {
+    return traceMemoryOperation("create", userId, { userId }, async (span) => {
       const thread = await this.backing.create(userId);
       span.setAttribute("appkit.memory.state", "created");
       return thread;
@@ -157,15 +160,20 @@ export class TracedThreadStore implements ThreadStore {
   }
 
   get(threadId: string, userId: string): Promise<Thread | null> {
-    return traceMemoryOperation("get", { threadId, userId }, async (span) => {
-      const thread = await this.backing.get(threadId, userId);
-      span.setAttribute("appkit.memory.state", thread ? "hit" : "miss");
-      return thread;
-    });
+    return traceMemoryOperation(
+      "get",
+      threadId,
+      { threadId, userId },
+      async (span) => {
+        const thread = await this.backing.get(threadId, userId);
+        span.setAttribute("appkit.memory.state", thread ? "hit" : "miss");
+        return thread;
+      },
+    );
   }
 
   list(userId: string): Promise<Thread[]> {
-    return traceMemoryOperation("list", { userId }, async (span) => {
+    return traceMemoryOperation("list", userId, { userId }, async (span) => {
       const threads = await this.backing.list(userId);
       span.setAttribute("appkit.memory.state", "completed");
       return threads;
@@ -179,6 +187,7 @@ export class TracedThreadStore implements ThreadStore {
   ): Promise<void> {
     return traceMemoryOperation(
       "addMessage",
+      threadId,
       { message, threadId, userId },
       async (span) => {
         await this.backing.addMessage(threadId, userId, message);
@@ -190,6 +199,7 @@ export class TracedThreadStore implements ThreadStore {
   delete(threadId: string, userId: string): Promise<boolean> {
     return traceMemoryOperation(
       "delete",
+      threadId,
       { threadId, userId },
       async (span) => {
         const deleted = await this.backing.delete(threadId, userId);
