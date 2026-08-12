@@ -61,6 +61,8 @@ function SmartDashboardRoute() {
   );
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mlflowTraceId, setMlflowTraceId] = useState<string | null>(null);
+  const [mlflowTraceUrl, setMlflowTraceUrl] = useState<string | null>(null);
 
   // Multi-turn chat history. Messages accumulate across sends so the user
   // can scroll back through the conversation rather than having the UI
@@ -177,6 +179,13 @@ function SmartDashboardRoute() {
     (event: SSEEvent) => {
       handleDispatcherEvent(event);
 
+      if (event.type === "appkit.metadata") {
+        const traceId = event.data?.traceId;
+        const traceUrl = event.data?.traceUrl;
+        if (typeof traceId === "string") setMlflowTraceId(traceId);
+        if (typeof traceUrl === "string") setMlflowTraceUrl(traceUrl);
+      }
+
       // Capture pending approvals and pin them to the user turn that
       // triggered them so the ChatDrawer can render the card inline.
       if (event.type === "appkit.approval_pending") {
@@ -250,6 +259,8 @@ function SmartDashboardRoute() {
 
   const dispatchToAgent = useCallback(
     (message: string) => {
+      setMlflowTraceId(null);
+      setMlflowTraceUrl(null);
       const userMsgId = nextMessageId();
       const assistantMsgId = nextMessageId();
       lastUserMessageIdRef.current = userMsgId;
@@ -478,6 +489,22 @@ function SmartDashboardRoute() {
         <div className="mb-4">
           <QuickActionsBar onSend={dispatchToAgent} disabled={agentLoading} />
         </div>
+
+        {mlflowTraceId && mlflowTraceUrl && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 text-xs">
+            <code className="truncate" title={mlflowTraceId}>
+              {mlflowTraceId}
+            </code>
+            <a
+              href={mlflowTraceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 font-medium text-primary hover:underline"
+            >
+              Open trace in MLflow
+            </a>
+          </div>
+        )}
 
         {(error || dataError) && (
           <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-xs text-red-700 dark:text-red-400">

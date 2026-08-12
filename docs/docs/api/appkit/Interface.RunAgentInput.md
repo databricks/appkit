@@ -2,6 +2,14 @@
 
 ## Properties
 
+### appName?
+
+```ts
+optional appName: string;
+```
+
+***
+
 ### messages
 
 ```ts
@@ -26,6 +34,22 @@ there is no HTTP request in standalone mode).
 
 ***
 
+### requestId?
+
+```ts
+optional requestId: string;
+```
+
+***
+
+### sessionId?
+
+```ts
+optional sessionId: string;
+```
+
+***
+
 ### signal?
 
 ```ts
@@ -33,3 +57,19 @@ optional signal: AbortSignal;
 ```
 
 Abort signal for cancellation.
+
+***
+
+### threadId?
+
+```ts
+optional threadId: string;
+```
+
+***
+
+### userId?
+
+```ts
+optional userId: string;
+```

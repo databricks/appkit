@@ -1219,9 +1219,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     // Trace discovery is committed by the outer request handler before any
     // SSE event. Queue the matching metadata before the adapter can emit.
+    const traceUrl = buildMlflowTraceUrl(observer.traceId);
     for (const evt of translator.translate({
       type: "metadata",
-      data: { threadId: thread.id, traceId: observer.traceId },
+      data: {
+        threadId: thread.id,
+        traceId: observer.traceId,
+        ...(traceUrl ? { traceUrl } : {}),
+      },
     })) {
       outboundEvents.push(evt);
     }
@@ -1970,6 +1975,13 @@ function provisionalTraceIdentity(
 function traceIdentityValue(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   return value.trim() || undefined;
+}
+
+function buildMlflowTraceUrl(traceId: string): string | undefined {
+  const workspaceHost = process.env.DATABRICKS_HOST?.trim().replace(/\/$/, "");
+  const experimentId = process.env.MLFLOW_EXPERIMENT_ID?.trim();
+  if (!workspaceHost || !experimentId) return undefined;
+  return `${workspaceHost}/ml/experiments/${encodeURIComponent(experimentId)}/traces?selectedTraceId=${encodeURIComponent(traceId)}`;
 }
 
 function respondWithTraceError(

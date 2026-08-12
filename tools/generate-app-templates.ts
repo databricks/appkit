@@ -39,6 +39,12 @@ const DATABRICKS_CLI = process.env.DATABRICKS_CLI ?? "databricks";
 const APPKIT_SECTION_START = "<!-- appkit-start -->";
 const APPKIT_SECTION_END = "<!-- appkit-end -->";
 
+// Task 1–9 tracing APIs first ship in the next AppKit minor. Static agent
+// variants must never resolve to the pre-feature 0.58.x runtime. The templates
+// remain publication-gated until this version exists in the registry; local
+// verification uses packed prerelease tarballs from this checkout.
+const FIRST_MLFLOW_UC_APPKIT_VERSION = "0.59.0";
+
 interface AppTemplate {
   /** Output directory name and --name passed to databricks apps init */
   name: string;
@@ -52,6 +58,7 @@ interface AppTemplate {
 
 const FEATURE_DEPENDENCIES: Record<string, string> = {
   analytics: "SQL warehouse",
+  agents: "MLflow experiment, SQL warehouse, Serving Endpoint",
   files: "Volume",
   genie: "Genie Space",
   lakebase: "Database",
@@ -61,18 +68,33 @@ const FEATURE_DEPENDENCIES: Record<string, string> = {
 const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-all-in-one",
-    features: ["analytics", "files", "genie", "lakebase", "serving"],
+    features: ["agents", "analytics", "files", "genie", "lakebase", "serving"],
     set: {
+      "agents.mlflow-experiment.id": "placeholder",
+      "agents.mlflow-tracing-warehouse.id": "placeholder",
+      "agents.agents-serving-endpoint.name": "placeholder",
       "analytics.sql-warehouse.id": "placeholder",
       "files.files.path": "placeholder",
       "genie.genie-space.id": "placeholder",
       "genie.genie-space.name": "placeholder",
+      "lakebase.postgres.project": "placeholder",
       "lakebase.postgres.branch": "placeholder",
       "lakebase.postgres.database": "placeholder",
       "serving.serving-endpoint.name": "placeholder",
     },
     description:
-      "Full-stack Node.js app with SQL analytics dashboards, file browser, Genie AI conversations, Lakebase Autoscaling (Postgres) CRUD, and Model Serving",
+      "Full-stack Node.js app with traced agents, SQL analytics dashboards, file browser, Genie AI conversations, Lakebase Autoscaling (Postgres) CRUD, and Model Serving",
+  },
+  {
+    name: "appkit-agents",
+    features: ["agents"],
+    set: {
+      "agents.mlflow-experiment.id": "placeholder",
+      "agents.mlflow-tracing-warehouse.id": "placeholder",
+      "agents.agents-serving-endpoint.name": "placeholder",
+    },
+    description:
+      "Node.js agent app with MLflow Unity Catalog tracing and a composed planner/helper example",
   },
   {
     name: "appkit-analytics",
@@ -113,6 +135,7 @@ const APP_TEMPLATES: AppTemplate[] = [
     name: "appkit-lakebase",
     features: ["lakebase"],
     set: {
+      "lakebase.postgres.project": "placeholder",
       "lakebase.postgres.branch": "placeholder",
       "lakebase.postgres.database": "placeholder",
     },
@@ -122,7 +145,17 @@ const APP_TEMPLATES: AppTemplate[] = [
 ];
 
 function run(cmd: string, args: string[], opts?: { cwd?: string }): number {
-  const result = spawnSync(cmd, args, { stdio: "inherit", cwd: opts?.cwd });
+  const result = spawnSync(cmd, args, {
+    stdio: "inherit",
+    cwd: opts?.cwd,
+    env: {
+      ...process.env,
+      DATABRICKS_HOST:
+        process.env.DATABRICKS_HOST ??
+        "https://your-workspace.cloud.databricks.com",
+      DATABRICKS_TOKEN: process.env.DATABRICKS_TOKEN ?? "appkit-template-only",
+    },
+  });
   return result.status ?? 1;
 }
 
@@ -148,6 +181,7 @@ for (const app of APP_TEMPLATES) {
     app.features.join(","),
     "--output-dir",
     OUTPUT_DIR,
+    "--skip-install",
   ];
 
   args.push("--description", app.description);
@@ -205,11 +239,34 @@ function postProcess(appDir: string, app: AppTemplate): void {
   );
   writeFileSync(join(appDir, "databricks.yml.tmpl"), databricksYmlTmpl);
 
+  // Agent templates depend on the tracing runtime added after 0.58.0. Pin the
+  // first containing release and remove the stale source lock, which cannot be
+  // regenerated against 0.59.0 until that release is published.
+  if (app.features.includes("agents")) {
+    const packageJsonPath = join(appDir, "package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    packageJson.dependencies["@databricks/appkit"] =
+      FIRST_MLFLOW_UC_APPKIT_VERSION;
+    packageJson.dependencies["@databricks/appkit-ui"] =
+      FIRST_MLFLOW_UC_APPKIT_VERSION;
+    writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    rmSync(join(appDir, "package-lock.json"), { force: true });
+  }
+
   // 3. Sync appkit.plugins.json based on server imports (discovers available plugins
   //    and marks the ones used in the plugins array as required).
   const syncStatus = run(
     "node",
-    [join(ROOT, "packages/shared/bin/appkit.js"), "plugin", "sync", "--write"],
+    [
+      join(ROOT, "packages/shared/bin/appkit.js"),
+      "plugin",
+      "sync",
+      "--write",
+      "--plugins-dir",
+      join(ROOT, "packages/appkit/src/plugins"),
+    ],
     { cwd: appDir },
   );
   if (syncStatus !== 0) {

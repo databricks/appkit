@@ -6,7 +6,7 @@ import {
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import type express from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 
@@ -36,6 +36,10 @@ beforeEach(() => {
     ),
     generateKey: vi.fn(() => "test-key"),
   };
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 function mockReq(body: unknown, userId = "alice"): express.Request {
@@ -732,6 +736,8 @@ describe("POST /invocations & /responses — successful invoke", () => {
 
 describe("POST /chat — trace discovery ordering", () => {
   test("sets the trace header and emits trace metadata before any streamed content", async () => {
+    vi.stubEnv("DATABRICKS_HOST", "https://example.cloud.databricks.com/");
+    vi.stubEnv("MLFLOW_EXPERIMENT_ID", "123456789");
     const plugin = new AgentsPlugin({ dir: false });
     const order: string[] = [];
     const streamed: Array<Record<string, unknown>> = [];
@@ -820,7 +826,13 @@ describe("POST /chat — trace discovery ordering", () => {
     expect(order[1]).toBe("body:appkit.metadata");
     expect(metadata).toMatchObject({
       type: "appkit.metadata",
-      data: { threadId: "thread-1", traceId: expect.any(String) },
+      data: {
+        threadId: "thread-1",
+        traceId: expect.any(String),
+        traceUrl: expect.stringMatching(
+          /^https:\/\/example\.cloud\.databricks\.com\/ml\/experiments\/123456789\/traces\?selectedTraceId=/,
+        ),
+      },
     });
     expect(setHeader).toHaveBeenCalledWith(
       "X-MLflow-Trace-Id",

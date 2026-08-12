@@ -23,6 +23,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Class.AgentUsageAccumulator",
+          label: "AgentUsageAccumulator"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.AppKitError",
           label: "AppKitError"
         },
@@ -119,6 +124,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentModelEndEvent",
+          label: "AgentModelEndEvent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentModelStartEvent",
+          label: "AgentModelStartEvent"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.AgentRunContext",
           label: "AgentRunContext"
         },
@@ -134,6 +149,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentUsage",
+          label: "AgentUsage"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.AutoInheritToolsConfig",
           label: "AutoInheritToolsConfig"
         },
@@ -146,6 +166,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.CacheConfig",
           label: "CacheConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.CapturedTraceValue",
+          label: "CapturedTraceValue"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.CaptureTraceValueOptions",
+          label: "CaptureTraceValueOptions"
         },
         {
           type: "doc",
@@ -420,6 +450,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AgentRemoteTraceEvent",
+          label: "AgentRemoteTraceEvent"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.AgentTool",
           label: "AgentTool"
         },
@@ -584,6 +619,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.captureTraceValue",
+          label: "captureTraceValue"
         },
         {
           type: "doc",

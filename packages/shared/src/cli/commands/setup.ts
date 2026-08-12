@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import yaml from "js-yaml";
 
 const PACKAGES = [
   { name: "@databricks/appkit", description: "Backend SDK" },
@@ -12,6 +14,231 @@ const PACKAGES = [
 
 const SECTION_START = "<!-- appkit-instructions-start -->";
 const SECTION_END = "<!-- appkit-instructions-end -->";
+
+const MLFLOW_UC_ENV_NAMES = [
+  "MLFLOW_EXPERIMENT_ID",
+  "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+  "MLFLOW_UC_CATALOG",
+  "MLFLOW_UC_SCHEMA",
+  "MLFLOW_UC_TABLE_PREFIX",
+  "MLFLOW_OTEL_SPANS_TABLE",
+] as const;
+
+export type MlflowUcValues = Record<
+  (typeof MLFLOW_UC_ENV_NAMES)[number],
+  string
+>;
+
+export interface MlflowUcSetupOptions {
+  cwd: string;
+  profile: string;
+  experimentName: string;
+  catalog: string;
+  schema: string;
+  tablePrefix: string;
+  warehouseId: string;
+}
+
+interface MlflowUcSetupDependencies {
+  scriptPath?: string;
+  run?: (command: string[]) => number;
+  log?: (message: string) => void;
+  workspaceHost?: string;
+}
+
+function readEnvFile(filePath: string): Record<string, string> {
+  if (!fs.existsSync(filePath)) return {};
+  return Object.fromEntries(
+    fs
+      .readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line.trim());
+        return match ? [[match[1], match[2]]] : [];
+      }),
+  );
+}
+
+export function projectRequiresMlflowUc(
+  cwd: string,
+  explicitlySelected: boolean,
+): boolean {
+  if (explicitlySelected) return true;
+  const manifestPath = path.join(cwd, "appkit.plugins.json");
+  if (!fs.existsSync(manifestPath)) return false;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      plugins?: { agents?: { requiredByTemplate?: boolean } };
+    };
+    return manifest.plugins?.agents?.requiredByTemplate === true;
+  } catch (error) {
+    throw new Error(`Could not read ${manifestPath}: ${String(error)}`);
+  }
+}
+
+export function buildMlflowProvisionCommand(
+  options: MlflowUcSetupOptions & { scriptPath: string },
+): string[] {
+  return [
+    "uv",
+    "run",
+    "--no-project",
+    "--with",
+    "mlflow[databricks]>=3.14.0,<4",
+    "python",
+    options.scriptPath,
+    "--profile",
+    options.profile,
+    "--experiment-name",
+    options.experimentName,
+    "--catalog",
+    options.catalog,
+    "--schema",
+    options.schema,
+    "--table-prefix",
+    options.tablePrefix,
+    "--warehouse-id",
+    options.warehouseId,
+    "--output-json",
+    path.join(options.cwd, ".databricks", "mlflow-uc.json"),
+  ];
+}
+
+function validateMlflowUcValues(value: unknown): MlflowUcValues {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("MLflow UC provisioner returned invalid JSON");
+  }
+  const record = value as Record<string, unknown>;
+  const missing = MLFLOW_UC_ENV_NAMES.filter(
+    (name) => typeof record[name] !== "string" || !record[name],
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `MLflow UC provisioner output missing: ${missing.join(", ")}`,
+    );
+  }
+  return Object.fromEntries(
+    MLFLOW_UC_ENV_NAMES.map((name) => [name, record[name] as string]),
+  ) as MlflowUcValues;
+}
+
+function persistDotEnv(filePath: string, values: MlflowUcValues): void {
+  const existing = fs.existsSync(filePath)
+    ? fs.readFileSync(filePath, "utf8").split(/\r?\n/)
+    : [];
+  const remaining = existing.filter(
+    (line) => !MLFLOW_UC_ENV_NAMES.some((name) => line.startsWith(`${name}=`)),
+  );
+  const lines = [
+    ...remaining.filter((line, index) => line || index < remaining.length - 1),
+    ...MLFLOW_UC_ENV_NAMES.map((name) => `${name}=${values[name]}`),
+  ];
+  fs.writeFileSync(filePath, `${lines.join("\n")}\n`);
+}
+
+function loadYamlObject(filePath: string): Record<string, unknown> {
+  if (!fs.existsSync(filePath)) return {};
+  const parsed = yaml.load(fs.readFileSync(filePath, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${filePath} must contain a YAML object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function writeYamlObject(
+  filePath: string,
+  document: Record<string, unknown>,
+): void {
+  fs.writeFileSync(
+    filePath,
+    yaml.dump(document, { lineWidth: 100, noRefs: true, quotingType: '"' }),
+  );
+}
+
+function persistAppYaml(filePath: string, values: MlflowUcValues): void {
+  const document = loadYamlObject(filePath) as {
+    env?: Array<{ name?: string; value?: string; valueFrom?: string }>;
+  };
+  const existing = Array.isArray(document.env) ? document.env : [];
+  document.env = [
+    ...existing.filter(
+      (entry) =>
+        !MLFLOW_UC_ENV_NAMES.includes(
+          entry.name as (typeof MLFLOW_UC_ENV_NAMES)[number],
+        ),
+    ),
+    ...MLFLOW_UC_ENV_NAMES.map((name) => ({ name, value: values[name] })),
+  ];
+  writeYamlObject(filePath, document as Record<string, unknown>);
+}
+
+function persistBundleYaml(filePath: string, values: MlflowUcValues): void {
+  const document = loadYamlObject(filePath) as {
+    variables?: Record<string, unknown>;
+    targets?: Record<string, { variables?: Record<string, string> }>;
+  };
+  document.variables ??= {};
+  for (const name of MLFLOW_UC_ENV_NAMES) {
+    document.variables[name] = {
+      description: `AppKit MLflow UC tracing: ${name}`,
+      default: values[name],
+    };
+  }
+  document.targets ??= {};
+  document.targets.default ??= {};
+  document.targets.default.variables ??= {};
+  Object.assign(document.targets.default.variables, values);
+  writeYamlObject(filePath, document as Record<string, unknown>);
+}
+
+export async function provisionAndPersistMlflowUc(
+  options: MlflowUcSetupOptions,
+  dependencies: MlflowUcSetupDependencies = {},
+): Promise<MlflowUcValues> {
+  const outputPath = path.join(options.cwd, ".databricks", "mlflow-uc.json");
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const scriptPath =
+    dependencies.scriptPath ??
+    path.join(
+      options.cwd,
+      "node_modules",
+      "@databricks",
+      "appkit",
+      "scripts",
+      "provision-mlflow-uc.py",
+    );
+  if (!fs.existsSync(scriptPath) && !dependencies.run) {
+    throw new Error(`MLflow UC provisioner not found: ${scriptPath}`);
+  }
+  const command = buildMlflowProvisionCommand({ ...options, scriptPath });
+  const run =
+    dependencies.run ??
+    ((argv: string[]) =>
+      spawnSync(argv[0], argv.slice(1), {
+        cwd: options.cwd,
+        stdio: "inherit",
+      }).status ?? 1);
+  const status = run(command);
+  if (status !== 0) {
+    throw new Error(`MLflow UC provisioning failed with exit code ${status}`);
+  }
+
+  const values = validateMlflowUcValues(
+    JSON.parse(fs.readFileSync(outputPath, "utf8")),
+  );
+  persistDotEnv(path.join(options.cwd, ".env"), values);
+  persistAppYaml(path.join(options.cwd, "app.yaml"), values);
+  persistBundleYaml(path.join(options.cwd, "databricks.yml"), values);
+
+  const log = dependencies.log ?? console.log;
+  const host = dependencies.workspaceHost?.replace(/\/$/, "");
+  if (host) {
+    log(
+      `MLflow experiment: ${host}/ml/experiments/${encodeURIComponent(values.MLFLOW_EXPERIMENT_ID)}/traces`,
+    );
+  }
+  return values;
+}
 
 /**
  * Find which AppKit packages are installed by checking for package.json
@@ -115,10 +342,73 @@ function updateContent(existingContent: string, packages: typeof PACKAGES) {
   return `${existingContent.trimEnd()}\n\n${newSection}\n`;
 }
 
+interface SetupCliOptions {
+  write?: boolean;
+  mlflowUc?: boolean;
+  mlflowCatalog: string;
+  mlflowSchema: string;
+  mlflowTablePrefix: string;
+  mlflowWarehouseId?: string;
+}
+
+function databricksJson(args: string[]): unknown {
+  const result = spawnSync("databricks", args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(
+      result.stderr.trim() ||
+        `databricks ${args.join(" ")} failed with exit code ${result.status}`,
+    );
+  }
+  return JSON.parse(result.stdout);
+}
+
+function resolveDatabricksUser(profile: string): string {
+  const user = databricksJson([
+    "current-user",
+    "me",
+    "--profile",
+    profile,
+    "--output",
+    "json",
+  ]) as { userName?: unknown; user_name?: unknown };
+  const value = user.userName ?? user.user_name;
+  if (typeof value !== "string" || !value) {
+    throw new Error(
+      "Databricks current user response did not include userName",
+    );
+  }
+  return value;
+}
+
+function resolveWorkspaceHost(
+  profile: string,
+  env: Record<string, string>,
+): string {
+  const configured = process.env.DATABRICKS_HOST ?? env.DATABRICKS_HOST;
+  if (configured) return configured;
+  const response = databricksJson(["auth", "profiles", "--output", "json"]);
+  const profiles = Array.isArray(response)
+    ? response
+    : (response as { profiles?: unknown }).profiles;
+  const selected = Array.isArray(profiles)
+    ? profiles.find(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (candidate as { name?: unknown }).name === profile,
+      )
+    : undefined;
+  const host = (selected as { host?: unknown } | undefined)?.host;
+  if (typeof host !== "string" || !host) {
+    throw new Error(`Could not resolve workspace host for profile ${profile}`);
+  }
+  return host;
+}
+
 /**
  * Setup command implementation
  */
-function runSetup(options: { write?: boolean }) {
+async function runSetup(options: SetupCliOptions) {
   const shouldWrite = options.write;
 
   // Find installed packages
@@ -177,16 +467,62 @@ function runSetup(options: { write?: boolean }) {
     console.log(generateSection(installed));
     console.log("─".repeat(50));
   }
+
+  const cwd = process.cwd();
+  if (projectRequiresMlflowUc(cwd, options.mlflowUc === true)) {
+    const env = readEnvFile(path.join(cwd, ".env"));
+    const profile =
+      process.env.DATABRICKS_CONFIG_PROFILE ??
+      env.DATABRICKS_CONFIG_PROFILE ??
+      "DEFAULT";
+    const warehouseId =
+      options.mlflowWarehouseId ??
+      process.env.MLFLOW_TRACING_SQL_WAREHOUSE_ID ??
+      env.MLFLOW_TRACING_SQL_WAREHOUSE_ID ??
+      process.env.DATABRICKS_WAREHOUSE_ID ??
+      env.DATABRICKS_WAREHOUSE_ID;
+    if (!warehouseId || warehouseId === "placeholder") {
+      throw new Error(
+        "MLflow UC setup requires --mlflow-warehouse-id (or MLFLOW_TRACING_SQL_WAREHOUSE_ID)",
+      );
+    }
+    const userName = resolveDatabricksUser(profile);
+    const workspaceHost = resolveWorkspaceHost(profile, env);
+    await provisionAndPersistMlflowUc(
+      {
+        cwd,
+        profile,
+        experimentName: `/Users/${userName}/appkit-agent-traces`,
+        catalog: options.mlflowCatalog,
+        schema: options.mlflowSchema,
+        tablePrefix: options.mlflowTablePrefix,
+        warehouseId,
+      },
+      { workspaceHost },
+    );
+  }
 }
 
 export const setupCommand = new Command("setup")
-  .description("Setup CLAUDE.md with AppKit package references")
+  .description("Set up AppKit project guidance and optional MLflow UC tracing")
   .option("-w, --write", "Create or update CLAUDE.md file in current directory")
+  .option(
+    "--mlflow-uc",
+    "Provision MLflow tracing in Unity Catalog (implied by agents)",
+  )
+  .option("--mlflow-catalog <catalog>", "Unity Catalog catalog", "main")
+  .option("--mlflow-schema <schema>", "Unity Catalog schema", "agent_traces")
+  .option("--mlflow-table-prefix <prefix>", "UC trace table prefix", "appkit")
+  .option(
+    "--mlflow-warehouse-id <id>",
+    "SQL warehouse used to provision and query UC trace tables",
+  )
   .addHelpText(
     "after",
     `
 Examples:
   $ appkit setup
-  $ appkit setup --write`,
+  $ appkit setup --write
+  $ appkit setup --write --mlflow-uc --mlflow-warehouse-id 0123456789abcdef`,
   )
   .action(runSetup);

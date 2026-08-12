@@ -61,12 +61,20 @@ export function AgentChat() {
   const [pendingAssistantId, setPendingAssistantId] = useState<string | null>(
     null,
   );
+  const [mlflowTraceId, setMlflowTraceId] = useState<string | null>(null);
+  const [mlflowTraceUrl, setMlflowTraceUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Surface tool-call events as inline messages. Sub-agent delegations
   // show up here as `agent-helper` tool calls — same wire shape as a
   // function tool, so the same row renders both.
   const handleEvent = (event: AgentChatEvent) => {
+    if (event.type === 'appkit.metadata') {
+      const traceId = event.data?.traceId;
+      const traceUrl = event.data?.traceUrl;
+      if (typeof traceId === 'string') setMlflowTraceId(traceId);
+      if (typeof traceUrl === 'string') setMlflowTraceUrl(traceUrl);
+    }
     if (
       event.type === 'response.output_item.added' &&
       event.item?.type === 'function_call' &&
@@ -112,6 +120,8 @@ export function AgentChat() {
     if (!message || isStreaming || !activeAgent) return;
 
     setInput('');
+    setMlflowTraceId(null);
+    setMlflowTraceUrl(null);
 
     const assistantId = `a-${Date.now()}`;
     setMessages((prev) => [
@@ -185,6 +195,17 @@ export function AgentChat() {
             );
           })}
         </CardContent>
+
+        {mlflowTraceId && mlflowTraceUrl && (
+          <div className="border-t px-4 py-2 text-xs flex items-center justify-between gap-3">
+            <code className="truncate" title={mlflowTraceId}>
+              {mlflowTraceId}
+            </code>
+            <a href={mlflowTraceUrl} target="_blank" rel="noreferrer">
+              Open trace in MLflow
+            </a>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
           <Input

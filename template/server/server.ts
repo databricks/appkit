@@ -20,6 +20,11 @@ import { helper } from './agents/helper';
 {{- end}}
 
 createApp({
+{{- if .plugins.agents}}
+  // Uses AppKit's existing TelemetryManager / OTel provider. The setup
+  // command provisions the immutable UC trace location before first run.
+  telemetry: { mlflowUc: true },
+{{- end}}
   plugins: [
 {{- range $name, $_ := .plugins}}
 {{- if eq $name "agents"}}

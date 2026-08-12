@@ -20,6 +20,28 @@ For the non-streaming path against a custom endpoint, use the `serving` plugin's
 Or skip serving-endpoint setup entirely with the managed [Supervisor API adapter](#managed-agents-the-supervisor-api-adapter) (beta).
 :::
 
+## First run: provision MLflow tracing in Unity Catalog
+
+Agent-enabled AppKit templates turn on MLflow UC tracing through AppKit's existing `TelemetryManager`; they do not initialize another OpenTelemetry provider or an MLflow JavaScript SDK. Run setup once after scaffolding and before starting the app:
+
+```bash
+npm run setup -- \
+  --mlflow-catalog main \
+  --mlflow-schema agent_traces \
+  --mlflow-table-prefix appkit \
+  --mlflow-warehouse-id 0123456789abcdef
+```
+
+Selecting the agents plugin implies `--mlflow-uc`. An adjacent AppKit project without agents can opt in explicitly with `--mlflow-uc`. Setup uses `mlflow[databricks]>=3.14.0,<4`, binds `/Users/<current-user>/appkit-agent-traces` with the supported `UnityCatalog` trace-location API, and persists `MLFLOW_EXPERIMENT_ID`, `MLFLOW_TRACING_SQL_WAREHOUSE_ID`, `MLFLOW_UC_CATALOG`, `MLFLOW_UC_SCHEMA`, `MLFLOW_UC_TABLE_PREFIX`, and `MLFLOW_OTEL_SPANS_TABLE` in the local and deployment configuration.
+
+The binding is immutable. Re-running setup with the same catalog, schema, and prefix is idempotent; attempting to move an existing experiment to another location fails and prints both locations. Choose the production location deliberately.
+
+The profile running setup needs permission to create or use the experiment and UC tables. Setup applies `USE CATALOG`, `USE SCHEMA`, and both `MODIFY` and `SELECT` on every discovered trace table to that profile's principal through the selected SQL warehouse. The generated app also binds the MLflow experiment with `CAN_MANAGE` and the tracing warehouse with `CAN_USE`. For production, run setup with the app service-principal profile so those UC grants reach the runtime identity.
+
+Each invocation emits exactly one semantic `AGENT` root, with `CHAT_MODEL` children for model turns, `TOOL` children for tool and sub-agent dispatch, `CHAIN` spans for approval decisions, and `MEMORY` spans for thread-store operations. The root records redacted, size-bounded inputs and outputs, status/error, agent/request/user/session identity, latency, and descendant token usage. Captured values default to 64 KiB and redact normalized authorization, cookie, API-key, token, password, secret, and credential field names as `[REDACTED]`. Cost is omitted unless every child reports a price; an unpriced model is shown as cost unavailable, never as zero. Runtime export failures are logged and do not fail the user request, while invalid or incomplete startup/provisioning configuration is fatal.
+
+The initial `appkit.metadata` SSE event carries the MLflow V4 trace ID and direct workspace trace URL. The generated chat page displays both after each invocation so the first runnable planner/helper example can be inspected immediately.
+
 ## Install
 
 `agents` is a regular plugin. Add it to `plugins[]` alongside `server()` and any ToolProvider plugins whose tools you want agents to reach.
