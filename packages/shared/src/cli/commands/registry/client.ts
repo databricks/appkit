@@ -34,6 +34,22 @@ export function stripNamespace(component: string): string {
 }
 
 /**
+ * A registry item name is a slug: letters, digits, dot, underscore, hyphen —
+ * never a path separator or `.`/`..`. Names come from user refs and from an
+ * item's untrusted `registryDependencies`, and are used both as the fetch path
+ * (`public/r/<name>.json`) and as the on-disk `plugins/<name>` dir. Rejecting
+ * separators and dot-segments at the source stops a crafted ref like
+ * `../../attacker/repo/payload` from redirecting the fetch (SSRF) or escaping
+ * the destination dir, and keeps control chars out of any printed name.
+ */
+const ITEM_NAME = /^[A-Za-z0-9._-]+$/;
+
+/** True when `name` is a safe registry item slug (post-namespace-strip). */
+export function isValidItemName(name: string): boolean {
+  return name !== "." && name !== ".." && ITEM_NAME.test(name);
+}
+
+/**
  * Fetches and parses a single registry item. When a token is present the GitHub
  * Contents API is used (works for the private/internal repo); otherwise the
  * public raw URL is used. Exits the process with a helpful message on failure.

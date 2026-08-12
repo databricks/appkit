@@ -7,6 +7,7 @@ import pc from "picocolors";
 import {
   fetchRegistryItem,
   fetchVerifiedNames,
+  isValidItemName,
   type RegistryItem,
   type RegistryItemFile,
   stripNamespace,
@@ -264,11 +265,23 @@ export async function resolveItems(
 ): Promise<RegistryItem[]> {
   const seen = new Set<string>();
   const ordered: RegistryItem[] = [];
+  // A name is used both as the fetch path (`public/r/<name>.json`) and as the
+  // on-disk `plugins/<name>` dir. Refs (and untrusted registryDependencies)
+  // that aren't plain slugs — containing `/`, `..`, control chars — could
+  // redirect the fetch (SSRF) or escape the destination dir, so reject them at
+  // the source before they reach either sink.
+  const enqueue = (ref: string): string => {
+    const name = stripNamespace(ref);
+    if (!isValidItemName(name)) {
+      throw new Error(`Invalid registry item name: ${JSON.stringify(ref)}`);
+    }
+    return name;
+  };
   // Breadth-first over the dependency graph, one level per iteration. Items in
   // a level are fetched concurrently (fetch latency is additive otherwise), but
   // levels stay ordered and dedup/cycle handling is unchanged: a name is marked
   // seen before its level is fetched, so it's never fetched or queued twice.
-  let level = names.map(stripNamespace).filter((name) => {
+  let level = names.map(enqueue).filter((name) => {
     if (seen.has(name)) return false;
     seen.add(name);
     return true;
@@ -292,7 +305,7 @@ export async function resolveItems(
     const next: string[] = [];
     for (const item of items) {
       for (const dep of item.registryDependencies ?? []) {
-        const depName = stripNamespace(dep);
+        const depName = enqueue(dep);
         if (seen.has(depName)) continue;
         seen.add(depName);
         next.push(depName);
@@ -351,8 +364,13 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   }
 
   // Resolve the full graph (requested items + their transitive
-  // registryDependencies) up front. Fetching item JSON is read-only — nothing
-  // is written to disk or installed until after the integrity gate below.
+  // registryDependencies) and, unless the gate is disabled, fetch the verified
+  // index concurrently — the two are independent network round-trips.
+  // Fetching item JSON is read-only; nothing is written to disk or installed
+  // until after the integrity gate below.
+  const verifiedP = opts.allowUnverified
+    ? Promise.resolve(null)
+    : fetchVerifiedNames(token);
   const items = await resolveItems(refs, token);
 
   // Integrity gate: only items the registry index marks `verified` are trusted.
@@ -362,7 +380,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   // without ever passing the gate. Fails closed — an unreadable index leaves
   // the verified set null, so every item counts as unverified.
   if (!opts.allowUnverified) {
-    const verified = await fetchVerifiedNames(token);
+    const verified = await verifiedP;
     const { unverified } = partitionVerified(
       items.map((i) => i.name),
       verified,

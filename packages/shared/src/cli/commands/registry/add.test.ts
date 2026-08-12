@@ -100,6 +100,26 @@ describe("resolveItems", () => {
     expect(result.map((i) => i.name)).toEqual(["evil"]);
   });
 
+  // Security: a name is used as a fetch path and a plugins/<name> dir; a ref
+  // with `/` or `..` could redirect the fetch (SSRF) or escape the dest dir.
+  it("rejects a top-level ref that is not a plain slug (no fetch)", async () => {
+    const fetch = vi.fn();
+    await expect(
+      resolveItems(["../../attacker/repo/payload"], null, fetch),
+    ).rejects.toThrow(/Invalid registry item name/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malicious transitive registryDependency ref", async () => {
+    const graph: Record<string, RegistryItem> = {
+      a: item("a", { registryDependencies: ["../../evil"] }),
+    };
+    const fetch = vi.fn(async (name: string) => graph[name]);
+    await expect(resolveItems(["a"], null, fetch)).rejects.toThrow(
+      /Invalid registry item name/,
+    );
+  });
+
   // Fix #9: items within one BFS level are fetched concurrently, but order
   // (requested first, then deps breadth-first) is preserved.
   it("fetches a level concurrently and preserves order", async () => {
