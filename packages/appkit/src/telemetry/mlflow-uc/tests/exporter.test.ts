@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { context, SpanStatusCode, TraceFlags, trace } from "@opentelemetry/api";
 import { ExportResultCode } from "@opentelemetry/core";
 import {
   BasicTracerProvider,
@@ -134,6 +134,93 @@ async function createTraceSpans(
   return spans;
 }
 
+async function createRemoteParentTraceSpans(): Promise<ReadableSpan[]> {
+  const inMemory = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(inMemory)],
+  });
+  const tracer = provider.getTracer("mlflow-uc-remote-parent-test");
+  const remoteParent = {
+    traceId: "11111111111111111111111111111111",
+    spanId: "2222222222222222",
+    traceFlags: TraceFlags.SAMPLED,
+    isRemote: true,
+  };
+  const agent = tracer.startSpan(
+    "remote-child-agent",
+    {
+      startTime: 1_700_000_000_000,
+      attributes: {
+        "mlflow.spanType": "AGENT",
+        "mlflow.spanInputs": '{"prompt":"remote"}',
+        "mlflow.spanOutputs": '{"answer":"complete"}',
+      },
+    },
+    trace.setSpanContext(context.active(), remoteParent),
+  );
+  agent.end(1_700_000_000_100);
+  await provider.forceFlush();
+  const spans = inMemory.getFinishedSpans();
+  await provider.shutdown();
+  return spans;
+}
+
+async function createHttpWrappedTraceSpans(): Promise<{
+  http: ReadableSpan;
+  agent: ReadableSpan;
+  model: ReadableSpan;
+}> {
+  const inMemory = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(inMemory)],
+  });
+  const tracer = provider.getTracer("mlflow-uc-http-root-test");
+  const http = tracer.startSpan("POST /api/agents/chat", {
+    startTime: 1_700_000_000_000,
+  });
+  const agent = tracer.startSpan(
+    "support-agent",
+    {
+      startTime: 1_700_000_000_010,
+      attributes: {
+        "mlflow.spanType": "AGENT",
+        "mlflow.spanInputs": '{"prompt":"hello"}',
+        "mlflow.spanOutputs": '{"answer":"world"}',
+      },
+    },
+    trace.setSpan(context.active(), http),
+  );
+  const model = tracer.startSpan(
+    "model-step",
+    {
+      startTime: 1_700_000_000_020,
+      attributes: { "mlflow.spanType": "CHAT_MODEL" },
+    },
+    trace.setSpan(context.active(), agent),
+  );
+
+  http.end(1_700_000_000_050);
+  model.end(1_700_000_000_100);
+  agent.end(1_700_000_000_150);
+  await provider.forceFlush();
+  const spans = inMemory.getFinishedSpans();
+  await provider.shutdown();
+
+  const readableHttp = spans.find(
+    (span) => span.name === "POST /api/agents/chat",
+  );
+  const readableAgent = spans.find((span) => span.name === "support-agent");
+  const readableModel = spans.find((span) => span.name === "model-step");
+  if (!readableHttp || !readableAgent || !readableModel) {
+    throw new Error("HTTP-wrapped trace fixture is incomplete");
+  }
+  return {
+    http: readableHttp,
+    agent: readableAgent,
+    model: readableModel,
+  };
+}
+
 function exportSpans(exporter: MlflowUcSpanExporter, spans: ReadableSpan[]) {
   return new Promise<{ code: ExportResultCode; error?: Error }>((resolve) =>
     exporter.export(spans, resolve),
@@ -262,6 +349,8 @@ describe("MlflowUcSpanExporter", () => {
     await expect(exportSpans(exporter, earlierFragments)).resolves.toEqual({
       code: ExportResultCode.SUCCESS,
     });
+    expect(traceInfoRoots).toEqual([]);
+    expect(uploads).toEqual([]);
     await expect(exportSpans(exporter, [semanticRoot])).resolves.toEqual({
       code: ExportResultCode.SUCCESS,
     });
@@ -273,6 +362,63 @@ describe("MlflowUcSpanExporter", () => {
         spanNames: ["helper-tool", "helper-agent", "support-agent"],
       },
     ]);
+  });
+
+  test("accepts a semantic AGENT whose missing parent context is remote", async () => {
+    const spans = await createRemoteParentTraceSpans();
+    const agent = spans[0];
+    expect(agent.parentSpanContext?.isRemote).toBe(true);
+    const { host, requests } = await startBackend();
+    const client = createClient(host, ["token-1", "token-2"]);
+    const exporter = new MlflowUcSpanExporter(config, client);
+
+    await expect(exportSpans(exporter, spans)).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+
+    expect(requests.map((request) => request.path)).toEqual([
+      "/api/4.0/mlflow/traces/main.agent_traces.appkit/11111111111111111111111111111111/info",
+      "/api/2.0/otel/v1/traces",
+    ]);
+  });
+
+  test("retains an earlier local HTTP root and uploads only its later semantic AGENT subtree", async () => {
+    const { http, agent, model } = await createHttpWrappedTraceSpans();
+    expect(agent.parentSpanContext?.spanId).toBe(http.spanContext().spanId);
+    expect(agent.parentSpanContext?.isRemote).not.toBe(true);
+    expect(model.parentSpanContext?.spanId).toBe(agent.spanContext().spanId);
+    const traceInfoRoots: string[] = [];
+    const uploads: string[][] = [];
+    const { host } = await startBackend((request, response) => {
+      const traceInfo = JSON.parse(request.body.toString("utf8"));
+      traceInfoRoots.push(traceInfo.tags["mlflow.traceName"]);
+      response.statusCode = 200;
+      response.end();
+    });
+    const client = createClient(host, ["token-1", "token-2"]);
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            uploads.push(spans.map((span) => span.name));
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(exportSpans(exporter, [http])).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+    expect(traceInfoRoots).toEqual([]);
+    expect(uploads).toEqual([]);
+    await expect(exportSpans(exporter, [model, agent])).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+
+    expect(traceInfoRoots).toEqual(["support-agent"]);
+    expect(uploads).toEqual([["model-step", "support-agent"]]);
   });
 
   test("authenticates each backend action and registers trace info before protobuf upload", async () => {

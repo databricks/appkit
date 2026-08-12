@@ -1,3 +1,4 @@
+import { isSpanContextValid } from "@opentelemetry/api";
 import { type ExportResult, ExportResultCode } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base";
@@ -122,17 +123,16 @@ export class MlflowUcSpanExporter
       const traceSpans = [...accumulated.values()];
       const semanticRoot = findSemanticRoot(traceSpans);
       if (semanticRoot) {
+        const semanticSpans = findSemanticSubtree(traceSpans, semanticRoot);
         this.pendingSpans.delete(traceId);
         batches.push({
           traceInfo: buildMlflowUcTraceInfo(
             this.config,
             semanticRoot,
-            traceSpans,
+            semanticSpans,
           ),
-          spans: traceSpans,
+          spans: semanticSpans,
         });
-      } else if (isCompletedRootlessTrace(traceSpans)) {
-        this.pendingSpans.delete(traceId);
       }
     }
     return batches;
@@ -237,8 +237,9 @@ function findSemanticRoot(spans: ReadableSpan[]): ReadableSpan | undefined {
 
     let parent = span.parentSpanContext;
     while (parent) {
+      if (!isSpanContextValid(parent)) return true;
       const parentSpan = bySpanId.get(parent.spanId);
-      if (!parentSpan) return false;
+      if (!parentSpan) return parent.isRemote === true;
       if (parentSpan.attributes["mlflow.spanType"] === "AGENT") return false;
       parent = parentSpan.parentSpanContext;
     }
@@ -246,9 +247,30 @@ function findSemanticRoot(spans: ReadableSpan[]): ReadableSpan | undefined {
   });
 }
 
-function isCompletedRootlessTrace(spans: ReadableSpan[]): boolean {
-  return (
-    spans.some((span) => !span.parentSpanContext) &&
-    spans.every((span) => span.attributes["mlflow.spanType"] !== "AGENT")
+function findSemanticSubtree(
+  spans: ReadableSpan[],
+  semanticRoot: ReadableSpan,
+): ReadableSpan[] {
+  const bySpanId = new Map(
+    spans.map((span) => [span.spanContext().spanId, span]),
   );
+  const semanticRootId = semanticRoot.spanContext().spanId;
+
+  return spans.filter((span) => {
+    let current: ReadableSpan | undefined = span;
+    const visited = new Set<string>();
+    while (current) {
+      const spanId = current.spanContext().spanId;
+      if (spanId === semanticRootId) return true;
+      if (visited.has(spanId)) return false;
+      visited.add(spanId);
+
+      const parentSpanContext: ReadableSpan["parentSpanContext"] =
+        current.parentSpanContext;
+      current = parentSpanContext
+        ? bySpanId.get(parentSpanContext.spanId)
+        : undefined;
+    }
+    return false;
+  });
 }
