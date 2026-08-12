@@ -93,6 +93,8 @@ export function useMetricView<
   const [warehouseStatus, setWarehouseStatus] =
     useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestKeyRef = useRef<string | null>(null);
+  const effectLeaseRef = useRef(0);
   const requestedShapeRef = useRef<string | null>(null);
 
   const publisherId = useId();
@@ -141,6 +143,7 @@ export function useMetricView<
     measures: options.measures,
     dimensions: options.dimensions ?? [],
   });
+  const requestKey = `${urlSuffix}\0${payload}`;
 
   // Return stale rows only if shape is current; hide during shape transitions.
   const isCurrentShape = result?.shape === resultShape;
@@ -163,6 +166,7 @@ export function useMetricView<
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    activeRequestKeyRef.current = requestKey;
 
     const sseContext: AnalyticsSseHandlerContext = {
       source: "useMetricView",
@@ -201,6 +205,7 @@ export function useMetricView<
   }, [
     key,
     payload,
+    requestKey,
     resultShape,
     urlSuffix,
     publishWarehouseStatus,
@@ -208,15 +213,43 @@ export function useMetricView<
   ]);
 
   useEffect(() => {
+    const lease = ++effectLeaseRef.current;
+
     if (autoStart) {
-      start();
+      // React Strict Mode runs an effect's setup/cleanup/setup sequence on
+      // mount. Keep the still-active identical stream for the second setup so
+      // development sends one POST, not an immediately-aborted duplicate.
+      // A real request change still starts synchronously and aborts the prior
+      // controller in start().
+      const activeController = abortControllerRef.current;
+      if (
+        activeRequestKeyRef.current !== requestKey ||
+        !activeController ||
+        activeController.signal.aborted
+      ) {
+        start();
+      }
+    } else {
+      abortControllerRef.current?.abort();
+      activeRequestKeyRef.current = null;
+      unpublishWarehouseStatus();
     }
 
     return () => {
-      abortControllerRef.current?.abort();
-      unpublishWarehouseStatus();
+      // Defer teardown by one microtask so Strict Mode's immediate second
+      // setup can claim the same request. On a genuine unmount there is no new
+      // lease, so the stream is still cancelled before later async work runs.
+      const controller = abortControllerRef.current;
+      queueMicrotask(() => {
+        if (effectLeaseRef.current !== lease) return;
+        controller?.abort();
+        if (abortControllerRef.current === controller) {
+          activeRequestKeyRef.current = null;
+        }
+        unpublishWarehouseStatus();
+      });
     };
-  }, [start, autoStart, unpublishWarehouseStatus]);
+  }, [start, autoStart, requestKey, unpublishWarehouseStatus]);
 
   useQueryHMR(key, start);
 

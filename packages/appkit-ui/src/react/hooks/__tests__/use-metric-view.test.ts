@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 let lastConnectArgs: any = null;
@@ -86,6 +87,36 @@ describe("useMetricView", () => {
       dimensions: ["region"],
       limit: 100,
     });
+  });
+
+  test("starts one request under React Strict Mode", () => {
+    renderHook(
+      () =>
+        useMetricView("orders", {
+          measures: ["revenue"],
+          dimensions: ["region"],
+        }),
+      { wrapper: StrictMode },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+      measures: ["revenue"],
+      dimensions: ["region"],
+    });
+    expect(lastConnectArgs.signal.aborted).toBe(false);
+  });
+
+  test("still aborts the active request after a genuine unmount", async () => {
+    const { unmount } = renderHook(() =>
+      useMetricView("orders", { measures: ["revenue"] }),
+    );
+    const signal = lastConnectArgs.signal as AbortSignal;
+
+    expect(signal.aborted).toBe(false);
+    unmount();
+
+    await waitFor(() => expect(signal.aborted).toBe(true));
   });
 
   test("does not start until autoStart becomes true and keeps it out of the request body", () => {
