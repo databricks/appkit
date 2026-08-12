@@ -67,6 +67,44 @@ describe("consumeAdapterStream", () => {
     expect(emitted).toEqual(["first"]);
   });
 
+  test("still consumes the model finalizer that immediately follows cancellation", async () => {
+    const controller = new AbortController();
+    const result = await consumeAdapterStream(
+      (async function* () {
+        yield { type: "message_delta", content: "partial" } as AgentEvent;
+        controller.abort();
+        yield {
+          type: "model_end",
+          stepId: "cancelled-step",
+          model: "model-a",
+          provider: "databricks",
+          output: { text: "partial" },
+          usage: {
+            inputTokens: 8,
+            outputTokens: 2,
+            totalTokens: 10,
+            costAvailable: false,
+          },
+          finishReason: "cancelled",
+          streamDurationMs: 10,
+          endedAt: 110,
+        } as AgentEvent;
+        yield { type: "message_delta", content: "ignored" } as AgentEvent;
+      })(),
+      { signal: controller.signal },
+    );
+
+    expect(result).toEqual({
+      text: "partial",
+      usage: {
+        inputTokens: 8,
+        outputTokens: 2,
+        totalTokens: 10,
+        costAvailable: false,
+      },
+    });
+  });
+
   test("returns an empty string for a stream with no content events", async () => {
     const result = await consumeAdapterStream(
       streamOf([{ type: "thinking", content: "…" }]),
@@ -151,6 +189,90 @@ describe("consumeAdapterStream", () => {
         spanId: "0123456789abcdef",
         source: "model-serving",
         relation: "linked",
+      },
+    });
+  });
+
+  test("aggregates each model step once and retains the last valid remote trace", async () => {
+    const firstEnd: AgentEvent = {
+      type: "model_end",
+      stepId: "step-1",
+      model: "model-a",
+      provider: "databricks",
+      output: { text: "answer" },
+      usage: {
+        inputTokens: 20,
+        outputTokens: 5,
+        totalTokens: 25,
+        cacheReadInputTokens: 4,
+        cacheCreationInputTokens: 2,
+        costUsd: 0.04,
+        costAvailable: true,
+      },
+      streamDurationMs: 20,
+      endedAt: 120,
+    };
+    const secondEnd: AgentEvent = {
+      type: "model_end",
+      stepId: "step-2",
+      model: "model-a",
+      provider: "databricks",
+      output: { text: "answer" },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 7,
+        totalTokens: 17,
+        cacheReadInputTokens: 1,
+        cacheCreationInputTokens: 3,
+        costUsd: 0.03,
+        costAvailable: true,
+      },
+      streamDurationMs: 30,
+      endedAt: 150,
+    };
+    const result = await consumeAdapterStream(
+      streamOf([
+        { type: "message_delta", content: "answer" },
+        firstEnd,
+        firstEnd,
+        secondEnd,
+        {
+          type: "remote_trace",
+          traceId: "trace:/catalog.schema.table/valid",
+          source: "model-serving",
+          relation: "continued",
+        },
+        {
+          type: "remote_trace",
+          traceId: "trace:/catalog.schema.table/invalid-linked",
+          source: "model-serving",
+          relation: "linked",
+        } as AgentEvent,
+        {
+          type: "remote_trace",
+          traceId: null,
+          source: "model-serving",
+          relation: "continued",
+        } as unknown as AgentEvent,
+      ]),
+    );
+
+    expect(result).toEqual({
+      text: "answer",
+      usage: {
+        inputTokens: 30,
+        outputTokens: 12,
+        totalTokens: 42,
+        cacheReadInputTokens: 5,
+        cacheCreationInputTokens: 5,
+        costUsd: 0.07,
+        costAvailable: true,
+      },
+      remoteTrace: {
+        type: "remote_trace",
+        traceId: "trace:/catalog.schema.table/valid",
+        source: "model-serving",
+        relation: "continued",
       },
     });
   });

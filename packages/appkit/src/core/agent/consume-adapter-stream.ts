@@ -1,4 +1,4 @@
-import type { AgentEvent } from "shared";
+import type { AgentEvent, AgentRemoteTraceEvent } from "shared";
 import {
   AgentUsageAccumulator,
   type ConsumedAgentStream,
@@ -18,6 +18,29 @@ interface ConsumeAdapterStreamOptions {
    * collect a raw event list for tests, or emit telemetry.
    */
   onEvent?: (event: AgentEvent) => void;
+}
+
+function isValidRemoteTrace(event: AgentEvent): event is AgentRemoteTraceEvent {
+  if (
+    event.type !== "remote_trace" ||
+    typeof event.traceId !== "string" ||
+    !event.traceId.trim()
+  ) {
+    return false;
+  }
+  if (
+    event.source !== "model-serving" &&
+    event.source !== "supervisor" &&
+    event.source !== "remote-agent"
+  ) {
+    return false;
+  }
+  if (event.relation === "continued") return true;
+  return (
+    event.relation === "linked" &&
+    typeof event.spanId === "string" &&
+    event.spanId.trim().length > 0
+  );
 }
 
 /**
@@ -44,16 +67,26 @@ export async function consumeAdapterStream(
 ): Promise<ConsumedAgentStream> {
   let text = "";
   const usage = new AgentUsageAccumulator();
+  const consumedModelSteps = new Set<string>();
   let remoteTrace: ConsumedAgentStream["remoteTrace"];
   for await (const event of stream) {
-    if (opts.signal?.aborted) break;
+    if (
+      opts.signal?.aborted &&
+      event.type !== "model_end" &&
+      event.type !== "remote_trace"
+    ) {
+      break;
+    }
     if (event.type === "message_delta") {
       text += event.content;
     } else if (event.type === "message") {
       text = event.content;
     } else if (event.type === "model_end") {
-      usage.add(event.usage);
-    } else if (event.type === "remote_trace") {
+      if (!consumedModelSteps.has(event.stepId)) {
+        consumedModelSteps.add(event.stepId);
+        usage.add(event.usage);
+      }
+    } else if (isValidRemoteTrace(event)) {
       remoteTrace = event;
     }
     opts.onEvent?.(event);

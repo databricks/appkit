@@ -2,10 +2,14 @@ import type {
   AgentAdapter,
   AgentEvent,
   AgentInput,
+  AgentRemoteTraceEvent,
   AgentRunContext,
   AgentToolDefinition,
+  AgentUsage,
 } from "shared";
 import {
+  getResponseHeaders,
+  retainResponseHeaders,
   type StreamBody,
   stream as servingStream,
 } from "../connectors/serving/client";
@@ -29,6 +33,149 @@ const RAW_FETCH_DEFAULT_TIMEOUT_MS = 120_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function finiteNonNegativeNumber(
+  record: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeUsage(
+  parsed: Record<string, unknown>,
+): AgentUsage | undefined {
+  const raw = isRecord(parsed.usage) ? parsed.usage : undefined;
+  if (!raw) return undefined;
+
+  const inputTokens =
+    finiteNonNegativeNumber(raw, "input_tokens", "prompt_tokens") ?? 0;
+  const outputTokens =
+    finiteNonNegativeNumber(raw, "output_tokens", "completion_tokens") ?? 0;
+  const totalTokens =
+    finiteNonNegativeNumber(raw, "total_tokens") ?? inputTokens + outputTokens;
+  const details = isRecord(raw.input_tokens_details)
+    ? raw.input_tokens_details
+    : isRecord(raw.prompt_tokens_details)
+      ? raw.prompt_tokens_details
+      : undefined;
+  const cacheReadInputTokens =
+    finiteNonNegativeNumber(raw, "cache_read_input_tokens", "cached_tokens") ??
+    finiteNonNegativeNumber(
+      details,
+      "cache_read_input_tokens",
+      "cached_tokens",
+    );
+  const cacheCreationInputTokens =
+    finiteNonNegativeNumber(raw, "cache_creation_input_tokens") ??
+    finiteNonNegativeNumber(
+      details,
+      "cache_creation_input_tokens",
+      "cache_creation_tokens",
+    );
+  const providerCost =
+    finiteNonNegativeNumber(raw, "cost_usd", "cost", "total_cost_usd") ??
+    finiteNonNegativeNumber(parsed, "cost_usd", "cost");
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
+    ...(cacheCreationInputTokens !== undefined
+      ? { cacheCreationInputTokens }
+      : {}),
+    ...(providerCost !== undefined ? { costUsd: providerCost } : {}),
+    costAvailable: providerCost !== undefined,
+  };
+}
+
+function emptyUsage(): AgentUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costAvailable: false,
+  };
+}
+
+function firstChoice(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const choices = parsed.choices;
+  if (!Array.isArray(choices) || !isRecord(choices[0])) return undefined;
+  return choices[0];
+}
+
+function remoteTraceFromPayload(
+  parsed: Record<string, unknown>,
+): AgentRemoteTraceEvent | undefined {
+  const nested = isRecord(parsed.remote_trace)
+    ? parsed.remote_trace
+    : undefined;
+  const traceIdCandidates = [
+    nested?.trace_id,
+    nested?.traceId,
+    parsed.mlflow_trace_id,
+    parsed.databricks_trace_id,
+  ];
+  const traceId = traceIdCandidates.find(
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
+  );
+  if (!traceId) return undefined;
+
+  const spanIdCandidates = [
+    nested?.span_id,
+    nested?.spanId,
+    parsed.mlflow_span_id,
+    parsed.databricks_span_id,
+  ];
+  const spanId = spanIdCandidates.find(
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
+  );
+  return spanId
+    ? {
+        type: "remote_trace",
+        traceId,
+        spanId,
+        source: "model-serving",
+        relation: "linked",
+      }
+    : {
+        type: "remote_trace",
+        traceId,
+        source: "model-serving",
+        relation: "continued",
+      };
+}
+
+function sanitizedModelError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Model request failed";
+  const withoutControls = Array.from(raw, (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 ? " " : character;
+  }).join("");
+  const singleLine = withoutControls.replace(/\s+/g, " ").trim();
+  return (singleLine || "Model request failed").slice(0, 512);
+}
+
+function modelFromEndpointUrl(endpointUrl: string): string {
+  try {
+    const parts = new URL(endpointUrl).pathname.split("/");
+    const endpointIndex = parts.indexOf("serving-endpoints");
+    const encoded = parts[endpointIndex + 1];
+    return encoded ? decodeURIComponent(encoded) : endpointUrl;
+  } catch {
+    return endpointUrl;
+  }
 }
 
 /**
@@ -80,11 +227,7 @@ function extractLlamaToolJsonSlice(text: string): string | undefined {
 /** OpenAI SSE payload: `{ choices: [{ delta }] }`. */
 function openAiChoicesDelta(parsed: unknown): unknown {
   if (!isRecord(parsed)) return undefined;
-  const choices = parsed.choices;
-  if (!Array.isArray(choices) || choices.length < 1) return undefined;
-  const first = choices[0];
-  if (!isRecord(first)) return undefined;
-  return first.delta;
+  return firstChoice(parsed)?.delta;
 }
 
 function isStreamingDeltaToolCall(value: unknown): value is DeltaToolCall {
@@ -113,6 +256,8 @@ function throwIfExceedsStreamLimit(
 interface RawFetchAdapterOptions {
   endpointUrl: string;
   authenticate: () => Promise<Record<string, string>>;
+  /** Model/endpoint name recorded in lifecycle telemetry. */
+  model?: string;
   maxSteps?: number;
   maxTokens?: number;
   /** Optional generation params forwarded to the serving request body. */
@@ -133,6 +278,8 @@ interface RawFetchAdapterOptions {
  */
 interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
+  /** Model/endpoint name recorded in lifecycle telemetry. */
+  model?: string;
   maxSteps?: number;
   maxTokens?: number;
   generationParams?: GenerationParams;
@@ -271,6 +418,7 @@ interface DeltaToolCall {
  */
 export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
+  private model: string;
   private maxSteps: number;
   private maxTokens: number;
   private generationParams: GenerationParams;
@@ -291,8 +439,10 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (isStreamBodyOptions(options)) {
       this.streamBody = options.streamBody;
+      this.model = options.model ?? "databricks-model-serving";
     } else {
       const { endpointUrl, authenticate } = options;
+      this.model = options.model ?? modelFromEndpointUrl(endpointUrl);
       this.streamBody = async (body, signal) => {
         const fetchSignal =
           signal ?? AbortSignal.timeout(RAW_FETCH_DEFAULT_TIMEOUT_MS);
@@ -314,7 +464,7 @@ export class DatabricksAdapter implements AgentAdapter {
           );
         }
         if (!response.body) throw new Error("No response body");
-        return response.body;
+        return retainResponseHeaders(response.body, response.headers);
       };
     }
   }
@@ -351,6 +501,7 @@ export class DatabricksAdapter implements AgentAdapter {
           body,
           signal,
         ),
+      model: endpointName,
       maxSteps,
       maxTokens,
       generationParams,
@@ -567,20 +718,25 @@ export class DatabricksAdapter implements AgentAdapter {
       body.tools = tools;
     }
 
-    let responseBody: ReadableStream<Uint8Array>;
-    try {
-      responseBody = await this.streamBody(body, context.signal);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Stream request failed";
-      yield { type: "status", status: "error", error: msg };
-      throw err;
-    }
+    const stepId = globalThis.crypto.randomUUID();
+    const startedAt = Date.now();
+    const startEvent: AgentEvent = {
+      type: "model_start",
+      stepId,
+      model: this.model,
+      provider: "databricks",
+      input: structuredClone(body),
+      startedAt,
+    };
 
-    const reader = responseBody.getReader();
-
-    const decoder = new TextDecoder();
-    let buffer = "";
     let fullText = "";
+    let finalUsage = emptyUsage();
+    let finishReason: string | undefined;
+    let firstTokenAt: number | undefined;
+    let streamStartedAt: number | undefined;
+    let modelError: string | undefined;
+    let caughtError: unknown;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const toolCallAccumulator = new Map<
       number,
       {
@@ -590,8 +746,37 @@ export class DatabricksAdapter implements AgentAdapter {
         thoughtSignature?: string;
       }
     >();
+    const emittedRemoteTraces = new Set<string>();
+    const snapshotToolCalls = (): OpenAIToolCall[] =>
+      Array.from(toolCallAccumulator.values()).map((tc) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: { name: tc.name, arguments: tc.arguments || "{}" },
+        ...(tc.thoughtSignature
+          ? { thoughtSignature: tc.thoughtSignature }
+          : {}),
+      }));
 
     try {
+      yield startEvent;
+      const responseBody = await this.streamBody(body, context.signal);
+      streamStartedAt = Date.now();
+      const headerTraceId = getResponseHeaders(responseBody)?.get(
+        "x-databricks-trace-id",
+      );
+      if (headerTraceId?.trim()) {
+        emittedRemoteTraces.add(headerTraceId);
+        yield {
+          type: "remote_trace",
+          traceId: headerTraceId,
+          source: "model-serving",
+          relation: "continued",
+        };
+      }
+
+      reader = responseBody.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
       while (true) {
         if (context.signal?.aborted) break;
 
@@ -632,8 +817,37 @@ export class DatabricksAdapter implements AgentAdapter {
             continue;
           }
 
+          if (!isRecord(parsed)) continue;
+
+          const usage = normalizeUsage(parsed);
+          if (usage) finalUsage = usage;
+
+          const choice = firstChoice(parsed);
+          if (typeof choice?.finish_reason === "string") {
+            finishReason = choice.finish_reason;
+          }
+
+          const remoteTrace = remoteTraceFromPayload(parsed);
+          if (remoteTrace) {
+            const key = `${remoteTrace.traceId}:${remoteTrace.spanId ?? ""}`;
+            if (!emittedRemoteTraces.has(key)) {
+              emittedRemoteTraces.add(key);
+              yield remoteTrace;
+            }
+          }
+
           const deltaUnknown = openAiChoicesDelta(parsed);
           if (!isRecord(deltaUnknown)) continue;
+
+          const toolCallsRaw = deltaUnknown.tool_calls;
+          if (
+            firstTokenAt === undefined &&
+            ((typeof deltaUnknown.content === "string" &&
+              deltaUnknown.content.length > 0) ||
+              (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0))
+          ) {
+            firstTokenAt = Date.now();
+          }
 
           if (typeof deltaUnknown.content === "string") {
             const content = deltaUnknown.content;
@@ -647,7 +861,6 @@ export class DatabricksAdapter implements AgentAdapter {
             yield { type: "message_delta" as const, content };
           }
 
-          const toolCallsRaw = deltaUnknown.tool_calls;
           if (!Array.isArray(toolCallsRaw)) continue;
 
           for (const tc of toolCallsRaw) {
@@ -684,35 +897,59 @@ export class DatabricksAdapter implements AgentAdapter {
           }
         }
       }
+      if (context.signal?.aborted && !finishReason) {
+        finishReason = "cancelled";
+      }
+    } catch (err) {
+      if (context.signal?.aborted) {
+        finishReason ??= "cancelled";
+      } else {
+        modelError = sanitizedModelError(err);
+        caughtError = err;
+        yield { type: "status", status: "error", error: modelError };
+      }
     } finally {
-      try {
-        await reader.cancel();
-      } catch (cancelErr) {
-        console.debug(
-          "[DatabricksAdapter] reader.cancel() failed during teardown",
-          cancelErr,
-        );
+      if (reader) {
+        try {
+          await reader.cancel();
+        } catch (cancelErr) {
+          console.debug(
+            "[DatabricksAdapter] reader.cancel() failed during teardown",
+            cancelErr,
+          );
+        }
+        try {
+          reader.releaseLock();
+        } catch (unlockErr) {
+          console.debug(
+            "[DatabricksAdapter] reader.releaseLock() failed during teardown",
+            unlockErr,
+          );
+        }
       }
-      try {
-        reader.releaseLock();
-      } catch (unlockErr) {
-        console.debug(
-          "[DatabricksAdapter] reader.releaseLock() failed during teardown",
-          unlockErr,
-        );
-      }
+
+      const endedAt = Date.now();
+      yield {
+        type: "model_end",
+        stepId,
+        model: this.model,
+        provider: "databricks",
+        output: { text: fullText, toolCalls: snapshotToolCalls() },
+        usage: finalUsage,
+        ...(finishReason ? { finishReason } : {}),
+        ...(firstTokenAt !== undefined ? { firstTokenAt } : {}),
+        streamDurationMs:
+          streamStartedAt === undefined
+            ? 0
+            : Math.max(0, endedAt - streamStartedAt),
+        endedAt,
+        ...(modelError ? { error: modelError } : {}),
+      };
     }
 
-    const toolCalls: OpenAIToolCall[] = Array.from(
-      toolCallAccumulator.values(),
-    ).map((tc) => ({
-      id: tc.id,
-      type: "function" as const,
-      function: { name: tc.name, arguments: tc.arguments || "{}" },
-      ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
-    }));
+    if (caughtError !== undefined) throw caughtError;
 
-    return { text: fullText, toolCalls };
+    return { text: fullText, toolCalls: snapshotToolCalls() };
   }
 
   private async *executeToolCalls(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { Context } from "../../../workspace-client";
-import { invoke, stream } from "../client";
+import { getResponseHeaders, invoke, stream } from "../client";
 
 function createMockClient(host = "https://test.databricks.com") {
   return {
@@ -93,6 +93,24 @@ describe("Serving Connector", () => {
       const result = await stream(client, "my-endpoint", { messages: [] });
 
       expect(result).toBeInstanceOf(ReadableStream);
+    });
+
+    test("retains response headers on the returned stream", async () => {
+      const contents = new ReadableStream<Uint8Array>();
+      const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents,
+        headers: new Headers({
+          "x-databricks-trace-id":
+            "trace:/main.agent_traces.appkit/remote-trace",
+        }),
+      });
+
+      const result = await stream(client, "my-endpoint", { messages: [] });
+
+      expect(getResponseHeaders(result)?.get("x-databricks-trace-id")).toBe(
+        "trace:/main.agent_traces.appkit/remote-trace",
+      );
     });
 
     test("sends stream: true in payload via apiClient.request", async () => {

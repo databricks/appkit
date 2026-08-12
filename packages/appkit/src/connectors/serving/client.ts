@@ -18,6 +18,11 @@ export interface ApiClientLike {
   };
 }
 
+const responseHeadersByStream = new WeakMap<
+  ReadableStream<Uint8Array>,
+  Headers
+>();
+
 /**
  * Transport shim shared by the agent adapters: given a request body, returns
  * the raw SSE byte stream from a serving / AI-gateway endpoint. Injected at
@@ -29,6 +34,33 @@ export type StreamBody = (
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<ReadableStream<Uint8Array>>;
+
+/**
+ * Retains response headers without changing or mutating the byte-stream API
+ * consumed by existing adapters. Weak ownership lets metadata be collected
+ * with the stream and avoids a discoverable property-name collision.
+ */
+export function retainResponseHeaders(
+  stream: ReadableStream<Uint8Array>,
+  headers: unknown,
+): ReadableStream<Uint8Array> {
+  if (headers == null) return stream;
+  const normalized =
+    headers instanceof Headers
+      ? headers
+      : new Headers(
+          headers as Headers | Record<string, string> | [string, string][],
+        );
+  responseHeadersByStream.set(stream, normalized);
+  return stream;
+}
+
+/** Reads response metadata retained by {@link retainResponseHeaders}. */
+export function getResponseHeaders(
+  stream: ReadableStream<Uint8Array>,
+): Headers | undefined {
+  return responseHeadersByStream.get(stream);
+}
 
 /**
  * Invokes a serving endpoint using the SDK's high-level query API.
@@ -92,13 +124,16 @@ export async function streamPath(
       raw: true,
     },
     context,
-  )) as { contents: ReadableStream<Uint8Array> | null };
+  )) as {
+    contents: ReadableStream<Uint8Array> | null;
+    headers?: unknown;
+  };
 
   if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");
   }
 
-  return response.contents;
+  return retainResponseHeaders(response.contents, response.headers);
 }
 
 /**
