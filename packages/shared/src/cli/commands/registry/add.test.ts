@@ -87,6 +87,19 @@ describe("resolveItems", () => {
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
 
+  // Security: an item's body `name` is untrusted; a `verified:false` item could
+  // claim a verified name to slip past the integrity gate (or hijack another
+  // item's plugin dir). resolveItems pins `name` to the fetch key.
+  it("pins item.name to the fetch key, ignoring a spoofed body name", async () => {
+    // Fetched under key "evil" but self-reports the verified name "analytics".
+    const fetch = vi.fn(async (_key: string) => ({
+      ...item("analytics"),
+      files: [],
+    }));
+    const result = await resolveItems(["evil"], null, fetch);
+    expect(result.map((i) => i.name)).toEqual(["evil"]);
+  });
+
   // Fix #9: items within one BFS level are fetched concurrently, but order
   // (requested first, then deps breadth-first) is preserved.
   it("fetches a level concurrently and preserves order", async () => {

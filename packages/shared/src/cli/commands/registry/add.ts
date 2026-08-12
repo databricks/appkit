@@ -276,7 +276,17 @@ export async function resolveItems(
 
   while (level.length > 0) {
     const items = await Promise.all(
-      level.map((name) => fetchItem(name, token)),
+      level.map(async (key) => {
+        const item = await fetchItem(key, token);
+        // The fetch key is the trustworthy identity — it's what the user
+        // requested / a parent listed, and what the registry index keys
+        // `verified` on. The item body's self-reported `name` is untrusted
+        // remote data (a `verified: false` item could claim a verified name to
+        // slip past the gate, or point its files at another item's dir), so
+        // pin `name` to the key it was actually fetched under.
+        item.name = key;
+        return item;
+      }),
     );
     ordered.push(...items);
     const next: string[] = [];
