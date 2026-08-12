@@ -79,6 +79,9 @@ export async function runWithAgentTrace<T>(
       const completedModels = new Set<string>();
       let outputText = "";
       let lifecycleError = false;
+      let reportedError: unknown;
+      let explicitOutput: unknown;
+      let hasExplicitOutput = false;
 
       const observer: AgentTraceObserver = {
         traceId,
@@ -113,15 +116,40 @@ export async function runWithAgentTrace<T>(
           if (event.type === "model_end") {
             if (completedModels.has(event.stepId)) return;
             completedModels.add(event.stepId);
-            usage.add(event.usage);
+            const normalizedUsage = normalizeUsage(event.usage);
+            usage.add(normalizedUsage);
             const active = activeModels.get(event.stepId);
             activeModels.delete(event.stepId);
-            if (event.error) lifecycleError = true;
-            if (active) finalizeModelSpan(active, event);
+            if (event.error) {
+              lifecycleError = true;
+              reportedError ??= event.error;
+            }
+            if (active) {
+              finalizeModelSpan(active, {
+                ...event,
+                usage: normalizedUsage,
+              });
+            }
             return;
           }
           if (event.type === "status" && event.status === "error") {
             lifecycleError = true;
+            reportedError ??= event.error;
+          }
+        },
+        updateIdentity(next) {
+          setIdentityAttributes(root, next);
+        },
+        setOutput(output) {
+          explicitOutput = output;
+          hasExplicitOutput = true;
+        },
+        recordError(error, output) {
+          lifecycleError = true;
+          reportedError ??= error;
+          if (output !== undefined) {
+            explicitOutput = output;
+            hasExplicitOutput = true;
           }
         },
       };
@@ -169,7 +197,7 @@ export async function runWithAgentTrace<T>(
         if (lifecycleError && !failed) {
           recordSafeException(
             root,
-            "Agent lifecycle reported an error",
+            reportedError ?? "Agent lifecycle reported an error",
             "Agent operation failed",
           );
         }
@@ -177,13 +205,18 @@ export async function runWithAgentTrace<T>(
         const finalUsage = usage.snapshot();
         setRootUsageAttributes(root, finalUsage);
         const finalOutputText = outputText || textFromValue(value);
+        const finalOutput = hasExplicitOutput
+          ? explicitOutput
+          : failed
+            ? { text: finalOutputText, error: errorValue(operationError) }
+            : outputText || textFromValue(value)
+              ? { text: finalOutputText }
+              : value;
         setCapturedAttribute(
           root,
           "mlflow.spanOutputs",
-          failed
-            ? { text: finalOutputText, error: errorValue(operationError) }
-            : { text: finalOutputText },
-          failed ? ["error"] : undefined,
+          finalOutput,
+          failed || lifecycleError ? ["error"] : undefined,
         );
         root.setStatus({
           code:
@@ -268,10 +301,30 @@ function setRootUsageAttributes(span: Span, usage: AgentUsage): void {
 }
 
 function setCostAttributes(span: Span, usage: AgentUsage): void {
-  span.setAttribute("appkit.cost.available", usage.costAvailable);
-  if (usage.costAvailable && usage.costUsd !== undefined) {
+  const costAvailable = hasCompleteCost(usage);
+  span.setAttribute("appkit.cost.available", costAvailable);
+  if (costAvailable && usage.costUsd !== undefined) {
     span.setAttribute("mlflow.llm.cost", usage.costUsd);
   }
+}
+
+function normalizeUsage(usage: AgentUsage): AgentUsage {
+  const { costUsd, ...withoutCost } = usage;
+  const costAvailable = hasCompleteCost(usage);
+  return {
+    ...withoutCost,
+    ...(costAvailable ? { costUsd } : {}),
+    costAvailable,
+  };
+}
+
+function hasCompleteCost(usage: AgentUsage): boolean {
+  return (
+    usage.costAvailable &&
+    typeof usage.costUsd === "number" &&
+    Number.isFinite(usage.costUsd) &&
+    usage.costUsd >= 0
+  );
 }
 
 function mlflowTokenUsage(usage: AgentUsage): Record<string, number> {
@@ -312,9 +365,36 @@ function recordSafeException(
       .value,
   );
   span.recordException({
-    name: error instanceof Error ? error.name : "Error",
+    name: "Error",
     message: publicMessage,
   });
+}
+
+function setIdentityAttributes(
+  span: Span,
+  identity: Partial<Omit<AgentTraceIdentity, "route">>,
+): void {
+  if (identity.appName !== undefined) {
+    span.setAttribute(
+      "appkit.app.name",
+      resolveAgentTraceAppName(identity.appName),
+    );
+  }
+  if (identity.agentName !== undefined) {
+    span.setAttribute("appkit.agent.name", identity.agentName);
+  }
+  if (identity.sessionId !== undefined) {
+    span.setAttribute("mlflow.trace.session", identity.sessionId);
+  }
+  if (identity.userId !== undefined) {
+    span.setAttribute("mlflow.trace.user", identity.userId);
+  }
+  if (identity.requestId !== undefined) {
+    span.setAttribute("appkit.request.id", identity.requestId);
+  }
+  if (identity.threadId !== undefined) {
+    span.setAttribute("appkit.thread.id", identity.threadId);
+  }
 }
 
 function errorValue(error: unknown): string {

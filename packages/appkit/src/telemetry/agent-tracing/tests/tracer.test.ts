@@ -40,6 +40,9 @@ interface AgentTraceIdentity {
 interface AgentTraceObserver {
   readonly traceId: string;
   onEvent(event: AgentEvent): void;
+  updateIdentity(identity: Partial<Omit<AgentTraceIdentity, "route">>): void;
+  setOutput(output: unknown): void;
+  recordError(error: unknown, output?: unknown): void;
 }
 
 type RunWithAgentTrace = <T>(
@@ -366,6 +369,39 @@ describe("runWithAgentTrace golden span trees", () => {
     expect(JSON.stringify(model?.events)).not.toContain("top-secret-token");
   });
 
+  test("never exposes a custom Error name through root or model exception.type", async () => {
+    installTracing();
+    const secret = "adapter-secret-name";
+    const customError = new Error("Authorization: Bearer message-secret");
+    customError.name = `${secret}-${"x".repeat(2_048)}`;
+
+    await expect(
+      runWithAgentTrace(
+        identity("responses"),
+        { message: "hello" },
+        async (observer) => {
+          for (const event of modelEvents({ error: `${secret}-model` })) {
+            observer.onEvent(event);
+          }
+          throw customError;
+        },
+      ),
+    ).rejects.toBe(customError);
+
+    const exceptionEvents = finishedSpans().flatMap((span) =>
+      span.events.filter((event) => event.name === "exception"),
+    );
+    expect(exceptionEvents).toHaveLength(2);
+    for (const event of exceptionEvents) {
+      expect(event.attributes?.["exception.type"]).toBe("Error");
+      expect(
+        String(event.attributes?.["exception.type"]).length,
+      ).toBeLessThanOrEqual(64);
+    }
+    expect(JSON.stringify(exceptionEvents)).not.toContain(secret);
+    expect(JSON.stringify(exceptionEvents)).not.toContain("message-secret");
+  });
+
   test("records an aborted partial stream as error and omits unavailable aggregate cost", async () => {
     installTracing();
     const abortError = new DOMException("client cancelled", "AbortError");
@@ -420,6 +456,31 @@ describe("runWithAgentTrace golden span trees", () => {
     expect(JSON.stringify(root?.events)).not.toContain("provider-secret");
   });
 
+  test("redacts explicit handled-error output when the operation does not throw", async () => {
+    installTracing();
+    const secret = "adapter-error-secret";
+
+    await runWithAgentTrace(
+      identity("invocations"),
+      { message: "hello" },
+      async (observer) => {
+        observer.recordError(new Error(secret), {
+          error: secret,
+          trace_id: "trace-123",
+        });
+      },
+    );
+
+    const root = finishedSpans().find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.status.code).toBe(SpanStatusCode.ERROR);
+    expect(root?.attributes["mlflow.spanOutputs"]).toBe(
+      '{"error":"[REDACTED]","trace_id":"trace-123"}',
+    );
+    expect(JSON.stringify(root?.events)).not.toContain(secret);
+  });
+
   test("counts each model_end once and withholds partial aggregate cost", async () => {
     installTracing();
 
@@ -459,5 +520,74 @@ describe("runWithAgentTrace golden span trees", () => {
         (span) => span.attributes["mlflow.spanType"] === "CHAT_MODEL",
       ),
     ).toHaveLength(2);
+  });
+
+  test("treats costAvailable without costUsd as unavailable for child and root", async () => {
+    installTracing();
+
+    const traced = await runWithAgentTrace(
+      identity("invocations"),
+      { message: "hello" },
+      async (observer) => {
+        for (const event of modelEvents({
+          costAvailable: true,
+          costUsd: undefined,
+        })) {
+          if (event.type === "model_end") {
+            observer.onEvent({
+              ...event,
+              usage: {
+                inputTokens: 7,
+                outputTokens: 2,
+                totalTokens: 9,
+                costAvailable: true,
+              },
+            });
+          } else {
+            observer.onEvent(event);
+          }
+        }
+        return { text: "Hello world" };
+      },
+    );
+
+    const root = finishedSpans().find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const model = finishedSpans().find(
+      (span) => span.attributes["mlflow.spanType"] === "CHAT_MODEL",
+    );
+    expect(traced.usage.costAvailable).toBe(false);
+    expect(root?.attributes["appkit.cost.available"]).toBe(false);
+    expect(root?.attributes["mlflow.llm.cost"]).toBeUndefined();
+    expect(model?.attributes["appkit.cost.available"]).toBe(false);
+    expect(model?.attributes["mlflow.llm.cost"]).toBeUndefined();
+  });
+
+  test("retains a legitimate zero cost as available for child and root", async () => {
+    installTracing();
+
+    const traced = await runWithAgentTrace(
+      identity("invocations"),
+      { message: "hello" },
+      async (observer) => {
+        for (const event of modelEvents({ costAvailable: true, costUsd: 0 })) {
+          observer.onEvent(event);
+        }
+        return { text: "Hello world" };
+      },
+    );
+
+    const priced = finishedSpans().filter((span) =>
+      ["AGENT", "CHAT_MODEL"].includes(
+        String(span.attributes["mlflow.spanType"]),
+      ),
+    );
+    expect(traced.usage).toMatchObject({ costAvailable: true, costUsd: 0 });
+    expect(priced).toHaveLength(2);
+    for (const span of priced) {
+      expect(span.attributes["appkit.cost.available"]).toBe(true);
+      expect(span.attributes["mlflow.llm.cost"]).toBe(0);
+    }
   });
 });

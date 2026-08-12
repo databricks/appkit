@@ -34,6 +34,9 @@ export interface AgentTraceObserver {
   /** MLflow V4 identity when UC is active; otherwise the 32-hex OTel trace ID. */
   readonly traceId: string;
   onEvent(event: AgentEvent): void;
+  updateIdentity(identity: Partial<Omit<AgentTraceIdentity, "route">>): void;
+  setOutput(output: unknown): void;
+  recordError(error: unknown, output?: unknown): void;
 }
 
 export interface AgentTraceResult<T> {

@@ -871,9 +871,26 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async _handleChat(req: express.Request, res: express.Response) {
+    const requestId = requestTraceId(req) ?? randomUUID();
+    await runWithAgentTrace(
+      provisionalTraceIdentity(req, "chat", requestId),
+      req.body,
+      async (observer) => {
+        res.setHeader("X-MLflow-Trace-Id", observer.traceId);
+        await this._handleChatWithinTrace(req, res, observer, requestId);
+      },
+    );
+  }
+
+  private async _handleChatWithinTrace(
+    req: express.Request,
+    res: express.Response,
+    observer: AgentTraceObserver,
+    requestId: string,
+  ): Promise<void> {
     const parsed = chatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: "Invalid request",
         details: parsed.error.flatten().fieldErrors,
       });
@@ -883,15 +900,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: agentName
           ? `Agent "${agentName}" not found`
           : "No agent registered",
       });
       return;
     }
+    observer.updateIdentity({ agentName: registered.name });
 
     const userId = this.resolveUserId(req);
+    observer.updateIdentity({ userId });
 
     // Reject early (before allocating a thread) when the user is already at
     // their concurrent-stream limit. Prevents a misbehaving client from
@@ -899,7 +918,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const limits = this.resolvedLimits;
     if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
       res.setHeader("Retry-After", "5");
-      res.status(429).json({
+      respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
@@ -916,10 +935,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         ? await this.threadStore.get(threadId, userId)
         : null;
       if (threadId && !existing) {
-        res.status(404).json({ error: `Thread ${threadId} not found` });
+        respondWithTraceError(observer, res, 404, {
+          error: `Thread ${threadId} not found`,
+        });
         return;
       }
       thread = existing ?? (await this.threadStore.create(userId));
+      observer.updateIdentity({
+        threadId: thread.id,
+        sessionId: requestSessionId(req) ?? thread.id,
+      });
 
       const userMessage: Message = {
         id: randomUUID(),
@@ -930,10 +955,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       await this.threadStore.addMessage(thread.id, userId, userMessage);
     } catch (err) {
       logger.error("threadStore failed in /chat: %O", err);
-      res.status(500).json({ error: "Thread operation failed" });
+      respondWithTraceError(observer, res, 500, {
+        error: "Thread operation failed",
+      });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId);
+    return this._streamAgent(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      observer,
+      requestId,
+    );
   }
 
   /**
@@ -971,9 +1006,27 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * does not provide. See {@link collectApprovalRequiredToolNames}.
    */
   private async _handleInvoke(req: express.Request, res: express.Response) {
+    const route = invokeTraceRoute(req);
+    const requestId = requestTraceId(req) ?? randomUUID();
+    await runWithAgentTrace(
+      provisionalTraceIdentity(req, route, requestId),
+      req.body,
+      async (observer) => {
+        res.setHeader("X-MLflow-Trace-Id", observer.traceId);
+        await this._handleInvokeWithinTrace(req, res, observer, requestId);
+      },
+    );
+  }
+
+  private async _handleInvokeWithinTrace(
+    req: express.Request,
+    res: express.Response,
+    observer: AgentTraceObserver,
+    requestId: string,
+  ): Promise<void> {
     const parsed = invocationsRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: "Invalid request",
         details: parsed.error.flatten().fieldErrors,
       });
@@ -982,9 +1035,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const { input } = parsed.data;
     const registered = this.resolveAgent();
     if (!registered) {
-      res.status(400).json({ error: "No agent registered" });
+      respondWithTraceError(observer, res, 400, {
+        error: "No agent registered",
+      });
       return;
     }
+    observer.updateIdentity({ agentName: registered.name });
 
     // Pre-flight HITL gate. The non-streaming invoke surface has no way to
     // surface an approval prompt back to the caller and no way to receive
@@ -993,7 +1049,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // with a confusing "denied by user" tool result in the final text).
     const approvalGated = this.collectApprovalRequiredToolNames(registered);
     if (approvalGated.length > 0) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error:
           `Agent '${registered.name}' exposes ${approvalGated.length} approval-gated tool(s) ` +
           `(${approvalGated.join(", ")}); /invocations and /responses are non-streaming and ` +
@@ -1004,13 +1060,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     const userId = this.resolveUserId(req);
+    observer.updateIdentity({ userId });
 
     // Match the rate-limit gate on /chat. Without this, a client can bypass
     // `limits.maxConcurrentStreamsPerUser` by hitting /invocations instead.
     const limits = this.resolvedLimits;
     if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
       res.setHeader("Retry-After", "5");
-      res.status(429).json({
+      respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
@@ -1021,6 +1078,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     let thread: Thread;
     try {
       thread = await this.threadStore.create(userId);
+      observer.updateIdentity({
+        threadId: thread.id,
+        sessionId: requestSessionId(req) ?? thread.id,
+      });
 
       if (typeof input === "string") {
         await this.threadStore.addMessage(thread.id, userId, {
@@ -1047,11 +1108,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       }
     } catch (err) {
       logger.error("threadStore failed in /invocations: %O", err);
-      res.status(500).json({ error: "Thread operation failed" });
+      respondWithTraceError(observer, res, 500, {
+        error: "Thread operation failed",
+      });
       return;
     }
 
-    return this._runAgentNonStreaming(req, res, registered, thread, userId);
+    return this._runAgentNonStreaming(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      observer,
+      requestId,
+    );
   }
 
   private async _streamAgent(
@@ -1060,10 +1131,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    observer: AgentTraceObserver,
+    requestId: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = requestTraceId(req) ?? randomUUID();
     this.trackStream(requestId, userId, abortController);
 
     // `hosted-supervisor` entries are not callable from the Node process
@@ -1094,6 +1166,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
+      traceObserver: observer,
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1123,79 +1196,62 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       ...thread.messages,
     ];
 
+    // Trace discovery is committed by the outer request handler before any
+    // SSE event. Queue the matching metadata before the adapter can emit.
+    for (const evt of translator.translate({
+      type: "metadata",
+      data: { threadId: thread.id, traceId: observer.traceId },
+    })) {
+      outboundEvents.push(evt);
+    }
+
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
     // generator below drains the channel in order. executeTool pushes
     // approval-pending events into the same channel before awaiting the gate.
+    let driverFailure: { error: unknown } | undefined;
     const driver = (async () => {
       try {
-        await runWithAgentTrace(
+        const stream = registered.adapter.run(
           {
-            appName: resolveAgentTraceAppName(),
-            agentName: registered.name,
-            route: "chat",
-            sessionId: requestSessionId(req) ?? thread.id,
-            userId,
-            requestId,
+            messages: messagesWithSystem,
+            tools,
             threadId: thread.id,
+            signal,
+            extensions: buildAdapterExtensions(registered.toolIndex),
           },
-          { messages: messagesWithSystem },
-          async (observer) => {
-            runState.traceObserver = observer;
-            // Trace discovery must be committed before any SSE event. The
-            // observer is created synchronously with the semantic root.
-            res.setHeader("X-MLflow-Trace-Id", observer.traceId);
-            for (const evt of translator.translate({
-              type: "metadata",
-              data: { threadId: thread.id, traceId: observer.traceId },
-            })) {
-              outboundEvents.push(evt);
-            }
-
-            const stream = registered.adapter.run(
-              {
-                messages: messagesWithSystem,
-                tools,
-                threadId: thread.id,
-                signal,
-                extensions: buildAdapterExtensions(registered.toolIndex),
-              },
-              { executeTool, signal },
-            );
-
-            const { text: fullContent } = await consumeAdapterStream(stream, {
-              signal,
-              onEvent: (event) => {
-                observer.onEvent(event);
-                for (const translated of translator.translate(event)) {
-                  outboundEvents.push(translated);
-                }
-              },
-            });
-
-            if (signal.aborted) throw agentRequestAbortError();
-
-            if (fullContent) {
-              await this.threadStore.addMessage(thread.id, userId, {
-                id: randomUUID(),
-                role: "assistant",
-                content: fullContent,
-                createdAt: new Date(),
-              });
-            }
-
-            for (const evt of translator.finalize()) outboundEvents.push(evt);
-            return { text: fullContent };
-          },
+          { executeTool, signal },
         );
-      } catch (error) {
-        if (signal.aborted) {
-          outboundEvents.close();
-          return;
+
+        const { text: fullContent } = await consumeAdapterStream(stream, {
+          signal,
+          onEvent: (event) => {
+            observer.onEvent(event);
+            for (const translated of translator.translate(event)) {
+              outboundEvents.push(translated);
+            }
+          },
+        });
+
+        if (signal.aborted) throw agentRequestAbortError();
+
+        if (fullContent) {
+          await this.threadStore.addMessage(thread.id, userId, {
+            id: randomUUID(),
+            role: "assistant",
+            content: fullContent,
+            createdAt: new Date(),
+          });
         }
-        logger.error("Agent chat error: %O", error);
+
+        for (const evt of translator.finalize()) outboundEvents.push(evt);
+        observer.setOutput({ text: fullContent });
+      } catch (error) {
+        driverFailure = { error };
+        if (!signal.aborted) {
+          logger.error("Agent chat error: %O", error);
+        }
         outboundEvents.close(error);
-        return;
       } finally {
         // Any pending approval gates for this stream are auto-denied so the
         // adapter can unwind if it was still waiting.
@@ -1216,8 +1272,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             );
           }
         }
+        outboundEvents.close();
       }
-      outboundEvents.close();
     })();
 
     await this.executeStream<ResponseStreamEvent>(
@@ -1244,6 +1300,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         stream: { ...agentStreamDefaults.stream, streamId: requestId },
       },
     );
+    await driver;
+    if (driverFailure) throw driverFailure.error;
   }
 
   /**
@@ -1275,10 +1333,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    observer: AgentTraceObserver,
+    requestId: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = requestTraceId(req) ?? randomUUID();
     this.trackStream(requestId, userId, abortController);
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
@@ -1298,6 +1357,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
+      traceObserver: observer,
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1328,53 +1388,38 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     ];
 
     let fullContent = "";
-    let traceId = "";
     try {
-      const traced = await runWithAgentTrace(
+      const stream = registered.adapter.run(
         {
-          appName: resolveAgentTraceAppName(),
-          agentName: registered.name,
-          route: invokeTraceRoute(req),
-          sessionId: requestSessionId(req) ?? thread.id,
-          userId,
-          requestId,
+          messages: messagesWithSystem,
+          tools,
           threadId: thread.id,
+          signal,
         },
-        { messages: messagesWithSystem },
-        async (observer) => {
-          runState.traceObserver = observer;
-          traceId = observer.traceId;
-          res.setHeader("X-MLflow-Trace-Id", traceId);
-          const stream = registered.adapter.run(
-            {
-              messages: messagesWithSystem,
-              tools,
-              threadId: thread.id,
-              signal,
-            },
-            { executeTool, signal },
-          );
-          const consumed = await consumeAdapterStream(stream, {
-            signal,
-            onEvent: observer.onEvent,
-          });
-          if (signal.aborted) throw agentRequestAbortError();
-          if (consumed.text) {
-            await this.threadStore.addMessage(thread.id, userId, {
-              id: randomUUID(),
-              role: "assistant",
-              content: consumed.text,
-              createdAt: new Date(),
-            });
-          }
-          return { text: consumed.text };
-        },
+        { executeTool, signal },
       );
-      fullContent = traced.value.text;
-      traceId = traced.traceId;
+      const consumed = await consumeAdapterStream(stream, {
+        signal,
+        onEvent: observer.onEvent,
+      });
+      if (signal.aborted) throw agentRequestAbortError();
+      fullContent = consumed.text;
+      if (fullContent) {
+        await this.threadStore.addMessage(thread.id, userId, {
+          id: randomUUID(),
+          role: "assistant",
+          content: fullContent,
+          createdAt: new Date(),
+        });
+      }
     } catch (error) {
       if (signal.aborted) {
-        res.status(499).json({ error: "Request aborted", trace_id: traceId });
+        const body = {
+          error: "Request aborted",
+          trace_id: observer.traceId,
+        };
+        observer.recordError(error, body);
+        res.status(499).json(body);
         return;
       }
       logger.error("Agent invoke error: %O", error);
@@ -1384,7 +1429,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           : error instanceof Error
             ? error.message
             : String(error);
-      res.status(500).json({ error: message, trace_id: traceId });
+      const body = { error: message, trace_id: observer.traceId };
+      observer.recordError(error, body);
+      res.status(500).json(body);
       return;
     } finally {
       this.approvalGate.abortStream(requestId);
@@ -1411,15 +1458,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       role: "assistant",
       content: [{ type: "output_text", text: fullContent }],
     };
-    res.json({
+    const payload = {
       id: responseId,
       object: "response",
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
-      trace_id: traceId,
+      trace_id: observer.traceId,
       output: [message],
-    });
+    };
+    observer.setOutput(payload);
+    res.json(payload);
   }
 
   /**
@@ -1814,6 +1863,43 @@ function requestTraceId(req: express.Request): string | undefined {
     req.header("x-databricks-request-id")?.trim() ||
     undefined
   );
+}
+
+function provisionalTraceIdentity(
+  req: express.Request,
+  route: "chat" | "invocations" | "responses",
+  requestId: string,
+) {
+  const body =
+    req.body && typeof req.body === "object"
+      ? (req.body as Record<string, unknown>)
+      : undefined;
+  const threadId = traceIdentityValue(body?.threadId) ?? requestId;
+  return {
+    appName: resolveAgentTraceAppName(),
+    agentName: traceIdentityValue(body?.agent) ?? "unresolved-agent",
+    route,
+    sessionId: requestSessionId(req) ?? threadId,
+    userId:
+      traceIdentityValue(req.header("x-forwarded-user")) ?? "unresolved-user",
+    requestId,
+    threadId,
+  };
+}
+
+function traceIdentityValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function respondWithTraceError(
+  observer: AgentTraceObserver,
+  res: express.Response,
+  status: number,
+  body: Record<string, unknown>,
+): void {
+  observer.recordError(body.error ?? `HTTP ${status}`, body);
+  res.status(status).json(body);
 }
 
 function requestSessionId(req: express.Request): string | undefined {

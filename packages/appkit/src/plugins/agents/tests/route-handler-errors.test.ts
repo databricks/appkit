@@ -1,3 +1,10 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  type ReadableSpan,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
@@ -35,6 +42,7 @@ function mockReq(body: unknown, userId = "alice"): express.Request {
   const headers: Record<string, string> = {
     "x-forwarded-user": userId,
     "x-forwarded-access-token": "fake-token",
+    "x-request-id": "request-early",
   };
   return {
     body,
@@ -43,9 +51,13 @@ function mockReq(body: unknown, userId = "alice"): express.Request {
   } as unknown as express.Request;
 }
 
-function mockRes() {
-  const json = vi.fn();
-  const setHeader = vi.fn();
+function mockRes(order?: string[]) {
+  const json = vi.fn((body: unknown) => {
+    order?.push(`body:${JSON.stringify(body)}`);
+  });
+  const setHeader = vi.fn((name: string, value: unknown) => {
+    order?.push(`header:${name}:${String(value)}`);
+  });
   let statusCode = 200;
   const status = vi.fn((code: number) => {
     statusCode = code;
@@ -61,6 +73,78 @@ function mockRes() {
   };
 }
 
+async function captureRouteSpans(
+  operation: () => Promise<void>,
+): Promise<{ spans: ReadableSpan[]; error?: unknown }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { spans, ...(error !== undefined ? { error } : {}) };
+}
+
+function requestForRoute(
+  route: "chat" | "invocations" | "responses",
+  body: unknown,
+  userId = "alice",
+): express.Request {
+  const req = mockReq(body, userId);
+  Object.assign(req, {
+    path: `/${route}`,
+    url: `/${route}`,
+    originalUrl: `/${route}`,
+  });
+  return req;
+}
+
+function expectEarlyErrorTrace(
+  spans: ReadableSpan[],
+  order: string[],
+  route: "chat" | "invocations" | "responses",
+  inputKey: "message" | "input",
+): void {
+  const roots = spans.filter(
+    (span) => span.attributes["mlflow.spanType"] === "AGENT",
+  );
+  expect(roots).toHaveLength(1);
+  const root = roots[0];
+  expect(root.status.code).toBe(SpanStatusCode.ERROR);
+  expect(root.attributes).toMatchObject({
+    "appkit.route": route,
+    "appkit.request.id": "request-early",
+  });
+  expect(String(root.attributes["mlflow.spanInputs"])).toContain(inputKey);
+  expect(String(root.attributes["mlflow.spanOutputs"]).length).toBeGreaterThan(
+    2,
+  );
+  expect(
+    spans.filter((span) => span.attributes["mlflow.spanType"] === "AGENT"),
+  ).toHaveLength(1);
+  const headerIndex = order.findIndex((entry) =>
+    entry.startsWith("header:X-MLflow-Trace-Id:"),
+  );
+  const bodyIndex = order.findIndex((entry) => entry.startsWith("body:"));
+  expect(headerIndex).toBeGreaterThanOrEqual(0);
+  expect(bodyIndex).toBeGreaterThan(headerIndex);
+}
+
 function seedPlugin(): AgentsPlugin {
   const plugin = new AgentsPlugin({ dir: false });
   // biome-ignore lint/suspicious/noExplicitAny: seed private state
@@ -74,6 +158,208 @@ function seedPlugin(): AgentsPlugin {
   (plugin as any).defaultAgentName = "default";
   return plugin;
 }
+
+describe("early HTTP failures create one semantic root before writing", () => {
+  test("/chat schema failure traces raw input and sets discovery before the body", async () => {
+    const plugin = seedPlugin();
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", { message: "" });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+  });
+
+  test("/chat missing-agent lookup finalizes the provisional root as ERROR", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", {
+      message: "hello",
+      agent: "missing-agent",
+    });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+  });
+
+  test("/chat thread setup failure updates resolved identity and ends one root", async () => {
+    const plugin = seedPlugin();
+    (plugin as any).threadStore = {
+      get: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockRejectedValue(new Error("DB unavailable")),
+      addMessage: vi.fn(),
+    };
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", { message: "hello" });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes).toMatchObject({
+      "appkit.agent.name": "default",
+      "mlflow.trace.user": "alice",
+    });
+  });
+
+  test("/chat user-context failure still sets discovery before middleware error body", async () => {
+    const plugin = seedPlugin();
+    const order: string[] = [];
+    const { res, json } = mockRes(order);
+    const req = requestForRoute("chat", { message: "hello" }, "");
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleChat: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleChat(req, res),
+      );
+      expect(observed.error).toBeDefined();
+      json({ error: "Authentication failed" });
+      expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  describe.each(["invocations", "responses"] as const)("/%s", (route) => {
+    test("schema failure creates and finalizes one root", async () => {
+      const plugin = seedPlugin();
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+    });
+
+    test("missing-agent lookup creates and finalizes one root", async () => {
+      const plugin = new AgentsPlugin({ dir: false });
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+    });
+
+    test("thread setup failure creates and finalizes one root", async () => {
+      const plugin = seedPlugin();
+      (plugin as any).threadStore = {
+        create: vi.fn().mockRejectedValue(new Error("DB unavailable")),
+        addMessage: vi.fn(),
+      };
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+      const root = observed.spans.find(
+        (span) => span.attributes["mlflow.spanType"] === "AGENT",
+      );
+      expect(root?.attributes).toMatchObject({
+        "appkit.agent.name": "default",
+        "mlflow.trace.user": "alice",
+      });
+    });
+
+    test("user-context failure sets discovery before middleware error body", async () => {
+      const plugin = seedPlugin();
+      const order: string[] = [];
+      const { res, json } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" }, "");
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const observed = await captureRouteSpans(() =>
+          (
+            plugin as unknown as {
+              _handleInvoke: (
+                request: express.Request,
+                response: express.Response,
+              ) => Promise<void>;
+            }
+          )._handleInvoke(req, res),
+        );
+        expect(observed.error).toBeDefined();
+        json({ error: "Authentication failed" });
+        expectEarlyErrorTrace(observed.spans, order, route, "input");
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+  });
+});
 
 describe("POST /chat — threadStore failure", () => {
   test("returns 500 when threadStore.get rejects (existing thread path)", async () => {
@@ -459,11 +745,6 @@ describe("POST /chat — trace discovery ordering", () => {
         order.push(`body:${String(event.type)}`);
       }
     };
-    // biome-ignore lint/suspicious/noExplicitAny: stub persistence
-    (plugin as any).threadStore = {
-      addMessage: vi.fn(),
-      delete: vi.fn(),
-    };
     const registered = {
       name: "planner",
       instructions: "help",
@@ -505,7 +786,18 @@ describe("POST /chat — trace discovery ordering", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    const req = mockReq({ message: "hi" });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private route state
+    (plugin as any).agents.set("planner", registered);
+    // biome-ignore lint/suspicious/noExplicitAny: seed private route state
+    (plugin as any).defaultAgentName = "planner";
+    // biome-ignore lint/suspicious/noExplicitAny: stub persistence
+    (plugin as any).threadStore = {
+      get: vi.fn(),
+      create: vi.fn().mockResolvedValue(thread),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    const req = mockReq({ message: "hi", agent: "planner" });
     const { res, setHeader } = mockRes();
     setHeader.mockImplementation((name, value) => {
       if (name === "X-MLflow-Trace-Id") order.push(`header:${String(value)}`);
@@ -513,15 +805,12 @@ describe("POST /chat — trace discovery ordering", () => {
 
     await (
       plugin as unknown as {
-        _streamAgent: (
+        _handleChat: (
           request: express.Request,
           response: express.Response,
-          agent: unknown,
-          currentThread: unknown,
-          userId: string,
         ) => Promise<void>;
       }
-    )._streamAgent(req, res, registered, thread, "alice");
+    )._handleChat(req, res);
 
     const metadata = streamed[0] as {
       type?: string;
