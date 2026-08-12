@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { trace } from "@opentelemetry/api";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -16,6 +15,11 @@ import {
   type SupervisorTool,
 } from "../../agents/supervisor-api";
 import { createLogger } from "../../logging/logger";
+import {
+  type AgentTraceObserver,
+  resolveAgentTraceAppName,
+  runWithAgentTrace,
+} from "../../telemetry/agent-tracing";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
@@ -52,6 +56,7 @@ export interface RunAgentInput {
   sessionId?: string;
   userId?: string;
   requestId?: string;
+  threadId?: string;
   appName?: string;
 }
 
@@ -102,18 +107,42 @@ export async function runAgent(
   // plugin, and silently diverge in-instance state between parent and child
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
-  await initStandalonePlugins(input.plugins ?? [], providerCache);
-  return runAgentInternal(def, input, providerCache);
+  const threadId = input.threadId ?? randomUUID();
+  const requestId = input.requestId ?? randomUUID();
+  const traced = await runWithAgentTrace(
+    {
+      appName: resolveAgentTraceAppName(input.appName),
+      agentName: def.name ?? "agent",
+      route: "runAgent",
+      sessionId: input.sessionId ?? threadId,
+      userId: input.userId ?? "service-principal",
+      requestId,
+      threadId,
+    },
+    { messages: input.messages },
+    async (observer) => {
+      await initStandalonePlugins(input.plugins ?? [], providerCache);
+      return runAgentInternal(
+        def,
+        { ...input, requestId, threadId },
+        providerCache,
+        observer,
+      );
+    },
+  );
+  return {
+    ...traced.value,
+    traceId: traced.traceId,
+    usage: traced.usage,
+  };
 }
 
 async function runAgentInternal(
   def: AgentDefinition,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
-): Promise<RunAgentResult> {
-  const traceId =
-    trace.getActiveSpan()?.spanContext().traceId ??
-    randomUUID().replaceAll("-", "");
+  observer: AgentTraceObserver,
+): Promise<Pick<RunAgentResult, "text" | "events">> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
@@ -165,6 +194,7 @@ async function runAgentInternal(
         entry.agentDef,
         subInput,
         providerCache,
+        observer,
       );
       return res.text;
     }
@@ -189,7 +219,7 @@ async function runAgentInternal(
     {
       messages,
       tools,
-      threadId: randomUUID(),
+      threadId: input.threadId ?? randomUUID(),
       signal,
       extensions: buildStandaloneExtensions(toolIndex),
     },
@@ -203,15 +233,24 @@ async function runAgentInternal(
     signal,
     onEvent: (event) => {
       events.push(event);
+      observer.onEvent(event);
     },
   });
+
+  if (signal?.aborted) {
+    throw agentAbortError();
+  }
 
   return {
     text: consumed.text,
     events,
-    traceId,
-    usage: consumed.usage,
   };
+}
+
+function agentAbortError(): Error {
+  const error = new Error("Agent run aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 /**

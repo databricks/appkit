@@ -284,7 +284,10 @@ export interface AppKitThinkingEvent {
 
 export interface AppKitMetadataEvent {
   type: "appkit.metadata";
-  data: Record<string, unknown>;
+  data: Record<string, unknown> & {
+    threadId?: string;
+    traceId?: string;
+  };
   sequence_number: number;
 }
 

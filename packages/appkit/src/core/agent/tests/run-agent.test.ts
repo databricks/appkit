@@ -1,4 +1,9 @@
-import { type Span, trace } from "@opentelemetry/api";
+import { trace } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -43,19 +48,25 @@ describe("runAgent", () => {
     expect(result.events).toHaveLength(3);
   });
 
-  test("returns the active trace and aggregate usage for identified runs", async () => {
-    const traceId = "0123456789abcdef0123456789abcdef";
-    const activeSpan = {
-      spanContext: () => ({
-        traceId,
-        spanId: "0123456789abcdef",
-        traceFlags: 1,
-      }),
-    } as unknown as Span;
-    const activeSpanSpy = vi
-      .spyOn(trace, "getActiveSpan")
-      .mockReturnValue(activeSpan);
+  test("creates the standalone semantic root and returns its trace and aggregate usage", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const getTracerSpy = vi
+      .spyOn(trace, "getTracer")
+      .mockImplementation((name: string, version?: string) =>
+        provider.getTracer(name, version),
+      );
     const events: AgentEvent[] = [
+      {
+        type: "model_start",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        input: { messages: [{ role: "user", content: "hi" }] },
+        startedAt: Date.now() - 10,
+      },
       { type: "message_delta", content: "done" },
       {
         type: "model_end",
@@ -75,20 +86,49 @@ describe("runAgent", () => {
       },
     ];
     const def = createAgent({
+      name: "planner",
       instructions: "x",
       model: scriptedAdapter(events),
     });
 
-    const result = await runAgent(def, {
-      messages: "hi",
-      sessionId: "session-1",
-      userId: "user-1",
-      requestId: "request-1",
-      appName: "test-app",
-    });
-    activeSpanSpy.mockRestore();
+    let result!: Awaited<ReturnType<typeof runAgent>>;
+    let spans = exporter.getFinishedSpans();
+    try {
+      result = await runAgent(def, {
+        messages: "hi",
+        sessionId: "session-1",
+        userId: "user-1",
+        requestId: "request-1",
+        threadId: "thread-1",
+        appName: "test-app",
+      });
+      await provider.forceFlush();
+      spans = exporter.getFinishedSpans();
+    } finally {
+      getTracerSpy.mockRestore();
+      await provider.shutdown();
+    }
 
-    expect(result.traceId).toBe(traceId);
+    const roots = spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const model = spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "CHAT_MODEL",
+    );
+    expect(roots).toHaveLength(1);
+    expect(roots[0].attributes).toMatchObject({
+      "appkit.app.name": "test-app",
+      "appkit.agent.name": "planner",
+      "appkit.route": "runAgent",
+      "appkit.request.id": "request-1",
+      "appkit.thread.id": "thread-1",
+      "mlflow.trace.session": "session-1",
+      "mlflow.trace.user": "user-1",
+    });
+    expect(model?.parentSpanContext?.spanId).toBe(
+      roots[0].spanContext().spanId,
+    );
+    expect(result.traceId).toBe(roots[0].spanContext().traceId);
     expect(result.usage).toEqual({
       inputTokens: 7,
       outputTokens: 2,

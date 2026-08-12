@@ -57,6 +57,7 @@ function mockRes() {
       return statusCode;
     },
     json,
+    setHeader,
   };
 }
 
@@ -356,7 +357,7 @@ describe("POST /invocations & /responses — successful invoke", () => {
       delete: vi.fn(),
     };
 
-    const { res, json } = mockRes();
+    const { res, json, setHeader } = mockRes();
     await (
       plugin as unknown as {
         _handleInvoke: (
@@ -378,6 +379,7 @@ describe("POST /invocations & /responses — successful invoke", () => {
         role: string;
         content: Array<{ type: string; text: string }>;
       }>;
+      trace_id: string;
     };
     expect(payload.object).toBe("response");
     expect(payload.status).toBe("completed");
@@ -390,6 +392,153 @@ describe("POST /invocations & /responses — successful invoke", () => {
       type: "output_text",
       text: "hello world",
     });
+    expect(payload.trace_id).toMatch(/^[0-9a-f]{32}$/);
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      payload.trace_id,
+    );
+  });
+
+  test("sets trace discovery headers even when the adapter throws", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "hi",
+      adapter: {
+        async *run() {
+          yield { type: "message_delta", content: "partial" };
+          throw new Error("adapter failed");
+        },
+      },
+      toolIndex: new Map(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).defaultAgentName = "default";
+    // biome-ignore lint/suspicious/noExplicitAny: stub
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const { res, json, setHeader } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq({ input: "hi" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+    );
+    expect(json).toHaveBeenCalledWith({
+      error: "adapter failed",
+      trace_id: expect.stringMatching(/^[0-9a-f]{32}$/),
+    });
+  });
+});
+
+describe("POST /chat — trace discovery ordering", () => {
+  test("sets the trace header and emits trace metadata before any streamed content", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const order: string[] = [];
+    const streamed: Array<Record<string, unknown>> = [];
+    // biome-ignore lint/suspicious/noExplicitAny: drive the real stream producer without StreamManager transport
+    (plugin as any).executeStream = async (
+      _res: express.Response,
+      source: (signal?: AbortSignal) => AsyncIterable<Record<string, unknown>>,
+    ) => {
+      for await (const event of source(new AbortController().signal)) {
+        streamed.push(event);
+        order.push(`body:${String(event.type)}`);
+      }
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: stub persistence
+    (plugin as any).threadStore = {
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    const registered = {
+      name: "planner",
+      instructions: "help",
+      adapter: {
+        async *run() {
+          const startedAt = Date.now() - 10;
+          yield {
+            type: "model_start" as const,
+            stepId: "step-1",
+            model: "model-a",
+            provider: "databricks",
+            input: { prompt: "hi" },
+            startedAt,
+          };
+          yield { type: "message_delta" as const, content: "hello" };
+          yield {
+            type: "model_end" as const,
+            stepId: "step-1",
+            model: "model-a",
+            provider: "databricks",
+            output: { text: "hello" },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              totalTokens: 2,
+              costAvailable: false,
+            },
+            streamDurationMs: 10,
+            endedAt: startedAt + 10,
+          };
+        },
+      },
+      toolIndex: new Map(),
+    };
+    const thread = {
+      id: "thread-1",
+      userId: "alice",
+      messages: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const req = mockReq({ message: "hi" });
+    const { res, setHeader } = mockRes();
+    setHeader.mockImplementation((name, value) => {
+      if (name === "X-MLflow-Trace-Id") order.push(`header:${String(value)}`);
+    });
+
+    await (
+      plugin as unknown as {
+        _streamAgent: (
+          request: express.Request,
+          response: express.Response,
+          agent: unknown,
+          currentThread: unknown,
+          userId: string,
+        ) => Promise<void>;
+      }
+    )._streamAgent(req, res, registered, thread, "alice");
+
+    const metadata = streamed[0] as {
+      type?: string;
+      data?: { traceId?: string; threadId?: string };
+    };
+    expect(order[0]).toMatch(/^header:[0-9a-f]{32}$/);
+    expect(order[1]).toBe("body:appkit.metadata");
+    expect(metadata).toMatchObject({
+      type: "appkit.metadata",
+      data: { threadId: "thread-1", traceId: expect.any(String) },
+    });
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      metadata.data?.traceId,
+    );
+    expect(JSON.stringify(streamed)).not.toContain("model_start");
+    expect(JSON.stringify(streamed)).not.toContain("model_end");
   });
 });
 

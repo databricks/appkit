@@ -51,6 +51,11 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import {
+  type AgentTraceObserver,
+  resolveAgentTraceAppName,
+  runWithAgentTrace,
+} from "../../telemetry/agent-tracing";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -128,6 +133,7 @@ interface RunState {
   };
   translator: AgentEventTranslator;
   outboundEvents: EventChannel<ResponseStreamEvent>;
+  traceObserver?: AgentTraceObserver;
   /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
   toolCallsUsed: { count: number };
 }
@@ -1057,7 +1063,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = randomUUID();
+    const requestId = requestTraceId(req) ?? randomUUID();
     this.trackStream(requestId, userId, abortController);
 
     // `hosted-supervisor` entries are not callable from the Node process
@@ -1093,77 +1099,95 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
       this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
 
+    const pluginNames = this.context
+      ? this.context
+          .getPluginNames()
+          .filter((n) => n !== this.name && n !== "server")
+      : [];
+    const fullPrompt = composePromptForAgent(
+      registered,
+      this.config.baseSystemPrompt,
+      {
+        agentName: registered.name,
+        pluginNames,
+        toolNames: tools.map((t) => t.name),
+      },
+    );
+    const messagesWithSystem: Message[] = [
+      {
+        id: "system",
+        role: "system",
+        content: fullPrompt,
+        createdAt: new Date(),
+      },
+      ...thread.messages,
+    ];
+
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
     // generator below drains the channel in order. executeTool pushes
     // approval-pending events into the same channel before awaiting the gate.
     const driver = (async () => {
       try {
-        for (const evt of translator.translate({
-          type: "metadata",
-          data: { threadId: thread.id },
-        })) {
-          outboundEvents.push(evt);
-        }
-
-        const pluginNames = this.context
-          ? this.context
-              .getPluginNames()
-              .filter((n) => n !== this.name && n !== "server")
-          : [];
-        const fullPrompt = composePromptForAgent(
-          registered,
-          this.config.baseSystemPrompt,
+        await runWithAgentTrace(
           {
+            appName: resolveAgentTraceAppName(),
             agentName: registered.name,
-            pluginNames,
-            toolNames: tools.map((t) => t.name),
-          },
-        );
-
-        const messagesWithSystem: Message[] = [
-          {
-            id: "system",
-            role: "system",
-            content: fullPrompt,
-            createdAt: new Date(),
-          },
-          ...thread.messages,
-        ];
-
-        const stream = registered.adapter.run(
-          {
-            messages: messagesWithSystem,
-            tools,
+            route: "chat",
+            sessionId: requestSessionId(req) ?? thread.id,
+            userId,
+            requestId,
             threadId: thread.id,
-            signal,
-            extensions: buildAdapterExtensions(registered.toolIndex),
           },
-          { executeTool, signal },
-        );
-
-        // The accumulation rule (deltas append, `message` replaces) is shared
-        // with `runAgent` and `runSubAgent`; see `consumeAdapterStream` for
-        // the rationale.
-        const { text: fullContent } = await consumeAdapterStream(stream, {
-          signal,
-          onEvent: (event) => {
-            for (const translated of translator.translate(event)) {
-              outboundEvents.push(translated);
+          { messages: messagesWithSystem },
+          async (observer) => {
+            runState.traceObserver = observer;
+            // Trace discovery must be committed before any SSE event. The
+            // observer is created synchronously with the semantic root.
+            res.setHeader("X-MLflow-Trace-Id", observer.traceId);
+            for (const evt of translator.translate({
+              type: "metadata",
+              data: { threadId: thread.id, traceId: observer.traceId },
+            })) {
+              outboundEvents.push(evt);
             }
+
+            const stream = registered.adapter.run(
+              {
+                messages: messagesWithSystem,
+                tools,
+                threadId: thread.id,
+                signal,
+                extensions: buildAdapterExtensions(registered.toolIndex),
+              },
+              { executeTool, signal },
+            );
+
+            const { text: fullContent } = await consumeAdapterStream(stream, {
+              signal,
+              onEvent: (event) => {
+                observer.onEvent(event);
+                for (const translated of translator.translate(event)) {
+                  outboundEvents.push(translated);
+                }
+              },
+            });
+
+            if (signal.aborted) throw agentRequestAbortError();
+
+            if (fullContent) {
+              await this.threadStore.addMessage(thread.id, userId, {
+                id: randomUUID(),
+                role: "assistant",
+                content: fullContent,
+                createdAt: new Date(),
+              });
+            }
+
+            for (const evt of translator.finalize()) outboundEvents.push(evt);
+            return { text: fullContent };
           },
-        });
-
-        if (fullContent) {
-          await this.threadStore.addMessage(thread.id, userId, {
-            id: randomUUID(),
-            role: "assistant",
-            content: fullContent,
-            createdAt: new Date(),
-          });
-        }
-
-        for (const evt of translator.finalize()) outboundEvents.push(evt);
+        );
       } catch (error) {
         if (signal.aborted) {
           outboundEvents.close();
@@ -1198,12 +1222,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     await this.executeStream<ResponseStreamEvent>(
       res,
-      async function* () {
+      async function* (streamSignal?: AbortSignal) {
+        const abortFromTransport = () => {
+          if (!signal.aborted) abortController.abort("Stream cancelled");
+        };
+        if (streamSignal?.aborted) abortFromTransport();
+        streamSignal?.addEventListener("abort", abortFromTransport, {
+          once: true,
+        });
         try {
           for await (const ev of outboundEvents) {
             yield ev;
           }
         } finally {
+          streamSignal?.removeEventListener("abort", abortFromTransport);
           await driver.catch(() => undefined);
         }
       },
@@ -1246,7 +1278,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = randomUUID();
+    const requestId = requestTraceId(req) ?? randomUUID();
     this.trackStream(requestId, userId, abortController);
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
@@ -1271,56 +1303,78 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
       this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
 
+    const pluginNames = this.context
+      ? this.context
+          .getPluginNames()
+          .filter((n) => n !== this.name && n !== "server")
+      : [];
+    const fullPrompt = composePromptForAgent(
+      registered,
+      this.config.baseSystemPrompt,
+      {
+        agentName: registered.name,
+        pluginNames,
+        toolNames: tools.map((t) => t.name),
+      },
+    );
+    const messagesWithSystem: Message[] = [
+      {
+        id: "system",
+        role: "system",
+        content: fullPrompt,
+        createdAt: new Date(),
+      },
+      ...thread.messages,
+    ];
+
     let fullContent = "";
+    let traceId = "";
     try {
-      const pluginNames = this.context
-        ? this.context
-            .getPluginNames()
-            .filter((n) => n !== this.name && n !== "server")
-        : [];
-      const fullPrompt = composePromptForAgent(
-        registered,
-        this.config.baseSystemPrompt,
+      const traced = await runWithAgentTrace(
         {
+          appName: resolveAgentTraceAppName(),
           agentName: registered.name,
-          pluginNames,
-          toolNames: tools.map((t) => t.name),
-        },
-      );
-
-      const messagesWithSystem: Message[] = [
-        {
-          id: "system",
-          role: "system",
-          content: fullPrompt,
-          createdAt: new Date(),
-        },
-        ...thread.messages,
-      ];
-
-      const stream = registered.adapter.run(
-        {
-          messages: messagesWithSystem,
-          tools,
+          route: invokeTraceRoute(req),
+          sessionId: requestSessionId(req) ?? thread.id,
+          userId,
+          requestId,
           threadId: thread.id,
-          signal,
         },
-        { executeTool, signal },
+        { messages: messagesWithSystem },
+        async (observer) => {
+          runState.traceObserver = observer;
+          traceId = observer.traceId;
+          res.setHeader("X-MLflow-Trace-Id", traceId);
+          const stream = registered.adapter.run(
+            {
+              messages: messagesWithSystem,
+              tools,
+              threadId: thread.id,
+              signal,
+            },
+            { executeTool, signal },
+          );
+          const consumed = await consumeAdapterStream(stream, {
+            signal,
+            onEvent: observer.onEvent,
+          });
+          if (signal.aborted) throw agentRequestAbortError();
+          if (consumed.text) {
+            await this.threadStore.addMessage(thread.id, userId, {
+              id: randomUUID(),
+              role: "assistant",
+              content: consumed.text,
+              createdAt: new Date(),
+            });
+          }
+          return { text: consumed.text };
+        },
       );
-
-      ({ text: fullContent } = await consumeAdapterStream(stream, { signal }));
-
-      if (fullContent) {
-        await this.threadStore.addMessage(thread.id, userId, {
-          id: randomUUID(),
-          role: "assistant",
-          content: fullContent,
-          createdAt: new Date(),
-        });
-      }
+      fullContent = traced.value.text;
+      traceId = traced.traceId;
     } catch (error) {
       if (signal.aborted) {
-        res.status(499).json({ error: "Request aborted" });
+        res.status(499).json({ error: "Request aborted", trace_id: traceId });
         return;
       }
       logger.error("Agent invoke error: %O", error);
@@ -1330,7 +1384,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           : error instanceof Error
             ? error.message
             : String(error);
-      res.status(500).json({ error: message });
+      res.status(500).json({ error: message, trace_id: traceId });
       return;
     } finally {
       this.approvalGate.abortStream(requestId);
@@ -1363,6 +1417,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
+      trace_id: traceId,
       output: [message],
     });
   }
@@ -1587,6 +1642,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // Approval-pending events emitted by `dispatchToolCall` already
         // reach `outboundEvents` directly, so they are not routed here.
         onEvent: (event) => {
+          runState.traceObserver?.onEvent(event);
           if (event.type === "metadata") return;
           for (const translated of runState.translator.translate(event)) {
             runState.outboundEvents.push(translated);
@@ -1750,6 +1806,36 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.agents.set(name, registered);
     if (!this.defaultAgentName) this.defaultAgentName = name;
   }
+}
+
+function requestTraceId(req: express.Request): string | undefined {
+  return (
+    req.header("x-request-id")?.trim() ||
+    req.header("x-databricks-request-id")?.trim() ||
+    undefined
+  );
+}
+
+function requestSessionId(req: express.Request): string | undefined {
+  return (
+    req.header("x-mlflow-session-id")?.trim() ||
+    req.header("x-session-id")?.trim() ||
+    undefined
+  );
+}
+
+function invokeTraceRoute(req: express.Request): "invocations" | "responses" {
+  const requestPath =
+    req.route?.path ?? req.path ?? req.originalUrl ?? req.url ?? "";
+  return String(requestPath).includes("responses")
+    ? "responses"
+    : "invocations";
+}
+
+function agentRequestAbortError(): Error {
+  const error = new Error("Agent request aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
