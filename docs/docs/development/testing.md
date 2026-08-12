@@ -16,7 +16,7 @@ The kit has two entry points plus a set of fixture helpers:
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
 - **Fixtures** — `createMockRequest`, `createMockResponse`, `mockServiceContext`, and SQL response builders.
 
-The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is a peer dependency and must be installed to import from this subpath. Any project that runs Vitest as its test runner already has it — AppKit apps scaffolded from the template do — so in practice there is nothing extra to add.
+The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so AppKit lists `vitest` as a dependency and installs it for you — there is nothing extra to add. It loads only when you import `@databricks/appkit/testing`; apps that never import the testing subpath never pull it into their runtime. (This mirrors how AppKit ships `vite` for the `@databricks/appkit/type-generator` subpath.)
 
 ## `createTestPluginContext()`
 
@@ -88,6 +88,8 @@ expect(mock.telemetry.getTracer().startActiveSpan).toHaveBeenCalled();
 
 `RecordedToolCall.asUser` is the high-value signal for cross-plugin calls: because the fake `asUser` enforces the same token precondition as the real `Plugin.asUser`, a dispatch that records `asUser: true` (with `userId` set) genuinely resolved the caller's user scope, and a request missing `x-forwarded-access-token` **rejects** instead — the OBO distinction that silent `{ executeTool }` stubs cannot verify. Assert both directions: a well-formed request records the expected `userId`, and a token-less one throws.
 
+The fake replicates `asUser`'s **token precondition**, not its internal dev-mode telemetry marker: in `NODE_ENV=development` the real `Plugin.asUser` skips impersonation and sets an OTel `isDevOboFallback()` flag, which the fake does not reproduce. Assert OBO through the recorded `asUser`/`userId` fields rather than `isDevOboFallback()`.
+
 ## `expectStream(...)`
 
 AppKit plugins stream Server-Sent Events. `expectStream` consumes a stream and asserts the ordered event types it emits. It accepts an async iterable (an agent adapter's `run()`), a plain array of events, or an SSE `Response` (or a promise of one) whose body it parses.
@@ -106,6 +108,12 @@ const types = await expectStream(res).collectTypes();
 ```
 
 `toEmit` checks that the expected types appear **in order** but tolerates other events before, between, or after them — which is what you want for streams that interleave bookkeeping events like heartbeats or metadata. Use `toEmitExactly` when the stream's shape is fully determined.
+
+`expectStream` buffers the whole source before asserting, so a stream that never terminates would otherwise hang until the test runner's own timeout. Pass `{ timeout }` to fail fast with a clear error instead:
+
+```ts
+await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
+```
 
 ## Fixtures
 

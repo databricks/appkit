@@ -70,6 +70,9 @@ export interface RecordedToolCall {
    * that call **throw** rather than record `asUser: true`. The meaningful
    * assertions are therefore: a well-formed request records `asUser: true`
    * with {@link userId} set, and a token-less request rejects.
+   *
+   * The fake replicates the token precondition only, not the real dev-mode
+   * OTel `isDevOboFallback()` marker — assert OBO here, not via that flag.
    */
   asUser: boolean;
   /**
@@ -258,6 +261,11 @@ export function createTestPluginContext(
     // throws `missingToken` (production behavior), except in development where
     // the real code skips impersonation. This is edge-faking of asUser's
     // *contract*, not a reimplementation of `runInUserContext`/`ServiceContext`.
+    //
+    // Deliberately NOT reproduced: the real dev-mode path sets an OTel
+    // `DEV_OBO_FALLBACK_KEY` marker (read by `isDevOboFallback()`). That key is
+    // module-private telemetry plumbing; assert OBO via the recorded
+    // `asUser`/`userId` fields, not `isDevOboFallback()`.
     const asUser = (req: IAppRequest): ToolProvider => {
       record.asUserRequests.push(req as express.Request);
       const token = (req as express.Request)

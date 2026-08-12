@@ -105,7 +105,9 @@ function parseSSEBody(text: string): StreamEvent[] {
   return events;
 }
 
-async function collectEvents(source: StreamSource): Promise<StreamEvent[]> {
+async function collectEventsInner(
+  source: StreamSource,
+): Promise<StreamEvent[]> {
   const resolved = await source;
 
   if (resolved instanceof Response) {
@@ -129,6 +131,48 @@ async function collectEvents(source: StreamSource): Promise<StreamEvent[]> {
   throw new Error(
     "expectStream: source must be an async iterable, an iterable, or a Response",
   );
+}
+
+async function collectEvents(
+  source: StreamSource,
+  timeoutMs?: number,
+): Promise<StreamEvent[]> {
+  // `expectStream` buffers the whole source before asserting. Without a bound,
+  // a stream that never terminates hangs until Vitest's per-test timeout —
+  // a poor signal. When a timeout is given, surface a clear, kit-specific
+  // error instead. The pending collection is abandoned (it cannot be force
+  // -cancelled), so callers should pair this with an aborting source.
+  if (timeoutMs === undefined) return collectEventsInner(source);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `expectStream: stream did not terminate within ${timeoutMs}ms. ` +
+              "Ensure the source ends, or raise the { timeout } option.",
+          ),
+        ),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race([collectEventsInner(source), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Options for {@link expectStream}. */
+export interface ExpectStreamOptions {
+  /**
+   * Fail with a clear error if the source has not finished within this many
+   * milliseconds, instead of hanging until the test runner's own timeout.
+   * Omit to buffer the source with no bound (the default).
+   */
+  timeout?: number;
 }
 
 /** Does `expected` appear as an in-order subsequence of `actual`? */
@@ -157,9 +201,21 @@ function isSubsequence(actual: string[], expected: string[]): boolean {
  * const res = await fetch("/api/analytics/query/top_users", { method: "POST" });
  * await expectStream(res).toEmit("warehouse_status", "result");
  * ```
+ *
+ * @example Guard against a non-terminating stream
+ * ```ts
+ * await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
+ * ```
+ *
+ * @param source - The stream, iterable, or SSE `Response` to consume.
+ * @param options - See {@link ExpectStreamOptions}; pass `{ timeout }` to fail
+ *   fast on a stream that never ends.
  */
-export function expectStream(source: StreamSource): StreamAssertion {
-  const events = collectEvents(source);
+export function expectStream(
+  source: StreamSource,
+  options: ExpectStreamOptions = {},
+): StreamAssertion {
+  const events = collectEvents(source, options.timeout);
 
   return {
     async collect() {

@@ -42,6 +42,7 @@
 // path (../core/plugin-context) that is not part of the package's exports map.
 export type { PluginContext } from "../core/plugin-context";
 export {
+  type ExpectStreamOptions,
   expectStream,
   parseSSEResponse,
   type StreamAssertion,

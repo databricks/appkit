@@ -160,6 +160,28 @@ describe("expectStream — invalid source", () => {
   });
 });
 
+describe("expectStream — timeout", () => {
+  test("fails with a clear error when a stream never terminates", async () => {
+    // A generator that yields once then hangs forever.
+    async function* neverEnds(): AsyncGenerator<{ type: string }> {
+      yield { type: "start" };
+      await new Promise(() => {}); // never resolves
+    }
+
+    await expect(
+      expectStream(neverEnds(), { timeout: 20 }).toEmit("start"),
+    ).rejects.toThrow(/did not terminate within 20ms/);
+  });
+
+  test("a terminating stream resolves normally under a generous timeout", async () => {
+    await expect(
+      expectStream(asyncEvents([{ type: "a" }, { type: "b" }]), {
+        timeout: 1000,
+      }).toEmit("a", "b"),
+    ).resolves.toEqual(["a", "b"]);
+  });
+});
+
 describe("parseSSEResponse — single-event helper", () => {
   test("returns eventType plus parsed data fields", async () => {
     const res = new Response(
