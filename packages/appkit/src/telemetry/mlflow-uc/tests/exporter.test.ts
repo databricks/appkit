@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { SpanStatusCode } from "@opentelemetry/api";
+import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { ExportResultCode } from "@opentelemetry/core";
 import {
   BasicTracerProvider,
@@ -81,7 +81,9 @@ function createClient(host: string, tokens: string[]): WorkspaceClient {
   } as unknown as WorkspaceClient;
 }
 
-async function createTraceSpans(): Promise<ReadableSpan[]> {
+async function createTraceSpans(
+  options: { nestedAgent?: boolean } = {},
+): Promise<ReadableSpan[]> {
   const inMemory = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(inMemory)],
@@ -104,6 +106,17 @@ async function createTraceSpans(): Promise<ReadableSpan[]> {
       "appkit.route": "chat",
     },
   });
+  if (options.nestedAgent) {
+    const nestedAgent = tracer.startSpan(
+      "helper-agent",
+      {
+        startTime: 1_700_000_000_100,
+        attributes: { "mlflow.spanType": "AGENT" },
+      },
+      trace.setSpan(context.active(), root),
+    );
+    nestedAgent.end(1_700_000_000_200);
+  }
   root.setStatus({ code: SpanStatusCode.OK });
   root.end(1_700_000_000_250);
   await provider.forceFlush();
@@ -119,6 +132,81 @@ function exportSpans(exporter: MlflowUcSpanExporter, spans: ReadableSpan[]) {
 }
 
 describe("MlflowUcSpanExporter", () => {
+  test("splits mixed OTel trace batches and registers each semantic root before its isolated upload", async () => {
+    const events: Array<
+      | { kind: "trace-info"; traceId: string; rootName: string }
+      | { kind: "otlp"; traceIds: string[] }
+    > = [];
+    const { host } = await startBackend((request, response) => {
+      const traceId = request.path.match(/\/([0-9a-f]{32})\/info$/)?.[1];
+      const traceInfo = JSON.parse(request.body.toString("utf8"));
+      events.push({
+        kind: "trace-info",
+        traceId: traceId ?? "missing",
+        rootName: traceInfo.tags["mlflow.traceName"],
+      });
+      response.statusCode = 200;
+      response.end();
+    });
+    const client = createClient(host, [
+      "token-1",
+      "token-2",
+      "token-3",
+      "token-4",
+    ]);
+    const firstTrace = await createTraceSpans({ nestedAgent: true });
+    const secondTrace = await createTraceSpans();
+    const firstTraceId = firstTrace[0].spanContext().traceId;
+    const secondTraceId = secondTrace[0].spanContext().traceId;
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            events.push({
+              kind: "otlp",
+              traceIds: [
+                ...new Set(spans.map((span) => span.spanContext().traceId)),
+              ],
+            });
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(
+      exportSpans(exporter, [...firstTrace, ...secondTrace]),
+    ).resolves.toEqual({ code: ExportResultCode.SUCCESS });
+
+    expect(events.filter((event) => event.kind === "trace-info")).toEqual([
+      {
+        kind: "trace-info",
+        traceId: firstTraceId,
+        rootName: "support-agent",
+      },
+      {
+        kind: "trace-info",
+        traceId: secondTraceId,
+        rootName: "support-agent",
+      },
+    ]);
+    expect(events.filter((event) => event.kind === "otlp")).toEqual([
+      { kind: "otlp", traceIds: [firstTraceId] },
+      { kind: "otlp", traceIds: [secondTraceId] },
+    ]);
+    for (const traceId of [firstTraceId, secondTraceId]) {
+      const traceInfoIndex = events.findIndex(
+        (event) => event.kind === "trace-info" && event.traceId === traceId,
+      );
+      const uploadIndex = events.findIndex(
+        (event) => event.kind === "otlp" && event.traceIds.includes(traceId),
+      );
+      expect(traceInfoIndex).toBeGreaterThanOrEqual(0);
+      expect(uploadIndex).toBeGreaterThan(traceInfoIndex);
+    }
+  });
+
   test("authenticates each backend action and registers trace info before protobuf upload", async () => {
     const { host, requests } = await startBackend();
     const client = createClient(host, ["token-1", "token-2"]);

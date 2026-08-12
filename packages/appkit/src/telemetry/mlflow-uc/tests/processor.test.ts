@@ -143,6 +143,32 @@ describe("MlflowUcSpanProcessor", () => {
     await provider.shutdown();
   });
 
+  test("releases completed trace state when later non-root work ends", async () => {
+    const registry = new MlflowUcTraceRegistry(config);
+    const { exporter, batches } = collectingExporter();
+    const processor = new MlflowUcSpanProcessor(config, exporter, registry);
+    const { provider, http, agent, model } = startTree(processor);
+    const otelTraceId = agent.spanContext().traceId;
+
+    model.end();
+    agent.end();
+
+    const tracer = provider.getTracer("late-non-root-test");
+    const lateSpan = tracer.startSpan(
+      "late-http-work",
+      { attributes: { "mlflow.spanType": "CHAIN" } },
+      trace.setSpan(context.active(), http),
+    );
+    lateSpan.end();
+
+    expect(batches).toHaveLength(1);
+    expect(registry.getSemanticRootSpanId(otelTraceId)).toBeUndefined();
+    expect(registry.getMlflowTraceId(otelTraceId)).toBeUndefined();
+
+    http.end();
+    await provider.shutdown();
+  });
+
   test("forceFlush waits for the root export callback", async () => {
     let finishExport!: () => void;
     const { exporter } = collectingExporter((_batch, callback) => {
@@ -200,4 +226,26 @@ describe("MlflowUcSpanProcessor", () => {
     http.end();
     await provider.shutdown();
   });
+
+  test("exports every concurrently active semantic root beyond the former registry capacity", async () => {
+    const { exporter, batches } = collectingExporter();
+    const processor = new MlflowUcSpanProcessor(config, exporter);
+    const provider = new BasicTracerProvider({ spanProcessors: [processor] });
+    const tracer = provider.getTracer("registry-capacity-test");
+    const roots = Array.from({ length: 10_001 }, (_, index) =>
+      tracer.startSpan(`agent-${index}`, {
+        attributes: { "mlflow.spanType": "AGENT" },
+      }),
+    );
+
+    for (const root of roots) root.end();
+    await processor.forceFlush();
+
+    expect(batches).toHaveLength(10_001);
+    expect(new Set(batches.map((batch) => batch.traceInfo.trace_id)).size).toBe(
+      10_001,
+    );
+
+    await provider.shutdown();
+  }, 15_000);
 });

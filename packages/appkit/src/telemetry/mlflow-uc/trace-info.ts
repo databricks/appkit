@@ -17,8 +17,6 @@ const TRACE_METADATA_IDENTITIES = [
   "appkit.route",
 ] as const;
 
-const MAX_REGISTRY_ENTRIES = 10_000;
-
 export interface MlflowUcTraceInfo {
   trace_id: string;
   client_request_id?: string;
@@ -64,10 +62,6 @@ export class MlflowUcTraceRegistry {
     const existing = this.traces.get(otelTraceId);
     if (existing) return existing.mlflowTraceId;
 
-    if (this.traces.size >= MAX_REGISTRY_ENTRIES) {
-      const oldest = this.traces.keys().next().value;
-      if (oldest) this.traces.delete(oldest);
-    }
     const mlflowTraceId = constructMlflowV4TraceId(this.config, otelTraceId);
     this.traces.set(otelTraceId, { mlflowTraceId });
     return mlflowTraceId;
@@ -88,6 +82,14 @@ export class MlflowUcTraceRegistry {
 
   getSemanticRootSpanId(otelTraceId: string): string | undefined {
     return this.traces.get(otelTraceId)?.semanticRootSpanId;
+  }
+
+  deleteTrace(otelTraceId: string): void {
+    this.traces.delete(otelTraceId);
+  }
+
+  clear(): void {
+    this.traces.clear();
   }
 
   private getOrCreateTrace(otelTraceId: string): RegisteredTrace {

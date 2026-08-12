@@ -62,20 +62,36 @@ export class MlflowUcSpanExporter
     spans: ReadableSpan[],
     resultCallback: (result: ExportResult) => void,
   ): void {
-    const semanticRoot = spans.find(
-      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    const batches = [...groupSpansByTrace(spans).values()].flatMap(
+      (traceSpans): MlflowUcExportBatch[] => {
+        const semanticRoot = findSemanticRoot(traceSpans);
+        return semanticRoot
+          ? [
+              {
+                traceInfo: buildMlflowUcTraceInfo(
+                  this.config,
+                  semanticRoot,
+                  traceSpans,
+                ),
+                spans: traceSpans,
+              },
+            ]
+          : [];
+      },
     );
-    if (!semanticRoot) {
+    if (batches.length === 0) {
       resultCallback({ code: ExportResultCode.SUCCESS });
       return;
     }
-    this.exportTrace(
-      {
-        traceInfo: buildMlflowUcTraceInfo(this.config, semanticRoot, spans),
-        spans,
-      },
-      resultCallback,
-    );
+
+    void (async () => {
+      for (const batch of batches) {
+        await new Promise<void>((resolve) => {
+          this.exportTrace(batch, () => resolve());
+        });
+      }
+      resultCallback({ code: ExportResultCode.SUCCESS });
+    })();
   }
 
   exportTrace(
@@ -173,4 +189,33 @@ export class MlflowUcSpanExporter
     await this.client.config.authenticate(headers);
     return Object.fromEntries(headers.entries());
   }
+}
+
+function groupSpansByTrace(spans: ReadableSpan[]): Map<string, ReadableSpan[]> {
+  const grouped = new Map<string, ReadableSpan[]>();
+  for (const span of spans) {
+    const traceId = span.spanContext().traceId;
+    const traceSpans = grouped.get(traceId) ?? [];
+    traceSpans.push(span);
+    grouped.set(traceId, traceSpans);
+  }
+  return grouped;
+}
+
+function findSemanticRoot(spans: ReadableSpan[]): ReadableSpan | undefined {
+  const bySpanId = new Map(
+    spans.map((span) => [span.spanContext().spanId, span]),
+  );
+  return spans.find((span) => {
+    if (span.attributes["mlflow.spanType"] !== "AGENT") return false;
+
+    let parent = span.parentSpanContext;
+    while (parent) {
+      const parentSpan = bySpanId.get(parent.spanId);
+      if (!parentSpan) break;
+      if (parentSpan.attributes["mlflow.spanType"] === "AGENT") return false;
+      parent = parentSpan.parentSpanContext;
+    }
+    return true;
+  });
 }

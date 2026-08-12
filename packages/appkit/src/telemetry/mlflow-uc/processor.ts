@@ -8,6 +8,7 @@ import type { MlflowUcConfig } from "./config";
 import type { MlflowUcExportBatch, MlflowUcTraceExporter } from "./exporter";
 import {
   buildMlflowUcTraceInfo,
+  constructMlflowV4TraceId,
   MLFLOW_EXPERIMENT_ID_ATTRIBUTE,
   MLFLOW_SPAN_TYPE_ATTRIBUTE,
   MLFLOW_TRACE_REQUEST_ID_ATTRIBUTE,
@@ -34,18 +35,25 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     if (this.closed) return;
     const spanContext = span.spanContext();
     const otelTraceId = spanContext.traceId;
-    const mlflowTraceId = this.registry.ensureTrace(otelTraceId);
+    const mlflowTraceId =
+      this.registry.getMlflowTraceId(otelTraceId) ??
+      constructMlflowV4TraceId(this.config, otelTraceId);
     span.setAttribute(MLFLOW_TRACE_REQUEST_ID_ATTRIBUTE, mlflowTraceId);
     span.setAttribute(MLFLOW_EXPERIMENT_ID_ATTRIBUTE, this.config.experimentId);
 
     let pending = this.pending.get(otelTraceId);
-    if (!pending) {
-      pending = { spans: [], memberSpanIds: new Set() };
-      this.pending.set(otelTraceId, pending);
-    }
-
     if (span.attributes[MLFLOW_SPAN_TYPE_ATTRIBUTE] === "AGENT") {
-      if (this.registry.registerSemanticRoot(otelTraceId, spanContext.spanId)) {
+      const registeredRoot = this.registry.registerSemanticRoot(
+        otelTraceId,
+        spanContext.spanId,
+      );
+      if (!pending && registeredRoot) {
+        pending = { spans: [], memberSpanIds: new Set() };
+        this.pending.set(otelTraceId, pending);
+      }
+      if (!pending) return;
+
+      if (registeredRoot) {
         pending.memberSpanIds.add(spanContext.spanId);
       } else if (
         span.parentSpanContext &&
@@ -57,6 +65,7 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     }
 
     if (
+      pending &&
       span.parentSpanContext &&
       pending.memberSpanIds.has(span.parentSpanContext.spanId)
     ) {
@@ -73,9 +82,6 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
 
     const semanticRootSpanId = this.registry.getSemanticRootSpanId(otelTraceId);
     if (!pending.memberSpanIds.has(spanContext.spanId)) {
-      if (!span.parentSpanContext && !semanticRootSpanId) {
-        this.pending.delete(otelTraceId);
-      }
       return;
     }
 
@@ -83,6 +89,7 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     if (spanContext.spanId !== semanticRootSpanId) return;
 
     this.pending.delete(otelTraceId);
+    this.registry.deleteTrace(otelTraceId);
     const batch: MlflowUcExportBatch = {
       traceInfo: buildMlflowUcTraceInfo(this.config, span, pending.spans),
       spans: pending.spans,
@@ -101,6 +108,8 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     if (this.closed) return;
     this.closed = true;
     await this.forceFlush();
+    this.pending.clear();
+    this.registry.clear();
     await this.exporter.shutdown();
   }
 
