@@ -191,12 +191,24 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
-    TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
-
     const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
     const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
+    const agentsEnabled = rawPlugins.some(
+      (plugin) => plugin?.name === "agents",
+    );
+    const requestedMlflowUc = config.telemetry?.mlflowUc;
+
+    // Configuration is resolved before plugin construction or server startup.
+    // The agents plugin enables UC tracing by default; adjacent AppKit projects
+    // can opt in explicitly without installing that plugin.
+    await TelemetryManager.initialize(
+      {
+        ...config.telemetry,
+        mlflowUc: agentsEnabled ? requestedMlflowUc || true : requestedMlflowUc,
+      },
+      config.client,
+    );
+    await CacheManager.getInstance(config?.cache);
 
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();

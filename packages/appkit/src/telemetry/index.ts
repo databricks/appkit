@@ -7,6 +7,15 @@ export { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 export { SeverityNumber } from "@opentelemetry/api-logs";
 export { normalizeTelemetryOptions } from "./config";
 export { instrumentations } from "./instrumentations";
+export {
+  constructMlflowV4TraceId,
+  getMlflowUcTraceId,
+  type MlflowUcConfig,
+  MlflowUcSpanExporter,
+  MlflowUcSpanProcessor,
+  MlflowUcTraceRegistry,
+  resolveMlflowUcConfig,
+} from "./mlflow-uc";
 export { TelemetryManager } from "./telemetry-manager";
 export { TelemetryProvider } from "./telemetry-provider";
 export type {
