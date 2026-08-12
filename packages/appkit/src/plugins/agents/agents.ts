@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import type express from "express";
 import pc from "picocolors";
 import type {
@@ -13,6 +14,7 @@ import type {
   ResponseStreamEvent,
   Thread,
   ToolAnnotations,
+  ToolEffect,
   ToolProvider,
 } from "shared";
 import {
@@ -53,6 +55,7 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import {
   type AgentTraceObserver,
+  captureTraceValue,
   resolveAgentTraceAppName,
   runWithAgentTrace,
 } from "../../telemetry/agent-tracing";
@@ -66,12 +69,92 @@ import {
   chatRequestSchema,
   invocationsRequestSchema,
 } from "./schemas";
-import { InMemoryThreadStore } from "./thread-store";
+import { InMemoryThreadStore, TracedThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 
 const logger = createLogger("agents");
 
 const DEFAULT_AGENTS_DIR = "./config/agents";
+
+const agentOperationTracer = () =>
+  trace.getTracer("@databricks/appkit-agent-tracing");
+
+export async function traceToolCall<T>(
+  input: {
+    name: string;
+    source: string;
+    effect?: ToolEffect;
+    args: unknown;
+  },
+  operation: (span: Span) => Promise<T>,
+): Promise<T> {
+  return agentOperationTracer().startActiveSpan(
+    `${input.name} tool`,
+    {
+      attributes: {
+        "mlflow.spanType": "TOOL",
+        "appkit.tool.name": input.name,
+        "appkit.tool.source": input.source,
+        ...(input.effect ? { "appkit.tool.effect": input.effect } : {}),
+      },
+    },
+    async (span) => {
+      const startedAt = Date.now();
+      setToolCapturedAttribute(span, "mlflow.spanInputs", input.args);
+      try {
+        const result = await operation(span);
+        setToolCapturedAttribute(span, "mlflow.spanOutputs", result);
+        span.setAttribute("appkit.tool.state", "completed");
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error) {
+        span.setAttribute("appkit.tool.state", "failed");
+        recordSafeToolFailure(span, error);
+        throw error;
+      } finally {
+        span.setAttribute(
+          "appkit.tool.duration_ms",
+          Math.max(0, Date.now() - startedAt),
+        );
+        span.end();
+      }
+    },
+  );
+}
+
+function setToolCapturedAttribute(
+  span: Span,
+  key: string,
+  value: unknown,
+): void {
+  const captured = captureTraceValue(value);
+  span.setAttribute(key, captured.value);
+  span.setAttribute(`${key}.original_bytes`, captured.originalBytes);
+  span.setAttribute(`${key}.sha256`, captured.sha256);
+  span.setAttribute(`${key}.truncated`, captured.truncated);
+}
+
+function recordSafeToolFailure(span: Span, error: unknown): void {
+  const failure = captureTraceValue(
+    {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error"),
+    },
+    { redactKeys: ["error"] },
+  );
+  span.setAttribute("appkit.error", failure.value);
+  span.setAttribute("mlflow.spanOutputs", failure.value);
+  span.setAttribute("mlflow.spanOutputs.original_bytes", failure.originalBytes);
+  span.setAttribute("mlflow.spanOutputs.sha256", failure.sha256);
+  span.setAttribute("mlflow.spanOutputs.truncated", failure.truncated);
+  span.recordException({ name: "Error", message: "Tool operation failed" });
+  span.setStatus({
+    code: SpanStatusCode.ERROR,
+    message: "Tool operation failed",
+  });
+}
 
 /**
  * Context flag recorded on the in-memory AgentDefinition to indicate whether
@@ -165,9 +248,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     super(config);
     this.config = config;
     if (config.threadStore) {
-      this.threadStore = config.threadStore;
+      this.threadStore =
+        config.threadStore instanceof TracedThreadStore
+          ? config.threadStore
+          : new TracedThreadStore(config.threadStore);
     } else {
-      this.threadStore = new InMemoryThreadStore();
+      this.threadStore = new TracedThreadStore(new InMemoryThreadStore());
       if (process.env.NODE_ENV === "production") {
         logger.warn(
           "InMemoryThreadStore is in use in a production build (NODE_ENV=production). " +
@@ -1489,104 +1575,131 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     args: unknown,
     depth: number,
   ): Promise<unknown> {
-    if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
-      runState.abortController.abort(
-        new Error(
-          `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
-        ),
-      );
-      throw new Error(
-        `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
-      );
-    }
-    runState.toolCallsUsed.count++;
-
     const entry = toolIndex.get(name);
-    if (!entry) throw new Error(`Unknown tool: ${name}`);
-
-    if (
-      runState.approvalPolicy.requireForDestructive &&
-      requiresApproval(entry.def.annotations)
-    ) {
-      const approvalId = randomUUID();
-      for (const ev of runState.translator.translate({
-        type: "approval_pending",
-        approvalId,
-        streamId: runState.requestId,
-        toolName: name,
+    return traceToolCall(
+      {
+        name,
+        source: entry?.source ?? "unknown",
+        effect: entry?.def.annotations?.effect,
         args,
-        annotations: entry.def.annotations,
-      })) {
-        runState.outboundEvents.push(ev);
-      }
-      const decision = await this.approvalGate.wait({
-        approvalId,
-        streamId: runState.requestId,
-        userId: runState.userId,
-        timeoutMs: runState.approvalPolicy.timeoutMs,
-      });
-      if (decision === "deny") {
-        return `Tool execution denied by user approval gate (tool: ${name}).`;
-      }
-    }
+      },
+      async () => {
+        if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
+          runState.abortController.abort(
+            new Error(
+              `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
+            ),
+          );
+          throw new Error(
+            `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
+          );
+        }
+        runState.toolCallsUsed.count++;
 
-    let result: unknown;
-    if (entry.source === "toolkit") {
-      if (!this.context) {
-        throw new Error(
-          "Plugin tool execution requires PluginContext; this should never happen through createApp",
-        );
-      }
-      result = await this.context.executeTool(
-        runState.req,
-        entry.pluginName,
-        entry.localName,
-        args,
-        runState.signal,
-        runState.limits.toolCallTimeoutMs,
-      );
-    } else if (entry.source === "function") {
-      // Function tools declare their parameters as a JSON-object schema,
-      // so adapters always serialize `args` as an object. A non-object
-      // value here means the upstream model emitted malformed tool-call
-      // JSON; surface a clear error rather than silently passing through
-      // a wrong-shape value the tool will then choke on.
-      if (typeof args !== "object" || args === null || Array.isArray(args)) {
-        throw new Error(
-          `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
-        );
-      }
-      result = await entry.functionTool.execute(
-        args as Record<string, unknown>,
-      );
-    } else if (entry.source === "mcp") {
-      if (!this.mcpClient) throw new Error("MCP client not connected");
-      const oboToken = runState.req.headers["x-forwarded-access-token"];
-      const mcpAuth =
-        typeof oboToken === "string"
-          ? { Authorization: `Bearer ${oboToken}` }
-          : undefined;
-      result = await this.mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
-    } else if (entry.source === "subagent") {
-      const childAgent = this.agents.get(entry.agentName);
-      if (!childAgent)
-        throw new Error(`Sub-agent not found: ${entry.agentName}`);
-      result = await this.runSubAgent(runState, childAgent, args, depth + 1);
-    } else if (entry.source === "hosted-supervisor") {
-      // Defense-in-depth: should never fire. Hosted-supervisor entries are
-      // routed via `AgentInput.extensions` and the SA endpoint executes
-      // them server-side; their `def` is filtered out of the adapter's
-      // `tools` array, so the model never sees a callable schema for them.
-      // If we reach here, the agent is paired with a non-SA adapter that
-      // somehow surfaced the placeholder def to the model — surface a
-      // clear error rather than crash later in `normalizeToolResult`.
-      throw new Error(
-        `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-          "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
-      );
-    }
+        if (!entry) throw new Error(`Unknown tool: ${name}`);
 
-    return normalizeToolResult(result);
+        if (
+          runState.approvalPolicy.requireForDestructive &&
+          requiresApproval(entry.def.annotations)
+        ) {
+          const approvalId = randomUUID();
+          for (const ev of runState.translator.translate({
+            type: "approval_pending",
+            approvalId,
+            streamId: runState.requestId,
+            toolName: name,
+            args,
+            annotations: entry.def.annotations,
+          })) {
+            runState.outboundEvents.push(ev);
+          }
+          const decision = await this.approvalGate.wait({
+            approvalId,
+            streamId: runState.requestId,
+            userId: runState.userId,
+            timeoutMs: runState.approvalPolicy.timeoutMs,
+            toolName: name,
+            effect: entry.def.annotations?.effect,
+            args,
+          });
+          if (decision === "deny") {
+            return `Tool execution denied by user approval gate (tool: ${name}).`;
+          }
+        }
+
+        let result: unknown;
+        if (entry.source === "toolkit") {
+          if (!this.context) {
+            throw new Error(
+              "Plugin tool execution requires PluginContext; this should never happen through createApp",
+            );
+          }
+          result = await this.context.executeTool(
+            runState.req,
+            entry.pluginName,
+            entry.localName,
+            args,
+            runState.signal,
+            runState.limits.toolCallTimeoutMs,
+            { name, source: entry.source },
+          );
+        } else if (entry.source === "function") {
+          // Function tools declare their parameters as a JSON-object schema,
+          // so adapters always serialize `args` as an object. A non-object
+          // value here means the upstream model emitted malformed tool-call
+          // JSON; surface a clear error rather than silently passing through
+          // a wrong-shape value the tool will then choke on.
+          if (
+            typeof args !== "object" ||
+            args === null ||
+            Array.isArray(args)
+          ) {
+            throw new Error(
+              `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+            );
+          }
+          result = await entry.functionTool.execute(
+            args as Record<string, unknown>,
+          );
+        } else if (entry.source === "mcp") {
+          if (!this.mcpClient) throw new Error("MCP client not connected");
+          const oboToken = runState.req.headers["x-forwarded-access-token"];
+          const mcpAuth =
+            typeof oboToken === "string"
+              ? { Authorization: `Bearer ${oboToken}` }
+              : undefined;
+          result = await this.mcpClient.callTool(
+            entry.mcpToolName,
+            args,
+            mcpAuth,
+          );
+        } else if (entry.source === "subagent") {
+          const childAgent = this.agents.get(entry.agentName);
+          if (!childAgent)
+            throw new Error(`Sub-agent not found: ${entry.agentName}`);
+          result = await this.runSubAgent(
+            runState,
+            childAgent,
+            args,
+            depth + 1,
+          );
+        } else if (entry.source === "hosted-supervisor") {
+          // Defense-in-depth: should never fire. Hosted-supervisor entries are
+          // routed via `AgentInput.extensions` and the SA endpoint executes
+          // them server-side; their `def` is filtered out of the adapter's
+          // `tools` array, so the model never sees a callable schema for them.
+          // If we reach here, the agent is paired with a non-SA adapter that
+          // somehow surfaced the placeholder def to the model — surface a
+          // clear error rather than crash later in `normalizeToolResult`.
+          throw new Error(
+            `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+              "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
+          );
+        }
+
+        return normalizeToolResult(result);
+      },
+    );
   }
 
   /**

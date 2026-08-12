@@ -1,6 +1,23 @@
+import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  type ReadableSpan,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type express from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { CacheManager } from "../../../cache";
+import { runWithAgentTrace } from "../../../telemetry/agent-tracing";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -20,6 +37,17 @@ import { AgentsPlugin } from "../agents";
  * common `RunState` object. Tests below pin those guarantees.
  */
 
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+});
+
+afterAll(() => {
+  context.disable();
+});
+
 beforeEach(() => {
   // dispatchToolCall is exercised without going through setup(), so we
   // need the cache singleton to be initialised before the plugin reads it.
@@ -34,6 +62,44 @@ beforeEach(() => {
     generateKey: vi.fn(() => "test-key"),
   };
 });
+
+async function captureSpans(
+  operation: () => Promise<unknown>,
+): Promise<{ spans: ReadableSpan[]; error?: unknown }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return {
+    spans,
+    ...(error !== undefined ? { error } : {}),
+  };
+}
+
+function semanticSpan(spans: ReadableSpan[], spanType: string): ReadableSpan {
+  const span = spans.find(
+    (candidate) => candidate.attributes["mlflow.spanType"] === spanType,
+  );
+  expect(span, `missing ${spanType} span`).toBeDefined();
+  return span as ReadableSpan;
+}
 
 function mockReq(): express.Request {
   return {
@@ -98,6 +164,427 @@ function callDispatch(
     args.depth ?? 0,
   );
 }
+
+describe("dispatchToolCall — semantic TOOL spans", () => {
+  test("creates one TOOL descendant for inline, toolkit, MCP, and local sub-agent dispatch", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    // These are the slow/external boundaries for toolkit and MCP execution;
+    // dispatch and span creation remain real.
+    // biome-ignore lint/suspicious/noExplicitAny: seed private integration seams
+    (plugin as any).context = {
+      executeTool: vi.fn().mockResolvedValue({ rows: [1, 2] }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: seed private integration seam
+    (plugin as any).mcpClient = {
+      callTool: vi.fn().mockResolvedValue({ content: "remote" }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: isolate dispatch from adapter streaming
+    (plugin as any).runSubAgent = vi.fn().mockResolvedValue("child output");
+    // biome-ignore lint/suspicious/noExplicitAny: seed the child registry lookup
+    (plugin as any).agents.set("researcher", { name: "researcher" });
+
+    const toolIndex = new Map<string, unknown>([
+      [
+        "inline",
+        {
+          source: "function",
+          def: {
+            name: "inline",
+            description: "inline",
+            parameters: { type: "object" },
+            annotations: { effect: "read" },
+          },
+          functionTool: {
+            execute: vi.fn().mockResolvedValue({ answer: 42 }),
+          },
+        },
+      ],
+      [
+        "analytics.query",
+        {
+          source: "toolkit",
+          pluginName: "analytics",
+          localName: "query",
+          def: {
+            name: "analytics.query",
+            description: "query",
+            parameters: { type: "object" },
+            annotations: { effect: "read" },
+          },
+        },
+      ],
+      [
+        "remote_lookup",
+        {
+          source: "mcp",
+          mcpToolName: "remote_lookup",
+          def: {
+            name: "remote_lookup",
+            description: "remote",
+            parameters: { type: "object" },
+            annotations: { effect: "read" },
+          },
+        },
+      ],
+      [
+        "agent-researcher",
+        {
+          source: "subagent",
+          agentName: "researcher",
+          def: {
+            name: "agent-researcher",
+            description: "delegate",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+
+    const observed = await captureSpans(() =>
+      runWithAgentTrace(
+        {
+          appName: "trace-test",
+          agentName: "planner",
+          route: "chat",
+          sessionId: "session-1",
+          userId: "alice",
+          requestId: "request-1",
+          threadId: "thread-1",
+        },
+        { message: "run tools" },
+        async () => {
+          await callDispatch(plugin, {
+            runState,
+            toolIndex,
+            name: "inline",
+            args: { password: "do-not-log", question: "meaning" },
+          });
+          await callDispatch(plugin, {
+            runState,
+            toolIndex,
+            name: "analytics.query",
+            args: { sql: "SELECT 1" },
+          });
+          await callDispatch(plugin, {
+            runState,
+            toolIndex,
+            name: "remote_lookup",
+            args: { id: 7 },
+          });
+          await callDispatch(plugin, {
+            runState,
+            toolIndex,
+            name: "agent-researcher",
+            args: { input: "investigate" },
+          });
+          return "done";
+        },
+      ),
+    );
+
+    expect(observed.error).toBeUndefined();
+    const root = semanticSpan(observed.spans, "AGENT");
+    const tools = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "TOOL",
+    );
+    expect(tools).toHaveLength(4);
+    expect(
+      tools.map((span) => [
+        span.attributes["appkit.tool.name"],
+        span.attributes["appkit.tool.source"],
+        span.attributes["appkit.tool.effect"],
+      ]),
+    ).toEqual([
+      ["inline", "function", "read"],
+      ["analytics.query", "toolkit", "read"],
+      ["remote_lookup", "mcp", "read"],
+      ["agent-researcher", "subagent", undefined],
+    ]);
+    expect(
+      tools.every(
+        (span) =>
+          span.parentSpanContext?.spanId === root.spanContext().spanId &&
+          span.status.code === SpanStatusCode.OK &&
+          typeof span.attributes["appkit.tool.duration_ms"] === "number",
+      ),
+    ).toBe(true);
+    expect(
+      JSON.parse(String(tools[0].attributes["mlflow.spanInputs"])),
+    ).toEqual({ password: "[REDACTED]", question: "meaning" });
+    expect(JSON.parse(String(tools[0].attributes["mlflow.spanOutputs"]))).toBe(
+      '{"answer":42}',
+    );
+    expect(JSON.parse(String(tools[1].attributes["mlflow.spanOutputs"]))).toBe(
+      '{"rows":[1,2]}',
+    );
+    expect(JSON.parse(String(tools[2].attributes["mlflow.spanOutputs"]))).toBe(
+      '{"content":"remote"}',
+    );
+    expect(JSON.parse(String(tools[3].attributes["mlflow.spanOutputs"]))).toBe(
+      "child output",
+    );
+  });
+
+  test("traces unknown tools as a failed TOOL without exposing the thrown detail", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+
+    const observed = await captureSpans(() =>
+      callDispatch(plugin, {
+        runState,
+        toolIndex: new Map(),
+        name: "missing_secret_tool",
+        args: { apiKey: "sensitive" },
+      }),
+    );
+
+    expect(observed.error).toEqual(
+      new Error("Unknown tool: missing_secret_tool"),
+    );
+    const tool = semanticSpan(observed.spans, "TOOL");
+    expect(tool.attributes).toMatchObject({
+      "appkit.tool.name": "missing_secret_tool",
+      "appkit.tool.source": "unknown",
+      "appkit.error": '{"error":"[REDACTED]"}',
+    });
+    expect(tool.status.code).toBe(SpanStatusCode.ERROR);
+    expect(tool.attributes["appkit.tool.duration_ms"]).toEqual(
+      expect.any(Number),
+    );
+    expect(
+      JSON.stringify({ attributes: tool.attributes, events: tool.events }),
+    ).not.toContain("Unknown tool: missing_secret_tool");
+  });
+
+  test("traces malformed function arguments and never invokes the function body", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    const execute = vi.fn();
+    const toolIndex = new Map<string, unknown>([
+      [
+        "object_only",
+        {
+          source: "function",
+          def: {
+            name: "object_only",
+            description: "object",
+            parameters: { type: "object" },
+          },
+          functionTool: { execute },
+        },
+      ],
+    ]);
+
+    const observed = await captureSpans(() =>
+      callDispatch(plugin, {
+        runState,
+        toolIndex,
+        name: "object_only",
+        args: ["wrong"],
+      }),
+    );
+
+    expect(observed.error).toEqual(
+      new Error(
+        "Function tool 'object_only' received non-object arguments (got array); expected a JSON object.",
+      ),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    const tool = semanticSpan(observed.spans, "TOOL");
+    expect(tool.attributes["appkit.tool.source"]).toBe("function");
+    expect(tool.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  test("records a toolkit timeout as a sanitized failed TOOL", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    // biome-ignore lint/suspicious/noExplicitAny: isolate the PluginContext boundary
+    (plugin as any).context = {
+      executeTool: vi
+        .fn()
+        .mockRejectedValue(
+          new DOMException("private timeout detail", "TimeoutError"),
+        ),
+    };
+    const toolIndex = new Map<string, unknown>([
+      [
+        "analytics.slow",
+        {
+          source: "toolkit",
+          pluginName: "analytics",
+          localName: "slow",
+          def: {
+            name: "analytics.slow",
+            description: "slow",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+
+    const observed = await captureSpans(() =>
+      callDispatch(plugin, {
+        runState,
+        toolIndex,
+        name: "analytics.slow",
+        args: {},
+      }),
+    );
+
+    expect(observed.error).toBeInstanceOf(DOMException);
+    const tool = semanticSpan(observed.spans, "TOOL");
+    expect(tool.status.code).toBe(SpanStatusCode.ERROR);
+    expect(tool.attributes["appkit.error"]).toBe('{"error":"[REDACTED]"}');
+    expect(
+      JSON.stringify({ attributes: tool.attributes, events: tool.events }),
+    ).not.toContain("private timeout detail");
+  });
+
+  test("records a function failure as a sanitized failed TOOL", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    const toolIndex = new Map<string, unknown>([
+      [
+        "explode",
+        {
+          source: "function",
+          def: {
+            name: "explode",
+            description: "fail",
+            parameters: { type: "object" },
+          },
+          functionTool: {
+            execute: async () => {
+              throw new Error("database password hunter2");
+            },
+          },
+        },
+      ],
+    ]);
+
+    const observed = await captureSpans(() =>
+      callDispatch(plugin, {
+        runState,
+        toolIndex,
+        name: "explode",
+        args: {},
+      }),
+    );
+
+    expect(observed.error).toEqual(new Error("database password hunter2"));
+    const tool = semanticSpan(observed.spans, "TOOL");
+    expect(tool.status.code).toBe(SpanStatusCode.ERROR);
+    expect(tool.attributes["appkit.error"]).toBe('{"error":"[REDACTED]"}');
+    expect(
+      JSON.stringify({ attributes: tool.attributes, events: tool.events }),
+    ).not.toContain("hunter2");
+  });
+});
+
+describe("dispatchToolCall — semantic approval descendants", () => {
+  function destructiveTool(execute: ReturnType<typeof vi.fn>) {
+    return new Map<string, unknown>([
+      [
+        "delete_user",
+        {
+          source: "function",
+          def: {
+            name: "delete_user",
+            description: "delete",
+            parameters: { type: "object" },
+            annotations: { effect: "destructive" },
+          },
+          functionTool: { execute },
+        },
+      ],
+    ]);
+  }
+
+  test("nests an approved CHAIN under TOOL and runs the body only after approve", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState, pushed } = makeRunState(plugin);
+    const order: string[] = [];
+    const execute = vi.fn(async () => {
+      order.push("tool");
+      return "deleted";
+    });
+
+    const observed = await captureSpans(async () => {
+      const pending = callDispatch(plugin, {
+        runState,
+        toolIndex: destructiveTool(execute),
+        name: "delete_user",
+        args: { userId: 7, password: "do-not-log" },
+      });
+      order.push("waiting");
+      expect(execute).not.toHaveBeenCalled();
+      const approvalId = (pushed[0] as { approvalId: string }).approvalId;
+      order.push("approved");
+      // biome-ignore lint/suspicious/noExplicitAny: exercise the real private gate
+      (plugin as any).approvalGate.submit({
+        approvalId,
+        userId: "alice",
+        decision: "approve",
+      });
+      await pending;
+    });
+
+    expect(observed.error).toBeUndefined();
+    expect(order).toEqual(["waiting", "approved", "tool"]);
+    const tool = semanticSpan(observed.spans, "TOOL");
+    const approval = semanticSpan(observed.spans, "CHAIN");
+    expect(approval.parentSpanContext?.spanId).toBe(tool.spanContext().spanId);
+    expect(approval.attributes).toMatchObject({
+      "appkit.approval.decision": "approve",
+      "appkit.approval.state": "approved",
+      "appkit.approval.tool_name": "delete_user",
+      "appkit.approval.duration_ms": expect.any(Number),
+    });
+    expect(
+      JSON.parse(String(approval.attributes["mlflow.spanInputs"])),
+    ).toEqual({
+      password: "[REDACTED]",
+      userId: 7,
+    });
+    expect(tool.status.code).toBe(SpanStatusCode.OK);
+  });
+
+  test("records denial and leaves the tool body idle", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState, pushed } = makeRunState(plugin);
+    const execute = vi.fn();
+    let result: unknown;
+
+    const observed = await captureSpans(async () => {
+      const pending = callDispatch(plugin, {
+        runState,
+        toolIndex: destructiveTool(execute),
+        name: "delete_user",
+        args: { userId: 7 },
+      });
+      const approvalId = (pushed[0] as { approvalId: string }).approvalId;
+      // biome-ignore lint/suspicious/noExplicitAny: exercise the real private gate
+      (plugin as any).approvalGate.submit({
+        approvalId,
+        userId: "alice",
+        decision: "deny",
+      });
+      result = await pending;
+    });
+
+    expect(observed.error).toBeUndefined();
+    expect(result).toBe(
+      "Tool execution denied by user approval gate (tool: delete_user).",
+    );
+    expect(execute).not.toHaveBeenCalled();
+    const approval = semanticSpan(observed.spans, "CHAIN");
+    expect(approval.attributes).toMatchObject({
+      "appkit.approval.decision": "deny",
+      "appkit.approval.state": "denied",
+    });
+  });
+});
 
 describe("dispatchToolCall — approval gate honours `effect`", () => {
   test('fires for `effect: "destructive"` even without legacy `destructive: true`', async () => {

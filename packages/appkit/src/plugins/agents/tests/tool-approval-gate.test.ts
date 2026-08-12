@@ -1,5 +1,67 @@
+import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  type ReadableSpan,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as approvalGateModule from "../tool-approval-gate";
 import { ToolApprovalGate } from "../tool-approval-gate";
+
+async function captureSpans(
+  operation: () => Promise<unknown>,
+): Promise<{ spans: ReadableSpan[]; error?: unknown }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    // The SDK's flush/shutdown path uses timers internally. Approval tests use
+    // fake timers for deterministic wait-state transitions, so restore real
+    // timers only after the operation (and its measured duration) completes.
+    vi.useRealTimers();
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { spans, ...(error !== undefined ? { error } : {}) };
+}
+
+function tracedWait(
+  gate: ToolApprovalGate,
+  input: {
+    approvalId: string;
+    streamId: string;
+    userId: string;
+    timeoutMs: number;
+    toolName: string;
+    effect?: "read" | "write" | "update" | "destructive";
+    args: unknown;
+  },
+): Promise<"approve" | "deny"> {
+  return gate.wait(input as unknown as Parameters<ToolApprovalGate["wait"]>[0]);
+}
+
+function approvalSpan(spans: ReadableSpan[]): ReadableSpan {
+  const span = spans.find(
+    (candidate) => candidate.attributes["mlflow.spanType"] === "CHAIN",
+  );
+  expect(span, "missing CHAIN span").toBeDefined();
+  return span as ReadableSpan;
+}
 
 describe("ToolApprovalGate", () => {
   let gate: ToolApprovalGate;
@@ -152,5 +214,152 @@ describe("ToolApprovalGate", () => {
       decision: "approve",
     });
     expect(late).toEqual({ ok: false, reason: "unknown" });
+  });
+
+  describe("semantic CHAIN spans", () => {
+    beforeEach(() => {
+      // The OpenTelemetry SDK's in-memory processor uses timers internally;
+      // approval state remains deterministic with a 1ms real timeout here.
+      vi.useRealTimers();
+    });
+
+    test.each([
+      ["approve", "approved"],
+      ["deny", "denied"],
+    ] as const)(
+      "records an explicit %s decision as %s",
+      async (decision, expectedState) => {
+        const observed = await captureSpans(async () => {
+          const waiter = tracedWait(gate, {
+            approvalId: `explicit-${decision}`,
+            streamId: "stream-explicit",
+            userId: "alice",
+            timeoutMs: 60_000,
+            toolName: "users.update",
+            effect: "update",
+            args: { password: "do-not-log", userId: 7 },
+          });
+          gate.submit({
+            approvalId: `explicit-${decision}`,
+            userId: "alice",
+            decision,
+          });
+          await expect(waiter).resolves.toBe(decision);
+        });
+
+        expect(observed.error).toBeUndefined();
+        const span = approvalSpan(observed.spans);
+        expect(span.attributes).toMatchObject({
+          "appkit.approval.id": `explicit-${decision}`,
+          "appkit.approval.tool_name": "users.update",
+          "appkit.approval.effect": "update",
+          "appkit.approval.decision": decision,
+          "appkit.approval.state": expectedState,
+          "appkit.approval.duration_ms": expect.any(Number),
+        });
+        expect(
+          JSON.parse(String(span.attributes["mlflow.spanInputs"])),
+        ).toEqual({
+          password: "[REDACTED]",
+          userId: 7,
+        });
+        expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toBe(
+          decision,
+        );
+        expect(span.status.code).toBe(SpanStatusCode.OK);
+      },
+    );
+
+    test("records automatic denial as timed_out", async () => {
+      const observed = await captureSpans(async () => {
+        const waiter = tracedWait(gate, {
+          approvalId: "timeout-1",
+          streamId: "stream-timeout",
+          userId: "alice",
+          timeoutMs: 1,
+          toolName: "users.delete",
+          effect: "destructive",
+          args: { userId: 8 },
+        });
+        await expect(waiter).resolves.toBe("deny");
+      });
+
+      expect(observed.error).toBeUndefined();
+      expect(approvalSpan(observed.spans).attributes).toMatchObject({
+        "appkit.approval.decision": "deny",
+        "appkit.approval.state": "timed_out",
+        "appkit.approval.duration_ms": expect.any(Number),
+      });
+    });
+
+    test("records stream abort as cancelled", async () => {
+      const observed = await captureSpans(async () => {
+        const waiter = tracedWait(gate, {
+          approvalId: "cancel-1",
+          streamId: "stream-cancel",
+          userId: "alice",
+          timeoutMs: 60_000,
+          toolName: "users.delete",
+          effect: "destructive",
+          args: { userId: 9 },
+        });
+        gate.abortStream("stream-cancel");
+        await expect(waiter).resolves.toBe("deny");
+      });
+
+      expect(observed.error).toBeUndefined();
+      expect(approvalSpan(observed.spans).attributes).toMatchObject({
+        "appkit.approval.decision": "deny",
+        "appkit.approval.state": "cancelled",
+        "appkit.approval.duration_ms": expect.any(Number),
+      });
+    });
+
+    test("traceApprovalWait records a sanitized failed state", async () => {
+      type TraceApprovalWait = <T>(
+        input: {
+          approvalId: string;
+          toolName: string;
+          effect?: "read" | "write" | "update" | "destructive";
+          args: unknown;
+        },
+        operation: (span: Span) => Promise<T>,
+      ) => Promise<T>;
+      const traceApprovalWait = (
+        approvalGateModule as unknown as {
+          traceApprovalWait?: TraceApprovalWait;
+        }
+      ).traceApprovalWait;
+
+      const observed = await captureSpans(() =>
+        traceApprovalWait
+          ? traceApprovalWait(
+              {
+                approvalId: "failed-1",
+                toolName: "users.delete",
+                effect: "destructive",
+                args: {},
+              },
+              async () => {
+                throw new Error("approval backend token secret-token");
+              },
+            )
+          : Promise.reject(new Error("traceApprovalWait is not implemented")),
+      );
+
+      expect(observed.error).toBeInstanceOf(Error);
+      const span = approvalSpan(observed.spans);
+      expect(span.attributes).toMatchObject({
+        "appkit.approval.id": "failed-1",
+        "appkit.approval.decision": "error",
+        "appkit.approval.state": "failed",
+        "appkit.error": '{"error":"[REDACTED]"}',
+        "appkit.approval.duration_ms": expect.any(Number),
+      });
+      expect(span.status.code).toBe(SpanStatusCode.ERROR);
+      expect(
+        JSON.stringify({ attributes: span.attributes, events: span.events }),
+      ).not.toContain("secret-token");
+    });
   });
 });

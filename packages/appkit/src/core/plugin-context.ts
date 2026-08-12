@@ -192,6 +192,10 @@ export class PluginContext {
     args: unknown,
     signal?: AbortSignal,
     timeoutMs: number = 300_000,
+    traceIdentity: { name: string; source: string } = {
+      name: `${pluginName}.${toolName}`,
+      source: "toolkit",
+    },
   ): Promise<unknown> {
     const provider = this.toolProviders.get(pluginName);
     if (!provider) {
@@ -204,6 +208,8 @@ export class PluginContext {
     const operationName = `executeTool:${pluginName}.${toolName}`;
 
     return tracer.startActiveSpan(operationName, async (span) => {
+      span.setAttribute?.("appkit.tool.name", traceIdentity.name);
+      span.setAttribute?.("appkit.tool.source", traceIdentity.source);
       const timeoutSignal = AbortSignal.timeout(timeoutMs);
       const combinedSignal = signal
         ? AbortSignal.any([signal, timeoutSignal])

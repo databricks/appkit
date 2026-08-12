@@ -1,3 +1,90 @@
+import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import type { ToolEffect } from "shared";
+import { captureTraceValue } from "../../telemetry/agent-tracing";
+
+const tracer = () => trace.getTracer("@databricks/appkit-agent-tracing");
+
+type ApprovalState =
+  | "approved"
+  | "denied"
+  | "timed_out"
+  | "cancelled"
+  | "failed";
+
+export async function traceApprovalWait<T>(
+  input: {
+    approvalId: string;
+    toolName: string;
+    effect?: ToolEffect;
+    args: unknown;
+  },
+  operation: (span: Span) => Promise<T>,
+): Promise<T> {
+  return tracer().startActiveSpan(
+    `${input.toolName} approval`,
+    {
+      attributes: {
+        "mlflow.spanType": "CHAIN",
+        "appkit.approval.id": input.approvalId,
+        "appkit.approval.tool_name": input.toolName,
+        ...(input.effect ? { "appkit.approval.effect": input.effect } : {}),
+      },
+    },
+    async (span) => {
+      const startedAt = Date.now();
+      setCapturedAttribute(span, "mlflow.spanInputs", input.args);
+      try {
+        const result = await operation(span);
+        setCapturedAttribute(span, "mlflow.spanOutputs", result);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error) {
+        span.setAttribute("appkit.approval.decision", "error");
+        span.setAttribute("appkit.approval.state", "failed");
+        recordSafeFailure(span, error, "Approval wait failed");
+        throw error;
+      } finally {
+        span.setAttribute(
+          "appkit.approval.duration_ms",
+          Math.max(0, Date.now() - startedAt),
+        );
+        span.end();
+      }
+    },
+  );
+}
+
+function setCapturedAttribute(span: Span, key: string, value: unknown): void {
+  const captured = captureTraceValue(value);
+  span.setAttribute(key, captured.value);
+  span.setAttribute(`${key}.original_bytes`, captured.originalBytes);
+  span.setAttribute(`${key}.sha256`, captured.sha256);
+  span.setAttribute(`${key}.truncated`, captured.truncated);
+}
+
+function recordSafeFailure(
+  span: Span,
+  error: unknown,
+  publicMessage: string,
+): void {
+  const failure = captureTraceValue(
+    {
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error"),
+    },
+    { redactKeys: ["error"] },
+  );
+  span.setAttribute("appkit.error", failure.value);
+  span.setAttribute("mlflow.spanOutputs", failure.value);
+  span.setAttribute("mlflow.spanOutputs.original_bytes", failure.originalBytes);
+  span.setAttribute("mlflow.spanOutputs.sha256", failure.sha256);
+  span.setAttribute("mlflow.spanOutputs.truncated", failure.truncated);
+  span.recordException({ name: "Error", message: publicMessage });
+  span.setStatus({ code: SpanStatusCode.ERROR, message: publicMessage });
+}
+
 /**
  * Server-side state for the human-in-the-loop approval gate on mutating
  * agent tool calls — tools annotated with `effect: "write" | "update" |
@@ -29,7 +116,7 @@
 type ApprovalDecision = "approve" | "deny";
 
 interface Pending {
-  resolve: (decision: ApprovalDecision) => void;
+  settle: (decision: ApprovalDecision, state: ApprovalState) => void;
   userId: string;
   streamId: string;
   timeout: ReturnType<typeof setTimeout>;
@@ -52,21 +139,40 @@ export class ToolApprovalGate {
     streamId: string;
     userId: string;
     timeoutMs: number;
+    toolName?: string;
+    effect?: ToolEffect;
+    args?: unknown;
   }): Promise<ApprovalDecision> {
-    const { approvalId, streamId, userId, timeoutMs } = args;
-    return new Promise<ApprovalDecision>((resolve) => {
-      const timeout = setTimeout(() => {
-        if (this.pending.delete(approvalId)) {
-          resolve("deny");
-        }
-      }, timeoutMs);
-      this.pending.set(approvalId, {
-        resolve,
-        userId,
-        streamId,
-        timeout,
-      });
-    });
+    const {
+      approvalId,
+      streamId,
+      userId,
+      timeoutMs,
+      toolName = "unknown",
+      effect,
+    } = args;
+    return traceApprovalWait(
+      { approvalId, toolName, effect, args: args.args },
+      (span) =>
+        new Promise<ApprovalDecision>((resolve) => {
+          const settle = (decision: ApprovalDecision, state: ApprovalState) => {
+            span.setAttribute("appkit.approval.decision", decision);
+            span.setAttribute("appkit.approval.state", state);
+            resolve(decision);
+          };
+          const timeout = setTimeout(() => {
+            if (this.pending.delete(approvalId)) {
+              settle("deny", "timed_out");
+            }
+          }, timeoutMs);
+          this.pending.set(approvalId, {
+            settle,
+            userId,
+            streamId,
+            timeout,
+          });
+        }),
+    );
   }
 
   /**
@@ -88,7 +194,7 @@ export class ToolApprovalGate {
     if (p.userId !== userId) return { ok: false, reason: "forbidden" };
     clearTimeout(p.timeout);
     this.pending.delete(approvalId);
-    p.resolve(decision);
+    p.settle(decision, decision === "approve" ? "approved" : "denied");
     return { ok: true };
   }
 
@@ -102,7 +208,7 @@ export class ToolApprovalGate {
       if (p.streamId === streamId) {
         clearTimeout(p.timeout);
         this.pending.delete(id);
-        p.resolve("deny");
+        p.settle("deny", "cancelled");
       }
     }
   }
@@ -112,7 +218,7 @@ export class ToolApprovalGate {
     for (const [id, p] of this.pending) {
       clearTimeout(p.timeout);
       this.pending.delete(id);
-      p.resolve("deny");
+      p.settle("deny", "cancelled");
     }
   }
 
