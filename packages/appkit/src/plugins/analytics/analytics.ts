@@ -34,7 +34,9 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
+  loadMetricMetadata,
   loadMetricRegistry,
+  METRIC_METADATA_FILE,
   selectMetricMetadata,
   validateMetricRequest,
 } from "./metric";
@@ -558,18 +560,40 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       throw err;
     }
 
+    const injectedMetadata = this.config.metricViewsMetadata;
+    const allMetadata =
+      injectedMetadata ??
+      (await loadMetricMetadata(this.app, req, this.devFileReader));
+
+    if (allMetadata !== undefined && !Object.hasOwn(allMetadata, key)) {
+      if (injectedMetadata !== undefined) {
+        logger.warn(
+          req,
+          "No display metadata for metric key %s in the injected metricViewsMetadata",
+          key,
+        );
+      } else {
+        logger.warn(
+          req,
+          "No display metadata for metric key %s — regenerate types to refresh %s",
+          key,
+          METRIC_METADATA_FILE,
+        );
+      }
+    }
+
     // Computed here, outside the cached execute below, so a cache hit still
     // serves the current metadata. Absent config → `undefined` → the `result`
     // message omits the field (envelope-identical to `/query`).
     const metadata = selectMetricMetadata(
-      this.config.metricViewsMetadata,
+      allMetadata,
       key,
       request.measures,
       request.dimensions,
     );
 
     // Cache key. Composed over the canonicalized args (sorted measures/
-    // dimensions, stable-sorted predicates, grain, timeDimension, limit) plus
+    // dimensions, stable-sorted predicates, grain, timeDimension, limit, orderBy) plus
     // the `executorKey` — `"sp"` shares the cache across all users, a per-user
     // identity hash isolates OBO callers.
     const cacheConfig = {
@@ -585,6 +609,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         format: "JSON_ARRAY",
         executorKey,
         limit: request.limit,
+        orderBy: request.orderBy,
       }),
     };
 

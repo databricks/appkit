@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
 import pc from "picocolors";
+import { METRIC_METADATA_FILE } from "../../../shared/src/schemas/metric-metadata-bundle";
 import { createLogger } from "../logging/logger";
 import {
   createWorkspaceClient,
@@ -28,7 +29,10 @@ import {
 } from "./migration";
 import { readMetricConfig, resolveMetricConfig } from "./mv-registry/config";
 import { createWorkspaceDescribeFetcher } from "./mv-registry/describe";
-import { generateMetricTypeDeclarations } from "./mv-registry/render-types";
+import {
+  buildMetricMetadataBundle,
+  generateMetricTypeDeclarations,
+} from "./mv-registry/render-types";
 import { emptyMetricSchema, syncMetrics } from "./mv-registry/sync";
 import type {
   DescribeFetcher,
@@ -834,7 +838,7 @@ export async function syncMetricViewsTypes(options: {
 
   // Same anti-clobber rule as the query path: when suppressDegradedWrite is set
   // (blocking mode), skip the write if any metric degraded, preserving the
-  // committed metric-views.ts. Non-blocking mode always writes.
+  // committed metric-views.d.ts. Non-blocking mode always writes.
   const shouldWriteMetrics =
     !suppressDegradedWrite || !hasAnyDegradedMetrics(schemas);
 
@@ -845,20 +849,24 @@ export async function syncMetricViewsTypes(options: {
       generateMetricTypeDeclarations(schemas),
       "utf-8",
     );
+
+    const bundlePath = path.join(metricViewsFolder, METRIC_METADATA_FILE);
+    await fs.writeFile(
+      bundlePath,
+      `${JSON.stringify(buildMetricMetadataBundle(schemas), null, 2)}\n`,
+      "utf-8",
+    );
+    logger.debug("Wrote metric metadata bundle to %s", bundlePath);
   }
-  // Sweep the ambient `metric-views.d.ts` a pre-`.ts` version left behind,
-  // which would otherwise duplicate the augmentation the new `.ts` emits.
-  // Skipped unless the replacement was actually written, so a degraded
-  // blocking pass leaves an app's only committed metric types in place.
-  if (
-    metricOutFile.endsWith(".ts") &&
-    !metricOutFile.endsWith(".d.ts") &&
-    existsSync(metricOutFile)
-  ) {
-    const staleDts = `${metricOutFile.slice(0, -".ts".length)}.d.ts`;
+  // Sweep the `metric-views.ts` an interim version left behind, which would
+  // otherwise duplicate the augmentation the `.d.ts` emits. Skipped unless the
+  // replacement was actually written, so a degraded blocking pass leaves an
+  // app's only committed metric types in place.
+  if (metricOutFile.endsWith(".d.ts") && existsSync(metricOutFile)) {
+    const staleTs = `${metricOutFile.slice(0, -".d.ts".length)}.ts`;
     try {
-      await fs.unlink(staleDts);
-      logger.debug("Removed stale generated types at %s", staleDts);
+      await fs.unlink(staleTs);
+      logger.debug("Removed stale generated types at %s", staleTs);
     } catch {
       // No stale sibling — nothing to clean up.
     }
@@ -904,4 +912,4 @@ export type {
 export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
-export const METRIC_TYPES_FILE = "metric-views.ts";
+export const METRIC_TYPES_FILE = "metric-views.d.ts";

@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { FALLBACK_UI_TOKENS } from "../constants";
 import {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -19,8 +20,22 @@ interface EChartsOption {
     borderColor?: string;
     textStyle?: { color: string };
   };
-  xAxis: { type: string; data?: unknown[] };
-  yAxis: { type: string; data?: unknown[] };
+  xAxis: {
+    type: string;
+    data?: unknown[];
+    axisLabel?: {
+      color?: string;
+      formatter?: (value: string | number) => string;
+    };
+  };
+  yAxis: {
+    type: string;
+    data?: unknown[];
+    axisLabel?: {
+      color?: string;
+      formatter?: (value: string | number) => string;
+    };
+  };
   series: Array<{
     type: string;
     data: unknown[];
@@ -28,12 +43,19 @@ interface EChartsOption {
     showSymbol?: boolean;
     symbol?: string;
     symbolSize?: number;
+    triggerLineEvent?: boolean;
     areaStyle?: { opacity: number };
     stack?: string;
     itemStyle?: { borderRadius?: number[] };
     color?: string;
-    label?: { show: boolean; position: string };
+    label?: {
+      show: boolean;
+      position: string;
+      formatter?: (params: { data: [number, number, number] }) => string;
+    };
+    tooltip?: { valueFormatter?: (value: unknown) => string };
     radius?: string | string[];
+    minAngle?: number;
   }>;
   radar?: {
     indicator: Array<{ name: string; max: number }>;
@@ -41,6 +63,7 @@ interface EChartsOption {
   visualMap?: {
     min: number;
     max: number;
+    formatter?: (value: number) => string;
     inRange: { color: string[] };
   };
 }
@@ -48,7 +71,11 @@ interface EChartsOption {
 interface RadarOption {
   series: Array<{
     type: string;
-    data: Array<{ value: number[]; areaStyle?: { opacity: number } }>;
+    data: Array<{
+      value: number[];
+      areaStyle?: { opacity: number };
+      tooltip?: { valueFormatter: (value: unknown) => string };
+    }>;
   }>;
 }
 
@@ -104,6 +131,31 @@ describe("buildCartesianOption", () => {
       expect(opt.xAxis.type).toBe("category");
       expect(opt.xAxis.data).toEqual(["A", "B", "C"]);
       expect(opt.yAxis.type).toBe("value");
+    });
+
+    test("formats value-axis ticks and series tooltips without replacing defaults", () => {
+      const valueFormatter = vi.fn(
+        (value: string | number, field: string) => `${field}: ${value}`,
+      );
+      const ctx = createBaseContext({ valueFormatter });
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "bar",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: false,
+          showSymbol: false,
+          symbolSize: 8,
+        }),
+      );
+
+      expect(opt.yAxis.axisLabel?.formatter?.(1234)).toBe("value: 1234");
+      expect(opt.series[0].tooltip?.valueFormatter?.(["Jan", 1234])).toBe(
+        "value: 1234",
+      );
+      expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
+      expect(opt.yAxis.axisLabel).toMatchObject({ color: TEST_UI.axisLabel });
     });
 
     test("applies border radius to bars", () => {
@@ -199,6 +251,65 @@ describe("buildCartesianOption", () => {
 
       expect(opt.series[0].smooth).toBe(false);
       expect(opt.series[0].showSymbol).toBe(false);
+    });
+
+    test("applies symbolSize to line series (not just scatter)", () => {
+      const ctx = createBaseContext();
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "line",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: true,
+          showSymbol: true,
+          symbolSize: 14,
+        }),
+      );
+
+      expect(opt.series[0].symbolSize).toBe(14);
+    });
+
+    test("sets triggerLineEvent only when interactive", () => {
+      const ctx = createBaseContext();
+      const base = {
+        ...ctx,
+        chartType: "line" as const,
+        isTimeSeries: false,
+        stacked: false,
+        smooth: true,
+        showSymbol: true,
+        symbolSize: 8,
+      };
+
+      // Non-interactive line: no triggerLineEvent.
+      expect(
+        asOption(buildCartesianOption(base)).series[0].triggerLineEvent,
+      ).toBeUndefined();
+
+      // Interactive line: whole stroke is clickable.
+      expect(
+        asOption(buildCartesianOption({ ...base, interactive: true })).series[0]
+          .triggerLineEvent,
+      ).toBe(true);
+    });
+
+    test("does not set triggerLineEvent on a bar series even when interactive", () => {
+      const ctx = createBaseContext();
+      const opt = asOption(
+        buildCartesianOption({
+          ...ctx,
+          chartType: "bar",
+          isTimeSeries: false,
+          stacked: false,
+          smooth: false,
+          showSymbol: false,
+          symbolSize: 8,
+          interactive: true,
+        }),
+      );
+
+      expect(opt.series[0].triggerLineEvent).toBeUndefined();
     });
   });
 
@@ -480,6 +591,16 @@ describe("buildHorizontalBarOption", () => {
 
     expect(opt.legend).toBeDefined();
   });
+
+  test("formats the horizontal value axis", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: ${value}`,
+    });
+    const opt = asOption(buildHorizontalBarOption(ctx, false));
+
+    expect(opt.xAxis.axisLabel?.formatter?.(42)).toBe("value: 42");
+    expect(opt.series[0].tooltip?.valueFormatter?.(42)).toBe("value: 42");
+  });
 });
 
 describe("buildPieOption", () => {
@@ -510,6 +631,16 @@ describe("buildPieOption", () => {
 
     // Donut has array radius [innerRadius%, "70%"]
     expect(opt.series[0].radius).toEqual(["50%", "70%"]);
+  });
+
+  test("keeps tiny pie and donut slices pointer-selectable", () => {
+    const ctx = createBaseContext({
+      yDataMap: { value: [99.6, 0.4] },
+      xData: ["Large", "Tiny"],
+    });
+    const opt = asOption(buildPieOption(ctx, "donut", 50, true, "outside"));
+
+    expect(opt.series[0].minAngle).toBe(3);
   });
 
   test("uses default inner radius for donut type", () => {
@@ -546,6 +677,23 @@ describe("buildPieOption", () => {
 
     const center = asOption(buildPieOption(ctx, "pie", 0, true, "center"));
     expect(center.series[0].label?.position).toBe("center");
+  });
+
+  test("formats tooltip values and preserves tooltip theming", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: $${value}`,
+    });
+    const opt = asOption(buildPieOption(ctx, "pie", 0, true, "outside"));
+    const formatter = opt.tooltip?.formatter as unknown as (params: {
+      name: string;
+      value: number;
+      percent: number;
+    }) => string;
+
+    expect(formatter({ name: "A", value: 10, percent: 25 })).toBe(
+      "A: value: $10 (25%)",
+    );
+    expect(opt.tooltip?.backgroundColor).toBe(TEST_UI.tooltipBg);
   });
 });
 
@@ -591,13 +739,22 @@ describe("buildRadarOption", () => {
     expect(opt.series[0].type).toBe("radar");
     expect(opt.series[0].data[0].value).toEqual([10, 20, 30]);
   });
+
+  test("formats radar tooltip values with the matching series field", () => {
+    const ctx = createBaseContext({
+      valueFormatter: (value, field) => `${field}: ${value}`,
+    });
+    const opt = asRadarOption(buildRadarOption(ctx, true));
+
+    expect(opt.series[0].data[0].tooltip?.valueFormatter(10)).toBe("value: 10");
+  });
 });
 
 describe("buildHeatmapOption", () => {
   const createHeatmapContext = (): HeatmapContext => ({
     xData: ["9AM", "10AM", "11AM"],
     yDataMap: {},
-    yFields: [],
+    yFields: ["value"],
     colors: ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
     title: "Activity Heatmap",
     showLegend: false,
@@ -686,6 +843,24 @@ describe("buildHeatmapOption", () => {
     expect(output).toBe(
       "&lt;img src=x onerror=alert(1)&gt;, &lt;script&gt;alert(2)&lt;/script&gt;: 10",
     );
+  });
+
+  test("formats tooltips, labels, and the visual scale", () => {
+    const ctx = {
+      ...createHeatmapContext(),
+      showLabels: true,
+      valueFormatter: (value: string | number, field: string) =>
+        `${field}: ${value}%`,
+    };
+    const opt = asOption(buildHeatmapOption(ctx));
+
+    expect(opt.tooltip?.formatter?.({ data: [1, 2, 25] })).toBe(
+      "10AM, Wed: value: 25%",
+    );
+    expect(opt.series[0].label?.formatter?.({ data: [1, 2, 25] })).toBe(
+      "value: 25%",
+    );
+    expect(opt.visualMap?.formatter?.(25)).toBe("value: 25%");
   });
 });
 
@@ -926,5 +1101,254 @@ describe("tooltip theming", () => {
     expect(opt.tooltip?.borderColor).toBe(TEST_UI.grid);
     // Formatter still runs (and still escapes) on top of the themed tooltip.
     expect(opt.tooltip?.formatter?.({ data: [0, 0, 10] })).toBe("A, Mon: 10");
+  });
+});
+
+// ============================================================================
+// applySelectionEmphasis — the cross-filter highlight transform
+// ============================================================================
+
+describe("applySelectionEmphasis", () => {
+  // Minimal helpers to read opacity off a transformed datum, tolerating both the
+  // object form ({ value, itemStyle }) and the wrapped-primitive form.
+  const opacityOf = (datum: unknown): number | undefined =>
+    (datum as { itemStyle?: { opacity?: number } })?.itemStyle?.opacity;
+
+  const barOption = (categories: (string | number)[], values: number[]) => ({
+    xAxis: { type: "category", data: categories },
+    yAxis: { type: "value" },
+    series: [{ type: "bar", data: values }],
+  });
+
+  describe("no-op cases (identity)", () => {
+    test("undefined selection returns the input unchanged (same reference)", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, undefined)).toBe(opt);
+    });
+
+    test("empty-string selection is a no-op — does NOT dim everything", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      // The bug being guarded: "" would match no category and dim all bars.
+      expect(applySelectionEmphasis(opt, "")).toBe(opt);
+    });
+
+    test("empty-array selection is a no-op", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, [])).toBe(opt);
+    });
+
+    test("an array of only empty strings is a no-op", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      expect(applySelectionEmphasis(opt, ["", ""])).toBe(opt);
+    });
+
+    test("option without a series array is returned unchanged", () => {
+      const opt = { xAxis: { type: "category", data: ["A"] } };
+      expect(applySelectionEmphasis(opt, "A")).toBe(opt);
+    });
+  });
+
+  describe("bar series (category axis)", () => {
+    test("dims non-selected categories and keeps the selected one at full opacity", () => {
+      const opt = barOption(["EMEA", "APAC", "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, "APAC"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // APAC selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("a mixed array selection ignores the dead empty-string member", () => {
+      const opt = barOption(["EMEA", "APAC", "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, ["EMEA", "", "AMER"]));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(1); // EMEA selected
+      expect(opacityOf(data[1])).toBe(0.3); // APAC dimmed
+      expect(opacityOf(data[2])).toBe(1); // AMER selected
+    });
+
+    test("preserves the series-level itemStyle (bar borderRadius) via a real builder", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC"],
+        yDataMap: { value: [10, 20] },
+      });
+      const built = buildCartesianOption({
+        ...ctx,
+        chartType: "bar",
+        isTimeSeries: false,
+        stacked: false,
+        smooth: false,
+        showSymbol: false,
+        symbolSize: 8,
+      });
+      const out = asOption(applySelectionEmphasis(built, "EMEA"));
+
+      // The per-datum itemStyle carries opacity but the bar's borderRadius is
+      // set at the series level and must survive (per-datum merges OVER series).
+      expect(opacityOf(out.series[0].data[0])).toBe(1);
+      expect(opacityOf(out.series[0].data[1])).toBe(0.3);
+      expect(out.series[0].itemStyle?.borderRadius).toEqual([4, 4, 0, 0]);
+    });
+
+    test("matches numeric category names by their string form", () => {
+      const opt = barOption([2024, 2025, 2026], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, "2025"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3);
+      expect(opacityOf(data[1])).toBe(1);
+      expect(opacityOf(data[2])).toBe(0.3);
+    });
+
+    test("respects custom opacity overrides", () => {
+      const opt = barOption(["EMEA", "APAC"], [10, 20]);
+      const out = asOption(
+        applySelectionEmphasis(opt, "EMEA", {
+          dimmedOpacity: 0.1,
+          selectedOpacity: 0.9,
+        }),
+      );
+      expect(opacityOf(out.series[0].data[0])).toBe(0.9);
+      expect(opacityOf(out.series[0].data[1])).toBe(0.1);
+    });
+
+    test("horizontal bars read categories from the yAxis", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC", "AMER"],
+        yDataMap: { value: [10, 20, 30] },
+      });
+      const built = buildHorizontalBarOption(ctx, false);
+      const out = asOption(applySelectionEmphasis(built, "APAC"));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3);
+      expect(opacityOf(data[1])).toBe(1);
+      expect(opacityOf(data[2])).toBe(0.3);
+    });
+  });
+
+  describe("pie series (name-keyed data)", () => {
+    test("dims non-selected slices, reading the name off each datum", () => {
+      const ctx = createBaseContext({
+        xData: ["EMEA", "APAC", "AMER"],
+        yDataMap: { value: [10, 20, 30] },
+        yFields: ["value"],
+      });
+      const built = buildPieOption(ctx, "pie", 0, true, "outside");
+      const out = asOption(applySelectionEmphasis(built, "AMER"));
+
+      const data = out.series[0].data as Array<{
+        name: string;
+        itemStyle?: { opacity?: number };
+      }>;
+      // Object data items are spread — name/value survive alongside opacity.
+      expect(data[0]).toMatchObject({ name: "EMEA" });
+      expect(data[0].itemStyle?.opacity).toBe(0.3);
+      expect(data[2].itemStyle?.opacity).toBe(1);
+    });
+  });
+
+  describe("non-categorical series are passed through untouched", () => {
+    test("line series (no category name per datum) is unchanged", () => {
+      const opt = {
+        xAxis: { type: "category", data: ["A", "B"] },
+        yAxis: { type: "value" },
+        series: [{ type: "line", data: [10, 20] }],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "A"));
+      // Line data is left as raw values (no itemStyle wrapping).
+      expect(out.series[0].data).toEqual([10, 20]);
+    });
+
+    test("scatter series is unchanged", () => {
+      const opt = {
+        xAxis: { type: "value" },
+        yAxis: { type: "value" },
+        series: [
+          {
+            type: "scatter",
+            data: [
+              [1, 2],
+              [3, 4],
+            ],
+          },
+        ],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "anything"));
+      expect(out.series[0].data).toEqual([
+        [1, 2],
+        [3, 4],
+      ]);
+    });
+
+    test("bar with no category axis (e.g. value/value) is left unchanged", () => {
+      const opt = {
+        xAxis: { type: "value" },
+        yAxis: { type: "value" },
+        series: [{ type: "bar", data: [10, 20] }],
+      };
+      const out = asOption(applySelectionEmphasis(opt, "A"));
+      expect(out.series[0].data).toEqual([10, 20]);
+    });
+  });
+
+  describe("sentinel-based category emphasis (chart click round-trip)", () => {
+    // When chart data is pre-normalized with sentinels (e.g., __empty__ for "",
+    // __none__ for NULL), toSelectionSet accepts these non-empty sentinels and
+    // can emphasize them. This tests that the appkit-ui layer supports the
+    // pattern without breaking the documented "empty string = no-op" guard.
+
+    test("emphasizes a sentinel category name (__empty__ for an empty-string value)", () => {
+      // Chart data has been pre-normalized: a row with "" becomes __empty__
+      const EMPTY = "__empty__";
+      const opt = barOption(["EMEA", EMPTY, "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, EMPTY));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // __empty__ selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("emphasizes a sentinel category name (__none__ for a NULL value)", () => {
+      // Chart data has been pre-normalized: a row with NULL becomes __none__
+      const NONE = "__none__";
+      const opt = barOption(["EMEA", NONE, "AMER"], [10, 20, 30]);
+      const out = asOption(applySelectionEmphasis(opt, NONE));
+
+      const data = out.series[0].data;
+      expect(opacityOf(data[0])).toBe(0.3); // EMEA dimmed
+      expect(opacityOf(data[1])).toBe(1); // __none__ selected
+      expect(opacityOf(data[2])).toBe(0.3); // AMER dimmed
+    });
+
+    test("still guards against an actual empty-string category (no pre-normalization)", () => {
+      // If data were NOT pre-normalized and somehow had a literal "", the guard
+      // still prevents it from dimming everything.
+      const opt = barOption(["EMEA", "", "AMER"], [10, 20, 30]);
+      expect(applySelectionEmphasis(opt, "")).toBe(opt);
+    });
+
+    test("pie series with sentinel categories work the same way", () => {
+      const EMPTY = "__empty__";
+      const NONE = "__none__";
+      const ctx = createBaseContext({
+        xData: ["EMEA", EMPTY, NONE],
+        yDataMap: { value: [10, 20, 30] },
+        yFields: ["value"],
+      });
+      const built = buildPieOption(ctx, "pie", 0, true, "outside");
+      const out = asOption(applySelectionEmphasis(built, EMPTY));
+
+      const data = out.series[0].data as Array<{
+        name: string;
+        itemStyle?: { opacity?: number };
+      }>;
+      expect(data[0].itemStyle?.opacity).toBe(0.3); // EMEA dimmed
+      expect(data[1].itemStyle?.opacity).toBe(1); // __empty__ selected
+      expect(data[2].itemStyle?.opacity).toBe(0.3); // __none__ dimmed
+    });
   });
 });

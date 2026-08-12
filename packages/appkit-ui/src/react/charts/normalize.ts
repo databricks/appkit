@@ -12,6 +12,7 @@ import {
   sortNumericAscending,
   sortTimeSeriesAscending,
   toChartArray,
+  toChronologicalValue,
 } from "./utils";
 
 // ============================================================================
@@ -19,11 +20,11 @@ import {
 // ============================================================================
 
 /**
- * Checks if a value looks like an ISO date string
+ * Checks if a value is a date string a time axis can plot.
  */
 function isDateString(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  return /^\d{4}-\d{2}-\d{2}(T|$)/.test(value);
+  return toChronologicalValue(value) !== null;
 }
 
 /**
@@ -157,9 +158,9 @@ function jsonValueToChartValue(
     return Number(value);
   }
   if (typeof value === "string") {
-    if (isDateField && isDateString(value)) {
-      const timestamp = new Date(value).getTime();
-      if (!Number.isNaN(timestamp)) {
+    if (isDateField) {
+      const timestamp = toChronologicalValue(value);
+      if (timestamp !== null) {
         return timestamp;
       }
     }

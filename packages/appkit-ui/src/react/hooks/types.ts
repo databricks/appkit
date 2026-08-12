@@ -1,4 +1,5 @@
 import type { Table } from "apache-arrow";
+import type { MetricViewColumnDisplay } from "shared";
 
 // ============================================================================
 // Data Format Types
@@ -297,9 +298,168 @@ export type InferServingRequest<K> =
 // Metric View Registry
 // ============================================================================
 
-/**
- * Metric view registry populated through module augmentation by the generated
- * `metric-views.ts` file.
- */
+/** Metric view registry for type-safe metric keys */
 // biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation (generated metric-views.ts)
 export interface MetricRegistry {}
+
+export type MetricKey = AugmentedRegistry<MetricRegistry> extends never
+  ? string
+  : AugmentedRegistry<MetricRegistry>;
+
+export type InferMeasureKeys<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { measureKeys: infer M }
+    ? M
+    : string
+  : string;
+
+export type InferDimensionKeys<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { dimensionKeys: infer D }
+    ? D
+    : string
+  : string;
+
+export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { timeGrains: infer G }
+    ? G
+    : string
+  : string;
+
+/**
+ * Infers the full row shape (every measure + dimension) from registry
+ * otherwise a total `Record<string, unknown>`.
+ */
+export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends {
+      measures: infer Meas;
+      dimensions: infer Dim;
+    }
+    ? Meas & Dim
+    : Record<string, unknown>
+  : Record<string, unknown>;
+
+export type PickMetricRow<
+  K,
+  M extends ReadonlyArray<PropertyKey>,
+  D extends ReadonlyArray<PropertyKey>,
+> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends {
+      measures: infer Meas;
+      dimensions: infer Dim;
+    }
+    ? Pick<Meas, Extract<M[number], keyof Meas>> &
+        Pick<Dim, Extract<D[number], keyof Dim>>
+    : Record<string, unknown>
+  : Record<string, unknown>;
+
+type MetricDimensionMeta<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { metadata: { dimensions: infer DM } }
+    ? DM
+    : never
+  : never;
+
+/**
+ * The dimension keys of K that are TEMPORAL — i.e. carry a `time_grain` tuple in
+ * the generated metadata. Only these can be a `timeDimension`.
+ * Degrades to `string` for an unknown key.
+ */
+export type InferTimeDimensionKeys<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? {
+        [P in keyof MetricDimensionMeta<K>]: MetricDimensionMeta<K>[P] extends {
+          time_grain: unknown;
+        }
+          ? P
+          : never;
+      }[keyof MetricDimensionMeta<K>]
+    : string;
+
+/**
+ * The valid grains for the SELECTED temporal dimensions `D` of K — the union of
+ * each selected temporal dimension's `time_grain` tuple. In practice grains are
+ * type-driven (all `timestamp` dims share one set, all `date` dims another), so
+ * the union is exactly the grains applicable to the query. Falls back to the
+ * metric's whole `timeGrains` union (or `string`) for an unknown/degraded key.
+ */
+export type GrainsForSelectedTimeDims<
+  K,
+  D extends ReadonlyArray<PropertyKey>,
+> = K extends AugmentedRegistry<MetricRegistry>
+  ? {
+      [P in Extract<
+        D[number],
+        keyof MetricDimensionMeta<K>
+      >]: MetricDimensionMeta<K>[P] extends {
+        time_grain: infer G extends readonly unknown[];
+      }
+        ? G[number]
+        : never;
+    }[Extract<D[number], keyof MetricDimensionMeta<K>>]
+  : string;
+
+export type {
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricOrderBy,
+  MetricOrderDirection,
+  MetricPredicate,
+  MetricViewColumnDisplay,
+} from "@/js";
+
+import type { MetricFilter, MetricOrderBy } from "@/js";
+
+/**
+ * Options for configuring a `useMetricView` query.
+ *
+ * Generic over the selected measure tuple `M` and dimension tuple `D` so the
+ * returned row shape ({@link PickMetricRow}) narrows to exactly the columns the
+ * query asked for. `timeDimension` must be a SELECTED, TEMPORAL dimension, and
+ * `timeGrain` is correlated to the grains valid for those dimensions — so
+ * bucketing a non-temporal dimension is a type error. `orderBy` is constrained
+ * to SELECTED measures and dimensions, so ordering by an unselected column is a
+ * compile-time error.
+ */
+type MetricViewTimeOptions<
+  K extends MetricKey,
+  D extends ReadonlyArray<InferDimensionKeys<K>>,
+> =
+  | {
+      timeGrain?: undefined;
+      timeDimension?: Extract<D[number], InferTimeDimensionKeys<K>>;
+    }
+  | {
+      timeGrain: GrainsForSelectedTimeDims<K, D>;
+      timeDimension: Extract<D[number], InferTimeDimensionKeys<K>>;
+    };
+
+export type UseMetricViewOptions<
+  K extends MetricKey = MetricKey,
+  M extends ReadonlyArray<InferMeasureKeys<K>> = ReadonlyArray<
+    InferMeasureKeys<K>
+  >,
+  D extends ReadonlyArray<InferDimensionKeys<K>> = ReadonlyArray<
+    InferDimensionKeys<K>
+  >,
+> = {
+  measures: M;
+  dimensions?: D;
+  filter?: MetricFilter;
+  orderBy?: ReadonlyArray<MetricOrderBy<M[number] | D[number]>>;
+  limit?: number;
+  /** Whether to automatically start the metric query. Default is true. */
+  autoStart?: boolean;
+} & MetricViewTimeOptions<K, D>;
+
+export interface UseMetricViewResult<T = Record<string, unknown>[]> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  /** Structured upstream error code, mirroring useAnalyticsQuery. */
+  errorCode: string | null;
+  /** Per-column display metadata for the queried columns, carried in the SSE result payload. `undefined` when the server injected no metadata (dormant / unknown key). */
+  metadata: Record<string, MetricViewColumnDisplay> | undefined;
+  /**
+   * Latest warehouse status emitted while waiting for the SQL warehouse to
+   * reach RUNNING. `null` until the current request receives a status event.
+   */
+  warehouseStatus: WarehouseStatus | null;
+}

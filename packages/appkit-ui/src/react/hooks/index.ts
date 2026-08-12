@@ -7,12 +7,26 @@ export {
 } from "../resource-status-indicator";
 export type {
   AnalyticsFormat,
+  GrainsForSelectedTimeDims,
+  InferDimensionKeys,
+  InferMeasureKeys,
+  InferMetricRow,
   InferResultByFormat,
   InferRowType,
   InferServingChunk,
   InferServingRequest,
   InferServingResponse,
+  InferTimeDimensionKeys,
+  InferTimeGrains,
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricKey,
+  MetricOrderBy,
+  MetricOrderDirection,
+  MetricPredicate,
   MetricRegistry,
+  MetricViewColumnDisplay,
+  PickMetricRow,
   PluginRegistry,
   QueryRegistry,
   ServingAlias,
@@ -20,6 +34,8 @@ export type {
   TypedArrowTable,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
+  UseMetricViewOptions,
+  UseMetricViewResult,
   WarehouseState,
   WarehouseStatus,
 } from "./types";
@@ -35,6 +51,7 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "./use-chart-data";
+export { useMetricView } from "./use-metric-view";
 export { useIsMobile } from "./use-mobile";
 export { usePluginClientConfig } from "./use-plugin-config";
 export {

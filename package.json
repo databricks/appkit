@@ -87,7 +87,8 @@
     "overrides": {
       "@opentelemetry/core@<2.8.0": "2.8.0",
       "protobufjs@<7.6.2": "7.6.2",
-      "qs@<6.15.2": "6.15.2"
+      "qs@<6.15.2": "6.15.2",
+      "size-sensor": "1.0.3"
     }
   }
 }
