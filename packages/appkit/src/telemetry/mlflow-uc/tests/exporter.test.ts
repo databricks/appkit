@@ -115,6 +115,15 @@ async function createTraceSpans(
       },
       trace.setSpan(context.active(), root),
     );
+    const nestedTool = tracer.startSpan(
+      "helper-tool",
+      {
+        startTime: 1_700_000_000_150,
+        attributes: { "mlflow.spanType": "TOOL" },
+      },
+      trace.setSpan(context.active(), nestedAgent),
+    );
+    nestedTool.end(1_700_000_000_175);
     nestedAgent.end(1_700_000_000_200);
   }
   root.setStatus({ code: SpanStatusCode.OK });
@@ -205,6 +214,65 @@ describe("MlflowUcSpanExporter", () => {
       expect(traceInfoIndex).toBeGreaterThanOrEqual(0);
       expect(uploadIndex).toBeGreaterThan(traceInfoIndex);
     }
+  });
+
+  test("buffers split trace fragments until the top semantic AGENT arrives", async () => {
+    const traceInfoRoots: Array<{ traceId: string; rootName: string }> = [];
+    const uploads: Array<{ traceId: string; spanNames: string[] }> = [];
+    const { host } = await startBackend((request, response) => {
+      const traceId = request.path.match(/\/([0-9a-f]{32})\/info$/)?.[1];
+      const traceInfo = JSON.parse(request.body.toString("utf8"));
+      traceInfoRoots.push({
+        traceId: traceId ?? "missing",
+        rootName: traceInfo.tags["mlflow.traceName"],
+      });
+      response.statusCode = 200;
+      response.end();
+    });
+    const client = createClient(host, [
+      "token-1",
+      "token-2",
+      "token-3",
+      "token-4",
+    ]);
+    const completeTrace = await createTraceSpans({ nestedAgent: true });
+    const semanticRoot = completeTrace.find(
+      (span) => span.name === "support-agent",
+    );
+    const earlierFragments = completeTrace.filter(
+      (span) => span.name !== "support-agent",
+    );
+    if (!semanticRoot) throw new Error("semantic root fixture is missing");
+    const traceId = semanticRoot.spanContext().traceId;
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            uploads.push({
+              traceId: spans[0].spanContext().traceId,
+              spanNames: spans.map((span) => span.name),
+            });
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(exportSpans(exporter, earlierFragments)).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+    await expect(exportSpans(exporter, [semanticRoot])).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+
+    expect(traceInfoRoots).toEqual([{ traceId, rootName: "support-agent" }]);
+    expect(uploads).toEqual([
+      {
+        traceId,
+        spanNames: ["helper-tool", "helper-agent", "support-agent"],
+      },
+    ]);
   });
 
   test("authenticates each backend action and registers trace info before protobuf upload", async () => {
@@ -402,5 +470,99 @@ describe("MlflowUcSpanExporter", () => {
     finishOtlp();
     await shutdown;
     expect(shutdownComplete).toBe(true);
+  });
+
+  test("shutdown drains every trace accepted by an active multi-trace export driver", async () => {
+    const firstTrace = await createTraceSpans();
+    const secondTrace = await createTraceSpans();
+    const lateTrace = await createTraceSpans();
+    const firstTraceId = firstTrace[0].spanContext().traceId;
+    const secondTraceId = secondTrace[0].spanContext().traceId;
+    const lateTraceId = lateTrace[0].spanContext().traceId;
+    const events: Array<{ kind: "trace-info" | "otlp"; traceId: string }> = [];
+
+    let releaseFirstTraceInfo!: () => void;
+    const firstTraceInfoReleased = new Promise<void>((resolve) => {
+      releaseFirstTraceInfo = resolve;
+    });
+    let firstTraceInfoStarted!: () => void;
+    const firstTraceInfoObserved = new Promise<void>((resolve) => {
+      firstTraceInfoStarted = resolve;
+    });
+    let finishSecondUpload!: () => void;
+    const secondUploadFinished = new Promise<void>((resolve) => {
+      finishSecondUpload = resolve;
+    });
+    let secondUploadStarted!: () => void;
+    const secondUploadObserved = new Promise<void>((resolve) => {
+      secondUploadStarted = resolve;
+    });
+
+    const { host } = await startBackend(async (request, response) => {
+      const traceId = request.path.match(/\/([0-9a-f]{32})\/info$/)?.[1];
+      if (traceId) events.push({ kind: "trace-info", traceId });
+      if (traceId === firstTraceId) {
+        firstTraceInfoStarted();
+        await firstTraceInfoReleased;
+      }
+      response.statusCode = 200;
+      response.end();
+    });
+    const client = createClient(host, [
+      "token-1",
+      "token-2",
+      "token-3",
+      "token-4",
+    ]);
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            const traceId = spans[0].spanContext().traceId;
+            events.push({ kind: "otlp", traceId });
+            if (traceId === secondTraceId) {
+              secondUploadStarted();
+              void secondUploadFinished.then(() =>
+                callback({ code: ExportResultCode.SUCCESS }),
+              );
+              return;
+            }
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    const activeExport = exportSpans(exporter, [...firstTrace, ...secondTrace]);
+    await firstTraceInfoObserved;
+    let shutdownComplete = false;
+    const shutdown = exporter.shutdown().then(() => {
+      shutdownComplete = true;
+    });
+    await expect(exportSpans(exporter, lateTrace)).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+    await Promise.resolve();
+    expect(shutdownComplete).toBe(false);
+
+    releaseFirstTraceInfo();
+    const secondAcceptedTraceStarted = await Promise.race([
+      secondUploadObserved.then(() => true),
+      activeExport.then(() => false),
+    ]);
+    expect(secondAcceptedTraceStarted).toBe(true);
+    await Promise.resolve();
+    expect(shutdownComplete).toBe(false);
+
+    finishSecondUpload();
+    await Promise.all([activeExport, shutdown]);
+    expect(events).toEqual([
+      { kind: "trace-info", traceId: firstTraceId },
+      { kind: "otlp", traceId: firstTraceId },
+      { kind: "trace-info", traceId: secondTraceId },
+      { kind: "otlp", traceId: secondTraceId },
+    ]);
+    expect(events.some((event) => event.traceId === lateTraceId)).toBe(false);
   });
 });

@@ -41,6 +41,7 @@ export class MlflowUcSpanExporter
   implements SpanExporter, MlflowUcTraceExporter
 {
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly pendingSpans = new Map<string, Map<string, ReadableSpan>>();
   private readonly createOtlpExporter: NonNullable<
     ExporterOptions["createOtlpExporter"]
   >;
@@ -62,36 +63,24 @@ export class MlflowUcSpanExporter
     spans: ReadableSpan[],
     resultCallback: (result: ExportResult) => void,
   ): void {
-    const batches = [...groupSpansByTrace(spans).values()].flatMap(
-      (traceSpans): MlflowUcExportBatch[] => {
-        const semanticRoot = findSemanticRoot(traceSpans);
-        return semanticRoot
-          ? [
-              {
-                traceInfo: buildMlflowUcTraceInfo(
-                  this.config,
-                  semanticRoot,
-                  traceSpans,
-                ),
-                spans: traceSpans,
-              },
-            ]
-          : [];
-      },
-    );
+    if (this.closed) {
+      resultCallback({ code: ExportResultCode.SUCCESS });
+      return;
+    }
+
+    const batches = this.accumulateReadyBatches(spans);
     if (batches.length === 0) {
       resultCallback({ code: ExportResultCode.SUCCESS });
       return;
     }
 
-    void (async () => {
+    const operation = (async () => {
       for (const batch of batches) {
-        await new Promise<void>((resolve) => {
-          this.exportTrace(batch, () => resolve());
-        });
+        await this.exportBatchSafely(batch);
       }
       resultCallback({ code: ExportResultCode.SUCCESS });
     })();
+    this.track(operation);
   }
 
   exportTrace(
@@ -103,22 +92,10 @@ export class MlflowUcSpanExporter
       return;
     }
 
-    let operation!: Promise<void>;
-    operation = this.exportBatch(batch)
-      .catch((error) => {
-        this.logger.error("MLflow UC trace export failed: %O", {
-          event: "mlflow_uc_trace_export_failed",
-          traceId: batch.traceInfo.trace_id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-      .then(() => {
-        resultCallback({ code: ExportResultCode.SUCCESS });
-      })
-      .finally(() => {
-        this.inFlight.delete(operation);
-      });
-    this.inFlight.add(operation);
+    const operation = this.exportBatchSafely(batch).then(() => {
+      resultCallback({ code: ExportResultCode.SUCCESS });
+    });
+    this.track(operation);
   }
 
   async forceFlush(): Promise<void> {
@@ -130,6 +107,55 @@ export class MlflowUcSpanExporter
   async shutdown(): Promise<void> {
     this.closed = true;
     await this.forceFlush();
+    this.pendingSpans.clear();
+  }
+
+  private accumulateReadyBatches(spans: ReadableSpan[]): MlflowUcExportBatch[] {
+    const batches: MlflowUcExportBatch[] = [];
+    for (const [traceId, newSpans] of groupSpansByTrace(spans)) {
+      const accumulated = this.pendingSpans.get(traceId) ?? new Map();
+      for (const span of newSpans) {
+        accumulated.set(span.spanContext().spanId, span);
+      }
+      this.pendingSpans.set(traceId, accumulated);
+
+      const traceSpans = [...accumulated.values()];
+      const semanticRoot = findSemanticRoot(traceSpans);
+      if (semanticRoot) {
+        this.pendingSpans.delete(traceId);
+        batches.push({
+          traceInfo: buildMlflowUcTraceInfo(
+            this.config,
+            semanticRoot,
+            traceSpans,
+          ),
+          spans: traceSpans,
+        });
+      } else if (isCompletedRootlessTrace(traceSpans)) {
+        this.pendingSpans.delete(traceId);
+      }
+    }
+    return batches;
+  }
+
+  private async exportBatchSafely(batch: MlflowUcExportBatch): Promise<void> {
+    try {
+      await this.exportBatch(batch);
+    } catch (error) {
+      this.logger.error("MLflow UC trace export failed: %O", {
+        event: "mlflow_uc_trace_export_failed",
+        traceId: batch.traceInfo.trace_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private track(operation: Promise<void>): void {
+    this.inFlight.add(operation);
+    void operation.then(
+      () => this.inFlight.delete(operation),
+      () => this.inFlight.delete(operation),
+    );
   }
 
   private async exportBatch(batch: MlflowUcExportBatch): Promise<void> {
@@ -212,10 +238,17 @@ function findSemanticRoot(spans: ReadableSpan[]): ReadableSpan | undefined {
     let parent = span.parentSpanContext;
     while (parent) {
       const parentSpan = bySpanId.get(parent.spanId);
-      if (!parentSpan) break;
+      if (!parentSpan) return false;
       if (parentSpan.attributes["mlflow.spanType"] === "AGENT") return false;
       parent = parentSpan.parentSpanContext;
     }
     return true;
   });
+}
+
+function isCompletedRootlessTrace(spans: ReadableSpan[]): boolean {
+  return (
+    spans.some((span) => !span.parentSpanContext) &&
+    spans.every((span) => span.attributes["mlflow.spanType"] !== "AGENT")
+  );
 }
