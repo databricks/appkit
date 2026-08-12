@@ -137,6 +137,9 @@ export async function runWithAgentTrace<T>(
             reportedError ??= event.error;
           }
         },
+        addChildUsage(childUsage) {
+          usage.add(normalizeUsage(childUsage));
+        },
         updateIdentity(next) {
           setIdentityAttributes(root, next);
         },

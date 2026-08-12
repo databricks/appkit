@@ -131,6 +131,13 @@ function makeRunState(plugin: AgentsPlugin) {
     outboundEvents: {
       push: (event: unknown) => pushed.push(event),
     },
+    traceIdentity: {
+      appName: "test-app",
+      route: "chat",
+      sessionId: "session-1",
+      userId: "alice",
+      requestId: "stream-1",
+    },
     toolCallsUsed: { count: 0 },
   };
   return { runState, pushed, plugin };
@@ -180,7 +187,15 @@ describe("dispatchToolCall — semantic TOOL spans", () => {
       callTool: vi.fn().mockResolvedValue({ content: "remote" }),
     };
     // biome-ignore lint/suspicious/noExplicitAny: isolate dispatch from adapter streaming
-    (plugin as any).runSubAgent = vi.fn().mockResolvedValue("child output");
+    (plugin as any).runSubAgent = vi.fn().mockResolvedValue({
+      text: "child output",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAvailable: false,
+      },
+    });
     // biome-ignore lint/suspicious/noExplicitAny: seed the child registry lookup
     (plugin as any).agents.set("researcher", { name: "researcher" });
 
@@ -915,5 +930,201 @@ describe("runSubAgent — sub-agent event forwarding", () => {
     expect(types).toContain("tool_call");
     expect(types).toContain("tool_result");
     expect(types).toContain("message_delta");
+  });
+
+  test("nests the helper AGENT inside its dispatch TOOL and adds child usage once", async () => {
+    const plugin = new AgentsPlugin({ dir: false, agents: {} });
+    const { runState } = makeRunState(plugin);
+    Object.assign(runState, {
+      traceIdentity: {
+        appName: "test-app",
+        requestId: "request-1",
+        route: "chat",
+        sessionId: "session-1",
+        userId: "alice",
+      },
+    });
+    const helperStartedAt = Date.now();
+    let childAdapterThreadId: string | undefined;
+    const helper = {
+      name: "helper",
+      instructions: "research",
+      adapter: {
+        async *run(input: any, runContext: any): any {
+          childAdapterThreadId = input.threadId;
+          yield {
+            type: "model_start",
+            stepId: "helper-step",
+            model: "helper.model",
+            provider: "databricks",
+            input: { messages: [{ role: "user", content: "research" }] },
+            startedAt: helperStartedAt,
+          };
+          const fact = await runContext.executeTool("helper.tool", {
+            topic: "tracing",
+          });
+          yield { type: "message_delta", content: `helper:${fact}` };
+          yield {
+            type: "model_end",
+            stepId: "helper-step",
+            model: "helper.model",
+            provider: "databricks",
+            output: { text: `helper:${fact}` },
+            usage: {
+              inputTokens: 6,
+              outputTokens: 3,
+              totalTokens: 9,
+              costUsd: 0.02,
+              costAvailable: true,
+            },
+            streamDurationMs: 5,
+            endedAt: helperStartedAt + 5,
+          };
+        },
+      },
+      toolIndex: new Map<string, unknown>([
+        [
+          "helper.tool",
+          {
+            source: "function",
+            def: {
+              name: "helper.tool",
+              description: "look up a fact",
+              parameters: { type: "object" },
+              annotations: { effect: "read" },
+            },
+            functionTool: {
+              execute: async ({ topic }: { topic: string }) => `fact:${topic}`,
+            },
+          },
+        ],
+      ]),
+    };
+    (plugin as any).agents.set("helper", helper);
+    const plannerToolIndex = new Map<string, unknown>([
+      [
+        "agent-helper",
+        {
+          source: "subagent",
+          agentName: "helper",
+          def: {
+            name: "agent-helper",
+            description: "delegate",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+    const plannerStartedAt = Date.now();
+    let aggregateUsage: unknown;
+
+    const observed = await captureSpans(async () => {
+      const traced = await runWithAgentTrace(
+        {
+          appName: "test-app",
+          agentName: "planner",
+          route: "chat",
+          sessionId: "session-1",
+          userId: "alice",
+          requestId: "request-1",
+          threadId: "planner-thread",
+        },
+        { message: "plan" },
+        async (observer) => {
+          Object.assign(runState, { traceObserver: observer });
+          observer.onEvent({
+            type: "model_start",
+            stepId: "planner-step",
+            model: "planner.model",
+            provider: "databricks",
+            input: { messages: [{ role: "user", content: "plan" }] },
+            startedAt: plannerStartedAt,
+          });
+          const delegated = await callDispatch(plugin, {
+            runState,
+            toolIndex: plannerToolIndex,
+            name: "agent-helper",
+            args: { input: "research" },
+          });
+          observer.onEvent({
+            type: "model_end",
+            stepId: "planner-step",
+            model: "planner.model",
+            provider: "databricks",
+            output: { text: String(delegated) },
+            usage: {
+              inputTokens: 10,
+              outputTokens: 4,
+              totalTokens: 14,
+              costUsd: 0.04,
+              costAvailable: true,
+            },
+            streamDurationMs: 8,
+            endedAt: plannerStartedAt + 8,
+          });
+          return delegated;
+        },
+      );
+      aggregateUsage = traced.usage;
+    });
+
+    expect(observed.error).toBeUndefined();
+    expect(aggregateUsage).toEqual({
+      inputTokens: 16,
+      outputTokens: 7,
+      totalTokens: 23,
+      costUsd: 0.06,
+      costAvailable: true,
+    });
+    const agentSpans = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const toolSpans = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "TOOL",
+    );
+    const planner = agentSpans.find(
+      (span) => span.attributes["appkit.agent.name"] === "planner",
+    );
+    const child = agentSpans.find(
+      (span) => span.attributes["appkit.agent.name"] === "helper",
+    );
+    const delegation = toolSpans.find(
+      (span) => span.attributes["appkit.tool.name"] === "agent-helper",
+    );
+    const helperTool = toolSpans.find(
+      (span) => span.attributes["appkit.tool.name"] === "helper.tool",
+    );
+    const helperModel = observed.spans.find(
+      (span) => span.attributes["mlflow.chat.model"] === "helper.model",
+    );
+    expect(agentSpans).toHaveLength(2);
+    expect(delegation?.parentSpanContext?.spanId).toBe(
+      planner?.spanContext().spanId,
+    );
+    expect(child?.parentSpanContext?.spanId).toBe(
+      delegation?.spanContext().spanId,
+    );
+    expect(helperModel?.parentSpanContext?.spanId).toBe(
+      child?.spanContext().spanId,
+    );
+    expect(helperTool?.parentSpanContext?.spanId).toBe(
+      child?.spanContext().spanId,
+    );
+    expect(child?.attributes).toMatchObject({
+      "appkit.agent.name": "helper",
+      "appkit.app.name": "test-app",
+      "appkit.request.id": "request-1",
+      "appkit.thread.id": childAdapterThreadId,
+      "mlflow.trace.session": "session-1",
+      "mlflow.trace.user": "alice",
+    });
+    expect(childAdapterThreadId).not.toBe("planner-thread");
+    expect(planner?.attributes["mlflow.trace.tokenUsage"]).toBe(
+      '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',
+    );
+    expect(planner?.attributes["mlflow.llm.cost"]).toBe(0.06);
+    expect(
+      JSON.parse(String(delegation?.attributes["mlflow.spanOutputs"])),
+    ).toBe("helper:fact:tracing");
   });
 });

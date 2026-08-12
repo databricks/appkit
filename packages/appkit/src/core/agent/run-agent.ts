@@ -29,6 +29,7 @@ import {
   isFunctionTool,
 } from "./tools/function-tool";
 import { isHostedTool } from "./tools/hosted-tools";
+import { traceToolCall } from "./trace-tool-call";
 import type {
   AgentDefinition,
   AgentTool,
@@ -68,6 +69,14 @@ export interface RunAgentResult {
   traceId: string;
   usage: AgentUsage;
 }
+
+type ResolvedRunAgentInput = RunAgentInput & {
+  appName: string;
+  requestId: string;
+  sessionId: string;
+  threadId: string;
+  userId: string;
+};
 
 /**
  * Standalone agent execution without `createApp`. Resolves the adapter, binds
@@ -109,13 +118,16 @@ export async function runAgent(
   const providerCache = new Map<string, ToolProvider>();
   const threadId = input.threadId ?? randomUUID();
   const requestId = input.requestId ?? randomUUID();
+  const appName = resolveAgentTraceAppName(input.appName);
+  const sessionId = input.sessionId ?? threadId;
+  const userId = input.userId ?? "service-principal";
   const traced = await runWithAgentTrace(
     {
-      appName: resolveAgentTraceAppName(input.appName),
+      appName,
       agentName: def.name ?? "agent",
       route: "runAgent",
-      sessionId: input.sessionId ?? threadId,
-      userId: input.userId ?? "service-principal",
+      sessionId,
+      userId,
       requestId,
       threadId,
     },
@@ -124,7 +136,14 @@ export async function runAgent(
       await initStandalonePlugins(input.plugins ?? [], providerCache);
       return runAgentInternal(
         def,
-        { ...input, requestId, threadId },
+        {
+          ...input,
+          appName,
+          requestId,
+          sessionId,
+          threadId,
+          userId,
+        },
         providerCache,
         observer,
       );
@@ -139,7 +158,7 @@ export async function runAgent(
 
 async function runAgentInternal(
   def: AgentDefinition,
-  input: RunAgentInput,
+  input: ResolvedRunAgentInput,
   providerCache: Map<string, ToolProvider>,
   observer: AgentTraceObserver,
 ): Promise<Pick<RunAgentResult, "text" | "events">> {
@@ -163,53 +182,81 @@ async function runAgentInternal(
   const executeTool = async (name: string, args: unknown): Promise<unknown> => {
     const entry = toolIndex.get(name);
     if (!entry) throw new Error(`Unknown tool: ${name}`);
-    if (entry.kind === "function") {
-      return entry.tool.execute(args as Record<string, unknown>);
-    }
-    if (entry.kind === "toolkit") {
-      return entry.provider.executeAgentTool(
-        entry.localName,
-        args as Record<string, unknown>,
-        signal,
-      );
-    }
-    if (entry.kind === "subagent") {
-      const subInput: RunAgentInput = {
-        messages:
-          typeof args === "object" &&
-          args !== null &&
-          typeof (args as { input?: unknown }).input === "string"
-            ? (args as { input: string }).input
-            : JSON.stringify(args),
-        signal,
-        plugins: input.plugins,
-        sessionId: input.sessionId,
-        userId: input.userId,
-        requestId: input.requestId,
-        appName: input.appName,
-      };
-      // Reuse the same `providerCache` so sub-agent plugin tools dispatch
-      // through the same instances the parent constructed.
-      const res = await runAgentInternal(
-        entry.agentDef,
-        subInput,
-        providerCache,
-        observer,
-      );
-      return res.text;
-    }
-    if (entry.kind === "hosted-supervisor") {
-      // Defense-in-depth: should never fire. The placeholder def is
-      // filtered out of `tools` above, so the model never sees a callable
-      // schema for hosted-supervisor entries. If we ever reach here, the
-      // model was somehow handed the def and tried to invoke it directly.
-      throw new Error(
-        `runAgent: tool "${name}" is a hosted-supervisor tool, executed server-side by the Databricks AI Gateway. It must not be invoked from the Node process.`,
-      );
-    }
-    throw new Error(
-      `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
-        "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
+    return traceToolCall(
+      {
+        name,
+        source: entry.kind,
+        effect: entry.def.annotations?.effect,
+        args,
+      },
+      async () => {
+        if (entry.kind === "function") {
+          return entry.tool.execute(args as Record<string, unknown>);
+        }
+        if (entry.kind === "toolkit") {
+          return entry.provider.executeAgentTool(
+            entry.localName,
+            args as Record<string, unknown>,
+            signal,
+          );
+        }
+        if (entry.kind === "subagent") {
+          const childThreadId = randomUUID();
+          const subInput: ResolvedRunAgentInput = {
+            messages:
+              typeof args === "object" &&
+              args !== null &&
+              typeof (args as { input?: unknown }).input === "string"
+                ? (args as { input: string }).input
+                : JSON.stringify(args),
+            signal,
+            plugins: input.plugins,
+            sessionId: input.sessionId,
+            userId: input.userId,
+            requestId: input.requestId,
+            threadId: childThreadId,
+            appName: input.appName,
+          };
+          const childTrace = await runWithAgentTrace(
+            {
+              appName: resolveAgentTraceAppName(input.appName),
+              agentName: entry.agentDef.name ?? "agent",
+              route: "runAgent",
+              sessionId: input.sessionId,
+              userId: input.userId,
+              requestId: input.requestId,
+              threadId: childThreadId,
+            },
+            { messages: subInput.messages },
+            (childObserver) =>
+              runAgentInternal(
+                entry.agentDef,
+                subInput,
+                providerCache,
+                childObserver,
+              ),
+          );
+          const childResult = {
+            text: childTrace.value.text,
+            usage: childTrace.usage,
+          };
+          observer.addChildUsage(childResult.usage);
+          return childResult.text;
+        }
+        if (entry.kind === "hosted-supervisor") {
+          // Defense-in-depth: should never fire. The placeholder def is
+          // filtered out of `tools` above, so the model never sees a callable
+          // schema for hosted-supervisor entries. If we ever reach here, the
+          // model was somehow handed the def and tried to invoke it directly.
+          throw new Error(
+            `runAgent: tool "${name}" is a hosted-supervisor tool, executed server-side by the Databricks AI Gateway. It must not be invoked from the Node process.`,
+          );
+        }
+        throw new Error(
+          `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
+            "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
+        );
+      },
     );
   };
 

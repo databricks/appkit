@@ -338,6 +338,13 @@ describe("runSubAgent — depth guard", () => {
       outboundEvents: {
         push: vi.fn(),
       },
+      traceIdentity: {
+        appName: "test-app",
+        route: "chat",
+        sessionId: "session-1",
+        userId: "alice",
+        requestId: "test-stream",
+      },
       toolCallsUsed: { count: 0 },
     };
   }
@@ -388,6 +395,14 @@ describe("runSubAgent — depth guard", () => {
       { input: "test" },
       3, // at the limit, not over
     );
-    expect(result).toBe("hello from depth-3");
+    expect(result).toEqual({
+      text: "hello from depth-3",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAvailable: false,
+      },
+    });
   });
 });

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import type express from "express";
 import pc from "picocolors";
 import type {
   AgentAdapter,
   AgentRunContext,
   AgentToolDefinition,
+  AgentUsage,
   IAppRouter,
   Message,
   PluginPhase,
@@ -14,7 +14,6 @@ import type {
   ResponseStreamEvent,
   Thread,
   ToolAnnotations,
-  ToolEffect,
   ToolProvider,
 } from "shared";
 import {
@@ -38,6 +37,7 @@ import {
   isHostedTool,
   resolveHostedTools,
 } from "../../core/agent/tools";
+import { traceToolCall } from "../../core/agent/trace-tool-call";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -55,7 +55,6 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import {
   type AgentTraceObserver,
-  captureTraceValue,
   resolveAgentTraceAppName,
   runWithAgentTrace,
 } from "../../telemetry/agent-tracing";
@@ -76,87 +75,7 @@ const logger = createLogger("agents");
 
 const DEFAULT_AGENTS_DIR = "./config/agents";
 
-const agentOperationTracer = () =>
-  trace.getTracer("@databricks/appkit-agent-tracing");
-
-export async function traceToolCall<T>(
-  input: {
-    name: string;
-    source: string;
-    effect?: ToolEffect;
-    args: unknown;
-  },
-  operation: (span: Span) => Promise<T>,
-): Promise<T> {
-  return agentOperationTracer().startActiveSpan(
-    `${input.name} tool`,
-    {
-      attributes: {
-        "mlflow.spanType": "TOOL",
-        "gen_ai.operation.name": "execute_tool",
-        "gen_ai.tool.name": input.name,
-        "appkit.tool.name": input.name,
-        "appkit.tool.source": input.source,
-        ...(input.effect ? { "appkit.tool.effect": input.effect } : {}),
-      },
-    },
-    async (span) => {
-      const startedAt = Date.now();
-      setToolCapturedAttribute(span, "mlflow.spanInputs", input.args);
-      try {
-        const result = await operation(span);
-        setToolCapturedAttribute(span, "mlflow.spanOutputs", result);
-        span.setAttribute("appkit.tool.state", "completed");
-        span.setStatus({ code: SpanStatusCode.OK });
-        return result;
-      } catch (error) {
-        span.setAttribute("appkit.tool.state", "failed");
-        recordSafeToolFailure(span, error);
-        throw error;
-      } finally {
-        span.setAttribute(
-          "appkit.tool.duration_ms",
-          Math.max(0, Date.now() - startedAt),
-        );
-        span.end();
-      }
-    },
-  );
-}
-
-function setToolCapturedAttribute(
-  span: Span,
-  key: string,
-  value: unknown,
-): void {
-  const captured = captureTraceValue(value);
-  span.setAttribute(key, captured.value);
-  span.setAttribute(`${key}.original_bytes`, captured.originalBytes);
-  span.setAttribute(`${key}.sha256`, captured.sha256);
-  span.setAttribute(`${key}.truncated`, captured.truncated);
-}
-
-function recordSafeToolFailure(span: Span, error: unknown): void {
-  const failure = captureTraceValue(
-    {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error ?? "Unknown error"),
-    },
-    { redactKeys: ["error"] },
-  );
-  span.setAttribute("appkit.error", failure.value);
-  span.setAttribute("mlflow.spanOutputs", failure.value);
-  span.setAttribute("mlflow.spanOutputs.original_bytes", failure.originalBytes);
-  span.setAttribute("mlflow.spanOutputs.sha256", failure.sha256);
-  span.setAttribute("mlflow.spanOutputs.truncated", failure.truncated);
-  span.recordException({ name: "Error", message: "Tool operation failed" });
-  span.setStatus({
-    code: SpanStatusCode.ERROR,
-    message: "Tool operation failed",
-  });
-}
+export { traceToolCall } from "../../core/agent/trace-tool-call";
 
 /**
  * Context flag recorded on the in-memory AgentDefinition to indicate whether
@@ -219,6 +138,13 @@ interface RunState {
   translator: AgentEventTranslator;
   outboundEvents: EventChannel<ResponseStreamEvent>;
   traceObserver?: AgentTraceObserver;
+  traceIdentity: {
+    appName: string;
+    route: "chat" | "invocations" | "responses";
+    sessionId: string;
+    userId: string;
+    requestId: string;
+  };
   /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
   toolCallsUsed: { count: number };
 }
@@ -1255,6 +1181,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       outboundEvents,
       toolCallsUsed: { count: 0 },
       traceObserver: observer,
+      traceIdentity: {
+        appName: resolveAgentTraceAppName(),
+        route: "chat",
+        sessionId: requestSessionId(req) ?? thread.id,
+        userId,
+        requestId,
+      },
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1446,6 +1379,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
       traceObserver: observer,
+      traceIdentity: {
+        appName: resolveAgentTraceAppName(),
+        route: invokeTraceRoute(req),
+        sessionId: requestSessionId(req) ?? thread.id,
+        userId,
+        requestId,
+      },
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
@@ -1679,12 +1619,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           const childAgent = this.agents.get(entry.agentName);
           if (!childAgent)
             throw new Error(`Sub-agent not found: ${entry.agentName}`);
-          result = await this.runSubAgent(
+          const childResult = await this.runSubAgent(
             runState,
             childAgent,
             args,
             depth + 1,
           );
+          runState.traceObserver?.addChildUsage(childResult.usage);
+          result = childResult.text;
         } else if (entry.source === "hosted-supervisor") {
           // Defense-in-depth: should never fire. Hosted-supervisor entries are
           // routed via `AgentInput.extensions` and the SA endpoint executes
@@ -1705,9 +1647,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Runs a sub-agent in response to an `agent-<key>` tool call. Returns the
-   * concatenated text output to hand back to the parent adapter as the tool
-   * result.
+   * Runs a sub-agent in response to an `agent-<key>` tool call. Returns its
+   * concatenated text and aggregate usage; dispatch folds that usage into the
+   * owning trace once, then hands only the text to outer tool normalization.
    *
    * `depth` starts at 1 for a top-level sub-agent invocation (i.e. the
    * outer `_streamAgent` calls `runSubAgent(..., 1)`) and increments on
@@ -1723,7 +1665,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     child: RegisteredAgent,
     args: unknown,
     depth: number,
-  ): Promise<string> {
+  ): Promise<{ text: string; usage: AgentUsage }> {
     if (depth > runState.limits.maxSubAgentDepth) {
       throw new Error(
         `Sub-agent depth exceeded (limit ${runState.limits.maxSubAgentDepth}). ` +
@@ -1743,14 +1685,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const childTools = Array.from(child.toolIndex.values())
       .filter((e) => e.source !== "hosted-supervisor")
       .map((e) => e.def);
-
-    const childExecute = (name: string, childArgs: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, child.toolIndex, name, childArgs, depth);
-
-    const runContext: AgentRunContext = {
-      executeTool: childExecute,
-      signal: runState.signal,
-    };
 
     const pluginNames = this.context
       ? this.context
@@ -1782,39 +1716,70 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       },
     ];
 
-    const consumed = await consumeAdapterStream(
-      child.adapter.run(
-        {
-          messages,
-          tools: childTools,
-          threadId: randomUUID(),
-          signal: runState.signal,
-          extensions: buildAdapterExtensions(child.toolIndex),
-        },
-        runContext,
-      ),
+    const childThreadId = randomUUID();
+    const traced = await runWithAgentTrace(
       {
-        signal: runState.signal,
-        // Forward every sub-agent event into the parent's outbound SSE
-        // stream so the client sees nested tool_call / tool_result events
-        // (UI-action tools like apply_filter / highlight_period rely on
-        // this) and the sub-agent's streaming text as it's generated.
-        //
-        // `metadata` is the one exception: sub-agents have their own
-        // threadId, and forwarding it would overwrite the parent's
-        // thread state on the client and break multi-turn continuity.
-        // Approval-pending events emitted by `dispatchToolCall` already
-        // reach `outboundEvents` directly, so they are not routed here.
-        onEvent: (event) => {
-          runState.traceObserver?.onEvent(event);
-          if (event.type === "metadata") return;
-          for (const translated of runState.translator.translate(event)) {
-            runState.outboundEvents.push(translated);
-          }
-        },
+        ...runState.traceIdentity,
+        agentName: child.name,
+        threadId: childThreadId,
+      },
+      { messages: input },
+      async (childObserver) => {
+        const childRunState: RunState = {
+          ...runState,
+          traceObserver: childObserver,
+        };
+        const childExecute = (
+          name: string,
+          childArgs: unknown,
+        ): Promise<unknown> =>
+          this.dispatchToolCall(
+            childRunState,
+            child.toolIndex,
+            name,
+            childArgs,
+            depth,
+          );
+        const runContext: AgentRunContext = {
+          executeTool: childExecute,
+          signal: runState.signal,
+        };
+        const consumed = await consumeAdapterStream(
+          child.adapter.run(
+            {
+              messages,
+              tools: childTools,
+              threadId: childThreadId,
+              signal: runState.signal,
+              extensions: buildAdapterExtensions(child.toolIndex),
+            },
+            runContext,
+          ),
+          {
+            signal: runState.signal,
+            // Forward every sub-agent event into the parent's outbound SSE
+            // stream so the client sees nested tool_call / tool_result events
+            // (UI-action tools like apply_filter / highlight_period rely on
+            // this) and the sub-agent's streaming text as it's generated.
+            //
+            // `metadata` is the one exception: sub-agents have their own
+            // threadId, and forwarding it would overwrite the parent's
+            // thread state on the client and break multi-turn continuity.
+            // Approval-pending events emitted by `dispatchToolCall` already
+            // reach `outboundEvents` directly, so they are not routed here.
+            onEvent: (event) => {
+              childObserver.onEvent(event);
+              if (event.type === "metadata") return;
+              for (const translated of runState.translator.translate(event)) {
+                runState.outboundEvents.push(translated);
+              }
+            },
+          },
+        );
+        return consumed.text;
       },
     );
-    return consumed.text;
+    return { text: traced.value, usage: traced.usage };
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
