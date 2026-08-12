@@ -770,9 +770,12 @@ async function runPluginsSync(options: {
         );
       });
     } else {
-      // npm import: direct string comparison
+      // npm import: accept package entrypoints as well as subpath exports.
       plugin = Object.values(plugins).find(
-        (p) => p.package === imp.source && p.name === imp.originalName,
+        (p) =>
+          (p.package === imp.source ||
+            imp.source.startsWith(`${p.package}/`)) &&
+          p.name === imp.originalName,
       );
     }
 
@@ -795,17 +798,6 @@ async function runPluginsSync(options: {
           `Warning: --require-plugins referenced "${name}" but no such plugin was discovered`,
         );
       }
-    }
-  }
-
-  // Step 6b: Strip requiredByTemplate for non-GA plugins
-  for (const plugin of Object.values(plugins)) {
-    if (
-      plugin.requiredByTemplate &&
-      plugin.stability &&
-      plugin.stability !== "ga"
-    ) {
-      plugin.requiredByTemplate = undefined;
     }
   }
 

@@ -66,6 +66,15 @@ export default defineConfig({
           environment: "node",
         },
       },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
+          name: "dev-playground-server",
+          root: "./apps/dev-playground",
+          include: ["server/tests/**/*.test.ts"],
+          environment: "node",
+        },
+      },
     ],
   },
 });

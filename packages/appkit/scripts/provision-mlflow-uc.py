@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,11 +32,39 @@ def _location_name(location: Any) -> str:
 
 
 def _execute(workspace: Any, warehouse_id: str, statement: str) -> Any:
-    return workspace.statement_execution.execute_statement(
+    response = workspace.statement_execution.execute_statement(
         statement=statement,
         warehouse_id=warehouse_id,
         wait_timeout="50s",
     )
+    for _ in range(120):
+        status = getattr(response, "status", None)
+        state = getattr(status, "state", None)
+        state_value = getattr(state, "value", state)
+        if state_value == "SUCCEEDED":
+            return response
+        if state_value in {"FAILED", "CANCELED", "CLOSED"}:
+            error = getattr(status, "error", None)
+            code = getattr(error, "error_code", None)
+            message = getattr(error, "message", None)
+            detail = ": ".join(str(value) for value in (code, message) if value)
+            raise RuntimeError(
+                f"SQL statement {state_value.lower()}: {detail or statement}"
+            )
+        if state_value not in {"PENDING", "RUNNING"}:
+            raise RuntimeError(
+                f"SQL statement returned unknown status {state_value!r}: {statement}"
+            )
+        statement_id = getattr(response, "statement_id", None)
+        if not isinstance(statement_id, str) or not statement_id:
+            raise RuntimeError(
+                f"SQL statement is {state_value.lower()} without a statement ID"
+            )
+        response = workspace.statement_execution.get_statement(statement_id)
+        next_state = getattr(getattr(response, "status", None), "state", None)
+        if getattr(next_state, "value", next_state) in {"PENDING", "RUNNING"}:
+            time.sleep(1)
+    raise TimeoutError(f"SQL statement did not finish after 120 polls: {statement}")
 
 
 def _discover_trace_tables(
@@ -59,7 +88,13 @@ def _discover_trace_tables(
         ),
     )
     rows = getattr(getattr(response, "result", None), "data_array", None) or []
-    return [str(row[0]) for row in rows if row and row[0] is not None]
+    return [
+        str(row[0])
+        for row in rows
+        if row
+        and row[0] is not None
+        and str(row[0]).startswith(table_prefix)
+    ]
 
 
 def _grant_trace_access(

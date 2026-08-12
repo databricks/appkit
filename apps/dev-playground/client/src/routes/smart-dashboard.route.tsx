@@ -490,19 +490,21 @@ function SmartDashboardRoute() {
           <QuickActionsBar onSend={dispatchToAgent} disabled={agentLoading} />
         </div>
 
-        {mlflowTraceId && mlflowTraceUrl && (
+        {mlflowTraceId && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 text-xs">
             <code className="truncate" title={mlflowTraceId}>
               {mlflowTraceId}
             </code>
-            <a
-              href={mlflowTraceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 font-medium text-primary hover:underline"
-            >
-              Open trace in MLflow
-            </a>
+            {mlflowTraceUrl && (
+              <a
+                href={mlflowTraceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 font-medium text-primary hover:underline"
+              >
+                Open trace in MLflow
+              </a>
+            )}
           </div>
         )}
 

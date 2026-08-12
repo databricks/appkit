@@ -24,6 +24,23 @@ const MLFLOW_UC_ENV_NAMES = [
   "MLFLOW_OTEL_SPANS_TABLE",
 ] as const;
 
+const MLFLOW_BUNDLE_VARIABLE_NAMES: Record<
+  (typeof MLFLOW_UC_ENV_NAMES)[number],
+  string
+> = {
+  MLFLOW_EXPERIMENT_ID: "mlflow_experiment_id",
+  MLFLOW_TRACING_SQL_WAREHOUSE_ID: "mlflow_tracing_warehouse_id",
+  MLFLOW_UC_CATALOG: "MLFLOW_UC_CATALOG",
+  MLFLOW_UC_SCHEMA: "MLFLOW_UC_SCHEMA",
+  MLFLOW_UC_TABLE_PREFIX: "MLFLOW_UC_TABLE_PREFIX",
+  MLFLOW_OTEL_SPANS_TABLE: "MLFLOW_OTEL_SPANS_TABLE",
+};
+
+const MLFLOW_RESOURCE_BINDING_ENV_NAMES = new Set([
+  "MLFLOW_EXPERIMENT_ID",
+  "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+]);
+
 export type MlflowUcValues = Record<
   (typeof MLFLOW_UC_ENV_NAMES)[number],
   string
@@ -122,15 +139,22 @@ function validateMlflowUcValues(value: unknown): MlflowUcValues {
   ) as MlflowUcValues;
 }
 
-function persistDotEnv(filePath: string, values: MlflowUcValues): void {
+function persistDotEnv(
+  filePath: string,
+  values: MlflowUcValues,
+  workspaceHost?: string,
+): void {
   const existing = fs.existsSync(filePath)
     ? fs.readFileSync(filePath, "utf8").split(/\r?\n/)
     : [];
   const remaining = existing.filter(
-    (line) => !MLFLOW_UC_ENV_NAMES.some((name) => line.startsWith(`${name}=`)),
+    (line) =>
+      !MLFLOW_UC_ENV_NAMES.some((name) => line.startsWith(`${name}=`)) &&
+      (!workspaceHost || !line.startsWith("DATABRICKS_HOST=")),
   );
   const lines = [
     ...remaining.filter((line, index) => line || index < remaining.length - 1),
+    ...(workspaceHost ? [`DATABRICKS_HOST=${workspaceHost}`] : []),
     ...MLFLOW_UC_ENV_NAMES.map((name) => `${name}=${values[name]}`),
   ];
   fs.writeFileSync(filePath, `${lines.join("\n")}\n`);
@@ -160,6 +184,7 @@ function persistAppYaml(filePath: string, values: MlflowUcValues): void {
     env?: Array<{ name?: string; value?: string; valueFrom?: string }>;
   };
   const existing = Array.isArray(document.env) ? document.env : [];
+  const existingByName = new Map(existing.map((entry) => [entry.name, entry]));
   document.env = [
     ...existing.filter(
       (entry) =>
@@ -167,7 +192,17 @@ function persistAppYaml(filePath: string, values: MlflowUcValues): void {
           entry.name as (typeof MLFLOW_UC_ENV_NAMES)[number],
         ),
     ),
-    ...MLFLOW_UC_ENV_NAMES.map((name) => ({ name, value: values[name] })),
+    ...MLFLOW_UC_ENV_NAMES.map((name) => {
+      const entry = existingByName.get(name);
+      if (
+        MLFLOW_RESOURCE_BINDING_ENV_NAMES.has(name) &&
+        typeof entry?.valueFrom === "string" &&
+        entry.valueFrom
+      ) {
+        return { name, valueFrom: entry.valueFrom };
+      }
+      return { name, value: values[name] };
+    }),
   ];
   writeYamlObject(filePath, document as Record<string, unknown>);
 }
@@ -179,7 +214,10 @@ function persistBundleYaml(filePath: string, values: MlflowUcValues): void {
   };
   document.variables ??= {};
   for (const name of MLFLOW_UC_ENV_NAMES) {
-    document.variables[name] = {
+    const variableName = MLFLOW_BUNDLE_VARIABLE_NAMES[name];
+    const existing = document.variables[variableName];
+    document.variables[variableName] = {
+      ...(existing && typeof existing === "object" ? existing : {}),
       description: `AppKit MLflow UC tracing: ${name}`,
       default: values[name],
     };
@@ -187,7 +225,10 @@ function persistBundleYaml(filePath: string, values: MlflowUcValues): void {
   document.targets ??= {};
   document.targets.default ??= {};
   document.targets.default.variables ??= {};
-  Object.assign(document.targets.default.variables, values);
+  for (const name of MLFLOW_UC_ENV_NAMES) {
+    document.targets.default.variables[MLFLOW_BUNDLE_VARIABLE_NAMES[name]] =
+      values[name];
+  }
   writeYamlObject(filePath, document as Record<string, unknown>);
 }
 
@@ -226,12 +267,12 @@ export async function provisionAndPersistMlflowUc(
   const values = validateMlflowUcValues(
     JSON.parse(fs.readFileSync(outputPath, "utf8")),
   );
-  persistDotEnv(path.join(options.cwd, ".env"), values);
+  const host = dependencies.workspaceHost?.replace(/\/+$/, "");
+  persistDotEnv(path.join(options.cwd, ".env"), values, host);
   persistAppYaml(path.join(options.cwd, "app.yaml"), values);
   persistBundleYaml(path.join(options.cwd, "databricks.yml"), values);
 
   const log = dependencies.log ?? console.log;
-  const host = dependencies.workspaceHost?.replace(/\/$/, "");
   if (host) {
     log(
       `MLflow experiment: ${host}/ml/experiments/${encodeURIComponent(values.MLFLOW_EXPERIMENT_ID)}/traces`,

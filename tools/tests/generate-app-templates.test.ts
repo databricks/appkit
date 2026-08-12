@@ -28,7 +28,7 @@ describe("generated AppKit agent templates", () => {
         readFileSync(join(app, "server/agents/helper.ts"), "utf8"),
       ).toContain("AGENT → TOOL → AGENT → TOOL");
       expect(readFileSync(join(app, "server/server.ts"), "utf8")).toContain(
-        "agents({ agents: { helper } })",
+        "agents: { helper }",
       );
     },
   );
@@ -58,6 +58,7 @@ describe("generated AppKit agent templates", () => {
       const manifest = JSON.parse(
         readFileSync(join(app, "appkit.plugins.json"), "utf8"),
       );
+      expect(manifest.plugins.agents.requiredByTemplate).toBe(true);
       expect(
         manifest.plugins.agents.resources.required.map(
           (resource: { resourceKey: string }) => resource.resourceKey,
@@ -100,5 +101,26 @@ describe("generated AppKit agent templates", () => {
     );
     expect(chat).toContain("Open trace in MLflow");
     expect(chat).toContain("mlflowTraceUrl");
+    expect(chat).toContain("{mlflowTraceId && (");
+    expect(chat).toContain("{mlflowTraceUrl && (");
   });
+
+  test.each(["appkit-agents", "appkit-all-in-one"])(
+    "%s keeps the agent model endpoint distinct from serving",
+    (name) => {
+      const app = join(outputDir, name);
+      const appYaml = yaml.load(
+        readFileSync(join(app, "app.yaml"), "utf8"),
+      ) as { env: Array<{ name: string; valueFrom?: string }> };
+      const envNames = appYaml.env.map((entry) => entry.name);
+      expect(new Set(envNames).size).toBe(envNames.length);
+      expect(appYaml.env).toContainEqual({
+        name: "DATABRICKS_AGENT_SERVING_ENDPOINT_NAME",
+        valueFrom: "agents-serving-endpoint",
+      });
+      expect(readFileSync(join(app, "server/server.ts"), "utf8")).toContain(
+        "defaultModel: process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME",
+      );
+    },
+  );
 });

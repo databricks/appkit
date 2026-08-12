@@ -28,7 +28,10 @@ createApp({
   plugins: [
 {{- range $name, $_ := .plugins}}
 {{- if eq $name "agents"}}
-    agents({ agents: { helper } }),
+    agents({
+      defaultModel: process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME,
+      agents: { helper },
+    }),
 {{- else}}
     {{$name}}(),
 {{- end}}

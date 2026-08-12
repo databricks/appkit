@@ -1,34 +1,17 @@
 import { expect, test } from "@playwright/test";
+import { runSmartDashboardTracingFixture } from "../server/tests/smart-dashboard-agent-tracing.fixture";
 import { setupMockAPI } from "./utils/test-utils";
-
-const traceId = `trace:/main.agent_traces.appkit/${"b".repeat(32)}`;
-const traceUrl = `https://example.cloud.databricks.com/ml/experiments/123456789/traces?selectedTraceId=${encodeURIComponent(traceId)}`;
 
 test("smart-dashboard planner action produces one linked semantic trace", async ({
   page,
 }) => {
+  const observed = await runSmartDashboardTracingFixture({
+    includeTraceUrl: true,
+  });
+  const traceUrl = observed.events[0].data?.traceUrl;
   await setupMockAPI(page);
   await page.route("**/api/agents/chat", async (route) => {
-    const body = [
-      {
-        type: "appkit.metadata",
-        data: { threadId: "dashboard-1", traceId, traceUrl },
-      },
-      {
-        type: "response.output_item.done",
-        item: {
-          type: "function_call",
-          call_id: "call-1",
-          name: "filter_by_date_range",
-          arguments: JSON.stringify({ start: "2016-11-01", end: "2016-11-30" }),
-        },
-      },
-      {
-        type: "response.output_text.delta",
-        delta: "Applied the November filter.",
-      },
-      { type: "response.completed", response: {} },
-    ]
+    const body = observed.events
       .map((event) => `data: ${JSON.stringify(event)}\n\n`)
       .join("");
     await route.fulfill({
@@ -46,6 +29,34 @@ test("smart-dashboard planner action produces one linked semantic trace", async 
   await expect(page.getByText("Applied the November filter.")).toBeVisible();
   const links = page.getByRole("link", { name: "Open trace in MLflow" });
   await expect(links).toHaveCount(1);
-  await expect(links).toHaveAttribute("href", traceUrl);
-  await expect(page.getByText(traceId)).toBeVisible();
+  expect(traceUrl).toBeDefined();
+  await expect(links).toHaveAttribute("href", traceUrl as string);
+  await expect(page.getByText(observed.traceId)).toBeVisible();
+});
+
+test("smart-dashboard surfaces its trace ID without a workspace link", async ({
+  page,
+}) => {
+  const observed = await runSmartDashboardTracingFixture();
+  await setupMockAPI(page);
+  await page.route("**/api/agents/chat", async (route) => {
+    const body = observed.events
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join("");
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body,
+    });
+  });
+
+  await page.goto("/smart-dashboard");
+  await page.getByRole("button", { name: "Toggle chat (⌘J)" }).click();
+  await page.getByPlaceholder("Ask the dashboard…").fill("Trace without a URL");
+  await page.getByPlaceholder("Ask the dashboard…").press("Enter");
+
+  await expect(page.getByText(observed.traceId)).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open trace in MLflow" }),
+  ).toHaveCount(0);
 });
