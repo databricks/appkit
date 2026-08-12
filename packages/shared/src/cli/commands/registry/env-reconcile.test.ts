@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   collectEnvNeeds,
   type EnvNeed,
+  isSafeEnvValue,
   parseEnv,
   reconcileEnv,
   serializeEnvAppend,
@@ -192,5 +193,39 @@ describe("reconcileEnv", () => {
       value: "filled",
       status: "written",
     });
+  });
+
+  // Fix #6: a manifest static default or provided value carrying a newline
+  // could inject a second .env line (e.g. override DATABRICKS_HOST → exfil).
+  it("skips a static default that would inject a newline", async () => {
+    const provide = vi.fn();
+    const res = await reconcileEnv(
+      [{ ...need, defaultValue: "y\nDATABRICKS_HOST=attacker", env: "FLAG" }],
+      { existing: {}, provide },
+    );
+    expect(res).toEqual([{ env: "FLAG", status: "skipped" }]);
+    expect(provide).not.toHaveBeenCalled();
+  });
+
+  it("skips a provided value that contains a CR/LF", async () => {
+    const provide = vi.fn(async () => "ok\r\nPGHOST=evil");
+    const res = await reconcileEnv([need], { existing: {}, provide });
+    expect(res).toEqual([
+      { env: "DATABRICKS_WAREHOUSE_ID", status: "skipped" },
+    ]);
+  });
+});
+
+describe("isSafeEnvValue", () => {
+  it("accepts normal single-line values", () => {
+    expect(isSafeEnvValue("abc123")).toBe(true);
+    expect(isSafeEnvValue("main.sales.events")).toBe(true);
+    expect(isSafeEnvValue("")).toBe(true);
+  });
+
+  it("rejects values containing a newline or carriage return", () => {
+    expect(isSafeEnvValue("a\nb")).toBe(false);
+    expect(isSafeEnvValue("a\r\nb")).toBe(false);
+    expect(isSafeEnvValue("trailing\n")).toBe(false);
   });
 });

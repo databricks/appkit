@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  composeResourceId,
   isFlatListable,
   isParentContext,
   listParentContextStep,
   listWorkspaceResources,
+  MAX_PICKER_RESULTS,
   parentContextDepth,
   toChoices,
 } from "./workspace-picker";
@@ -74,7 +76,10 @@ describe("listWorkspaceResources", () => {
       undefined,
       factory,
     );
-    expect(res).toEqual([{ value: "w1", label: "One (w1)" }]);
+    expect(res).toEqual({
+      choices: [{ value: "w1", label: "One (w1)" }],
+      truncated: false,
+    });
   });
 
   it("maps job_id + settings.name for jobs", async () => {
@@ -83,7 +88,7 @@ describe("listWorkspaceResources", () => {
         jobs: { list: asyncList([{ job_id: 42, settings: { name: "ETL" } }]) },
       });
     const res = await listWorkspaceResources("job", undefined, factory);
-    expect(res).toEqual([{ value: "42", label: "ETL (42)" }]);
+    expect(res.choices).toEqual([{ value: "42", label: "ETL (42)" }]);
   });
 
   it("adapts genie listSpaces (Promise-wrapped .spaces)", async () => {
@@ -96,7 +101,47 @@ describe("listWorkspaceResources", () => {
         },
       });
     const res = await listWorkspaceResources("genie_space", undefined, factory);
-    expect(res).toEqual([{ value: "s1", label: "Sales (s1)" }]);
+    expect(res.choices).toEqual([{ value: "s1", label: "Sales (s1)" }]);
+  });
+
+  // Fix #10: genie listSpaces is single-page; the adapter must follow
+  // next_page_token so large workspaces aren't capped at one page.
+  it("follows genie next_page_token across pages", async () => {
+    const pages: Record<
+      string,
+      { spaces: unknown[]; next_page_token?: string }
+    > = {
+      "": { spaces: [{ space_id: "s1" }], next_page_token: "p2" },
+      p2: { spaces: [{ space_id: "s2" }] },
+    };
+    const seen: (string | undefined)[] = [];
+    const factory = () =>
+      fakeClient({
+        genie: {
+          listSpaces: async (req: { page_token?: string }) => {
+            seen.push(req.page_token);
+            return pages[req.page_token ?? ""];
+          },
+        },
+      });
+    const res = await listWorkspaceResources("genie_space", undefined, factory);
+    expect(res.choices.map((c) => c.value)).toEqual(["s1", "s2"]);
+    expect(seen).toEqual([undefined, "p2"]);
+  });
+
+  it("stops genie pagination if the same token is echoed back", async () => {
+    const factory = () =>
+      fakeClient({
+        genie: {
+          listSpaces: async () => ({
+            spaces: [{ space_id: "s1" }],
+            next_page_token: "same",
+          }),
+        },
+      });
+    // Would loop forever if the repeated-token guard weren't present.
+    const res = await listWorkspaceResources("genie_space", undefined, factory);
+    expect(res.choices.length).toBeGreaterThan(0);
   });
 
   it("passes the profile to the client factory", async () => {
@@ -107,14 +152,40 @@ describe("listWorkspaceResources", () => {
     expect(factory).toHaveBeenCalledWith("dogfood");
   });
 
-  it("returns [] for an unknown type", async () => {
+  it("caps results and reports truncation, stopping pagination early", async () => {
+    // Yield far more than the cap; the iterator must be abandoned at the cap.
+    let yielded = 0;
+    const factory = () =>
+      fakeClient({
+        warehouses: {
+          list: () =>
+            (async function* () {
+              for (let i = 0; i < 10_000; i++) {
+                yielded++;
+                yield { id: `w${i}`, name: `W${i}` };
+              }
+            })(),
+        },
+      });
+    const res = await listWorkspaceResources(
+      "sql_warehouse",
+      undefined,
+      factory,
+    );
+    expect(res.truncated).toBe(true);
+    expect(res.choices).toHaveLength(MAX_PICKER_RESULTS);
+    // Pagination stopped: we consumed only up to the cap, not all 10k.
+    expect(yielded).toBe(MAX_PICKER_RESULTS);
+  });
+
+  it("returns empty listing for an unknown type", async () => {
     const factory = () => fakeClient({});
     expect(
       await listWorkspaceResources("nonsense", undefined, factory),
-    ).toEqual([]);
+    ).toEqual({ choices: [], truncated: false });
   });
 
-  it("returns [] when the SDK call throws (auth/network error)", async () => {
+  it("returns empty listing when the SDK call throws (auth/network error)", async () => {
     const factory = () =>
       fakeClient({
         warehouses: {
@@ -124,16 +195,18 @@ describe("listWorkspaceResources", () => {
         },
       });
     expect(
-      await listWorkspaceResources("sql_warehouse", undefined, factory),
+      (await listWorkspaceResources("sql_warehouse", undefined, factory))
+        .choices,
     ).toEqual([]);
   });
 
-  it("returns [] when the client factory throws", async () => {
+  it("returns empty listing when the client factory throws", async () => {
     const factory = () => {
       throw new Error("no config");
     };
     expect(
-      await listWorkspaceResources("sql_warehouse", undefined, factory),
+      (await listWorkspaceResources("sql_warehouse", undefined, factory))
+        .choices,
     ).toEqual([]);
   });
 });
@@ -236,5 +309,36 @@ describe("listParentContextStep", () => {
     const run = vi.fn(() => ({ status: 0, stdout: "[]" }));
     const step = listParentContextStep("volume", 0, [], undefined, run);
     expect(step?.choices).toEqual([]);
+  });
+
+  // Fix #7: a prior pick starting with `-` would be parsed as a CLI flag when
+  // passed as a positional arg. Refuse it (empty step → free-text fallback)
+  // rather than shell out with an attacker-controlled flag.
+  it("refuses a `-`-prefixed parent pick without running the CLI", () => {
+    const run = vi.fn(() => ({ status: 0, stdout: "[]" }));
+    const step = listParentContextStep(
+      "volume",
+      1,
+      ["--profile"],
+      undefined,
+      run,
+    );
+    expect(step?.choices).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("composeResourceId", () => {
+  it("joins scope and key for a secret", () => {
+    expect(composeResourceId("secret", ["my-scope", "api-token"])).toBe(
+      "my-scope/api-token",
+    );
+  });
+
+  it("returns the last (self-qualified) pick for other types", () => {
+    expect(
+      composeResourceId("volume", ["main", "sales", "main.sales.events"]),
+    ).toBe("main.sales.events");
+    expect(composeResourceId("vector_search_index", ["ep", "idx"])).toBe("idx");
   });
 });

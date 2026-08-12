@@ -6,24 +6,27 @@ import { Command } from "commander";
 import pc from "picocolors";
 import {
   fetchRegistryItem,
+  fetchVerifiedNames,
   type RegistryItem,
   type RegistryItemFile,
   stripNamespace,
 } from "./client";
-import { buildConfigPlan, planHasContent } from "./config-plan";
+import {
+  buildConfigPlan,
+  collectBindingValueNeeds,
+  planHasContent,
+} from "./config-plan";
 import {
   reportConfigWrite,
   validateBundle,
   writeConfig,
 } from "./config-writer";
 import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
-import { reportEnvResolutions, syncEnv } from "./env-writer";
 import {
   extractRequirements,
   type ResourceRequirementRow,
   renderRequirements,
 } from "./requirements";
-import { registerPluginInServer } from "./server-register";
 
 /** Subdirectories that commonly hold the frontend / server in an AppKit app. */
 const FRONTEND_SUBDIRS = ["client", "frontend", "web", "app"];
@@ -78,17 +81,48 @@ function findNearestPackageJson(start: string): string {
   }
 }
 
-/** UI file destination: target under the frontend root, placed in src/ if present. */
-function resolveUiTarget(base: string, file: RegistryItemFile): string {
+/**
+ * Resolves a registry item's `target` under `base`, enforcing that the result
+ * stays inside `base`. Registry items are untrusted remote data; a `target`
+ * like `../../../.zshrc` or an absolute path could otherwise write files
+ * anywhere on disk (arbitrary-write → RCE). Throws on any escape.
+ */
+export function resolveWithinBase(base: string, target: string): string {
+  if (path.isAbsolute(target)) {
+    throw new Error(`Refusing absolute file target from registry: ${target}`);
+  }
+  const baseResolved = path.resolve(base);
+  const resolved = path.resolve(baseResolved, target);
+  if (
+    resolved !== baseResolved &&
+    !resolved.startsWith(baseResolved + path.sep)
+  ) {
+    throw new Error(
+      `Refusing file target that escapes the destination directory: ${target}`,
+    );
+  }
+  return resolved;
+}
+
+/** UI file destination (relative to the frontend root): placed in src/ if present. */
+function uiTargetPath(base: string, file: RegistryItemFile): string {
   let target = file.target ?? path.join("components", path.basename(file.path));
   if (!target.startsWith("src/") && isDir(path.join(base, "src"))) {
     target = path.join("src", target);
   }
-  return path.join(base, target);
+  return target;
 }
 
-/** Best-effort: the `toPlugin` export name from the item's index.ts. */
-function pluginExportName(item: RegistryItem): string | null {
+/** A valid, safe JS identifier — export names are written into the user's
+ * server source, so anything else is rejected to prevent code injection from
+ * a crafted registry `index.ts`. */
+const JS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** Best-effort: the `toPlugin` export name from the item's index.ts. Returns
+ * null (caller falls back to printed instructions) unless the name is a plain
+ * JS identifier — the item is untrusted remote content and the value is
+ * interpolated into the user's server.ts. */
+export function pluginExportName(item: RegistryItem): string | null {
   const index = (item.files ?? []).find(
     (f) => path.basename(f.target ?? f.path) === "index.ts",
   );
@@ -96,7 +130,8 @@ function pluginExportName(item: RegistryItem): string | null {
   if (!match) return null;
   const names = match[1].split(",").map((s) => s.trim());
   // Prefer the camelCase toPlugin instance over the PascalCase class.
-  return names.find((n) => /^[a-z]/.test(n)) ?? names[0] ?? null;
+  const chosen = names.find((n) => /^[a-z]/.test(n)) ?? names[0];
+  return chosen && JS_IDENTIFIER.test(chosen) ? chosen : null;
 }
 
 function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
@@ -106,27 +141,64 @@ function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
   return "npm";
 }
 
+/**
+ * A safe npm dependency spec: `[@scope/]name` with an optional `@version`
+ * range. Registry `dependencies` are untrusted remote data passed to the
+ * package manager, so we reject anything that isn't a plain name+range —
+ * blocks tarball/git URL specs (install-script RCE) and `-`-prefixed entries
+ * that the PM would parse as flags (argument injection).
+ */
+const SAFE_DEP_SPEC =
+  /^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(@[\w.\-+~^><=|* ]+)?$/i;
+
+/** Splits deps into safe (installable) and rejected (surfaced to the user). */
+export function partitionDeps(deps: string[]): {
+  safe: string[];
+  rejected: string[];
+} {
+  const safe: string[] = [];
+  const rejected: string[] = [];
+  for (const dep of deps) {
+    if (dep.startsWith("-") || !SAFE_DEP_SPEC.test(dep)) rejected.push(dep);
+    else safe.push(dep);
+  }
+  return { safe, rejected };
+}
+
 function installDependencies(deps: string[], cwd: string): void {
   if (deps.length === 0) return;
+
+  const { safe, rejected } = partitionDeps(deps);
+  if (rejected.length > 0) {
+    console.warn(
+      pc.yellow(
+        `Skipping suspicious dependenc${rejected.length === 1 ? "y" : "ies"} from the registry (not a plain name@version): ${rejected.join(", ")}. Install manually if you trust them.`,
+      ),
+    );
+  }
+  if (safe.length === 0) return;
+
   if (!fs.existsSync(path.join(cwd, "package.json"))) {
     console.warn(
       pc.yellow(
-        `No package.json found — install these manually: ${deps.join(" ")}`,
+        `No package.json found — install these manually: ${safe.join(" ")}`,
       ),
     );
     return;
   }
   const pm = detectPackageManager(cwd);
   const subcommand = pm === "npm" ? "install" : "add";
-  console.log(`\nInstalling dependencies with ${pm}: ${deps.join(" ")}`);
-  const result = spawnSync(pm, [subcommand, ...deps], {
+  console.log(`\nInstalling dependencies with ${pm}: ${safe.join(" ")}`);
+  // `--` stops the PM from parsing any dep as a flag (defense in depth on top
+  // of the SAFE_DEP_SPEC check above).
+  const result = spawnSync(pm, [subcommand, "--", ...safe], {
     stdio: "inherit",
     cwd,
   });
   if (result.status !== 0) {
     console.warn(
       pc.yellow(
-        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${deps.join(" ")}`,
+        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${safe.join(" ")}`,
       ),
     );
   }
@@ -149,11 +221,13 @@ function runPluginSync(cwd: string): void {
 }
 
 function writeItemFile(
-  dest: string,
+  base: string,
+  target: string,
   content: string,
   force: boolean,
   cwd: string,
 ): void {
+  const dest = resolveWithinBase(base, target);
   const existed = fs.existsSync(dest);
   if (existed && !force) {
     console.error(
@@ -190,18 +264,31 @@ export async function resolveItems(
 ): Promise<RegistryItem[]> {
   const seen = new Set<string>();
   const ordered: RegistryItem[] = [];
-  const queue = [...names];
-
-  while (queue.length > 0) {
-    const name = stripNamespace(queue.shift() as string);
-    if (seen.has(name)) continue;
+  // Breadth-first over the dependency graph, one level per iteration. Items in
+  // a level are fetched concurrently (fetch latency is additive otherwise), but
+  // levels stay ordered and dedup/cycle handling is unchanged: a name is marked
+  // seen before its level is fetched, so it's never fetched or queued twice.
+  let level = names.map(stripNamespace).filter((name) => {
+    if (seen.has(name)) return false;
     seen.add(name);
-    const item = await fetchItem(name, token);
-    ordered.push(item);
-    for (const dep of item.registryDependencies ?? []) {
-      const depName = stripNamespace(dep);
-      if (!seen.has(depName)) queue.push(depName);
+    return true;
+  });
+
+  while (level.length > 0) {
+    const items = await Promise.all(
+      level.map((name) => fetchItem(name, token)),
+    );
+    ordered.push(...items);
+    const next: string[] = [];
+    for (const item of items) {
+      for (const dep of item.registryDependencies ?? []) {
+        const depName = stripNamespace(dep);
+        if (seen.has(depName)) continue;
+        seen.add(depName);
+        next.push(depName);
+      }
     }
+    level = next;
   }
 
   return ordered;
@@ -219,6 +306,29 @@ interface AddOptions {
   env?: Record<string, string>;
   /** Databricks profile passed to `bundle validate` after writing config. */
   profile?: string;
+  /** true = install items the registry index doesn't mark verified. */
+  allowUnverified?: boolean;
+}
+
+/**
+ * Splits requested names into verified and unverified against the index's
+ * verified set. When `verified` is null the index couldn't be read — we can't
+ * prove anything is verified, so every name is treated as unverified (the gate
+ * then decides whether to warn-and-continue or block). Names are compared with
+ * the namespace stripped, matching how items are fetched.
+ */
+export function partitionVerified(
+  refs: string[],
+  verified: Set<string> | null,
+): { verified: string[]; unverified: string[] } {
+  const ok: string[] = [];
+  const bad: string[] = [];
+  for (const ref of refs) {
+    const name = stripNamespace(ref);
+    if (verified?.has(name)) ok.push(name);
+    else bad.push(name);
+  }
+  return { verified: ok, unverified: bad };
 }
 
 async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
@@ -228,6 +338,31 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     console.log(
       `Using ${token.envName} to fetch from ${REGISTRY_REPO} (private).`,
     );
+  }
+
+  // Integrity gate: only items the registry index marks `verified` are trusted.
+  // Unverified items ship code that runs in the user's app / is written into
+  // their source, so block them unless the user opts in with --allow-unverified.
+  if (!opts.allowUnverified) {
+    const verified = await fetchVerifiedNames(token);
+    const { unverified } = partitionVerified(refs, verified);
+    if (unverified.length > 0) {
+      const reason =
+        verified === null
+          ? "could not read the registry index to verify these items"
+          : `not marked verified in ${REGISTRY_REPO}`;
+      console.error(
+        pc.red(
+          `Refusing to add unverified item(s) (${reason}): ${unverified.join(", ")}.`,
+        ),
+      );
+      console.error(
+        pc.dim(
+          "  Re-run with --allow-unverified if you trust the source; unverified items run code in your app.",
+        ),
+      );
+      process.exit(1);
+    }
   }
 
   const items = await resolveItems(refs, token);
@@ -258,7 +393,8 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
           file.target ??
           path.join("plugins", item.name, path.basename(file.path));
         writeItemFile(
-          path.join(serverRoot, target),
+          serverRoot,
+          target,
           file.content,
           Boolean(opts.force),
           cwd,
@@ -279,7 +415,8 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     } else {
       for (const file of item.files ?? []) {
         writeItemFile(
-          resolveUiTarget(frontendRoot, file),
+          frontendRoot,
+          uiTargetPath(frontendRoot, file),
           file.content,
           Boolean(opts.force),
           cwd,
@@ -303,11 +440,18 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       ),
     );
   }
+  // Loaded lazily: server-register pulls in @ast-grep/napi (a native addon),
+  // and this whole CLI is imported eagerly by index.ts, so a static import
+  // would make every unrelated command (docs, lint, …) pay that cost.
+  const registerPluginInServer =
+    opts.register !== false && pluginSummaries.some((s) => s.exportName)
+      ? (await import("./server-register.js")).registerPluginInServer
+      : null;
   for (const s of pluginSummaries) {
     // Try to wire the plugin into the server's createApp call automatically;
     // fall back to printing the snippet when the shape isn't the standard one.
     let wired = false;
-    if (opts.register !== false && s.exportName) {
+    if (registerPluginInServer && opts.register !== false && s.exportName) {
       const result = registerPluginInServer(cwd, s.importPath, s.exportName);
       if (result.status === "wired") {
         console.log(
@@ -334,6 +478,11 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   }
 
   if (opts.resources !== false && allRequirements.length > 0) {
+    // Loaded lazily: env-writer pulls in the workspace picker and, through it,
+    // the Databricks SDK. index.ts imports this CLI eagerly, so a static import
+    // would make every unrelated command pay the SDK load cost.
+    const { collectBindingValues, reportEnvResolutions, syncEnv } =
+      await import("./env-writer.js");
     console.log(pc.dim("\nReconciling resource env vars into .env..."));
     const resolutions = await syncEnv(allRequirements, {
       cwd,
@@ -349,6 +498,19 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     const values: Record<string, string> = { ...(opts.env ?? {}) };
     for (const r of resolutions) {
       if (r.value !== undefined) values[r.env] = r.value;
+    }
+    // Binding fields with no env name (e.g. postgres project/branch/database)
+    // never flow through .env, so collect them separately — else their
+    // databricks.yml bundle variables stay unassigned and bundle validate fails.
+    const bindingNeeds = collectBindingValueNeeds(allRequirements);
+    if (bindingNeeds.length > 0) {
+      const bindingValues = await collectBindingValues(bindingNeeds, {
+        cwd,
+        nonInteractive: Boolean(opts.yes),
+        values: opts.env,
+        profile: opts.profile,
+      });
+      Object.assign(values, bindingValues);
     }
     const plan = buildConfigPlan(allRequirements, values);
     if (planHasContent(plan)) {
@@ -430,6 +592,10 @@ export const addCommand = new Command("add")
     {},
   )
   .option("-p, --profile <name>", "Databricks profile for bundle validate")
+  .option(
+    "--allow-unverified",
+    "Add items the registry doesn't mark verified (runs untrusted code)",
+  )
   .addHelpText(
     "after",
     `

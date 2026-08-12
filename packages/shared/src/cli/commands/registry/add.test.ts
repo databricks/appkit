@@ -1,10 +1,33 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveItems, scopesForResources } from "./add";
+import {
+  partitionDeps,
+  partitionVerified,
+  pluginExportName,
+  resolveItems,
+  resolveWithinBase,
+  scopesForResources,
+} from "./add";
 import type { RegistryItem } from "./client";
 import type { ResourceRequirementRow } from "./requirements";
 
 function item(name: string, extra: Partial<RegistryItem> = {}): RegistryItem {
   return { name, ...extra };
+}
+
+/** A registry item shipping an index.ts with the given export block content. */
+function itemWithIndex(exportBlock: string): RegistryItem {
+  return {
+    name: "p",
+    files: [
+      {
+        path: "index.ts",
+        target: "index.ts",
+        type: "registry:file",
+        content: `export { ${exportBlock} } from "./p";`,
+      },
+    ],
+  };
 }
 
 function resourceRow(type: string): ResourceRequirementRow {
@@ -63,6 +86,46 @@ describe("resolveItems", () => {
     const result = await resolveItems(["a"], null, fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
+
+  // Fix #9: items within one BFS level are fetched concurrently, but order
+  // (requested first, then deps breadth-first) is preserved.
+  it("fetches a level concurrently and preserves order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const fetch = vi.fn(async (name: string) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active--;
+      return item(name);
+    });
+    const result = await resolveItems(["a", "b", "c"], null, fetch);
+    expect(result.map((i) => i.name)).toEqual(["a", "b", "c"]);
+    expect(maxActive).toBeGreaterThan(1); // ran in parallel, not one-at-a-time
+  });
+});
+
+describe("partitionVerified", () => {
+  it("splits requested names by the index's verified set", () => {
+    const res = partitionVerified(
+      ["metric-card", "hello"],
+      new Set(["metric-card"]),
+    );
+    expect(res).toEqual({ verified: ["metric-card"], unverified: ["hello"] });
+  });
+
+  it("strips the namespace before comparing", () => {
+    const res = partitionVerified(
+      ["@databricks-appkit/metric-card"],
+      new Set(["metric-card"]),
+    );
+    expect(res).toEqual({ verified: ["metric-card"], unverified: [] });
+  });
+
+  it("treats everything as unverified when the index is unreadable (null)", () => {
+    const res = partitionVerified(["a", "b"], null);
+    expect(res).toEqual({ verified: [], unverified: ["a", "b"] });
+  });
 });
 
 describe("scopesForResources", () => {
@@ -89,5 +152,92 @@ describe("scopesForResources", () => {
       resourceRow("genie_space"),
     ]);
     expect(scopes.size).toBe(1);
+  });
+});
+
+describe("resolveWithinBase (path-traversal guard)", () => {
+  const base = "/app/server";
+
+  it("resolves a normal relative target under the base", () => {
+    expect(resolveWithinBase(base, "plugins/hello/index.ts")).toBe(
+      path.resolve(base, "plugins/hello/index.ts"),
+    );
+  });
+
+  it("allows the base itself", () => {
+    expect(resolveWithinBase(base, ".")).toBe(path.resolve(base));
+  });
+
+  it("rejects a `..` target that escapes the base", () => {
+    expect(() => resolveWithinBase(base, "../../../../../../tmp/evil")).toThrow(
+      /escapes/,
+    );
+  });
+
+  it("rejects an absolute target", () => {
+    expect(() => resolveWithinBase(base, "/etc/passwd")).toThrow(/absolute/);
+  });
+
+  it("rejects a sneaky prefix sibling (base-adjacent dir)", () => {
+    // /app/server-evil must NOT be treated as inside /app/server
+    expect(() => resolveWithinBase(base, "../server-evil/x")).toThrow(
+      /escapes/,
+    );
+  });
+});
+
+describe("pluginExportName (code-injection guard)", () => {
+  it("returns a plain camelCase export name", () => {
+    expect(pluginExportName(itemWithIndex("helloPlugin"))).toBe("helloPlugin");
+  });
+
+  it("prefers the lowercase factory over a PascalCase class", () => {
+    expect(pluginExportName(itemWithIndex("HelloPlugin, hello"))).toBe("hello");
+  });
+
+  it("rejects an export token carrying an injected statement", () => {
+    // The chosen token is not a bare identifier → refuse (caller falls back)
+    expect(
+      pluginExportName(
+        itemWithIndex("evil()); require('child_process').exec('x'); (y"),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when there is no index.ts", () => {
+    expect(pluginExportName(item("p"))).toBeNull();
+  });
+});
+
+describe("partitionDeps (dependency-injection guard)", () => {
+  it("accepts plain names and scoped names with ranges", () => {
+    const { safe, rejected } = partitionDeps([
+      "lodash",
+      "@databricks/appkit-ui@^0.41.0",
+      "react@19.2.0",
+    ]);
+    expect(safe).toEqual([
+      "lodash",
+      "@databricks/appkit-ui@^0.41.0",
+      "react@19.2.0",
+    ]);
+    expect(rejected).toEqual([]);
+  });
+
+  it("rejects flag-like and URL/git specs (argument injection / RCE)", () => {
+    const { safe, rejected } = partitionDeps([
+      "--registry=http://attacker",
+      "-g",
+      "evil@https://attacker/e.tgz",
+      "git+ssh://attacker/x",
+      "ok-pkg",
+    ]);
+    expect(safe).toEqual(["ok-pkg"]);
+    expect(rejected).toEqual([
+      "--registry=http://attacker",
+      "-g",
+      "evil@https://attacker/e.tgz",
+      "git+ssh://attacker/x",
+    ]);
   });
 });

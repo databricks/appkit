@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConfigPlan } from "./config-plan";
+import { buildConfigPlan, collectBindingValueNeeds } from "./config-plan";
 import type { ResourceRequirementRow } from "./requirements";
 
 /** A DABs `${var.<name>}` reference (literal bundle syntax, not JS interp). */
@@ -112,5 +112,34 @@ describe("buildConfigPlan — unverified types", () => {
     expect(plan.resourceBindings).toEqual([]);
     expect(plan.bundleVariables).toEqual([]);
     expect(plan.unverifiedTypes).toEqual(["genie_space"]);
+  });
+});
+
+describe("collectBindingValueNeeds", () => {
+  it("reports postgres binding fields that have no env name", () => {
+    // project/branch/database carry bundle variables but no env → the .env
+    // flow never collects them; they must be gathered separately or the
+    // databricks.yml target variables stay unassigned.
+    const needs = collectBindingValueNeeds([POSTGRES]);
+    expect(needs.map((n) => n.fieldKey)).toEqual([
+      "project",
+      "branch",
+      "database",
+    ]);
+    expect(needs.every((n) => n.resourceType === "postgres")).toBe(true);
+  });
+
+  it("does not report sql_warehouse (its binding field has an env name)", () => {
+    expect(collectBindingValueNeeds([WAREHOUSE])).toEqual([]);
+  });
+
+  it("ignores unverified types (no binding spec)", () => {
+    const genie: ResourceRequirementRow = {
+      type: "genie_space",
+      resourceKey: "genie-space",
+      required: true,
+      fields: [{ key: "id", env: "GENIE_SPACE_ID", origin: "user" }],
+    };
+    expect(collectBindingValueNeeds([genie])).toEqual([]);
   });
 });

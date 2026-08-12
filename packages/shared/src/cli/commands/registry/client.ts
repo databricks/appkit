@@ -1,5 +1,7 @@
 import process from "node:process";
 import {
+  REGISTRY_INDEX_API_URL,
+  REGISTRY_INDEX_URL,
   REGISTRY_ITEM_API_TEMPLATE,
   REGISTRY_ITEM_URL_TEMPLATE,
   REGISTRY_NAMESPACE,
@@ -81,4 +83,41 @@ export async function fetchRegistryItem(
   }
 
   return (await res.json()) as RegistryItem;
+}
+
+/** One entry in the registry index (`registry.json`). */
+export interface RegistryIndexEntry {
+  name: string;
+  meta?: { verified?: boolean };
+}
+
+/**
+ * Fetches the registry index (`registry.json`) and returns the set of item
+ * names marked `meta.verified`. The `verified` flag lives only in the index —
+ * the per-item JSON at `public/r/<name>.json` does not carry it — so the `add`
+ * integrity gate must consult this. Returns null (not an empty set) if the
+ * index can't be read, so the caller can tell "nothing verified" apart from
+ * "couldn't check".
+ */
+export async function fetchVerifiedNames(
+  token: RegistryToken | null,
+): Promise<Set<string> | null> {
+  const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token.value}`;
+    headers.Accept = "application/vnd.github.raw";
+  }
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { items?: RegistryIndexEntry[] };
+    const verified = new Set<string>();
+    for (const item of data.items ?? []) {
+      if (item.meta?.verified === true) verified.add(item.name);
+    }
+    return verified;
+  } catch {
+    return null;
+  }
 }

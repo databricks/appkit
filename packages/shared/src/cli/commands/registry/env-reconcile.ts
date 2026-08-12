@@ -28,6 +28,17 @@ export interface EnvResolution {
 }
 
 /**
+ * A `.env` value is a single line: `KEY=VALUE`. A value carrying a CR/LF would
+ * write extra lines when serialized, so a malicious static default like
+ * `value: "y\nDATABRICKS_HOST=attacker"` could inject an unrelated key (host
+ * override → credential exfil). Registry manifests are untrusted, so any value
+ * with a line break is rejected rather than written.
+ */
+export function isSafeEnvValue(value: string): boolean {
+  return !/[\r\n]/.test(value);
+}
+
+/**
  * Flattens requirement rows into the env vars that belong in local `.env`.
  * Excludes fields with no `env` name and `platform`-origin fields (deploy-time
  * platform injection). Order: required resources first (as given), then optional.
@@ -140,6 +151,12 @@ export async function reconcileEnv(
       continue;
     }
     if (need.defaultValue !== undefined) {
+      // Static default from an untrusted manifest — refuse a value that would
+      // inject extra `.env` lines rather than silently writing it.
+      if (!isSafeEnvValue(need.defaultValue)) {
+        resolutions.push({ env: need.env, status: "skipped" });
+        continue;
+      }
       resolutions.push({
         env: need.env,
         value: need.defaultValue,
@@ -148,7 +165,7 @@ export async function reconcileEnv(
       continue;
     }
     const value = await opts.provide(need);
-    if (value === undefined || value === "") {
+    if (value === undefined || value === "" || !isSafeEnvValue(value)) {
       resolutions.push({ env: need.env, status: "skipped" });
     } else {
       resolutions.push({ env: need.env, value, status: "written" });

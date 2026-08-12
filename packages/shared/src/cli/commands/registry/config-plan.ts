@@ -144,6 +144,49 @@ export function buildConfigPlan(
   return { appYamlEnv, bundleVariables, resourceBindings, unverifiedTypes };
 }
 
+/**
+ * A bundle-variable value the user must supply that the .env reconciliation
+ * flow can't collect — a binding field with NO `env` name (e.g. postgres
+ * project/branch/database). Without collecting these, databricks.yml declares
+ * `${var.postgres_branch}` but never assigns it, and `bundle validate` fails.
+ * Keyed by `fieldKey` (matching how buildConfigPlan looks up `values`).
+ */
+export interface BindingValueNeed {
+  fieldKey: string;
+  resourceType: string;
+  description?: string;
+}
+
+/**
+ * Binding fields that carry a bundle-variable value but have no `env` name and
+ * no static default — so they're invisible to collectEnvNeeds and must be
+ * collected separately (keyed by fieldKey) to produce a valid databricks.yml.
+ */
+export function collectBindingValueNeeds(
+  rows: ResourceRequirementRow[],
+): BindingValueNeed[] {
+  const needs: BindingValueNeed[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!BINDING_SPECS[row.type]) continue;
+    const varFields = VARIABLE_FIELDS[row.type] ?? [];
+    for (const fieldKey of varFields) {
+      const field = row.fields.find((f) => f.key === fieldKey);
+      // Skip fields that already flow through .env (have an env name) or carry
+      // a static default — those get their value elsewhere.
+      if (field?.env || field?.value !== undefined) continue;
+      if (seen.has(fieldKey)) continue;
+      seen.add(fieldKey);
+      needs.push({
+        fieldKey,
+        resourceType: row.type,
+        description: field?.description,
+      });
+    }
+  }
+  return needs;
+}
+
 /** True when the plan has any deploy-config content to write. */
 export function planHasContent(plan: ConfigPlan): boolean {
   return (

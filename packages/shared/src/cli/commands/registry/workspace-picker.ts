@@ -51,12 +51,27 @@ function choiceFrom(
   return { value, label };
 }
 
-/** Genie listSpaces returns a Promise wrapper; adapt it to an async iterable. */
+/**
+ * Genie listSpaces returns a single page (a Promise wrapper), not an
+ * auto-paginating iterable like the other services. Adapt it to an async
+ * iterable that follows `next_page_token` so large workspaces aren't capped at
+ * one page. The caller stops consuming at MAX_PICKER_RESULTS, which ends the
+ * loop early; the guard against a repeated token avoids an infinite loop if the
+ * API ever echoes the same token back.
+ */
 async function* iterateGenieSpaces(
   client: LegacyWorkspaceClient,
 ): AsyncIterable<unknown> {
-  const res = await client.genie.listSpaces({});
-  for (const space of res.spaces ?? []) yield space;
+  let pageToken: string | undefined;
+  do {
+    const res = await client.genie.listSpaces(
+      pageToken ? { page_token: pageToken } : {},
+    );
+    for (const space of res.spaces ?? []) yield space;
+    const next = res.next_page_token;
+    if (next && next === pageToken) break;
+    pageToken = next;
+  } while (pageToken);
 }
 
 /** Flat, top-level listable resource types, backed by SDK services. */
@@ -117,9 +132,26 @@ export function makeWorkspaceClient(profile?: string): LegacyWorkspaceClient {
 }
 
 /**
- * Lists workspace resources of a flat-listable type via the SDK. Returns [] on
- * any failure (unknown type, auth/config error, network) so the caller can
- * fall back to free-text entry. `clientFactory` is injectable for tests.
+ * Max resources fetched for the picker. The SDK `list()` auto-paginates, so on
+ * a large workspace (5000+ warehouses) draining it fully means many sequential
+ * paged API calls before the prompt can even render. Breaking out of the
+ * async iterator stops pagination early; the picker's "Enter manually" option
+ * covers anything beyond the cap.
+ */
+export const MAX_PICKER_RESULTS = 200;
+
+/** A listing result plus whether it was truncated at the fetch cap. */
+export interface WorkspaceListing {
+  choices: WorkspaceChoice[];
+  truncated: boolean;
+}
+
+/**
+ * Lists workspace resources of a flat-listable type via the SDK, stopping at
+ * MAX_PICKER_RESULTS so pagination doesn't drain a huge workspace. Returns an
+ * empty listing on any failure (unknown type, auth/config error, network) so
+ * the caller can fall back to free-text entry. `clientFactory` is injectable
+ * for tests.
  */
 export async function listWorkspaceResources(
   resourceType: string,
@@ -127,20 +159,27 @@ export async function listWorkspaceResources(
   clientFactory: (
     profile?: string,
   ) => LegacyWorkspaceClient = makeWorkspaceClient,
-): Promise<WorkspaceChoice[]> {
+): Promise<WorkspaceListing> {
   const lister = SDK_LISTERS[resourceType];
-  if (!lister) return [];
+  if (!lister) return { choices: [], truncated: false };
   try {
     const client = clientFactory(profile);
     const choices: WorkspaceChoice[] = [];
+    let truncated = false;
     for await (const item of lister.list(client)) {
       if (typeof item !== "object" || item === null) continue;
       const choice = lister.toChoice(item as Record<string, unknown>);
-      if (choice) choices.push(choice);
+      if (!choice) continue;
+      choices.push(choice);
+      if (choices.length >= MAX_PICKER_RESULTS) {
+        // Stop iterating — halts the async iterator, so no further pages fetch.
+        truncated = true;
+        break;
+      }
     }
-    return choices;
+    return { choices, truncated };
   } catch {
-    return [];
+    return { choices: [], truncated: false };
   }
 }
 
@@ -364,6 +403,14 @@ export function listParentContextStep(
   const chain = PARENT_CONTEXT_CHAINS[resourceType];
   if (!chain || stepIndex >= chain.length) return null;
   const step = chain[stepIndex];
+  // Prior picks flow into the `databricks` CLI as positional args. A value
+  // starting with `-` (e.g. a maliciously-named workspace resource surfaced in
+  // an earlier step) would be parsed as a flag — refuse it so it can't inject
+  // CLI options. Legitimate catalog/schema/scope/endpoint names never start
+  // with `-`; an empty step drops the caller to free-text entry.
+  if (parents.some((p) => p.startsWith("-"))) {
+    return { key: step.key, choices: [] };
+  }
   const spec = step.list(parents);
   return {
     key: step.key,
@@ -380,4 +427,20 @@ export function listParentContextStep(
 /** Number of drill-down steps for a parent-context type (0 if not one). */
 export function parentContextDepth(resourceType: string): number {
   return PARENT_CONTEXT_CHAINS[resourceType]?.length ?? 0;
+}
+
+/**
+ * Builds the final resource identifier from the values picked across a
+ * drill-down. Most types end on a self-qualified id (volume/uc_function list
+ * `full_name`; a vector-search index name is already catalog.schema-qualified),
+ * so the last pick is the whole answer. A `secret` is addressed by both its
+ * scope and key (`scope/key`) — returning only the key drops the scope and
+ * yields a value that can't locate the secret — so its picks are joined.
+ */
+export function composeResourceId(
+  resourceType: string,
+  picks: string[],
+): string {
+  if (resourceType === "secret") return picks.join("/");
+  return picks[picks.length - 1];
 }

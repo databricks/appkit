@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { autocomplete, isCancel, select, text } from "@clack/prompts";
 import pc from "picocolors";
+import type { BindingValueNeed } from "./config-plan";
 import {
   collectEnvNeeds,
   type EnvNeed,
@@ -13,6 +14,7 @@ import {
 } from "./env-reconcile";
 import type { ResourceRequirementRow } from "./requirements";
 import {
+  composeResourceId,
   isFlatListable,
   isParentContext,
   listParentContextStep,
@@ -159,8 +161,9 @@ async function pickParentContext(
     if (picked === null || picked === MANUAL) return undefined;
     picks.push(picked);
   }
-  // Last pick is the resource id itself.
-  return picks[picks.length - 1];
+  // Compose the id from the picks: most types end on a self-qualified id, but a
+  // secret needs both scope and key (scope/key).
+  return composeResourceId(need.resourceType, picks);
 }
 
 /**
@@ -177,11 +180,18 @@ function makeProvider(opts: EnvSyncOptions): ValueProvider {
     if (opts.nonInteractive) return undefined;
 
     if (isFlatListable(need.resourceType)) {
-      const choices = await listWorkspaceResources(
+      const { choices, truncated } = await listWorkspaceResources(
         need.resourceType,
         opts.profile,
       );
       if (choices.length > 0) {
+        if (truncated) {
+          console.log(
+            pc.dim(
+              `  Showing the first ${choices.length} ${need.resourceType}s; use "Enter manually" if yours isn't listed.`,
+            ),
+          );
+        }
         const picked = await autocompleteFrom(
           `${need.env} — search ${need.resourceType}s`,
           choices,
@@ -247,6 +257,38 @@ export async function syncEnv(
   );
 
   return resolutions;
+}
+
+/**
+ * Collects values for binding fields that carry a databricks.yml bundle
+ * variable but have no `env` name (e.g. postgres project/branch/database), so
+ * the .env flow never sees them. Returns a `fieldKey -> value` map to feed into
+ * buildConfigPlan; without it the bundle variables stay unassigned and
+ * `databricks bundle validate` fails. Values are NOT written to .env (these
+ * fields have no env var). Prompts interactively; in non-interactive mode uses
+ * `values[fieldKey]` if provided, else leaves the field unset.
+ */
+export async function collectBindingValues(
+  needs: BindingValueNeed[],
+  opts: EnvSyncOptions,
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const need of needs) {
+    const fromFlag = opts.values?.[need.fieldKey];
+    if (fromFlag !== undefined) {
+      out[need.fieldKey] = fromFlag;
+      continue;
+    }
+    if (opts.nonInteractive) continue;
+    const answer = await text({
+      message: `${need.fieldKey} (${need.resourceType}) — required for databricks.yml`,
+      placeholder: need.description ?? "leave blank to set before deploy",
+    });
+    if (isCancel(answer)) continue;
+    const value = (answer ?? "").trim();
+    if (value !== "") out[need.fieldKey] = value;
+  }
+  return out;
 }
 
 /** Prints a concise summary of what env reconciliation did. */
