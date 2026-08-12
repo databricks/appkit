@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 856371,
-        "unpacked": 2998738
+        "packed": 853907,
+        "unpacked": 2989105
       },
       "dist": {
         "total": {
-          "raw": 2985081,
-          "gzip": 1001459
+          "raw": 2975448,
+          "gzip": 998194
         },
         "js": {
-          "raw": 884887,
-          "gzip": 308455
+          "raw": 883861,
+          "gzip": 307903
         },
         "types": {
           "raw": 321999,
-          "gzip": 111358
+          "gzip": 111349
         },
         "maps": {
-          "raw": 1767400,
-          "gzip": 577828
+          "raw": 1758793,
+          "gzip": 575124
         },
         "css": {
           "raw": 0,
@@ -31,7 +31,7 @@
           "raw": 10795,
           "gzip": 3818
         },
-        "fileCount": 604
+        "fileCount": 599
       },
       "entries": [
         {
@@ -64,11 +64,11 @@
         },
         {
           "id": "./beta",
-          "gzip": 49500,
+          "gzip": 49499,
           "composition": {
-            "initialGzip": 49041,
+            "initialGzip": 49040,
             "lazyGzip": 459,
-            "totalGzip": 49500,
+            "totalGzip": 49499,
             "own": 144088,
             "nodeModules": null,
             "chunks": [
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1347,
+                "gzip": 1346,
                 "kind": "initial"
               },
               {
@@ -153,25 +153,25 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 349140,
-        "unpacked": 1420504
+        "packed": 350143,
+        "unpacked": 1423713
       },
       "dist": {
         "total": {
-          "raw": 1416558,
-          "gzip": 474354
+          "raw": 1419767,
+          "gzip": 475361
         },
         "js": {
-          "raw": 398367,
-          "gzip": 133326
+          "raw": 399119,
+          "gzip": 133518
         },
         "types": {
-          "raw": 232757,
-          "gzip": 84824
+          "raw": 233038,
+          "gzip": 84885
         },
         "maps": {
-          "raw": 768574,
-          "gzip": 252858
+          "raw": 770750,
+          "gzip": 253612
         },
         "css": {
           "raw": 16860,
@@ -232,17 +232,17 @@
         },
         {
           "id": "./react",
-          "gzip": 49867,
+          "gzip": 50023,
           "composition": {
-            "initialGzip": 441976,
+            "initialGzip": 442075,
             "lazyGzip": 49772,
-            "totalGzip": 491748,
-            "own": 179209,
+            "totalGzip": 491847,
+            "own": 179474,
             "nodeModules": 1403020,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 439826,
+                "gzip": 439925,
                 "kind": "initial"
               },
               {
