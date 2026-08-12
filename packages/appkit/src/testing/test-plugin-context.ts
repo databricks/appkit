@@ -276,7 +276,7 @@ export function createTestPluginContext(
       }
 
       return {
-        getAgentTools: () => record.tools,
+        ...base,
         executeAgentTool: (toolName, args, signal) =>
           resolve(toolName, args, signal, true, userId),
       };

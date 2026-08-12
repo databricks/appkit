@@ -136,6 +136,7 @@ function isSubsequence(actual: string[], expected: string[]): boolean {
   let i = 0;
   for (const type of actual) {
     if (i < expected.length && type === expected[i]) i++;
+    if (i === expected.length) break;
   }
   return i === expected.length;
 }

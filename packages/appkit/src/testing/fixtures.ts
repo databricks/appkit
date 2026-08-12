@@ -108,21 +108,7 @@ export function createMockRouter(): {
  * service-principal client slots; override any field via `overrides`.
  */
 export function createMockRequest(overrides: Any = {}) {
-  const mockWorkspaceClient = {
-    statementExecution: {
-      executeStatement: vi.fn().mockResolvedValue({
-        status: { state: "SUCCEEDED" },
-        result: { data: [] },
-      }),
-    },
-    // Analytics route now calls `warehouses.get` before issuing SQL to
-    // ensure the warehouse is RUNNING. Default to RUNNING so existing
-    // tests that only care about SQL behaviour aren't affected.
-    warehouses: {
-      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
-      start: vi.fn().mockResolvedValue(undefined),
-    },
-  };
+  const mockWorkspaceClient = createMockWorkspaceClient();
 
   const req = {
     params: {},
@@ -163,7 +149,6 @@ export function createMockResponse() {
     sendStatus: vi.fn().mockReturnThis(),
     end: vi.fn(function (this: Any) {
       this.writableEnded = true;
-      // Trigger 'close' event when end is called
       if (eventListeners.close) {
         for (const handler of eventListeners.close) {
           handler();
@@ -264,10 +249,9 @@ export function createMockWorkspaceClient() {
  * singleton. Use with {@link mockServiceContext} to install it.
  */
 export function createMockServiceContext(options: TestContextOptions = {}) {
-  const mockWorkspaceClient = createMockWorkspaceClient();
-
   const serviceContext: ServiceContextState = {
-    client: (options.serviceDatabricksClient || mockWorkspaceClient) as Any,
+    client: (options.serviceDatabricksClient ||
+      createMockWorkspaceClient()) as Any,
     serviceUserId: options.serviceUserId || "test-service-user",
     warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
     workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
@@ -282,10 +266,9 @@ export function createMockServiceContext(options: TestContextOptions = {}) {
 export function createMockUserContext(
   options: TestContextOptions = {},
 ): UserContext {
-  const mockWorkspaceClient = createMockWorkspaceClient();
-
   return {
-    client: (options.userDatabricksClient || mockWorkspaceClient) as Any,
+    client: (options.userDatabricksClient ||
+      createMockWorkspaceClient()) as Any,
     userId: options.userId || "test-user",
     warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
     workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
@@ -316,13 +299,12 @@ export function mockServiceContext(options: TestContextOptions = {}) {
     .spyOn(ServiceContext, "isInitialized")
     .mockReturnValue(true);
 
-  // Mock createUserContext to return a test user context
   const createUserContextSpy = vi
     .spyOn(ServiceContext, "createUserContext")
     .mockImplementation((_token: string, userId: string, userName?: string) => {
-      const mockWorkspaceClient = createMockWorkspaceClient();
       return {
-        client: (options.userDatabricksClient || mockWorkspaceClient) as Any,
+        client: (options.userDatabricksClient ||
+          createMockWorkspaceClient()) as Any,
         userId,
         userName,
         warehouseId: serviceContext.warehouseId,
