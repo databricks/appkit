@@ -216,6 +216,10 @@ export function buildPieOption(
         type: "pie",
         radius: isDonut ? [`${innerRadius || 40}%`, "70%"] : "70%",
         center: ["60%", "50%"],
+        // Keep very small categories pointer-selectable. ECharts still reports
+        // labels/tooltips from the true values, while a three-degree sector is
+        // wide enough to survive CSS-pixel rounding on typical card sizes.
+        minAngle: 3,
         data: pieData,
         label: {
           show: showLabels,

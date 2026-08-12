@@ -55,6 +55,7 @@ interface EChartsOption {
     };
     tooltip?: { valueFormatter?: (value: unknown) => string };
     radius?: string | string[];
+    minAngle?: number;
   }>;
   radar?: {
     indicator: Array<{ name: string; max: number }>;
@@ -630,6 +631,16 @@ describe("buildPieOption", () => {
 
     // Donut has array radius [innerRadius%, "70%"]
     expect(opt.series[0].radius).toEqual(["50%", "70%"]);
+  });
+
+  test("keeps tiny pie and donut slices pointer-selectable", () => {
+    const ctx = createBaseContext({
+      yDataMap: { value: [99.6, 0.4] },
+      xData: ["Large", "Tiny"],
+    });
+    const opt = asOption(buildPieOption(ctx, "donut", 50, true, "outside"));
+
+    expect(opt.series[0].minAngle).toBe(3);
   });
 
   test("uses default inner radius for donut type", () => {
