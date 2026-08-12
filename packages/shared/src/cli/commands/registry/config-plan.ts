@@ -1,4 +1,8 @@
-import { fieldOrigin, type ResourceRequirementRow } from "./requirements";
+import {
+  fieldOrigin,
+  isValidEnvName,
+  type ResourceRequirementRow,
+} from "./requirements";
 
 /**
  * Deploy-config generation for a plugin's resources, reproducing what
@@ -102,6 +106,9 @@ export function buildConfigPlan(
     const resourceKey = row.resourceKey ?? row.type;
     for (const field of row.fields) {
       if (!field.env || fieldOrigin(field) === "platform") continue;
+      // env names are untrusted manifest data emitted into app.yaml — drop
+      // anything that isn't a plain env identifier (mirrors the .env guard).
+      if (!isValidEnvName(field.env)) continue;
       if (seenEnv.has(field.env)) continue;
       seenEnv.add(field.env);
       appYamlEnv.push({ name: field.env, valueFrom: resourceKey });

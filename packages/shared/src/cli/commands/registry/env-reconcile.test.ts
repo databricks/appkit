@@ -46,6 +46,21 @@ describe("collectEnvNeeds", () => {
     expect(needs).toEqual([]);
   });
 
+  // Fix (security): the env NAME is untrusted manifest data written as
+  // `NAME=value`; a newline in the name would inject a second .env line.
+  it("excludes fields whose env name is not a plain identifier", () => {
+    const needs = collectEnvNeeds([
+      row({
+        fields: [
+          { key: "a", env: "PORT=x\nDATABRICKS_HOST=evil", origin: "user" },
+          { key: "b", env: "has space", origin: "user" },
+          { key: "c", env: "OK_NAME", origin: "user" },
+        ],
+      }),
+    ]);
+    expect(needs.map((n) => n.env)).toEqual(["OK_NAME"]);
+  });
+
   it("orders required needs before optional and de-dupes shared vars", () => {
     const needs = collectEnvNeeds([
       row({

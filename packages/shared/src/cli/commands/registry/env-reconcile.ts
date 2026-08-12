@@ -1,5 +1,6 @@
 import {
   fieldOrigin,
+  isValidEnvName,
   type RequirementField,
   type ResourceRequirementRow,
 } from "./requirements";
@@ -69,9 +70,13 @@ export function collectEnvNeeds(rows: ResourceRequirementRow[]): EnvNeed[] {
   return needs;
 }
 
-/** A field belongs in `.env` iff it names an env var and isn't platform-injected. */
+/** A field belongs in `.env` iff it names a valid env var and isn't platform-injected. */
 function includeInEnv(field: RequirementField): boolean {
   if (!field.env) return false;
+  // The env name comes from an untrusted manifest and is written as `NAME=value`;
+  // a malformed name (e.g. one containing a newline) could inject an extra .env
+  // line, so drop anything that isn't a plain env identifier.
+  if (!isValidEnvName(field.env)) return false;
   // Origin is derived from the authored contract (localOnly/value/resolve) so
   // registry-fetched manifests without a computed origin classify correctly.
   return fieldOrigin(field) !== "platform";

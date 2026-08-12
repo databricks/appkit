@@ -126,6 +126,23 @@ describe("partitionVerified", () => {
     const res = partitionVerified(["a", "b"], null);
     expect(res).toEqual({ verified: [], unverified: ["a", "b"] });
   });
+
+  // Security: the gate runs over the *resolved* set (requested + transitive
+  // deps), so a verified item pulling an unverified registryDependency is
+  // caught. Mirrors runAdd calling partitionVerified(items.map(i => i.name)).
+  it("flags an unverified transitive dep in the resolved set", async () => {
+    const graph: Record<string, RegistryItem> = {
+      "verified-a": item("verified-a", { registryDependencies: ["evil-dep"] }),
+      "evil-dep": item("evil-dep"),
+    };
+    const fetch = vi.fn(async (name: string) => graph[name]);
+    const items = await resolveItems(["verified-a"], null, fetch);
+    const res = partitionVerified(
+      items.map((i) => i.name),
+      new Set(["verified-a"]), // only the top-level item is verified
+    );
+    expect(res.unverified).toEqual(["evil-dep"]);
+  });
 });
 
 describe("scopesForResources", () => {

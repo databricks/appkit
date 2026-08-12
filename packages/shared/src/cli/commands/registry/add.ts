@@ -340,12 +340,23 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     );
   }
 
+  // Resolve the full graph (requested items + their transitive
+  // registryDependencies) up front. Fetching item JSON is read-only — nothing
+  // is written to disk or installed until after the integrity gate below.
+  const items = await resolveItems(refs, token);
+
   // Integrity gate: only items the registry index marks `verified` are trusted.
-  // Unverified items ship code that runs in the user's app / is written into
-  // their source, so block them unless the user opts in with --allow-unverified.
+  // Checked over the *entire resolved set*, not just the requested names: a
+  // verified item can declare an unverified registryDependency whose code would
+  // otherwise be written into the user's app and wired into their server
+  // without ever passing the gate. Fails closed — an unreadable index leaves
+  // the verified set null, so every item counts as unverified.
   if (!opts.allowUnverified) {
     const verified = await fetchVerifiedNames(token);
-    const { unverified } = partitionVerified(refs, verified);
+    const { unverified } = partitionVerified(
+      items.map((i) => i.name),
+      verified,
+    );
     if (unverified.length > 0) {
       const reason =
         verified === null
@@ -364,8 +375,6 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       process.exit(1);
     }
   }
-
-  const items = await resolveItems(refs, token);
 
   const hasUi = items.some((i) => !isPluginItem(i));
   const hasPlugin = items.some(isPluginItem);

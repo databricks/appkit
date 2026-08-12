@@ -143,6 +143,20 @@ export function renderRequirements(
 }
 
 /**
+ * A syntactically valid environment variable name. Field `env` names come from
+ * an untrusted manifest and are written into `.env` as `NAME=value` (a newline
+ * in the name would inject a second line — e.g. `PORT=x\nDATABRICKS_HOST=…` →
+ * credential exfil) and emitted into `app.yaml`. Anything that isn't a plain
+ * env identifier is dropped before it reaches those sinks.
+ */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** True when `name` is a safe, well-formed environment variable name. */
+export function isValidEnvName(name: string): boolean {
+  return ENV_NAME.test(name);
+}
+
+/**
  * Effective origin of a field. Mirrors what `plugin sync` computes so the
  * classification is correct whether we read a synced manifest (origin present)
  * or an authored one (origin absent — derive from localOnly/value/resolve).

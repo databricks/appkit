@@ -3,6 +3,7 @@ import type { RegistryItem } from "./client";
 import {
   extractRequirements,
   fieldOrigin,
+  isValidEnvName,
   renderRequirements,
 } from "./requirements";
 
@@ -151,5 +152,21 @@ describe("fieldOrigin", () => {
     expect(fieldOrigin({ key: "port", localOnly: true, value: "5432" })).toBe(
       "platform",
     );
+  });
+});
+
+describe("isValidEnvName", () => {
+  it("accepts plain env identifiers", () => {
+    expect(isValidEnvName("DATABRICKS_WAREHOUSE_ID")).toBe(true);
+    expect(isValidEnvName("_private")).toBe(true);
+    expect(isValidEnvName("PORT2")).toBe(true);
+  });
+
+  it("rejects names with a newline, space, or leading digit", () => {
+    expect(isValidEnvName("PORT=x\nDATABRICKS_HOST=evil")).toBe(false);
+    expect(isValidEnvName("has space")).toBe(false);
+    expect(isValidEnvName("2FOO")).toBe(false);
+    expect(isValidEnvName("")).toBe(false);
+    expect(isValidEnvName("FOO=BAR")).toBe(false);
   });
 });

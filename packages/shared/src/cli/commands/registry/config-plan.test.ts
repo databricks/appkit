@@ -97,6 +97,24 @@ describe("buildConfigPlan — postgres", () => {
   });
 });
 
+describe("buildConfigPlan — malformed env names", () => {
+  it("drops a field whose env name is not a plain identifier", () => {
+    const plan = buildConfigPlan([
+      {
+        type: "sql_warehouse",
+        resourceKey: "sql-warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: [
+          // untrusted manifest name with an injected line
+          { key: "id", env: "X\nINJECTED=1", origin: "user" },
+        ],
+      },
+    ]);
+    expect(plan.appYamlEnv).toEqual([]);
+  });
+});
+
 describe("buildConfigPlan — unverified types", () => {
   it("still emits env but flags the type and writes no binding", () => {
     const genie: ResourceRequirementRow = {
