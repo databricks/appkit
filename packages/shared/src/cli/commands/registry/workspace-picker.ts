@@ -52,12 +52,9 @@ function choiceFrom(
 }
 
 /**
- * Genie listSpaces returns a single page (a Promise wrapper), not an
- * auto-paginating iterable like the other services. Adapt it to an async
- * iterable that follows `next_page_token` so large workspaces aren't capped at
- * one page. The caller stops consuming at MAX_PICKER_RESULTS, which ends the
- * loop early; the guard against a repeated token avoids an infinite loop if the
- * API ever echoes the same token back.
+ * Genie listSpaces returns a single page, not an auto-paginating iterable like
+ * the other services. Adapt it to one that follows `next_page_token`; the
+ * repeated-token guard avoids an infinite loop if the API echoes a token back.
  */
 async function* iterateGenieSpaces(
   client: LegacyWorkspaceClient,
@@ -132,11 +129,9 @@ export function makeWorkspaceClient(profile?: string): LegacyWorkspaceClient {
 }
 
 /**
- * Max resources fetched for the picker. The SDK `list()` auto-paginates, so on
- * a large workspace (5000+ warehouses) draining it fully means many sequential
- * paged API calls before the prompt can even render. Breaking out of the
- * async iterator stops pagination early; the picker's "Enter manually" option
- * covers anything beyond the cap.
+ * Max resources fetched for the picker. `list()` auto-paginates, so on a large
+ * workspace (5000+ warehouses) breaking out at the cap stops pagination early;
+ * the picker's "Enter manually" option covers anything beyond it.
  */
 export const MAX_PICKER_RESULTS = 200;
 
@@ -274,7 +269,8 @@ export function runList(
  */
 export interface ParentContextStep {
   key: string;
-  list: (parents: string[]) => { command: string[] } & {
+  list: (parents: string[]) => {
+    command: string[];
     idField: string;
     labelField?: string;
   };
@@ -403,11 +399,9 @@ export function listParentContextStep(
   const chain = PARENT_CONTEXT_CHAINS[resourceType];
   if (!chain || stepIndex >= chain.length) return null;
   const step = chain[stepIndex];
-  // Prior picks flow into the `databricks` CLI as positional args. A value
-  // starting with `-` (e.g. a maliciously-named workspace resource surfaced in
-  // an earlier step) would be parsed as a flag — refuse it so it can't inject
-  // CLI options. Legitimate catalog/schema/scope/endpoint names never start
-  // with `-`; an empty step drops the caller to free-text entry.
+  // Prior picks become positional CLI args; a value starting with `-` would be
+  // parsed as a flag, so refuse it (empty step → free-text fallback). Real
+  // catalog/schema/scope/endpoint names never start with `-`.
   if (parents.some((p) => p.startsWith("-"))) {
     return { key: step.key, choices: [] };
   }

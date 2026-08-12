@@ -46,8 +46,8 @@ describe("collectEnvNeeds", () => {
     expect(needs).toEqual([]);
   });
 
-  // Fix (security): the env NAME is untrusted manifest data written as
-  // `NAME=value`; a newline in the name would inject a second .env line.
+  // The env name is untrusted and written as `NAME=value`; a newline in it
+  // would inject a second .env line.
   it("excludes fields whose env name is not a plain identifier", () => {
     const needs = collectEnvNeeds([
       row({
@@ -210,8 +210,8 @@ describe("reconcileEnv", () => {
     });
   });
 
-  // Fix #6: a manifest static default or provided value carrying a newline
-  // could inject a second .env line (e.g. override DATABRICKS_HOST → exfil).
+  // A value carrying a newline could inject a second .env line (e.g. override
+  // DATABRICKS_HOST → exfil).
   it("skips a static default that would inject a newline", async () => {
     const provide = vi.fn();
     const res = await reconcileEnv(

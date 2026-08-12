@@ -3,6 +3,13 @@ import { spawnSync } from "node:child_process";
 /** shadcn registry namespace consumers reference, e.g. `@databricks-appkit/metric-card`. */
 export const REGISTRY_NAMESPACE = "@databricks-appkit";
 
+/**
+ * A plain JS identifier. A plugin's export name is interpolated into the user's
+ * server source, so it's validated against this before use — a registry item is
+ * untrusted, and anything else could inject code.
+ */
+export const JS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
 /** GitHub repo hosting the registry, and the branch the built items live on. */
 export const REGISTRY_REPO = "databricks/appkit-registry";
 export const REGISTRY_REF = "main";

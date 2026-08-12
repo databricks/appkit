@@ -50,11 +50,14 @@ export interface ConfigPlan {
  * Per-type rules for producing databricks.yml bundle variables and the app
  * resource binding. Only types verified against golden fixtures appear here.
  *
- * - `bindingFields`: field keys included in the resource binding (a subset of
- *   the manifest fields; e.g. postgres binds branch+database but not project).
+ * - `variableFields`: field keys that become bundle variables (a superset of
+ *   the binding fields; e.g. postgres declares project+branch+database).
+ * - `bindingFields`: field keys included in the resource binding (a subset;
+ *   e.g. postgres binds branch+database but not project).
  * - `variable(field)`: the bundle-variable name for a given field key.
  */
 interface BindingSpec {
+  variableFields: string[];
   bindingFields: string[];
   variable: (fieldKey: string) => string;
 }
@@ -62,22 +65,18 @@ interface BindingSpec {
 const BINDING_SPECS: Record<string, BindingSpec> = {
   // Verified against __fixtures__/analytics.
   sql_warehouse: {
+    variableFields: ["id"],
     bindingFields: ["id"],
     // fixture: variable is `sql_warehouse_id`
     variable: (f) => `sql_warehouse_${f}`,
   },
   // Verified against __fixtures__/lakebase.
   postgres: {
+    variableFields: ["project", "branch", "database"],
     bindingFields: ["branch", "database"],
     // fixture: variables are `postgres_<fieldKey>` (project/branch/database)
     variable: (f) => `postgres_${f}`,
   },
-};
-
-/** Field keys that become bundle variables for a type (superset of binding). */
-const VARIABLE_FIELDS: Record<string, string[]> = {
-  sql_warehouse: ["id"],
-  postgres: ["project", "branch", "database"],
 };
 
 /**
@@ -98,11 +97,8 @@ export function buildConfigPlan(
   const seenVar = new Set<string>();
 
   for (const row of rows) {
-    // app.yaml env: every env-bearing field maps to a valueFrom = resourceKey.
-    // Platform-injected fields (origin=platform) are NOT bound here — the
-    // platform provides them directly (fixtures confirm only cli/user fields
-    // appear in app.yaml env). Origin is derived from the authored contract so
-    // registry manifests without a computed origin classify correctly.
+    // app.yaml env: every env-bearing field maps to valueFrom = resourceKey,
+    // except platform-injected fields (the platform provides those directly).
     const resourceKey = row.resourceKey ?? row.type;
     for (const field of row.fields) {
       if (!field.env || fieldOrigin(field) === "platform") continue;
@@ -121,8 +117,7 @@ export function buildConfigPlan(
     }
 
     // Bundle variables (superset of binding fields for this type).
-    const varFields = VARIABLE_FIELDS[row.type] ?? spec.bindingFields;
-    for (const fieldKey of varFields) {
+    for (const fieldKey of spec.variableFields) {
       const varName = spec.variable(fieldKey);
       if (seenVar.has(varName)) continue;
       seenVar.add(varName);
@@ -175,9 +170,9 @@ export function collectBindingValueNeeds(
   const needs: BindingValueNeed[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    if (!BINDING_SPECS[row.type]) continue;
-    const varFields = VARIABLE_FIELDS[row.type] ?? [];
-    for (const fieldKey of varFields) {
+    const spec = BINDING_SPECS[row.type];
+    if (!spec) continue;
+    for (const fieldKey of spec.variableFields) {
       const field = row.fields.find((f) => f.key === fieldKey);
       // Skip fields that already flow through .env (have an env name) or carry
       // a static default — those get their value elsewhere.

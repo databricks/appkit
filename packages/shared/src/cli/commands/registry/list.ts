@@ -1,6 +1,7 @@
 import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
+import { registryAuthHeaders } from "./client";
 import {
   REGISTRY_INDEX_API_URL,
   REGISTRY_INDEX_URL,
@@ -112,15 +113,10 @@ function printTable(items: RegistryIndexItem[]): void {
 async function fetchIndex(): Promise<RegistryIndexItem[]> {
   const token = resolveToken();
   const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token.value}`;
-    headers.Accept = "application/vnd.github.raw";
-  }
 
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
-    res = await fetch(url, { headers });
+    res = await fetch(url, { headers: registryAuthHeaders(token) });
   } catch (err) {
     console.error(pc.red(`Failed to reach the registry at ${url}`));
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);

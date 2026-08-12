@@ -101,10 +101,7 @@ async function selectFrom(
 ): Promise<string | typeof MANUAL | null> {
   const picked = await select({
     message,
-    options: [
-      ...choices.map((c) => ({ value: c.value, label: c.label })),
-      { value: MANUAL, label: "Enter manually / skip" },
-    ],
+    options: [...choices, { value: MANUAL, label: "Enter manually / skip" }],
   });
   if (isCancel(picked)) return null;
   return String(picked) as string | typeof MANUAL;
@@ -122,10 +119,7 @@ async function autocompleteFrom(
 ): Promise<string | typeof MANUAL | null> {
   const picked = await autocomplete({
     message,
-    options: [
-      ...choices.map((c) => ({ value: c.value, label: c.label })),
-      { value: MANUAL, label: "Enter manually / skip" },
-    ],
+    options: [...choices, { value: MANUAL, label: "Enter manually / skip" }],
     placeholder: "type to search…",
   });
   if (isCancel(picked)) return null;
@@ -260,13 +254,10 @@ export async function syncEnv(
 }
 
 /**
- * Collects values for binding fields that carry a databricks.yml bundle
- * variable but have no `env` name (e.g. postgres project/branch/database), so
- * the .env flow never sees them. Returns a `fieldKey -> value` map to feed into
- * buildConfigPlan; without it the bundle variables stay unassigned and
- * `databricks bundle validate` fails. Values are NOT written to .env (these
- * fields have no env var). Prompts interactively; in non-interactive mode uses
- * `values[fieldKey]` if provided, else leaves the field unset.
+ * Prompts for the {@link BindingValueNeed}s that `.env` reconciliation can't
+ * collect, returning a `fieldKey -> value` map for buildConfigPlan. Values are
+ * not written to `.env` (these fields have no env var). Non-interactive mode
+ * uses `values[fieldKey]` if provided, else leaves the field unset.
  */
 export async function collectBindingValues(
   needs: BindingValueNeed[],

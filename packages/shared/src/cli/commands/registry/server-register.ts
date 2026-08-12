@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import { JS_IDENTIFIER } from "./constants";
 
 /** Server entry candidates, relative to the repo/server root, in priority order. */
 const SERVER_FILE_CANDIDATES = [
@@ -66,7 +67,7 @@ export function registerPluginInServer(
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
   // crafted export name or import path.
-  if (!/^[A-Za-z_$][\w$]*$/.test(exportName)) {
+  if (!JS_IDENTIFIER.test(exportName)) {
     return { status: "skipped", reason: "invalid plugin export name" };
   }
   if (!/^[.][./A-Za-z0-9_-]*$/.test(importPath)) {

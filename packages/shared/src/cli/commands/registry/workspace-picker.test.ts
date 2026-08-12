@@ -104,8 +104,8 @@ describe("listWorkspaceResources", () => {
     expect(res.choices).toEqual([{ value: "s1", label: "Sales (s1)" }]);
   });
 
-  // Fix #10: genie listSpaces is single-page; the adapter must follow
-  // next_page_token so large workspaces aren't capped at one page.
+  // genie listSpaces is single-page; the adapter must follow next_page_token
+  // so large workspaces aren't capped at one page.
   it("follows genie next_page_token across pages", async () => {
     const pages: Record<
       string,
@@ -311,9 +311,8 @@ describe("listParentContextStep", () => {
     expect(step?.choices).toEqual([]);
   });
 
-  // Fix #7: a prior pick starting with `-` would be parsed as a CLI flag when
-  // passed as a positional arg. Refuse it (empty step → free-text fallback)
-  // rather than shell out with an attacker-controlled flag.
+  // A prior pick starting with `-` would be parsed as a flag when passed as a
+  // positional arg, so refuse it rather than shell out with it.
   it("refuses a `-`-prefixed parent pick without running the CLI", () => {
     const run = vi.fn(() => ({ status: 0, stdout: "[]" }));
     const step = listParentContextStep(

@@ -41,8 +41,6 @@ describe("resolveItems", () => {
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
 
-  // Bugs #1 + #3: registryDependencies were ignored on plugins and never
-  // resolved transitively.
   it("resolves transitive registryDependencies", async () => {
     const graph: Record<string, RegistryItem> = {
       a: item("a", { registryDependencies: ["b"] }),
@@ -87,9 +85,8 @@ describe("resolveItems", () => {
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
 
-  // Security: an item's body `name` is untrusted; a `verified:false` item could
-  // claim a verified name to slip past the integrity gate (or hijack another
-  // item's plugin dir). resolveItems pins `name` to the fetch key.
+  // The body `name` is untrusted (could claim a verified name to pass the gate),
+  // so resolveItems pins it to the fetch key.
   it("pins item.name to the fetch key, ignoring a spoofed body name", async () => {
     // Fetched under key "evil" but self-reports the verified name "analytics".
     const fetch = vi.fn(async (_key: string) => ({
@@ -100,9 +97,8 @@ describe("resolveItems", () => {
     expect(result.map((i) => i.name)).toEqual(["evil"]);
   });
 
-  // Security: a name is used as a fetch path and a plugins/<name> dir; a ref
-  // with `/` or `..` could redirect the fetch to another repo path or escape
-  // the dest dir.
+  // A name is a fetch path and a plugins/<name> dir; `/` or `..` could redirect
+  // the fetch or escape the dest dir.
   it("rejects a top-level ref that is not a plain slug (no fetch)", async () => {
     const fetch = vi.fn();
     await expect(
@@ -121,8 +117,6 @@ describe("resolveItems", () => {
     );
   });
 
-  // Fix #9: items within one BFS level are fetched concurrently, but order
-  // (requested first, then deps breadth-first) is preserved.
   it("fetches a level concurrently and preserves order", async () => {
     let active = 0;
     let maxActive = 0;
@@ -161,9 +155,8 @@ describe("partitionVerified", () => {
     expect(res).toEqual({ verified: [], unverified: ["a", "b"] });
   });
 
-  // Security: the gate runs over the *resolved* set (requested + transitive
-  // deps), so a verified item pulling an unverified registryDependency is
-  // caught. Mirrors runAdd calling partitionVerified(items.map(i => i.name)).
+  // The gate runs over the resolved set, so a verified item pulling an
+  // unverified registryDependency is still caught.
   it("flags an unverified transitive dep in the resolved set", async () => {
     const graph: Record<string, RegistryItem> = {
       "verified-a": item("verified-a", { registryDependencies: ["evil-dep"] }),

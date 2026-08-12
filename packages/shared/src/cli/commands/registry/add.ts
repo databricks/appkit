@@ -22,7 +22,12 @@ import {
   validateBundle,
   writeConfig,
 } from "./config-writer";
-import { REGISTRY_REPO, type RegistryToken, resolveToken } from "./constants";
+import {
+  JS_IDENTIFIER,
+  REGISTRY_REPO,
+  type RegistryToken,
+  resolveToken,
+} from "./constants";
 import {
   extractRequirements,
   type ResourceRequirementRow,
@@ -114,11 +119,6 @@ function uiTargetPath(base: string, file: RegistryItemFile): string {
   return target;
 }
 
-/** A valid, safe JS identifier — export names are written into the user's
- * server source, so anything else is rejected to prevent code injection from
- * a crafted registry `index.ts`. */
-const JS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
-
 /** Best-effort: the `toPlugin` export name from the item's index.ts. Returns
  * null (caller falls back to printed instructions) unless the name is a plain
  * JS identifier — the item is untrusted remote content and the value is
@@ -190,8 +190,7 @@ function installDependencies(deps: string[], cwd: string): void {
   const pm = detectPackageManager(cwd);
   const subcommand = pm === "npm" ? "install" : "add";
   console.log(`\nInstalling dependencies with ${pm}: ${safe.join(" ")}`);
-  // `--` stops the PM from parsing any dep as a flag (defense in depth on top
-  // of the SAFE_DEP_SPEC check above).
+  // `--` stops the PM from parsing any dep as a flag (defense in depth).
   const result = spawnSync(pm, [subcommand, "--", ...safe], {
     stdio: "inherit",
     cwd,
@@ -265,11 +264,8 @@ export async function resolveItems(
 ): Promise<RegistryItem[]> {
   const seen = new Set<string>();
   const ordered: RegistryItem[] = [];
-  // A name is used both as the fetch path (`public/r/<name>.json`) and as the
-  // on-disk `plugins/<name>` dir. Refs (and untrusted registryDependencies)
-  // that aren't plain slugs — containing `/`, `..`, control chars — could
-  // redirect the fetch to another path in the repo or escape the destination
-  // dir, so reject them at the source before they reach either sink.
+  // A name is both the fetch path and the on-disk `plugins/<name>` dir, so
+  // reject non-slug refs (`/`, `..`, control chars) before they reach either.
   const enqueue = (ref: string): string => {
     const name = stripNamespace(ref);
     if (!isValidItemName(name)) {
@@ -291,12 +287,9 @@ export async function resolveItems(
     const items = await Promise.all(
       level.map(async (key) => {
         const item = await fetchItem(key, token);
-        // The fetch key is the trustworthy identity — it's what the user
-        // requested / a parent listed, and what the registry index keys
-        // `verified` on. The item body's self-reported `name` is untrusted
-        // remote data (a `verified: false` item could claim a verified name to
-        // slip past the gate, or point its files at another item's dir), so
-        // pin `name` to the key it was actually fetched under.
+        // Pin to the fetch key: the body's self-reported `name` is untrusted
+        // and could claim a verified name to slip past the gate. The key is the
+        // trustworthy identity the index keys `verified` on.
         item.name = key;
         return item;
       }),
@@ -363,22 +356,17 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     );
   }
 
-  // Resolve the full graph (requested items + their transitive
-  // registryDependencies) and, unless the gate is disabled, fetch the verified
-  // index concurrently — the two are independent network round-trips.
-  // Fetching item JSON is read-only; nothing is written to disk or installed
-  // until after the integrity gate below.
+  // Resolve the full graph and fetch the verified index concurrently (two
+  // independent round-trips). Item resolution is read-only — nothing is written
+  // or installed until after the gate below.
   const verifiedP = opts.allowUnverified
     ? Promise.resolve(null)
     : fetchVerifiedNames(token);
   const items = await resolveItems(refs, token);
 
-  // Integrity gate: only items the registry index marks `verified` are trusted.
-  // Checked over the *entire resolved set*, not just the requested names: a
-  // verified item can declare an unverified registryDependency whose code would
-  // otherwise be written into the user's app and wired into their server
-  // without ever passing the gate. Fails closed — an unreadable index leaves
-  // the verified set null, so every item counts as unverified.
+  // Integrity gate over the *entire resolved set* (not just requested names, so
+  // an unverified transitive dep can't ride in on a verified item). Fails closed:
+  // a null verified set (unreadable index) makes every item count as unverified.
   if (!opts.allowUnverified) {
     const verified = await verifiedP;
     const { unverified } = partitionVerified(
@@ -477,9 +465,9 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       ),
     );
   }
-  // Loaded lazily: server-register pulls in @ast-grep/napi (a native addon),
-  // and this whole CLI is imported eagerly by index.ts, so a static import
-  // would make every unrelated command (docs, lint, …) pay that cost.
+  // Lazy import: server-register pulls in @ast-grep/napi (a native addon), and
+  // this CLI is imported eagerly by index.ts, so a static import would make
+  // every unrelated command pay that cost.
   const registerPluginInServer =
     opts.register !== false && pluginSummaries.some((s) => s.exportName)
       ? (await import("./server-register.js")).registerPluginInServer
@@ -488,7 +476,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     // Try to wire the plugin into the server's createApp call automatically;
     // fall back to printing the snippet when the shape isn't the standard one.
     let wired = false;
-    if (registerPluginInServer && opts.register !== false && s.exportName) {
+    if (registerPluginInServer && s.exportName) {
       const result = registerPluginInServer(cwd, s.importPath, s.exportName);
       if (result.status === "wired") {
         console.log(
@@ -515,9 +503,8 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   }
 
   if (opts.resources !== false && allRequirements.length > 0) {
-    // Loaded lazily: env-writer pulls in the workspace picker and, through it,
-    // the Databricks SDK. index.ts imports this CLI eagerly, so a static import
-    // would make every unrelated command pay the SDK load cost.
+    // Lazy import (same reason as server-register above): env-writer pulls in
+    // the workspace picker and, through it, the Databricks SDK.
     const { collectBindingValues, reportEnvResolutions, syncEnv } =
       await import("./env-writer.js");
     console.log(pc.dim("\nReconciling resource env vars into .env..."));

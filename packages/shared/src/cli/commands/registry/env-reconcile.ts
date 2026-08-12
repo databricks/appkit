@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import {
   fieldOrigin,
   isValidEnvName,
@@ -82,26 +83,12 @@ function includeInEnv(field: RequirementField): boolean {
   return fieldOrigin(field) !== "platform";
 }
 
-/** Parses a `.env` file body into a KEY -> value map. Minimal KEY=VALUE scan. */
+/**
+ * Parses a `.env` file body into a KEY -> value map, using the same `dotenv`
+ * parser the app loads `.env` with at runtime so the CLI reads it identically.
+ */
 export function parseEnv(content: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    const key = line.slice(0, eq).trim();
-    if (!key) continue;
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
-  }
-  return out;
+  return dotenv.parse(content);
 }
 
 /**

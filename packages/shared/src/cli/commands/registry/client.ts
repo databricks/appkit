@@ -51,6 +51,22 @@ export function isValidItemName(name: string): boolean {
 }
 
 /**
+ * Auth headers for a registry request. With a token the GitHub Contents API is
+ * used and `Accept: raw` makes it return file bytes directly; without one the
+ * public raw URL needs no headers. Single source for the auth contract shared
+ * by every registry fetch.
+ */
+export function registryAuthHeaders(
+  token: RegistryToken | null,
+): Record<string, string> {
+  if (!token) return {};
+  return {
+    Authorization: `Bearer ${token.value}`,
+    Accept: "application/vnd.github.raw",
+  };
+}
+
+/**
  * Fetches and parses a single registry item. When a token is present the GitHub
  * Contents API is used (works for the private/internal repo); otherwise the
  * public raw URL is used. Exits the process with a helpful message on failure.
@@ -63,11 +79,7 @@ export async function fetchRegistryItem(
     ? REGISTRY_ITEM_API_TEMPLATE
     : REGISTRY_ITEM_URL_TEMPLATE;
   const url = template.replace("{name}", name);
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token.value}`;
-    headers.Accept = "application/vnd.github.raw";
-  }
+  const headers = registryAuthHeaders(token);
 
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
@@ -120,13 +132,8 @@ export async function fetchVerifiedNames(
   token: RegistryToken | null,
 ): Promise<Set<string> | null> {
   const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token.value}`;
-    headers.Accept = "application/vnd.github.raw";
-  }
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers: registryAuthHeaders(token) });
     if (!res.ok) return null;
     const data = (await res.json()) as { items?: RegistryIndexEntry[] };
     const verified = new Set<string>();
