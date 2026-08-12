@@ -1613,26 +1613,32 @@ describe("DatabricksAdapter", () => {
     const secretValues = [
       "bearer-secret",
       "authorization-secret",
-      "cookie-secret",
+      "cookie-one-secret",
+      "cookie-two-secret",
+      "set-cookie-one-secret",
+      "set-cookie-two-secret",
       "api-key-secret",
       "password-secret",
       "credential-secret",
       "url-token-secret",
       "url-api-key-secret",
       "url-password-secret",
+      "http-url-secret",
     ];
     const adapter = new DatabricksAdapter({
       model: "secret-error-model",
       streamBody: async () => {
         throw new Error(
           "failed\n" +
-            "Bearer bearer-secret " +
-            "Authorization: Basic authorization-secret " +
-            "Cookie: session=cookie-secret " +
-            "X-API-Key: api-key-secret " +
-            "password=password-secret " +
-            "credentials=credential-secret " +
-            "https://example.test/path?token=url-token-secret&api_key=url-api-key-secret&password=url-password-secret",
+            "Bearer bearer-secret\n" +
+            "Authorization: Basic authorization-secret\n" +
+            "Cookie: first=cookie-one-secret; second=cookie-two-secret; theme=public\n" +
+            "Set-Cookie: session=set-cookie-one-secret; Path=/; preference=set-cookie-two-secret; Secure\n" +
+            "X-API-Key: api-key-secret\n" +
+            "password=password-secret\n" +
+            "credentials=credential-secret\n" +
+            "https://example.test/path?token=url-token-secret&api_key=url-api-key-secret&password=url-password-secret\n" +
+            "http://insecure.test/path?secret=http-url-secret",
         );
       },
       maxSteps: 1,
@@ -1657,6 +1663,10 @@ describe("DatabricksAdapter", () => {
     expect(error).toContain("[REDACTED]");
     expect(error?.length).toBeLessThanOrEqual(512);
     expect(error).not.toContain("\n");
+    expect(error).not.toMatch(/https?:\/\//);
+    expect(error).not.toContain("theme=public");
+    expect(error).not.toContain("Path=/");
+    expect(error).not.toContain("Secure");
     for (const secret of secretValues) expect(error).not.toContain(secret);
   });
 

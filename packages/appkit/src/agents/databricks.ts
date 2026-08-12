@@ -45,6 +45,8 @@ const ERROR_SENSITIVE_KEY_PATTERN = new RegExp(
 const ERROR_AUTHORIZATION_PATTERN =
   /\b((?:proxy-)?authorization)\s*[:=]\s*(?:(?:Basic|Bearer)\s+)?[^\s,;]+/gi;
 const ERROR_AUTH_SCHEME_PATTERN = /\b(Basic|Bearer)\s+[^\s,;]+/gi;
+const ERROR_COOKIE_PATTERN = /\b(cookie|set-cookie)\s*[:=]\s*[^\r\n]*/gi;
+const ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -185,6 +187,11 @@ function remoteTraceFromPayload(
 function sanitizedModelError(error: unknown): string {
   const raw = error instanceof Error ? error.message : "Model request failed";
   const redacted = raw
+    .replace(
+      ERROR_COOKIE_PATTERN,
+      (_match, key: string) => `${key}: ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(ERROR_URL_PATTERN, REDACTED_TRACE_VALUE)
     .replace(
       ERROR_AUTHORIZATION_PATTERN,
       (_match, key: string) => `${key}: ${REDACTED_TRACE_VALUE}`,
