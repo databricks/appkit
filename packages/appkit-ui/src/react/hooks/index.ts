@@ -25,6 +25,7 @@ export type {
   MetricOrderDirection,
   MetricPredicate,
   MetricRegistry,
+  MetricViewColumnDisplay,
   PickMetricRow,
   PluginRegistry,
   QueryRegistry,

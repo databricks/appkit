@@ -1,5 +1,7 @@
 import type { MetricViewColumnDisplay } from "shared";
 
+export type { MetricViewColumnDisplay };
+
 const SPEC_CACHE_MAX = 256;
 const specCache = new Map<
   string,

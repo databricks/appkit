@@ -402,6 +402,7 @@ export type {
   MetricOrderBy,
   MetricOrderDirection,
   MetricPredicate,
+  MetricViewColumnDisplay,
 } from "@/js";
 
 import type { MetricFilter, MetricOrderBy } from "@/js";
