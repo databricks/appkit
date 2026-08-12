@@ -1,7 +1,7 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
-import { mockPluginContext } from "../../../testing";
+import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -323,7 +323,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     // forwarded timeout is exercised through actual signal composition — and
     // spying on it lets us keep asserting the exact call signature the agents
     // plugin passes.
-    const mock = mockPluginContext({ analytics: { query: "rows" } });
+    const mock = createTestPluginContext({ analytics: { query: "rows" } });
     const executeToolSpy = vi.spyOn(mock.ctx, "executeTool");
     // biome-ignore lint/suspicious/noExplicitAny: attach the real context to the plugin
     (plugin as any).context = mock.ctx;
@@ -362,7 +362,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     const { runState } = makeRunState(plugin);
     runState.limits.toolCallTimeoutMs = 5;
 
-    const mock = mockPluginContext({
+    const mock = createTestPluginContext({
       analytics: {
         query: (_args, signal) =>
           new Promise((_resolve, reject) => {

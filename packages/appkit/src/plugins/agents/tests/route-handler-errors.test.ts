@@ -1,7 +1,7 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
-import { mockPluginContext } from "../../../testing";
+import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -401,7 +401,7 @@ describe("/invocations and /responses are aliases", () => {
     // captures the RAW handlers passed to addRoute — the aliasing assertion
     // needs the original references, which the context's forwardAsyncErrors
     // wrapping would otherwise break.
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     // biome-ignore lint/suspicious/noExplicitAny: attach the real context
     (plugin as any).context = mock.ctx;
     // biome-ignore lint/suspicious/noExplicitAny: invoke private mounter

@@ -12,15 +12,15 @@ Exercise a plugin's real code paths — route registration, cross-plugin tool di
 
 The kit has two entry points plus a set of fixture helpers:
 
-- **`mockPluginContext()`** — build a real `PluginContext` with faked edges and attach it to a plugin.
+- **`createTestPluginContext()`** — build a real `PluginContext` with faked edges and attach it to a plugin.
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
 - **Fixtures** — `createMockRequest`, `createMockResponse`, `mockServiceContext`, and SQL response builders.
 
 The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is a peer dependency and must be installed to import from this subpath. Any project that runs Vitest as its test runner already has it — AppKit apps scaffolded from the template do — so in practice there is nothing extra to add.
 
-## `mockPluginContext()`
+## `createTestPluginContext()`
 
-`PluginContext` is the mediator AppKit passes to every plugin — it buffers routes, tracks tool providers, and runs cross-plugin tool calls with user scoping and a timeout. `mockPluginContext()` returns the **real** context with three edges faked:
+`PluginContext` is the mediator AppKit passes to every plugin — it buffers routes, tracks tool providers, and runs cross-plugin tool calls with user scoping and a timeout. `createTestPluginContext()` returns the **real** context with three edges faked:
 
 | Edge | How it's faked |
 | --- | --- |
@@ -35,9 +35,9 @@ Because the context is real, `executeTool` still resolves the user scope via `as
 Pass canned responses keyed by plugin name, then tool name. A response is either a static value or a function of the call arguments and the composed abort signal:
 
 ```ts
-import { mockPluginContext } from "@databricks/appkit/testing";
+import { createTestPluginContext } from "@databricks/appkit/testing";
 
-const mock = mockPluginContext({
+const mock = createTestPluginContext({
   analytics: {
     // static response
     top_users: [{ user: "alice", events: 42 }],
@@ -122,7 +122,7 @@ Instantiate the plugin **class** directly with `new`. The `analytics()` / `agent
 
 ```ts
 import { Plugin, type PluginManifest } from "@databricks/appkit";
-import { expectStream, mockPluginContext } from "@databricks/appkit/testing";
+import { expectStream, createTestPluginContext } from "@databricks/appkit/testing";
 import { describe, expect, test } from "vitest";
 
 // A small plugin that registers a route and streams two events.
@@ -146,7 +146,7 @@ class GreeterPlugin extends Plugin {
 
 describe("greeter plugin", () => {
   test("registers its route through the context", async () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     const plugin = new GreeterPlugin({});
 
     await mock.attach(plugin);
@@ -170,7 +170,7 @@ describe("greeter plugin", () => {
 To test a plugin that dispatches cross-plugin tool calls, register fake providers and assert on `mock.toolCalls` — including `asUser`, which confirms the on-behalf-of path ran:
 
 ```ts
-const mock = mockPluginContext({ analytics: { query: [{ n: 1 }] } });
+const mock = createTestPluginContext({ analytics: { query: [{ n: 1 }] } });
 const plugin = new MyAgentPlugin({ dir: false });
 await mock.attach(plugin);
 

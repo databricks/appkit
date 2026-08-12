@@ -10,7 +10,7 @@
  * with no credentials.
  *
  * Two entry points:
- * - {@link mockPluginContext} — build a real `PluginContext` with faked edges
+ * - {@link createTestPluginContext} — build a real `PluginContext` with faked edges
  *   and attach it to a plugin.
  * - {@link expectStream} — assert the ordered event types a stream emits.
  *
@@ -19,12 +19,12 @@
  *
  * @example
  * ```ts
- * import { mockPluginContext, expectStream } from "@databricks/appkit/testing";
+ * import { createTestPluginContext, expectStream } from "@databricks/appkit/testing";
  *
  * // Attach a real PluginContext (with faked edges) to your plugin instance,
  * // then assert on what a streaming source emits. `expectStream` consumes an
  * // async event stream, a plain array, or an SSE `Response`.
- * const mock = mockPluginContext({ analytics: { query: fixtureRows } });
+ * const mock = createTestPluginContext({ analytics: { query: fixtureRows } });
  * const plugin = new MyPlugin({});
  * await mock.attach(plugin);
  *
@@ -37,7 +37,7 @@
  * @module
  */
 
-// Re-export the PluginContext type so `MockPluginContext.ctx` is nameable
+// Re-export the PluginContext type so `TestPluginContext.ctx` is nameable
 // through this entry point — the class is otherwise reachable only via a deep
 // path (../core/plugin-context) that is not part of the package's exports map.
 export type { PluginContext } from "../core/plugin-context";
@@ -65,11 +65,11 @@ export {
   type TestContextOptions,
 } from "./fixtures";
 export {
+  createTestPluginContext,
   type FakeProvider,
   type FakeProviders,
   type FakeToolResponse,
-  type MockPluginContext,
-  mockPluginContext,
   type RecordedRoute,
   type RecordedToolCall,
-} from "./mock-plugin-context";
+  type TestPluginContext,
+} from "./test-plugin-context";

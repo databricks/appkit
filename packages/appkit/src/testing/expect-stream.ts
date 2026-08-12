@@ -143,7 +143,7 @@ function isSubsequence(actual: string[], expected: string[]): boolean {
 /**
  * Consume a stream and make ordered assertions about the event types it emits.
  *
- * Deterministic and network-free: pair it with {@link mockPluginContext} to
+ * Deterministic and network-free: pair it with {@link createTestPluginContext} to
  * exercise a plugin's streaming handler and assert what it emits.
  *
  * @example Async event stream (adapter output)

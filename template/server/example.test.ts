@@ -1,5 +1,5 @@
 import { Plugin, type PluginManifest } from '@databricks/appkit';
-import { expectStream, mockPluginContext } from '@databricks/appkit/testing';
+import { expectStream, createTestPluginContext } from '@databricks/appkit/testing';
 import { describe, expect, test } from 'vitest';
 
 /**
@@ -10,7 +10,7 @@ import { describe, expect, test } from 'vitest';
  * it as a starting point for testing your own plugins.
  *
  * Two headline helpers are shown below:
- *  - `mockPluginContext()` — a real PluginContext with faked edges, attachable
+ *  - `createTestPluginContext()` — a real PluginContext with faked edges, attachable
  *    to a plugin so its real code paths (routes, tool dispatch, user scoping)
  *    run under test.
  *  - `expectStream(...).toEmit(...)` — assert the ordered event types a
@@ -32,7 +32,7 @@ class GreeterPlugin extends Plugin {
   } as PluginManifest<'greeter'>;
 
   async setup() {
-    // Routes registered here are captured by mockPluginContext().routes.
+    // Routes registered here are captured by createTestPluginContext().routes.
     this.context?.addRoute('get', '/hello', (_req, res) => {
       res.end();
     });
@@ -47,7 +47,7 @@ class GreeterPlugin extends Plugin {
 
 describe('testing kit example', () => {
   test('attaches a real PluginContext and records registered routes', async () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     const plugin = new GreeterPlugin({});
 
     await mock.attach(plugin);

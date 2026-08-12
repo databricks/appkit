@@ -43,7 +43,7 @@ export type FakeToolResponse =
  * Fake connector responses, keyed by plugin name and then tool name:
  *
  * ```ts
- * mockPluginContext({ analytics: { query: fixtureRows } });
+ * createTestPluginContext({ analytics: { query: fixtureRows } });
  * ```
  *
  * Each top-level key registers a fake {@link ToolProvider} under that plugin
@@ -102,13 +102,18 @@ export interface FakeProvider {
 }
 
 /**
- * The result of {@link mockPluginContext}: the real `PluginContext` plus the
+ * The result of {@link createTestPluginContext}: the real `PluginContext` plus the
  * seams a test needs to drive and inspect it.
  */
-export interface MockPluginContext {
+export interface TestPluginContext {
   /** The real {@link PluginContext}, constructed with mock telemetry. */
   ctx: PluginContext;
-  /** The injected mock telemetry provider — assert on spans here. */
+  /**
+   * The mock telemetry provider injected into the {@link PluginContext}.
+   * Captures the spans the *context* opens (notably `executeTool`) — not the
+   * plugin's own spans: `attachContext` rebuilds the plugin's `this.telemetry`
+   * from the real `TelemetryManager`, so plugin-internal spans do not land here.
+   */
   telemetry: ITelemetry;
   /**
    * Tool dispatches observed across all fake providers, in call order. Live —
@@ -145,7 +150,9 @@ export interface MockPluginContext {
  * timeout composition, and the on-behalf-of (`asUser`) path all run for real.
  * Only three edges are faked, matching the seams the class actually has:
  *
- * - **Telemetry** is a mock provider (the one injectable production seam).
+ * - **Telemetry** is a mock provider injected into the context (the one
+ *   injectable production seam); it records the context's own spans, not the
+ *   plugin's.
  * - **Tool providers** are fakes registered through the existing public
  *   `registerToolProvider`; their `asUser`/`executeAgentTool` are recorded.
  * - **Routes** are captured by wrapping the public `addRoute`/`addMiddleware`.
@@ -156,15 +163,15 @@ export interface MockPluginContext {
  *
  * @example
  * ```ts
- * const mock = mockPluginContext({ analytics: { query: fixtureRows } });
+ * const mock = createTestPluginContext({ analytics: { query: fixtureRows } });
  * await mock.attach(agentsPlugin);
  * // ...exercise a handler that dispatches analytics.query...
  * expect(mock.toolCalls[0]).toMatchObject({ plugin: "analytics", asUser: true });
  * ```
  */
-export function mockPluginContext(
+export function createTestPluginContext(
   fakes: FakeProviders = {},
-): MockPluginContext {
+): TestPluginContext {
   const telemetry = createMockTelemetry();
   const ctx = new PluginContext({ telemetry });
 
@@ -226,7 +233,7 @@ export function mockPluginContext(
       // Object.prototype method and be invoked instead of reported missing.
       if (!Object.hasOwn(tools, toolName)) {
         throw new Error(
-          `mockPluginContext: plugin "${name}" has no fake tool "${toolName}". ` +
+          `createTestPluginContext: plugin "${name}" has no fake tool "${toolName}". ` +
             `Available: ${Object.keys(tools).join(", ") || "(none)"}`,
         );
       }

@@ -13,7 +13,7 @@ type Any = any;
 /**
  * Creates a mock telemetry provider for testing. Every span/meter/logger is a
  * `vi.fn()` no-op, so plugins that trace, count, or log run without a live
- * OpenTelemetry pipeline. Passed into {@link mockPluginContext} as the one
+ * OpenTelemetry pipeline. Passed into {@link createTestPluginContext} as the one
  * injectable production seam.
  */
 export function createMockTelemetry(): ITelemetry {

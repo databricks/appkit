@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { PluginContext } from "../../core/plugin-context";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { mockPluginContext } from "../mock-plugin-context";
+import { createTestPluginContext } from "../test-plugin-context";
 
 // A minimal real plugin for exercising attach() end-to-end.
 class ProbePlugin extends Plugin {
@@ -25,7 +25,7 @@ class ProbePlugin extends Plugin {
 }
 
 /**
- * Contract for `mockPluginContext`. The point of the kit is that it wraps the
+ * Contract for `createTestPluginContext`. The point of the kit is that it wraps the
  * REAL PluginContext — so these tests drive the real `executeTool`,
  * `addRoute`, and `getToolProviders` and assert the observable seams (OBO,
  * timeout, route recording) rather than a reimplementation.
@@ -46,14 +46,14 @@ function mockReq(
   } as unknown as express.Request;
 }
 
-describe("mockPluginContext — construction", () => {
+describe("createTestPluginContext — construction", () => {
   test("produces a real PluginContext instance", () => {
-    const { ctx } = mockPluginContext();
+    const { ctx } = createTestPluginContext();
     expect(ctx).toBeInstanceOf(PluginContext);
   });
 
   test("registers fake providers passed at construction", () => {
-    const { ctx } = mockPluginContext({
+    const { ctx } = createTestPluginContext({
       analytics: { query: [{ id: 1 }] },
       genie: { ask: "hi" },
     });
@@ -63,10 +63,10 @@ describe("mockPluginContext — construction", () => {
   });
 });
 
-describe("mockPluginContext — executeTool runs the REAL user-scoping path", () => {
+describe("createTestPluginContext — executeTool runs the REAL user-scoping path", () => {
   test("dispatches through asUser and returns the canned static response", async () => {
     const rows = [{ user: "alice", n: 3 }];
-    const mock = mockPluginContext({ analytics: { top_users: rows } });
+    const mock = createTestPluginContext({ analytics: { top_users: rows } });
 
     const result = await mock.ctx.executeTool(
       mockReq(),
@@ -94,7 +94,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
     // The fake asUser enforces the same token precondition as Plugin.asUser,
     // so a header-less request must reject rather than silently record
     // asUser: true — this is what makes the OBO assertion meaningful.
-    const mock = mockPluginContext({ analytics: { top_users: [] } });
+    const mock = createTestPluginContext({ analytics: { top_users: [] } });
 
     await expect(
       mock.ctx.executeTool(mockReq({}), "analytics", "top_users", {}),
@@ -104,7 +104,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 
   test("rejects a request with a token but no user id", async () => {
-    const mock = mockPluginContext({ analytics: { top_users: [] } });
+    const mock = createTestPluginContext({ analytics: { top_users: [] } });
 
     await expect(
       mock.ctx.executeTool(
@@ -118,7 +118,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 
   test("records the resolved user id so a test can assert who the tool ran as", async () => {
-    const mock = mockPluginContext({ analytics: { top_users: [] } });
+    const mock = createTestPluginContext({ analytics: { top_users: [] } });
     await mock.ctx.executeTool(
       mockReq({
         "x-forwarded-access-token": "tok",
@@ -132,7 +132,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 
   test("invokes a function response with the args and the composed signal", async () => {
-    const mock = mockPluginContext({
+    const mock = createTestPluginContext({
       analytics: {
         query: (args, signal) => ({ echoed: args, aborted: signal?.aborted }),
       },
@@ -148,7 +148,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 
   test("forwards the caller timeout so a slow tool is aborted", async () => {
-    const mock = mockPluginContext({
+    const mock = createTestPluginContext({
       slow: {
         wait: (_args, signal) =>
           new Promise((_resolve, reject) => {
@@ -168,14 +168,14 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 
   test("throws with a helpful message for an unknown plugin", async () => {
-    const mock = mockPluginContext({ analytics: { query: [] } });
+    const mock = createTestPluginContext({ analytics: { query: [] } });
     await expect(
       mock.ctx.executeTool(mockReq(), "nope", "query", {}),
     ).rejects.toThrow(/unknown plugin "nope"/);
   });
 
   test("throws with a helpful message for an unknown tool", async () => {
-    const mock = mockPluginContext({ analytics: { query: [] } });
+    const mock = createTestPluginContext({ analytics: { query: [] } });
     await expect(
       mock.ctx.executeTool(mockReq(), "analytics", "missing", {}),
     ).rejects.toThrow(/no fake tool "missing"/);
@@ -184,7 +184,7 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   test("returns a null response as a value rather than treating it as missing", async () => {
     // `resolve` distinguishes a null fake response (valid) from undefined
     // (unregistered tool), so a tool can model an empty/absent result.
-    const mock = mockPluginContext({ analytics: { lookup: null } });
+    const mock = createTestPluginContext({ analytics: { lookup: null } });
     const result = await mock.ctx.executeTool(
       mockReq(),
       "analytics",
@@ -195,9 +195,9 @@ describe("mockPluginContext — executeTool runs the REAL user-scoping path", ()
   });
 });
 
-describe("mockPluginContext — telemetry seam", () => {
+describe("createTestPluginContext — telemetry seam", () => {
   test("records a span on the injected mock telemetry for each executeTool", async () => {
-    const mock = mockPluginContext({ analytics: { query: [] } });
+    const mock = createTestPluginContext({ analytics: { query: [] } });
     const tracer = mock.telemetry.getTracer();
 
     await mock.ctx.executeTool(mockReq(), "analytics", "query", {});
@@ -207,9 +207,9 @@ describe("mockPluginContext — telemetry seam", () => {
   });
 });
 
-describe("mockPluginContext — route recording", () => {
+describe("createTestPluginContext — route recording", () => {
   test("records addRoute calls with raw (pre-wrap) handlers", () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     const handler: express.RequestHandler = (_req, res) => {
       res.end();
     };
@@ -229,7 +229,7 @@ describe("mockPluginContext — route recording", () => {
   });
 
   test("records addMiddleware under the 'use' method", () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     const mw: express.RequestHandler = (_req, _res, next) => next();
     mock.ctx.addMiddleware("/api", mw);
     expect(mock.routes).toEqual([
@@ -238,18 +238,18 @@ describe("mockPluginContext — route recording", () => {
   });
 });
 
-describe("mockPluginContext — registerProvider after construction", () => {
+describe("createTestPluginContext — registerProvider after construction", () => {
   test("adds a provider dynamically", async () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     mock.registerProvider("late", { ping: "pong" });
     const result = await mock.ctx.executeTool(mockReq(), "late", "ping", {});
     expect(result).toBe("pong");
   });
 });
 
-describe("mockPluginContext — attach()", () => {
+describe("createTestPluginContext — attach()", () => {
   test("seeds the cache, flips isReady, and registers the plugin", async () => {
-    const mock = mockPluginContext();
+    const mock = createTestPluginContext();
     const plugin = new ProbePlugin({});
 
     // Before attach the plugin may not be ready (no cache seeded yet in a
@@ -271,7 +271,7 @@ describe("mockPluginContext — attach()", () => {
   test("does not overwrite an injected fake provider of the same name", async () => {
     // If the plugin under test shares a name with an injected fake, the fake
     // (the authored double) must win — attach must not clobber it.
-    const mock = mockPluginContext({ probe: { canned: "fake" } });
+    const mock = createTestPluginContext({ probe: { canned: "fake" } });
     const plugin = new ProbePlugin({});
     await mock.attach(plugin);
 
