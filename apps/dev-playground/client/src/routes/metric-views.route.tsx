@@ -479,6 +479,8 @@ function MetricViewsRoute() {
               {!region.error && region.data && region.data.length > 0 && (
                 <BarChart
                   data={normalizeChartDataForChart(region.data, "region")}
+                  ariaLabel="Annual recurring revenue by region"
+                  testId="metric-region-chart"
                   xKey="region"
                   yKey="arr"
                   height={280}
@@ -517,6 +519,8 @@ function MetricViewsRoute() {
               {!segment.error && segment.data && segment.data.length > 0 && (
                 <DonutChart
                   data={normalizeChartDataForChart(segment.data, "segment")}
+                  ariaLabel="Annual recurring revenue by customer segment"
+                  testId="metric-segment-chart"
                   xKey="segment"
                   yKey="arr"
                   height={280}
@@ -557,6 +561,8 @@ function MetricViewsRoute() {
             {!trend.error && trend.data && trend.data.length > 0 && (
               <LineChart
                 data={trend.data}
+                ariaLabel="Annual and monthly recurring revenue by month"
+                testId="metric-trend-chart"
                 xKey="created_at"
                 yKey={[...TREND_MEASURES]}
                 height={320}
