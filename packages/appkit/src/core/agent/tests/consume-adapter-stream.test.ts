@@ -71,6 +71,14 @@ describe("consumeAdapterStream", () => {
     const controller = new AbortController();
     const result = await consumeAdapterStream(
       (async function* () {
+        yield {
+          type: "model_start",
+          stepId: "cancelled-step",
+          model: "model-a",
+          provider: "databricks",
+          input: { prompt: "hello" },
+          startedAt: 100,
+        } as AgentEvent;
         yield { type: "message_delta", content: "partial" } as AgentEvent;
         controller.abort();
         yield {
@@ -101,6 +109,69 @@ describe("consumeAdapterStream", () => {
         outputTokens: 2,
         totalTokens: 10,
         costAvailable: false,
+      },
+    });
+  });
+
+  test("tracks a model_start observed in the same turn that cancellation begins", async () => {
+    const controller = new AbortController();
+    const seen: AgentEvent[] = [];
+    const result = await consumeAdapterStream(
+      (async function* () {
+        controller.abort();
+        yield {
+          type: "model_start",
+          stepId: "racing-step",
+          model: "model-a",
+          provider: "databricks",
+          input: { prompt: "hello" },
+          startedAt: 100,
+        } as AgentEvent;
+        yield { type: "message_delta", content: "suppressed" } as AgentEvent;
+        yield {
+          type: "remote_trace",
+          traceId: "trace:/catalog.schema.table/racing-step",
+          source: "model-serving",
+          relation: "continued",
+        } as AgentEvent;
+        yield {
+          type: "model_end",
+          stepId: "racing-step",
+          model: "model-a",
+          provider: "databricks",
+          output: { text: "suppressed" },
+          usage: {
+            inputTokens: 5,
+            outputTokens: 1,
+            totalTokens: 6,
+            costAvailable: false,
+          },
+          finishReason: "cancelled",
+          streamDurationMs: 10,
+          endedAt: 110,
+        } as AgentEvent;
+      })(),
+      { signal: controller.signal, onEvent: (event) => seen.push(event) },
+    );
+
+    expect(seen.map((event) => event.type)).toEqual([
+      "model_start",
+      "remote_trace",
+      "model_end",
+    ]);
+    expect(result).toEqual({
+      text: "",
+      usage: {
+        inputTokens: 5,
+        outputTokens: 1,
+        totalTokens: 6,
+        costAvailable: false,
+      },
+      remoteTrace: {
+        type: "remote_trace",
+        traceId: "trace:/catalog.schema.table/racing-step",
+        source: "model-serving",
+        relation: "continued",
       },
     });
   });

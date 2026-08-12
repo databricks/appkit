@@ -14,6 +14,10 @@ import {
   stream as servingStream,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
+import {
+  DEFAULT_TRACE_REDACT_KEYS,
+  REDACTED_TRACE_VALUE,
+} from "../telemetry/agent-tracing/attributes";
 import { createWorkspaceClient } from "../workspace-client";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
@@ -30,6 +34,17 @@ const PYTHON_STYLE_TOOL_PARSE_MAX_INPUT = 64 * 1024;
 
 /** Fallback HTTP timeout when the raw fetch adapter path receives no AbortSignal from the runner. */
 const RAW_FETCH_DEFAULT_TIMEOUT_MS = 120_000;
+
+const ERROR_SENSITIVE_KEY_PATTERN = new RegExp(
+  `\\b(${[...DEFAULT_TRACE_REDACT_KEYS]
+    .sort((left, right) => right.length - left.length)
+    .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})\\b\\s*[:=]\\s*(?:"[^"]*"|'[^']*'|[^\\s,;&#]+)`,
+  "gi",
+);
+const ERROR_AUTHORIZATION_PATTERN =
+  /\b((?:proxy-)?authorization)\s*[:=]\s*(?:(?:Basic|Bearer)\s+)?[^\s,;]+/gi;
+const ERROR_AUTH_SCHEME_PATTERN = /\b(Basic|Bearer)\s+[^\s,;]+/gi;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -50,9 +65,20 @@ function finiteNonNegativeNumber(
 
 function normalizeUsage(
   parsed: Record<string, unknown>,
+  previous: AgentUsage,
 ): AgentUsage | undefined {
   const raw = isRecord(parsed.usage) ? parsed.usage : undefined;
-  if (!raw) return undefined;
+  const providerCost =
+    finiteNonNegativeNumber(raw, "cost_usd", "cost", "total_cost_usd") ??
+    finiteNonNegativeNumber(parsed, "cost_usd", "cost", "total_cost_usd");
+  if (!raw) {
+    if (providerCost === undefined) return undefined;
+    return {
+      ...previous,
+      costUsd: providerCost,
+      costAvailable: true,
+    };
+  }
 
   const inputTokens =
     finiteNonNegativeNumber(raw, "input_tokens", "prompt_tokens") ?? 0;
@@ -79,9 +105,8 @@ function normalizeUsage(
       "cache_creation_input_tokens",
       "cache_creation_tokens",
     );
-  const providerCost =
-    finiteNonNegativeNumber(raw, "cost_usd", "cost", "total_cost_usd") ??
-    finiteNonNegativeNumber(parsed, "cost_usd", "cost");
+  const retainedCost =
+    providerCost ?? (previous.costAvailable ? previous.costUsd : undefined);
 
   return {
     inputTokens,
@@ -91,8 +116,8 @@ function normalizeUsage(
     ...(cacheCreationInputTokens !== undefined
       ? { cacheCreationInputTokens }
       : {}),
-    ...(providerCost !== undefined ? { costUsd: providerCost } : {}),
-    costAvailable: providerCost !== undefined,
+    ...(retainedCost !== undefined ? { costUsd: retainedCost } : {}),
+    costAvailable: retainedCost !== undefined,
   };
 }
 
@@ -159,7 +184,20 @@ function remoteTraceFromPayload(
 
 function sanitizedModelError(error: unknown): string {
   const raw = error instanceof Error ? error.message : "Model request failed";
-  const withoutControls = Array.from(raw, (character) => {
+  const redacted = raw
+    .replace(
+      ERROR_AUTHORIZATION_PATTERN,
+      (_match, key: string) => `${key}: ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(
+      ERROR_AUTH_SCHEME_PATTERN,
+      (_match, scheme: string) => `${scheme} ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(
+      ERROR_SENSITIVE_KEY_PATTERN,
+      (_match, key: string) => `${key}=${REDACTED_TRACE_VALUE}`,
+    );
+  const withoutControls = Array.from(redacted, (character) => {
     const code = character.charCodeAt(0);
     return code < 32 || code === 127 ? " " : character;
   }).join("");
@@ -458,10 +496,7 @@ export class DatabricksAdapter implements AgentAdapter {
           signal: fetchSignal,
         });
         if (!response.ok) {
-          const errorText = await response.text().catch(() => "Unknown error");
-          throw new Error(
-            `Databricks API error (${response.status}): ${errorText}`,
-          );
+          throw new Error(`Databricks API error (${response.status})`);
         }
         if (!response.body) throw new Error("No response body");
         return retainResponseHeaders(response.body, response.headers);
@@ -747,11 +782,19 @@ export class DatabricksAdapter implements AgentAdapter {
       }
     >();
     const emittedRemoteTraces = new Set<string>();
-    const snapshotToolCalls = (): OpenAIToolCall[] =>
+    const snapshotToolCalls = (
+      normalizeCompletedArguments = false,
+    ): OpenAIToolCall[] =>
       Array.from(toolCallAccumulator.values()).map((tc) => ({
         id: tc.id,
         type: "function" as const,
-        function: { name: tc.name, arguments: tc.arguments || "{}" },
+        function: {
+          name: tc.name,
+          arguments:
+            normalizeCompletedArguments && tc.arguments === ""
+              ? "{}"
+              : tc.arguments,
+        },
         ...(tc.thoughtSignature
           ? { thoughtSignature: tc.thoughtSignature }
           : {}),
@@ -819,7 +862,7 @@ export class DatabricksAdapter implements AgentAdapter {
 
           if (!isRecord(parsed)) continue;
 
-          const usage = normalizeUsage(parsed);
+          const usage = normalizeUsage(parsed, finalUsage);
           if (usage) finalUsage = usage;
 
           const choice = firstChoice(parsed);
@@ -949,7 +992,7 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (caughtError !== undefined) throw caughtError;
 
-    return { text: fullText, toolCalls: snapshotToolCalls() };
+    return { text: fullText, toolCalls: snapshotToolCalls(true) };
   }
 
   private async *executeToolCalls(

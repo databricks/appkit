@@ -67,21 +67,28 @@ export async function consumeAdapterStream(
 ): Promise<ConsumedAgentStream> {
   let text = "";
   const usage = new AgentUsageAccumulator();
+  const activeModelSteps = new Set<string>();
   const consumedModelSteps = new Set<string>();
   let remoteTrace: ConsumedAgentStream["remoteTrace"];
   for await (const event of stream) {
-    if (
-      opts.signal?.aborted &&
-      event.type !== "model_end" &&
-      event.type !== "remote_trace"
-    ) {
-      break;
+    const aborted = opts.signal?.aborted === true;
+    if (event.type === "model_start") activeModelSteps.add(event.stepId);
+    if (aborted) {
+      if (activeModelSteps.size === 0) break;
+      if (
+        event.type !== "model_start" &&
+        event.type !== "model_end" &&
+        event.type !== "remote_trace"
+      ) {
+        continue;
+      }
     }
     if (event.type === "message_delta") {
       text += event.content;
     } else if (event.type === "message") {
       text = event.content;
     } else if (event.type === "model_end") {
+      activeModelSteps.delete(event.stepId);
       if (!consumedModelSteps.has(event.stepId)) {
         consumedModelSteps.add(event.stepId);
         usage.add(event.usage);
@@ -90,6 +97,7 @@ export async function consumeAdapterStream(
       remoteTrace = event;
     }
     opts.onEvent?.(event);
+    if (aborted && activeModelSteps.size === 0) break;
   }
   return {
     text,

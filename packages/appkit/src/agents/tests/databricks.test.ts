@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentToolDefinition, Message } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import {
   DatabricksAdapter,
   type GenerationParams,
@@ -67,7 +68,12 @@ function createReadableStream(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 function createTimedReadableStream(
-  reads: Array<{ at: number; chunk?: string; error?: Error }>,
+  reads: Array<{
+    at: number;
+    chunk?: string;
+    error?: Error;
+    onRead?: () => void;
+  }>,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let i = 0;
@@ -78,6 +84,7 @@ function createTimedReadableStream(
           const next = reads[i++];
           if (!next) return { done: true, value: undefined };
           vi.setSystemTime(next.at);
+          next.onRead?.();
           if (next.error) throw next.error;
           if (next.chunk === undefined) {
             return { done: true, value: undefined };
@@ -98,6 +105,7 @@ function completionChunk(options: {
   usage?: Record<string, unknown>;
   mlflowTraceId?: string;
   mlflowSpanId?: string;
+  totalCostUsd?: number;
 }): string {
   return sseChunk(
     JSON.stringify({
@@ -119,6 +127,9 @@ function completionChunk(options: {
         ? { mlflow_trace_id: options.mlflowTraceId }
         : {}),
       ...(options.mlflowSpanId ? { mlflow_span_id: options.mlflowSpanId } : {}),
+      ...(options.totalCostUsd !== undefined
+        ? { total_cost_usd: options.totalCostUsd }
+        : {}),
     }),
   );
 }
@@ -472,6 +483,82 @@ describe("DatabricksAdapter", () => {
     expect(events[2]).not.toHaveProperty("firstTokenAt");
   });
 
+  test("applies a cost-only terminal frame without losing prior token usage", async () => {
+    globalThis.fetch = mockFetch([
+      completionChunk({
+        content: "answer",
+        finishReason: "stop",
+        usage: {
+          input_tokens: 12,
+          output_tokens: 4,
+          total_tokens: 16,
+        },
+      }),
+      sseChunk(
+        JSON.stringify({
+          choices: [],
+          total_cost_usd: 0.123,
+        }),
+      ),
+      sseChunk("[DONE]"),
+    ]);
+
+    const events: AgentEvent[] = [];
+    for await (const event of createAdapter().run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.find((event) => event.type === "model_end")).toEqual(
+      expect.objectContaining({
+        usage: {
+          inputTokens: 12,
+          outputTokens: 4,
+          totalTokens: 16,
+          costUsd: 0.123,
+          costAvailable: true,
+        },
+      }),
+    );
+  });
+
+  test("maps top-level total_cost_usd when usage shares the terminal frame", async () => {
+    globalThis.fetch = mockFetch([
+      completionChunk({
+        finishReason: "stop",
+        usage: {
+          prompt_tokens: 6,
+          completion_tokens: 2,
+          total_tokens: 8,
+        },
+        totalCostUsd: 0.456,
+      }),
+      sseChunk("[DONE]"),
+    ]);
+
+    const events: AgentEvent[] = [];
+    for await (const event of createAdapter().run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.find((event) => event.type === "model_end")).toEqual(
+      expect.objectContaining({
+        usage: {
+          inputTokens: 6,
+          outputTokens: 2,
+          totalTokens: 8,
+          costUsd: 0.456,
+          costAvailable: true,
+        },
+      }),
+    );
+  });
+
   test("emits a linked remote trace from a terminal MLflow trace event", async () => {
     globalThis.fetch = mockFetch([
       completionChunk({
@@ -592,6 +679,164 @@ describe("DatabricksAdapter", () => {
       }),
     );
     expect(events[3]).not.toHaveProperty("error");
+  });
+
+  test("drains buffered deltas through model_end after cancellation without exposing them", async () => {
+    const controller = new AbortController();
+    globalThis.fetch = mockFetch([
+      textDelta("visible") +
+        textDelta("suppressed") +
+        completionChunk({
+          finishReason: "stop",
+          usage: {
+            input_tokens: 9,
+            output_tokens: 3,
+            total_tokens: 12,
+          },
+          mlflowTraceId: "trace:/catalog.schema.table/cancelled-remote",
+          mlflowSpanId: "0123456789abcdef",
+        }) +
+        sseChunk("[DONE]"),
+    ]);
+    const seen: AgentEvent[] = [];
+
+    const result = await consumeAdapterStream(
+      createAdapter().run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn(), signal: controller.signal },
+      ),
+      {
+        signal: controller.signal,
+        onEvent(event) {
+          seen.push(event);
+          if (event.type === "message_delta") controller.abort();
+        },
+      },
+    );
+
+    expect(seen.map((event) => event.type)).toEqual([
+      "status",
+      "model_start",
+      "message_delta",
+      "remote_trace",
+      "model_end",
+    ]);
+    expect(result).toEqual({
+      text: "visible",
+      usage: {
+        inputTokens: 9,
+        outputTokens: 3,
+        totalTokens: 12,
+        costAvailable: false,
+      },
+      remoteTrace: {
+        type: "remote_trace",
+        traceId: "trace:/catalog.schema.table/cancelled-remote",
+        spanId: "0123456789abcdef",
+        source: "model-serving",
+        relation: "linked",
+      },
+    });
+  });
+
+  test("retains empty tool arguments when streaming fails after the tool name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(6_000);
+    const adapter = new DatabricksAdapter({
+      model: "partial-tool-model",
+      streamBody: async () =>
+        createTimedReadableStream([
+          {
+            at: 6_010,
+            chunk: toolCallDelta(0, "call_partial", "analytics__query", ""),
+          },
+          { at: 6_020, error: new Error("stream failed") },
+        ]),
+      maxSteps: 1,
+    });
+    const events: AgentEvent[] = [];
+
+    await expect(async () => {
+      for await (const event of adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: createTestTools(),
+          threadId: "t1",
+        },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(event);
+      }
+    }).rejects.toThrow("stream failed");
+
+    expect(events.find((event) => event.type === "model_end")).toEqual(
+      expect.objectContaining({
+        output: {
+          text: "",
+          toolCalls: [
+            {
+              id: "call_partial",
+              type: "function",
+              function: {
+                name: "analytics__query",
+                arguments: "",
+              },
+            },
+          ],
+        },
+        error: "stream failed",
+      }),
+    );
+  });
+
+  test("retains empty tool arguments when cancelled after the tool name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(7_000);
+    const controller = new AbortController();
+    const adapter = new DatabricksAdapter({
+      model: "cancelled-tool-model",
+      streamBody: async () =>
+        createTimedReadableStream([
+          {
+            at: 7_010,
+            chunk: toolCallDelta(0, "call_partial", "analytics__query", ""),
+            onRead: () => controller.abort(),
+          },
+          { at: 7_020 },
+        ]),
+      maxSteps: 1,
+    });
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool: vi.fn(), signal: controller.signal },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.find((event) => event.type === "model_end")).toEqual(
+      expect.objectContaining({
+        output: {
+          text: "",
+          toolCalls: [
+            {
+              id: "call_partial",
+              type: "function",
+              function: {
+                name: "analytics__query",
+                arguments: "",
+              },
+            },
+          ],
+        },
+        finishReason: "cancelled",
+      }),
+    );
   });
 
   test("finalizes a model step when iteration stops immediately after model_start", async () => {
@@ -1313,23 +1558,106 @@ describe("DatabricksAdapter", () => {
     }).rejects.toThrow(/tool call arguments exceed/);
   });
 
-  test("throws on non-ok response", async () => {
+  test("omits the raw response body from non-ok transport errors", async () => {
+    const secretValues = [
+      "bearer-secret",
+      "authorization-secret",
+      "cookie-secret",
+      "api-key-secret",
+      "password-secret",
+      "credential-secret",
+      "url-token-secret",
+      "url-api-key-secret",
+      "url-password-secret",
+    ];
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      text: () => Promise.resolve("Unauthorized"),
+      text: () =>
+        Promise.resolve(
+          "Unauthorized " +
+            "Bearer bearer-secret " +
+            "Authorization: Basic authorization-secret " +
+            "Cookie: session=cookie-secret " +
+            "X-API-Key: api-key-secret " +
+            "password=password-secret " +
+            "credentials=credential-secret " +
+            "https://example.test/path?token=url-token-secret&api_key=url-api-key-secret&password=url-password-secret",
+        ),
     });
 
     const adapter = createAdapter();
+    const events: AgentEvent[] = [];
 
     await expect(async () => {
-      for await (const _ of adapter.run(
+      for await (const event of adapter.run(
         { messages: createTestMessages(), tools: [], threadId: "t1" },
         { executeTool: vi.fn() },
       )) {
-        // drain
+        events.push(event);
       }
-    }).rejects.toThrow("Databricks API error (401): Unauthorized");
+    }).rejects.toThrow(/^Databricks API error \(401\)$/);
+
+    const modelEnd = events.find((event) => event.type === "model_end");
+    expect(modelEnd).toEqual(
+      expect.objectContaining({ error: "Databricks API error (401)" }),
+    );
+    for (const secret of secretValues) {
+      expect(
+        (modelEnd as Extract<AgentEvent, { type: "model_end" }>).error,
+      ).not.toContain(secret);
+    }
+  });
+
+  test("redacts secret-bearing patterns from other lifecycle errors", async () => {
+    const secretValues = [
+      "bearer-secret",
+      "authorization-secret",
+      "cookie-secret",
+      "api-key-secret",
+      "password-secret",
+      "credential-secret",
+      "url-token-secret",
+      "url-api-key-secret",
+      "url-password-secret",
+    ];
+    const adapter = new DatabricksAdapter({
+      model: "secret-error-model",
+      streamBody: async () => {
+        throw new Error(
+          "failed\n" +
+            "Bearer bearer-secret " +
+            "Authorization: Basic authorization-secret " +
+            "Cookie: session=cookie-secret " +
+            "X-API-Key: api-key-secret " +
+            "password=password-secret " +
+            "credentials=credential-secret " +
+            "https://example.test/path?token=url-token-secret&api_key=url-api-key-secret&password=url-password-secret",
+        );
+      },
+      maxSteps: 1,
+    });
+    const events: AgentEvent[] = [];
+
+    await expect(async () => {
+      for await (const event of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(event);
+      }
+    }).rejects.toThrow("bearer-secret");
+
+    const error = (
+      events.find(
+        (event): event is Extract<AgentEvent, { type: "model_end" }> =>
+          event.type === "model_end",
+      ) as Extract<AgentEvent, { type: "model_end" }>
+    ).error;
+    expect(error).toContain("[REDACTED]");
+    expect(error?.length).toBeLessThanOrEqual(512);
+    expect(error).not.toContain("\n");
+    for (const secret of secretValues) expect(error).not.toContain(secret);
   });
 
   test("yields error status then throws when injected streamBody fails", async () => {
