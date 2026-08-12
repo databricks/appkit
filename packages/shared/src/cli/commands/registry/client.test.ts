@@ -21,7 +21,7 @@ describe("isValidItemName", () => {
   });
 
   it("rejects path separators, dot-segments, and control chars", () => {
-    // SSRF / path-traversal vectors from an untrusted registryDependency ref
+    // path-traversal vectors from an untrusted registryDependency ref
     expect(isValidItemName("../../attacker/repo/payload")).toBe(false);
     expect(isValidItemName("a/b")).toBe(false);
     expect(isValidItemName("a\\b")).toBe(false);

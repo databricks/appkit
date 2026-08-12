@@ -39,8 +39,9 @@ export function stripNamespace(component: string): string {
  * item's untrusted `registryDependencies`, and are used both as the fetch path
  * (`public/r/<name>.json`) and as the on-disk `plugins/<name>` dir. Rejecting
  * separators and dot-segments at the source stops a crafted ref like
- * `../../attacker/repo/payload` from redirecting the fetch (SSRF) or escaping
- * the destination dir, and keeps control chars out of any printed name.
+ * `../../attacker/repo/payload` from redirecting the fetch to another path in
+ * the registry repo or escaping the destination dir, and keeps control chars
+ * out of any printed name.
  */
 const ITEM_NAME = /^[A-Za-z0-9._-]+$/;
 

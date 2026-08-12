@@ -268,8 +268,8 @@ export async function resolveItems(
   // A name is used both as the fetch path (`public/r/<name>.json`) and as the
   // on-disk `plugins/<name>` dir. Refs (and untrusted registryDependencies)
   // that aren't plain slugs — containing `/`, `..`, control chars — could
-  // redirect the fetch (SSRF) or escape the destination dir, so reject them at
-  // the source before they reach either sink.
+  // redirect the fetch to another path in the repo or escape the destination
+  // dir, so reject them at the source before they reach either sink.
   const enqueue = (ref: string): string => {
     const name = stripNamespace(ref);
     if (!isValidItemName(name)) {

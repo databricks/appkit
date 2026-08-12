@@ -1,13 +1,21 @@
 import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
-import { fetchRegistryItem, stripNamespace } from "./client";
+import { fetchRegistryItem, isValidItemName, stripNamespace } from "./client";
 import { resolveToken } from "./constants";
 import { extractRequirements, renderRequirements } from "./requirements";
 
 async function runInfo(ref: string, opts: { json?: boolean }): Promise<void> {
   const token = resolveToken();
-  const item = await fetchRegistryItem(stripNamespace(ref), token);
+  // Validate before fetching: the name is interpolated into the fetch path, so
+  // reject non-slug refs (matches the `add` guard) rather than let `/` or `..`
+  // redirect the request to another path in the repo.
+  const name = stripNamespace(ref);
+  if (!isValidItemName(name)) {
+    console.error(`Invalid registry item name: ${JSON.stringify(ref)}`);
+    process.exit(1);
+  }
+  const item = await fetchRegistryItem(name, token);
   const rows = extractRequirements(item);
 
   if (opts.json) {

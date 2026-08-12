@@ -101,7 +101,8 @@ describe("resolveItems", () => {
   });
 
   // Security: a name is used as a fetch path and a plugins/<name> dir; a ref
-  // with `/` or `..` could redirect the fetch (SSRF) or escape the dest dir.
+  // with `/` or `..` could redirect the fetch to another repo path or escape
+  // the dest dir.
   it("rejects a top-level ref that is not a plain slug (no fetch)", async () => {
     const fetch = vi.fn();
     await expect(
