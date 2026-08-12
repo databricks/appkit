@@ -1,3 +1,4 @@
+import http from "node:http";
 import {
   context,
   createTraceState,
@@ -16,12 +17,13 @@ import {
   test,
   vi,
 } from "vitest";
-import { Context } from "../../../workspace-client";
+import { Context, createWorkspaceClient } from "../../../workspace-client";
 import { getResponseHeaders, invoke, stream } from "../client";
 
 const TRACE_ID = "0123456789abcdef0123456789abcdef";
 const SPAN_ID = "0123456789abcdef";
 const TRACEPARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+const W3C_PROPAGATOR = new W3CTraceContextPropagator();
 
 beforeAll(() => {
   context.disable();
@@ -29,7 +31,7 @@ beforeAll(() => {
     new AsyncLocalStorageContextManager().enable(),
   );
   propagation.disable();
-  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  propagation.setGlobalPropagator(W3C_PROPAGATOR);
 });
 
 afterAll(() => {
@@ -37,10 +39,10 @@ afterAll(() => {
   context.disable();
 });
 
-function withActiveTrace<T>(operation: () => T): T {
+function withActiveTrace<T>(operation: () => T, spanId = SPAN_ID): T {
   const span = trace.wrapSpanContext({
     traceId: TRACE_ID,
-    spanId: SPAN_ID,
+    spanId,
     traceFlags: TraceFlags.SAMPLED,
     traceState: createTraceState("vendor=value"),
   });
@@ -123,6 +125,103 @@ describe("Serving Connector", () => {
   });
 
   describe("stream", () => {
+    test("injects after SDK authentication on every request and preserves final wire headers", async () => {
+      const secondSpanId = "fedcba9876543210";
+      const order: string[] = [];
+      const wireHeaders: http.IncomingHttpHeaders[] = [];
+      let authentication = 0;
+      const server = http.createServer((request, response) => {
+        order.push(`wire:${wireHeaders.length + 1}`);
+        wireHeaders.push(request.headers);
+        request.resume();
+        request.on("end", () => {
+          response.writeHead(200, { "Content-Type": "text/event-stream" });
+          response.end("data: {}\n\n");
+        });
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Failed to bind SDK wire-test server");
+      }
+      const client = createWorkspaceClient({
+        host: `http://127.0.0.1:${address.port}`,
+        token: "sdk-test-token",
+        authType: "pat",
+      });
+      const originalAuthenticate = client.config.authenticate.bind(
+        client.config,
+      );
+      vi.spyOn(client.config, "authenticate").mockImplementation(
+        async (headers) => {
+          authentication++;
+          order.push(`auth:${authentication}`);
+          await originalAuthenticate(headers);
+          headers.set("Authorization", `Bearer fresh-${authentication}`);
+          headers.set(
+            "traceparent",
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00",
+          );
+          headers.set("tracestate", "auth=stale");
+        },
+      );
+      const originalInject = W3C_PROPAGATOR.inject.bind(W3C_PROPAGATOR);
+      vi.spyOn(W3C_PROPAGATOR, "inject").mockImplementation(
+        (activeContext, carrier, setter) => {
+          order.push(`inject:${authentication}`);
+          originalInject(activeContext, carrier, setter);
+        },
+      );
+
+      try {
+        await withActiveTrace(() =>
+          stream(client, "my-endpoint", { messages: [] }),
+        );
+        await withActiveTrace(
+          () => stream(client, "my-endpoint", { messages: [] }),
+          secondSpanId,
+        );
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+
+      expect(order).toEqual([
+        "auth:1",
+        "inject:1",
+        "wire:1",
+        "auth:2",
+        "inject:2",
+        "wire:2",
+      ]);
+      expect(
+        wireHeaders.map((headers) => ({
+          authorization: headers.authorization,
+          traceparent: headers.traceparent,
+          tracestate: headers.tracestate,
+          contentType: headers["content-type"],
+          accept: headers.accept,
+        })),
+      ).toEqual([
+        {
+          authorization: "Bearer fresh-1",
+          traceparent: TRACEPARENT,
+          tracestate: "vendor=value",
+          contentType: "application/json",
+          accept: "text/event-stream",
+        },
+        {
+          authorization: "Bearer fresh-2",
+          traceparent: `00-${TRACE_ID}-${secondSpanId}-01`,
+          tracestate: "vendor=value",
+          contentType: "application/json",
+          accept: "text/event-stream",
+        },
+      ]);
+    });
+
     test("injects the active W3C context into the actual SDK streaming request", async () => {
       const client = createMockClient();
       client.apiClient.request.mockResolvedValue({
