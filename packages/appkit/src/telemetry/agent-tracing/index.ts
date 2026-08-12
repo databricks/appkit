@@ -1,3 +1,8 @@
+export {
+  attachRemoteTraceLink,
+  injectActiveTraceContext,
+  type RemoteTraceReference,
+} from "./propagation";
 export { captureTraceValue } from "./serialization";
 export {
   getActiveAgentTraceIdentity,

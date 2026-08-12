@@ -1,5 +1,22 @@
+import {
+  context,
+  createTraceState,
+  propagation,
+  TraceFlags,
+  trace,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import type { AgentEvent, AgentInput } from "shared";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import {
   fromSupervisorApi,
   isSupervisorTool,
@@ -9,6 +26,34 @@ import {
   type SupervisorTool,
   supervisorTools,
 } from "../supervisor-api";
+
+const TRACE_ID = "0123456789abcdef0123456789abcdef";
+const SPAN_ID = "0123456789abcdef";
+const TRACEPARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+  propagation.disable();
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+});
+
+afterAll(() => {
+  propagation.disable();
+  context.disable();
+});
+
+function withActiveTrace<T>(operation: () => T): T {
+  const span = trace.wrapSpanContext({
+    traceId: TRACE_ID,
+    spanId: SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    traceState: createTraceState("vendor=value"),
+  });
+  return context.with(trace.setSpan(context.active(), span), operation);
+}
 
 function createReadableStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -1108,6 +1153,30 @@ describe("fromSupervisorApi", () => {
       stream: true,
     });
     expect(requestArgs.payload).not.toHaveProperty("tools");
+  });
+
+  test("injects active W3C context into the Supervisor SDK request", async () => {
+    const request = vi.fn().mockResolvedValue({
+      contents: createReadableStream([sseEvent("response.completed", {})]),
+    });
+    const adapter = await fromSupervisorApi({
+      model: "databricks-claude-sonnet-4",
+      workspaceClient: {
+        config: { ensureResolved: vi.fn(async () => {}) },
+        apiClient: { request },
+      },
+    });
+
+    await withActiveTrace(() =>
+      collect(adapter.run(createInput(), { executeTool: vi.fn() })),
+    );
+
+    const [requestArgs] = request.mock.calls[0];
+    const headers = new Headers(requestArgs.headers);
+    expect(headers.get("traceparent")).toBe(TRACEPARENT);
+    expect(headers.get("tracestate")).toBe("vendor=value");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("accept")).toBe("text/event-stream");
   });
 });
 

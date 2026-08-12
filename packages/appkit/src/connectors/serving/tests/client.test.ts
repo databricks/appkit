@@ -1,6 +1,51 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  context,
+  createTraceState,
+  propagation,
+  TraceFlags,
+  trace,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { Context } from "../../../workspace-client";
 import { getResponseHeaders, invoke, stream } from "../client";
+
+const TRACE_ID = "0123456789abcdef0123456789abcdef";
+const SPAN_ID = "0123456789abcdef";
+const TRACEPARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+  propagation.disable();
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+});
+
+afterAll(() => {
+  propagation.disable();
+  context.disable();
+});
+
+function withActiveTrace<T>(operation: () => T): T {
+  const span = trace.wrapSpanContext({
+    traceId: TRACE_ID,
+    spanId: SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    traceState: createTraceState("vendor=value"),
+  });
+  return context.with(trace.setSpan(context.active(), span), operation);
+}
 
 function createMockClient(host = "https://test.databricks.com") {
   return {
@@ -78,6 +123,38 @@ describe("Serving Connector", () => {
   });
 
   describe("stream", () => {
+    test("injects the active W3C context into the actual SDK streaming request", async () => {
+      const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: new ReadableStream(),
+      });
+
+      await withActiveTrace(() =>
+        stream(client, "my-endpoint", { messages: [] }),
+      );
+
+      const [request] = client.apiClient.request.mock.calls[0];
+      const headers = new Headers(request.headers);
+      expect(headers.get("traceparent")).toBe(TRACEPARENT);
+      expect(headers.get("tracestate")).toBe("vendor=value");
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("accept")).toBe("text/event-stream");
+    });
+
+    test("does not add W3C headers when no valid span is active", async () => {
+      const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: new ReadableStream(),
+      });
+
+      await stream(client, "my-endpoint", { messages: [] });
+
+      const [request] = client.apiClient.request.mock.calls[0];
+      const headers = new Headers(request.headers);
+      expect(headers.get("traceparent")).toBeNull();
+      expect(headers.get("tracestate")).toBeNull();
+    });
+
     test("returns a ReadableStream from apiClient.request", async () => {
       const encoder = new TextEncoder();
       const mockContents = new ReadableStream<Uint8Array>({

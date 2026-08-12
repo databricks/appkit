@@ -1,11 +1,57 @@
+import {
+  context,
+  createTraceState,
+  propagation,
+  TraceFlags,
+  trace,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import type { AgentEvent, AgentToolDefinition, Message } from "shared";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import {
   DatabricksAdapter,
   type GenerationParams,
   parseTextToolCalls,
 } from "../databricks";
+
+const TRACE_ID = "0123456789abcdef0123456789abcdef";
+const SPAN_ID = "0123456789abcdef";
+const TRACEPARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+  propagation.disable();
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+});
+
+afterAll(() => {
+  propagation.disable();
+  context.disable();
+});
+
+function withActiveTrace<T>(operation: () => T): T {
+  const span = trace.wrapSpanContext({
+    traceId: TRACE_ID,
+    spanId: SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    traceState: createTraceState("vendor=value"),
+  });
+  return context.with(trace.setSpan(context.active(), span), operation);
+}
 
 const mockAuthenticate = vi
   .fn()
@@ -936,7 +982,48 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(1);
 
     const [, init] = (globalThis.fetch as any).mock.calls[0];
-    expect(init.headers.Authorization).toBe("Bearer test-token");
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  test("injects active W3C context after fresh auth on every raw remote-agent request", async () => {
+    globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+    const adapter = createAdapter();
+
+    await withActiveTrace(async () => {
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    });
+
+    const [, init] = (globalThis.fetch as any).mock.calls[0];
+    const headers = new Headers(init.headers);
+    expect(headers.get("traceparent")).toBe(TRACEPARENT);
+    expect(headers.get("tracestate")).toBe("vendor=value");
+    expect(headers.get("authorization")).toBe("Bearer test-token");
+    expect(headers.get("content-type")).toBe("application/json");
+  });
+
+  test("does not add W3C headers to raw requests without a valid active span", async () => {
+    globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
+    const adapter = createAdapter();
+
+    for await (const _ of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [, init] = (globalThis.fetch as any).mock.calls[0];
+    const headers = new Headers(init.headers);
+    expect(headers.get("traceparent")).toBeNull();
+    expect(headers.get("tracestate")).toBeNull();
+    expect(headers.get("authorization")).toBe("Bearer test-token");
   });
 
   test("throws when two tool names map to the same wire format", async () => {
@@ -1813,6 +1900,32 @@ describe("DatabricksAdapter", () => {
 });
 
 describe("DatabricksAdapter.fromServingEndpoint", () => {
+  test("propagates the active W3C context through the SDK-backed adapter route", async () => {
+    const apiClient = {
+      request: vi.fn().mockResolvedValue({
+        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+      }),
+    };
+    const adapter = await DatabricksAdapter.fromServingEndpoint({
+      workspaceClient: { apiClient },
+      endpointName: "remote-agent",
+    });
+
+    await withActiveTrace(async () => {
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    });
+
+    const [requestArgs] = apiClient.request.mock.calls[0];
+    const headers = new Headers(requestArgs.headers);
+    expect(headers.get("traceparent")).toBe(TRACEPARENT);
+    expect(headers.get("tracestate")).toBe("vendor=value");
+  });
+
   test("routes tool-free chat through apiClient.request with a streaming payload", async () => {
     const apiClient = {
       request: vi.fn().mockResolvedValue({

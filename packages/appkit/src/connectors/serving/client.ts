@@ -1,4 +1,5 @@
 import { createLogger } from "../../logging/logger";
+import { injectActiveTraceContext } from "../../telemetry/agent-tracing";
 import type { serving, WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
@@ -116,10 +117,12 @@ export async function streamPath(
     {
       path,
       method: "POST",
-      headers: new Headers({
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      }),
+      headers: injectActiveTraceContext(
+        new Headers({
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        }),
+      ),
       payload: body,
       raw: true,
     },

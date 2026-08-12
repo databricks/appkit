@@ -14,6 +14,7 @@ import {
   stream as servingStream,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
+import { injectActiveTraceContext } from "../telemetry/agent-tracing";
 import {
   DEFAULT_TRACE_REDACT_KEYS,
   REDACTED_TRACE_VALUE,
@@ -492,13 +493,16 @@ export class DatabricksAdapter implements AgentAdapter {
         const fetchSignal =
           signal ?? AbortSignal.timeout(RAW_FETCH_DEFAULT_TIMEOUT_MS);
         const authHeaders = await authenticate();
-        const response = await fetch(endpointUrl, {
-          method: "POST",
-          headers: {
+        const headers = injectActiveTraceContext(
+          new Headers({
             "User-Agent": APPKIT_USER_AGENT,
             "Content-Type": "application/json",
             ...authHeaders,
-          },
+          }),
+        );
+        const response = await fetch(endpointUrl, {
+          method: "POST",
+          headers,
           body: JSON.stringify(body),
           signal: fetchSignal,
         });
