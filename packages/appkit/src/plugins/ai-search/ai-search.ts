@@ -1,11 +1,12 @@
+import { createHash } from "node:crypto";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type { CacheConfig, IAppRouter, PluginExecutionSettings } from "shared";
 import { AiSearchConnector } from "../../connectors/ai-search/client";
 import type {
   VsQueryParams,
   VsRawResponse,
 } from "../../connectors/ai-search/types";
-import { getWorkspaceClient } from "../../context";
+import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -166,22 +167,28 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
         // projection past what the app configured. (query() callers are
         // trusted and keep the override.)
         const { columns: _clientColumns, ...safeBody } = body;
-        const plugin =
-          indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+        const isAsUser = indexConfig.auth === "on-behalf-of-user";
+        const plugin = isAsUser ? this.asUser(req) : this;
         const queryType =
           safeBody.queryType ?? indexConfig.queryType ?? "hybrid";
+
+        // Key per user for OBO so results never leak across users; SP shares "global".
+        const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
         try {
           // Prepare inside execute so a self-managed embeddingFn runs in the
           // same OBO context as the query, not as the service principal.
-          const result = await plugin.execute(async (signal) => {
-            const prepared = await this._prepareQuery(safeBody, indexConfig);
-            return this.connector.query(
-              getWorkspaceClient(),
-              { indexName: indexConfig.indexName, ...prepared },
-              signal,
-            );
-          }, querySettings);
+          const result = await plugin.execute(
+            async (signal) => {
+              const prepared = await this._prepareQuery(safeBody, indexConfig);
+              return this.connector.query(
+                getWorkspaceClient(),
+                { indexName: indexConfig.indexName, ...prepared },
+                signal,
+              );
+            },
+            this._executeSettings(safeBody, indexConfig, executorKey),
+          );
 
           this._sendResult(res, result, queryType);
         } catch (error) {
@@ -230,6 +237,8 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           const plugin =
             indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
 
+          // Uncached: a page token is a single-use cursor. `querySettings` has
+          // no `cacheKey`, so caching stays off.
           const result = await plugin.execute(
             async (signal) =>
               this.connector.queryNextPage(
@@ -301,16 +310,22 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       throw new Error(`No index configured with alias "${alias}"`);
     }
 
-    const prepared = await this._prepareQuery(request, indexConfig);
+    // Resolve queryType for the response here; _prepareQuery runs inside
+    // execute so a cache hit skips the embedding and the VS call.
+    const { queryType } = this._resolveQueryParams(request, indexConfig);
 
+    // getCurrentUserId() is the user's id under asUser(), the service id
+    // otherwise — keying per caller like the route's executorKey.
     const result = await this.execute(
-      async (signal) =>
-        this.connector.query(
+      async (signal) => {
+        const prepared = await this._prepareQuery(request, indexConfig);
+        return this.connector.query(
           getWorkspaceClient(),
           { indexName: indexConfig.indexName, ...prepared },
           signal,
-        ),
-      querySettings,
+        );
+      },
+      this._executeSettings(request, indexConfig, getCurrentUserId()),
     );
 
     if (!result.ok) {
@@ -319,7 +334,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       );
     }
 
-    return this._parseResponse(result.data, prepared.queryType);
+    return this._parseResponse(result.data, queryType);
   }
 
   async shutdown(): Promise<void> {
@@ -373,11 +388,31 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     res.json(this._parseResponse(result.data, queryType));
   }
 
+  /**
+   * Resolve request-vs-index defaults for the result-determining fields.
+   * Shared by `_prepareQuery` (the payload) and `_cacheKeyFor` (the key) so
+   * the two can't drift.
+   */
+  private _resolveQueryParams(
+    request: SearchRequest,
+    indexConfig: IndexConfig,
+  ): Pick<VsQueryParams, "queryType" | "columns" | "numResults" | "reranker"> {
+    const queryType = request.queryType ?? indexConfig.queryType ?? "hybrid";
+    const columns = request.columns ?? indexConfig.columns ?? [];
+    return {
+      queryType,
+      columns,
+      numResults: request.numResults ?? indexConfig.numResults ?? 20,
+      reranker: this._resolveReranker(request.reranker, indexConfig, columns),
+    };
+  }
+
   private async _prepareQuery(
     request: SearchRequest,
     indexConfig: IndexConfig,
   ): Promise<Omit<VsQueryParams, "indexName">> {
-    const queryType = request.queryType ?? indexConfig.queryType ?? "hybrid";
+    const { queryType, columns, numResults, reranker } =
+      this._resolveQueryParams(request, indexConfig);
     let queryText = request.queryText;
     let queryVector = request.queryVector;
 
@@ -398,16 +433,78 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
       }
     }
 
-    const columns = request.columns ?? indexConfig.columns ?? [];
     return {
       queryText,
       queryVector,
       queryType,
       columns,
-      numResults: request.numResults ?? indexConfig.numResults ?? 20,
+      numResults,
       filters: request.filters,
-      reranker: this._resolveReranker(request.reranker, indexConfig, columns),
+      reranker,
     };
+  }
+
+  /**
+   * Cache key for a query: every input that changes the VS result, resolved
+   * via `_resolveQueryParams` so the key matches the payload (post-allowlist
+   * `columns`, not the raw request). `queryVector` is hashed (vectors are
+   * large); the key uses `queryText`, not the derived embedding, since the
+   * embedding is a function of `queryText` and hasn't run at key-build time.
+   * `columns`/`filters` are order-normalized so equivalent requests share an
+   * entry.
+   */
+  private _cacheKeyFor(
+    request: SearchRequest,
+    indexConfig: IndexConfig & { indexName: string },
+    executorKey: string,
+  ): CacheConfig["cacheKey"] {
+    const { queryType, columns, numResults, reranker } =
+      this._resolveQueryParams(request, indexConfig);
+    return [
+      "ai-search:query",
+      indexConfig.indexName,
+      request.queryText ?? "",
+      request.queryVector ? this._hashVector(request.queryVector) : "",
+      queryType,
+      numResults,
+      // columns is a projection; order doesn't affect results, so sort a copy.
+      JSON.stringify([...columns].sort()),
+      this._stableStringify(request.filters ?? null),
+      String(!!reranker),
+      executorKey,
+    ];
+  }
+
+  private _hashVector(vector: number[]): string {
+    return createHash("sha256").update(JSON.stringify(vector)).digest("hex");
+  }
+
+  /** Execute settings with the per-call cache key folded in. */
+  private _executeSettings(
+    request: SearchRequest,
+    indexConfig: IndexConfig & { indexName: string },
+    executorKey: string,
+  ): PluginExecutionSettings {
+    return {
+      default: {
+        ...aiSearchDefaults,
+        cache: {
+          ...aiSearchDefaults.cache,
+          cacheKey: this._cacheKeyFor(request, indexConfig, executorKey),
+        },
+      },
+    };
+  }
+
+  /** `JSON.stringify` with object keys sorted recursively; array order kept. */
+  private _stableStringify(value: unknown): string {
+    return JSON.stringify(value, (_key, val) =>
+      val && typeof val === "object" && !Array.isArray(val)
+        ? Object.fromEntries(
+            Object.entries(val).sort(([a], [b]) => a.localeCompare(b)),
+          )
+        : val,
+    );
   }
 
   private _resolveReranker(

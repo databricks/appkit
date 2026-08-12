@@ -106,6 +106,24 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+## [0.58.0](https://github.com/databricks/appkit/compare/v0.57.0...v0.58.0) (2026-08-11)
+
+### appkit
+
+* **appkit:** cache ai-search queries with OBO-safe keys ([#514](https://github.com/databricks/appkit/issues/514)) ([dbade24](https://github.com/databricks/appkit/commit/dbade2450e778ae94f4a2ceb2aa057571b16ef73))
+
+
+## [0.57.0](https://github.com/databricks/appkit/compare/v0.56.0...v0.57.0) (2026-08-10)
+
+### cli
+
+* **cli:** add appkit doctor command ([#489](https://github.com/databricks/appkit/issues/489)) ([2225889](https://github.com/databricks/appkit/commit/2225889b79e92642baed2d8095935d3bf1d5150f))
+
+
 ## [0.56.0](https://github.com/databricks/appkit/compare/v0.55.1...v0.56.0) (2026-08-07)
 
 ### shared
