@@ -985,7 +985,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { input } = parsed.data;
+    const { input, mlflowRunId } = parsed.data;
     const registered = this.resolveAgent();
     if (!registered) {
       res.status(400).json({ error: "No agent registered" });
@@ -1057,7 +1057,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    return this._runAgentNonStreaming(req, res, registered, thread, userId);
+    return this._runAgentNonStreaming(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      mlflowRunId,
+    );
   }
 
   private async _streamAgent(
@@ -1285,6 +1292,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    mlflowRunId?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1293,6 +1301,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
     const limits = this.resolvedLimits;
+
+    // Surfaced in the response envelope so an eval runner can attach
+    // assessments to this turn's trace. Set inside the span below (the only
+    // context where the active trace id is resolvable); undefined when tracing
+    // is disabled.
+    let mlflowTraceId: string | undefined;
 
     const runState: RunState = {
       req,
@@ -1327,6 +1341,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           })),
         },
         async (span) => {
+          // Link this turn's trace to an eval run when supplied, so the trace
+          // shows under the MLflow evaluation run. Mirrors `_streamAgent`.
+          if (mlflowRunId) linkTraceToRun(mlflowRunId);
+
           const pluginNames = this.context
             ? this.context
                 .getPluginNames()
@@ -1373,6 +1391,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
               createdAt: new Date(),
             });
           }
+
+          // Capture inside the span, where the active trace id resolves.
+          // No-op when tracing is disabled.
+          mlflowTraceId = currentTraceId();
         },
       );
     } catch (error) {
@@ -1420,6 +1442,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
+      // Present only when tracing is enabled; lets an eval runner attach
+      // assessments to this turn's trace (the streaming path surfaces the same
+      // id via a `metadata` event).
+      ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
       output: [message],
     });
   }

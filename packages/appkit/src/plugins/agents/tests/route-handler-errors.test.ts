@@ -3,6 +3,27 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 
+// Partial-mock the tracing module: keep traceAgent/traceTool executing their
+// callbacks (so the turn runs), but make the trace id deterministic and spy on
+// run-linking so the invoke-surface wiring can be asserted.
+const linkTraceToRun = vi.hoisted(() => vi.fn());
+let mockTraceId: string | undefined;
+vi.mock("../mlflow", () => ({
+  initAgentTracing: vi.fn(async () => {}),
+  traceAgent: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  traceTool: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  currentTraceId: () => mockTraceId,
+  linkTraceToRun,
+}));
+
 /**
  * Surface-level guarantees on the agents plugin's HTTP route handlers when
  * downstream dependencies fail. Prior to PR #305 review finding #1+#2,
@@ -19,6 +40,8 @@ import { AgentsPlugin } from "../agents";
  */
 
 beforeEach(() => {
+  linkTraceToRun.mockClear();
+  mockTraceId = undefined;
   // biome-ignore lint/suspicious/noExplicitAny: test seam, mirrors other suites
   (CacheManager as any).instance = {
     get: vi.fn(),
@@ -390,6 +413,80 @@ describe("POST /invocations & /responses — successful invoke", () => {
       type: "output_text",
       text: "hello world",
     });
+  });
+
+  function seedEchoPlugin(): AgentsPlugin {
+    const plugin = new AgentsPlugin({ dir: false });
+    // biome-ignore lint/suspicious/noExplicitAny: seed
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "hi",
+      adapter: {
+        async *run() {
+          yield { type: "message_delta", content: "ok" };
+        },
+      },
+      toolIndex: new Map(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed
+    (plugin as any).defaultAgentName = "default";
+    // biome-ignore lint/suspicious/noExplicitAny: stub
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    return plugin;
+  }
+
+  async function invoke(
+    plugin: AgentsPlugin,
+    body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq(body), res);
+    return json.mock.calls[0]?.[0] as Record<string, unknown>;
+  }
+
+  test("links the trace to the run and echoes mlflow_trace_id when tracing is on", async () => {
+    mockTraceId = "tr-abc123";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, {
+      input: "hi",
+      mlflowRunId: "run-99",
+    });
+
+    expect(linkTraceToRun).toHaveBeenCalledWith("run-99");
+    expect(payload.mlflow_trace_id).toBe("tr-abc123");
+  });
+
+  test("omits mlflow_trace_id and does not link when tracing is off", async () => {
+    mockTraceId = undefined; // currentTraceId() no-ops when disabled
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    expect(payload).not.toHaveProperty("mlflow_trace_id");
+  });
+
+  test("does not link when no run id is supplied even if tracing is on", async () => {
+    mockTraceId = "tr-standalone";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    // Trace still exists and its id is surfaced — just not linked to a run.
+    expect(payload.mlflow_trace_id).toBe("tr-standalone");
   });
 });
 
