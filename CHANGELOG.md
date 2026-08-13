@@ -112,6 +112,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.60.0](https://github.com/databricks/appkit/compare/v0.59.0...v0.60.0) (2026-08-13)
+
+### appkit
+
+* **appkit:** mlflow tracing for agents (stack 1/5) ([#477](https://github.com/databricks/appkit/issues/477)) ([8dd909d](https://github.com/databricks/appkit/commit/8dd909d5818edbc1333e2a117883d65b2ebe0966))
+
+
 ## [0.59.0](https://github.com/databricks/appkit/compare/v0.58.0...v0.59.0) (2026-08-12)
 
 ### analytics
