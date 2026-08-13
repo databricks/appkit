@@ -211,7 +211,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
     await TelemetryManager.initialize(
       {
         ...config.telemetry,
-        mlflowUc: agentsEnabled ? requestedMlflowUc || true : requestedMlflowUc,
+        mlflowUc: agentsEnabled
+          ? (requestedMlflowUc ?? true)
+          : requestedMlflowUc,
       },
       config.client,
     );

@@ -5,6 +5,7 @@ import { ServiceContext } from "../../context/service-context";
 import { uiVariants } from "../../plugins/ui-variants";
 import type { PluginManifest } from "../../registry/types";
 import { ResourceType } from "../../registry/types";
+import { TelemetryManager } from "../../telemetry/telemetry-manager";
 import { AppKit, createApp } from "../appkit";
 
 const mockReporter = {
@@ -224,6 +225,25 @@ describe("AppKit", () => {
       const instance = await createApp({ plugins: [] });
       expect(instance).toBeDefined();
       expect(instance).toBeInstanceOf(AppKit);
+    });
+
+    test("honors an explicit MLflow UC opt-out when agents are enabled", async () => {
+      const initialize = vi
+        .spyOn(TelemetryManager, "initialize")
+        .mockResolvedValue(undefined);
+
+      const instance = await createApp({
+        plugins: [
+          { plugin: CoreTestPlugin, config: {}, name: "agents" as const },
+        ],
+        telemetry: { mlflowUc: false },
+      });
+
+      expect(initialize).toHaveBeenCalledWith(
+        expect.objectContaining({ mlflowUc: false }),
+        undefined,
+      );
+      await instance.shutdown();
     });
 
     test("should initialize with single plugin", async () => {

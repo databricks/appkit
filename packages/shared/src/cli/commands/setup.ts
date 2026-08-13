@@ -257,12 +257,26 @@ export async function provisionAndPersistMlflowUc(
   const command = buildMlflowProvisionCommand({ ...options, scriptPath });
   const run =
     dependencies.run ??
-    ((argv: string[]) =>
-      spawnSync(argv[0], argv.slice(1), {
+    ((argv: string[]) => {
+      const result = spawnSync(argv[0], argv.slice(1), {
         cwd: options.cwd,
         stdio: "inherit",
-      }).status ?? 1);
-  const status = run(command);
+      });
+      if (result.error) throw result.error;
+      return result.status ?? 1;
+    });
+  let status: number;
+  try {
+    status = run(command);
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === "ENOENT") {
+      throw new Error(
+        "MLflow UC setup requires uv. Install it from https://docs.astral.sh/uv/getting-started/installation/ and rerun appkit setup --write.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   if (status !== 0) {
     throw new Error(`MLflow UC provisioning failed with exit code ${status}`);
   }
@@ -514,7 +528,7 @@ async function runSetup(options: SetupCliOptions) {
   }
 
   const cwd = process.cwd();
-  if (projectRequiresMlflowUc(cwd, options.mlflowUc === true)) {
+  if (shouldWrite && projectRequiresMlflowUc(cwd, options.mlflowUc === true)) {
     const env = readEnvFile(path.join(cwd, ".env"));
     const profile =
       process.env.DATABRICKS_CONFIG_PROFILE ??

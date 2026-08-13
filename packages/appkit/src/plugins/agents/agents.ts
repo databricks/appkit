@@ -270,12 +270,31 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     requestId: string,
     userId: string,
     controller: AbortController,
-  ): void {
+  ): boolean {
+    if (this.activeStreams.has(requestId)) return false;
     this.activeStreams.set(requestId, { controller, userId });
     this.userStreamCounts.set(
       userId,
       (this.userStreamCounts.get(userId) ?? 0) + 1,
     );
+    return true;
+  }
+
+  /** Atomically enforce the per-user limit and reserve a server-owned key. */
+  private reserveStream(
+    userId: string,
+    maxConcurrentStreams: number,
+  ): { requestId: string; controller: AbortController } | undefined {
+    if (this.countUserStreams(userId) >= maxConcurrentStreams) {
+      return undefined;
+    }
+    for (;;) {
+      const requestId = randomUUID();
+      const controller = new AbortController();
+      if (this.trackStream(requestId, userId, controller)) {
+        return { requestId, controller };
+      }
+    }
   }
 
   /**
@@ -900,7 +919,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     req: express.Request,
     res: express.Response,
     observer: AgentTraceObserver,
-    requestId: string,
+    traceRequestId: string,
   ): Promise<void> {
     const parsed = chatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -931,59 +950,68 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // their concurrent-stream limit. Prevents a misbehaving client from
     // churning thread rows while being denied elsewhere.
     const limits = this.resolvedLimits;
-    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+    const reservation = this.reserveStream(
+      userId,
+      limits.maxConcurrentStreamsPerUser,
+    );
+    if (!reservation) {
       res.setHeader("Retry-After", "5");
       respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
     }
+    const { requestId, controller } = reservation;
 
-    // ThreadStore can throw on backing-storage failures (DB unreachable,
-    // permission errors, transient I/O). Without a try/catch the
-    // `async` Express handler bubbles the rejection without a response and
-    // the client connection hangs until the proxy times out. Surface the
-    // failure as a 500 so the SSE client falls back instead of waiting.
-    let thread: Thread;
     try {
-      const existing = threadId
-        ? await this.threadStore.get(threadId, userId)
-        : null;
-      if (threadId && !existing) {
-        respondWithTraceError(observer, res, 404, {
-          error: `Thread ${threadId} not found`,
+      // ThreadStore can throw on backing-storage failures (DB unreachable,
+      // permission errors, transient I/O). Surface the failure as a 500 so
+      // the client does not hang until the proxy times out.
+      let thread: Thread;
+      try {
+        const existing = threadId
+          ? await this.threadStore.get(threadId, userId)
+          : null;
+        if (threadId && !existing) {
+          respondWithTraceError(observer, res, 404, {
+            error: `Thread ${threadId} not found`,
+          });
+          return;
+        }
+        thread = existing ?? (await this.threadStore.create(userId));
+        observer.updateIdentity({
+          threadId: thread.id,
+          sessionId: requestSessionId(req) ?? thread.id,
+        });
+
+        const userMessage: Message = {
+          id: randomUUID(),
+          role: "user",
+          content: message,
+          createdAt: new Date(),
+        };
+        await this.threadStore.addMessage(thread.id, userId, userMessage);
+      } catch (err) {
+        logger.error("threadStore failed in /chat: %O", err);
+        respondWithTraceError(observer, res, 500, {
+          error: "Thread operation failed",
         });
         return;
       }
-      thread = existing ?? (await this.threadStore.create(userId));
-      observer.updateIdentity({
-        threadId: thread.id,
-        sessionId: requestSessionId(req) ?? thread.id,
-      });
-
-      const userMessage: Message = {
-        id: randomUUID(),
-        role: "user",
-        content: message,
-        createdAt: new Date(),
-      };
-      await this.threadStore.addMessage(thread.id, userId, userMessage);
-    } catch (err) {
-      logger.error("threadStore failed in /chat: %O", err);
-      respondWithTraceError(observer, res, 500, {
-        error: "Thread operation failed",
-      });
-      return;
+      return await this._streamAgent(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        observer,
+        requestId,
+        controller,
+        traceRequestId,
+      );
+    } finally {
+      this.untrackStream(requestId);
     }
-    return this._streamAgent(
-      req,
-      res,
-      registered,
-      thread,
-      userId,
-      observer,
-      requestId,
-    );
   }
 
   /**
@@ -1047,7 +1075,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     req: express.Request,
     res: express.Response,
     observer: AgentTraceObserver,
-    requestId: string,
+    traceRequestId: string,
   ): Promise<void> {
     const parsed = invocationsRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1091,64 +1119,74 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Match the rate-limit gate on /chat. Without this, a client can bypass
     // `limits.maxConcurrentStreamsPerUser` by hitting /invocations instead.
     const limits = this.resolvedLimits;
-    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+    const reservation = this.reserveStream(
+      userId,
+      limits.maxConcurrentStreamsPerUser,
+    );
+    if (!reservation) {
       res.setHeader("Retry-After", "5");
       respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
     }
+    const { requestId, controller } = reservation;
 
-    // Same rationale as `_handleChat`: surface threadStore failures as a
-    // 500 instead of letting the async handler hang the client connection.
-    let thread: Thread;
     try {
-      thread = await this.threadStore.create(userId);
-      observer.updateIdentity({
-        threadId: thread.id,
-        sessionId: requestSessionId(req) ?? thread.id,
-      });
-
-      if (typeof input === "string") {
-        await this.threadStore.addMessage(thread.id, userId, {
-          id: randomUUID(),
-          role: "user",
-          content: input,
-          createdAt: new Date(),
+      // Same rationale as `_handleChat`: surface threadStore failures as a
+      // 500 instead of letting the async handler hang the client connection.
+      let thread: Thread;
+      try {
+        thread = await this.threadStore.create(userId);
+        observer.updateIdentity({
+          threadId: thread.id,
+          sessionId: requestSessionId(req) ?? thread.id,
         });
-      } else {
-        for (const item of input) {
-          const role = (item.role ?? "user") as Message["role"];
-          const content =
-            typeof item.content === "string"
-              ? item.content
-              : JSON.stringify(item.content ?? "");
-          if (!content) continue;
+
+        if (typeof input === "string") {
           await this.threadStore.addMessage(thread.id, userId, {
             id: randomUUID(),
-            role,
-            content,
+            role: "user",
+            content: input,
             createdAt: new Date(),
           });
+        } else {
+          for (const item of input) {
+            const role = (item.role ?? "user") as Message["role"];
+            const content =
+              typeof item.content === "string"
+                ? item.content
+                : JSON.stringify(item.content ?? "");
+            if (!content) continue;
+            await this.threadStore.addMessage(thread.id, userId, {
+              id: randomUUID(),
+              role,
+              content,
+              createdAt: new Date(),
+            });
+          }
         }
+      } catch (err) {
+        logger.error("threadStore failed in /invocations: %O", err);
+        respondWithTraceError(observer, res, 500, {
+          error: "Thread operation failed",
+        });
+        return;
       }
-    } catch (err) {
-      logger.error("threadStore failed in /invocations: %O", err);
-      respondWithTraceError(observer, res, 500, {
-        error: "Thread operation failed",
-      });
-      return;
+      return await this._runAgentNonStreaming(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        observer,
+        requestId,
+        controller,
+        traceRequestId,
+      );
+    } finally {
+      this.untrackStream(requestId);
     }
-
-    return this._runAgentNonStreaming(
-      req,
-      res,
-      registered,
-      thread,
-      userId,
-      observer,
-      requestId,
-    );
   }
 
   private async _streamAgent(
@@ -1159,10 +1197,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     userId: string,
     observer: AgentTraceObserver,
     requestId: string,
+    abortController: AbortController,
+    traceRequestId: string,
   ): Promise<void> {
-    const abortController = new AbortController();
     const signal = abortController.signal;
-    this.trackStream(requestId, userId, abortController);
 
     // `hosted-supervisor` entries are not callable from the Node process
     // (the SA endpoint executes them server-side). Their `def` is a
@@ -1198,7 +1236,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         route: "chat",
         sessionId: requestSessionId(req) ?? thread.id,
         userId,
-        requestId,
+        requestId: traceRequestId,
       },
     };
 
@@ -1374,10 +1412,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     userId: string,
     observer: AgentTraceObserver,
     requestId: string,
+    abortController: AbortController,
+    traceRequestId: string,
   ): Promise<void> {
-    const abortController = new AbortController();
     const signal = abortController.signal;
-    this.trackStream(requestId, userId, abortController);
 
     const tools = Array.from(registered.toolIndex.values())
       .filter((e) => e.source !== "hosted-supervisor")
@@ -1404,7 +1442,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         route: invokeTraceRoute(req),
         sessionId: requestSessionId(req) ?? thread.id,
         userId,
-        requestId,
+        requestId: traceRequestId,
       },
     };
 

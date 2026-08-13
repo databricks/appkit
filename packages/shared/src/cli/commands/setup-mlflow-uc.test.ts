@@ -2,11 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "js-yaml";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   buildMlflowProvisionCommand,
   projectRequiresMlflowUc,
   provisionAndPersistMlflowUc,
+  setupCommand,
 } from "./setup";
 
 const EXPECTED_VALUES = {
@@ -64,6 +65,10 @@ function createProject(): string {
 }
 
 describe("MLflow UC setup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("agent-enabled projects require UC tracing setup", () => {
     const cwd = createProject();
 
@@ -109,6 +114,54 @@ describe("MLflow UC setup", () => {
       "--output-json",
       "/workspace/traced-app/.databricks/mlflow-uc.json",
     ]);
+  });
+
+  test("preview mode does not provision agent tracing resources", async () => {
+    const cwd = createProject();
+    const packageDirectory = join(cwd, "node_modules", "@databricks", "appkit");
+    mkdirSync(packageDirectory, { recursive: true });
+    writeFileSync(
+      join(packageDirectory, "package.json"),
+      JSON.stringify({ name: "@databricks/appkit" }),
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      setupCommand.parseAsync(["node", "setup"]),
+    ).resolves.toBeDefined();
+
+    expect(() => readFileSync(join(cwd, "CLAUDE.md"), "utf8")).toThrow();
+    expect(() =>
+      readFileSync(join(cwd, ".databricks", "mlflow-uc.json"), "utf8"),
+    ).toThrow();
+  });
+
+  test("reports an actionable error when uv is unavailable", async () => {
+    const cwd = createProject();
+
+    await expect(
+      provisionAndPersistMlflowUc(
+        {
+          cwd,
+          profile: "DEFAULT",
+          experimentName: "/Users/user@example.com/appkit-agent-traces",
+          catalog: "main",
+          schema: "agent_traces",
+          tablePrefix: "appkit",
+          warehouseId: "0123456789abcdef",
+          runtimePrincipal: "runtime-app-sp",
+        },
+        {
+          scriptPath: join(cwd, "provision-mlflow-uc.py"),
+          run() {
+            throw Object.assign(new Error("spawn uv ENOENT"), {
+              code: "ENOENT",
+            });
+          },
+        },
+      ),
+    ).rejects.toThrow(/requires uv.*install/i);
   });
 
   test("persists all tracing values for local and deployed runtimes", async () => {

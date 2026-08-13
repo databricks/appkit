@@ -16,8 +16,17 @@ import { chatRequestSchema, invocationsRequestSchema } from "../schemas";
  * mocked req/res pattern already used by approval-route.test.ts.
  */
 
-function mockReq(body: unknown, userId?: string): express.Request {
-  const headers: Record<string, string> = {};
+function mockReq(
+  body: unknown,
+  userId?: string,
+  extraHeaders: Record<string, string> = {},
+): express.Request {
+  const headers: Record<string, string> = Object.fromEntries(
+    Object.entries(extraHeaders).map(([name, value]) => [
+      name.toLowerCase(),
+      value,
+    ]),
+  );
   if (userId) {
     headers["x-forwarded-user"] = userId;
     headers["x-forwarded-access-token"] = "fake-token";
@@ -190,6 +199,72 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     )._handleChat(mockReq({ message: "hi" }, "carol"), res);
 
     expect(res.status).not.toHaveBeenCalledWith(429);
+  });
+
+  test("uses a unique server-generated stream key when clients reuse x-request-id", async () => {
+    const plugin = seedPlugin();
+    const run = vi.fn(async (..._args: unknown[]) => undefined);
+    (plugin as any)._streamAgent = run;
+
+    await (plugin as any)._handleChat(
+      mockReq({ message: "first" }, "alice", {
+        "x-request-id": "client-controlled-id",
+      }),
+      mockRes().res,
+    );
+    await (plugin as any)._handleChat(
+      mockReq({ message: "second" }, "alice", {
+        "x-request-id": "client-controlled-id",
+      }),
+      mockRes().res,
+    );
+
+    const streamIds = run.mock.calls.map((call) => call[6]);
+    expect(streamIds).toHaveLength(2);
+    expect(new Set(streamIds).size).toBe(2);
+    expect(streamIds).not.toContain("client-controlled-id");
+  });
+
+  test("reserves the concurrency slot before awaiting thread storage", async () => {
+    const plugin = seedPlugin({
+      dir: false,
+      limits: { maxConcurrentStreamsPerUser: 1 },
+    });
+    let releaseFirst!: () => void;
+    const firstThread = new Promise<{ id: string; messages: [] }>((resolve) => {
+      releaseFirst = () => resolve({ id: "thread-1", messages: [] });
+    });
+    let firstCreateStarted!: () => void;
+    const firstCreateObserved = new Promise<void>((resolve) => {
+      firstCreateStarted = resolve;
+    });
+    (plugin as any).threadStore = {
+      get: vi.fn().mockResolvedValue(null),
+      create: vi
+        .fn()
+        .mockImplementationOnce(() => {
+          firstCreateStarted();
+          return firstThread;
+        })
+        .mockResolvedValue({ id: "thread-2", messages: [] }),
+      addMessage: vi.fn().mockResolvedValue(undefined),
+    };
+    (plugin as any)._streamAgent = vi.fn(async () => undefined);
+
+    const first = (plugin as any)._handleChat(
+      mockReq({ message: "first" }, "alice"),
+      mockRes().res,
+    );
+    await firstCreateObserved;
+    const secondResponse = mockRes();
+    await (plugin as any)._handleChat(
+      mockReq({ message: "second" }, "alice"),
+      secondResponse.res,
+    );
+
+    expect(secondResponse.res.status).toHaveBeenCalledWith(429);
+    releaseFirst();
+    await first;
   });
 
   test("honours agents({ limits: { maxConcurrentStreamsPerUser } })", async () => {
