@@ -380,5 +380,20 @@ describe("LifecycleManager", () => {
       expect(signals).toContain("SIGINT");
       onceSpy.mockRestore();
     });
+
+    test("programmatic shutdown removes installed handlers without exiting", async () => {
+      const baselineSigterm = process.listenerCount("SIGTERM");
+      const baselineSigint = process.listenerCount("SIGINT");
+      const manager = new LifecycleManager(contextWithPlugins({}));
+      manager.installSignalHandlers();
+      expect(process.listenerCount("SIGTERM")).toBe(baselineSigterm + 1);
+      expect(process.listenerCount("SIGINT")).toBe(baselineSigint + 1);
+
+      await manager.shutdown({ exitProcess: false });
+
+      expect(process.listenerCount("SIGTERM")).toBe(baselineSigterm);
+      expect(process.listenerCount("SIGINT")).toBe(baselineSigint);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
   });
 });

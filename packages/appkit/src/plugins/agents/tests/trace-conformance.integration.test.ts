@@ -626,6 +626,9 @@ async function captureGeneratedHttpTurn(
     .spyOn(ServiceContext, "get")
     .mockReturnValue(serviceContext as never);
   let server: Server | undefined;
+  let appkit:
+    | { server: { getServer(): Server }; shutdown(): Promise<void> }
+    | undefined;
   try {
     const requireFromGeneratedPackage = createRequire(
       join(directory, "package.json"),
@@ -637,13 +640,16 @@ async function captureGeneratedHttpTurn(
 
     const serverPath = join(directory, "server/server.ts");
     const generatedServer = (await import(pathToFileURL(serverPath).href)) as {
-      app?: Promise<{ server: { getServer(): Server } }>;
+      app?: Promise<{
+        server: { getServer(): Server };
+        shutdown(): Promise<void>;
+      }>;
     };
     expect(
       generatedServer.app,
       `${template} must export its generated createApp execution`,
     ).toBeDefined();
-    const appkit = await generatedServer.app;
+    appkit = await generatedServer.app;
     server = appkit?.server.getServer();
     if (!server) {
       throw new Error(
@@ -690,15 +696,19 @@ async function captureGeneratedHttpTurn(
       .filter((span) => span.attributes["mlflow.spanType"] !== undefined);
     return normalize(template, semanticSpans);
   } finally {
-    await closeServer(server);
-    initializeServiceContext.mockRestore();
-    getServiceContext.mockRestore();
-    for (const [name, previous] of previousEnvironment) {
-      if (previous === undefined) delete process.env[name];
-      else process.env[name] = previous;
+    try {
+      if (appkit) await appkit.shutdown();
+      else await closeServer(server);
+    } finally {
+      initializeServiceContext.mockRestore();
+      getServiceContext.mockRestore();
+      for (const [name, previous] of previousEnvironment) {
+        if (previous === undefined) delete process.env[name];
+        else process.env[name] = previous;
+      }
+      getTracer.mockRestore();
+      await provider.shutdown();
     }
-    getTracer.mockRestore();
-    await provider.shutdown();
   }
 }
 
@@ -734,6 +744,8 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
   const failures: string[] = [];
   for (const candidate of candidates) {
     try {
+      const baselineSigterm = process.listenerCount("SIGTERM");
+      const baselineSigint = process.listenerCount("SIGINT");
       const localManifest = await captureTurn(candidate.name);
       const reloaded = JSON.parse(
         JSON.stringify(localManifest),
@@ -741,6 +753,12 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
       assertContract(reloaded);
 
       const manifest = await captureGeneratedHttpTurn(candidate);
+      expect(process.listenerCount("SIGTERM"), candidate.name).toBe(
+        baselineSigterm,
+      );
+      expect(process.listenerCount("SIGINT"), candidate.name).toBe(
+        baselineSigint,
+      );
       expect(
         manifest.spans.some(
           (span) =>
@@ -1137,6 +1155,13 @@ interface UcSpanRow {
 interface DeployedTraceProof {
   appName: string;
   configuredExperimentId: string;
+  requestBody: unknown;
+  responseBody: unknown;
+  expectedTool: {
+    name: string;
+    inputs: unknown;
+    outputs: unknown;
+  };
   returnedTraceId: string;
   binding: ReturnType<typeof deriveUcBinding>;
   experiment: {
@@ -1165,6 +1190,33 @@ function deployedProofFixture(): DeployedTraceProof {
   manifest.template = appName;
   manifest.spans[0].attributes.app_id = appName;
   const returnedTraceId = `${binding.mlflowTracePrefix}${manifest.traceId}`;
+  const requestBody = {
+    input: "Count the words in hello traced world. Use count_words.",
+  };
+  const responseBody = {
+    object: "response",
+    status: "completed",
+    trace_id: returnedTraceId,
+    output: [
+      {
+        type: "message",
+        status: "completed",
+        content: [{ type: "output_text", text: "3" }],
+      },
+    ],
+  };
+  const expectedTool = {
+    name: "count_words tool",
+    inputs: { text: "hello traced world" },
+    outputs: { text: "hello traced world", word_count: 3 },
+  };
+  manifest.spans[0].inputs = requestBody;
+  manifest.spans[0].outputs = responseBody;
+  const toolSpan = manifest.spans.find((span) => span.spanType === "TOOL");
+  if (!toolSpan) throw new Error("deployed fixture requires a TOOL span");
+  toolSpan.name = expectedTool.name;
+  toolSpan.inputs = expectedTool.inputs;
+  toolSpan.outputs = expectedTool.outputs;
   const rows = manifest.spans.map((span, index) => ({
     traceId: manifest.traceId,
     spanId: span.spanId,
@@ -1193,6 +1245,9 @@ function deployedProofFixture(): DeployedTraceProof {
   return {
     appName,
     configuredExperimentId,
+    requestBody,
+    responseBody,
+    expectedTool,
     returnedTraceId,
     binding,
     experiment: {
@@ -1210,6 +1265,7 @@ function deployedProofFixture(): DeployedTraceProof {
         spans: rows.map((row) => ({
           span_id: row.spanId,
           parent_span_id: row.parentSpanId,
+          name: row.name,
           attributes: row.attributes,
           status: { code: "OK" },
           latency_ms: 1,
@@ -1259,6 +1315,31 @@ function assertAppIdentity(
   ].filter((value) => value !== undefined);
   if (values.length === 0 || values.some((value) => value !== expected)) {
     throw new Error(`${source} app identity does not match configured app`);
+  }
+}
+
+function canonicalTraceValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalTraceValue);
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalTraceValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function assertExactTraceValue(
+  label: string,
+  actual: unknown,
+  expected: unknown,
+): void {
+  if (
+    JSON.stringify(canonicalTraceValue(actual)) !==
+    JSON.stringify(canonicalTraceValue(expected))
+  ) {
+    throw new Error(`${label} does not match the deployed turn`);
   }
 }
 
@@ -1380,9 +1461,23 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
   }
 
   const mlflowSpans = proof.traceRecord.data?.spans ?? [];
-  const mlflowSpanIds = new Set(
-    mlflowSpans.map((span) => String(span.span_id ?? span.spanId)),
+  const mlflowSpanIdentities = mlflowSpans.map((span) =>
+    String(span.span_id ?? span.spanId),
   );
+  const ucSpanIdentities = proof.rows.map((row) => String(row.spanId));
+  const mlflowSpanIds = new Set(mlflowSpanIdentities);
+  const ucSpanIds = new Set(ucSpanIdentities);
+  // The shared contract does not permit an unpaired provider-created span,
+  // so there is intentionally no identity exception here.
+  if (
+    mlflowSpanIds.size !== mlflowSpanIdentities.length ||
+    ucSpanIds.size !== ucSpanIdentities.length ||
+    mlflowSpanIds.size !== ucSpanIds.size ||
+    [...mlflowSpanIds].some((spanId) => !ucSpanIds.has(spanId)) ||
+    [...ucSpanIds].some((spanId) => !mlflowSpanIds.has(spanId))
+  ) {
+    throw new Error("MLflow and UC span identity sets do not match exactly");
+  }
   const semanticRows = proof.rows.filter(
     (row) => row.attributes["mlflow.spanType"] !== undefined,
   );
@@ -1413,6 +1508,51 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
 
   const manifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
   assertContract(manifest);
+  const roots = manifest.spans.filter(
+    (span) => span.parentSpanId === null && span.spanType === "AGENT",
+  );
+  if (roots.length !== 1) {
+    throw new Error("deployed trace does not have one exact AGENT root");
+  }
+  const root = roots[0];
+  assertExactTraceValue("AGENT request input", root.inputs, proof.requestBody);
+  if (proof.responseBody === undefined || proof.responseBody === null) {
+    throw new Error("deployed response output is missing");
+  }
+  const responseTraceId = objectValue(proof.responseBody).trace_id;
+  if (responseTraceId !== proof.returnedTraceId) {
+    throw new Error("deployed response trace ID does not match returned trace");
+  }
+  assertExactTraceValue(
+    "AGENT response output",
+    root.outputs,
+    proof.responseBody,
+  );
+  if (
+    !manifest.spans.some(
+      (span) => span.spanType === "CHAT_MODEL" || span.spanType === "LLM",
+    )
+  ) {
+    throw new Error("deployed trace is missing an LLM span");
+  }
+  const toolSpan = manifest.spans.find(
+    (span) => span.spanType === "TOOL" && span.name === proof.expectedTool.name,
+  );
+  if (!toolSpan) {
+    throw new Error(
+      `deployed trace is missing TOOL ${proof.expectedTool.name}`,
+    );
+  }
+  assertExactTraceValue(
+    "TOOL inputs",
+    toolSpan.inputs,
+    proof.expectedTool.inputs,
+  );
+  assertExactTraceValue(
+    "TOOL outputs",
+    toolSpan.outputs,
+    proof.expectedTool.outputs,
+  );
   return manifest;
 }
 
@@ -1562,6 +1702,114 @@ test.each([
   },
 );
 
+test.each([
+  [
+    "missing response output",
+    (proof: DeployedTraceProof) => {
+      proof.responseBody = undefined;
+    },
+  ],
+  [
+    "wrong response output",
+    (proof: DeployedTraceProof) => {
+      proof.responseBody = {
+        object: "response",
+        status: "completed",
+        trace_id: proof.returnedTraceId,
+        output: [{ content: [{ type: "output_text", text: "wrong" }] }],
+      };
+    },
+  ],
+] as const)(
+  "rejects %s that is not bound to the AGENT root",
+  (_name, mutate) => {
+    const proof = deployedProofFixture();
+    mutate(proof);
+    expect(() => validateDeployedProof(proof)).toThrow(/response|output/i);
+  },
+);
+
+test.each([
+  [
+    "absent TOOL span",
+    (proof: DeployedTraceProof) => {
+      const toolRow = proof.rows.find(
+        (row) => row.attributes["mlflow.spanType"] === "TOOL",
+      );
+      proof.rows = proof.rows.filter((row) => row !== toolRow);
+      if (toolRow && proof.traceRecord.data?.spans) {
+        proof.traceRecord.data.spans = proof.traceRecord.data.spans.filter(
+          (span) =>
+            String(span.span_id ?? span.spanId) !== String(toolRow.spanId),
+        );
+      }
+    },
+  ],
+  [
+    "wrong TOOL span",
+    (proof: DeployedTraceProof) => {
+      const toolRow = proof.rows.find(
+        (row) => row.attributes["mlflow.spanType"] === "TOOL",
+      );
+      if (toolRow) toolRow.name = "different tool";
+    },
+  ],
+  [
+    "wrong TOOL inputs",
+    (proof: DeployedTraceProof) => {
+      const toolRow = proof.rows.find(
+        (row) => row.attributes["mlflow.spanType"] === "TOOL",
+      );
+      if (toolRow) toolRow.attributes["mlflow.spanInputs"] = { text: "wrong" };
+    },
+  ],
+  [
+    "wrong TOOL outputs",
+    (proof: DeployedTraceProof) => {
+      const toolRow = proof.rows.find(
+        (row) => row.attributes["mlflow.spanType"] === "TOOL",
+      );
+      if (toolRow)
+        toolRow.attributes["mlflow.spanOutputs"] = { word_count: 99 };
+    },
+  ],
+] as const)(
+  "rejects %s for the deterministic deployed turn",
+  (_name, mutate) => {
+    const proof = deployedProofFixture();
+    mutate(proof);
+    expect(() => validateDeployedProof(proof)).toThrow(/TOOL/i);
+  },
+);
+
+test("rejects an extra MLflow span missing from UC", () => {
+  const proof = deployedProofFixture();
+  proof.traceRecord.data?.spans?.push({
+    span_id: "mlflow-only",
+    parent_span_id: null,
+    name: "provider bookkeeping",
+    attributes: {},
+  });
+
+  expect(() => validateDeployedProof(proof)).toThrow(/span identity/i);
+});
+
+test("rejects an extra UC span missing from MLflow", () => {
+  const proof = deployedProofFixture();
+  proof.rows.push({
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId: "uc-only",
+    parentSpanId: null,
+    name: "provider bookkeeping",
+    attributes: {},
+    statusCode: "OK",
+    startTimeUnixNano: "1000000",
+    endTimeUnixNano: "2000000",
+  });
+
+  expect(() => validateDeployedProof(proof)).toThrow(/span identity/i);
+});
+
 test("polls asynchronous Statement Execution to success", async () => {
   const getStatement = vi.fn(() => ({
     statement_id: "statement-1",
@@ -1645,6 +1893,14 @@ test.skipIf(missingDeployed.length > 0)(
         encoding: "utf8",
       }),
     ).access_token;
+    const requestBody = {
+      input: "Count the words in hello traced world. Use count_words.",
+    };
+    const expectedTool = {
+      name: "count_words tool",
+      inputs: { text: "hello traced world" },
+      outputs: { text: "hello traced world", word_count: 3 },
+    };
     const response = await fetch(
       process.env.APPKIT_TRACE_CONFORMANCE_URL ?? "",
       {
@@ -1654,14 +1910,11 @@ test.skipIf(missingDeployed.length > 0)(
           "Content-Type": "application/json",
           "X-MLflow-Return-Trace-Id": "true",
         },
-        body: JSON.stringify({
-          input: [
-            { role: "user", content: "What time is it? Use the clock tool." },
-          ],
-        }),
+        body: JSON.stringify(requestBody),
       },
     );
     expect(response.ok).toBe(true);
+    const responseBody = await response.json();
     const traceId = response.headers.get("x-mlflow-trace-id");
     expect(traceId).toBeTruthy();
     const otelTraceId = otelTraceIdFromReturnedTrace(
@@ -1768,6 +2021,9 @@ test.skipIf(missingDeployed.length > 0)(
     validateDeployedProof({
       appName,
       configuredExperimentId,
+      requestBody,
+      responseBody,
+      expectedTool,
       returnedTraceId: traceId ?? "",
       binding,
       experiment,

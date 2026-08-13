@@ -56,6 +56,10 @@ export class LifecycleManager {
    * can say where shutdown got stuck without extra bookkeeping.
    */
   private shutdownPhase = "not started";
+  private signalHandlers?: {
+    SIGTERM: () => void;
+    SIGINT: () => void;
+  };
 
   constructor(private readonly context: PluginContext) {}
 
@@ -67,8 +71,20 @@ export class LifecycleManager {
    * `isShuttingDown` inside {@link shutdown}.
    */
   installSignalHandlers(): void {
-    process.once("SIGTERM", () => this.shutdown());
-    process.once("SIGINT", () => this.shutdown());
+    if (this.signalHandlers) return;
+    this.signalHandlers = {
+      SIGTERM: () => void this.shutdown(),
+      SIGINT: () => void this.shutdown(),
+    };
+    process.once("SIGTERM", this.signalHandlers.SIGTERM);
+    process.once("SIGINT", this.signalHandlers.SIGINT);
+  }
+
+  private removeSignalHandlers(): void {
+    if (!this.signalHandlers) return;
+    process.removeListener("SIGTERM", this.signalHandlers.SIGTERM);
+    process.removeListener("SIGINT", this.signalHandlers.SIGINT);
+    this.signalHandlers = undefined;
   }
 
   /**
@@ -86,7 +102,11 @@ export class LifecycleManager {
    * shutdown is not a crash. Exit 1 is reserved for an unexpected error
    * thrown by the sequence itself.
    */
-  async shutdown(): Promise<void> {
+  async shutdown({
+    exitProcess = true,
+  }: {
+    exitProcess?: boolean;
+  } = {}): Promise<void> {
     // Must stay synchronous and first: any await before the flag is set
     // would let a second signal re-enter the shutdown sequence.
     if (this.isShuttingDown) return;
@@ -101,20 +121,22 @@ export class LifecycleManager {
     // shutdown, not a crash), and orchestrators record nonzero exits on
     // deploys as crashes. The error log below is the stuck-shutdown
     // signal instead of the exit code.
-    const forceExitTimer = setTimeout(() => {
-      logger.error(
-        "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
-        LifecycleManager.SHUTDOWN_TIMEOUT_MS,
-        this.shutdownPhase,
-      );
-      process.exit(0);
-    }, LifecycleManager.SHUTDOWN_TIMEOUT_MS);
+    const forceExitTimer = exitProcess
+      ? setTimeout(() => {
+          logger.error(
+            "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
+            LifecycleManager.SHUTDOWN_TIMEOUT_MS,
+            this.shutdownPhase,
+          );
+          process.exit(0);
+        }, LifecycleManager.SHUTDOWN_TIMEOUT_MS)
+      : undefined;
     // unref so this backstop timer never by itself keeps the process alive.
     // Any real pending teardown (OTEL export timer, DB pool sockets, the
     // still-open HTTP listener) is a ref'd handle that holds the loop open
     // until this fires; if nothing is ref'd, there is nothing left to tear
     // down and exiting early is correct.
-    forceExitTimer.unref();
+    forceExitTimer?.unref();
 
     try {
       const plugins = Array.from(this.context.getPlugins().values());
@@ -183,8 +205,9 @@ export class LifecycleManager {
       exitCode = 1;
     }
 
-    clearTimeout(forceExitTimer);
-    process.exit(exitCode);
+    if (forceExitTimer) clearTimeout(forceExitTimer);
+    this.removeSignalHandlers();
+    if (exitProcess) process.exit(exitCode);
   }
 
   /** Close the cache storage, bounded and error-isolated. */
