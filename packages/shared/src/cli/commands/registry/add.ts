@@ -477,15 +477,20 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     // fall back to printing the snippet when the shape isn't the standard one.
     let wired = false;
     if (registerPluginInServer && s.exportName) {
-      const result = registerPluginInServer(cwd, s.importPath, s.exportName);
+      const result = registerPluginInServer(
+        serverRoot,
+        s.importPath,
+        s.exportName,
+      );
+      // result.file is relative to serverRoot; show it from cwd for the user.
+      const shown =
+        result.file && path.relative(cwd, path.join(serverRoot, result.file));
       if (result.status === "wired") {
-        console.log(
-          `\n${pc.green("Registered")} ${s.exportName} in ${result.file}`,
-        );
+        console.log(`\n${pc.green("Registered")} ${s.exportName} in ${shown}`);
         wired = true;
       } else if (result.status === "already") {
         console.log(
-          pc.dim(`\n${s.exportName} is already registered in ${result.file}`),
+          pc.dim(`\n${s.exportName} is already registered in ${shown}`),
         );
         wired = true;
       }

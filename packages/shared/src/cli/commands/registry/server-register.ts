@@ -3,10 +3,8 @@ import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { JS_IDENTIFIER } from "./constants";
 
-/** Server entry candidates, relative to the repo/server root, in priority order. */
+/** Server entry candidates within the server root, in priority order. */
 const SERVER_FILE_CANDIDATES = [
-  "server/server.ts",
-  "server/index.ts",
   "server.ts",
   "index.ts",
   "src/server.ts",
@@ -20,9 +18,9 @@ export interface RegisterResult {
   reason?: string;
 }
 
-function findServerFile(repoRoot: string): string | null {
+function findServerFile(serverRoot: string): string | null {
   for (const candidate of SERVER_FILE_CANDIDATES) {
-    const p = path.join(repoRoot, candidate);
+    const p = path.join(serverRoot, candidate);
     if (fs.existsSync(p)) return p;
   }
   return null;
@@ -59,7 +57,7 @@ function arrayElementNames(arr: SgNode): Set<string> {
  * so the caller can fall back to printing manual instructions. Idempotent.
  */
 export function registerPluginInServer(
-  repoRoot: string,
+  serverRoot: string,
   importPath: string,
   exportName: string,
 ): RegisterResult {
@@ -74,7 +72,7 @@ export function registerPluginInServer(
     return { status: "skipped", reason: "invalid plugin import path" };
   }
 
-  const serverFile = findServerFile(repoRoot);
+  const serverFile = findServerFile(serverRoot);
   if (!serverFile) {
     return { status: "skipped", reason: "no server entry file found" };
   }
@@ -91,7 +89,7 @@ export function registerPluginInServer(
     };
   }
 
-  const file = path.relative(repoRoot, serverFile);
+  const file = path.relative(serverRoot, serverFile);
   if (arrayElementNames(arr).has(exportName)) {
     return { status: "already", file };
   }
