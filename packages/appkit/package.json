@@ -85,6 +85,7 @@
     "get-port": "7.2.0",
     "js-yaml": "4.2.0",
     "magic-string": "0.30.21",
+    "mlflow-tracing": "0.1.3",
     "obug": "2.1.1",
     "pg": "8.18.0",
     "picocolors": "1.1.1",

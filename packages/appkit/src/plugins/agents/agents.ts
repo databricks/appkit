@@ -56,6 +56,13 @@ import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
 import {
+  currentTraceId,
+  initAgentTracing,
+  linkTraceToRun,
+  traceAgent,
+  traceTool,
+} from "./mlflow";
+import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
@@ -133,7 +140,11 @@ interface RunState {
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
-  static manifest = manifest as PluginManifest;
+  // Routed through `unknown`: the optional resources have differing `fields`
+  // keys (serving `name`, experiment `experimentId`), which TS widens to an
+  // incompatible union on the JSON import. The shape is validated at runtime
+  // against the plugin-manifest schema.
+  static manifest = manifest as unknown as PluginManifest;
   static phase: PluginPhase = "deferred";
 
   protected declare config: AgentsPluginConfig;
@@ -276,6 +287,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   async setup() {
+    await initAgentTracing();
     const { agents, defaultAgentName } = await this.buildAgentRegistry();
     this.agents = agents;
     this.defaultAgentName = defaultAgentName;
@@ -873,7 +885,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName } = parsed.data;
+    const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -927,7 +939,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId);
+    return this._streamAgent(req, res, registered, thread, userId, mlflowRunId);
   }
 
   /**
@@ -973,7 +985,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { input } = parsed.data;
+    const { input, mlflowRunId } = parsed.data;
     const registered = this.resolveAgent();
     if (!registered) {
       res.status(400).json({ error: "No agent registered" });
@@ -1045,7 +1057,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    return this._runAgentNonStreaming(req, res, registered, thread, userId);
+    return this._runAgentNonStreaming(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      mlflowRunId,
+    );
   }
 
   private async _streamAgent(
@@ -1054,6 +1073,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    mlflowRunId?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1106,62 +1126,91 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           outboundEvents.push(evt);
         }
 
-        const pluginNames = this.context
-          ? this.context
-              .getPluginNames()
-              .filter((n) => n !== this.name && n !== "server")
-          : [];
-        const fullPrompt = composePromptForAgent(
-          registered,
-          this.config.baseSystemPrompt,
+        // Root MLflow span for the turn; tool-call spans nest under it.
+        await traceAgent(
+          registered.name ?? "agent",
           {
-            agentName: registered.name,
-            pluginNames,
-            toolNames: tools.map((t) => t.name),
+            messages: thread.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
           },
-        );
+          async (span) => {
+            // Link this turn's trace to an eval run when the eval runner
+            // supplied one, so the trace shows under the MLflow evaluation run.
+            if (mlflowRunId) linkTraceToRun(mlflowRunId);
 
-        const messagesWithSystem: Message[] = [
-          {
-            id: "system",
-            role: "system",
-            content: fullPrompt,
-            createdAt: new Date(),
-          },
-          ...thread.messages,
-        ];
+            const pluginNames = this.context
+              ? this.context
+                  .getPluginNames()
+                  .filter((n) => n !== this.name && n !== "server")
+              : [];
+            const fullPrompt = composePromptForAgent(
+              registered,
+              this.config.baseSystemPrompt,
+              {
+                agentName: registered.name,
+                pluginNames,
+                toolNames: tools.map((t) => t.name),
+              },
+            );
 
-        const stream = registered.adapter.run(
-          {
-            messages: messagesWithSystem,
-            tools,
-            threadId: thread.id,
-            signal,
-            extensions: buildAdapterExtensions(registered.toolIndex),
-          },
-          { executeTool, signal },
-        );
+            const messagesWithSystem: Message[] = [
+              {
+                id: "system",
+                role: "system",
+                content: fullPrompt,
+                createdAt: new Date(),
+              },
+              ...thread.messages,
+            ];
 
-        // The accumulation rule (deltas append, `message` replaces) is shared
-        // with `runAgent` and `runSubAgent`; see `consumeAdapterStream` for
-        // the rationale.
-        const fullContent = await consumeAdapterStream(stream, {
-          signal,
-          onEvent: (event) => {
-            for (const translated of translator.translate(event)) {
-              outboundEvents.push(translated);
+            const stream = registered.adapter.run(
+              {
+                messages: messagesWithSystem,
+                tools,
+                threadId: thread.id,
+                signal,
+                extensions: buildAdapterExtensions(registered.toolIndex),
+              },
+              { executeTool, signal },
+            );
+
+            // The accumulation rule (deltas append, `message` replaces) is
+            // shared with `runAgent` and `runSubAgent`; see
+            // `consumeAdapterStream` for the rationale.
+            const fullContent = await consumeAdapterStream(stream, {
+              signal,
+              onEvent: (event) => {
+                for (const translated of translator.translate(event)) {
+                  outboundEvents.push(translated);
+                }
+              },
+            });
+
+            if (fullContent) {
+              span.setOutputs({ role: "assistant", content: fullContent });
+              await this.threadStore.addMessage(thread.id, userId, {
+                id: randomUUID(),
+                role: "assistant",
+                content: fullContent,
+                createdAt: new Date(),
+              });
+            }
+
+            // Surface the MLflow trace id so eval runs can attach assessments
+            // to this turn's trace. No-op when tracing is disabled.
+            const mlflowTraceId = currentTraceId();
+            if (mlflowTraceId) {
+              for (const evt of translator.translate({
+                type: "metadata",
+                data: { mlflowTraceId },
+              })) {
+                outboundEvents.push(evt);
+              }
             }
           },
-        });
-
-        if (fullContent) {
-          await this.threadStore.addMessage(thread.id, userId, {
-            id: randomUUID(),
-            role: "assistant",
-            content: fullContent,
-            createdAt: new Date(),
-          });
-        }
+        );
 
         for (const evt of translator.finalize()) outboundEvents.push(evt);
       } catch (error) {
@@ -1243,6 +1292,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    mlflowRunId?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1251,6 +1301,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
     const limits = this.resolvedLimits;
+
+    // Assigned inside the span below (the only place the active trace id
+    // resolves), read into the response envelope after.
+    let mlflowTraceId: string | undefined;
 
     const runState: RunState = {
       req,
@@ -1273,51 +1327,72 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     let fullContent = "";
     try {
-      const pluginNames = this.context
-        ? this.context
-            .getPluginNames()
-            .filter((n) => n !== this.name && n !== "server")
-        : [];
-      const fullPrompt = composePromptForAgent(
-        registered,
-        this.config.baseSystemPrompt,
+      // Root MLflow span for the turn; tool-call spans nest under it. Mirrors
+      // the streaming path so the invoke surface produces the same trace shape
+      // instead of orphan root TOOL spans.
+      await traceAgent(
+        registered.name ?? "agent",
         {
-          agentName: registered.name,
-          pluginNames,
-          toolNames: tools.map((t) => t.name),
+          messages: thread.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+        async (span) => {
+          // Link this turn's trace to an eval run when the eval runner
+          // supplied one, so the trace shows under the MLflow evaluation run.
+          if (mlflowRunId) linkTraceToRun(mlflowRunId);
+
+          const pluginNames = this.context
+            ? this.context
+                .getPluginNames()
+                .filter((n) => n !== this.name && n !== "server")
+            : [];
+          const fullPrompt = composePromptForAgent(
+            registered,
+            this.config.baseSystemPrompt,
+            {
+              agentName: registered.name,
+              pluginNames,
+              toolNames: tools.map((t) => t.name),
+            },
+          );
+
+          const messagesWithSystem: Message[] = [
+            {
+              id: "system",
+              role: "system",
+              content: fullPrompt,
+              createdAt: new Date(),
+            },
+            ...thread.messages,
+          ];
+
+          const stream = registered.adapter.run(
+            {
+              messages: messagesWithSystem,
+              tools,
+              threadId: thread.id,
+              signal,
+            },
+            { executeTool, signal },
+          );
+
+          fullContent = await consumeAdapterStream(stream, { signal });
+
+          if (fullContent) {
+            span.setOutputs({ role: "assistant", content: fullContent });
+            await this.threadStore.addMessage(thread.id, userId, {
+              id: randomUUID(),
+              role: "assistant",
+              content: fullContent,
+              createdAt: new Date(),
+            });
+          }
+
+          mlflowTraceId = currentTraceId();
         },
       );
-
-      const messagesWithSystem: Message[] = [
-        {
-          id: "system",
-          role: "system",
-          content: fullPrompt,
-          createdAt: new Date(),
-        },
-        ...thread.messages,
-      ];
-
-      const stream = registered.adapter.run(
-        {
-          messages: messagesWithSystem,
-          tools,
-          threadId: thread.id,
-          signal,
-        },
-        { executeTool, signal },
-      );
-
-      fullContent = await consumeAdapterStream(stream, { signal });
-
-      if (fullContent) {
-        await this.threadStore.addMessage(thread.id, userId, {
-          id: randomUUID(),
-          role: "assistant",
-          content: fullContent,
-          createdAt: new Date(),
-        });
-      }
     } catch (error) {
       if (signal.aborted) {
         res.status(499).json({ error: "Request aborted" });
@@ -1363,6 +1438,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
+      // Lets an eval runner attach assessments to this turn's trace; absent
+      // when tracing is disabled.
+      ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
       output: [message],
     });
   }
@@ -1426,63 +1504,73 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       }
     }
 
-    let result: unknown;
-    if (entry.source === "toolkit") {
-      if (!this.context) {
+    // Traced from here so the span covers execution only, not the approval
+    // wait above (which is human latency).
+    const toolResult = await traceTool(name, args, async () => {
+      let result: unknown;
+      if (entry.source === "toolkit") {
+        if (!this.context) {
+          throw new Error(
+            "Plugin tool execution requires PluginContext; this should never happen through createApp",
+          );
+        }
+        result = await this.context.executeTool(
+          runState.req,
+          entry.pluginName,
+          entry.localName,
+          args,
+          runState.signal,
+          runState.limits.toolCallTimeoutMs,
+        );
+      } else if (entry.source === "function") {
+        // Function tools declare their parameters as a JSON-object schema,
+        // so adapters always serialize `args` as an object. A non-object
+        // value here means the upstream model emitted malformed tool-call
+        // JSON; surface a clear error rather than silently passing through
+        // a wrong-shape value the tool will then choke on.
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
+          throw new Error(
+            `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+          );
+        }
+        result = await entry.functionTool.execute(
+          args as Record<string, unknown>,
+        );
+      } else if (entry.source === "mcp") {
+        if (!this.mcpClient) throw new Error("MCP client not connected");
+        const oboToken = runState.req.headers["x-forwarded-access-token"];
+        const mcpAuth =
+          typeof oboToken === "string"
+            ? { Authorization: `Bearer ${oboToken}` }
+            : undefined;
+        result = await this.mcpClient.callTool(
+          entry.mcpToolName,
+          args,
+          mcpAuth,
+        );
+      } else if (entry.source === "subagent") {
+        const childAgent = this.agents.get(entry.agentName);
+        if (!childAgent)
+          throw new Error(`Sub-agent not found: ${entry.agentName}`);
+        result = await this.runSubAgent(runState, childAgent, args, depth + 1);
+      } else if (entry.source === "hosted-supervisor") {
+        // Defense-in-depth: should never fire. Hosted-supervisor entries are
+        // routed via `AgentInput.extensions` and the SA endpoint executes
+        // them server-side; their `def` is filtered out of the adapter's
+        // `tools` array, so the model never sees a callable schema for them.
+        // If we reach here, the agent is paired with a non-SA adapter that
+        // somehow surfaced the placeholder def to the model — surface a
+        // clear error rather than crash later in `normalizeToolResult`.
         throw new Error(
-          "Plugin tool execution requires PluginContext; this should never happen through createApp",
+          `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+            "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
         );
       }
-      result = await this.context.executeTool(
-        runState.req,
-        entry.pluginName,
-        entry.localName,
-        args,
-        runState.signal,
-        runState.limits.toolCallTimeoutMs,
-      );
-    } else if (entry.source === "function") {
-      // Function tools declare their parameters as a JSON-object schema,
-      // so adapters always serialize `args` as an object. A non-object
-      // value here means the upstream model emitted malformed tool-call
-      // JSON; surface a clear error rather than silently passing through
-      // a wrong-shape value the tool will then choke on.
-      if (typeof args !== "object" || args === null || Array.isArray(args)) {
-        throw new Error(
-          `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
-        );
-      }
-      result = await entry.functionTool.execute(
-        args as Record<string, unknown>,
-      );
-    } else if (entry.source === "mcp") {
-      if (!this.mcpClient) throw new Error("MCP client not connected");
-      const oboToken = runState.req.headers["x-forwarded-access-token"];
-      const mcpAuth =
-        typeof oboToken === "string"
-          ? { Authorization: `Bearer ${oboToken}` }
-          : undefined;
-      result = await this.mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
-    } else if (entry.source === "subagent") {
-      const childAgent = this.agents.get(entry.agentName);
-      if (!childAgent)
-        throw new Error(`Sub-agent not found: ${entry.agentName}`);
-      result = await this.runSubAgent(runState, childAgent, args, depth + 1);
-    } else if (entry.source === "hosted-supervisor") {
-      // Defense-in-depth: should never fire. Hosted-supervisor entries are
-      // routed via `AgentInput.extensions` and the SA endpoint executes
-      // them server-side; their `def` is filtered out of the adapter's
-      // `tools` array, so the model never sees a callable schema for them.
-      // If we reach here, the agent is paired with a non-SA adapter that
-      // somehow surfaced the placeholder def to the model — surface a
-      // clear error rather than crash later in `normalizeToolResult`.
-      throw new Error(
-        `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-          "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
-      );
-    }
 
-    return normalizeToolResult(result);
+      return result;
+    });
+
+    return normalizeToolResult(toolResult);
   }
 
   /**
