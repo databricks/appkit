@@ -1849,6 +1849,7 @@ describe("analytics as a cross-plugin tool provider", () => {
       rows,
       echoedArgs: { sql: "SELECT * FROM top_customers" },
     });
+    expect(mock.toolCalls).toHaveLength(1);
     expect(mock.toolCalls[0]).toMatchObject({
       plugin: "analytics",
       tool: "query",
