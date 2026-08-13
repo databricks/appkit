@@ -1,7 +1,11 @@
 import type express from "express";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, test, vi } from "vitest";
 import { ServiceContext } from "../../../context";
-import { createTestPluginContext, expectStream } from "../../../testing";
+import {
+  createMockResponse,
+  createTestPluginContext,
+  expectStream,
+} from "../../../testing";
 import { type GeniePlugin, genie } from "../genie";
 
 /**
@@ -11,10 +15,10 @@ import { type GeniePlugin, genie } from "../genie";
  * suite drives that real handler and asserts the emitted event ORDER with
  * `expectStream` — the streaming-assertion path the kit is meant to make easy.
  *
- * See internal/testing-kit-dogfooding.md for the developer-experience notes
- * this exercise produced (notably: the kit's `createMockResponse` does not
- * capture written SSE bytes, so a small capturing response is needed to bridge
- * a `res.write`-based handler into `expectStream`).
+ * The kit's `createMockResponse` captures the SSE bytes the handler writes, and
+ * `expectStream` reads them straight back: `expectStream(res).toEmit(...)`. No
+ * hand-rolled capturing response is needed. See
+ * internal/testing-kit-dogfooding.md for the wider developer-experience notes.
  */
 
 // The base Plugin reads the cache singleton on attach; a tiny in-memory stub
@@ -34,48 +38,6 @@ const { mockCacheInstance } = vi.hoisted(() => ({
 vi.mock("../../../cache", () => ({
   CacheManager: { getInstanceSync: vi.fn(() => mockCacheInstance) },
 }));
-
-/**
- * Collects the SSE bytes a handler writes and exposes them as a `Response`,
- * so a `res.write`-based handler can be asserted with `expectStream`.
- *
- * NOTE: this bridge is exactly the friction the dogfooding writeup flags — the
- * kit's own `createMockResponse` throws written chunks away, so streaming
- * handler tests need this until the kit ships a capturing response.
- */
-function createCapturingResponse() {
-  const chunks: string[] = [];
-  const listeners: Record<string, Array<() => void>> = {};
-  const res = {
-    headersSent: false,
-    writableEnded: false,
-    statusCode: 200,
-    status: vi.fn().mockReturnThis(),
-    json: vi.fn().mockReturnThis(),
-    setHeader: vi.fn().mockReturnThis(),
-    flushHeaders: vi.fn().mockReturnThis(),
-    write: vi.fn((chunk: unknown) => {
-      chunks.push(String(chunk));
-      return true;
-    }),
-    end: vi.fn(function (this: { writableEnded: boolean }) {
-      this.writableEnded = true;
-      for (const fn of listeners.close ?? []) fn();
-      return this;
-    }),
-    on: vi.fn((event: string, fn: () => void) => {
-      listeners[event] ??= [];
-      listeners[event].push(fn);
-      return res;
-    }),
-    off: vi.fn().mockReturnThis(),
-    destroy: vi.fn().mockReturnThis(),
-  };
-  return {
-    res: res as unknown as express.Response,
-    toResponse: () => new Response(chunks.join("")),
-  };
-}
 
 function mockReq(body: unknown): express.Request {
   const headers: Record<string, string> = {
@@ -153,7 +115,7 @@ describe("genie plugin — dogfooding the testing kit", () => {
   });
 
   test("_handleSendMessage streams status -> message -> complete in order", async () => {
-    const { res, toResponse } = createCapturingResponse();
+    const res = createMockResponse();
 
     await (
       plugin as unknown as {
@@ -162,9 +124,11 @@ describe("genie plugin — dogfooding the testing kit", () => {
           w: express.Response,
         ) => Promise<void>;
       }
-    )._handleSendMessage(mockReq({ content: "top customers?" }), res);
+    )._handleSendMessage(
+      mockReq({ content: "top customers?" }),
+      res as unknown as express.Response,
+    );
 
-    // The kit's expectStream parses the real SSE the handler wrote.
-    await expectStream(toResponse()).toEmit("status", "message", "complete");
+    await expectStream(res).toEmit("status", "message", "complete");
   });
 });

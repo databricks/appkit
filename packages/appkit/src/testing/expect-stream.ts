@@ -11,16 +11,38 @@ export interface StreamEvent {
 }
 
 /**
+ * A response double that captured what a streaming handler wrote and can
+ * replay it as a real `Response`. {@link createMockResponse} returns one; this
+ * structural type lets {@link expectStream} accept it without importing the
+ * fixtures module (which would form a cycle).
+ */
+export interface CapturedSSEResponse {
+  sseResponse(): Response;
+}
+
+/**
  * Anything {@link expectStream} can consume:
  * - an async event stream (an adapter's `run()`, an SSE reader),
  * - an already-collected array of events,
- * - an SSE `Response` (or a promise of one) — its body is parsed into events.
+ * - an SSE `Response` (or a promise of one) — its body is parsed into events,
+ * - a captured mock response ({@link createMockResponse}) — its written SSE
+ *   bytes are parsed into events.
  */
 export type StreamSource =
   | AsyncIterable<StreamEvent>
   | Iterable<StreamEvent>
   | Response
-  | Promise<Response>;
+  | Promise<Response>
+  | CapturedSSEResponse;
+
+/** Does `value` expose a `sseResponse()` — i.e. is it a captured mock response? */
+function isCapturedSSEResponse(value: unknown): value is CapturedSSEResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as CapturedSSEResponse).sseResponse === "function"
+  );
+}
 
 /** Assertions over the events collected from a {@link StreamSource}. */
 export interface StreamAssertion {
@@ -110,8 +132,27 @@ async function collectEventsInner(
 ): Promise<StreamEvent[]> {
   const resolved = await source;
 
+  // A raw SSE body string is a trap: a string is itself an iterable, so it
+  // would be walked one character at a time. Reject it with a pointer to the
+  // right input rather than silently producing per-character "events".
+  if (typeof resolved === "string") {
+    throw new Error(
+      "expectStream: received a raw string. Pass a Response, a captured " +
+        "response from createMockResponse(), or call its sseResponse() — " +
+        "not the SSE body text (a string iterates one character at a time).",
+    );
+  }
+
   if (resolved instanceof Response) {
     const text = await resolved.text();
+    return parseSSEBody(text);
+  }
+
+  // A captured mock response ({@link createMockResponse}) — replay the SSE it
+  // recorded. Checked before the generic iterable branches (it is a plain
+  // object without an iterator) so a streaming route reads back as events.
+  if (isCapturedSSEResponse(resolved)) {
+    const text = await resolved.sseResponse().text();
     return parseSSEBody(text);
   }
 
@@ -200,6 +241,13 @@ function isSubsequence(actual: string[], expected: string[]): boolean {
  * ```ts
  * const res = await fetch("/api/analytics/query/top_users", { method: "POST" });
  * await expectStream(res).toEmit("warehouse_status", "result");
+ * ```
+ *
+ * @example A plugin's streaming route (via {@link createMockResponse})
+ * ```ts
+ * const res = createMockResponse();
+ * await plugin._handleStream(req, res); // writes SSE to res
+ * await expectStream(res).toEmit("status", "result");
  * ```
  *
  * @example Guard against a non-terminating stream

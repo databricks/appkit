@@ -1,6 +1,6 @@
 import type express from "express";
 import { describe, expect, test } from "vitest";
-import { createTestPluginContext } from "../../../testing";
+import { createMockRequest, createTestPluginContext } from "../../../testing";
 
 /**
  * Dogfooding `@databricks/appkit/testing` for the cross-plugin tool-call (OBO)
@@ -18,14 +18,6 @@ import { createTestPluginContext } from "../../../testing";
  * workspace-client fixtures because that work lives behind those seams.)
  */
 
-function mockReq(headers: Record<string, string>): express.Request {
-  return {
-    body: {},
-    headers,
-    header: (name: string) => headers[name.toLowerCase()],
-  } as unknown as express.Request;
-}
-
 describe("analytics as a cross-plugin tool provider — dogfooding the kit", () => {
   test("a consumer dispatches analytics.query on-behalf-of the user", async () => {
     const rows = [{ customer: "Acme", revenue: 1_000_000 }];
@@ -38,10 +30,9 @@ describe("analytics as a cross-plugin tool provider — dogfooding the kit", () 
 
     // Simulate what a consumer plugin (e.g. agents) does internally: resolve a
     // sibling plugin's tool through the shared PluginContext.
-    const req = mockReq({
-      "x-forwarded-access-token": "user-token",
-      "x-forwarded-user": "analyst@example.com",
-    });
+    const req = createMockRequest({
+      obo: { userId: "analyst@example.com" },
+    }) as unknown as express.Request;
     const result = await mock.ctx.executeTool(req, "analytics", "query", {
       sql: "SELECT * FROM top_customers",
     });
@@ -51,8 +42,7 @@ describe("analytics as a cross-plugin tool provider — dogfooding the kit", () 
       echoedArgs: { sql: "SELECT * FROM top_customers" },
     });
 
-    // The kit proves the dispatch ran as the end user, not the service
-    // principal — and records who.
+    // Prove the dispatch ran as the end user, not the service principal.
     expect(mock.toolCalls).toHaveLength(1);
     expect(mock.toolCalls[0]).toMatchObject({
       plugin: "analytics",
@@ -67,8 +57,10 @@ describe("analytics as a cross-plugin tool provider — dogfooding the kit", () 
       analytics: { query: () => ({ rows: [] }) },
     });
 
+    // No `obo` — a request with no forwarded token must be rejected.
+    const req = createMockRequest() as unknown as express.Request;
     await expect(
-      mock.ctx.executeTool(mockReq({}), "analytics", "query", {}),
+      mock.ctx.executeTool(req, "analytics", "query", {}),
     ).rejects.toThrow(/Missing user token/);
     expect(mock.toolCalls).toHaveLength(0);
   });
@@ -85,12 +77,10 @@ describe("analytics as a cross-plugin tool provider — dogfooding the kit", () 
       },
     });
 
+    const req = createMockRequest({ obo: true }) as unknown as express.Request;
     await expect(
       mock.ctx.executeTool(
-        mockReq({
-          "x-forwarded-access-token": "t",
-          "x-forwarded-user": "u",
-        }),
+        req,
         "analytics",
         "query",
         {},

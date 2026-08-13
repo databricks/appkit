@@ -42,6 +42,7 @@
 // path (../core/plugin-context) that is not part of the package's exports map.
 export type { PluginContext } from "../core/plugin-context";
 export {
+  type CapturedSSEResponse,
   type ExpectStreamOptions,
   expectStream,
   parseSSEResponse,
@@ -55,15 +56,17 @@ export {
   createMockRequest,
   createMockResponse,
   createMockRouter,
-  createMockServiceContext,
   createMockTelemetry,
-  createMockUserContext,
   createMockWorkspaceClient,
   createSuccessfulSQLResponse,
   mockServiceContext,
+  type OboOption,
+  resetTestCache,
   runWithRequestContext,
+  type ServiceContextMock,
   setupDatabricksEnv,
   type TestContextOptions,
+  useServiceContextMock,
 } from "./fixtures";
 export {
   createTestPluginContext,

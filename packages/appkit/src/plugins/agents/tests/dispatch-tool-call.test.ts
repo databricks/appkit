@@ -325,8 +325,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     // plugin passes.
     const mock = createTestPluginContext({ analytics: { query: "rows" } });
     const executeToolSpy = vi.spyOn(mock.ctx, "executeTool");
-    // biome-ignore lint/suspicious/noExplicitAny: attach the real context to the plugin
-    (plugin as any).context = mock.ctx;
+    await mock.attach(plugin);
 
     const result = await callDispatch(plugin, {
       runState,
@@ -372,8 +371,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
           }),
       },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: attach the real context
-    (plugin as any).context = mock.ctx;
+    await mock.attach(plugin);
 
     await expect(
       callDispatch(plugin, {

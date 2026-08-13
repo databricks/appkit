@@ -1,9 +1,9 @@
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
-import type { UserContext } from "../context/user-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
@@ -103,18 +103,64 @@ export function createMockRouter(): {
 }
 
 /**
- * Creates a mock Express request object. Carries a default mock
- * WorkspaceClient (SQL succeeds, warehouse is RUNNING) on both the user and
- * service-principal client slots; override any field via `overrides`.
+ * On-behalf-of shorthand for {@link createMockRequest}. `true` uses the default
+ * test user; an object picks the identity. Sets the forwarded headers the real
+ * `Plugin.asUser` reads (`x-forwarded-access-token`, `x-forwarded-user`, and —
+ * when given — `x-forwarded-email`), so an OBO test is one flag instead of
+ * hand-rolled headers.
+ */
+export type OboOption =
+  | boolean
+  | {
+      /** `x-forwarded-user` — defaults to `"test-user"`. */
+      userId?: string;
+      /** `x-forwarded-access-token` — defaults to `"test-user-token"`. */
+      token?: string;
+      /** `x-forwarded-email` — omitted unless provided. */
+      email?: string;
+    };
+
+/** Build the forwarded identity headers an `obo` option implies. */
+function oboHeaders(obo: Exclude<OboOption, false>): Record<string, string> {
+  const opts = obo === true ? {} : obo;
+  const headers: Record<string, string> = {
+    "x-forwarded-access-token": opts.token ?? "test-user-token",
+    "x-forwarded-user": opts.userId ?? "test-user",
+  };
+  if (opts.email) headers["x-forwarded-email"] = opts.email;
+  return headers;
+}
+
+/**
+ * Creates a mock Express request. Pass `overrides` to set `params`, `query`,
+ * `body`, `headers`, etc.
+ *
+ * For on-behalf-of tests, pass `obo` instead of hand-adding forwarded headers —
+ * `createMockRequest({ obo: true })` sets the identity headers the real
+ * `asUser` requires. Any explicit `headers` you also pass win over the ones
+ * `obo` generates, so you can override a single field.
+ *
+ * @example
+ * ```ts
+ * createMockRequest({ obo: true });                 // default test user + token
+ * createMockRequest({ obo: { userId: "alice" } });  // pick the user
+ * ```
  */
 export function createMockRequest(overrides: Any = {}) {
   const mockWorkspaceClient = createMockWorkspaceClient();
+  const { obo, headers: headerOverrides, ...rest } = overrides;
+
+  // `obo` seeds the forwarded identity headers; an explicit `headers` override
+  // still wins (merged last) so a test can tweak or drop a single field.
+  const headers = {
+    ...(obo ? oboHeaders(obo) : {}),
+    ...headerOverrides,
+  };
 
   const req = {
     params: {},
     query: {},
     body: {},
-    headers: {},
     userWorkspaceClient: mockWorkspaceClient,
     serviceWorkspaceClient: mockWorkspaceClient,
     getWarehouseId: vi.fn().mockResolvedValue("test-warehouse-id"),
@@ -122,7 +168,10 @@ export function createMockRequest(overrides: Any = {}) {
     header: function (name: string) {
       return this.headers[name.toLowerCase()];
     },
-    ...overrides,
+    // `...rest` keeps the original override power over every default above;
+    // `headers` is applied last as the one managed field (obo + overrides).
+    ...rest,
+    headers,
   };
   return req;
 }
@@ -131,9 +180,21 @@ export function createMockRequest(overrides: Any = {}) {
  * Creates a mock Express response object. `write`/`send`/`setHeader` flip
  * `headersSent`, `end` flips `writableEnded` and fires any `close` listener —
  * enough for streaming handlers that branch on those flags.
+ *
+ * Every chunk passed to `write` (and a final chunk to `end`) is captured, so a
+ * streaming route's real SSE output can be replayed: pass the response straight
+ * to {@link expectStream}, or call `sseResponse()` for a real `Response`.
+ *
+ * @example Assert what a streaming route emitted
+ * ```ts
+ * const res = createMockResponse();
+ * await plugin._handleStream(req, res);
+ * await expectStream(res).toEmit("status", "result");
+ * ```
  */
 export function createMockResponse() {
   const eventListeners: Record<string, Array<(...args: Any[]) => void>> = {};
+  const chunks: string[] = [];
 
   const res = {
     // Flips to true once headers/body have gone out — mirrors Express so
@@ -147,7 +208,12 @@ export function createMockResponse() {
       return this;
     }),
     sendStatus: vi.fn().mockReturnThis(),
-    end: vi.fn(function (this: Any) {
+    end: vi.fn(function (this: Any, chunk?: unknown) {
+      // Express allows `end(chunk)` and `end(callback)`; capture only a data
+      // chunk, never the completion callback.
+      if (chunk != null && typeof chunk !== "function") {
+        chunks.push(String(chunk));
+      }
       this.writableEnded = true;
       if (eventListeners.close) {
         for (const handler of eventListeners.close) {
@@ -156,8 +222,11 @@ export function createMockResponse() {
       }
       return this;
     }),
-    write: vi.fn(function (this: Any) {
+    write: vi.fn(function (this: Any, chunk?: unknown) {
       this.headersSent = true;
+      if (chunk != null) chunks.push(String(chunk));
+      // Return `this` (truthy) rather than a boolean: handlers that gate on
+      // backpressure (`if (res.write(buf)) …`) then take the no-wait path.
       return this;
     }),
     setHeader: vi.fn(function (this: Any) {
@@ -190,6 +259,15 @@ export function createMockResponse() {
       return this;
     }),
     writableEnded: false,
+    /**
+     * The SSE body captured so far, as a real `Response` — the bridge from a
+     * `res.write`-based handler into {@link expectStream}. `expectStream`
+     * detects this method and calls it for you, so `expectStream(res)` and
+     * `expectStream(res.sseResponse())` are equivalent.
+     */
+    sseResponse(): Response {
+      return new Response(chunks.join(""));
+    },
   };
   return res;
 }
@@ -202,6 +280,36 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
   process.env.DATABRICKS_HOST = "https://test.databricks.com";
   process.env.DATABRICKS_WAREHOUSE_ID = "test-warehouse-id";
   Object.assign(process.env, overrides);
+}
+
+/**
+ * Clears AppKit's process-wide cache singleton so cached values don't leak
+ * between tests in the same file.
+ *
+ * The cache `attach()` seeds is shared by every test in a file (Vitest isolates
+ * files, not tests within a file). Call this in `beforeEach` when one test's
+ * cached value must not be seen by the next, or mid-test to force a cache miss
+ * before asserting a subsequent hit.
+ *
+ * No-ops when the cache has not been initialized yet, so it is safe to call
+ * before any `attach()`.
+ *
+ * @example
+ * ```ts
+ * beforeEach(async () => {
+ *   await resetTestCache();
+ * });
+ * ```
+ */
+export async function resetTestCache(): Promise<void> {
+  let cache: ReturnType<typeof CacheManager.getInstanceSync>;
+  try {
+    cache = CacheManager.getInstanceSync();
+  } catch {
+    // Not initialized yet — nothing to clear.
+    return;
+  }
+  await cache.clear();
 }
 
 /**
@@ -245,34 +353,19 @@ export function createMockWorkspaceClient() {
 }
 
 /**
- * Builds a {@link ServiceContextState} for testing without touching the
- * singleton. Use with {@link mockServiceContext} to install it.
+ * Builds a {@link ServiceContextState} value for testing without touching the
+ * singleton. Internal building block for {@link mockServiceContext}, which
+ * installs the state as spies — that installer is the public entry point.
  */
-export function createMockServiceContext(options: TestContextOptions = {}) {
-  const serviceContext: ServiceContextState = {
+function buildServiceContextState(
+  options: TestContextOptions = {},
+): ServiceContextState {
+  return {
     client: (options.serviceDatabricksClient ||
       createMockWorkspaceClient()) as Any,
     serviceUserId: options.serviceUserId || "test-service-user",
     warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
     workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
-  };
-
-  return serviceContext;
-}
-
-/**
- * Creates a mock UserContext for testing.
- */
-export function createMockUserContext(
-  options: TestContextOptions = {},
-): UserContext {
-  return {
-    client: (options.userDatabricksClient ||
-      createMockWorkspaceClient()) as Any,
-    userId: options.userId || "test-user",
-    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
-    workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
-    isUserContext: true,
   };
 }
 
@@ -285,7 +378,7 @@ export function createMockUserContext(
  * @returns The mock context plus the spies and a `restore()` helper.
  */
 export function mockServiceContext(options: TestContextOptions = {}) {
-  const serviceContext = createMockServiceContext(options);
+  const serviceContext = buildServiceContextState(options);
 
   const getSpy = vi
     .spyOn(ServiceContext, "get")
@@ -324,6 +417,63 @@ export function mockServiceContext(options: TestContextOptions = {}) {
       initSpy.mockRestore();
       isInitializedSpy.mockRestore();
       createUserContextSpy.mockRestore();
+    },
+  };
+}
+
+/** The handle {@link mockServiceContext} returns (spies + `restore`). */
+export type ServiceContextMock = ReturnType<typeof mockServiceContext>;
+
+/**
+ * Registers a fresh {@link mockServiceContext} before each test and restores it
+ * after — the whole `beforeEach`/`afterEach` dance in one line.
+ *
+ * Call it at the top of a `describe` block (or module top-level), NOT inside a
+ * test: Vitest's `beforeEach`/`afterEach` only register during collection, so a
+ * call from within a test body registers nothing for that test.
+ *
+ * Returns a **live** accessor, not the handle: each `beforeEach` builds fresh
+ * spies, so reading `.current` inside a test always sees that test's mock. A
+ * handle captured once would go stale after the first hook runs.
+ *
+ * @example
+ * ```ts
+ * describe("my plugin", () => {
+ *   const ctx = useServiceContextMock({ warehouseId: "wh-1" });
+ *
+ *   test("resolves the warehouse", async () => {
+ *     await myHandler(req, res);
+ *     expect(ctx.current.getSpy).toHaveBeenCalled();
+ *   });
+ * });
+ * ```
+ *
+ * @returns `{ current }` — the active {@link ServiceContextMock} for the test.
+ */
+export function useServiceContextMock(options: TestContextOptions = {}): {
+  readonly current: ServiceContextMock;
+} {
+  let handle: ServiceContextMock | undefined;
+
+  beforeEach(() => {
+    handle = mockServiceContext(options);
+  });
+
+  afterEach(() => {
+    handle?.restore();
+    handle = undefined;
+  });
+
+  return {
+    get current(): ServiceContextMock {
+      if (!handle) {
+        throw new Error(
+          "useServiceContextMock: no active mock. Call useServiceContextMock() " +
+            "at the top of a describe block (not inside a test), and read " +
+            "`.current` from within a test.",
+        );
+      }
+      return handle;
     },
   };
 }

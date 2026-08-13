@@ -16,9 +16,7 @@ export {
   createMockRequest,
   createMockResponse,
   createMockRouter,
-  createMockServiceContext,
   createMockTelemetry,
-  createMockUserContext,
   createMockWorkspaceClient,
   createSuccessfulSQLResponse,
   mockServiceContext,
@@ -26,4 +24,5 @@ export {
   runWithRequestContext,
   setupDatabricksEnv,
   type TestContextOptions,
+  useServiceContextMock,
 } from "../packages/appkit/src/testing";

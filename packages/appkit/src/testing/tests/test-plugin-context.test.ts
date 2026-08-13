@@ -193,6 +193,53 @@ describe("createTestPluginContext — executeTool runs the REAL user-scoping pat
     );
     expect(result).toBeNull();
   });
+
+  test("reports a tool named like an Object.prototype method as missing", async () => {
+    // The lookup guard uses Object.hasOwn, not `tools[name] === undefined`, so
+    // a tool named "constructor"/"toString"/etc. does NOT resolve to the
+    // inherited prototype method — it is reported missing like any other. This
+    // pins that guard against being weakened to `in` / `=== undefined`.
+    const mock = createTestPluginContext({ analytics: { query: [] } });
+
+    for (const inherited of ["constructor", "toString", "hasOwnProperty"]) {
+      await expect(
+        mock.ctx.executeTool(mockReq(), "analytics", inherited, {}),
+      ).rejects.toThrow(new RegExp(`no fake tool "${inherited}"`));
+    }
+    // None of them reached a tool.
+    expect(mock.toolCalls.every((c) => c.args !== undefined)).toBe(true);
+  });
+});
+
+describe("createTestPluginContext — asUser dev-mode branch", () => {
+  test("in development, a token-less request is allowed through (no throw)", async () => {
+    // The fake asUser mirrors Plugin.asUser's dev-mode behavior: under
+    // NODE_ENV=development a missing token skips impersonation instead of
+    // throwing. The rest of the suite runs under NODE_ENV=test, so this is the
+    // only place that branch is exercised.
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    try {
+      const mock = createTestPluginContext({ analytics: { top_users: [] } });
+
+      // No forwarded headers at all — would reject in production.
+      const result = await mock.ctx.executeTool(
+        mockReq({}),
+        "analytics",
+        "top_users",
+        {},
+      );
+
+      expect(result).toEqual([]);
+      // It still records the dispatch as an OBO call; userId is unset because
+      // no user header was present (dev skips impersonation, does not invent one).
+      expect(mock.toolCalls).toHaveLength(1);
+      expect(mock.toolCalls[0]).toMatchObject({ asUser: true });
+      expect(mock.toolCalls[0]?.userId).toBeUndefined();
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
 });
 
 describe("createTestPluginContext — telemetry seam", () => {

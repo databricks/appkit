@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { expectStream, parseSSEResponse } from "../expect-stream";
+import { createMockResponse } from "../fixtures";
 
 async function* asyncEvents<T>(events: T[]): AsyncGenerator<T> {
   for (const event of events) {
@@ -149,6 +150,82 @@ describe("expectStream — SSE Response", () => {
       expectStream(res).toEmitExactly("warehouse_status", "result"),
     ).resolves.toEqual(["warehouse_status", "result"]);
   });
+
+  // Data payloads that are not JSON objects. A JSON object spreads its fields
+  // onto the event; anything else (scalar, array, non-JSON, multi-line) lands
+  // under a `data` key. These pin the four non-object branches of parseSSEBody.
+  test("a scalar JSON data value lands under `data`", async () => {
+    const res = new Response("event: n\ndata: 42\n\n");
+    const events = await expectStream(res).collect();
+    expect(events[0]).toEqual({ type: "n", data: 42 });
+  });
+
+  test("an array JSON data value lands under `data` (not spread)", async () => {
+    const res = new Response("event: xs\ndata: [1,2,3]\n\n");
+    const events = await expectStream(res).collect();
+    expect(events[0]).toEqual({ type: "xs", data: [1, 2, 3] });
+  });
+
+  test("a non-JSON data value is kept as a raw string", async () => {
+    const res = new Response("event: note\ndata: plain text\n\n");
+    const events = await expectStream(res).collect();
+    expect(events[0]).toEqual({ type: "note", data: "plain text" });
+  });
+
+  test("multiple data: lines in one frame are joined with newlines", async () => {
+    // Per the SSE spec, consecutive `data:` lines join with `\n`. Here the
+    // joined value is not JSON, so it stays a string.
+    const res = new Response(
+      "event: multi\ndata: line one\ndata: line two\n\n",
+    );
+    const events = await expectStream(res).collect();
+    expect(events[0]).toEqual({ type: "multi", data: "line one\nline two" });
+  });
+});
+
+describe("expectStream — captured mock response", () => {
+  // Write SSE frames the way the real SSEWriter does: three writes per frame
+  // (`id:`, `event:`, `data:`), split across calls, terminated by a blank line.
+  function writeFrame(
+    res: ReturnType<typeof createMockResponse>,
+    id: number,
+    event: string,
+    data: unknown,
+  ) {
+    res.write(`id: ${id}\n`);
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  test("reads the SSE a handler wrote straight from the mock response", async () => {
+    const res = createMockResponse();
+    writeFrame(res, 0, "warehouse_status", { state: "RUNNING" });
+    writeFrame(res, 1, "result", { rows: [] });
+    res.end();
+
+    await expect(
+      expectStream(res).toEmitExactly("warehouse_status", "result"),
+    ).resolves.toEqual(["warehouse_status", "result"]);
+  });
+
+  test("sseResponse() exposes the same bytes as a real Response", async () => {
+    const res = createMockResponse();
+    writeFrame(res, 0, "result", { ok: true });
+
+    const events = await expectStream(res.sseResponse()).collect();
+    expect(events[0]).toMatchObject({ type: "result", ok: true });
+  });
+
+  test("captures a final chunk passed to end()", async () => {
+    const res = createMockResponse();
+    res.write(`event: a\ndata: {}\n\n`);
+    res.end(`event: b\ndata: {}\n\n`);
+
+    await expect(expectStream(res).toEmitExactly("a", "b")).resolves.toEqual([
+      "a",
+      "b",
+    ]);
+  });
 });
 
 describe("expectStream — invalid source", () => {
@@ -157,6 +234,15 @@ describe("expectStream — invalid source", () => {
       // Intentionally wrong type to exercise the runtime guard.
       expectStream(42 as unknown as never).collect(),
     ).rejects.toThrow(/async iterable, an iterable, or a Response/);
+  });
+
+  test("rejects a raw SSE body string with an actionable error", async () => {
+    // A string is itself iterable (one char at a time), so silently walking it
+    // would produce per-character "events". The guard must point to the fix.
+    const body = `event: result\ndata: {"ok":true}\n\n`;
+    await expect(
+      expectStream(body as unknown as never).collect(),
+    ).rejects.toThrow(/raw string.*sseResponse/s);
   });
 });
 

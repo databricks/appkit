@@ -16,7 +16,7 @@ The kit has two entry points plus a set of fixture helpers:
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
 - **Fixtures** — `createMockRequest`, `createMockResponse`, `mockServiceContext`, and SQL response builders.
 
-The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so AppKit lists `vitest` as a dependency and installs it for you — there is nothing extra to add. It loads only when you import `@databricks/appkit/testing`; apps that never import the testing subpath never pull it into their runtime. (This mirrors how AppKit ships `vite` for the `@databricks/appkit/type-generator` subpath.)
+The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is an **optional peer dependency**: you already have it (you're writing Vitest tests), and the kit resolves to your copy rather than bundling a second one. Because it's optional, it is not installed into apps that never import `@databricks/appkit/testing` — production installs stay free of the test framework. Any Vitest v3 or v4 works.
 
 ## `createTestPluginContext()`
 
@@ -58,7 +58,17 @@ await mock.attach(plugin);
 
 Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
 
-The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, reset between tests (e.g. clear the cache in `beforeEach`).
+The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
+
+```ts
+import { resetTestCache } from "@databricks/appkit/testing";
+
+beforeEach(async () => {
+  await resetTestCache(); // no-op if the cache isn't initialized yet
+});
+```
+
+It also helps *within* a single test — clear the cache to force a miss, then assert the following call is a hit.
 
 ### Inspecting what happened
 
@@ -92,7 +102,7 @@ The fake replicates `asUser`'s **token precondition**, not its internal dev-mode
 
 ## `expectStream(...)`
 
-AppKit plugins stream Server-Sent Events. `expectStream` consumes a stream and asserts the ordered event types it emits. It accepts an async iterable (an agent adapter's `run()`), a plain array of events, or an SSE `Response` (or a promise of one) whose body it parses.
+AppKit plugins stream Server-Sent Events. `expectStream` consumes a stream and asserts the ordered event types it emits. It accepts an async iterable (an agent adapter's `run()`), a plain array of events, an SSE `Response` (or a promise of one) whose body it parses, or a `createMockResponse()` whose captured writes it replays.
 
 ```ts
 import { expectStream } from "@databricks/appkit/testing";
@@ -107,6 +117,22 @@ await expectStream(events).toEmitExactly("warehouse_status", "result");
 const types = await expectStream(res).collectTypes();
 ```
 
+### Asserting a plugin's streaming route
+
+Most plugins stream SSE from a **route handler** (`res.write(...)`), not a bare generator. `createMockResponse()` captures those writes, and `expectStream` reads them straight back — drive the real handler, then assert:
+
+```ts
+import { createMockRequest, createMockResponse, expectStream } from "@databricks/appkit/testing";
+
+const res = createMockResponse();
+await plugin._handleStream(createMockRequest({ obo: true }), res);
+
+// The mock captured the SSE the handler wrote; expectStream parses it.
+await expectStream(res).toEmit("status", "result");
+```
+
+`expectStream(res)` and `expectStream(res.sseResponse())` are equivalent — the latter hands you the raw `Response` if you want it. Do **not** pass the SSE body as a string: a string is an iterable of characters, so `expectStream` rejects it with a pointer to `sseResponse()` rather than emitting one "event" per character.
+
 `toEmit` checks that the expected types appear **in order** but tolerates other events before, between, or after them — which is what you want for streams that interleave bookkeeping events like heartbeats or metadata. Use `toEmitExactly` when the stream's shape is fully determined.
 
 `expectStream` buffers the whole source before asserting, so a stream that never terminates would otherwise hang until the test runner's own timeout. Pass `{ timeout }` to fail fast with a clear error instead:
@@ -119,10 +145,21 @@ await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
 
 The kit re-exports the request/response/context fixtures AppKit uses internally:
 
-- `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`) and a mock `WorkspaceClient`.
+- `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`) and a mock `WorkspaceClient`. Pass `obo: true` (or `obo: { userId, token, email }`) to set the forwarded identity headers `asUser` requires, instead of hand-adding them. `createMockResponse()` also captures everything a handler writes; pass it to `expectStream` (or call `sseResponse()`) to assert a streaming route's SSE.
 - `mockServiceContext(options?)` — spy the `ServiceContext` singleton so code that resolves the service principal or a user context gets test doubles. Call in `beforeEach`, and call the returned `restore()` in `afterEach`.
+- `useServiceContextMock(options?)` — the same, in one line: it registers the `beforeEach` install and `afterEach` restore for you. Call it at the top of a `describe` block (not inside a test), and read the live `.current` handle from within a test:
+  ```ts
+  describe("my plugin", () => {
+    const ctx = useServiceContextMock();
+    test("...", async () => {
+      await handler(createMockRequest({ obo: true }), res);
+      expect(ctx.current.createUserContextSpy).toHaveBeenCalled();
+    });
+  });
+  ```
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
+- `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
 
 ## Full example
 
@@ -130,7 +167,7 @@ Instantiate the plugin **class** directly with `new`. The `analytics()` / `agent
 
 ```ts
 import { Plugin, type PluginManifest } from "@databricks/appkit";
-import { expectStream, createTestPluginContext } from "@databricks/appkit/testing";
+import { expectStream, createMockRequest, createTestPluginContext } from "@databricks/appkit/testing";
 import { describe, expect, test } from "vitest";
 
 // A small plugin that registers a route and streams two events.
@@ -182,6 +219,9 @@ const mock = createTestPluginContext({ analytics: { query: [{ n: 1 }] } });
 const plugin = new MyAgentPlugin({ dir: false });
 await mock.attach(plugin);
 
+// `obo` sets the forwarded identity headers `asUser` needs — without them the
+// dispatch would (correctly) reject with "Missing user token".
+const req = createMockRequest({ obo: true });
 await plugin.runSomethingThatCallsAnalytics(req);
 
 expect(mock.toolCalls[0]).toMatchObject({
