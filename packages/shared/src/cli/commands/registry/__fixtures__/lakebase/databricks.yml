@@ -31,7 +31,7 @@ targets:
   default:
     default: true
     workspace:
-      host: https://e2-dogfood.staging.cloud.databricks.com
+      host: https://example.cloud.databricks.com
 
     variables:
       postgres_branch: projects/p1/branches/b1

@@ -148,8 +148,8 @@ describe("listWorkspaceResources", () => {
     const factory = vi.fn(() =>
       fakeClient({ warehouses: { list: asyncList([]) } }),
     );
-    await listWorkspaceResources("sql_warehouse", "dogfood", factory);
-    expect(factory).toHaveBeenCalledWith("dogfood");
+    await listWorkspaceResources("sql_warehouse", "my-profile", factory);
+    expect(factory).toHaveBeenCalledWith("my-profile");
   });
 
   it("caps results and reports truncation, stopping pagination early", async () => {
@@ -233,7 +233,7 @@ describe("listParentContextStep", () => {
       status: 0,
       stdout: JSON.stringify([{ name: "main" }]),
     }));
-    const step = listParentContextStep("volume", 0, [], "dogfood", run);
+    const step = listParentContextStep("volume", 0, [], "my-profile", run);
     expect(step?.key).toBe("catalog");
     expect(step?.choices).toEqual([{ value: "main", label: "main (main)" }]);
     expect(run).toHaveBeenCalledWith([
@@ -242,7 +242,7 @@ describe("listParentContextStep", () => {
       "-o",
       "json",
       "-p",
-      "dogfood",
+      "my-profile",
     ]);
   });
 

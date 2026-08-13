@@ -26,7 +26,7 @@ targets:
   default:
     default: true
     workspace:
-      host: https://e2-dogfood.staging.cloud.databricks.com
+      host: https://example.cloud.databricks.com
 
     variables:
       sql_warehouse_id: abc123warehouse
