@@ -1,5 +1,6 @@
 import path from "node:path";
 import pc from "picocolors";
+import { computeOriginFromField } from "../../../schemas/manifest";
 import type { RegistryItem } from "./client";
 
 /**
@@ -157,18 +158,14 @@ export function isValidEnvName(name: string): boolean {
 }
 
 /**
- * Effective origin of a field. Mirrors what `plugin sync` computes so the
- * classification is correct whether we read a synced manifest (origin present)
- * or an authored one (origin absent — derive from localOnly/value/resolve).
- * Precedence matches the documented contract: localOnly > value > resolve.
+ * Effective origin of a field: trust a synced manifest's stamped `origin`, else
+ * derive it from the field shape via the same rule `plugin sync` uses, so an
+ * authored manifest (no `origin`) still classifies correctly.
  */
 export function fieldOrigin(
   field: RequirementField,
 ): "platform" | "static" | "cli" | "user" {
   if (field.origin)
     return field.origin as "platform" | "static" | "cli" | "user";
-  if (field.localOnly) return "platform";
-  if (field.value !== undefined) return "static";
-  if (field.resolve) return "cli";
-  return "user";
+  return computeOriginFromField(field);
 }
