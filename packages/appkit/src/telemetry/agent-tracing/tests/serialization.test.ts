@@ -104,4 +104,44 @@ describe("captureTraceValue", () => {
     expect(result.originalBytes).toBe(70 * 1024 + 2);
     expect(result.truncated).toBe(true);
   });
+
+  test("captures circular references without failing the agent operation", () => {
+    const value: Record<string, unknown> = { prompt: "hello" };
+    value.self = value;
+
+    expect(JSON.parse(captureTraceValue(value).value)).toEqual({
+      prompt: "hello",
+      self: "[Circular]",
+    });
+  });
+
+  test("does not label a shared acyclic value as circular", () => {
+    const shared = { value: "reused" };
+
+    expect(
+      JSON.parse(captureTraceValue({ first: shared, second: shared }).value),
+    ).toEqual({
+      first: { value: "reused" },
+      second: { value: "reused" },
+    });
+  });
+
+  test("captures BigInt values without failing the agent operation", () => {
+    expect(JSON.parse(captureTraceValue({ rows: 42n }).value)).toEqual({
+      rows: "[BigInt:42]",
+    });
+  });
+
+  test("preserves native and custom toJSON semantics", () => {
+    const custom = {
+      toJSON: () => ({ kind: "custom", value: 7 }),
+    };
+
+    expect(
+      JSON.parse(captureTraceValue({ at: new Date(0), custom }).value),
+    ).toEqual({
+      at: "1970-01-01T00:00:00.000Z",
+      custom: { kind: "custom", value: 7 },
+    });
+  });
 });

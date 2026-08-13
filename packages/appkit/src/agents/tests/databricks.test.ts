@@ -2061,6 +2061,15 @@ describe("DatabricksAdapter.fromModelServing", () => {
     process.env = originalEnv;
   });
 
+  test("reads endpoint from the agents resource env var", async () => {
+    delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
+    process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME = "agents-model";
+
+    const adapter = await DatabricksAdapter.fromModelServing();
+
+    expect(adapter).toBeInstanceOf(DatabricksAdapter);
+  });
+
   test("reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var", async () => {
     process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "my-model";
 

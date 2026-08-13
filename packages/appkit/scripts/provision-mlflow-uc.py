@@ -31,6 +31,19 @@ def _location_name(location: Any) -> str:
     return repr(location)
 
 
+def _location_fields(location: Any) -> tuple[str, str, str] | None:
+    if location is None:
+        return None
+    fields = (
+        getattr(location, "catalog_name", None),
+        getattr(location, "schema_name", None),
+        getattr(location, "table_prefix", None),
+    )
+    if not all(isinstance(value, str) and value for value in fields):
+        return None
+    return fields
+
+
 def _execute(workspace: Any, warehouse_id: str, statement: str) -> Any:
     response = workspace.statement_execution.execute_statement(
         statement=statement,
@@ -207,7 +220,7 @@ def provision_mlflow_uc(
         trace_location=requested_location,
     )
     existing_location = getattr(experiment, "trace_location", None)
-    if existing_location != requested_location:
+    if _location_fields(existing_location) != _location_fields(requested_location):
         raise ValueError(
             "MLflow experiment trace location is immutable: "
             f"existing={_location_name(existing_location)}, "

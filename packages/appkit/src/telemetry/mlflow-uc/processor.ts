@@ -4,6 +4,7 @@ import type {
   Span,
   SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
+import { createLogger } from "../../logging/logger";
 import type { MlflowUcConfig } from "./config";
 import type { MlflowUcExportBatch, MlflowUcTraceExporter } from "./exporter";
 import {
@@ -18,12 +19,19 @@ import {
 interface PendingTrace {
   spans: ReadableSpan[];
   memberSpanIds: Set<string>;
+  lastTouchedMs: number;
 }
+
+const MAX_PENDING_TRACES = 10_000;
+const MAX_SPANS_PER_TRACE = 10_000;
+const PENDING_TRACE_TTL_MS = 5 * 60_000;
+const logger = createLogger("telemetry:mlflow-uc:processor");
 
 export class MlflowUcSpanProcessor implements SpanProcessor {
   private readonly pending = new Map<string, PendingTrace>();
   private readonly inFlight = new Set<Promise<void>>();
   private closed = false;
+  private shutdownPromise?: Promise<void>;
 
   constructor(
     private readonly config: MlflowUcConfig,
@@ -33,6 +41,8 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
 
   onStart(span: Span, _parentContext: Context): void {
     if (this.closed) return;
+    const now = Date.now();
+    this.evictExpired(now);
     const spanContext = span.spanContext();
     const otelTraceId = spanContext.traceId;
     const mlflowTraceId =
@@ -48,16 +58,19 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
         spanContext.spanId,
       );
       if (!pending && registeredRoot) {
-        pending = { spans: [], memberSpanIds: new Set() };
+        this.ensurePendingCapacity();
+        pending = { spans: [], memberSpanIds: new Set(), lastTouchedMs: now };
         this.pending.set(otelTraceId, pending);
       }
       if (!pending) return;
+      pending.lastTouchedMs = now;
 
       if (registeredRoot) {
         pending.memberSpanIds.add(spanContext.spanId);
       } else if (
         span.parentSpanContext &&
-        pending.memberSpanIds.has(span.parentSpanContext.spanId)
+        pending.memberSpanIds.has(span.parentSpanContext.spanId) &&
+        pending.memberSpanIds.size < MAX_SPANS_PER_TRACE
       ) {
         pending.memberSpanIds.add(spanContext.spanId);
       }
@@ -67,7 +80,8 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     if (
       pending &&
       span.parentSpanContext &&
-      pending.memberSpanIds.has(span.parentSpanContext.spanId)
+      pending.memberSpanIds.has(span.parentSpanContext.spanId) &&
+      pending.memberSpanIds.size < MAX_SPANS_PER_TRACE
     ) {
       pending.memberSpanIds.add(spanContext.spanId);
     }
@@ -75,6 +89,8 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
 
   onEnd(span: ReadableSpan): void {
     if (this.closed) return;
+    const now = Date.now();
+    this.evictExpired(now);
     const spanContext = span.spanContext();
     const otelTraceId = spanContext.traceId;
     const pending = this.pending.get(otelTraceId);
@@ -84,9 +100,18 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     if (!pending.memberSpanIds.has(spanContext.spanId)) {
       return;
     }
+    pending.lastTouchedMs = now;
 
-    pending.spans.push(span);
-    if (spanContext.spanId !== semanticRootSpanId) return;
+    const isSemanticRoot = spanContext.spanId === semanticRootSpanId;
+    if (isSemanticRoot) {
+      if (pending.spans.length >= MAX_SPANS_PER_TRACE) {
+        pending.spans.length = MAX_SPANS_PER_TRACE - 1;
+      }
+      pending.spans.push(span);
+    } else if (pending.spans.length < MAX_SPANS_PER_TRACE - 1) {
+      pending.spans.push(span);
+    }
+    if (!isSemanticRoot) return;
 
     this.pending.delete(otelTraceId);
     this.registry.deleteTrace(otelTraceId);
@@ -105,12 +130,16 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
   }
 
   async shutdown(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    await this.forceFlush();
-    this.pending.clear();
-    this.registry.clear();
-    await this.exporter.shutdown();
+    if (!this.shutdownPromise) {
+      this.closed = true;
+      this.shutdownPromise = (async () => {
+        await this.forceFlush();
+        this.pending.clear();
+        this.registry.clear();
+        await this.exporter.shutdown();
+      })();
+    }
+    await this.shutdownPromise;
   }
 
   private startExport(batch: MlflowUcExportBatch): void {
@@ -125,5 +154,36 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
       resolveExport();
     }
     void exportComplete.finally(() => this.inFlight.delete(exportComplete));
+  }
+
+  private ensurePendingCapacity(): void {
+    while (this.pending.size >= MAX_PENDING_TRACES) {
+      const oldestTraceId = this.pending.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestTraceId) return;
+      this.evictTrace(oldestTraceId, "capacity");
+    }
+  }
+
+  private evictExpired(now: number): void {
+    for (const [traceId, pending] of this.pending) {
+      if (now - pending.lastTouchedMs <= PENDING_TRACE_TTL_MS) continue;
+      this.evictTrace(traceId, "ttl");
+    }
+  }
+
+  private evictTrace(traceId: string, reason: "capacity" | "ttl"): void {
+    const pending = this.pending.get(traceId);
+    if (!pending) return;
+    this.pending.delete(traceId);
+    this.registry.deleteTrace(traceId);
+    logger.error("Dropped incomplete MLflow UC trace: %O", {
+      event: "mlflow_uc_incomplete_trace_dropped",
+      traceId,
+      reason,
+      retainedSpans: pending.spans.length,
+      memberSpans: pending.memberSpanIds.size,
+    });
   }
 }

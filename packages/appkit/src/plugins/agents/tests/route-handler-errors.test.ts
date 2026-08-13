@@ -569,6 +569,72 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
     }
   });
 
+  test("rejects when a nested sub-agent exposes an approval-gated tool", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const childToolIndex = new Map();
+    childToolIndex.set("delete_records", {
+      source: "function",
+      def: {
+        name: "delete_records",
+        description: "deletes records",
+        parameters: { type: "object", properties: {} },
+        annotations: { effect: "destructive" },
+      },
+    });
+    const parentToolIndex = new Map();
+    parentToolIndex.set("agent-helper", {
+      source: "subagent",
+      agentName: "helper",
+      def: {
+        name: "agent-helper",
+        description: "delegate to helper",
+        parameters: { type: "object", properties: {} },
+      },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "delegate",
+      adapter: { async *run() {} },
+      toolIndex: parentToolIndex,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("helper", {
+      name: "helper",
+      instructions: "delete when asked",
+      adapter: { async *run() {} },
+      toolIndex: childToolIndex,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).defaultAgentName = "default";
+    // biome-ignore lint/suspicious/noExplicitAny: prove the pre-flight rejects before execution
+    (plugin as any)._runAgentNonStreaming = vi.fn(async () => undefined);
+    // biome-ignore lint/suspicious/noExplicitAny: stub
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-1", messages: [] }),
+      addMessage: vi.fn(),
+    };
+
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq({ input: "hi" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringMatching(/delete_records/),
+      }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: rejection must happen before adapter execution
+    expect((plugin as any)._runAgentNonStreaming).not.toHaveBeenCalled();
+  });
+
   test("passes pre-flight when approval.requireForDestructive is disabled", async () => {
     const plugin = seedPluginWithTools(
       { effect: "destructive" },

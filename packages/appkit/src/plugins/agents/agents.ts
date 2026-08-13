@@ -503,7 +503,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         );
       } catch (err) {
         throw new Error(
-          `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
+          `Agent '${name}' has no model configured and neither DATABRICKS_AGENT_SERVING_ENDPOINT_NAME nor DATABRICKS_SERVING_ENDPOINT_NAME is available`,
           { cause: err instanceof Error ? err : undefined },
         );
       }
@@ -1001,13 +1001,23 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
   ): string[] {
     if (!this.resolvedApprovalPolicy.requireForDestructive) return [];
-    const names: string[] = [];
-    for (const entry of registered.toolIndex.values()) {
-      if (requiresApproval(entry.def.annotations)) {
-        names.push(entry.def.name);
+    const names = new Set<string>();
+    const visitedAgents = new Set<string>();
+    const visit = (agent: RegisteredAgent): void => {
+      if (visitedAgents.has(agent.name)) return;
+      visitedAgents.add(agent.name);
+      for (const entry of agent.toolIndex.values()) {
+        if (requiresApproval(entry.def.annotations)) {
+          names.add(entry.def.name);
+        }
+        if (entry.source === "subagent") {
+          const child = this.agents.get(entry.agentName);
+          if (child) visit(child);
+        }
       }
-    }
-    return names;
+    };
+    visit(registered);
+    return [...names];
   }
 
   /**

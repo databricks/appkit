@@ -365,6 +365,111 @@ describe("MlflowUcSpanExporter", () => {
     ]);
   });
 
+  test("evicts the oldest incomplete trace when the pending trace limit is reached", async () => {
+    const first = await createHttpWrappedTraceSpans();
+    const second = await createHttpWrappedTraceSpans();
+    const third = await createHttpWrappedTraceSpans();
+    const uploadedTraceIds: string[] = [];
+    const logger = { error: vi.fn() };
+    const { host } = await startBackend();
+    const client = createClient(host, ["token-1", "token-2"]);
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxPendingTraces: 2,
+      logger,
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            uploadedTraceIds.push(spans[0].spanContext().traceId);
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await exportSpans(exporter, [first.http, second.http, third.http]);
+    await exportSpans(exporter, [first.agent, first.model]);
+    await exportSpans(exporter, [third.agent, third.model]);
+
+    expect(uploadedTraceIds).toEqual([third.agent.spanContext().traceId]);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Dropped incomplete MLflow UC trace: %O",
+      expect.objectContaining({
+        event: "mlflow_uc_incomplete_trace_dropped",
+        traceId: first.http.spanContext().traceId,
+        reason: "capacity",
+      }),
+    );
+  });
+
+  test("expires incomplete trace fragments before accepting later spans", async () => {
+    let now = 1_000;
+    const first = await createHttpWrappedTraceSpans();
+    const second = await createHttpWrappedTraceSpans();
+    const uploadedTraceIds: string[] = [];
+    const logger = { error: vi.fn() };
+    const { host } = await startBackend();
+    const client = createClient(host, ["token-1", "token-2"]);
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      pendingTraceTtlMs: 50,
+      now: () => now,
+      logger,
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            uploadedTraceIds.push(spans[0].spanContext().traceId);
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await exportSpans(exporter, [first.http]);
+    now += 51;
+    await exportSpans(exporter, [first.agent, first.model]);
+    await exportSpans(exporter, [second.http, second.agent, second.model]);
+
+    expect(uploadedTraceIds).toEqual([second.agent.spanContext().traceId]);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Dropped incomplete MLflow UC trace: %O",
+      expect.objectContaining({
+        event: "mlflow_uc_incomplete_trace_dropped",
+        traceId: first.http.spanContext().traceId,
+        reason: "ttl",
+      }),
+    );
+  });
+
+  test("caps retained fragments without dropping a semantic root that completes the trace", async () => {
+    const spans = await createTraceSpans({ nestedAgent: true });
+    const root = spans.find((span) => span.name === "support-agent");
+    const fragments = spans.filter((span) => span !== root);
+    if (!root) throw new Error("semantic root fixture is missing");
+    const uploads: string[][] = [];
+    const { host } = await startBackend();
+    const client = createClient(host, ["token-1", "token-2"]);
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxSpansPerTrace: 2,
+      createOtlpExporter() {
+        return {
+          export(spans, callback) {
+            uploads.push(spans.map((span) => span.name));
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await exportSpans(exporter, fragments);
+    await exportSpans(exporter, [root]);
+
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]).toHaveLength(2);
+    expect(uploads[0]).toContain("support-agent");
+  });
+
   test("accepts a semantic AGENT whose missing parent context is remote", async () => {
     const spans = await createRemoteParentTraceSpans();
     const agent = spans[0];
@@ -447,7 +552,7 @@ describe("MlflowUcSpanExporter", () => {
 
     const traceInfo = JSON.parse(requests[0].body.toString("utf8"));
     expect(traceInfo).toEqual({
-      trace_id: `trace:/main.agent_traces.appkit/${otelTraceId}`,
+      trace_id: otelTraceId,
       client_request_id: "request-1",
       trace_location: {
         type: "UC_TABLE_PREFIX",
@@ -455,7 +560,7 @@ describe("MlflowUcSpanExporter", () => {
           catalog_name: "main",
           schema_name: "agent_traces",
           table_prefix: "appkit",
-          otel_spans_table_name: "main.agent_traces.appkit_otel_spans",
+          spans_table_name: "main.agent_traces.appkit_otel_spans",
         },
       },
       request_preview: '{"prompt":"hello"}',
@@ -490,7 +595,7 @@ describe("MlflowUcSpanExporter", () => {
     const spans = await createTraceSpans();
     const exportCalls: Array<{
       url: string;
-      headers: Record<string, string>;
+      headers: Record<string, string> | (() => Promise<Record<string, string>>);
       spans: ReadableSpan[];
     }> = [];
     const exporter = new MlflowUcSpanExporter(config, client, {
@@ -513,27 +618,142 @@ describe("MlflowUcSpanExporter", () => {
     expect(exportCalls).toHaveLength(1);
     expect(exportCalls[0]).toMatchObject({
       url: `${host}/api/2.0/otel/v1/traces`,
-      headers: {
-        authorization: "Bearer token-2",
-        "X-Databricks-UC-Table-Name": "main.agent_traces.appkit_otel_spans",
-      },
       spans,
+    });
+    const headers = exportCalls[0].headers;
+    await expect(
+      typeof headers === "function" ? headers() : headers,
+    ).resolves.toEqual({
+      authorization: "Bearer token-2",
+      "X-Databricks-UC-Table-Name": "main.agent_traces.appkit_otel_spans",
     });
   });
 
-  test("isolates a backend rejection, calls back with success, and logs one structured error", async () => {
-    const { host } = await startBackend((_request, response) => {
+  test("reuses one OTLP exporter while resolving fresh auth headers per trace", async () => {
+    const { host } = await startBackend();
+    const client = createClient(host, [
+      "trace-1",
+      "otel-1",
+      "trace-2",
+      "otel-2",
+    ]);
+    const first = await createTraceSpans();
+    const second = await createTraceSpans();
+    const observedHeaders: Record<string, string>[] = [];
+    const shutdown = vi.fn().mockResolvedValue(undefined);
+    let exporterCreations = 0;
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter(options) {
+        exporterCreations += 1;
+        return {
+          export(_spans, callback) {
+            const headers = options.headers as
+              | Record<string, string>
+              | (() => Promise<Record<string, string>>);
+            void Promise.resolve(
+              typeof headers === "function" ? headers() : headers,
+            ).then((resolved) => {
+              observedHeaders.push(resolved);
+              callback({ code: ExportResultCode.SUCCESS });
+            });
+          },
+          shutdown,
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(exportSpans(exporter, first)).resolves.toMatchObject({
+      code: ExportResultCode.SUCCESS,
+    });
+    await expect(exportSpans(exporter, second)).resolves.toMatchObject({
+      code: ExportResultCode.SUCCESS,
+    });
+    await exporter.shutdown();
+
+    expect(exporterCreations).toBe(1);
+    expect(observedHeaders).toEqual([
+      {
+        authorization: "Bearer otel-1",
+        "X-Databricks-UC-Table-Name": "main.agent_traces.appkit_otel_spans",
+      },
+      {
+        authorization: "Bearer otel-2",
+        "X-Databricks-UC-Table-Name": "main.agent_traces.appkit_otel_spans",
+      },
+    ]);
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a transient trace-info rejection and succeeds", async () => {
+    let attempts = 0;
+    const { host } = await startBackend((request, response) => {
+      if (request.path.endsWith("/info")) attempts += 1;
+      response.statusCode = attempts === 1 ? 500 : 200;
+      response.end(attempts === 1 ? "backend unavailable" : "");
+    });
+    const client = createClient(host, ["token-1", "token-2", "token-3"]);
+    const spans = await createTraceSpans();
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxAttempts: 2,
+      retryDelayMs: 0,
+    });
+
+    await expect(exportSpans(exporter, spans)).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  test("does not retry a non-retryable OTLP client error", async () => {
+    const { host } = await startBackend();
+    const client = createClient(host, ["token-1"]);
+    const spans = await createTraceSpans();
+    let attempts = 0;
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxAttempts: 3,
+      retryDelayMs: 0,
+      createOtlpExporter() {
+        return {
+          export(_spans, callback) {
+            attempts += 1;
+            callback({
+              code: ExportResultCode.FAILED,
+              error: Object.assign(new Error("bad request"), {
+                name: "OTLPExporterError",
+                code: 400,
+              }),
+            });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(exportSpans(exporter, spans)).resolves.toMatchObject({
+      code: ExportResultCode.FAILED,
+    });
+    expect(attempts).toBe(1);
+  });
+
+  test("reports a persistent backend rejection as failed and logs one structured error", async () => {
+    const { host, requests } = await startBackend((_request, response) => {
       response.statusCode = 500;
       response.end("backend unavailable");
     });
     const logger = { error: vi.fn() };
     const client = createClient(host, ["token-1"]);
     const spans = await createTraceSpans();
-    const exporter = new MlflowUcSpanExporter(config, client, { logger });
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      logger,
+      maxAttempts: 2,
+      retryDelayMs: 0,
+    });
 
     await expect(exportSpans(exporter, spans)).resolves.toEqual({
-      code: ExportResultCode.SUCCESS,
+      code: ExportResultCode.FAILED,
+      error: expect.any(Error),
     });
+    expect(requests).toHaveLength(2);
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledWith(
       "MLflow UC trace export failed: %O",
@@ -552,7 +772,8 @@ describe("MlflowUcSpanExporter", () => {
     const exporter = new MlflowUcSpanExporter(config, client, { logger });
 
     await expect(exportSpans(exporter, spans)).resolves.toEqual({
-      code: ExportResultCode.SUCCESS,
+      code: ExportResultCode.FAILED,
+      error: expect.any(Error),
     });
     expect(logger.error).toHaveBeenCalledWith(
       "MLflow UC trace export failed: %O",
@@ -560,6 +781,57 @@ describe("MlflowUcSpanExporter", () => {
         error: "Databricks workspace host is unavailable for MLflow UC export",
       }),
     );
+  });
+
+  test("bounds a hung trace-info request and reports failure", async () => {
+    const { host } = await startBackend(async (request, response) => {
+      if (request.path.endsWith("/info")) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      response.statusCode = 200;
+      response.end();
+    });
+    const client = createClient(host, ["token-1", "token-2"]);
+    const spans = await createTraceSpans();
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxAttempts: 1,
+      operationTimeoutMs: 25,
+    });
+    const started = Date.now();
+
+    await expect(exportSpans(exporter, spans)).resolves.toEqual({
+      code: ExportResultCode.FAILED,
+      error: expect.any(Error),
+    });
+    await exporter.forceFlush();
+    expect(Date.now() - started).toBeLessThan(80);
+  });
+
+  test("bounds workspace authentication before any trace request begins", async () => {
+    const client = {
+      config: {
+        host: "http://127.0.0.1:1",
+        ensureResolved: vi.fn().mockResolvedValue(undefined),
+        authenticate: vi.fn(() => new Promise<void>(() => undefined)),
+      },
+    } as unknown as WorkspaceClient;
+    const spans = await createTraceSpans();
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      maxAttempts: 1,
+      operationTimeoutMs: 25,
+    });
+
+    const result = await Promise.race([
+      exportSpans(exporter, spans),
+      new Promise<{ timedOut: true }>((resolve) =>
+        setTimeout(() => resolve({ timedOut: true }), 100),
+      ),
+    ]);
+
+    expect(result).toMatchObject({
+      code: ExportResultCode.FAILED,
+      error: expect.any(Error),
+    });
   });
 
   test("shutdown waits for in-flight trace-info and OTLP work", async () => {
@@ -689,7 +961,8 @@ describe("MlflowUcSpanExporter", () => {
       shutdownComplete = true;
     });
     await expect(exportSpans(exporter, lateTrace)).resolves.toEqual({
-      code: ExportResultCode.SUCCESS,
+      code: ExportResultCode.FAILED,
+      error: expect.any(Error),
     });
     await Promise.resolve();
     expect(shutdownComplete).toBe(false);

@@ -115,7 +115,7 @@ describe("MlflowUcSpanProcessor", () => {
       "support-agent",
     ]);
     expect(batches[0].traceInfo).toMatchObject({
-      trace_id: mlflowTraceId,
+      trace_id: otelTraceId,
       client_request_id: "request-1",
       request_preview: '{"prompt":"hello"}',
       response_preview: '{"answer":"world"}',
@@ -196,6 +196,31 @@ describe("MlflowUcSpanProcessor", () => {
     await provider.shutdown();
   });
 
+  test("concurrent shutdown callers wait for the same exporter barrier", async () => {
+    let releaseShutdown!: () => void;
+    const shutdownBarrier = new Promise<void>((resolve) => {
+      releaseShutdown = resolve;
+    });
+    const exporter: MlflowUcTraceExporter = {
+      exportTrace: vi.fn(),
+      forceFlush: vi.fn().mockResolvedValue(undefined),
+      shutdown: vi.fn(() => shutdownBarrier),
+    };
+    const processor = new MlflowUcSpanProcessor(config, exporter);
+
+    const first = processor.shutdown();
+    let secondComplete = false;
+    const second = processor.shutdown().then(() => {
+      secondComplete = true;
+    });
+    await Promise.resolve();
+
+    expect(secondComplete).toBe(false);
+    releaseShutdown();
+    await Promise.all([first, second]);
+    expect(exporter.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps nested AGENT spans inside the first semantic root", async () => {
     const { exporter, batches } = collectingExporter();
     const processor = new MlflowUcSpanProcessor(config, exporter);
@@ -229,7 +254,7 @@ describe("MlflowUcSpanProcessor", () => {
     await provider.shutdown();
   });
 
-  test("exports every concurrently active semantic root beyond the former registry capacity", async () => {
+  test("bounds concurrently active semantic roots and evicts the oldest unfinished trace", async () => {
     const { exporter, batches } = collectingExporter();
     const processor = new MlflowUcSpanProcessor(config, exporter);
     const provider = new BasicTracerProvider({ spanProcessors: [processor] });
@@ -243,9 +268,12 @@ describe("MlflowUcSpanProcessor", () => {
     for (const root of roots) root.end();
     await processor.forceFlush();
 
-    expect(batches).toHaveLength(10_001);
+    expect(batches).toHaveLength(10_000);
     expect(new Set(batches.map((batch) => batch.traceInfo.trace_id)).size).toBe(
-      10_001,
+      10_000,
+    );
+    expect(batches.some((batch) => batch.spans[0]?.name === "agent-0")).toBe(
+      false,
     );
 
     await provider.shutdown();

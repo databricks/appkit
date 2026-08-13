@@ -15,25 +15,13 @@ export function captureTraceValue(
       normalizeRedactKey(key),
     ),
   );
-  const serialized =
-    JSON.stringify(value, (key, current) => {
-      if (redactKeys.has(normalizeRedactKey(key))) return REDACTED_TRACE_VALUE;
-      if (
-        current !== null &&
-        typeof current === "object" &&
-        !Array.isArray(current)
-      ) {
-        return Object.fromEntries(
-          Object.keys(current)
-            .sort()
-            .map((objectKey) => [
-              objectKey,
-              (current as Record<string, unknown>)[objectKey],
-            ]),
-        );
-      }
-      return current;
-    }) ?? "null";
+  let serialized: string;
+  try {
+    serialized =
+      JSON.stringify(canonicalTraceValue(value, redactKeys)) ?? "null";
+  } catch {
+    serialized = '"[Unserializable]"';
+  }
 
   const encoded = Buffer.from(serialized, "utf8");
   const maxBytes = normalizeMaxBytes(options.maxBytes);
@@ -45,6 +33,45 @@ export function captureTraceValue(
     sha256: createHash("sha256").update(encoded).digest("hex"),
     truncated: retained.length < encoded.length,
   };
+}
+
+function canonicalTraceValue(
+  value: unknown,
+  redactKeys: Set<string>,
+  ancestors = new Set<object>(),
+): unknown {
+  if (typeof value === "bigint") return `[BigInt:${value.toString()}]`;
+  if (value === null || typeof value !== "object") return value;
+  if (ancestors.has(value)) return "[Circular]";
+
+  ancestors.add(value);
+  try {
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") {
+      return canonicalTraceValue(toJSON.call(value), redactKeys, ancestors);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) =>
+        canonicalTraceValue(item, redactKeys, ancestors),
+      );
+    }
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [
+          key,
+          redactKeys.has(normalizeRedactKey(key))
+            ? REDACTED_TRACE_VALUE
+            : canonicalTraceValue(
+                (value as Record<string, unknown>)[key],
+                redactKeys,
+                ancestors,
+              ),
+        ]),
+    );
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 export function normalizeFailureOutput(

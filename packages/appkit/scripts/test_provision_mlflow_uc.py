@@ -210,6 +210,19 @@ def test_repeated_setup_is_idempotent():
     assert second == first
 
 
+def test_accepts_equivalent_trace_location_from_real_sdk_shape():
+    module = load_script()
+    location = SimpleNamespace(
+        catalog_name="main",
+        schema_name="agent_traces",
+        table_prefix="appkit",
+    )
+
+    result, _, _ = provision(module, location=location)
+
+    assert result["MLFLOW_EXPERIMENT_ID"] == "123456789"
+
+
 def test_existing_different_uc_location_is_rejected_with_both_locations():
     module = load_script()
 

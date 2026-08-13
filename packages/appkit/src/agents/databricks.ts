@@ -553,11 +553,13 @@ export class DatabricksAdapter implements AgentAdapter {
   /**
    * Creates a DatabricksAdapter from a Model Serving endpoint name.
    * Auto-creates a WorkspaceClient internally. Reads the endpoint name
-   * from the argument or the `DATABRICKS_SERVING_ENDPOINT_NAME` env var.
+   * from the argument, the agents resource env var, or the legacy serving
+   * plugin env var (in that order).
    *
    * @example
    * ```ts
-   * // Reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var
+   * // Reads DATABRICKS_AGENT_SERVING_ENDPOINT_NAME, falling back to the
+   * // backward-compatible DATABRICKS_SERVING_ENDPOINT_NAME env var
    * const adapter = await DatabricksAdapter.fromModelServing();
    *
    * // Explicit endpoint
@@ -575,12 +577,14 @@ export class DatabricksAdapter implements AgentAdapter {
     options?: ModelServingOptions,
   ): Promise<DatabricksAdapter> {
     const resolvedEndpoint =
-      endpointName ?? process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
+      endpointName ??
+      process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME ??
+      process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
 
     if (!resolvedEndpoint) {
       throw new Error(
-        "No endpoint name provided and DATABRICKS_SERVING_ENDPOINT_NAME env var is not set. " +
-          "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
+        "No endpoint name provided and neither DATABRICKS_AGENT_SERVING_ENDPOINT_NAME nor " +
+          "DATABRICKS_SERVING_ENDPOINT_NAME is set. Pass an endpoint name or bind an agents serving endpoint.",
       );
     }
 

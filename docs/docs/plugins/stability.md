@@ -116,7 +116,10 @@ When `plugin sync` discovers non-GA plugins, it includes their stability in the 
 }
 ```
 
-Only GA plugins can be marked `requiredByTemplate`. Non-GA plugins always remain optional during init.
+Any discovered plugin can be marked `requiredByTemplate` when the template wires
+it into `createApp`. Stability still controls how an otherwise optional plugin is
+presented, but it does not erase the usage signal for beta plugins that the
+generated app requires.
 
 ## For Third-Party Plugin Authors
 

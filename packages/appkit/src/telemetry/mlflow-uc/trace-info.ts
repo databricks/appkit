@@ -27,7 +27,7 @@ export interface MlflowUcTraceInfo {
       catalog_name: string;
       schema_name: string;
       table_prefix: string;
-      otel_spans_table_name: string;
+      spans_table_name: string;
     };
   };
   request_preview?: string;
@@ -153,7 +153,10 @@ export function buildMlflowUcTraceInfo(
   const requestTimeMs = hrTimeToMilliseconds(semanticRoot.startTime);
   const durationMs = hrTimeToMilliseconds(semanticRoot.duration);
   return {
-    trace_id: constructMlflowV4TraceId(config, otelTraceId),
+    // The Databricks V4 wire proto carries the bare 32-hex OTel identity.
+    // AppKit's public/span alias remains the fully qualified `trace:/...` ID
+    // constructed by MlflowUcTraceRegistry.
+    trace_id: otelTraceId,
     client_request_id: stringAttribute(
       semanticRoot.attributes,
       "appkit.request.id",
@@ -164,7 +167,7 @@ export function buildMlflowUcTraceInfo(
         catalog_name: config.catalogName,
         schema_name: config.schemaName,
         table_prefix: config.tablePrefix,
-        otel_spans_table_name: config.otelSpansTableName,
+        spans_table_name: config.otelSpansTableName,
       },
     },
     request_preview: inputs,

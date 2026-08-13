@@ -241,7 +241,7 @@ describe("TelemetryManager", () => {
 
   test("starts the single AppKit provider for valid UC config without generic OTLP", async () => {
     delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-    process.env.MLFLOW_EXPERIMENT_ID = "experiment-123";
+    process.env.MLFLOW_EXPERIMENT_ID = "123456789";
     process.env.MLFLOW_UC_CATALOG = "main";
     process.env.MLFLOW_UC_SCHEMA = "agent_traces";
     process.env.MLFLOW_UC_TABLE_PREFIX = "appkit";
@@ -261,7 +261,7 @@ describe("TelemetryManager", () => {
 
   test("coexists with generic OTLP on the same AppKit provider", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
-    process.env.MLFLOW_EXPERIMENT_ID = "experiment-123";
+    process.env.MLFLOW_EXPERIMENT_ID = "123456789";
     process.env.MLFLOW_UC_CATALOG = "main";
     process.env.MLFLOW_UC_SCHEMA = "agent_traces";
     process.env.MLFLOW_UC_TABLE_PREFIX = "appkit";
