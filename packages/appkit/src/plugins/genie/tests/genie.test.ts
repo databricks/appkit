@@ -2,6 +2,7 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
+  expectStream,
   mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
@@ -333,23 +334,16 @@ describe("Genie Plugin", () => {
         "no-cache, no-transform",
       );
 
-      // Verify SSE events are written
-      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
-      const allWritten = writeCalls.join("");
-
-      // Should have message_start event
-      expect(allWritten).toContain("message_start");
-      expect(allWritten).toContain("new-conv-id");
-
-      // Should have status events
-      expect(allWritten).toContain("status");
-      expect(allWritten).toContain("ASKING_AI");
-
-      // Should have message_result event
-      expect(allWritten).toContain("message_result");
-
-      // Should have query_result event
-      expect(allWritten).toContain("query_result");
+      // Assert the emitted SSE event ORDER via the kit's expectStream, which
+      // parses the SSE the handler actually wrote (captured by the mock
+      // response). This pins genie's real event sequence — a reorder or drop
+      // fails here, unlike a substring check.
+      await expectStream(mockRes).toEmit(
+        "message_start",
+        "status",
+        "message_result",
+        "query_result",
+      );
 
       expect(mockRes.end).toHaveBeenCalled();
     });

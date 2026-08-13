@@ -19,6 +19,8 @@ export {
   createMockTelemetry,
   createMockWorkspaceClient,
   createSuccessfulSQLResponse,
+  createTestPluginContext,
+  expectStream,
   mockServiceContext,
   parseSSEResponse,
   runWithRequestContext,

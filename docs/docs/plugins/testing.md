@@ -1,5 +1,5 @@
 ---
-sidebar_position: 7
+sidebar_position: 8
 ---
 
 # Testing
@@ -233,6 +233,6 @@ expect(mock.toolCalls[0]).toMatchObject({
 
 ## See also
 
-- [Local development](./local-development.mdx) — run your app with hot reload while iterating.
-- [Custom plugins](../plugins/custom-plugins.md) — build the plugins you test with this kit.
-- [Execution context](../plugins/execution-context.md) — how `asUser` and the service principal differ at runtime.
+- [Custom plugins](./custom-plugins.md) — build the plugins you test with this kit.
+- [Execution context](./execution-context.md) — how `asUser` and the service principal differ at runtime.
+- [Local development](../development/local-development.mdx) — run your app with hot reload while iterating.
