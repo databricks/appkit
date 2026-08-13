@@ -44,13 +44,9 @@ export class LifecycleManager {
    */
   private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
-  /**
-   * Guards against re-entrant shutdown (e.g. SIGTERM followed by SIGINT).
-   * The flag set in `shutdown` must remain synchronous and first — any
-   * `await` before it would open a window for a second signal to re-enter
-   * the sequence.
-   */
-  private isShuttingDown = false;
+  private shutdownPromise?: Promise<void>;
+  private exitRequested = false;
+  private forceExitTimer?: ReturnType<typeof setTimeout>;
   /**
    * Name of the shutdown phase currently in flight, so the force-exit log
    * can say where shutdown got stuck without extra bookkeeping.
@@ -73,8 +69,8 @@ export class LifecycleManager {
   installSignalHandlers(): void {
     if (this.signalHandlers) return;
     this.signalHandlers = {
-      SIGTERM: () => void this.shutdown(),
-      SIGINT: () => void this.shutdown(),
+      SIGTERM: () => void this.shutdown({ exitProcess: true }),
+      SIGINT: () => void this.shutdown({ exitProcess: true }),
     };
     process.once("SIGTERM", this.signalHandlers.SIGTERM);
     process.once("SIGINT", this.signalHandlers.SIGINT);
@@ -102,16 +98,32 @@ export class LifecycleManager {
    * shutdown is not a crash. Exit 1 is reserved for an unexpected error
    * thrown by the sequence itself.
    */
-  async shutdown({
+  shutdown({
     exitProcess = true,
   }: {
     exitProcess?: boolean;
   } = {}): Promise<void> {
-    // Must stay synchronous and first: any await before the flag is set
-    // would let a second signal re-enter the shutdown sequence.
-    if (this.isShuttingDown) return;
-    this.isShuttingDown = true;
+    if (exitProcess) this.requestProcessExit();
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shutdownPromise = Promise.resolve().then(() => this.runShutdown());
+    return this.shutdownPromise;
+  }
 
+  private requestProcessExit(): void {
+    this.exitRequested = true;
+    if (this.forceExitTimer) return;
+    this.forceExitTimer = setTimeout(() => {
+      logger.error(
+        "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
+        LifecycleManager.SHUTDOWN_TIMEOUT_MS,
+        this.shutdownPhase,
+      );
+      process.exit(0);
+    }, LifecycleManager.SHUTDOWN_TIMEOUT_MS);
+    this.forceExitTimer.unref();
+  }
+
+  private async runShutdown(): Promise<void> {
     logger.info("Starting graceful shutdown...");
 
     let exitCode = 0;
@@ -121,23 +133,6 @@ export class LifecycleManager {
     // shutdown, not a crash), and orchestrators record nonzero exits on
     // deploys as crashes. The error log below is the stuck-shutdown
     // signal instead of the exit code.
-    const forceExitTimer = exitProcess
-      ? setTimeout(() => {
-          logger.error(
-            "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
-            LifecycleManager.SHUTDOWN_TIMEOUT_MS,
-            this.shutdownPhase,
-          );
-          process.exit(0);
-        }, LifecycleManager.SHUTDOWN_TIMEOUT_MS)
-      : undefined;
-    // unref so this backstop timer never by itself keeps the process alive.
-    // Any real pending teardown (OTEL export timer, DB pool sockets, the
-    // still-open HTTP listener) is a ref'd handle that holds the loop open
-    // until this fires; if nothing is ref'd, there is nothing left to tear
-    // down and exiting early is correct.
-    forceExitTimer?.unref();
-
     try {
       const plugins = Array.from(this.context.getPlugins().values());
 
@@ -205,9 +200,12 @@ export class LifecycleManager {
       exitCode = 1;
     }
 
-    if (forceExitTimer) clearTimeout(forceExitTimer);
+    if (this.forceExitTimer) {
+      clearTimeout(this.forceExitTimer);
+      this.forceExitTimer = undefined;
+    }
     this.removeSignalHandlers();
-    if (exitProcess) process.exit(exitCode);
+    if (this.exitRequested) process.exit(exitCode);
   }
 
   /** Close the cache storage, bounded and error-isolated. */

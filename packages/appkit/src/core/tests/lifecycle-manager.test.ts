@@ -401,5 +401,38 @@ describe("LifecycleManager", () => {
       expect(process.listenerCount("SIGINT")).toBe(baselineSigint);
       expect(exitSpy).not.toHaveBeenCalled();
     });
+
+    test("a signal during programmatic shutdown exits only after the shared teardown completes", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      const shutdownHook = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = resolve;
+          }),
+      );
+      const manager = new LifecycleManager(
+        contextWithPlugins({
+          agent: { name: "agent", shutdown: shutdownHook },
+        }),
+      );
+      manager.installSignalHandlers();
+      const sigterm = process.listeners("SIGTERM").at(-1) as () => void;
+      const sigint = process.listeners("SIGINT").at(-1) as () => void;
+
+      const programmaticShutdown = manager.shutdown({ exitProcess: false });
+      await vi.waitFor(() => expect(shutdownHook).toHaveBeenCalledTimes(1));
+
+      sigterm();
+      sigint();
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(shutdownHook).toHaveBeenCalledTimes(1);
+
+      releaseShutdown?.();
+      await programmaticShutdown;
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(shutdownHook).toHaveBeenCalledTimes(1);
+    });
   });
 });

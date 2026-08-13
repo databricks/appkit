@@ -102,6 +102,7 @@ describe("CacheManager", () => {
     // Access private static fields to reset singleton
     (CacheManager as any).instance = null;
     (CacheManager as any).initPromise = null;
+    (CacheManager as any).shutdownPromise = null;
     // Default: Lakebase unavailable (most tests pass explicit storage)
     mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
   });
@@ -838,6 +839,60 @@ describe("CacheManager", () => {
       });
 
       await expect(cache.close()).resolves.not.toThrow();
+    });
+
+    test("shutdown detaches closing storage before awaiting close and cannot close its replacement", async () => {
+      let releaseClose: (() => void) | undefined;
+      const closingStorage = createMockStorage(true);
+      closingStorage.close = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseClose = resolve;
+          }),
+      );
+      const closingInstance = await CacheManager.getInstance({
+        storage: closingStorage,
+      });
+
+      const shutdown = CacheManager.shutdown();
+
+      await Promise.resolve();
+      expect(closingStorage.close).toHaveBeenCalledTimes(1);
+      expect(() => CacheManager.getInstanceSync()).toThrow(
+        "CacheManager not initialized",
+      );
+
+      const replacementStorage = createMockStorage(true);
+      let replacementResolved = false;
+      const replacementPromise = CacheManager.getInstance({
+        storage: replacementStorage,
+      }).then((instance) => {
+        replacementResolved = true;
+        return instance;
+      });
+      await Promise.resolve();
+      expect(replacementResolved).toBe(false);
+      expect(() => CacheManager.getInstanceSync()).toThrow(
+        "CacheManager not initialized",
+      );
+
+      releaseClose?.();
+      await shutdown;
+      const replacement = await replacementPromise;
+
+      expect(replacement).not.toBe(closingInstance);
+      expect(CacheManager.getInstanceSync()).toBe(replacement);
+      expect(closingStorage.close).toHaveBeenCalledTimes(1);
+      expect(replacementStorage.close).not.toHaveBeenCalled();
+    });
+
+    test("concurrent shutdown callers close a detached instance only once", async () => {
+      const storage = createMockStorage(true);
+      await CacheManager.getInstance({ storage });
+
+      await Promise.all([CacheManager.shutdown(), CacheManager.shutdown()]);
+
+      expect(storage.close).toHaveBeenCalledTimes(1);
     });
   });
 

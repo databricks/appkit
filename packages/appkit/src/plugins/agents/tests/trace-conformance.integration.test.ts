@@ -1410,16 +1410,10 @@ function normalizeUcRows(
   traceId: string,
   rows: UcSpanRow[],
 ): TraceManifest {
-  const semanticRows = rows.filter(
-    (row) => row.attributes["mlflow.spanType"] !== undefined,
-  );
-  const semanticSpanIds = new Set(
-    semanticRows.map((row) => String(row.spanId)),
-  );
   return {
     template,
     traceId,
-    spans: semanticRows.map((row) => {
+    spans: rows.map((row) => {
       const attributes = { ...row.attributes };
       attributes.app_id ??=
         attributes["app.id"] ?? attributes["appkit.app.name"];
@@ -1454,12 +1448,7 @@ function normalizeUcRows(
         name: String(row.name),
         spanType,
         spanId: String(row.spanId),
-        parentSpanId:
-          spanType === "AGENT" &&
-          rawParentSpanId !== null &&
-          !semanticSpanIds.has(rawParentSpanId)
-            ? null
-            : rawParentSpanId,
+        parentSpanId: rawParentSpanId,
         inputs: decoded(attributes["mlflow.spanInputs"]),
         outputs: decoded(attributes["mlflow.spanOutputs"]),
         status: normalizeUcStatus(row.statusCode),
@@ -1481,16 +1470,10 @@ function normalizeMlflowSpans(
   traceId: string,
   spans: Array<Record<string, unknown>>,
 ): TraceManifest {
-  const semanticSpans = spans.filter(
-    (span) => objectValue(span.attributes)["mlflow.spanType"] !== undefined,
-  );
-  const semanticSpanIds = new Set(
-    semanticSpans.map((span) => String(span.span_id ?? span.spanId)),
-  );
   return {
     template,
     traceId,
-    spans: semanticSpans.map((span) => {
+    spans: spans.map((span) => {
       const attributes = { ...objectValue(span.attributes) };
       attributes.app_id ??=
         attributes["app.id"] ?? attributes["appkit.app.name"];
@@ -1528,12 +1511,7 @@ function normalizeMlflowSpans(
         name: String(span.name),
         spanType,
         spanId: String(span.span_id ?? span.spanId),
-        parentSpanId:
-          spanType === "AGENT" &&
-          parentSpanId !== null &&
-          !semanticSpanIds.has(parentSpanId)
-            ? null
-            : parentSpanId,
+        parentSpanId,
         inputs: decoded(attributes["mlflow.spanInputs"]),
         outputs: decoded(attributes["mlflow.spanOutputs"]),
         status: normalizeUcStatus(
@@ -1568,6 +1546,7 @@ function contractSemantics(span: SpanManifest): Record<string, unknown> {
     costUsd: span.costUsd,
     costAvailable: span.costAvailable,
     links: span.links,
+    attributes: span.attributes,
     identity: {
       app_id: span.attributes.app_id,
       user_id: span.attributes.user_id,
@@ -1578,6 +1557,23 @@ function contractSemantics(span: SpanManifest): Record<string, unknown> {
       ttft_ms: span.attributes.ttft_ms,
       stream_duration_ms: span.attributes.stream_duration_ms,
     },
+  };
+}
+
+function semanticProjection(manifest: TraceManifest): TraceManifest {
+  const spans = manifest.spans.filter((span) => span.spanType !== "");
+  const semanticSpanIds = new Set(spans.map((span) => span.spanId));
+  return {
+    ...manifest,
+    spans: spans.map((span) => ({
+      ...span,
+      parentSpanId:
+        span.spanType === "AGENT" &&
+        span.parentSpanId !== null &&
+        !semanticSpanIds.has(span.parentSpanId)
+          ? null
+          : span.parentSpanId,
+    })),
   };
 }
 
@@ -1608,11 +1604,17 @@ function assertCrossSourceParity(
         `MLflow and UC parent identity differs for span ${spanId}`,
       );
     }
-    if (
-      JSON.stringify(canonicalTraceValue(contractSemantics(mlflowSpan))) !==
-      JSON.stringify(canonicalTraceValue(contractSemantics(ucSpan)))
-    ) {
-      throw new Error(`MLflow and UC semantics differ for span ${spanId}`);
+    const mlflowSemantics = contractSemantics(mlflowSpan);
+    const ucSemantics = contractSemantics(ucSpan);
+    for (const field of Object.keys(mlflowSemantics)) {
+      if (
+        JSON.stringify(canonicalTraceValue(mlflowSemantics[field])) !==
+        JSON.stringify(canonicalTraceValue(ucSemantics[field]))
+      ) {
+        throw new Error(
+          `MLflow and UC semantics ${field} differs for span ${spanId}`,
+        );
+      }
     }
   }
 }
@@ -1709,12 +1711,15 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
   }
   assertAppIdentity(ucRoot.attributes, proof.appName, "UC trace");
 
-  const mlflowManifest = normalizeMlflowSpans(
+  const rawMlflowManifest = normalizeMlflowSpans(
     proof.appName,
     otelTraceId,
     mlflowSpans,
   );
-  const ucManifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
+  const rawUcManifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
+  assertCrossSourceParity(rawMlflowManifest, rawUcManifest);
+  const mlflowManifest = semanticProjection(rawMlflowManifest);
+  const ucManifest = semanticProjection(rawUcManifest);
   assertContract(mlflowManifest);
   assertContract(ucManifest);
   assertCrossSourceParity(mlflowManifest, ucManifest);
@@ -2018,6 +2023,115 @@ test("rejects an extra UC span missing from MLflow", () => {
   });
 
   expect(() => validateDeployedProof(proof)).toThrow(/span identity/i);
+});
+
+function addPairedNonSemanticSpan(
+  proof: DeployedTraceProof,
+  {
+    spanId = "provider-wrapper",
+    parentSpanId = null,
+  }: { spanId?: string; parentSpanId?: string | null } = {},
+): void {
+  proof.rows.push({
+    traceId: "0123456789abcdef0123456789abcdef",
+    spanId,
+    parentSpanId,
+    name: "provider bookkeeping",
+    attributes: {
+      "http.request.body": { prompt: "hello" },
+      "http.response.body": { answer: "world" },
+      "http.route": "/invocations",
+    },
+    statusCode: "OK",
+    startTimeUnixNano: "11000000",
+    endTimeUnixNano: "12000000",
+  });
+  proof.traceRecord.data?.spans?.push({
+    span_id: spanId,
+    parent_span_id: parentSpanId,
+    name: "provider bookkeeping",
+    attributes: {
+      "http.request.body": { prompt: "hello" },
+      "http.response.body": { answer: "world" },
+      "http.route": "/invocations",
+    },
+    status: { code: "OK" },
+    latency_ms: 1,
+  });
+}
+
+test.each([
+  [
+    "parent",
+    (span: Record<string, unknown>) => {
+      span.parent_span_id = "root";
+    },
+  ],
+  [
+    "name",
+    (span: Record<string, unknown>) => {
+      span.name = "different provider bookkeeping";
+    },
+  ],
+  [
+    "status",
+    (span: Record<string, unknown>) => {
+      span.status = { code: "ERROR" };
+    },
+  ],
+  [
+    "latency",
+    (span: Record<string, unknown>) => {
+      span.latency_ms = 2;
+    },
+  ],
+  [
+    "input",
+    (span: Record<string, unknown>) => {
+      objectValue(span.attributes)["http.request.body"] = { prompt: "wrong" };
+    },
+  ],
+  [
+    "output",
+    (span: Record<string, unknown>) => {
+      objectValue(span.attributes)["http.response.body"] = { answer: "wrong" };
+    },
+  ],
+  [
+    "attribute",
+    (span: Record<string, unknown>) => {
+      objectValue(span.attributes)["http.route"] = "/wrong";
+    },
+  ],
+] as const)("rejects paired non-semantic span %s mismatch", (_name, mutate) => {
+  const proof = deployedProofFixture();
+  addPairedNonSemanticSpan(proof);
+  const span = proof.traceRecord.data?.spans?.find(
+    (candidate) => candidate.span_id === "provider-wrapper",
+  );
+  if (!span) throw new Error("fixture requires provider wrapper");
+  mutate(span);
+
+  expect(() => validateDeployedProof(proof)).toThrow(
+    /parent|parity|semantics/i,
+  );
+});
+
+test("rejects a semantic AGENT child whose filtered parent differs by source", () => {
+  const proof = deployedProofFixture();
+  addPairedNonSemanticSpan(proof);
+  addPairedNonSemanticSpan(proof, { spanId: "other-provider-wrapper" });
+  const mlflowRoot = proof.traceRecord.data?.spans?.find(
+    (span) => objectValue(span.attributes)["mlflow.spanType"] === "AGENT",
+  );
+  const ucRoot = proof.rows.find(
+    (row) => row.attributes["mlflow.spanType"] === "AGENT",
+  );
+  if (!mlflowRoot || !ucRoot) throw new Error("fixture requires AGENT roots");
+  mlflowRoot.parent_span_id = "provider-wrapper";
+  ucRoot.parentSpanId = "other-provider-wrapper";
+
+  expect(() => validateDeployedProof(proof)).toThrow(/parent|parity/i);
 });
 
 test.each([

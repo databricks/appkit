@@ -128,12 +128,14 @@ export class CacheManager {
     }
 
     if (!CacheManager.initPromise) {
-      CacheManager.initPromise = CacheManager.create(userConfig).then(
-        (instance) => {
+      let ownedInitialization: Promise<CacheManager>;
+      ownedInitialization = CacheManager.create(userConfig).then((instance) => {
+        if (CacheManager.initPromise === ownedInitialization) {
           CacheManager.instance = instance;
-          return instance;
-        },
-      );
+        }
+        return instance;
+      });
+      CacheManager.initPromise = ownedInitialization;
     }
 
     return CacheManager.initPromise;
@@ -146,33 +148,29 @@ export class CacheManager {
    * waits for that close and creates fresh storage, so an ended persistent
    * pool can never remain reachable through the singleton.
    */
-  static async shutdown(): Promise<void> {
+  static shutdown(): Promise<void> {
     if (CacheManager.shutdownPromise) return CacheManager.shutdownPromise;
 
-    const shutdown = async () => {
-      const pendingInitialization = CacheManager.initPromise;
-      let instance = CacheManager.instance;
-      if (!instance && pendingInitialization) {
-        try {
-          instance = await pendingInitialization;
-        } catch {
-          // Failed initialization owns no resource that can be closed.
-        }
-      }
-      try {
-        await instance?.close();
-      } finally {
-        if (CacheManager.instance === instance) CacheManager.instance = null;
-        if (CacheManager.initPromise === pendingInitialization) {
-          CacheManager.initPromise = null;
-        }
-      }
-    };
+    const detachedInstance = CacheManager.instance;
+    const detachedInitialization = CacheManager.initPromise;
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
 
-    CacheManager.shutdownPromise = shutdown().finally(() => {
-      CacheManager.shutdownPromise = null;
+    const detachedOwner = detachedInstance
+      ? Promise.resolve(detachedInstance)
+      : detachedInitialization;
+    let ownedShutdown: Promise<void>;
+    ownedShutdown = (
+      detachedOwner
+        ? detachedOwner.then((instance) => instance.close())
+        : Promise.resolve()
+    ).finally(() => {
+      if (CacheManager.shutdownPromise === ownedShutdown) {
+        CacheManager.shutdownPromise = null;
+      }
     });
-    return CacheManager.shutdownPromise;
+    CacheManager.shutdownPromise = ownedShutdown;
+    return ownedShutdown;
   }
 
   /**
