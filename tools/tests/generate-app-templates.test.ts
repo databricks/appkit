@@ -10,9 +10,18 @@ const outputDir = mkdtempSync(join(tmpdir(), "appkit-traced-templates-"));
 
 describe("generated AppKit agent templates", () => {
   beforeAll(() => {
+    const compatibleCli = "/tmp/databricks-cli-1.11.0/databricks";
     execFileSync("pnpm", ["generate:app-templates"], {
       cwd: root,
-      env: { ...process.env, APP_TEMPLATES_OUTPUT_DIR: outputDir },
+      env: {
+        ...process.env,
+        APP_TEMPLATES_OUTPUT_DIR: outputDir,
+        ...(process.env.DATABRICKS_CLI
+          ? {}
+          : existsSync(compatibleCli)
+            ? { DATABRICKS_CLI: compatibleCli }
+            : {}),
+      },
       stdio: "pipe",
     });
   }, 120_000);
@@ -88,8 +97,9 @@ describe("generated AppKit agent templates", () => {
       expect(packageJson.scripts.setup).toBe(
         "appkit setup --write --mlflow-uc",
       );
-      expect(packageJson.dependencies["@databricks/appkit"]).toBe("0.59.0");
-      expect(packageJson.dependencies["@databricks/appkit-ui"]).toBe("0.59.0");
+      expect(packageJson.dependencies["@databricks/appkit"]).toBe("0.60.0");
+      expect(packageJson.dependencies["@databricks/appkit-ui"]).toBe("0.60.0");
+      expect(packageJson.dependencies["@mlflow/core"]).toBeUndefined();
       expect(existsSync(join(app, "package-lock.json"))).toBe(false);
     },
   );

@@ -43,7 +43,7 @@ const APPKIT_SECTION_END = "<!-- appkit-end -->";
 // variants must never resolve to the pre-feature 0.58.x runtime. The templates
 // remain publication-gated until this version exists in the registry; local
 // verification uses packed prerelease tarballs from this checkout.
-const FIRST_MLFLOW_UC_APPKIT_VERSION = "0.59.0";
+const FIRST_MLFLOW_UC_APPKIT_VERSION = "0.60.0";
 
 interface AppTemplate {
   /** Output directory name and --name passed to databricks apps init */
@@ -240,8 +240,9 @@ function postProcess(appDir: string, app: AppTemplate): void {
   writeFileSync(join(appDir, "databricks.yml.tmpl"), databricksYmlTmpl);
 
   // Agent templates depend on the tracing runtime added after 0.58.0. Pin the
-  // first containing release and remove the stale source lock, which cannot be
-  // regenerated against 0.59.0 until that release is published.
+  // first containing release and remove the stale source lock. Published
+  // 0.59.0 predates this tracing stack, so templates remain intentionally
+  // installation-gated until 0.60.0 is released.
   if (app.features.includes("agents")) {
     const packageJsonPath = join(appDir, "package.json");
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {

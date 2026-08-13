@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -27,14 +29,39 @@ interface GeneratedCandidate {
   directory: string;
 }
 
-function discoverGeneratedAgentTemplates(): GeneratedCandidate[] {
-  return readdirSync(output, { withFileTypes: true })
+function discoverGeneratedAgentTemplates(
+  searchRoot = output,
+): GeneratedCandidate[] {
+  const behaviorSignals = [
+    /\bAgentServer\b/,
+    /\b(?:createAgent|agents)\s*\(/,
+    /agents:\s*\{/,
+    /\/(?:invocations|responses|api\/agents)\b/,
+    /(?:for\s+await|while\s*\()[\s\S]*?\bmodel\b[\s\S]*?\b(?:tool|executeTool)\b/i,
+    /\b(?:retriev|vectorSearch)\w*[\s\S]*?\b(?:generat|model)\w*/i,
+  ];
+  return readdirSync(searchRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => ({ name: entry.name, directory: join(output, entry.name) }))
+    .map((entry) => ({
+      name: entry.name,
+      directory: join(searchRoot, entry.name),
+    }))
     .filter(({ directory }) => {
-      const server = readFileSync(join(directory, "server/server.ts"), "utf8");
-      return /\bagents\s*\(/.test(server) || /agents:\s*\{/.test(server);
-    });
+      const sources = readdirSync(directory, {
+        recursive: true,
+        encoding: "utf8",
+      })
+        .filter(
+          (relative) =>
+            !relative.includes("node_modules/") &&
+            /\.(?:ts|tsx|js|jsx|py)$/.test(relative),
+        )
+        .map((relative) => readFileSync(join(directory, relative), "utf8"));
+      return behaviorSignals.some((signal) =>
+        sources.some((source) => signal.test(source)),
+      );
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 describe("behavior-discovered generated agent template policy", () => {
@@ -64,6 +91,42 @@ describe("behavior-discovered generated agent template policy", () => {
       "appkit-agents",
       "appkit-all-in-one",
     ]);
+  });
+
+  test("admits arbitrary candidates from every behavior signal even without proof", () => {
+    const fixtures = mkdtempSync(join(tmpdir(), "appkit-agent-signals-"));
+    const signals = new Map([
+      ["odd-server", "const app = new AgentServer();"],
+      ["unusual-constructor", "export const worker = createAgent({});"],
+      ["endpoint-client", 'fetch("/invocations", { method: "POST" });'],
+      [
+        "loop-surface",
+        "for await (const event of model.run()) { await executeTool(event); }",
+      ],
+      [
+        "rag-surface",
+        "const docs = await vectorSearch.query(); await model.generate(docs);",
+      ],
+    ]);
+    try {
+      for (const [name, source] of signals) {
+        const serverDirectory = join(fixtures, name, "server");
+        mkdirSync(serverDirectory, { recursive: true });
+        writeFileSync(join(serverDirectory, "server.ts"), source);
+      }
+      const plainDirectory = join(fixtures, "plain-web", "server");
+      mkdirSync(plainDirectory, { recursive: true });
+      writeFileSync(
+        join(plainDirectory, "server.ts"),
+        "createApp({ plugins: [] });",
+      );
+
+      expect(
+        discoverGeneratedAgentTemplates(fixtures).map(({ name }) => name),
+      ).toEqual([...signals.keys()].sort());
+    } finally {
+      rmSync(fixtures, { recursive: true, force: true });
+    }
   });
 
   test("every discovered surface declares immutable UC trace resources", () => {
@@ -120,7 +183,11 @@ describe("behavior-discovered generated agent template policy", () => {
       expect(
         packageJson.dependencies["@databricks/appkit"],
         candidate.name,
-      ).toBe("0.59.0");
+      ).toBe("0.60.0");
+      expect(
+        packageJson.dependencies["@mlflow/core"],
+        `${candidate.name} must keep AppKit as its sole tracing provider`,
+      ).toBeUndefined();
     }
   });
 });
