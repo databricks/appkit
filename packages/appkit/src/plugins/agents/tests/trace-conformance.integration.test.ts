@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import type { Server } from "node:http";
 import { createRequire } from "node:module";
@@ -744,6 +745,25 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
   const failures: string[] = [];
   for (const candidate of candidates) {
     try {
+      const requestedCandidate = process.env.APPKIT_TRACE_CONFORMANCE_CANDIDATE;
+      if (requestedCandidate === candidate.name) {
+        const sourceDirectory =
+          process.env.APPKIT_TRACE_CONFORMANCE_SOURCE_DIRECTORY;
+        if (!sourceDirectory) {
+          throw new Error(
+            `${candidate.name} owner proof is missing its generated source directory`,
+          );
+        }
+        for (const relative of [
+          "server/server.ts",
+          "server/agents/helper.ts",
+        ]) {
+          expect(
+            readFileSync(join(sourceDirectory, relative), "utf8"),
+            `${candidate.name} source provenance ${relative}`,
+          ).toBe(readFileSync(join(candidate.directory, relative), "utf8"));
+        }
+      }
       const baselineSigterm = process.listenerCount("SIGTERM");
       const baselineSigint = process.listenerCount("SIGINT");
       const localManifest = await captureTurn(candidate.name);
@@ -769,6 +789,12 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
         ),
       ).toBe(true);
       assertContract(manifest);
+      if (
+        process.env.APPKIT_TRACE_CONFORMANCE_CANDIDATE === candidate.name &&
+        process.env.TRACE_CONFORMANCE_MANIFEST
+      ) {
+        writePythonManifest(process.env.TRACE_CONFORMANCE_MANIFEST, manifest);
+      }
     } catch (error) {
       failures.push(
         `${candidate.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -883,6 +909,42 @@ function fixtureManifest(children: SpanManifest[]): TraceManifest {
       ...children,
     ],
   };
+}
+
+function writePythonManifest(path: string, manifest: TraceManifest): void {
+  writeFileSync(
+    path,
+    `${JSON.stringify(
+      {
+        template: manifest.template,
+        trace_id: manifest.traceId,
+        spans: manifest.spans.map((span) => ({
+          name: span.name,
+          span_type: span.spanType,
+          span_id: span.spanId,
+          parent_span_id: span.parentSpanId,
+          inputs: span.inputs,
+          outputs: span.outputs,
+          status:
+            span.status === 1
+              ? "OK"
+              : span.status === 2
+                ? "ERROR"
+                : span.status,
+          latency_ms: span.latencyMs,
+          model: span.model ?? null,
+          provider: span.provider ?? null,
+          usage: span.usage,
+          cost_usd: span.costUsd ?? null,
+          cost_available: span.costAvailable,
+          links: span.links,
+          attributes: span.attributes,
+        })),
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 function validWorkloads(): TraceManifest[] {
@@ -1266,7 +1328,7 @@ function deployedProofFixture(): DeployedTraceProof {
           span_id: row.spanId,
           parent_span_id: row.parentSpanId,
           name: row.name,
-          attributes: row.attributes,
+          attributes: structuredClone(row.attributes),
           status: { code: "OK" },
           latency_ms: 1,
         })),
@@ -1414,6 +1476,147 @@ function normalizeUcRows(
   };
 }
 
+function normalizeMlflowSpans(
+  template: string,
+  traceId: string,
+  spans: Array<Record<string, unknown>>,
+): TraceManifest {
+  const semanticSpans = spans.filter(
+    (span) => objectValue(span.attributes)["mlflow.spanType"] !== undefined,
+  );
+  const semanticSpanIds = new Set(
+    semanticSpans.map((span) => String(span.span_id ?? span.spanId)),
+  );
+  return {
+    template,
+    traceId,
+    spans: semanticSpans.map((span) => {
+      const attributes = { ...objectValue(span.attributes) };
+      attributes.app_id ??=
+        attributes["app.id"] ?? attributes["appkit.app.name"];
+      attributes.user_id ??=
+        attributes["user.id"] ?? attributes["mlflow.trace.user"];
+      attributes.session_id ??=
+        attributes["session.id"] ?? attributes["mlflow.trace.session"];
+      attributes.ttft_ms ??=
+        attributes["appkit.ttft_ms"] ??
+        attributes["appkit.first_token.duration_ms"];
+      attributes.stream_duration_ms ??=
+        attributes["appkit.stream_duration_ms"] ??
+        attributes["appkit.stream.duration_ms"];
+      if (
+        attributes.ttft_ms !== undefined ||
+        attributes.stream_duration_ms !== undefined
+      ) {
+        attributes.streaming = true;
+      }
+      const spanType = String(attributes["mlflow.spanType"] ?? "");
+      const usage = objectValue(
+        attributes[
+          spanType === "AGENT"
+            ? "mlflow.trace.tokenUsage"
+            : "mlflow.chat.tokenUsage"
+        ],
+      ) as Record<string, number>;
+      const rawParentSpanId = span.parent_span_id ?? span.parentSpanId;
+      const parentSpanId =
+        rawParentSpanId === undefined || rawParentSpanId === null
+          ? null
+          : String(rawParentSpanId);
+      const statusRecord = objectValue(span.status);
+      return {
+        name: String(span.name),
+        spanType,
+        spanId: String(span.span_id ?? span.spanId),
+        parentSpanId:
+          spanType === "AGENT" &&
+          parentSpanId !== null &&
+          !semanticSpanIds.has(parentSpanId)
+            ? null
+            : parentSpanId,
+        inputs: decoded(attributes["mlflow.spanInputs"]),
+        outputs: decoded(attributes["mlflow.spanOutputs"]),
+        status: normalizeUcStatus(
+          statusRecord.code ?? statusRecord.status_code ?? span.status,
+        ),
+        latencyMs: Number(span.latency_ms ?? span.latencyMs ?? -1),
+        model: attributes["mlflow.chat.model"] as string | undefined,
+        provider: attributes["mlflow.chat.provider"] as string | undefined,
+        usage,
+        costUsd: attributes["mlflow.llm.cost"] as number | undefined,
+        costAvailable: attributes["appkit.cost.available"] === true,
+        links: Array.isArray(span.links) ? span.links : [],
+        attributes,
+      };
+    }),
+  };
+}
+
+function contractSemantics(span: SpanManifest): Record<string, unknown> {
+  return {
+    name: span.name,
+    spanType: span.spanType,
+    spanId: span.spanId,
+    parentSpanId: span.parentSpanId,
+    inputs: span.inputs,
+    outputs: span.outputs,
+    status: span.status,
+    latencyMs: span.latencyMs,
+    model: span.model,
+    provider: span.provider,
+    usage: span.usage,
+    costUsd: span.costUsd,
+    costAvailable: span.costAvailable,
+    links: span.links,
+    identity: {
+      app_id: span.attributes.app_id,
+      user_id: span.attributes.user_id,
+      session_id: span.attributes.session_id,
+    },
+    streaming: {
+      enabled: span.attributes.streaming,
+      ttft_ms: span.attributes.ttft_ms,
+      stream_duration_ms: span.attributes.stream_duration_ms,
+    },
+  };
+}
+
+function assertCrossSourceParity(
+  mlflow: TraceManifest,
+  uc: TraceManifest,
+): void {
+  if (mlflow.traceId !== uc.traceId) {
+    throw new Error("MLflow and UC trace identities do not match exactly");
+  }
+  const mlflowById = new Map(
+    mlflow.spans.map((span) => [span.spanId, span] as const),
+  );
+  const ucById = new Map(uc.spans.map((span) => [span.spanId, span] as const));
+  if (
+    mlflowById.size !== mlflow.spans.length ||
+    ucById.size !== uc.spans.length ||
+    mlflowById.size !== ucById.size ||
+    [...mlflowById.keys()].some((spanId) => !ucById.has(spanId)) ||
+    [...ucById.keys()].some((spanId) => !mlflowById.has(spanId))
+  ) {
+    throw new Error("MLflow and UC span identity sets do not match exactly");
+  }
+  for (const [spanId, mlflowSpan] of mlflowById) {
+    const ucSpan = ucById.get(spanId);
+    if (!ucSpan || mlflowSpan.parentSpanId !== ucSpan.parentSpanId) {
+      throw new Error(
+        `MLflow and UC parent identity differs for span ${spanId}`,
+      );
+    }
+    if (
+      JSON.stringify(canonicalTraceValue(contractSemantics(mlflowSpan))) !==
+      JSON.stringify(canonicalTraceValue(contractSemantics(ucSpan)))
+    ) {
+      throw new Error(`MLflow and UC semantics differ for span ${spanId}`);
+    }
+  }
+}
+
 function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
   const experiment = proof.experiment.experiment;
   if (experiment?.experiment_id !== proof.configuredExperimentId) {
@@ -1489,15 +1692,15 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
     }
   }
 
-  const mlflowRoot = mlflowSpans.find((span) => {
-    const attributes = objectValue(span.attributes);
-    return attributes["mlflow.spanType"] === "AGENT";
-  });
+  const mlflowRoot = mlflowSpans.find(
+    (span) => objectValue(span.attributes)["mlflow.spanType"] === "AGENT",
+  );
   assertAppIdentity(
     objectValue(mlflowRoot?.attributes),
     proof.appName,
     "MLflow trace",
   );
+
   const ucRoot = semanticRows.find(
     (row) => row.attributes["mlflow.spanType"] === "AGENT",
   );
@@ -1506,9 +1709,16 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
   }
   assertAppIdentity(ucRoot.attributes, proof.appName, "UC trace");
 
-  const manifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
-  assertContract(manifest);
-  const roots = manifest.spans.filter(
+  const mlflowManifest = normalizeMlflowSpans(
+    proof.appName,
+    otelTraceId,
+    mlflowSpans,
+  );
+  const ucManifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
+  assertContract(mlflowManifest);
+  assertContract(ucManifest);
+  assertCrossSourceParity(mlflowManifest, ucManifest);
+  const roots = ucManifest.spans.filter(
     (span) => span.parentSpanId === null && span.spanType === "AGENT",
   );
   if (roots.length !== 1) {
@@ -1529,13 +1739,13 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
     proof.responseBody,
   );
   if (
-    !manifest.spans.some(
+    !ucManifest.spans.some(
       (span) => span.spanType === "CHAT_MODEL" || span.spanType === "LLM",
     )
   ) {
     throw new Error("deployed trace is missing an LLM span");
   }
-  const toolSpan = manifest.spans.find(
+  const toolSpan = ucManifest.spans.find(
     (span) => span.spanType === "TOOL" && span.name === proof.expectedTool.name,
   );
   if (!toolSpan) {
@@ -1553,7 +1763,7 @@ function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
     toolSpan.outputs,
     proof.expectedTool.outputs,
   );
-  return manifest;
+  return ucManifest;
 }
 
 async function pollStatement(
@@ -1808,6 +2018,133 @@ test("rejects an extra UC span missing from MLflow", () => {
   });
 
   expect(() => validateDeployedProof(proof)).toThrow(/span identity/i);
+});
+
+test.each([
+  [
+    "missing MLflow AGENT request",
+    (proof: DeployedTraceProof) => {
+      const root = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "AGENT",
+      );
+      delete objectValue(root?.attributes)["mlflow.spanInputs"];
+    },
+  ],
+  [
+    "incorrect MLflow AGENT response",
+    (proof: DeployedTraceProof) => {
+      const root = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "AGENT",
+      );
+      objectValue(root?.attributes)["mlflow.spanOutputs"] = { output: "wrong" };
+    },
+  ],
+  [
+    "incorrect MLflow TOOL name",
+    (proof: DeployedTraceProof) => {
+      const tool = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "TOOL",
+      );
+      if (tool) tool.name = "wrong tool";
+    },
+  ],
+  [
+    "missing MLflow TOOL input",
+    (proof: DeployedTraceProof) => {
+      const tool = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "TOOL",
+      );
+      delete objectValue(tool?.attributes)["mlflow.spanInputs"];
+    },
+  ],
+  [
+    "incorrect MLflow TOOL output",
+    (proof: DeployedTraceProof) => {
+      const tool = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "TOOL",
+      );
+      objectValue(tool?.attributes)["mlflow.spanOutputs"] = { word_count: 99 };
+    },
+  ],
+  [
+    "missing MLflow model input",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      delete objectValue(model?.attributes)["mlflow.spanInputs"];
+    },
+  ],
+  [
+    "incorrect MLflow model output",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      objectValue(model?.attributes)["mlflow.spanOutputs"] = { text: "wrong" };
+    },
+  ],
+  [
+    "missing MLflow model usage",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      delete objectValue(model?.attributes)["mlflow.chat.tokenUsage"];
+    },
+  ],
+  [
+    "incorrect MLflow model cost",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      objectValue(model?.attributes)["mlflow.llm.cost"] = 99;
+    },
+  ],
+  [
+    "missing MLflow model timing",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      delete objectValue(model?.attributes).ttft_ms;
+    },
+  ],
+  [
+    "incorrect MLflow model status",
+    (proof: DeployedTraceProof) => {
+      const model = proof.traceRecord.data?.spans?.find((span) =>
+        ["CHAT_MODEL", "LLM"].includes(
+          String(objectValue(span.attributes)["mlflow.spanType"]),
+        ),
+      );
+      if (model) model.status = { code: "UNSET" };
+    },
+  ],
+  [
+    "incorrect MLflow topology",
+    (proof: DeployedTraceProof) => {
+      const tool = proof.traceRecord.data?.spans?.find(
+        (span) => objectValue(span.attributes)["mlflow.spanType"] === "TOOL",
+      );
+      if (tool) tool.parent_span_id = "model";
+    },
+  ],
+] as const)("rejects %s while UC remains valid", (_name, mutate) => {
+  const proof = deployedProofFixture();
+  mutate(proof);
+  expect(() => validateDeployedProof(proof)).toThrow();
 });
 
 test("polls asynchronous Statement Execution to success", async () => {

@@ -212,16 +212,15 @@ export class LifecycleManager {
 
   /** Close the cache storage, bounded and error-isolated. */
   private async closeCacheStorage(): Promise<void> {
-    let cache: CacheManager;
     try {
-      cache = CacheManager.getInstanceSync();
+      CacheManager.getInstanceSync();
     } catch {
       // Cache was never initialized — nothing to close.
       return;
     }
     try {
       await this.raceWithTimeout(
-        cache.close(),
+        CacheManager.shutdown(),
         LifecycleManager.PHASE_SHUTDOWN_TIMEOUT_MS,
         "cache storage close",
       );

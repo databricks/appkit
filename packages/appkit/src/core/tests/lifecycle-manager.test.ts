@@ -15,6 +15,7 @@ vi.mock("../../cache", () => ({
     getInstanceSync: vi.fn().mockReturnValue({
       close: vi.fn().mockResolvedValue(undefined),
     }),
+    shutdown: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -227,6 +228,7 @@ describe("LifecycleManager", () => {
       vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
         close,
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(close);
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: flush,
       } as any);
@@ -266,6 +268,7 @@ describe("LifecycleManager", () => {
       vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
         close: hangingClose,
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(hangingClose);
 
       const done = new LifecycleManager(contextWithPlugins({})).shutdown();
       await vi.advanceTimersByTimeAsync(2_000);
@@ -318,6 +321,9 @@ describe("LifecycleManager", () => {
           order.push("cache-close");
         }),
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(async () => {
+        order.push("cache-close");
+      });
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: vi.fn(async () => {
           order.push("flush");

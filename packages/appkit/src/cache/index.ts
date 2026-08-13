@@ -56,6 +56,7 @@ export class CacheManager {
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
+  private static shutdownPromise: Promise<void> | null = null;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -119,6 +120,9 @@ export class CacheManager {
   static async getInstance(
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
+    if (CacheManager.shutdownPromise) {
+      await CacheManager.shutdownPromise;
+    }
     if (CacheManager.instance) {
       return CacheManager.instance;
     }
@@ -133,6 +137,42 @@ export class CacheManager {
     }
 
     return CacheManager.initPromise;
+  }
+
+  /**
+   * Close and retire the process-owned cache singleton.
+   *
+   * Concurrent shutdown callers share one close. A later `getInstance()`
+   * waits for that close and creates fresh storage, so an ended persistent
+   * pool can never remain reachable through the singleton.
+   */
+  static async shutdown(): Promise<void> {
+    if (CacheManager.shutdownPromise) return CacheManager.shutdownPromise;
+
+    const shutdown = async () => {
+      const pendingInitialization = CacheManager.initPromise;
+      let instance = CacheManager.instance;
+      if (!instance && pendingInitialization) {
+        try {
+          instance = await pendingInitialization;
+        } catch {
+          // Failed initialization owns no resource that can be closed.
+        }
+      }
+      try {
+        await instance?.close();
+      } finally {
+        if (CacheManager.instance === instance) CacheManager.instance = null;
+        if (CacheManager.initPromise === pendingInitialization) {
+          CacheManager.initPromise = null;
+        }
+      }
+    };
+
+    CacheManager.shutdownPromise = shutdown().finally(() => {
+      CacheManager.shutdownPromise = null;
+    });
+    return CacheManager.shutdownPromise;
   }
 
   /**
