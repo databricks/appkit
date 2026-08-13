@@ -8,13 +8,14 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import yaml from "js-yaml";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 const root = resolve(import.meta.dirname, "../..");
-const output = mkdtempSync(join(tmpdir(), "appkit-agent-policy-"));
+const output = mkdtempSync(join(root, ".appkit-agent-policy-"));
 const requiredTraceEnvironment = [
   "MLFLOW_EXPERIMENT_ID",
   "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
@@ -188,6 +189,26 @@ describe("behavior-discovered generated agent template policy", () => {
         packageJson.dependencies["@mlflow/core"],
         `${candidate.name} must keep AppKit as its sole tracing provider`,
       ).toBeUndefined();
+    }
+  });
+
+  test("every discovered surface exposes its generated server as executable proof", () => {
+    for (const candidate of discoverGeneratedAgentTemplates()) {
+      const serverSource = readFileSync(
+        join(candidate.directory, "server/server.ts"),
+        "utf8",
+      );
+      expect(serverSource, candidate.name).toContain(
+        "export const app = createApp({",
+      );
+
+      const requireFromGeneratedPackage = createRequire(
+        join(candidate.directory, "package.json"),
+      );
+      expect(
+        requireFromGeneratedPackage.resolve("@databricks/appkit/package.json"),
+        `${candidate.name} must execute against its generated package resolution`,
+      ).toBe(join(root, "packages/appkit/package.json"));
     }
   });
 });

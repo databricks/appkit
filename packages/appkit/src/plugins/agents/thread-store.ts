@@ -28,7 +28,11 @@ async function traceMemoryOperation<T>(
       setCapturedAttribute(span, "mlflow.spanInputs", inputs);
       try {
         const result = await operation(span);
-        setCapturedAttribute(span, "mlflow.spanOutputs", result);
+        setCapturedAttribute(
+          span,
+          "mlflow.spanOutputs",
+          result === undefined ? { completed: true } : result,
+        );
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error) {

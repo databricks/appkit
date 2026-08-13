@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import type { Server } from "node:http";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context, trace } from "@opentelemetry/api";
@@ -10,9 +18,11 @@ import {
   type ReadableSpan,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
+import getPort from "get-port";
 import type { AgentAdapter, AgentInput, AgentRunContext } from "shared";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { z } from "zod";
+import { ServiceContext } from "../../../context/service-context";
 import { createAgent } from "../../../core/agent/create-agent";
 import { runAgent } from "../../../core/agent/run-agent";
 import { tool } from "../../../core/agent/tools/tool";
@@ -22,6 +32,44 @@ const repositoryRoot = resolve(import.meta.dirname, "../../../../../..");
 const generatedApps = mkdtempSync(
   join(repositoryRoot, ".trace-conformance-generated-"),
 );
+
+interface GeneratedCandidate {
+  name: string;
+  directory: string;
+}
+
+function discoverGeneratedAgentTemplates(): GeneratedCandidate[] {
+  const behaviorSignals = [
+    /\bAgentServer\b/,
+    /\b(?:createAgent|agents)\s*\(/,
+    /agents:\s*\{/,
+    /\/(?:invocations|responses|api\/agents)\b/,
+    /(?:for\s+await|while\s*\()[\s\S]*?\bmodel\b[\s\S]*?\b(?:tool|executeTool)\b/i,
+    /\b(?:retriev|vectorSearch)\w*[\s\S]*?\b(?:generat|model)\w*/i,
+  ];
+  return readdirSync(generatedApps, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      directory: join(generatedApps, entry.name),
+    }))
+    .filter(({ directory }) => {
+      const sources = readdirSync(directory, {
+        recursive: true,
+        encoding: "utf8",
+      })
+        .filter(
+          (relative) =>
+            !relative.includes("node_modules/") &&
+            /\.(?:ts|tsx|js|jsx|py)$/.test(relative),
+        )
+        .map((relative) => readFileSync(join(directory, relative), "utf8"));
+      return behaviorSignals.some((signal) =>
+        sources.some((source) => signal.test(source)),
+      );
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 interface SpanManifest {
   name: string;
@@ -65,6 +113,9 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function normalize(template: string, spans: ReadableSpan[]): TraceManifest {
   const traceIds = new Set(spans.map((span) => span.spanContext().traceId));
+  const semanticSpanIds = new Set(
+    spans.map((span) => span.spanContext().spanId),
+  );
   expect(traceIds.size, `${template}: mixed trace IDs`).toBe(1);
   return {
     template,
@@ -101,11 +152,18 @@ function normalize(template: string, spans: ReadableSpan[]): TraceManifest {
             : "mlflow.chat.tokenUsage"
         ],
       ) as Record<string, number>;
+      const spanType = String(attributes["mlflow.spanType"] ?? "");
+      const recordedParentSpanId = span.parentSpanContext?.spanId;
       return {
         name: span.name,
-        spanType: String(attributes["mlflow.spanType"] ?? ""),
+        spanType,
         spanId: span.spanContext().spanId,
-        parentSpanId: span.parentSpanContext?.spanId ?? null,
+        parentSpanId:
+          spanType === "AGENT" &&
+          recordedParentSpanId !== undefined &&
+          !semanticSpanIds.has(recordedParentSpanId)
+            ? null
+            : (recordedParentSpanId ?? null),
         inputs: decoded(attributes["mlflow.spanInputs"]),
         outputs: decoded(attributes["mlflow.spanOutputs"]),
         status: span.status.code,
@@ -463,8 +521,22 @@ async function captureTurn(template: string): Promise<TraceManifest> {
   }
 }
 
-async function captureGeneratedTurn(template: string): Promise<TraceManifest> {
-  const helperPath = join(generatedApps, template, "server/agents/helper.ts");
+async function closeServer(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return;
+  server.closeAllConnections?.();
+  await new Promise<void>((resolveClose, rejectClose) => {
+    server.close((error) => {
+      if (error) rejectClose(error);
+      else resolveClose();
+    });
+  });
+}
+
+async function captureGeneratedHttpTurn(
+  candidate: GeneratedCandidate,
+): Promise<TraceManifest> {
+  const { name: template, directory } = candidate;
+  const helperPath = join(directory, "server/agents/helper.ts");
   const generated = (await import(pathToFileURL(helperPath).href)) as {
     helper: AgentDefinition;
   };
@@ -510,18 +582,121 @@ async function captureGeneratedTurn(template: string): Promise<TraceManifest> {
   const getTracer = vi
     .spyOn(trace, "getTracer")
     .mockImplementation((name, version) => provider.getTracer(name, version));
+  const port = await getPort();
+  const environment = {
+    NODE_ENV: "production",
+    DISABLE_APPKIT_INTERNAL_TELEMETRY: "true",
+    DATABRICKS_APP_PORT: String(port),
+    FLASK_RUN_HOST: "127.0.0.1",
+    DATABRICKS_APP_NAME: template,
+    DATABRICKS_HOST: "https://test.databricks.com",
+    DATABRICKS_CLIENT_ID: "test-client-id",
+    DATABRICKS_AGENT_SERVING_ENDPOINT_NAME: "generated-test-model",
+    DATABRICKS_WAREHOUSE_ID: "test-warehouse",
+    DATABRICKS_VOLUME_FILES: "/Volumes/main/default/files",
+    DATABRICKS_GENIE_SPACE_ID: "test-genie-space",
+    DATABRICKS_SERVING_ENDPOINT_NAME: "test-serving-endpoint",
+    LAKEBASE_ENDPOINT: "test-lakebase-endpoint",
+    PGUSER: "test-client-id",
+    PGHOST: "localhost",
+    PGDATABASE: "appkit",
+    PGPORT: "5432",
+    PGSSLMODE: "require",
+    MLFLOW_EXPERIMENT_ID: "test-experiment",
+    MLFLOW_TRACING_SQL_WAREHOUSE_ID: "test-warehouse",
+    MLFLOW_UC_CATALOG: "main",
+    MLFLOW_UC_SCHEMA: "agent_traces",
+    MLFLOW_UC_TABLE_PREFIX: "appkit",
+    MLFLOW_OTEL_SPANS_TABLE: "main.agent_traces.appkit_otel_spans",
+  };
+  const previousEnvironment = new Map(
+    Object.keys(environment).map((name) => [name, process.env[name]]),
+  );
+  Object.assign(process.env, environment);
+  const serviceContext = {
+    client: {},
+    serviceUserId: "test-client-id",
+    warehouseId: Promise.resolve("test-warehouse"),
+    workspaceId: Promise.resolve("test-workspace"),
+  };
+  const initializeServiceContext = vi
+    .spyOn(ServiceContext, "initialize")
+    .mockResolvedValue(serviceContext as never);
+  const getServiceContext = vi
+    .spyOn(ServiceContext, "get")
+    .mockReturnValue(serviceContext as never);
+  let server: Server | undefined;
   try {
-    await runAgent(generated.helper, {
-      messages: "Count the words in hello traced world. Use count_words.",
-      appName: template,
-      requestId: "request-1",
-      sessionId: "session-1",
-      threadId: "thread-1",
-      userId: "user-1",
-    });
+    const requireFromGeneratedPackage = createRequire(
+      join(directory, "package.json"),
+    );
+    expect(
+      requireFromGeneratedPackage.resolve("@databricks/appkit/package.json"),
+      `${template} generated package resolution`,
+    ).toBe(join(repositoryRoot, "packages/appkit/package.json"));
+
+    const serverPath = join(directory, "server/server.ts");
+    const generatedServer = (await import(pathToFileURL(serverPath).href)) as {
+      app?: Promise<{ server: { getServer(): Server } }>;
+    };
+    expect(
+      generatedServer.app,
+      `${template} must export its generated createApp execution`,
+    ).toBeDefined();
+    const appkit = await generatedServer.app;
+    server = appkit?.server.getServer();
+    if (!server) {
+      throw new Error(
+        `${template} generated createApp did not expose its server`,
+      );
+    }
+    if (!server.listening) {
+      await new Promise<void>((resolveListening, rejectListening) => {
+        server?.once("listening", resolveListening);
+        server?.once("error", rejectListening);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error(`${template} generated HTTP server did not bind a port`);
+    }
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/invocations`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-user": "user-1",
+          "x-mlflow-session-id": "session-1",
+          "x-request-id": "request-1",
+        },
+        body: JSON.stringify({
+          input: "Count the words in hello traced world. Use count_words.",
+        }),
+      },
+    );
+    const responseBody = await response.text();
+    expect(
+      response.ok,
+      `${template} HTTP ${response.status}: ${responseBody}`,
+    ).toBe(true);
+    expect(
+      response.headers.get("x-mlflow-trace-id"),
+      `${template} generated handler trace identity`,
+    ).toBeTruthy();
     await provider.forceFlush();
-    return normalize(template, exporter.getFinishedSpans());
+    const semanticSpans = exporter
+      .getFinishedSpans()
+      .filter((span) => span.attributes["mlflow.spanType"] !== undefined);
+    return normalize(template, semanticSpans);
   } finally {
+    await closeServer(server);
+    initializeServiceContext.mockRestore();
+    getServiceContext.mockRestore();
+    for (const [name, previous] of previousEnvironment) {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }
     getTracer.mockRestore();
     await provider.shutdown();
   }
@@ -553,22 +728,19 @@ afterAll(() => {
   rmSync(generatedApps, { recursive: true, force: true });
 });
 
-describe.each(["appkit-agents", "appkit-all-in-one"])(
-  "%s trace conformance",
-  (template) => {
-    test("writes, reloads, and validates a deterministic tool turn", async () => {
-      const manifest = await captureTurn(template);
-      const reloaded = JSON.parse(JSON.stringify(manifest)) as TraceManifest;
+test("every behavior-discovered generated surface executes its HTTP trace proof", async () => {
+  const candidates = discoverGeneratedAgentTemplates();
+  expect(candidates.length).toBeGreaterThan(0);
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const localManifest = await captureTurn(candidate.name);
+      const reloaded = JSON.parse(
+        JSON.stringify(localManifest),
+      ) as TraceManifest;
       assertContract(reloaded);
-    });
-  },
-);
 
-describe.each(["appkit-agents", "appkit-all-in-one"])(
-  "%s generated production package",
-  (template) => {
-    test("invokes its own generated agent definition and validates the trace", async () => {
-      const manifest = await captureGeneratedTurn(template);
+      const manifest = await captureGeneratedHttpTurn(candidate);
       expect(
         manifest.spans.some(
           (span) =>
@@ -579,9 +751,17 @@ describe.each(["appkit-agents", "appkit-all-in-one"])(
         ),
       ).toBe(true);
       assertContract(manifest);
-    });
-  },
-);
+    } catch (error) {
+      failures.push(
+        `${candidate.name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  expect(
+    failures,
+    `discovered candidates without executable generated HTTP proof:\n${failures.join("\n")}`,
+  ).toEqual([]);
+}, 120_000);
 
 function requiredSpan(manifest: TraceManifest, spanType: string): SpanManifest {
   const span = manifest.spans.find(
@@ -893,6 +1073,13 @@ interface StatementResponse {
   result?: { data_array?: unknown[][] };
 }
 
+const persistedSpanStatement =
+  "SELECT trace_id, span_id, parent_span_id, name, attributes, " +
+  "status_code, start_time_unix_nano, end_time_unix_nano\n" +
+  "FROM IDENTIFIER(:otel_spans_table)\n" +
+  "WHERE trace_id = :trace_id\n" +
+  "ORDER BY start_time_unix_nano";
+
 function deriveUcBinding(
   catalog: string,
   schema: string,
@@ -936,6 +1123,299 @@ function otelTraceIdFromReturnedTrace(
   return otelTraceId.toLowerCase();
 }
 
+interface UcSpanRow {
+  traceId: unknown;
+  spanId: unknown;
+  parentSpanId: unknown;
+  name: unknown;
+  attributes: Record<string, unknown>;
+  statusCode?: unknown;
+  startTimeUnixNano?: unknown;
+  endTimeUnixNano?: unknown;
+}
+
+interface DeployedTraceProof {
+  appName: string;
+  configuredExperimentId: string;
+  returnedTraceId: string;
+  binding: ReturnType<typeof deriveUcBinding>;
+  experiment: {
+    experiment?: {
+      experiment_id?: string;
+      trace_location?: Record<string, unknown>;
+    };
+  };
+  traceRecord: {
+    info?: {
+      trace_id?: string;
+      traceId?: string;
+      experiment_id?: string;
+      experimentId?: string;
+    };
+    data?: { spans?: Array<Record<string, unknown>> };
+  };
+  rows: UcSpanRow[];
+}
+
+function deployedProofFixture(): DeployedTraceProof {
+  const appName = "appkit-agents";
+  const configuredExperimentId = "experiment-123";
+  const binding = deriveUcBinding("main", "agent_traces", "appkit");
+  const manifest = validWorkloads()[1];
+  manifest.template = appName;
+  manifest.spans[0].attributes.app_id = appName;
+  const returnedTraceId = `${binding.mlflowTracePrefix}${manifest.traceId}`;
+  const rows = manifest.spans.map((span, index) => ({
+    traceId: manifest.traceId,
+    spanId: span.spanId,
+    parentSpanId: span.parentSpanId,
+    name: span.name,
+    attributes: {
+      ...span.attributes,
+      "mlflow.spanType": span.spanType,
+      "mlflow.spanInputs": span.inputs,
+      "mlflow.spanOutputs": span.outputs,
+      [span.spanType === "AGENT"
+        ? "mlflow.trace.tokenUsage"
+        : "mlflow.chat.tokenUsage"]: span.usage,
+      "mlflow.chat.model": span.model,
+      "mlflow.chat.provider": span.provider,
+      "mlflow.llm.cost": span.costUsd,
+      "appkit.cost.available": span.costAvailable,
+      "appkit.app.name": span.attributes.app_id,
+      "mlflow.trace.user": span.attributes.user_id,
+      "mlflow.trace.session": span.attributes.session_id,
+    },
+    statusCode: "OK",
+    startTimeUnixNano: String(1_000_000 + index * 2_000_000),
+    endTimeUnixNano: String(2_000_000 + index * 2_000_000),
+  }));
+  return {
+    appName,
+    configuredExperimentId,
+    returnedTraceId,
+    binding,
+    experiment: {
+      experiment: {
+        experiment_id: configuredExperimentId,
+        trace_location: binding.location,
+      },
+    },
+    traceRecord: {
+      info: {
+        trace_id: returnedTraceId,
+        experiment_id: configuredExperimentId,
+      },
+      data: {
+        spans: rows.map((row) => ({
+          span_id: row.spanId,
+          parent_span_id: row.parentSpanId,
+          attributes: row.attributes,
+          status: { code: "OK" },
+          latency_ms: 1,
+        })),
+      },
+    },
+    rows,
+  };
+}
+
+function normalizeUcStatus(value: unknown): string | number {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string" || !value.trim()) return "UNSET";
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/^STATUS_CODE_/, "");
+}
+
+function unixNanos(value: unknown): bigint | undefined {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    return BigInt(value);
+  }
+  return undefined;
+}
+
+function ucLatencyMs(row: UcSpanRow): number {
+  const start = unixNanos(row.startTimeUnixNano);
+  const end = unixNanos(row.endTimeUnixNano);
+  if (start === undefined || end === undefined || end < start) return -1;
+  return Number(end - start) / 1_000_000;
+}
+
+function assertAppIdentity(
+  attributes: Record<string, unknown>,
+  expected: string,
+  source: string,
+): void {
+  const values = [
+    attributes.app_id,
+    attributes["app.id"],
+    attributes["appkit.app.name"],
+  ].filter((value) => value !== undefined);
+  if (values.length === 0 || values.some((value) => value !== expected)) {
+    throw new Error(`${source} app identity does not match configured app`);
+  }
+}
+
+function normalizeUcRows(
+  template: string,
+  traceId: string,
+  rows: UcSpanRow[],
+): TraceManifest {
+  const semanticRows = rows.filter(
+    (row) => row.attributes["mlflow.spanType"] !== undefined,
+  );
+  const semanticSpanIds = new Set(
+    semanticRows.map((row) => String(row.spanId)),
+  );
+  return {
+    template,
+    traceId,
+    spans: semanticRows.map((row) => {
+      const attributes = { ...row.attributes };
+      attributes.app_id ??=
+        attributes["app.id"] ?? attributes["appkit.app.name"];
+      attributes.user_id ??=
+        attributes["user.id"] ?? attributes["mlflow.trace.user"];
+      attributes.session_id ??=
+        attributes["session.id"] ?? attributes["mlflow.trace.session"];
+      attributes.ttft_ms ??=
+        attributes["appkit.ttft_ms"] ??
+        attributes["appkit.first_token.duration_ms"];
+      attributes.stream_duration_ms ??=
+        attributes["appkit.stream_duration_ms"] ??
+        attributes["appkit.stream.duration_ms"];
+      if (
+        attributes.ttft_ms !== undefined ||
+        attributes.stream_duration_ms !== undefined
+      ) {
+        attributes.streaming = true;
+      }
+      const spanType = String(attributes["mlflow.spanType"] ?? "");
+      const usage = objectValue(
+        attributes[
+          spanType === "AGENT"
+            ? "mlflow.trace.tokenUsage"
+            : "mlflow.chat.tokenUsage"
+        ],
+      ) as Record<string, number>;
+      const rawParentSpanId = row.parentSpanId
+        ? String(row.parentSpanId)
+        : null;
+      return {
+        name: String(row.name),
+        spanType,
+        spanId: String(row.spanId),
+        parentSpanId:
+          spanType === "AGENT" &&
+          rawParentSpanId !== null &&
+          !semanticSpanIds.has(rawParentSpanId)
+            ? null
+            : rawParentSpanId,
+        inputs: decoded(attributes["mlflow.spanInputs"]),
+        outputs: decoded(attributes["mlflow.spanOutputs"]),
+        status: normalizeUcStatus(row.statusCode),
+        latencyMs: ucLatencyMs(row),
+        model: attributes["mlflow.chat.model"] as string | undefined,
+        provider: attributes["mlflow.chat.provider"] as string | undefined,
+        usage,
+        costUsd: attributes["mlflow.llm.cost"] as number | undefined,
+        costAvailable: attributes["appkit.cost.available"] === true,
+        links: [],
+        attributes,
+      };
+    }),
+  };
+}
+
+function validateDeployedProof(proof: DeployedTraceProof): TraceManifest {
+  const experiment = proof.experiment.experiment;
+  if (experiment?.experiment_id !== proof.configuredExperimentId) {
+    throw new Error(
+      `experiment API returned ${String(experiment?.experiment_id)} for configured experiment ${proof.configuredExperimentId}`,
+    );
+  }
+  if (
+    JSON.stringify(experiment.trace_location) !==
+    JSON.stringify(proof.binding.location)
+  ) {
+    throw new Error(
+      "experiment trace location does not match configured UC binding",
+    );
+  }
+  const traceInfo = proof.traceRecord.info;
+  const storedTraceId = traceInfo?.trace_id ?? traceInfo?.traceId;
+  if (storedTraceId !== proof.returnedTraceId) {
+    throw new Error(
+      `MLflow trace ${String(storedTraceId)} does not match returned trace ${proof.returnedTraceId}`,
+    );
+  }
+  const storedExperimentId =
+    traceInfo?.experiment_id ?? traceInfo?.experimentId;
+  if (storedExperimentId !== proof.configuredExperimentId) {
+    throw new Error(
+      `MLflow trace experiment ${String(storedExperimentId)} does not match configured experiment ${proof.configuredExperimentId}`,
+    );
+  }
+  const otelTraceId = otelTraceIdFromReturnedTrace(
+    proof.returnedTraceId,
+    proof.binding.mlflowTracePrefix,
+  );
+  if (proof.rows.length === 0) {
+    throw new Error(
+      `UC table ${proof.binding.spansTable} returned no trace rows`,
+    );
+  }
+  for (const row of proof.rows) {
+    if (String(row.traceId).toLowerCase() !== otelTraceId) {
+      throw new Error(
+        `UC row trace ${String(row.traceId)} does not match returned OTel trace ${otelTraceId}`,
+      );
+    }
+  }
+
+  const mlflowSpans = proof.traceRecord.data?.spans ?? [];
+  const mlflowSpanIds = new Set(
+    mlflowSpans.map((span) => String(span.span_id ?? span.spanId)),
+  );
+  const semanticRows = proof.rows.filter(
+    (row) => row.attributes["mlflow.spanType"] !== undefined,
+  );
+  for (const row of semanticRows) {
+    if (!mlflowSpanIds.has(String(row.spanId))) {
+      throw new Error(
+        `UC span ${String(row.spanId)} is not associated with the returned MLflow trace`,
+      );
+    }
+  }
+
+  const mlflowRoot = mlflowSpans.find((span) => {
+    const attributes = objectValue(span.attributes);
+    return attributes["mlflow.spanType"] === "AGENT";
+  });
+  assertAppIdentity(
+    objectValue(mlflowRoot?.attributes),
+    proof.appName,
+    "MLflow trace",
+  );
+  const ucRoot = semanticRows.find(
+    (row) => row.attributes["mlflow.spanType"] === "AGENT",
+  );
+  if (!ucRoot) {
+    throw new Error("UC trace app identity does not match configured app");
+  }
+  assertAppIdentity(ucRoot.attributes, proof.appName, "UC trace");
+
+  const manifest = normalizeUcRows(proof.appName, otelTraceId, proof.rows);
+  assertContract(manifest);
+  return manifest;
+}
+
 async function pollStatement(
   initial: StatementResponse,
   getStatement: (statementId: string) => StatementResponse,
@@ -976,6 +1456,16 @@ test("derives the exact immutable UC location, table, and MLflow trace prefix", 
   });
 });
 
+test("queries UC-native status and timing for the exact returned trace", () => {
+  expect(persistedSpanStatement).toBe(
+    "SELECT trace_id, span_id, parent_span_id, name, attributes, " +
+      "status_code, start_time_unix_nano, end_time_unix_nano\n" +
+      "FROM IDENTIFIER(:otel_spans_table)\n" +
+      "WHERE trace_id = :trace_id\n" +
+      "ORDER BY start_time_unix_nano",
+  );
+});
+
 test("extracts the OTel trace ID only from the exact returned UC trace identity", () => {
   expect(
     otelTraceIdFromReturnedTrace(
@@ -990,6 +1480,87 @@ test("extracts the OTel trace ID only from the exact returned UC trace identity"
     ),
   ).toThrow(/exact UC location/);
 });
+
+test.each([
+  [
+    "experiment API",
+    (proof: DeployedTraceProof) => {
+      if (proof.experiment.experiment) {
+        proof.experiment.experiment.experiment_id = "wrong-experiment";
+      }
+    },
+  ],
+  [
+    "MLflow trace",
+    (proof: DeployedTraceProof) => {
+      if (proof.traceRecord.info) {
+        proof.traceRecord.info.experiment_id = "wrong-experiment";
+      }
+    },
+  ],
+] as const)(
+  "rejects a wrong configured experiment association from %s despite the matching UC location",
+  (_name, mutate) => {
+    const proof = deployedProofFixture();
+    mutate(proof);
+    expect(() => validateDeployedProof(proof)).toThrow(/experiment/i);
+  },
+);
+
+test.each([
+  [
+    "returned trace",
+    (proof: DeployedTraceProof) => {
+      if (proof.traceRecord.info) {
+        proof.traceRecord.info.trace_id = `${proof.binding.mlflowTracePrefix}fedcba9876543210fedcba9876543210`;
+      }
+    },
+  ],
+  [
+    "MLflow app",
+    (proof: DeployedTraceProof) => {
+      const root = proof.traceRecord.data?.spans?.find(
+        (span) => !span.parent_span_id,
+      );
+      if (root) objectValue(root.attributes)["appkit.app.name"] = "other-app";
+    },
+  ],
+  [
+    "UC app",
+    (proof: DeployedTraceProof) => {
+      const root = proof.rows.find((row) => !row.parentSpanId);
+      if (root) root.attributes["appkit.app.name"] = "other-app";
+    },
+  ],
+] as const)("rejects a wrong %s association", (_name, mutate) => {
+  const proof = deployedProofFixture();
+  mutate(proof);
+  expect(() => validateDeployedProof(proof)).toThrow(/trace|app/i);
+});
+
+test.each([
+  ["missing UC status", (row: UcSpanRow) => delete row.statusCode],
+  [
+    "nonterminal UC status",
+    (row: UcSpanRow) => {
+      row.statusCode = "UNSET";
+    },
+  ],
+  ["missing UC end time", (row: UcSpanRow) => delete row.endTimeUnixNano],
+  [
+    "negative UC duration",
+    (row: UcSpanRow) => {
+      row.endTimeUnixNano = "0";
+    },
+  ],
+] as const)(
+  "rejects %s without borrowing correct MLflow lifecycle values",
+  (_name, mutate) => {
+    const proof = deployedProofFixture();
+    mutate(proof.rows[0]);
+    expect(() => validateDeployedProof(proof)).toThrow(/status|latency/i);
+  },
+);
 
 test("polls asynchronous Statement Execution to success", async () => {
   const getStatement = vi.fn(() => ({
@@ -1059,7 +1630,11 @@ test.skipIf(missingDeployed.length > 0)(
   async () => {
     const profile = process.env.APPKIT_TRACE_CONFORMANCE_PROFILE ?? "";
     const appName = process.env.APPKIT_TRACE_CONFORMANCE_APP_NAME ?? "";
-    expect(["appkit-agents", "appkit-all-in-one"]).toContain(appName);
+    expect(discoverGeneratedAgentTemplates().map(({ name }) => name)).toContain(
+      appName,
+    );
+    const configuredExperimentId =
+      process.env.APPKIT_TRACE_CONFORMANCE_EXPERIMENT_ID ?? "";
     const binding = deriveUcBinding(
       process.env.APPKIT_TRACE_CONFORMANCE_UC_CATALOG ?? "",
       process.env.APPKIT_TRACE_CONFORMANCE_UC_SCHEMA ?? "",
@@ -1099,16 +1674,13 @@ test.skipIf(missingDeployed.length > 0)(
         [
           "api",
           "get",
-          `/api/2.0/mlflow/experiments/get?experiment_id=${encodeURIComponent(process.env.APPKIT_TRACE_CONFORMANCE_EXPERIMENT_ID ?? "")}`,
+          `/api/2.0/mlflow/experiments/get?experiment_id=${encodeURIComponent(configuredExperimentId)}`,
           "-p",
           profile,
         ],
         { encoding: "utf8" },
       ),
     );
-    const location = experiment.experiment?.trace_location;
-    expect(location).toEqual(binding.location);
-
     let storedTrace: Record<string, unknown> | undefined;
     for (let attempt = 0; attempt < 15 && !storedTrace; attempt += 1) {
       try {
@@ -1133,18 +1705,8 @@ test.skipIf(missingDeployed.length > 0)(
       storedTrace,
       `MLflow could not retrieve trace ${traceId}`,
     ).toBeDefined();
-    const traceRecord = (storedTrace?.trace ?? storedTrace) as {
-      info?: { trace_id?: string; traceId?: string };
-      data?: { spans?: Array<Record<string, unknown>> };
-    };
-    expect(traceRecord.info?.trace_id ?? traceRecord.info?.traceId).toBe(
-      traceId,
-    );
-    const statement =
-      "SELECT trace_id, span_id, parent_span_id, name, attributes\n" +
-      "FROM IDENTIFIER(:otel_spans_table)\n" +
-      "WHERE trace_id = :trace_id\n" +
-      "ORDER BY start_time_unix_nano";
+    const traceRecord = (storedTrace?.trace ??
+      storedTrace) as DeployedTraceProof["traceRecord"];
     const sql = JSON.parse(
       execFileSync(
         "databricks",
@@ -1157,7 +1719,7 @@ test.skipIf(missingDeployed.length > 0)(
           "--json",
           JSON.stringify({
             warehouse_id: process.env.APPKIT_TRACE_CONFORMANCE_WAREHOUSE_ID,
-            statement,
+            statement: persistedSpanStatement,
             wait_timeout: "50s",
             parameters: [
               {
@@ -1191,83 +1753,27 @@ test.skipIf(missingDeployed.length > 0)(
       () => new Promise((resolve) => setTimeout(resolve, 1_000)),
     );
     expect(completedSql.result?.data_array?.length).toBeGreaterThan(0);
-    const storedSpans = traceRecord.data?.spans ?? [];
-    const rows = (completedSql.result?.data_array ?? []).map((row) => ({
-      traceId: row[0],
-      spanId: row[1],
-      parentSpanId: row[2],
-      name: row[3],
-      attributes: objectValue(row[4]),
-    }));
-    expect(new Set(rows.map((row) => row.traceId))).toEqual(
-      new Set([otelTraceId]),
-    );
-    const persistedManifest: TraceManifest = {
-      template: appName,
-      traceId: otelTraceId,
-      spans: rows.map((row) => {
-        const source = storedSpans.find(
-          (span) => (span.span_id ?? span.spanId) === row.spanId,
-        );
-        expect(
-          source,
-          `UC span ${String(row.spanId)} missing from MLflow`,
-        ).toBeDefined();
-        const attributes = row.attributes;
-        attributes.app_id ??=
-          attributes["app.id"] ?? attributes["appkit.app.name"];
-        attributes.user_id ??=
-          attributes["user.id"] ?? attributes["mlflow.trace.user"];
-        attributes.session_id ??=
-          attributes["session.id"] ?? attributes["mlflow.trace.session"];
-        attributes.ttft_ms ??=
-          attributes["appkit.ttft_ms"] ??
-          attributes["appkit.first_token.duration_ms"];
-        attributes.stream_duration_ms ??=
-          attributes["appkit.stream_duration_ms"] ??
-          attributes["appkit.stream.duration_ms"];
-        if (
-          attributes.ttft_ms !== undefined ||
-          attributes.stream_duration_ms !== undefined
-        ) {
-          attributes.streaming = true;
-        }
-        const spanType = String(attributes["mlflow.spanType"] ?? "");
-        const usage = objectValue(
-          attributes[
-            spanType === "AGENT"
-              ? "mlflow.trace.tokenUsage"
-              : "mlflow.chat.tokenUsage"
-          ],
-        ) as Record<string, number>;
-        return {
-          name: String(row.name),
-          spanType,
-          spanId: String(row.spanId),
-          parentSpanId: row.parentSpanId ? String(row.parentSpanId) : null,
-          inputs: decoded(attributes["mlflow.spanInputs"]),
-          outputs: decoded(attributes["mlflow.spanOutputs"]),
-          status:
-            (source?.status as { code?: string | number } | undefined)?.code ??
-            (source?.status as { status_code?: string | number } | undefined)
-              ?.status_code ??
-            String(attributes["mlflow.spanStatus"] ?? "UNSET"),
-          latencyMs: Number(source?.latency_ms ?? source?.latencyMs ?? -1),
-          model: attributes["mlflow.chat.model"] as string | undefined,
-          provider: attributes["mlflow.chat.provider"] as string | undefined,
-          usage,
-          costUsd: attributes["mlflow.llm.cost"] as number | undefined,
-          costAvailable: attributes["appkit.cost.available"] === true,
-          links: [],
-          attributes,
-        };
+    const rows: UcSpanRow[] = (completedSql.result?.data_array ?? []).map(
+      (row) => ({
+        traceId: row[0],
+        spanId: row[1],
+        parentSpanId: row[2],
+        name: row[3],
+        attributes: objectValue(row[4]),
+        statusCode: row[5],
+        startTimeUnixNano: row[6],
+        endTimeUnixNano: row[7],
       }),
-    };
-    const persistedRoot = persistedManifest.spans.find(
-      (span) => span.parentSpanId === null,
     );
-    expect(persistedRoot?.attributes.app_id).toBe(appName);
-    assertContract(persistedManifest);
+    validateDeployedProof({
+      appName,
+      configuredExperimentId,
+      returnedTraceId: traceId ?? "",
+      binding,
+      experiment,
+      traceRecord,
+      rows,
+    });
   },
   180_000,
 );
