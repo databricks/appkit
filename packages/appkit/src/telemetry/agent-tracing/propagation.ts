@@ -9,12 +9,43 @@ import {
 import { getMlflowUcTraceId } from "../mlflow-uc";
 
 const MLFLOW_V4_TRACE_ID = /^trace:\/[^/]+\/([0-9a-f]{32})$/;
+const OTEL_TRACE_ID = /^[0-9a-f]{32}$/;
 
 export interface RemoteTraceReference {
   traceId: string;
   otelTraceId: string;
   spanId: string;
   source: "model-serving" | "supervisor" | "mcp" | "remote-agent";
+}
+
+export function remoteOtelTraceId(traceId: string): string | undefined {
+  const normalized = traceId.trim();
+  if (OTEL_TRACE_ID.test(normalized)) return normalized;
+  return MLFLOW_V4_TRACE_ID.exec(normalized)?.[1];
+}
+
+export function verifiedAgentRemoteTrace(
+  traceId: string,
+  spanId: string | undefined,
+  source: "model-serving" | "supervisor" | "remote-agent",
+): import("shared").AgentRemoteTraceEvent | undefined {
+  const remoteTraceId = remoteOtelTraceId(traceId);
+  if (!remoteTraceId) return undefined;
+  const localTraceId = trace.getActiveSpan()?.spanContext().traceId;
+  if (localTraceId && remoteTraceId === localTraceId) {
+    return { type: "remote_trace", traceId, source, relation: "continued" };
+  }
+  const normalizedSpanId = spanId?.trim().toLowerCase();
+  if (!normalizedSpanId || !/^[0-9a-f]{16}$/.test(normalizedSpanId)) {
+    return undefined;
+  }
+  return {
+    type: "remote_trace",
+    traceId,
+    spanId: normalizedSpanId,
+    source,
+    relation: "linked",
+  };
 }
 
 /**
@@ -45,7 +76,6 @@ export function attachRemoteTraceLink(
   span: Span,
   reference: RemoteTraceReference,
 ): void {
-  const mlflowMatch = MLFLOW_V4_TRACE_ID.exec(reference.traceId);
   const remoteContext = {
     traceId: reference.otelTraceId,
     spanId: reference.spanId,
@@ -53,8 +83,7 @@ export function attachRemoteTraceLink(
     isRemote: true,
   };
   if (
-    !mlflowMatch ||
-    mlflowMatch[1] !== reference.otelTraceId ||
+    remoteOtelTraceId(reference.traceId) !== reference.otelTraceId ||
     !isSpanContextValid(remoteContext)
   ) {
     return;

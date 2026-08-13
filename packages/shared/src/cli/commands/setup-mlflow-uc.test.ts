@@ -82,6 +82,7 @@ describe("MLflow UC setup", () => {
         schema: "agent_traces",
         tablePrefix: "appkit",
         warehouseId: "0123456789abcdef",
+        runtimePrincipal: "runtime-app-sp",
       }),
     ).toEqual([
       "uv",
@@ -103,6 +104,8 @@ describe("MLflow UC setup", () => {
       "appkit",
       "--warehouse-id",
       "0123456789abcdef",
+      "--runtime-principal",
+      "runtime-app-sp",
       "--output-json",
       "/workspace/traced-app/.databricks/mlflow-uc.json",
     ]);
@@ -130,6 +133,7 @@ describe("MLflow UC setup", () => {
         schema: "agent_traces",
         tablePrefix: "appkit",
         warehouseId: "0123456789abcdef",
+        runtimePrincipal: "runtime-app-sp",
       },
       {
         scriptPath: join(cwd, "provision-mlflow-uc.py"),

@@ -42,6 +42,18 @@ describe("generated AppKit agent templates", () => {
     },
   );
 
+  test.each([
+    "appkit-analytics",
+    "appkit-files",
+    "appkit-genie",
+    "appkit-lakebase",
+    "appkit-serving",
+  ])("%s generates a whitespace-clean gitignore", (name) => {
+    expect(
+      readFileSync(join(outputDir, name, ".gitignore"), "utf8"),
+    ).not.toMatch(/\n\n$/);
+  });
+
   test.each(["appkit-agents", "appkit-all-in-one"])(
     "%s persists all UC tracing configuration and resources",
     (name) => {
@@ -101,6 +113,13 @@ describe("generated AppKit agent templates", () => {
       expect(packageJson.dependencies["@databricks/appkit-ui"]).toBe("0.60.0");
       expect(packageJson.dependencies["@mlflow/core"]).toBeUndefined();
       expect(existsSync(join(app, "package-lock.json"))).toBe(false);
+      const readme = readFileSync(join(app, "README.md"), "utf8");
+      expect(readme).toContain("**Agents**");
+      expect(readme).toContain("uv");
+      expect(readme).toContain("npm run setup -- --mlflow-runtime-principal");
+      expect(readme).toContain("USE CATALOG");
+      expect(readme).toContain("MODIFY");
+      expect(readme).toContain("partial_output");
     },
   );
 

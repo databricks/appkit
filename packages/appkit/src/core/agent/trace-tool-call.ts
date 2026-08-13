@@ -1,6 +1,9 @@
 import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { ToolEffect } from "shared";
-import { captureTraceValue } from "../../telemetry/agent-tracing";
+import {
+  captureTraceValue,
+  normalizeFailureOutput,
+} from "../../telemetry/agent-tracing";
 
 const tracer = () => trace.getTracer("@databricks/appkit-agent-tracing");
 
@@ -58,16 +61,16 @@ function setCapturedAttribute(span: Span, key: string, value: unknown): void {
 }
 
 function recordSafeFailure(span: Span, error: unknown): void {
-  const failure = captureTraceValue(
-    {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error ?? "Unknown error"),
-    },
+  const safeError =
+    error instanceof Error ? error.message : String(error ?? "Unknown error");
+  const errorAttribute = captureTraceValue(
+    { error: safeError },
     { redactKeys: ["error"] },
   );
-  span.setAttribute("appkit.error", failure.value);
+  const failure = captureTraceValue(normalizeFailureOutput(undefined, error), {
+    redactKeys: ["error"],
+  });
+  span.setAttribute("appkit.error", errorAttribute.value);
   span.setAttribute("mlflow.spanOutputs", failure.value);
   span.setAttribute("mlflow.spanOutputs.original_bytes", failure.originalBytes);
   span.setAttribute("mlflow.spanOutputs.sha256", failure.sha256);

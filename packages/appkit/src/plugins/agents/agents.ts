@@ -1366,7 +1366,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const signal = abortController.signal;
     this.trackStream(requestId, userId, abortController);
 
-    const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
+    const tools = Array.from(registered.toolIndex.values())
+      .filter((e) => e.source !== "hosted-supervisor")
+      .map((e) => e.def);
     const limits = this.resolvedLimits;
 
     const runState: RunState = {
@@ -1428,6 +1430,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           tools,
           threadId: thread.id,
           signal,
+          extensions: buildAdapterExtensions(registered.toolIndex),
         },
         { executeTool, signal },
       );

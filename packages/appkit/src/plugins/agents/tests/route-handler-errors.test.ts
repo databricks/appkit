@@ -624,6 +624,72 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
 });
 
 describe("POST /invocations & /responses — successful invoke", () => {
+  test.each(["invocations", "responses"] as const)(
+    "passes Supervisor hosted-tool extensions through /%s",
+    async (route) => {
+      const observed: unknown[] = [];
+      const plugin = new AgentsPlugin({ dir: false });
+      // biome-ignore lint/suspicious/noExplicitAny: seed private runtime state
+      (plugin as any).agents.set("default", {
+        name: "default",
+        instructions: "hi",
+        adapter: {
+          acceptsExtensions: ["databricks.supervisor"],
+          async *run(input: unknown) {
+            observed.push(input);
+            yield { type: "message", content: "done" };
+          },
+        },
+        toolIndex: new Map([
+          [
+            "genie",
+            {
+              source: "hosted-supervisor",
+              def: { name: "genie", description: "hosted", parameters: {} },
+              spec: {
+                type: "genie_space",
+                genie_space: { id: "space-1", description: "hosted" },
+              },
+            },
+          ],
+        ]),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: seed private runtime state
+      (plugin as any).defaultAgentName = "default";
+      // biome-ignore lint/suspicious/noExplicitAny: stub persistence
+      (plugin as any).threadStore = {
+        create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+        addMessage: vi.fn(),
+        delete: vi.fn(),
+      };
+
+      const { res } = mockRes();
+      await (
+        plugin as unknown as {
+          _handleInvoke: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleInvoke(requestForRoute(route, { input: "hi" }), res);
+
+      expect(observed).toHaveLength(1);
+      expect(observed[0]).toMatchObject({
+        tools: [],
+        extensions: {
+          "databricks.supervisor": {
+            hostedTools: [
+              {
+                type: "genie_space",
+                genie_space: { id: "space-1", description: "hosted" },
+              },
+            ],
+          },
+        },
+      });
+    },
+  );
+
   test("returns OpenAI Responses-shaped JSON with aggregated assistant text", async () => {
     const plugin = new AgentsPlugin({ dir: false });
     // biome-ignore lint/suspicious/noExplicitAny: seed

@@ -68,6 +68,18 @@ class FakeStatementExecution:
             return statement_response("PENDING")
         if "information_schema.tables" in statement:
             return statement_response("SUCCEEDED", table_names=self.table_names)
+        if statement.startswith("SHOW GRANTS ON"):
+            if " ON CATALOG " in statement:
+                rows = [["runtime-app-sp", "USE CATALOG"]]
+            elif " ON SCHEMA " in statement:
+                rows = [["runtime-app-sp", "USE SCHEMA"]]
+            else:
+                rows = [["runtime-app-sp", "MODIFY"], ["runtime-app-sp", "SELECT"]]
+            return SimpleNamespace(
+                statement_id="statement-1",
+                status=SimpleNamespace(state="SUCCEEDED", error=None),
+                result=SimpleNamespace(data_array=rows),
+            )
         return statement_response("SUCCEEDED")
 
     def get_statement(self, statement_id: str):
@@ -118,6 +130,7 @@ def provision(
         schema_name="agent_traces",
         table_prefix=table_prefix,
         warehouse_id="0123456789abcdef",
+        runtime_principal="runtime-app-sp",
         mlflow_module=mlflow_module,
         workspace=workspace,
         unity_catalog_type=UnityCatalog,
@@ -151,16 +164,41 @@ def test_provisions_supported_uc_location_and_grants_every_discovered_table(
         "MLFLOW_UC_TABLE_PREFIX": "appkit",
         "MLFLOW_OTEL_SPANS_TABLE": "main.agent_traces.appkit_otel_spans",
     }
-    assert workspace.statement_execution.statements[1:] == [
-        "GRANT USE CATALOG ON CATALOG `main` TO `service-principal`",
-        "GRANT USE SCHEMA ON SCHEMA `main`.`agent_traces` TO `service-principal`",
-        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_otel_spans` TO `service-principal`",
-        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_otel_spans` TO `service-principal`",
-        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_otel_logs` TO `service-principal`",
-        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_otel_logs` TO `service-principal`",
-        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_annotations` TO `service-principal`",
-        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_annotations` TO `service-principal`",
+    assert workspace.statement_execution.statements[1:9] == [
+        "GRANT USE CATALOG ON CATALOG `main` TO `runtime-app-sp`",
+        "GRANT USE SCHEMA ON SCHEMA `main`.`agent_traces` TO `runtime-app-sp`",
+        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_otel_spans` TO `runtime-app-sp`",
+        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_otel_spans` TO `runtime-app-sp`",
+        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_otel_logs` TO `runtime-app-sp`",
+        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_otel_logs` TO `runtime-app-sp`",
+        "GRANT MODIFY ON TABLE `main`.`agent_traces`.`appkit_annotations` TO `runtime-app-sp`",
+        "GRANT SELECT ON TABLE `main`.`agent_traces`.`appkit_annotations` TO `runtime-app-sp`",
     ]
+    verification = workspace.statement_execution.statements[9:]
+    assert verification == [
+        "SHOW GRANTS ON CATALOG `main`",
+        "SHOW GRANTS ON SCHEMA `main`.`agent_traces`",
+        "SHOW GRANTS ON TABLE `main`.`agent_traces`.`appkit_otel_spans`",
+        "SHOW GRANTS ON TABLE `main`.`agent_traces`.`appkit_otel_logs`",
+        "SHOW GRANTS ON TABLE `main`.`agent_traces`.`appkit_annotations`",
+    ]
+
+
+def test_runtime_principal_is_required():
+    module = load_script()
+    with pytest.raises(ValueError, match="runtime principal"):
+        module.provision_mlflow_uc(
+            profile="DEFAULT",
+            experiment_name="/Shared/appkit-agent-traces",
+            catalog_name="main",
+            schema_name="agent_traces",
+            table_prefix="appkit",
+            warehouse_id="0123456789abcdef",
+            runtime_principal="",
+            mlflow_module=SimpleNamespace(),
+            workspace=FakeWorkspace(["appkit_otel_spans"]),
+            unity_catalog_type=UnityCatalog,
+        )
 
 
 def test_repeated_setup_is_idempotent():

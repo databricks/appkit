@@ -242,6 +242,7 @@ describe("runWithAgentTrace golden span trees", () => {
       expect(model.parentSpanContext?.spanId).toBe(root.spanContext().spanId);
       expect(model.attributes).toMatchObject({
         "mlflow.spanType": "CHAT_MODEL",
+        "gen_ai.operation.name": "chat",
         "mlflow.spanInputs": '{"messages":[{"content":"Hello","role":"user"}]}',
         "mlflow.spanOutputs": '{"text":"Hello world"}',
         "mlflow.chat.model": "dbx-claude-sonnet",
@@ -250,6 +251,10 @@ describe("runWithAgentTrace golden span trees", () => {
           '{"cache_read_input_tokens":3,"input_tokens":7,"output_tokens":2,"total_tokens":9}',
         "gen_ai.usage.input_tokens": 7,
         "gen_ai.usage.output_tokens": 2,
+        "gen_ai.usage.cache_read_input_tokens": 3,
+        "gen_ai.response.model": "dbx-claude-sonnet",
+        "gen_ai.response.time_to_first_token_ms": 12,
+        "gen_ai.response.stream_duration_ms": 40,
         "appkit.cache.read_input_tokens": 3,
         "appkit.first_token.duration_ms": 12,
         "appkit.stream.duration_ms": 40,
@@ -312,6 +317,49 @@ describe("runWithAgentTrace golden span trees", () => {
     expect(traced.traceId).toBe(observedTraceId);
   });
 
+  test("exports a verified linked remote model trace and rejects unverified continuation", async () => {
+    installTracing();
+    const remoteTraceId =
+      "trace:/main.agent_traces.remote/11111111111111111111111111111111";
+
+    await runWithAgentTrace(
+      identity("responses"),
+      { message: "delegate" },
+      async (observer) => {
+        const [start, ...rest] = modelEvents();
+        observer.onEvent(start);
+        observer.onEvent({
+          type: "remote_trace",
+          traceId: remoteTraceId,
+          spanId: "2222222222222222",
+          source: "model-serving",
+          relation: "linked",
+        });
+        observer.onEvent({
+          type: "remote_trace",
+          traceId: "trace:/main.agent_traces.remote/unverified",
+          source: "model-serving",
+          relation: "continued",
+        });
+        for (const event of rest) observer.onEvent(event);
+        return { text: "done" };
+      },
+    );
+
+    const model = finishedSpans().find(
+      (span) => span.attributes["mlflow.spanType"] === "CHAT_MODEL",
+    );
+    expect(model?.links).toHaveLength(1);
+    expect(model?.links[0]?.context).toMatchObject({
+      traceId: "11111111111111111111111111111111",
+      spanId: "2222222222222222",
+    });
+    expect(model?.links[0]?.attributes).toMatchObject({
+      "mlflow.traceRequestId": remoteTraceId,
+      "appkit.remote_trace.source": "model-serving",
+    });
+  });
+
   test("keeps the fallback trace ID active when no tracer provider is installed", async () => {
     let activeTraceId: string | undefined;
 
@@ -358,7 +406,10 @@ describe("runWithAgentTrace golden span trees", () => {
       '{"password":"[REDACTED]"}',
     );
     expect(root?.attributes["mlflow.spanOutputs"]).toBe(
-      '{"error":"[REDACTED]","text":"partial"}',
+      '{"error":"[REDACTED]","partial_output":"partial"}',
+    );
+    expect(model?.attributes["mlflow.spanOutputs"]).toBe(
+      '{"error":"[REDACTED]","partial_output":{"text":"partial"}}',
     );
     expect(root?.status.code).toBe(SpanStatusCode.ERROR);
     expect(model?.status.code).toBe(SpanStatusCode.ERROR);
@@ -424,7 +475,7 @@ describe("runWithAgentTrace golden span trees", () => {
       (span) => span.attributes["mlflow.spanType"] === "AGENT",
     );
     expect(root?.attributes["mlflow.spanOutputs"]).toBe(
-      '{"error":"[REDACTED]","text":"Hello "}',
+      '{"error":"[REDACTED]","partial_output":"Hello "}',
     );
     expect(root?.attributes["appkit.cost.available"]).toBe(false);
     expect(root?.attributes["mlflow.llm.cost"]).toBeUndefined();
@@ -476,7 +527,7 @@ describe("runWithAgentTrace golden span trees", () => {
     );
     expect(root?.status.code).toBe(SpanStatusCode.ERROR);
     expect(root?.attributes["mlflow.spanOutputs"]).toBe(
-      '{"error":"[REDACTED]","trace_id":"trace-123"}',
+      '{"error":"[REDACTED]","partial_output":{"trace_id":"trace-123"}}',
     );
     expect(JSON.stringify(root?.events)).not.toContain(secret);
   });

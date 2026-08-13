@@ -13,7 +13,8 @@ import type {
   AgentUsage,
 } from "shared";
 import { getMlflowUcTraceId } from "../mlflow-uc";
-import { captureTraceValue } from "./serialization";
+import { attachRemoteTraceLink, remoteOtelTraceId } from "./propagation";
+import { captureTraceValue, normalizeFailureOutput } from "./serialization";
 import type {
   AgentTraceIdentity,
   AgentTraceObserver,
@@ -150,6 +151,20 @@ export async function runWithAgentTrace<T>(
             }
             return;
           }
+          if (event.type === "remote_trace") {
+            const active = [...activeModels.values()].at(-1);
+            if (!active) return;
+            const otelTraceId = remoteOtelTraceId(event.traceId);
+            if (event.relation === "linked" && otelTraceId && event.spanId) {
+              attachRemoteTraceLink(active.span, {
+                traceId: event.traceId,
+                otelTraceId,
+                spanId: event.spanId,
+                source: event.source,
+              });
+            }
+            return;
+          }
           if (event.type === "status" && event.status === "error") {
             lifecycleError = true;
             reportedError ??= event.error;
@@ -228,13 +243,17 @@ export async function runWithAgentTrace<T>(
         setRootUsageAttributes(root, finalUsage);
         onCompleteUsage?.(finalUsage);
         const finalOutputText = outputText || textFromValue(value);
-        const finalOutput = hasExplicitOutput
-          ? explicitOutput
-          : failed
-            ? { text: finalOutputText, error: errorValue(operationError) }
-            : outputText || textFromValue(value)
-              ? { text: finalOutputText }
-              : value;
+        const finalOutput =
+          failed || lifecycleError
+            ? normalizeFailureOutput(
+                hasExplicitOutput ? explicitOutput : finalOutputText,
+                operationError ?? reportedError,
+              )
+            : hasExplicitOutput
+              ? explicitOutput
+              : outputText || textFromValue(value)
+                ? { text: finalOutputText }
+                : value;
         setCapturedAttribute(
           root,
           "mlflow.spanOutputs",
@@ -270,6 +289,7 @@ function updateActiveIdentity(
 function modelStartAttributes(event: AgentModelStartEvent) {
   return {
     "mlflow.spanType": "CHAT_MODEL",
+    "gen_ai.operation.name": "chat",
     "mlflow.chat.model": event.model,
     "mlflow.chat.provider": event.provider,
     "gen_ai.request.model": event.model,
@@ -283,7 +303,14 @@ function finalizeModelSpan(
   event: AgentModelEndEvent,
 ): void {
   const { span } = active;
-  setCapturedAttribute(span, "mlflow.spanOutputs", event.output);
+  setCapturedAttribute(
+    span,
+    "mlflow.spanOutputs",
+    event.error
+      ? normalizeFailureOutput(event.output, event.error)
+      : event.output,
+    event.error ? ["error"] : undefined,
+  );
   span.setAttribute(
     "mlflow.chat.tokenUsage",
     captureTraceValue(mlflowTokenUsage(event.usage)).value,
@@ -292,11 +319,19 @@ function finalizeModelSpan(
   span.setAttribute("gen_ai.usage.output_tokens", event.usage.outputTokens);
   if (event.usage.cacheReadInputTokens !== undefined) {
     span.setAttribute(
+      "gen_ai.usage.cache_read_input_tokens",
+      event.usage.cacheReadInputTokens,
+    );
+    span.setAttribute(
       "appkit.cache.read_input_tokens",
       event.usage.cacheReadInputTokens,
     );
   }
   if (event.usage.cacheCreationInputTokens !== undefined) {
+    span.setAttribute(
+      "gen_ai.usage.cache_creation_input_tokens",
+      event.usage.cacheCreationInputTokens,
+    );
     span.setAttribute(
       "appkit.cache.creation_input_tokens",
       event.usage.cacheCreationInputTokens,
@@ -305,12 +340,21 @@ function finalizeModelSpan(
   if (event.finishReason) {
     span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
   }
+  span.setAttribute("gen_ai.response.model", event.model);
   if (event.firstTokenAt !== undefined) {
+    span.setAttribute(
+      "gen_ai.response.time_to_first_token_ms",
+      Math.max(0, event.firstTokenAt - active.event.startedAt),
+    );
     span.setAttribute(
       "appkit.first_token.duration_ms",
       Math.max(0, event.firstTokenAt - active.event.startedAt),
     );
   }
+  span.setAttribute(
+    "gen_ai.response.stream_duration_ms",
+    event.streamDurationMs,
+  );
   span.setAttribute("appkit.stream.duration_ms", event.streamDurationMs);
   setCostAttributes(span, event.usage);
   if (event.error) {

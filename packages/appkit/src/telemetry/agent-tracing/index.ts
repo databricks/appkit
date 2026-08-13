@@ -2,8 +2,9 @@ export {
   attachRemoteTraceLink,
   injectActiveTraceContext,
   type RemoteTraceReference,
+  verifiedAgentRemoteTrace,
 } from "./propagation";
-export { captureTraceValue } from "./serialization";
+export { captureTraceValue, normalizeFailureOutput } from "./serialization";
 export {
   getActiveAgentTraceIdentity,
   resolveAgentTraceAppName,

@@ -375,6 +375,10 @@ describe("dispatchToolCall — semantic TOOL spans", () => {
       "appkit.error": '{"error":"[REDACTED]"}',
     });
     expect(tool.status.code).toBe(SpanStatusCode.ERROR);
+    expect(JSON.parse(String(tool.attributes["mlflow.spanOutputs"]))).toEqual({
+      error: "[REDACTED]",
+      partial_output: { available: false, reason: "no output produced" },
+    });
     expect(tool.attributes["appkit.tool.duration_ms"]).toEqual(
       expect.any(Number),
     );

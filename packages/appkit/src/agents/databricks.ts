@@ -1,3 +1,4 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -14,7 +15,12 @@ import {
   stream as servingStream,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
-import { injectActiveTraceContext } from "../telemetry/agent-tracing";
+import {
+  captureTraceValue,
+  injectActiveTraceContext,
+  normalizeFailureOutput,
+  verifiedAgentRemoteTrace,
+} from "../telemetry/agent-tracing";
 import {
   DEFAULT_TRACE_REDACT_KEYS,
   REDACTED_TRACE_VALUE,
@@ -169,20 +175,7 @@ function remoteTraceFromPayload(
     (value): value is string =>
       typeof value === "string" && value.trim().length > 0,
   );
-  return spanId
-    ? {
-        type: "remote_trace",
-        traceId,
-        spanId,
-        source: "model-serving",
-        relation: "linked",
-      }
-    : {
-        type: "remote_trace",
-        traceId,
-        source: "model-serving",
-        relation: "continued",
-      };
+  return verifiedAgentRemoteTrace(traceId, spanId, "model-serving");
 }
 
 function sanitizedModelError(error: unknown): string {
@@ -819,13 +812,20 @@ export class DatabricksAdapter implements AgentAdapter {
         "x-databricks-trace-id",
       );
       if (headerTraceId?.trim()) {
-        emittedRemoteTraces.add(headerTraceId);
-        yield {
-          type: "remote_trace",
-          traceId: headerTraceId,
-          source: "model-serving",
-          relation: "continued",
-        };
+        const headerSpanId = getResponseHeaders(responseBody)?.get(
+          "x-databricks-span-id",
+        );
+        const remoteTrace = verifiedAgentRemoteTrace(
+          headerTraceId,
+          headerSpanId ?? undefined,
+          "model-serving",
+        );
+        if (remoteTrace) {
+          emittedRemoteTraces.add(
+            `${remoteTrace.traceId}:${remoteTrace.spanId ?? ""}`,
+          );
+          yield remoteTrace;
+        }
       }
 
       reader = responseBody.getReader();
@@ -1119,15 +1119,66 @@ export class DatabricksAdapter implements AgentAdapter {
 export function parseTextToolCalls(
   text: string,
 ): Array<{ name: string; args: unknown }> {
+  const span = trace
+    .getTracer("@databricks/appkit-agent-tracing")
+    .startSpan("databricks text tool-call parser", {
+      attributes: {
+        "mlflow.spanType": "PARSER",
+        "appkit.parser.source": "databricks.text_tool_calls",
+      },
+    });
+  const startedAt = Date.now();
+  setParserCapturedAttribute(span, "mlflow.spanInputs", { source: text });
   const trimmed = text.trim();
+  try {
+    const jsonResult = tryParseLlamaJsonToolCalls(trimmed);
+    const result =
+      jsonResult.length > 0
+        ? jsonResult
+        : tryParsePythonStyleToolCalls(trimmed);
+    const validationFailure =
+      result.length === 0 && looksLikeTextToolCall(trimmed);
+    span.setAttribute("appkit.parser.validation_error", validationFailure);
+    if (validationFailure) {
+      setParserCapturedAttribute(
+        span,
+        "mlflow.spanOutputs",
+        normalizeFailureOutput([], "Tool-call text failed validation"),
+        ["error"],
+      );
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: "Parser validation failed",
+      });
+    } else {
+      setParserCapturedAttribute(span, "mlflow.spanOutputs", result);
+      span.setStatus({ code: SpanStatusCode.OK });
+    }
+    return result;
+  } finally {
+    span.setAttribute(
+      "appkit.parser.duration_ms",
+      Math.max(0, Date.now() - startedAt),
+    );
+    span.end();
+  }
+}
 
-  const jsonResult = tryParseLlamaJsonToolCalls(trimmed);
-  if (jsonResult.length > 0) return jsonResult;
+function looksLikeTextToolCall(text: string): boolean {
+  return /\[\s*\{|[A-Za-z_][\w.]*\s*\(/.test(text);
+}
 
-  const pyResult = tryParsePythonStyleToolCalls(trimmed);
-  if (pyResult.length > 0) return pyResult;
-
-  return [];
+function setParserCapturedAttribute(
+  span: import("@opentelemetry/api").Span,
+  key: string,
+  value: unknown,
+  redactKeys?: readonly string[],
+): void {
+  const captured = captureTraceValue(value, { redactKeys });
+  span.setAttribute(key, captured.value);
+  span.setAttribute(`${key}.original_bytes`, captured.originalBytes);
+  span.setAttribute(`${key}.sha256`, captured.sha256);
+  span.setAttribute(`${key}.truncated`, captured.truncated);
 }
 
 function isLlamaToolJsonItem(value: unknown): value is Record<

@@ -18,6 +18,7 @@ import {
   test,
   vi,
 } from "vitest";
+import { retainResponseHeaders } from "../../connectors/serving/client";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import {
   DatabricksAdapter,
@@ -333,7 +334,6 @@ describe("DatabricksAdapter", () => {
     expect(events.map((event) => event.type)).toEqual([
       "status",
       "model_start",
-      "remote_trace",
       "model_end",
       "tool_call",
       "tool_result",
@@ -460,11 +460,78 @@ describe("DatabricksAdapter", () => {
       streamDurationMs: 30,
       endedAt: 1_055,
     });
-    expect(events[2]).toEqual({
+    expect(events.some((event) => event.type === "remote_trace")).toBe(false);
+  });
+
+  test("accepts a trace-only response identity only when it proves W3C continuation", async () => {
+    const adapter = new DatabricksAdapter({
+      model: "continued-model",
+      streamBody: async () => {
+        const response = await (mockFetch([
+          completionChunk({ content: "done", finishReason: "stop" }),
+        ])("http://test") as unknown as Promise<{
+          body: ReadableStream<Uint8Array>;
+        }>);
+        return retainResponseHeaders(
+          response.body,
+          new Headers({ "x-databricks-trace-id": TRACE_ID }),
+        );
+      },
+    });
+    const events: AgentEvent[] = [];
+
+    await withActiveTrace(async () => {
+      for await (const event of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(event);
+      }
+    });
+
+    expect(events).toContainEqual({
       type: "remote_trace",
-      traceId: "trace:/main.agent_traces.appkit/remote-step-1",
+      traceId: TRACE_ID,
       source: "model-serving",
       relation: "continued",
+    });
+  });
+
+  test("turns a foreign response trace and span header into linkable identity", async () => {
+    const remoteTrace = "11111111111111111111111111111111";
+    const remoteSpan = "2222222222222222";
+    const adapter = new DatabricksAdapter({
+      model: "linked-model",
+      streamBody: async () => {
+        const response = await (mockFetch([
+          completionChunk({ content: "done", finishReason: "stop" }),
+        ])("http://test") as unknown as Promise<{
+          body: ReadableStream<Uint8Array>;
+        }>);
+        return retainResponseHeaders(
+          response.body,
+          new Headers({
+            "x-databricks-trace-id": `trace:/main.agent_traces.remote/${remoteTrace}`,
+            "x-databricks-span-id": remoteSpan,
+          }),
+        );
+      },
+    });
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      type: "remote_trace",
+      traceId: `trace:/main.agent_traces.remote/${remoteTrace}`,
+      spanId: remoteSpan,
+      source: "model-serving",
+      relation: "linked",
     });
   });
 
@@ -606,12 +673,13 @@ describe("DatabricksAdapter", () => {
   });
 
   test("emits a linked remote trace from a terminal MLflow trace event", async () => {
+    const remoteTrace = "33333333333333333333333333333333";
     globalThis.fetch = mockFetch([
       completionChunk({
         content: "ok",
         finishReason: "stop",
         usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-        mlflowTraceId: "trace:/catalog.schema.table/terminal-trace",
+        mlflowTraceId: `trace:/catalog.schema.table/${remoteTrace}`,
         mlflowSpanId: "0123456789abcdef",
       }),
     ]);
@@ -626,7 +694,7 @@ describe("DatabricksAdapter", () => {
 
     expect(events).toContainEqual({
       type: "remote_trace",
-      traceId: "trace:/catalog.schema.table/terminal-trace",
+      traceId: `trace:/catalog.schema.table/${remoteTrace}`,
       spanId: "0123456789abcdef",
       source: "model-serving",
       relation: "linked",
@@ -739,7 +807,8 @@ describe("DatabricksAdapter", () => {
             output_tokens: 3,
             total_tokens: 12,
           },
-          mlflowTraceId: "trace:/catalog.schema.table/cancelled-remote",
+          mlflowTraceId:
+            "trace:/catalog.schema.table/44444444444444444444444444444444",
           mlflowSpanId: "0123456789abcdef",
         }) +
         sseChunk("[DONE]"),
@@ -777,7 +846,7 @@ describe("DatabricksAdapter", () => {
       },
       remoteTrace: {
         type: "remote_trace",
-        traceId: "trace:/catalog.schema.table/cancelled-remote",
+        traceId: "trace:/catalog.schema.table/44444444444444444444444444444444",
         spanId: "0123456789abcdef",
         source: "model-serving",
         relation: "linked",

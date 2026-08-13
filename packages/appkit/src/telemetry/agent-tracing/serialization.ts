@@ -47,6 +47,31 @@ export function captureTraceValue(
   };
 }
 
+export function normalizeFailureOutput(
+  partialOutput: unknown,
+  error: unknown,
+): { partial_output: unknown; error: string } {
+  const partial = partialOutputValue(partialOutput);
+  return {
+    partial_output:
+      partial === undefined || partial === null || partial === ""
+        ? { available: false, reason: "no output produced" }
+        : partial,
+    error:
+      error instanceof Error ? error.message : String(error ?? "Unknown error"),
+  };
+}
+
+function partialOutputValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.length > 0 ? value : undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if ("partial_output" in record) return record.partial_output;
+  if (Object.keys(record).length === 1 && "error" in record) return undefined;
+  const { error: _error, ...partial } = record;
+  return Object.keys(partial).length > 0 ? partial : undefined;
+}
+
 function normalizeRedactKey(value: string): string {
   return value.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
 }

@@ -54,6 +54,7 @@ export interface MlflowUcSetupOptions {
   schema: string;
   tablePrefix: string;
   warehouseId: string;
+  runtimePrincipal: string;
 }
 
 interface MlflowUcSetupDependencies {
@@ -116,6 +117,8 @@ export function buildMlflowProvisionCommand(
     options.tablePrefix,
     "--warehouse-id",
     options.warehouseId,
+    "--runtime-principal",
+    options.runtimePrincipal,
     "--output-json",
     path.join(options.cwd, ".databricks", "mlflow-uc.json"),
   ];
@@ -390,6 +393,7 @@ interface SetupCliOptions {
   mlflowSchema: string;
   mlflowTablePrefix: string;
   mlflowWarehouseId?: string;
+  mlflowRuntimePrincipal?: string;
 }
 
 function databricksJson(args: string[]): unknown {
@@ -528,6 +532,15 @@ async function runSetup(options: SetupCliOptions) {
       );
     }
     const userName = resolveDatabricksUser(profile);
+    const runtimePrincipal =
+      options.mlflowRuntimePrincipal ??
+      process.env.DATABRICKS_APP_SERVICE_PRINCIPAL ??
+      env.DATABRICKS_APP_SERVICE_PRINCIPAL;
+    if (!runtimePrincipal?.trim()) {
+      throw new Error(
+        "MLflow UC setup requires --mlflow-runtime-principal (the deployed app service principal application ID)",
+      );
+    }
     const workspaceHost = resolveWorkspaceHost(profile, env);
     await provisionAndPersistMlflowUc(
       {
@@ -538,6 +551,7 @@ async function runSetup(options: SetupCliOptions) {
         schema: options.mlflowSchema,
         tablePrefix: options.mlflowTablePrefix,
         warehouseId,
+        runtimePrincipal: runtimePrincipal.trim(),
       },
       { workspaceHost },
     );
@@ -557,6 +571,10 @@ export const setupCommand = new Command("setup")
   .option(
     "--mlflow-warehouse-id <id>",
     "SQL warehouse used to provision and query UC trace tables",
+  )
+  .option(
+    "--mlflow-runtime-principal <application-id>",
+    "Deployed app service principal receiving explicit UC trace grants",
   )
   .addHelpText(
     "after",

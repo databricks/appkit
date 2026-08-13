@@ -533,17 +533,20 @@ async function closeServer(server: Server | undefined): Promise<void> {
   });
 }
 
-async function captureGeneratedHttpTurn(
+async function captureGeneratedHttpTurns(
   candidate: GeneratedCandidate,
-): Promise<TraceManifest> {
+): Promise<{ success: TraceManifest; failure: TraceManifest }> {
   const { name: template, directory } = candidate;
   const helperPath = join(directory, "server/agents/helper.ts");
   const generated = (await import(pathToFileURL(helperPath).href)) as {
     helper: AgentDefinition;
   };
   const adapter: AgentAdapter = {
-    async *run(_input: AgentInput, runtime: AgentRunContext) {
+    async *run(input: AgentInput, runtime: AgentRunContext) {
       const startedAt = Date.now() - 10;
+      const injectFailure = JSON.stringify(input.messages).includes(
+        "INJECT_TRACE_FAILURE",
+      );
       yield {
         type: "model_start",
         stepId: "generated-step",
@@ -552,6 +555,27 @@ async function captureGeneratedHttpTurn(
         input: { messages: [{ role: "user", content: "Use count_words" }] },
         startedAt,
       };
+      if (injectFailure) {
+        yield { type: "message_delta", content: "partial" };
+        yield {
+          type: "model_end",
+          stepId: "generated-step",
+          model: "generated-test-model",
+          provider: "databricks",
+          output: { text: "partial" },
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            totalTokens: 2,
+            costAvailable: false,
+          },
+          firstTokenAt: startedAt + 2,
+          streamDurationMs: 10,
+          endedAt: startedAt + 10,
+          error: "injected model failure",
+        };
+        return;
+      }
       const value = await runtime.executeTool("count_words", {
         text: "hello traced world",
       });
@@ -667,35 +691,54 @@ async function captureGeneratedHttpTurn(
     if (!address || typeof address === "string") {
       throw new Error(`${template} generated HTTP server did not bind a port`);
     }
-    const response = await fetch(
-      `http://127.0.0.1:${address.port}/invocations`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-forwarded-user": "user-1",
-          "x-mlflow-session-id": "session-1",
-          "x-request-id": "request-1",
+    const invoke = async (input: string) => {
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/invocations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-user": "user-1",
+            "x-mlflow-session-id": "session-1",
+            "x-request-id": "request-1",
+          },
+          body: JSON.stringify({ input }),
         },
-        body: JSON.stringify({
-          input: "Count the words in hello traced world. Use count_words.",
-        }),
-      },
+      );
+      const responseBody = await response.text();
+      expect(
+        response.ok,
+        `${template} HTTP ${response.status}: ${responseBody}`,
+      ).toBe(true);
+      const traceId = response.headers.get("x-mlflow-trace-id");
+      expect(
+        traceId,
+        `${template} generated handler trace identity`,
+      ).toBeTruthy();
+      return traceId?.split("/").at(-1) ?? "";
+    };
+    const successTraceId = await invoke(
+      "Count the words in hello traced world. Use count_words.",
     );
-    const responseBody = await response.text();
-    expect(
-      response.ok,
-      `${template} HTTP ${response.status}: ${responseBody}`,
-    ).toBe(true);
-    expect(
-      response.headers.get("x-mlflow-trace-id"),
-      `${template} generated handler trace identity`,
-    ).toBeTruthy();
+    const failureTraceId = await invoke("INJECT_TRACE_FAILURE");
     await provider.forceFlush();
     const semanticSpans = exporter
       .getFinishedSpans()
       .filter((span) => span.attributes["mlflow.spanType"] !== undefined);
-    return normalize(template, semanticSpans);
+    return {
+      success: normalize(
+        template,
+        semanticSpans.filter(
+          (span) => span.spanContext().traceId === successTraceId,
+        ),
+      ),
+      failure: normalize(
+        template,
+        semanticSpans.filter(
+          (span) => span.spanContext().traceId === failureTraceId,
+        ),
+      ),
+    };
   } finally {
     try {
       if (appkit) await appkit.shutdown();
@@ -772,7 +815,8 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
       ) as TraceManifest;
       assertContract(reloaded);
 
-      const manifest = await captureGeneratedHttpTurn(candidate);
+      const { success: manifest, failure } =
+        await captureGeneratedHttpTurns(candidate);
       expect(process.listenerCount("SIGTERM"), candidate.name).toBe(
         baselineSigterm,
       );
@@ -789,11 +833,27 @@ test("every behavior-discovered generated surface executes its HTTP trace proof"
         ),
       ).toBe(true);
       assertContract(manifest);
+      assertContract(failure);
+      expect(
+        failure.spans.some(
+          (span) => span.status === "ERROR" || span.status === 2,
+        ),
+        `${candidate.name} injected failure did not finalize as ERROR: ${JSON.stringify(
+          failure.spans.map((span) => [span.name, span.status, span.outputs]),
+        )}`,
+      ).toBe(true);
       if (
         process.env.APPKIT_TRACE_CONFORMANCE_CANDIDATE === candidate.name &&
         process.env.TRACE_CONFORMANCE_MANIFEST
       ) {
         writePythonManifest(process.env.TRACE_CONFORMANCE_MANIFEST, manifest);
+        const failurePath = process.env.TRACE_CONFORMANCE_FAILURE_MANIFEST;
+        if (!failurePath) {
+          throw new Error(
+            `${candidate.name} owner proof is missing TRACE_CONFORMANCE_FAILURE_MANIFEST`,
+          );
+        }
+        writePythonManifest(failurePath, failure);
       }
     } catch (error) {
       failures.push(

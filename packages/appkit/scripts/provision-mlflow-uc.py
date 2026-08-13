@@ -124,6 +124,47 @@ def _grant_trace_access(
         _execute(workspace, warehouse_id, statement)
 
 
+def _verify_trace_access(
+    workspace: Any,
+    warehouse_id: str,
+    principal: str,
+    catalog_name: str,
+    schema_name: str,
+    table_names: list[str],
+) -> None:
+    targets = [
+        (f"CATALOG {_quoted_identifier(catalog_name)}", {"USE CATALOG"}),
+        (
+            f"SCHEMA {_quoted_identifier(catalog_name)}.{_quoted_identifier(schema_name)}",
+            {"USE SCHEMA"},
+        ),
+        *[
+            (
+                "TABLE "
+                f"{_quoted_identifier(catalog_name)}.{_quoted_identifier(schema_name)}."
+                f"{_quoted_identifier(table_name)}",
+                {"MODIFY", "SELECT"},
+            )
+            for table_name in table_names
+        ],
+    ]
+    for target, required in targets:
+        response = _execute(workspace, warehouse_id, f"SHOW GRANTS ON {target}")
+        rows = getattr(getattr(response, "result", None), "data_array", None) or []
+        observed = {
+            str(value).upper()
+            for row in rows
+            if any(str(value) == principal for value in row)
+            for value in row
+        }
+        missing = required - observed
+        if missing:
+            raise RuntimeError(
+                f"Runtime principal {principal!r} lacks explicit "
+                f"{', '.join(sorted(missing))} on {target}"
+            )
+
+
 def provision_mlflow_uc(
     *,
     profile: str,
@@ -132,10 +173,14 @@ def provision_mlflow_uc(
     schema_name: str,
     table_prefix: str,
     warehouse_id: str,
+    runtime_principal: str,
     mlflow_module: Any | None = None,
     workspace: Any | None = None,
     unity_catalog_type: type | None = None,
 ) -> dict[str, str]:
+    runtime_principal = runtime_principal.strip()
+    if not runtime_principal:
+        raise ValueError("The deployed app runtime principal is required for UC grants")
     if mlflow_module is None:
         import mlflow as mlflow_module
     if unity_catalog_type is None:
@@ -183,26 +228,18 @@ def provision_mlflow_uc(
             f"was not created; discovered: {', '.join(table_names) or '<none>'}"
         )
 
-    current_user = workspace.current_user.me()
-    principal = next(
-        (
-            value
-            for value in (
-                getattr(current_user, "user_name", None),
-                getattr(current_user, "application_id", None),
-                getattr(current_user, "id", None),
-            )
-            if isinstance(value, str) and value
-        ),
-        None,
-    )
-    if principal is None:
-        raise RuntimeError("Could not resolve the principal receiving UC trace grants")
-
     _grant_trace_access(
         workspace,
         warehouse_id,
-        principal,
+        runtime_principal,
+        catalog_name,
+        schema_name,
+        table_names,
+    )
+    _verify_trace_access(
+        workspace,
+        warehouse_id,
+        runtime_principal,
         catalog_name,
         schema_name,
         table_names,
@@ -244,6 +281,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--schema", required=True)
     parser.add_argument("--table-prefix", required=True)
     parser.add_argument("--warehouse-id", required=True)
+    parser.add_argument("--runtime-principal", required=True)
     parser.add_argument("--output-json", type=Path, required=True)
     return parser.parse_args()
 
@@ -257,6 +295,7 @@ def main() -> None:
         schema_name=args.schema,
         table_prefix=args.table_prefix,
         warehouse_id=args.warehouse_id,
+        runtime_principal=args.runtime_principal,
     )
     write_output_atomically(args.output_json, values)
     print(json.dumps(values, sort_keys=True))
