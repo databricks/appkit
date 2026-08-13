@@ -66,10 +66,9 @@ export const invocationsRequestSchema = z.object({
   ]),
   model: z.string().optional(),
   /**
-   * MLflow run id to link this turn's trace to, same as {@link chatRequestSchema}.
-   * The non-streaming invoke surface returns the trace id in the response body
-   * (`mlflow_trace_id`) rather than a `metadata` event, so an eval runner can
-   * attach assessments to the trace.
+   * MLflow run id to link this turn's trace to. Same as `chatRequestSchema`,
+   * but the trace id comes back in the response body (`mlflow_trace_id`) since
+   * this surface has no `metadata` event.
    */
   mlflowRunId: z.string().max(64).optional(),
 });

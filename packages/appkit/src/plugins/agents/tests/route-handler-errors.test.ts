@@ -3,9 +3,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 
-// Partial-mock the tracing module: keep traceAgent/traceTool executing their
-// callbacks (so the turn runs), but make the trace id deterministic and spy on
-// run-linking so the invoke-surface wiring can be asserted.
+// Partial-mock the tracing module: traceAgent/traceTool still run their
+// callbacks, but the trace id is deterministic and run-linking is a spy.
 const linkTraceToRun = vi.hoisted(() => vi.fn());
 let mockTraceId: string | undefined;
 vi.mock("../mlflow", () => ({
@@ -83,13 +82,13 @@ function mockRes() {
   };
 }
 
-function seedPlugin(): AgentsPlugin {
+function seedPlugin(adapter: unknown = { async *run() {} }): AgentsPlugin {
   const plugin = new AgentsPlugin({ dir: false });
   // biome-ignore lint/suspicious/noExplicitAny: seed private state
   (plugin as any).agents.set("default", {
     name: "default",
     instructions: "hi",
-    adapter: { async *run() {} },
+    adapter,
     toolIndex: new Map(),
   });
   // biome-ignore lint/suspicious/noExplicitAny: seed private state
@@ -416,20 +415,11 @@ describe("POST /invocations & /responses — successful invoke", () => {
   });
 
   function seedEchoPlugin(): AgentsPlugin {
-    const plugin = new AgentsPlugin({ dir: false });
-    // biome-ignore lint/suspicious/noExplicitAny: seed
-    (plugin as any).agents.set("default", {
-      name: "default",
-      instructions: "hi",
-      adapter: {
-        async *run() {
-          yield { type: "message_delta", content: "ok" };
-        },
+    const plugin = seedPlugin({
+      async *run() {
+        yield { type: "message_delta", content: "ok" };
       },
-      toolIndex: new Map(),
     });
-    // biome-ignore lint/suspicious/noExplicitAny: seed
-    (plugin as any).defaultAgentName = "default";
     // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),

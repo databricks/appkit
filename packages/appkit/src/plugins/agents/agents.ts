@@ -1302,10 +1302,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
     const limits = this.resolvedLimits;
 
-    // Surfaced in the response envelope so an eval runner can attach
-    // assessments to this turn's trace. Set inside the span below (the only
-    // context where the active trace id is resolvable); undefined when tracing
-    // is disabled.
+    // Assigned inside the span below (the only place the active trace id
+    // resolves), read into the response envelope after.
     let mlflowTraceId: string | undefined;
 
     const runState: RunState = {
@@ -1341,8 +1339,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           })),
         },
         async (span) => {
-          // Link this turn's trace to an eval run when supplied, so the trace
-          // shows under the MLflow evaluation run. Mirrors `_streamAgent`.
+          // Link this turn's trace to an eval run when the eval runner
+          // supplied one, so the trace shows under the MLflow evaluation run.
           if (mlflowRunId) linkTraceToRun(mlflowRunId);
 
           const pluginNames = this.context
@@ -1392,8 +1390,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             });
           }
 
-          // Capture inside the span, where the active trace id resolves.
-          // No-op when tracing is disabled.
           mlflowTraceId = currentTraceId();
         },
       );
@@ -1442,9 +1438,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
-      // Present only when tracing is enabled; lets an eval runner attach
-      // assessments to this turn's trace (the streaming path surfaces the same
-      // id via a `metadata` event).
+      // Lets an eval runner attach assessments to this turn's trace; absent
+      // when tracing is disabled.
       ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
       output: [message],
     });
