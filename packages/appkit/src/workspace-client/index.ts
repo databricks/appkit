@@ -5,6 +5,14 @@
  * behind a stable facade.
  */
 
+export {
+  ApiError,
+  ConfigError,
+  Context,
+  createWorkspaceClient,
+  Time,
+  TimeUnits,
+} from "shared";
 export type {
   CancellationToken,
   ClientOptions,
@@ -16,12 +24,4 @@ export type {
   Waiter,
   WorkspaceClient,
   WorkspaceClientOptions,
-} from "shared/workspace-client";
-export {
-  ApiError,
-  ConfigError,
-  Context,
-  createWorkspaceClient,
-  Time,
-  TimeUnits,
 } from "shared/workspace-client";
