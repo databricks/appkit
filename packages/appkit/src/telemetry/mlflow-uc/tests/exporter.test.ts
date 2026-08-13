@@ -33,6 +33,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
+  vi.unstubAllGlobals();
 });
 
 async function startBackend(
@@ -587,6 +588,42 @@ describe("MlflowUcSpanExporter", () => {
       tags: { "mlflow.traceName": "support-agent" },
       assessments: [],
     });
+  });
+
+  test("releases the successful trace-info response body before OTLP upload", async () => {
+    let traceInfoBodyCancelled = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                traceInfoBodyCancelled = true;
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const client = createClient("https://example.test", ["token-1"]);
+    const spans = await createTraceSpans();
+    const exporter = new MlflowUcSpanExporter(config, client, {
+      createOtlpExporter() {
+        return {
+          export(_spans, callback) {
+            callback({ code: ExportResultCode.SUCCESS });
+          },
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } satisfies SpanExporter;
+      },
+    });
+
+    await expect(exportSpans(exporter, spans)).resolves.toEqual({
+      code: ExportResultCode.SUCCESS,
+    });
+
+    expect(traceInfoBodyCancelled).toBe(true);
   });
 
   test("passes the exact UC header name to a freshly authenticated OTLP exporter", async () => {

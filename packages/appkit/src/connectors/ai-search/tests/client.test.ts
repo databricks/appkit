@@ -269,18 +269,18 @@ describe("AiSearchConnector semantic retrieval spans", () => {
     });
     expect(span.status).toEqual({
       code: SpanStatusCode.ERROR,
-      message: "Retriever operation failed",
+      message: "vector backend exposed password [REDACTED]",
     });
     expect(span.events).toEqual([
       expect.objectContaining({
         name: "exception",
         attributes: expect.objectContaining({
-          "exception.message": "Retriever operation failed",
+          "exception.message": "vector backend exposed password [REDACTED]",
         }),
       }),
     ]);
     expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
-      error: "[REDACTED]",
+      message: "vector backend exposed password [REDACTED]",
     });
     expect(JSON.parse(String(span.attributes["mlflow.spanInputs"]))).toEqual({
       columns: ["id", "text"],
@@ -396,7 +396,7 @@ describe("AiSearchConnector semantic retrieval spans", () => {
     const span = retrieverSpan(observed.spans);
     expect(span.status).toEqual({
       code: SpanStatusCode.ERROR,
-      message: "Retriever operation failed",
+      message: "Query cancelled before execution",
     });
     expect(span.attributes).toMatchObject({
       "appkit.retriever.latency_ms": expect.any(Number),
@@ -413,7 +413,7 @@ describe("AiSearchConnector semantic retrieval spans", () => {
       reranker: null,
     });
     expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
-      error: "[REDACTED]",
+      message: "Query cancelled before execution",
     });
     expect(span.events).toEqual([
       expect.objectContaining({ name: "exception" }),
@@ -446,7 +446,7 @@ describe("AiSearchConnector semantic retrieval spans", () => {
     const span = retrieverSpan(observed.spans);
     expect(span.status).toEqual({
       code: SpanStatusCode.ERROR,
-      message: "Retriever operation failed",
+      message: "Query cancelled before execution",
     });
     expect(span.attributes).toMatchObject({
       "appkit.retriever.latency_ms": expect.any(Number),
@@ -459,7 +459,7 @@ describe("AiSearchConnector semantic retrieval spans", () => {
       queryType: "next_page",
     });
     expect(JSON.parse(String(span.attributes["mlflow.spanOutputs"]))).toEqual({
-      error: "[REDACTED]",
+      message: "Query cancelled before execution",
     });
     expect(span.events).toEqual([
       expect.objectContaining({ name: "exception" }),

@@ -503,30 +503,8 @@ async function runSetup(options: SetupCliOptions) {
     action = "Created";
   }
 
-  if (shouldWrite) {
-    fs.writeFileSync(claudePath, finalContent);
-    console.log(`\n✓ ${action} CLAUDE.md`);
-    console.log(`  Path: ${claudePath}`);
-  } else {
-    console.log("\nTo create/update CLAUDE.md, run:");
-    console.log("  npx appkit setup --write\n");
-
-    if (existingContent) {
-      console.log(
-        `This will ${
-          existingContent.includes(SECTION_START)
-            ? "update the existing"
-            : "add a new"
-        } AppKit section.\n`,
-      );
-    }
-
-    console.log("Preview of AppKit section:\n");
-    console.log("─".repeat(50));
-    console.log(generateSection(installed));
-    console.log("─".repeat(50));
-  }
-
+  // Validate and provision tracing before writing any local guidance so a
+  // failed prerequisite cannot leave the project in a partially updated state.
   const cwd = process.cwd();
   if (shouldWrite && projectRequiresMlflowUc(cwd, options.mlflowUc === true)) {
     const env = readEnvFile(path.join(cwd, ".env"));
@@ -569,6 +547,30 @@ async function runSetup(options: SetupCliOptions) {
       },
       { workspaceHost },
     );
+  }
+
+  if (shouldWrite) {
+    fs.writeFileSync(claudePath, finalContent);
+    console.log(`\n✓ ${action} CLAUDE.md`);
+    console.log(`  Path: ${claudePath}`);
+  } else {
+    console.log("\nTo create/update CLAUDE.md, run:");
+    console.log("  npx appkit setup --write\n");
+
+    if (existingContent) {
+      console.log(
+        `This will ${
+          existingContent.includes(SECTION_START)
+            ? "update the existing"
+            : "add a new"
+        } AppKit section.\n`,
+      );
+    }
+
+    console.log("Preview of AppKit section:\n");
+    console.log("─".repeat(50));
+    console.log(generateSection(installed));
+    console.log("─".repeat(50));
   }
 }
 

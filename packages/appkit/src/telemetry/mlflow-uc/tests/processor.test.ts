@@ -196,6 +196,39 @@ describe("MlflowUcSpanProcessor", () => {
     await provider.shutdown();
   });
 
+  test("limits concurrent trace exports and starts queued work as capacity frees", async () => {
+    const callbacks: Array<
+      (result: { code: ExportResultCode; error?: Error }) => void
+    > = [];
+    const { exporter, batches } = collectingExporter((_batch, callback) => {
+      callbacks.push(callback);
+    });
+    const processor = new MlflowUcSpanProcessor(config, exporter, undefined, {
+      maxConcurrentExports: 2,
+    });
+    const trees = [
+      startTree(processor),
+      startTree(processor),
+      startTree(processor),
+    ];
+
+    for (const { model, agent } of trees) {
+      model.end();
+      agent.end();
+    }
+    expect(batches).toHaveLength(2);
+
+    callbacks.shift()?.({ code: ExportResultCode.SUCCESS });
+    await Promise.resolve();
+    expect(batches).toHaveLength(3);
+
+    for (const callback of callbacks) {
+      callback({ code: ExportResultCode.SUCCESS });
+    }
+    for (const { http } of trees) http.end();
+    await processor.shutdown();
+  });
+
   test("concurrent shutdown callers wait for the same exporter barrier", async () => {
     let releaseShutdown!: () => void;
     const shutdownBarrier = new Promise<void>((resolve) => {

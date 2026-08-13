@@ -137,6 +137,24 @@ describe("MLflow UC setup", () => {
     ).toThrow();
   });
 
+  test("does not partially write guidance when tracing prerequisites fail", async () => {
+    const cwd = createProject();
+    const packageDirectory = join(cwd, "node_modules", "@databricks", "appkit");
+    mkdirSync(packageDirectory, { recursive: true });
+    writeFileSync(
+      join(packageDirectory, "package.json"),
+      JSON.stringify({ name: "@databricks/appkit" }),
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      setupCommand.parseAsync(["node", "setup", "--write"]),
+    ).rejects.toThrow(/requires --mlflow-warehouse-id/i);
+
+    expect(() => readFileSync(join(cwd, "CLAUDE.md"), "utf8")).toThrow();
+  });
+
   test("reports an actionable error when uv is unavailable", async () => {
     const cwd = createProject();
 

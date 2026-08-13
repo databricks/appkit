@@ -362,6 +362,7 @@ export class MlflowUcSpanExporter
         parseRetryAfter(traceInfoResponse.headers.get("retry-after")),
       );
     }
+    await traceInfoResponse.body?.cancel();
 
     const otlpExporter = this.getOrCreateOtlpExporter(host);
     await new Promise<void>((resolve, reject) => {

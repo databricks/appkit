@@ -359,26 +359,31 @@ function setCapturedAttribute(span: Span, key: string, value: unknown): void {
 }
 
 function recordRetrieverFailure(span: Span, error: unknown): void {
-  const failure = captureTraceValue(
-    {
-      error:
-        error instanceof Error
-          ? error.message
-          : String(error ?? "Unknown error"),
-    },
-    { redactKeys: ["error"] },
-  );
+  const message = sanitizeRetrieverErrorMessage(error);
+  const failure = captureTraceValue({ message });
   span.setAttribute("appkit.error", failure.value);
   span.setAttribute("mlflow.spanOutputs", failure.value);
   span.setAttribute("mlflow.spanOutputs.original_bytes", failure.originalBytes);
   span.setAttribute("mlflow.spanOutputs.sha256", failure.sha256);
   span.setAttribute("mlflow.spanOutputs.truncated", failure.truncated);
   span.recordException({
-    name: "Error",
-    message: "Retriever operation failed",
+    name: error instanceof Error ? error.name : "Error",
+    message,
   });
   span.setStatus({
     code: SpanStatusCode.ERROR,
-    message: "Retriever operation failed",
+    message,
   });
+}
+
+function sanitizeRetrieverErrorMessage(error: unknown): string {
+  return (
+    error instanceof Error ? error.message : String(error ?? "Unknown error")
+  )
+    .replace(/\bBearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(
+      /\b(password|passwd|pwd|secret|token|api[_ -]?key)\b\s*(?:[:=]\s*)?\S+/gi,
+      "$1 [REDACTED]",
+    )
+    .slice(0, 1024);
 }

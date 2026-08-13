@@ -22,14 +22,30 @@ interface PendingTrace {
   lastTouchedMs: number;
 }
 
+interface ProcessorOptions {
+  maxConcurrentExports?: number;
+  maxQueuedExports?: number;
+}
+
+interface QueuedExport {
+  batch: MlflowUcExportBatch;
+  resolve: () => void;
+}
+
 const MAX_PENDING_TRACES = 10_000;
 const MAX_SPANS_PER_TRACE = 10_000;
 const PENDING_TRACE_TTL_MS = 5 * 60_000;
+const MAX_CONCURRENT_EXPORTS = 32;
+const MAX_QUEUED_EXPORTS = 10_000;
 const logger = createLogger("telemetry:mlflow-uc:processor");
 
 export class MlflowUcSpanProcessor implements SpanProcessor {
   private readonly pending = new Map<string, PendingTrace>();
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly exportQueue: QueuedExport[] = [];
+  private readonly maxConcurrentExports: number;
+  private readonly maxQueuedExports: number;
+  private activeExports = 0;
   private closed = false;
   private shutdownPromise?: Promise<void>;
 
@@ -37,7 +53,17 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
     private readonly config: MlflowUcConfig,
     private readonly exporter: MlflowUcTraceExporter,
     readonly registry = new MlflowUcTraceRegistry(config),
-  ) {}
+    options: ProcessorOptions = {},
+  ) {
+    this.maxConcurrentExports = Math.max(
+      1,
+      Math.floor(options.maxConcurrentExports ?? MAX_CONCURRENT_EXPORTS),
+    );
+    this.maxQueuedExports = Math.max(
+      1,
+      Math.floor(options.maxQueuedExports ?? MAX_QUEUED_EXPORTS),
+    );
+  }
 
   onStart(span: Span, _parentContext: Context): void {
     if (this.closed) return;
@@ -123,10 +149,10 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
   }
 
   async forceFlush(): Promise<void> {
-    await this.exporter.forceFlush();
     while (this.inFlight.size > 0) {
       await Promise.allSettled([...this.inFlight]);
     }
+    await this.exporter.forceFlush();
   }
 
   async shutdown(): Promise<void> {
@@ -143,17 +169,50 @@ export class MlflowUcSpanProcessor implements SpanProcessor {
   }
 
   private startExport(batch: MlflowUcExportBatch): void {
+    if (
+      this.activeExports >= this.maxConcurrentExports &&
+      this.exportQueue.length >= this.maxQueuedExports
+    ) {
+      logger.error("Dropped completed MLflow UC trace before export: %O", {
+        event: "mlflow_uc_completed_trace_dropped",
+        traceId: batch.traceInfo.trace_id,
+        reason: "export_queue_capacity",
+        queuedExports: this.exportQueue.length,
+      });
+      return;
+    }
     let resolveExport!: () => void;
     const exportComplete = new Promise<void>((resolve) => {
       resolveExport = resolve;
     });
     this.inFlight.add(exportComplete);
-    try {
-      this.exporter.exportTrace(batch, () => resolveExport());
-    } catch {
-      resolveExport();
-    }
+    this.exportQueue.push({ batch, resolve: resolveExport });
     void exportComplete.finally(() => this.inFlight.delete(exportComplete));
+    this.drainExports();
+  }
+
+  private drainExports(): void {
+    while (
+      this.activeExports < this.maxConcurrentExports &&
+      this.exportQueue.length > 0
+    ) {
+      const queued = this.exportQueue.shift();
+      if (!queued) return;
+      this.activeExports += 1;
+      let completed = false;
+      const complete = () => {
+        if (completed) return;
+        completed = true;
+        this.activeExports -= 1;
+        queued.resolve();
+        queueMicrotask(() => this.drainExports());
+      };
+      try {
+        this.exporter.exportTrace(queued.batch, complete);
+      } catch {
+        complete();
+      }
+    }
   }
 
   private ensurePendingCapacity(): void {
