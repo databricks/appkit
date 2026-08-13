@@ -142,16 +142,13 @@ describe("normalizeChartData", () => {
     });
 
     test("sorts time-series data in ascending order", () => {
-      // The current implementation uses sortTimeSeriesAscending which only
-      // sorts if first > last (fully reversed), not partially unsorted data
-      // So we test with fully reversed data
-      const reversedData = [
+      const shuffledData = [
+        { date: "2025-01-01", value: 100 },
         { date: "2025-01-03", value: 300 },
         { date: "2025-01-02", value: 200 },
-        { date: "2025-01-01", value: 100 },
       ];
 
-      const result = normalizeChartData(reversedData);
+      const result = normalizeChartData(shuffledData);
 
       // First timestamp should be earliest after sorting
       expect(result.xData[0]).toBeLessThan(result.xData[1] as number);
@@ -165,6 +162,39 @@ describe("normalizeChartData", () => {
 
       const expectedTimestamp = new Date("2025-01-15T12:00:00Z").getTime();
       expect(result.xData[0]).toBe(expectedTimestamp);
+    });
+
+    // Spark JSON_ARRAY separates date and time with a space rather than "T".
+    // Detection and sorting must agree on that form, or the rows reach the
+    // chart in whatever order SQL returned them.
+    test("sorts space-separated SQL timestamps", () => {
+      const shuffledData = [
+        { created_at: "2025-01-01 00:00:00", arr: 100 },
+        { created_at: "2025-03-01 00:00:00", arr: 300 },
+        { created_at: "2025-02-01 00:00:00", arr: 200 },
+      ];
+
+      const result = normalizeChartData(shuffledData);
+
+      expect(result.chartType).toBe("timeseries");
+      expect(result.yDataMap.arr).toEqual([100, 200, 300]);
+      expect(result.xData[0]).toBeLessThan(result.xData[1] as number);
+      expect(result.xData[1]).toBeLessThan(result.xData[2] as number);
+    });
+
+    test("treats a date-shaped but unparseable value as categorical", () => {
+      const data = [
+        { created_at: "2025-01-01 not-a-time", arr: 100 },
+        { created_at: "2025-03-01 also-not", arr: 300 },
+      ];
+
+      const result = normalizeChartData(data);
+
+      expect(result.chartType).toBe("categorical");
+      expect(result.xData).toEqual([
+        "2025-01-01 not-a-time",
+        "2025-03-01 also-not",
+      ]);
     });
   });
 

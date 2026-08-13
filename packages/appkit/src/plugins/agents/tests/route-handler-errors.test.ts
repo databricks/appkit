@@ -714,14 +714,16 @@ describe("POST /invocations & /responses — successful invoke", () => {
     };
 
     const { res, json, setHeader } = mockRes();
-    await (
-      plugin as unknown as {
-        _handleInvoke: (
-          r: express.Request,
-          w: express.Response,
-        ) => Promise<void>;
-      }
-    )._handleInvoke(mockReq({ input: "hi" }), res);
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleInvoke: (
+            r: express.Request,
+            w: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleInvoke(mockReq({ input: "hi", mlflowRunId: "run-99" }), res),
+    );
 
     expect(res.status).not.toHaveBeenCalledWith(500);
     expect(json).toHaveBeenCalledTimes(1);
@@ -736,6 +738,7 @@ describe("POST /invocations & /responses — successful invoke", () => {
         content: Array<{ type: string; text: string }>;
       }>;
       trace_id: string;
+      mlflow_trace_id: string;
     };
     expect(payload.object).toBe("response");
     expect(payload.status).toBe("completed");
@@ -749,6 +752,11 @@ describe("POST /invocations & /responses — successful invoke", () => {
       text: "hello world",
     });
     expect(payload.trace_id).toMatch(/^[0-9a-f]{32}$/);
+    expect(payload.mlflow_trace_id).toBe(payload.trace_id);
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes["mlflow.sourceRun"]).toBe("run-99");
     expect(setHeader).toHaveBeenCalledWith(
       "X-MLflow-Trace-Id",
       payload.trace_id,
@@ -869,24 +877,34 @@ describe("POST /chat — trace discovery ordering", () => {
       addMessage: vi.fn(),
       delete: vi.fn(),
     };
-    const req = mockReq({ message: "hi", agent: "planner" });
+    const req = mockReq({
+      message: "hi",
+      agent: "planner",
+      mlflowRunId: "run-chat-99",
+    });
     const { res, setHeader } = mockRes();
     setHeader.mockImplementation((name, value) => {
       if (name === "X-MLflow-Trace-Id") order.push(`header:${String(value)}`);
     });
 
-    await (
-      plugin as unknown as {
-        _handleChat: (
-          request: express.Request,
-          response: express.Response,
-        ) => Promise<void>;
-      }
-    )._handleChat(req, res);
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
 
     const metadata = streamed[0] as {
       type?: string;
-      data?: { traceId?: string; threadId?: string };
+      data?: {
+        traceId?: string;
+        mlflowTraceId?: string;
+        threadId?: string;
+      };
     };
     expect(order[0]).toMatch(/^header:[0-9a-f]{32}$/);
     expect(order[1]).toBe("body:appkit.metadata");
@@ -895,6 +913,7 @@ describe("POST /chat — trace discovery ordering", () => {
       data: {
         threadId: "thread-1",
         traceId: expect.any(String),
+        mlflowTraceId: expect.any(String),
         traceUrl: expect.stringMatching(
           /^https:\/\/example\.cloud\.databricks\.com\/ml\/experiments\/123456789\/traces\?selectedTraceId=/,
         ),
@@ -904,6 +923,11 @@ describe("POST /chat — trace discovery ordering", () => {
       "X-MLflow-Trace-Id",
       metadata.data?.traceId,
     );
+    expect(metadata.data?.mlflowTraceId).toBe(metadata.data?.traceId);
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes["mlflow.sourceRun"]).toBe("run-chat-99");
     expect(JSON.stringify(streamed)).not.toContain("model_start");
     expect(JSON.stringify(streamed)).not.toContain("model_end");
   });

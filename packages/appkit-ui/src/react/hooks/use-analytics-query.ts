@@ -7,6 +7,14 @@ import {
   useState,
 } from "react";
 import { ArrowClient, connectSSE } from "@/js";
+import {
+  type AnalyticsSseHandlerContext,
+  GENERIC_LOAD_ERROR,
+  getDevMode,
+  handleAnalyticsSseError,
+  handleAnalyticsSseMessage,
+  userFacingFetchError,
+} from "./analytics-sse";
 import type {
   AnalyticsFormat,
   InferParams,
@@ -54,112 +62,6 @@ function useStableParams<T>(value: T): T {
     ref.current = value;
   }
   return ref.current;
-}
-
-function getDevMode(): string {
-  const dev = new URL(window.location.href).searchParams.get("dev");
-  return dev ? `?dev=${dev}` : "";
-}
-
-const GENERIC_LOAD_ERROR = "Unable to load data, please try again";
-
-/** Map a fetch/SSE transport error to a user-facing message. */
-function userFacingFetchError(error: unknown): string {
-  if (error instanceof Error) {
-    if (error.name === "AbortError") {
-      return "Request timed out, please try again";
-    }
-    if (error.message.includes("Failed to fetch")) {
-      return "Network error. Please check your connection.";
-    }
-  }
-  return GENERIC_LOAD_ERROR;
-}
-
-interface AnalyticsQuerySseContext<ResultType> {
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  setErrorCode: (code: string | null) => void;
-  setData: (data: ResultType | null) => void;
-  setWarehouseStatus: (status: WarehouseStatus | null) => void;
-  publishWarehouseStatus: (status: WarehouseStatus | null) => void;
-  unpublishWarehouseStatus: () => void;
-}
-
-function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as WarehouseStatus).state === "string"
-  );
-}
-
-async function handleAnalyticsSseMessage<ResultType>(
-  parsed: Record<string, unknown>,
-  ctx: AnalyticsQuerySseContext<ResultType>,
-): Promise<void> {
-  if (parsed.type === "warehouse_status") {
-    if (!isWarehouseStatusPayload(parsed.status)) {
-      ctx.setLoading(false);
-      ctx.setError(GENERIC_LOAD_ERROR);
-      ctx.unpublishWarehouseStatus();
-      console.error(
-        "[useAnalyticsQuery] Malformed warehouse_status event",
-        parsed,
-      );
-      return;
-    }
-    ctx.setWarehouseStatus(parsed.status);
-    ctx.publishWarehouseStatus(parsed.status);
-    return;
-  }
-
-  // JSON result. The SSE wire schema is intentionally loose (`data` is an
-  // optional array of unknown values), so a structural check is enough here —
-  // no need to ship a schema validator (zod, ~60 KB gz) to the browser just
-  // to read our own same-origin server's messages. Missing or non-array
-  // `data` normalizes to [] so `undefined` never bleeds into the hook's
-  // `T | null` state.
-  if (parsed.type === "result") {
-    ctx.setLoading(false);
-    ctx.setData((Array.isArray(parsed.data) ? parsed.data : []) as ResultType);
-    ctx.unpublishWarehouseStatus();
-    return;
-  }
-
-  // NOTE: ARROW_STREAM no longer flows over SSE — the server streams the
-  // raw Arrow IPC bytes back as the query response body, handled by
-  // `fetchArrowDirect` instead of this SSE handler.
-
-  if (parsed.type === "error" || parsed.error || parsed.code) {
-    const errorMsg =
-      (parsed.error as string | undefined) ||
-      (parsed.message as string | undefined) ||
-      "Unable to execute query";
-    ctx.setLoading(false);
-    ctx.setError(errorMsg);
-    ctx.unpublishWarehouseStatus();
-    // Propagate the upstream structured code so UI consumers can branch on
-    // a stable identifier (e.g. format-switch on
-    // RESULT_TOO_LARGE_FOR_JSON_FALLBACK or ARROW_DELIVERY_UNSUPPORTED)
-    // instead of parsing the human-readable message.
-    if (typeof parsed.errorCode === "string") {
-      ctx.setErrorCode(parsed.errorCode);
-    }
-    if (parsed.code) {
-      console.error(
-        `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
-      );
-    }
-    return;
-  }
-
-  // Not a warehouse-status, result, or error event — surface a generic error
-  // rather than silently dropping an unrecognized payload.
-  console.error("[useAnalyticsQuery] Unrecognized SSE payload", parsed);
-  ctx.setLoading(false);
-  ctx.setError(GENERIC_LOAD_ERROR);
-  ctx.unpublishWarehouseStatus();
 }
 
 interface ArrowDirectContext {
@@ -392,13 +294,21 @@ export function useAnalyticsQuery<
       return;
     }
 
-    const sseContext: AnalyticsQuerySseContext<ResultType> = {
+    const sseContext: AnalyticsSseHandlerContext = {
+      source: "useAnalyticsQuery",
+      resource: { queryKey },
+      defaultExecutionError: "Unable to execute query",
+      unpublishOnMalformedMessage: false,
+      signal: abortController.signal,
+      abort: () => abortController.abort(),
       setLoading,
       setError,
       setErrorCode,
-      setData,
-      setWarehouseStatus,
-      publishWarehouseStatus,
+      onWarehouseStatus: (status) => {
+        setWarehouseStatus(status);
+        publishWarehouseStatus(status);
+      },
+      onResult: (message) => setData(message.data as ResultType),
       unpublishWarehouseStatus,
     };
 
@@ -406,44 +316,9 @@ export function useAnalyticsQuery<
       url: urlSuffix,
       payload,
       signal: abortController.signal,
-      onMessage: async (message) => {
-        // Drop late envelopes from a stream whose controller was already
-        // aborted (React StrictMode unmount→remount). Mirrors onError below.
-        if (abortController.signal.aborted) return;
-        try {
-          const parsed = JSON.parse(message.data) as Record<string, unknown>;
-          await handleAnalyticsSseMessage(parsed, sseContext);
-        } catch (error) {
-          // A `JSON.parse` failure (or any other thrown error inside the
-          // SSE message handler) used to leave the hook permanently in
-          // `loading=true` with no error surfaced — the UI would just
-          // spin forever. Clear loading and report a user-facing error
-          // so the consumer can render a retry affordance.
-          //
-          // We also abort the SSE connection: if the upstream is
-          // emitting un-parseable frames, leaving the stream open just
-          // re-fires the same failure on the next message. Closing
-          // forces the consumer into a clean retry path.
-          console.warn("[useAnalyticsQuery] Malformed message received", error);
-          setLoading(false);
-          setError(GENERIC_LOAD_ERROR);
-          abortController.abort();
-        }
-      },
-      onError: (error) => {
-        if (abortController.signal.aborted) return;
-        setLoading(false);
-        unpublishWarehouseStatus();
-
-        if (error instanceof Error) {
-          console.error("[useAnalyticsQuery] Error", {
-            queryKey,
-            error: error.message,
-            stack: error.stack,
-          });
-        }
-        setError(userFacingFetchError(error));
-      },
+      onMessage: (message) =>
+        handleAnalyticsSseMessage(message.data, sseContext),
+      onError: (error) => handleAnalyticsSseError(error, sseContext),
     });
   }, [
     queryKey,

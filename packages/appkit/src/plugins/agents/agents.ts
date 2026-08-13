@@ -910,7 +910,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName } = parsed.data;
+    const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
+    if (mlflowRunId) observer.linkToRun(mlflowRunId);
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -1046,7 +1047,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { input } = parsed.data;
+    const { input, mlflowRunId } = parsed.data;
+    if (mlflowRunId) observer.linkToRun(mlflowRunId);
     const registered = this.resolveAgent();
     if (!registered) {
       respondWithTraceError(observer, res, 400, {
@@ -1225,6 +1227,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       data: {
         threadId: thread.id,
         traceId: observer.traceId,
+        mlflowTraceId: observer.traceId,
         ...(traceUrl ? { traceUrl } : {}),
       },
     })) {
@@ -1501,6 +1504,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       status: "completed",
       thread_id: thread.id,
       trace_id: observer.traceId,
+      mlflow_trace_id: observer.traceId,
       output: [message],
     };
     observer.setOutput(payload);

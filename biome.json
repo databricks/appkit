@@ -20,7 +20,8 @@
       "!**/*.gen.css",
       "!**/*.gen.ts",
       "!**/typedoc-sidebar.ts",
-      "!**/template"
+      "!**/template",
+      "!**/appkit-types/metric-views.ts"
     ]
   },
   "formatter": {

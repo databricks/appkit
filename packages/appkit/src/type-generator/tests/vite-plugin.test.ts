@@ -410,7 +410,10 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
     );
   });
 
-  test("rejects a .d.ts custom mvOutFile up front (it would emit a runtime const into an ambient decl → TS1039)", () => {
+  // A `.d.ts` mvOutFile was rejected while the metric artifact carried a
+  // runtime const (illegal in an ambient declaration file). The const now ships
+  // as a JSON bundle, so a declaration-only path is the normal case.
+  test("accepts a .d.ts custom mvOutFile", () => {
     const plugin = appKitTypesPlugin({
       mvOutFile: "custom/types/metric-views.d.ts",
     });
@@ -420,7 +423,7 @@ describe("appKitTypesPlugin — metric option plumbing", () => {
     );
     expect(() =>
       configResolved({ root: path.join(process.cwd(), "client") }),
-    ).toThrow(/must be a \.ts file, not a \.d\.ts/);
+    ).not.toThrow();
   });
 });
 

@@ -85,6 +85,7 @@ export {
 // ============================================================================
 
 export {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -108,10 +109,12 @@ export type {
   BarChartSpecificProps,
   // Base props
   ChartBaseProps,
+  ChartClickDatum,
   ChartColorPalette,
   ChartData,
   ChartType,
   ChartUITokens,
+  ChartValueFormatter,
   // Data formats
   DataFormat,
   DataProps,

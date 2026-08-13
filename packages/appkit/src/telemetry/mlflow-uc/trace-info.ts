@@ -10,6 +10,7 @@ export const MLFLOW_SPAN_TYPE_ATTRIBUTE = "mlflow.spanType";
 const TRACE_METADATA_IDENTITIES = [
   "mlflow.trace.session",
   "mlflow.trace.user",
+  "mlflow.sourceRun",
   "appkit.app.name",
   "appkit.request.id",
   "appkit.thread.id",

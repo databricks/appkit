@@ -29,6 +29,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { useCallback, useMemo, useRef } from "react";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -38,11 +39,15 @@ import {
 } from "./options";
 import { useChartUITokens, useThemeColors } from "./theme";
 import type {
+  ChartBaseProps,
+  ChartClickDatum,
   ChartColorPalette,
   ChartData,
   ChartType,
+  ChartValueFormatter,
   Orientation,
 } from "./types";
+import { mapToDatum } from "./utils";
 
 // ============================================================================
 // ECharts Registration (modular imports for tree-shaking)
@@ -166,8 +171,22 @@ export interface BaseChartProps {
    * duplicate echarts copies won't share registrations).
    */
   options?: Record<string, unknown>;
+  /** Formats measure values. See {@link ChartBaseProps.valueFormatter}. */
+  valueFormatter?: ChartValueFormatter;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Fired when a data element (bar, slice, point) is clicked. Fire-and-forget:
+   * the return value is ignored (async handlers are fine — the chart never awaits).
+   * The handler receives a normalized {@link ChartClickDatum}.
+   *
+   * Pointer-only: charts render to <canvas>, so this does not fire for keyboard
+   * users. Provide a keyboard-accessible equivalent (e.g. a table row action) for
+   * the same action.
+   */
+  onDataClick?: (datum: ChartClickDatum) => void;
+  /** Controlled selection by category name. See {@link ChartBaseProps.selected}. */
+  selected?: string | string[];
 }
 
 // ============================================================================
@@ -201,7 +220,10 @@ export function BaseChart({
   min,
   max,
   options: customOptions,
+  valueFormatter,
   className,
+  onDataClick,
+  selected,
 }: BaseChartProps) {
   // Determine the appropriate color palette based on chart type
   const resolvedPalette = colorPalette ?? getDefaultPalette(chartType);
@@ -209,6 +231,15 @@ export function BaseChart({
   const colors = customColors ?? themeColors;
 
   const ui = useChartUITokens();
+
+  // Handler presence enables line interaction and gates events. Tracking the
+  // boolean keeps inline handler identities from rebuilding chart options.
+  const interactive = !!onDataClick;
+
+  // Keep the latest handler in a ref so `onEvents` can call the current
+  // `onDataClick` without listing it as a dependency (see `onEvents` below).
+  const onDataClickRef = useRef(onDataClick);
+  onDataClickRef.current = onDataClick;
 
   // Store ECharts instance directly to avoid stale ref issues on unmount
   const echartsInstanceRef = useRef<ECharts | null>(null);
@@ -270,6 +301,7 @@ export function BaseChart({
       showLegend,
       xField,
       ui,
+      valueFormatter,
     };
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";
@@ -326,11 +358,13 @@ export function BaseChart({
         smooth,
         showSymbol,
         symbolSize,
+        interactive,
       });
     }
 
-    // Merge custom options
-    return customOptions ? { ...opt, ...customOptions } : opt;
+    // Apply selection after custom options; empty selection is a no-op.
+    const merged = customOptions ? { ...opt, ...customOptions } : opt;
+    return applySelectionEmphasis(merged, selected);
   }, [
     normalized,
     colors,
@@ -350,7 +384,51 @@ export function BaseChart({
     min,
     max,
     customOptions,
+    valueFormatter,
+    selected,
+    interactive,
   ]);
+
+  // Heatmap data uses axis indexes; preserve labels for click results instead
+  // of exposing those raw positions.
+  const axisLabels = useMemo(
+    () => ({
+      xLabels: normalized.xData,
+      yLabels:
+        "yAxisData" in normalized
+          ? (normalized.yAxisData as (string | number)[])
+          : undefined,
+    }),
+    [normalized],
+  );
+
+  // `onEvents` must not re-subscribe when the data changes (e.g. each SSE tick).
+  const axisLabelsRef = useRef(axisLabels);
+  axisLabelsRef.current = axisLabels;
+
+  // Memoize by handler presence because echarts-for-react re-subscribes whenever
+  // `onEvents` changes, while callers commonly pass a new inline callback on
+  // every render. This also avoids churn during frequently changing data such
+  // as SSE ticks.
+  const onEvents = useMemo(
+    () =>
+      interactive
+        ? {
+            click: (params: unknown, instance: ECharts) => {
+              const result = onDataClickRef.current?.(
+                mapToDatum(params, axisLabelsRef.current, instance),
+              ) as void | Promise<void>;
+              if (
+                result &&
+                typeof (result as Promise<void>).then === "function"
+              ) {
+                (result as Promise<void>).catch(() => {});
+              }
+            },
+          }
+        : undefined,
+    [interactive],
+  );
 
   if (!option) {
     return (
@@ -370,6 +448,7 @@ export function BaseChart({
       opts={{ renderer: "canvas" }}
       notMerge={false}
       lazyUpdate={true}
+      onEvents={onEvents}
     />
   );
 }

@@ -18,6 +18,7 @@ import {
   buildMetricSql,
   composeMetricCacheKey,
   deriveMetricExecutorKey,
+  loadMetricMetadata,
   loadMetricRegistry,
   selectMetricMetadata,
   validateMetricRequest,
@@ -345,14 +346,14 @@ describe("analytics metric route", () => {
       );
     });
 
-    test("dimensions + limit compose GROUP BY ALL then LIMIT", () => {
+    test("dimensions + limit compose GROUP BY ALL then ORDER BY (deterministic) then LIMIT", () => {
       const { statement } = buildMetricSql(registration, {
         measures: ["arr"],
         dimensions: ["region"],
         limit: 100,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL LIMIT 100",
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region` LIMIT 100",
       );
     });
 
@@ -459,6 +460,235 @@ describe("analytics metric route", () => {
           dimensions: ["region\tbad"],
         }),
       ).toThrow(/not a valid identifier|control character/);
+    });
+  });
+
+  // ── orderBy identifier safety. `renderOrderByClause` re-gates each field
+  // rather than trusting the validator, because `buildMetricSql` is exported and
+  // reachable on paths that never ran the request schema.
+  describe("buildMetricSql orderBy identifier safety (quoting)", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("neutralizes an injection-shaped orderBy field by quoting", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr; DROP TABLE users"],
+        orderBy: [{ field: "arr; DROP TABLE users" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr; DROP TABLE users`) AS `arr; DROP TABLE users` FROM `cat`.`sch`.`revenue_metrics` ORDER BY `arr; DROP TABLE users`",
+      );
+    });
+
+    test("neutralizes a backtick in an orderBy field by doubling it", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr`"],
+        orderBy: [{ field: "arr`", direction: "DESC" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr```) AS `arr``` FROM `cat`.`sch`.`revenue_metrics` ORDER BY `arr``` DESC",
+      );
+    });
+
+    test("throws for an orderBy field containing a control character", () => {
+      expect(() =>
+        buildMetricSql(registration, {
+          measures: ["arr"],
+          orderBy: [{ field: "arr\tbad" }],
+        }),
+      ).toThrow(/not a valid identifier|control character/);
+    });
+  });
+
+  // ── orderBy clause: explicit ordering, direction normalization, deterministic
+  // default completion, and cache-key semantics. The orderBy feature adds
+  // `ORDER BY <fields>` between `GROUP BY ALL` and `LIMIT`.
+  describe("buildMetricSql orderBy (explicit ordering)", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("single explicit orderBy key without limit → ORDER BY (no tie-breaker)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region"],
+        orderBy: [{ field: "region" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region`",
+      );
+    });
+
+    test("orderBy direction: DESC → renders ` DESC` suffix", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region"],
+        orderBy: [{ field: "region", direction: "DESC" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region` DESC",
+      );
+    });
+
+    test("orderBy direction: ASC explicitly → renders WITHOUT ASC keyword (SQL default)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region"],
+        orderBy: [{ field: "region", direction: "ASC" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region`",
+      );
+    });
+
+    test("multi-key orderBy preserves caller order (not sorted)", () => {
+      const { statement: stmt1 } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        orderBy: [{ field: "region" }, { field: "segment" }],
+      });
+      expect(stmt1).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region`, `segment`",
+      );
+
+      // Reversed order produces different SQL (proves entries are not sorted).
+      const { statement: stmt2 } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        orderBy: [{ field: "segment" }, { field: "region" }],
+      });
+      expect(stmt2).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `segment`, `region`",
+      );
+      expect(stmt1).not.toBe(stmt2);
+    });
+
+    test("orderBy can name a measure", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr", "revenue"],
+        dimensions: ["region"],
+        orderBy: [{ field: "revenue" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `revenue`",
+      );
+    });
+
+    test("orderBy can name a dimension", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["order_date", "region"],
+        orderBy: [{ field: "order_date" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `order_date`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `order_date`",
+      );
+    });
+
+    test("orderBy naming the timeDimension with timeGrain → ORDER BY bare column (no date_trunc in clause)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["order_date", "region"],
+        timeGrain: "month",
+        timeDimension: "order_date",
+        orderBy: [{ field: "order_date" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, date_trunc('month', `order_date`) AS `order_date`, `region` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `order_date`",
+      );
+    });
+  });
+
+  // ── orderBy deterministic default (tie-breaker completion): when limit is
+  // set and no orderBy is provided, the builder appends ALL dimensions in
+  // sorted order as a tie-breaker to ensure deterministic results under LIMIT.
+  describe("buildMetricSql orderBy deterministic default (tie-breaker completion)", () => {
+    const registration: MetricRegistration = {
+      key: "revenue",
+      source: "cat.sch.revenue_metrics",
+      lane: "sp",
+    };
+
+    test("limit set + no orderBy → appends all dimensions in sorted order", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        limit: 100,
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `region`, `segment` LIMIT 100",
+      );
+    });
+
+    test("limit set + no orderBy + two dimensions → tie-breaker preserves sorted order", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["zebra", "apple"],
+        limit: 100,
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `apple`, `zebra` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `apple`, `zebra` LIMIT 100",
+      );
+    });
+
+    test("limit set + no orderBy + no dimensions → no ORDER BY clause (pure aggregate)", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        limit: 100,
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics` LIMIT 100",
+      );
+    });
+
+    test("no limit + dimensions + no orderBy → no ORDER BY clause", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL",
+      );
+    });
+
+    test("limit set + explicit orderBy naming one of two dimensions → explicit key first, then unnamed dimension appended", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        limit: 100,
+        orderBy: [{ field: "segment" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `segment`, `region` LIMIT 100",
+      );
+    });
+
+    test("limit set + explicit orderBy naming a measure → measure first, all dimensions appended in sorted order", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr", "revenue"],
+        dimensions: ["region", "segment"],
+        limit: 100,
+        orderBy: [{ field: "revenue" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `revenue`, `region`, `segment` LIMIT 100",
+      );
+    });
+
+    test("explicit orderBy + no limit → honored WITHOUT tie-breaker completion", () => {
+      const { statement } = buildMetricSql(registration, {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        orderBy: [{ field: "segment" }],
+      });
+      expect(statement).toBe(
+        "SELECT MEASURE(`arr`) AS `arr`, `region`, `segment` FROM `cat`.`sch`.`revenue_metrics` GROUP BY ALL ORDER BY `segment`",
+      );
     });
   });
 
@@ -653,6 +883,95 @@ describe("analytics metric route", () => {
         arr: { type: "decimal", display_name: "ARR", format: "currency" },
         region: { type: "string", display_name: "Region" },
       });
+    });
+
+    // ── The "no metadata for this key" warning names a remedy, so it must know
+    // which source it is talking about: regenerating types cannot fix an
+    // injected value, and the bundle is not read at all on that path.
+    test("a key missing from the injected metadata does not advise regenerating types", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const plugin = pluginForDir(
+        // Injected metadata that covers `revenue` but not `costs`.
+        { ...config, metricViewsMetadata: REVENUE_METADATA },
+        registryDir({
+          costs: { key: "costs", source: "cat.sch.cost_metrics", lane: "sp" },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ spend: 1 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      await handler(
+        createMockRequest({
+          params: { key: "costs" },
+          body: { measures: ["spend"] },
+        }),
+        createMockResponse(),
+      );
+
+      const warnings = warnSpy.mock.calls.map((c) => c.join(" "));
+      const missing = warnings.filter((w) =>
+        w.includes("No display metadata for metric key"),
+      );
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing.join(" ")).toContain("injected metricViewsMetadata");
+      // The generated bundle is never consulted on the injected path, so
+      // naming it here would send the operator after the wrong file.
+      expect(missing.join(" ")).not.toContain("regenerate types");
+      expect(missing.join(" ")).not.toContain("metadata.generated.json");
+      warnSpy.mockRestore();
+    });
+
+    test("a key missing from the discovered bundle advises regenerating types", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const dir = registryDir({
+        costs: { key: "costs", source: "cat.sch.cost_metrics", lane: "sp" },
+      });
+      // A bundle must exist for this branch to be reachable: an absent bundle
+      // resolves to `undefined`, which is dormancy rather than a stale bundle.
+      // It covers `revenue` but not the `costs` key being queried.
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      const plugin = pluginForDir(config, dir); // no injection → discovery path
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: { data: [{ spend: 1 }] },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      await handler(
+        createMockRequest({
+          params: { key: "costs" },
+          body: { measures: ["spend"] },
+        }),
+        createMockResponse(),
+      );
+
+      const warnings = warnSpy.mock.calls.map((c) => c.join(" "));
+      const missing = warnings.filter((w) =>
+        w.includes("No display metadata for metric key"),
+      );
+      expect(missing.length).toBeGreaterThan(0);
+      // Regenerating types is the correct remedy here, and it names the file to
+      // regenerate — the opposite of the injected path above.
+      expect(missing.join(" ")).toContain("regenerate types");
+      expect(missing.join(" ")).toContain("metadata.generated.json");
+      expect(missing.join(" ")).not.toContain("injected metricViewsMetadata");
+      warnSpy.mockRestore();
     });
 
     test("omits the metadata field entirely when no metadata is injected (envelope parity with /query)", async () => {
@@ -1128,6 +1447,111 @@ describe("loadMetricRegistry", () => {
   test("malformed JSON throws", async () => {
     writeFileSync(path.join(dir, "definitions.json"), "{ not json");
     await expect(loadMetricRegistry(app)).rejects.toThrow(/Failed to parse/);
+  });
+
+  // ── The generated metadata bundle. Unlike definitions.json, every failure
+  // mode here degrades to `undefined` instead of throwing: metadata is pure
+  // response decoration, so a bad bundle must never fail a working query.
+  describe("loadMetricMetadata", () => {
+    const bundle = (extra?: Record<string, unknown>) =>
+      JSON.stringify({
+        version: 1,
+        metricViews: {
+          revenue: {
+            measures: { arr: { type: "double", format: "$#,##0.00" } },
+            dimensions: { region: { type: "string", display_name: "Region" } },
+          },
+        },
+        ...extra,
+      });
+
+    test("absent bundle → undefined (dormancy)", async () => {
+      expect(await loadMetricMetadata(app)).toBeUndefined();
+    });
+
+    test("reads per-column metadata for a valid bundle", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), bundle());
+      const metadata = await loadMetricMetadata(app);
+      expect(metadata?.revenue).toEqual({
+        measures: { arr: { type: "double", format: "$#,##0.00" } },
+        dimensions: { region: { type: "string", display_name: "Region" } },
+      });
+    });
+
+    test("result has a null prototype (no inherited-property lookups)", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), bundle());
+      const metadata = await loadMetricMetadata(app);
+      expect(Object.getPrototypeOf(metadata)).toBeNull();
+      expect(
+        (metadata as unknown as Record<string, unknown>).toString,
+      ).toBeUndefined();
+    });
+
+    test("malformed JSON → undefined, never throws", async () => {
+      writeFileSync(path.join(dir, "metadata.generated.json"), "{ not json");
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("schema-invalid bundle → undefined, never throws", async () => {
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({ version: 1, metricViews: { revenue: "nope" } }),
+      );
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("a future bundle version is ignored rather than mis-parsed", async () => {
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({ version: 99, metricViews: {} }),
+      );
+      await expect(loadMetricMetadata(app)).resolves.toBeUndefined();
+    });
+
+    test("tolerates unknown per-column fields from a newer generator", async () => {
+      // Non-strict per-column schema: an older runtime keeps serving the fields
+      // it understands instead of rejecting the whole bundle.
+      writeFileSync(
+        path.join(dir, "metadata.generated.json"),
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double", unit_of_measure: "USD" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      const metadata = await loadMetricMetadata(app);
+      expect(metadata?.revenue.measures.arr.type).toBe("double");
+    });
+
+    test("picks up an edited bundle rather than serving a stale parse", async () => {
+      const file = path.join(dir, "metadata.generated.json");
+      writeFileSync(file, bundle());
+      expect((await loadMetricMetadata(app))?.revenue.measures.arr.format).toBe(
+        "$#,##0.00",
+      );
+
+      // The parse cache is keyed on raw contents, so a regenerated bundle is
+      // reflected without a restart (matters for the dev-tunnel path).
+      writeFileSync(
+        file,
+        JSON.stringify({
+          version: 1,
+          metricViews: {
+            revenue: {
+              measures: { arr: { type: "double", format: "€#,##0" } },
+              dimensions: {},
+            },
+          },
+        }),
+      );
+      expect((await loadMetricMetadata(app))?.revenue.measures.arr.format).toBe(
+        "€#,##0",
+      );
+    });
   });
 
   test("schema-invalid config throws", async () => {
@@ -1891,6 +2315,143 @@ describe("metric — filter translator", () => {
     });
   });
 
+  describe("orderBy (validator)", () => {
+    test("valid orderBy with one dimension is accepted", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region" }],
+        }),
+      ).not.toThrow();
+    });
+
+    test("valid orderBy with direction: ASC is accepted", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region", direction: "ASC" }],
+        }),
+      ).not.toThrow();
+    });
+
+    test("valid orderBy with direction: DESC is accepted", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region", direction: "DESC" }],
+        }),
+      ).not.toThrow();
+    });
+
+    test("valid orderBy round-trips unchanged", () => {
+      const req = validateMetricRequest({
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        orderBy: [{ field: "segment", direction: "DESC" }, { field: "region" }],
+      });
+      expect(req.orderBy).toEqual([
+        { field: "segment", direction: "DESC" },
+        { field: "region" },
+      ]);
+    });
+
+    test("orderBy field must be in measures or dimensions", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "unknown_field" }],
+        }),
+      ).toThrowError(/fields:.*orderBy.*0.*field/);
+    });
+
+    test("orderBy field can be a measure", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr", "revenue"],
+          dimensions: ["region"],
+          orderBy: [{ field: "revenue" }],
+        }),
+      ).not.toThrow();
+    });
+
+    test("orderBy rejects an unknown direction value", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region", direction: "UP" as never }],
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy entry rejects extra properties (strict mode)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region", extra: "property" } as never],
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy rejects duplicate fields", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region", "segment"],
+          orderBy: [{ field: "region" }, { field: "region" }],
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy rejects empty array", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [],
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy rejects over-cap (21+ entries)", () => {
+      const orderByArray = Array.from({ length: 21 }, (_, i) => ({
+        field: `dim_${i}`,
+      }));
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: orderByArray.map((_, i) => `dim_${i}`),
+          orderBy: orderByArray as never,
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy field with control character is rejected", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ field: "region\tbad" }],
+        }),
+      ).toThrowError(/fields:.*orderBy/);
+    });
+
+    test("orderBy field missing entirely is rejected (Zod type error)", () => {
+      expect(() =>
+        validateMetricRequest({
+          measures: ["arr"],
+          dimensions: ["region"],
+          orderBy: [{ direction: "DESC" } as never],
+        }),
+      ).toThrowError();
+    });
+  });
+
   describe("sort-before-hash (predicate ordering inside groups)", () => {
     test("predicate order does not affect the rendered SQL within an AND group", () => {
       const a = render({
@@ -2230,6 +2791,78 @@ describe("composeMetricCacheKey", () => {
       }),
     });
     expect(sp).not.toEqual(obo);
+  });
+
+  test("different orderBy → different keys", () => {
+    const a = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region" }],
+    });
+    const b = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region", direction: "DESC" }],
+    });
+    expect(a).not.toEqual(b);
+  });
+
+  test("orderBy field ORDER matters — sequence is semantic, not sorted (prevents cache collision)", () => {
+    // ORDER BY a, b returns different rows than ORDER BY b, a under LIMIT.
+    // orderBy is NOT sorted before hashing (unlike measures/dimensions), so the
+    // sequence must fork the key. This test guards against a regression.
+    const ab = composeMetricCacheKey({
+      ...base,
+      dimensions: ["a", "b"],
+      orderBy: [{ field: "a" }, { field: "b" }],
+    });
+    const ba = composeMetricCacheKey({
+      ...base,
+      dimensions: ["a", "b"],
+      orderBy: [{ field: "b" }, { field: "a" }],
+    });
+    expect(ab).not.toEqual(ba);
+  });
+
+  test("orderBy direction normalization: absent vs ASC → same key", () => {
+    const noDir = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region" }],
+    });
+    const asc = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region", direction: "ASC" }],
+    });
+    expect(noDir).toEqual(asc);
+  });
+
+  test("orderBy direction: DESC → different key from absent/ASC", () => {
+    const noDir = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region" }],
+    });
+    const desc = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region", direction: "DESC" }],
+    });
+    expect(noDir).not.toEqual(desc);
+  });
+
+  test("absent vs present orderBy → different keys", () => {
+    const without = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+    });
+    const with_ = composeMetricCacheKey({
+      ...base,
+      dimensions: ["region"],
+      orderBy: [{ field: "region" }],
+    });
+    expect(without).not.toEqual(with_);
   });
 });
 

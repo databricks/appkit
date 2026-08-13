@@ -97,6 +97,7 @@ async function createTraceSpans(
       "mlflow.spanOutputs": '{"answer":"world"}',
       "mlflow.trace.session": "session-1",
       "mlflow.trace.user": "user-1",
+      "mlflow.sourceRun": "run-99",
       "mlflow.trace.tokenUsage":
         '{"input_tokens":4,"output_tokens":2,"total_tokens":6}',
       "appkit.app.name": "support-console",
@@ -469,6 +470,7 @@ describe("MlflowUcSpanExporter", () => {
         "mlflow.traceOutputs": '{"answer":"world"}',
         "mlflow.trace.session": "session-1",
         "mlflow.trace.user": "user-1",
+        "mlflow.sourceRun": "run-99",
         "mlflow.trace.tokenUsage":
           '{"input_tokens":4,"output_tokens":2,"total_tokens":6}',
         "appkit.app.name": "support-console",

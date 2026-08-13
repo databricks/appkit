@@ -2,6 +2,7 @@ export * from "./agent";
 export * from "./cache";
 export * from "./execute";
 export * from "./genie";
+export * from "./metric-filter";
 export * from "./metric-metadata";
 export * from "./plugin";
 export * from "./sql";

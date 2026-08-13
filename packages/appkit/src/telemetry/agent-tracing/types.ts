@@ -36,6 +36,8 @@ export interface AgentTraceObserver {
   onEvent(event: AgentEvent): void;
   /** Adds one completed local child trace's aggregate usage to this root. */
   addChildUsage(usage: AgentUsage): void;
+  /** Links this trace to the MLflow run that launched the agent invocation. */
+  linkToRun(runId: string): void;
   updateIdentity(identity: Partial<Omit<AgentTraceIdentity, "route">>): void;
   setOutput(output: unknown): void;
   recordError(error: unknown, output?: unknown): void;

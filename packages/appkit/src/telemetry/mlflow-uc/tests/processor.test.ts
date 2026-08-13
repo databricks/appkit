@@ -54,6 +54,7 @@ function startTree(processor: MlflowUcSpanProcessor) {
         "mlflow.spanOutputs": '{"answer":"world"}',
         "mlflow.trace.session": "session-1",
         "mlflow.trace.user": "user-1",
+        "mlflow.sourceRun": "run-99",
         "appkit.app.name": "support-console",
         "appkit.request.id": "request-1",
         "appkit.thread.id": "thread-1",
@@ -123,6 +124,7 @@ describe("MlflowUcSpanProcessor", () => {
         "mlflow.trace_schema.version": "4",
         "mlflow.trace.tokenUsage":
           '{"input_tokens":4,"output_tokens":2,"total_tokens":6,"cache_read_input_tokens":1}',
+        "mlflow.sourceRun": "run-99",
         "appkit.app.name": "support-console",
       },
     });

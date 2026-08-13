@@ -173,6 +173,9 @@ export async function runWithAgentTrace<T>(
         addChildUsage(childUsage) {
           usage.add(normalizeUsage(childUsage));
         },
+        linkToRun(runId) {
+          root.setAttribute("mlflow.sourceRun", runId);
+        },
         updateIdentity(next) {
           updateActiveIdentity(activeIdentity, next);
           setIdentityAttributes(root, next);
