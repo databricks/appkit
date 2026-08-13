@@ -2185,6 +2185,8 @@ describe("parseTextToolCalls", () => {
     const cap = 64 * 1024;
     const filler = "x".repeat(cap);
     const suffix = "[analytics.query(query='SELECT 1')]";
+    const startedAt = performance.now();
     expect(parseTextToolCalls(`${filler}${suffix}`)).toEqual([]);
+    expect(performance.now() - startedAt).toBeLessThan(500);
   });
 });

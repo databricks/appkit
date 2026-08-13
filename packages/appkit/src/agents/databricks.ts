@@ -1165,7 +1165,39 @@ export function parseTextToolCalls(
 }
 
 function looksLikeTextToolCall(text: string): boolean {
-  return /\[\s*\{|[A-Za-z_][\w.]*\s*\(/.test(text);
+  let arrayStartPending = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (arrayStartPending) {
+      if (character === "{") return true;
+      if (!isWhitespace(character)) {
+        arrayStartPending = character === "[";
+      }
+    } else if (character === "[") {
+      arrayStartPending = true;
+    }
+
+    if (!isIdentifierStart(character)) continue;
+    let cursor = index + 1;
+    while (cursor < text.length && isIdentifierPart(text[cursor])) cursor += 1;
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor += 1;
+    if (text[cursor] === "(") return true;
+    index = Math.max(index, cursor - 1);
+  }
+  return false;
+}
+
+function isIdentifierStart(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z_]/.test(character);
+}
+
+function isIdentifierPart(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z0-9_.]/.test(character);
+}
+
+function isWhitespace(character: string | undefined): boolean {
+  return character !== undefined && /\s/.test(character);
 }
 
 function setParserCapturedAttribute(
