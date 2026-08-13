@@ -17,11 +17,6 @@ import type { WarehouseStatus } from "./types";
  * fetch) and fans both the final result and mid-flight `warehouse_status`
  * updates out to every subscriber via `useSyncExternalStore`.
  *
- * SSE parsing and state transitions are shared with `useMetricView` via
- * `analytics-sse.ts`; this store adapts that handler's imperative
- * `setLoading`/`setError`/`onResult` callbacks onto its immutable per-key
- * snapshot + notify model.
- *
  * Dedup-only: a keyed entry lives exactly as long as it has subscribers. When
  * the last one releases, teardown is deferred a tick (so a StrictMode
  * unmount→remount reuses the in-flight request instead of aborting it); if no
@@ -49,7 +44,7 @@ interface AnalyticsRequestSnapshot {
 }
 
 /** Idle snapshot returned for keys with no live entry. Referentially stable. */
-export const EMPTY_SNAPSHOT: AnalyticsRequestSnapshot = {
+const EMPTY_SNAPSHOT: AnalyticsRequestSnapshot = {
   data: null,
   loading: false,
   error: null,
@@ -78,10 +73,8 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
-// Listeners are keyed independently of `entries` so a subscriber registered
-// before its entry exists (React can call `useSyncExternalStore`'s subscribe
-// before the `retain` effect runs) still receives notifications once the
-// request starts.
+// Keyed separately from `entries`: `subscribe` can run before `retain` creates
+// the entry, so listeners must survive independently of entry lifetime.
 const listenersByKey = new Map<string, Set<() => void>>();
 
 function notify(key: string): void {
@@ -218,10 +211,9 @@ export function start(key: string): void {
     return;
   }
 
-  // Adapt the shared SSE handler's imperative callbacks onto this store's
-  // snapshot+notify model. No warehouse publisher lives here — the hook
-  // mirrors warehouse status into the resource-status provider from the
-  // snapshot — so `unpublishWarehouseStatus` is a no-op.
+  // Adapts the shared SSE handler onto the snapshot model. No warehouse
+  // publisher lives here — the hook mirrors status from the snapshot — so
+  // `unpublishWarehouseStatus` is a no-op.
   const sseContext: AnalyticsSseHandlerContext = {
     source: "useAnalyticsQuery",
     resource: { url: entry.options.url },

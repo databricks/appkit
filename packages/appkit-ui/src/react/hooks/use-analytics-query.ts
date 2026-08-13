@@ -56,8 +56,6 @@ function useStableParams<T>(value: T): T {
   return ref.current;
 }
 
-const NOOP_SUBSCRIBE: (listener: () => void) => () => void = () => () => {};
-
 /**
  * Subscribe to an analytics query and return its latest result. JSON_ARRAY
  * results stream over SSE (with warehouse-readiness progress); ARROW_STREAM
@@ -149,31 +147,27 @@ export function useAnalyticsQuery<
 
   // Cache key shared across hook instances. `payload` already serializes
   // `{ parameters, format }`, so identical requests collapse to one key.
-  const cacheKey = payload === null ? null : `${urlSuffix}::${payload}`;
+  // On a serialization failure (`payload === null`) the key stays unused: no
+  // request is retained and the store reports the stable idle snapshot.
+  const cacheKey = `${urlSuffix}::${payload}`;
 
   const subscribe = useCallback(
-    (listener: () => void) =>
-      cacheKey === null
-        ? NOOP_SUBSCRIBE(listener)
-        : store.subscribe(cacheKey, listener),
+    (listener: () => void) => store.subscribe(cacheKey, listener),
     [cacheKey],
   );
   const getSnapshot = useCallback(
-    () =>
-      cacheKey === null ? store.EMPTY_SNAPSHOT : store.getSnapshot(cacheKey),
+    () => store.getSnapshot(cacheKey),
     [cacheKey],
   );
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  const start = useCallback(() => {
-    if (cacheKey !== null) store.start(cacheKey);
-  }, [cacheKey]);
+  const start = useCallback(() => store.start(cacheKey), [cacheKey]);
 
   // Register with the shared store on mount / key change; release on cleanup.
   // The store starts the request on first retain of a key and reuses the
   // in-flight request for later subscribers.
   useEffect(() => {
-    if (cacheKey === null || payload === null) return;
+    if (payload === null) return;
     return store.retain(
       cacheKey,
       { url: urlSuffix, payload, format },
@@ -203,10 +197,9 @@ export function useAnalyticsQuery<
   return {
     data: snapshot.data as ResultType | null,
     loading: snapshot.loading,
-    // A serialization failure never creates a store entry; surface the same
-    // error the pre-shared-request implementation did.
+    // A serialization failure never creates a store entry, so surface it here.
     error:
-      cacheKey === null
+      payload === null
         ? "Failed to serialize query parameters"
         : snapshot.error,
     errorCode: snapshot.errorCode,

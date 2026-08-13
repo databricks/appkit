@@ -60,12 +60,8 @@ test.describe("Data Visualization Route Tests", () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForLoadState("networkidle");
 
-    // Requests are deduplicated by (queryKey, parameters, format): the many
-    // charts sharing a query + params + resolved format collapse to a single
-    // in-flight request, and StrictMode remounts reuse it rather than refiring.
-    // Every chart here uses the same params per key, so each key settles at
-    // one request (the two untagged_apps DataTables share one; the six
-    // spend_data and four top_contributors charts each share one).
+    // Deduplicated by (queryKey, parameters, format): every chart here uses the
+    // same params per key, so all charts of a key collapse to one request.
     expect(untaggedAppsCalls.length).toBe(1);
     expect(spendDataCalls.length).toBe(1);
     expect(topContributorsCalls.length).toBe(1);

@@ -8,7 +8,7 @@ import {
   useAnalyticsQuery,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/query-dedup")({
@@ -25,35 +25,15 @@ type DemoQueryKey = (typeof QUERY_KEYS)[number];
 const ANALYTICS_PATH = "/api/analytics/query/";
 
 /**
- * Route-local counter for analytics network requests. Wraps `window.fetch`
- * while this route is mounted (restored on unmount) and counts POSTs to the
- * analytics query endpoint. This is what makes dedup observable in-page
- * instead of only in the DevTools Network tab — it counts the real transport
- * calls `useAnalyticsQuery` makes, without instrumenting the hook itself.
+ * Count analytics network requests by wrapping `window.fetch` for the lifetime
+ * of the route (restored on unmount), tallying POSTs to the analytics query
+ * endpoint. This is what makes dedup observable in-page instead of only in the
+ * DevTools Network tab — it counts the real transport calls `useAnalyticsQuery`
+ * makes, without instrumenting the hook itself.
  */
-const requestCounter = (() => {
-  let count = 0;
-  const listeners = new Set<() => void>();
-  const emit = () => {
-    for (const l of listeners) l();
-  };
-  return {
-    increment() {
-      count += 1;
-      emit();
-    },
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    get() {
-      return count;
-    },
-  };
-})();
-
-/** Install the fetch wrapper for the lifetime of the route. */
 function useAnalyticsRequestCounter(): number {
+  const [count, setCount] = useState(0);
+
   useEffect(() => {
     const original = window.fetch;
     window.fetch = (input, init) => {
@@ -64,7 +44,7 @@ function useAnalyticsRequestCounter(): number {
             ? input.toString()
             : input.url;
       if (url.includes(ANALYTICS_PATH) && init?.method === "POST") {
-        requestCounter.increment();
+        setCount((c) => c + 1);
       }
       return original(input, init);
     };
@@ -73,11 +53,7 @@ function useAnalyticsRequestCounter(): number {
     };
   }, []);
 
-  return useSyncExternalStore(
-    requestCounter.subscribe,
-    requestCounter.get,
-    requestCounter.get,
-  );
+  return count;
 }
 
 /**

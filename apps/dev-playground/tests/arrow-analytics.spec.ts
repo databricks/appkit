@@ -27,12 +27,9 @@ test.describe("Arrow Analytics", () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await waitForChartsToLoad(page);
 
-    // Requests are deduplicated by (queryKey, parameters, format): components
-    // sharing a signature share one in-flight request, and StrictMode
-    // remounts reuse it rather than refiring. So each key collapses to one
-    // request per distinct format it's rendered in — here every query appears
-    // in both a JSON and an Arrow chart (auto-format resolves to one of the
-    // two), so each settles at 2.
+    // Deduplicated by (queryKey, parameters, format): each query is rendered
+    // in both a JSON and an Arrow chart, so it settles at one request per
+    // format = 2.
     expect(appsListCalls.length).toBe(2);
     expect(spendDataCalls.length).toBe(2);
     expect(topContributorsCalls.length).toBe(2);
