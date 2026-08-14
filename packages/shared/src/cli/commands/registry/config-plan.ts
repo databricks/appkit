@@ -1,3 +1,4 @@
+import type { AppYamlEnvEntry, ResourceBinding } from "../../deploy-config";
 import {
   fieldOrigin,
   isValidEnvName,
@@ -13,29 +14,12 @@ import {
  * binding is skipped with a warning rather than guessed.
  */
 
-/** An `app.yaml` env entry: `- name: <env>` + `valueFrom: <resourceKey>`. */
-export interface AppYamlEnvEntry {
-  name: string;
-  valueFrom: string;
-}
-
 /** A `databricks.yml` top-level bundle variable. */
 export interface BundleVariable {
   name: string;
   description?: string;
   /** The value placed under targets.default.variables. */
   value?: string;
-}
-
-/** A `databricks.yml` app resource binding under resources.apps.app.resources. */
-export interface ResourceBinding {
-  /** Binding name (= resourceKey). */
-  name: string;
-  /** Resource type key, e.g. sql_warehouse / postgres. */
-  type: string;
-  permission?: string;
-  /** Binding fields → `${var.<variable>}` references. */
-  fields: Record<string, string>;
 }
 
 export interface ConfigPlan {

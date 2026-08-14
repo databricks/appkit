@@ -4,11 +4,12 @@ import path from "node:path";
 import pc from "picocolors";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 import {
+  APP_YAML_FILE,
   type AppYamlEnvEntry,
-  type ConfigPlan,
-  planHasContent,
-  type ResourceBinding,
-} from "./config-plan";
+  bindingToNode,
+  DATABRICKS_YML_FILE,
+} from "../../deploy-config";
+import { type ConfigPlan, planHasContent } from "./config-plan";
 
 export interface ConfigWriteResult {
   appYamlChanged: boolean;
@@ -144,20 +145,13 @@ function patchDatabricksYml(
   return { added, changed };
 }
 
-/** Shapes a binding into the `{name, <type>: {…fields, permission}}` node. */
-function bindingToNode(binding: ResourceBinding): Record<string, unknown> {
-  const inner: Record<string, unknown> = { ...binding.fields };
-  if (binding.permission) inner.permission = binding.permission;
-  return { name: binding.name, [binding.type]: inner };
-}
-
 /**
  * Applies a config plan to `app.yaml` and `databricks.yml` in `cwd` via
  * comment-preserving additive patches. Never overwrites existing entries.
  */
 export function writeConfig(cwd: string, plan: ConfigPlan): ConfigWriteResult {
-  const appAdded = patchAppYaml(path.join(cwd, "app.yaml"), plan.appYamlEnv);
-  const db = patchDatabricksYml(path.join(cwd, "databricks.yml"), plan);
+  const appAdded = patchAppYaml(path.join(cwd, APP_YAML_FILE), plan.appYamlEnv);
+  const db = patchDatabricksYml(path.join(cwd, DATABRICKS_YML_FILE), plan);
   return {
     appYamlChanged: appAdded.length > 0,
     databricksYmlChanged: db.changed,

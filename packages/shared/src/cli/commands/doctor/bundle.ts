@@ -14,11 +14,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
+import {
+  APP_YAML_FILE,
+  bindingTypeOf,
+  DATABRICKS_YML_FILE,
+} from "../../deploy-config";
 import type { ResourceOrigin } from "./types";
 import { errorMessage } from "./utils";
-
-export const DEFAULT_BUNDLE_FILE = "databricks.yml";
-export const DEFAULT_APP_YAML_FILE = "app.yaml";
 
 /** A `${resources.<type>.<key>.<field>}` reference — a bundle-created resource. */
 const RESOURCES_REF = /\$\{resources\.([^.]+)\.([^.}]+)\.[^}]+\}/;
@@ -62,15 +64,6 @@ interface AppYamlDoc {
   env?: Array<{ name?: string; valueFrom?: string }>;
 }
 
-/** The typed sub-key of a binding is its single non-`name` object property. */
-function bindingType(block: AppResourceBlock): string | undefined {
-  for (const [k, v] of Object.entries(block)) {
-    if (k === "name") continue;
-    if (v && typeof v === "object") return k;
-  }
-  return undefined;
-}
-
 /** Classifies a binding by its typed sub-key and origin: scanning its field
  * values for a `${resources.*}` reference (bundle-managed) vs anything else
  * (external). */
@@ -79,7 +72,7 @@ function classifyBinding(block: AppResourceBlock): {
   origin: ResourceOrigin;
   ref?: { type: string; key: string };
 } {
-  const type = bindingType(block);
+  const type = bindingTypeOf(block);
   const typed = type ? block[type] : undefined;
   if (typed && typeof typed === "object") {
     for (const value of Object.values(typed as Record<string, unknown>)) {
@@ -126,8 +119,8 @@ function readYaml<T>(filePath: string): T | null {
  */
 export function readBundleInfo(
   cwd: string = process.cwd(),
-  bundleFile: string = DEFAULT_BUNDLE_FILE,
-  appYamlFile: string = DEFAULT_APP_YAML_FILE,
+  bundleFile: string = DATABRICKS_YML_FILE,
+  appYamlFile: string = APP_YAML_FILE,
 ): BundleInfo {
   const bindings = new Map<string, BundleBinding>();
   const envToBinding = new Map<string, string>();
