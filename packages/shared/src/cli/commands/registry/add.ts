@@ -28,6 +28,7 @@ import {
   type RegistryToken,
   resolveToken,
 } from "./constants";
+import { parseEnv } from "./env-reconcile";
 import {
   extractRequirements,
   type ResourceRequirementRow,
@@ -84,6 +85,24 @@ function findNearestPackageJson(start: string): string {
     const parent = path.dirname(dir);
     if (parent === dir) return start;
     dir = parent;
+  }
+}
+
+/**
+ * The Databricks profile the app is configured with, read from
+ * `DATABRICKS_CONFIG_PROFILE` in `cwd/.env` via the same dotenv parser the app
+ * loads its env with. The CLI's top-level `dotenv/config` only loads the launch
+ * dir's `.env` into `process.env`; when `--cwd` points at a different app dir,
+ * that file isn't loaded, so the workspace picker and bundle validate would
+ * miss the app's profile — this reads it directly. Undefined if the file or key
+ * is absent, so the SDK's own default resolution still applies.
+ */
+export function profileFromEnv(cwd: string): string | undefined {
+  try {
+    const content = fs.readFileSync(path.join(cwd, ".env"), "utf-8");
+    return parseEnv(content).DATABRICKS_CONFIG_PROFILE || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -476,7 +495,15 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     // Try to wire the plugin into the server's createApp call automatically;
     // fall back to printing the snippet when the shape isn't the standard one.
     let wired = false;
-    if (registerPluginInServer && s.exportName) {
+    // Why auto-registration was skipped, so the fallback can say so (an empty
+    // reason means the user opted out via --no-register — no nag then).
+    let skipReason: string | undefined;
+    if (opts.register === false) {
+      // opted out — print the snippet without a "couldn't" message
+    } else if (!s.exportName) {
+      skipReason =
+        "couldn't read a plugin export name from the item's index.ts";
+    } else if (registerPluginInServer) {
       const result = registerPluginInServer(
         serverRoot,
         s.importPath,
@@ -493,12 +520,19 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
           pc.dim(`\n${s.exportName} is already registered in ${shown}`),
         );
         wired = true;
+      } else {
+        skipReason = result.reason;
       }
     }
     if (!wired) {
       const imp = s.exportName ?? "<plugin>";
+      if (skipReason) {
+        console.log(
+          pc.yellow(`\nCouldn't auto-register ${imp} — ${skipReason}.`),
+        );
+      }
       console.log(
-        `\n${pc.bold("Add this to your server's createApp call:")}\n` +
+        `${pc.bold("Add this to your server's createApp call:")}\n` +
           pc.dim(
             `  import { ${imp} } from "${s.importPath}";\n` +
               `  const app = await createApp({ plugins: [${imp}(), /* ... */] });`,
@@ -512,12 +546,15 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     // the workspace picker and, through it, the Databricks SDK.
     const { collectBindingValues, reportEnvResolutions, syncEnv } =
       await import("./env-writer.js");
+    // Without --profile, fall back to the app's configured profile so the
+    // picker and bundle validate reach the workspace the app runs against.
+    const profile = opts.profile ?? profileFromEnv(cwd);
     console.log(pc.dim("\nReconciling resource env vars into .env..."));
     const resolutions = await syncEnv(allRequirements, {
       cwd,
       nonInteractive: Boolean(opts.yes),
       values: opts.env,
-      profile: opts.profile,
+      profile,
     });
     reportEnvResolutions(resolutions);
 
@@ -537,7 +574,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
         cwd,
         nonInteractive: Boolean(opts.yes),
         values: opts.env,
-        profile: opts.profile,
+        profile,
       });
       Object.assign(values, bindingValues);
     }
@@ -545,7 +582,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     if (planHasContent(plan)) {
       const result = writeConfig(cwd, plan);
       reportConfigWrite(result);
-      if (result.databricksYmlChanged) validateBundle(cwd, opts.profile);
+      if (result.databricksYmlChanged) validateBundle(cwd, profile);
     }
     warnScopeNeeding(allRequirements);
   }
@@ -620,7 +657,10 @@ export const addCommand = new Command("add")
     collectEnvFlag,
     {},
   )
-  .option("-p, --profile <name>", "Databricks profile for bundle validate")
+  .option(
+    "-p, --profile <name>",
+    "Databricks profile for the resource picker and bundle validate (defaults to the app's DATABRICKS_CONFIG_PROFILE)",
+  )
   .option(
     "--allow-unverified",
     "Add items the registry doesn't mark verified (runs untrusted code)",

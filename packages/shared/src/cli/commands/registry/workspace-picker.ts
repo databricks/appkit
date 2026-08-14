@@ -139,6 +139,15 @@ export const MAX_PICKER_RESULTS = 200;
 export interface WorkspaceListing {
   choices: WorkspaceChoice[];
   truncated: boolean;
+  /** Short reason the listing failed (auth/config/network), if it did — lets
+   * the caller distinguish a real error from a genuinely empty workspace. */
+  error?: string;
+}
+
+/** First line of an error, capped, for a user-facing one-liner. */
+function shortErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.split("\n")[0].trim().slice(0, 200);
 }
 
 /**
@@ -173,8 +182,11 @@ export async function listWorkspaceResources(
       }
     }
     return { choices, truncated };
-  } catch {
-    return { choices: [], truncated: false };
+  } catch (err) {
+    // Don't swallow silently: return the reason so the caller can tell the user
+    // the picker fell back because listing failed (typically auth/profile), not
+    // because the workspace has none of this resource.
+    return { choices: [], truncated: false, error: shortErrorMessage(err) };
   }
 }
 

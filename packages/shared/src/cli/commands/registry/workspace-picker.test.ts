@@ -200,6 +200,32 @@ describe("listWorkspaceResources", () => {
     ).toEqual([]);
   });
 
+  it("reports the failure reason instead of a silent empty listing", async () => {
+    const factory = () =>
+      fakeClient({
+        warehouses: {
+          list: () => {
+            throw new Error(
+              "default auth: cannot configure default credentials",
+            );
+          },
+        },
+      });
+    const res = await listWorkspaceResources(
+      "sql_warehouse",
+      undefined,
+      factory,
+    );
+    expect(res.choices).toEqual([]);
+    expect(res.error).toContain("cannot configure default credentials");
+  });
+
+  it("has no error field for a genuinely empty (unknown-type) listing", async () => {
+    const factory = () => fakeClient({});
+    const res = await listWorkspaceResources("nonsense", undefined, factory);
+    expect(res.error).toBeUndefined();
+  });
+
   it("returns empty listing when the client factory throws", async () => {
     const factory = () => {
       throw new Error("no config");

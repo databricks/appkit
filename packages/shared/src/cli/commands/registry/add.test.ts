@@ -1,9 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   partitionDeps,
   partitionVerified,
   pluginExportName,
+  profileFromEnv,
   resolveItems,
   resolveWithinBase,
   scopesForResources,
@@ -14,6 +17,54 @@ import type { ResourceRequirementRow } from "./requirements";
 function item(name: string, extra: Partial<RegistryItem> = {}): RegistryItem {
   return { name, ...extra };
 }
+
+const tempDirs: string[] = [];
+function makeTempDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "add-profile-"));
+  tempDirs.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of tempDirs) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best effort
+    }
+  }
+  tempDirs.length = 0;
+});
+
+describe("profileFromEnv", () => {
+  it("reads DATABRICKS_CONFIG_PROFILE from cwd/.env", () => {
+    const dir = makeTempDir();
+    fs.writeFileSync(
+      path.join(dir, ".env"),
+      "DATABRICKS_APP_PORT=8000\nDATABRICKS_CONFIG_PROFILE=dogfood\n",
+    );
+    expect(profileFromEnv(dir)).toBe("dogfood");
+  });
+
+  it("strips surrounding quotes from the value", () => {
+    const dir = makeTempDir();
+    fs.writeFileSync(
+      path.join(dir, ".env"),
+      'DATABRICKS_CONFIG_PROFILE="my prof"\n',
+    );
+    expect(profileFromEnv(dir)).toBe("my prof");
+  });
+
+  it("returns undefined when the key is absent", () => {
+    const dir = makeTempDir();
+    fs.writeFileSync(path.join(dir, ".env"), "DATABRICKS_APP_PORT=8000\n");
+    expect(profileFromEnv(dir)).toBeUndefined();
+  });
+
+  it("returns undefined when there is no .env file", () => {
+    const dir = makeTempDir();
+    expect(profileFromEnv(dir)).toBeUndefined();
+  });
+});
 
 /** A registry item shipping an index.ts with the given export block content. */
 function itemWithIndex(exportBlock: string): RegistryItem {

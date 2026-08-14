@@ -174,7 +174,7 @@ function makeProvider(opts: EnvSyncOptions): ValueProvider {
     if (opts.nonInteractive) return undefined;
 
     if (isFlatListable(need.resourceType)) {
-      const { choices, truncated } = await listWorkspaceResources(
+      const { choices, truncated, error } = await listWorkspaceResources(
         need.resourceType,
         opts.profile,
       );
@@ -193,6 +193,19 @@ function makeProvider(opts: EnvSyncOptions): ValueProvider {
         if (picked === null) return undefined;
         if (picked !== MANUAL) return picked;
         // fall through to free-text
+      } else if (error) {
+        // Listing failed (usually auth/profile) — say so, don't pretend the
+        // workspace is empty, and point at the fix.
+        console.log(
+          pc.yellow(
+            `  Couldn't list ${need.resourceType}s from the workspace (${error}).`,
+          ),
+        );
+        console.log(
+          pc.dim(
+            "  Enter an id manually, or re-run with --profile <name> (or set DATABRICKS_CONFIG_PROFILE) so the picker can reach the workspace.",
+          ),
+        );
       } else {
         console.log(
           pc.dim(
