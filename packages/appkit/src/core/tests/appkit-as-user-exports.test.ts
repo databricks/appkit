@@ -44,6 +44,8 @@ vi.mock("../../telemetry", async () => {
     ...actual,
     TelemetryManager: {
       initialize: vi.fn(),
+      start: vi.fn(),
+      registerSpanProcessor: vi.fn(),
       getProvider: () => ({
         getTracer: () => ({
           startActiveSpan: vi.fn((_name: string, fn: (span: any) => any) =>
