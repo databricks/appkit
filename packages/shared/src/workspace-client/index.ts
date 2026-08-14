@@ -18,6 +18,7 @@ export type {
 export {
   ConfigError,
   Context,
+  loadConfigFile,
   Time,
   TimeUnits,
 } from "./legacy";

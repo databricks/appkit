@@ -18,6 +18,7 @@ vi.mock("@databricks/sdk-experimental", () => ({
   Context: class Context {},
   Time: class Time {},
   TimeUnits: { milliseconds: 0 },
+  loadConfigFile: vi.fn(),
 }));
 
 import { buildLegacyWorkspaceClient } from "../legacy";
