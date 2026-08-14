@@ -50,6 +50,31 @@ function arrayElementNames(arr: SgNode): Set<string> {
   return names;
 }
 
+/** Local binding names introduced by an import statement — default, namespace,
+ * and named specifiers, with aliases resolved to the local name. */
+function importBindingNames(stmt: SgNode): Set<string> {
+  const names = new Set<string>();
+  const clause = stmt.find({ rule: { kind: "import_clause" } });
+  if (!clause) return names;
+  for (const child of clause.children()) {
+    const kind = child.kind();
+    if (kind === "identifier") {
+      names.add(child.text());
+    } else if (kind === "namespace_import") {
+      const id = child.find({ rule: { kind: "identifier" } });
+      if (id) names.add(id.text());
+    } else if (kind === "named_imports") {
+      for (const spec of child.findAll({
+        rule: { kind: "import_specifier" },
+      })) {
+        const local = spec.field("alias")?.text() ?? spec.field("name")?.text();
+        if (local) names.add(local);
+      }
+    }
+  }
+  return names;
+}
+
 /**
  * Best-effort: register a plugin in the server entry's `createApp({ plugins })`
  * call by inserting the import and adding it to the array. Only edits the
@@ -116,20 +141,23 @@ export function registerPluginInServer(
     edits.push(firstEl.replace(`${newElem}${sep}${firstEl.text()}`));
   }
 
-  // Add the import unless one from the same path already exists.
+  // Add the import unless `exportName` is already bound by some import. De-dup
+  // on the binding, not the module path: an existing import from the same path
+  // under a different name (e.g. `import { HelloPlugin } from "./plugins/hello"`)
+  // must not suppress this one, or the `${exportName}()` element just added to
+  // the array would reference an unimported symbol and the server won't compile.
   const importStmts = root.findAll({ rule: { kind: "import_statement" } });
-  const hasImport = importStmts.some((s) => {
-    const src = s.find({ rule: { kind: "string" } });
-    return src?.text().replace(/^['"]|['"]$/g, "") === importPath;
-  });
+  const hasBinding = importStmts.some((s) =>
+    importBindingNames(s).has(exportName),
+  );
   const importLine = `import { ${exportName} } from "${importPath}";`;
-  if (!hasImport && importStmts.length > 0) {
+  if (!hasBinding && importStmts.length > 0) {
     const last = importStmts[importStmts.length - 1];
     edits.push(last.replace(`${last.text()}\n${importLine}`));
   }
 
   let output = root.commitEdits(edits);
-  if (!hasImport && importStmts.length === 0) {
+  if (!hasBinding && importStmts.length === 0) {
     output = `${importLine}\n${output}`;
   }
   fs.writeFileSync(serverFile, output);

@@ -77,6 +77,50 @@ describe("registerPluginInServer", () => {
     expect(written.match(/hello\(\)/g)).toHaveLength(1);
   });
 
+  it("adds the import when the same path is imported under a different binding", () => {
+    // Regression: import de-dup must key on the binding, not the module path.
+    // An existing `import { HelloPlugin } from "./plugins/hello"` (different
+    // local name, not in the plugins array) must not suppress the `hello`
+    // import, or the added `hello()` element references an unimported symbol.
+    const dir = makeTempDir();
+    const file = path.join(dir, "index.ts");
+    fs.writeFileSync(
+      file,
+      `import { createApp } from "@databricks/appkit";\n` +
+        `import { HelloPlugin } from "./plugins/hello";\n\n` +
+        `const app = await createApp({ plugins: [] });\n`,
+    );
+
+    const result = registerPluginInServer(dir, "./plugins/hello", "hello");
+
+    expect(result.status).toBe("wired");
+    const written = fs.readFileSync(file, "utf-8");
+    expect(written).toContain('import { hello } from "./plugins/hello";');
+    expect(written).toContain("hello()");
+    // The pre-existing, differently-named import is left intact.
+    expect(written).toContain('import { HelloPlugin } from "./plugins/hello";');
+  });
+
+  it("does not duplicate the import when the binding already exists", () => {
+    // The binding `hello` is already imported but not yet in the array — wire
+    // the array element without adding a second (conflicting) import.
+    const dir = makeTempDir();
+    const file = path.join(dir, "index.ts");
+    fs.writeFileSync(
+      file,
+      `import { createApp } from "@databricks/appkit";\n` +
+        `import { hello } from "./plugins/hello";\n\n` +
+        `const app = await createApp({ plugins: [] });\n`,
+    );
+
+    const result = registerPluginInServer(dir, "./plugins/hello", "hello");
+
+    expect(result.status).toBe("wired");
+    const written = fs.readFileSync(file, "utf-8");
+    expect(written.match(/import \{ hello \} from/g)).toHaveLength(1);
+    expect(written).toContain("hello()");
+  });
+
   it("skips (for a printed fallback) when there is no server entry", () => {
     const dir = makeTempDir();
     const result = registerPluginInServer(dir, "./plugins/hello", "hello");
