@@ -53,7 +53,7 @@
                   "@databricks/sdk-experimental",
                   "@databricks/sdk-experimental/**"
                 ],
-                "message": "Import the Databricks SDK only through the wrapper in packages/appkit/src/workspace-client. Add a re-export there if you need a new symbol."
+                "message": "Import the Databricks SDK only through the wrapper in packages/shared/src/workspace-client. Add a re-export there if you need a new symbol."
               }
             ]
           }
@@ -77,7 +77,7 @@
   "overrides": [
     {
       "includes": [
-        "packages/appkit/src/workspace-client/**",
+        "packages/shared/src/workspace-client/**",
         "packages/lakebase/**"
       ],
       "linter": {

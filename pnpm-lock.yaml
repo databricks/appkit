@@ -255,9 +255,6 @@ importers:
       '@databricks/lakebase':
         specifier: workspace:*
         version: link:../lakebase
-      '@databricks/sdk-experimental':
-        specifier: 0.17.0
-        version: 0.17.0
       '@opentelemetry/api':
         specifier: 1.9.0
         version: 1.9.0
@@ -561,6 +558,9 @@ importers:
       '@clack/prompts':
         specifier: 1.0.1
         version: 1.0.1
+      '@databricks/sdk-experimental':
+        specifier: 0.17.0
+        version: 0.17.0
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0

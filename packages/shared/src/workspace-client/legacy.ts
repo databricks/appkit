@@ -29,6 +29,8 @@ export type LegacyWorkspaceClient = SdkWorkspaceClient;
 export interface WorkspaceClientOptions {
   /** Databricks host, e.g. https://my-workspace.cloud.databricks.com. Defaults to DATABRICKS_HOST / profile resolution. */
   host?: string;
+  /** `~/.databrickscfg` profile name. Used when no host/token is provided. */
+  profile?: string;
   /** Bearer token. When set, `authType` defaults to "pat". */
   token?: string;
   /** Authentication strategy passed to the legacy client. */
@@ -60,7 +62,9 @@ export function buildLegacyWorkspaceClient(
       ? { host: opts.host, token: opts.token, authType: opts.authType ?? "pat" }
       : opts.host
         ? { host: opts.host }
-        : {};
+        : opts.profile
+          ? { profile: opts.profile }
+          : {};
   return new SdkWorkspaceClientCtor(cfg, opts.clientOptions);
 }
 
