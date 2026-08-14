@@ -147,7 +147,6 @@ function oboHeaders(obo: Exclude<OboOption, false>): Record<string, string> {
  * ```
  */
 export function createMockRequest(overrides: Any = {}) {
-  const mockWorkspaceClient = createMockWorkspaceClient();
   const { obo, headers: headerOverrides, ...rest } = overrides;
 
   // `obo` seeds the forwarded identity headers; an explicit `headers` override
@@ -161,10 +160,6 @@ export function createMockRequest(overrides: Any = {}) {
     params: {},
     query: {},
     body: {},
-    userWorkspaceClient: mockWorkspaceClient,
-    serviceWorkspaceClient: mockWorkspaceClient,
-    getWarehouseId: vi.fn().mockResolvedValue("test-warehouse-id"),
-    getWorkspaceId: vi.fn().mockResolvedValue("test-workspace-id"),
     header: function (name: string) {
       return this.headers[name.toLowerCase()];
     },

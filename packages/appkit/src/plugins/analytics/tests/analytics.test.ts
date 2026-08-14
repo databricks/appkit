@@ -1649,7 +1649,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("emits warehouse_status events before the result for a STARTING warehouse", async () => {
+    test("emits warehouse_status events before the result", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1667,27 +1667,30 @@ describe("Analytics Plugin", () => {
 
       const handler = getHandler("POST", "/query/:query_key");
 
-      // Override the default RUNNING mock with a STARTING -> RUNNING sequence
-      // so the route streams a warehouse_status event before the result.
-      const warehouseGet = vi
-        .fn()
-        .mockResolvedValueOnce({ state: "STARTING" })
-        .mockResolvedValueOnce({ state: "RUNNING" });
+      // The route resolves its warehouse client via getWorkspaceClient() ->
+      // ServiceContext (NOT the request), so install it there. A warehouse that
+      // is already RUNNING still emits one warehouse_status event before the
+      // result — which is what this test pins, without a poll/sleep cycle.
+      const warehouseGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
+      serviceContextMock.restore();
+      serviceContextMock = await mockServiceContext({
+        serviceDatabricksClient: {
+          statementExecution: {
+            executeStatement: vi.fn().mockResolvedValue({
+              status: { state: "SUCCEEDED" },
+              result: { data: [] },
+            }),
+          },
+          warehouses: { get: warehouseGet, start: vi.fn() },
+        },
+      });
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
         body: { parameters: {} },
       });
-      mockReq.serviceWorkspaceClient.warehouses.get = warehouseGet;
-      mockReq.userWorkspaceClient.warehouses.get = warehouseGet;
       const mockRes = createMockResponse();
 
-      // The connector polls every 3s between warehouse state checks; use fake
-      // timers so the test doesn't actually sleep.
-      vi.useFakeTimers();
-      const handlerPromise = handler(mockReq, mockRes);
-      await vi.runAllTimersAsync();
-      await handlerPromise;
-      vi.useRealTimers();
+      await handler(mockReq, mockRes);
 
       // Inspect the SSE writes: a `warehouse_status` event must precede the
       // `result` event.
@@ -1704,11 +1707,9 @@ describe("Analytics Plugin", () => {
       expect(resultIdx).toBeGreaterThanOrEqual(0);
       expect(warehouseIdx).toBeLessThan(resultIdx);
 
-      // The status payload should include the state field.
+      // The status payload should include the RUNNING state.
       expect(mockRes.write).toHaveBeenCalledWith(
-        expect.stringMatching(
-          /"type":"warehouse_status".*"state":"(STARTING|RUNNING)"/,
-        ),
+        expect.stringMatching(/"type":"warehouse_status".*"state":"RUNNING"/),
       );
 
       expect(executeMock).toHaveBeenCalledTimes(1);

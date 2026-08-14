@@ -512,7 +512,7 @@ describe("analytics metric route", () => {
       expect(mockRes.end).toHaveBeenCalled();
     });
 
-    test("emits warehouse_status before result for a STARTING warehouse", async () => {
+    test("emits warehouse_status before result", async () => {
       const plugin = pluginForDir(
         config,
         registryDir({
@@ -533,23 +533,30 @@ describe("analytics metric route", () => {
       plugin.injectRoutes(router);
       const handler = getHandler("POST", "/metric/:key");
 
-      const warehouseGet = vi
-        .fn()
-        .mockResolvedValueOnce({ state: "STARTING" })
-        .mockResolvedValueOnce({ state: "RUNNING" });
+      // The route resolves its warehouse client via getWorkspaceClient() ->
+      // ServiceContext (NOT the request), so install it there. A warehouse that
+      // is already RUNNING still emits one warehouse_status event before the
+      // result — which is what this test pins, without a poll/sleep cycle.
+      const warehouseGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
+      serviceContextMock.restore();
+      serviceContextMock = await mockServiceContext({
+        serviceDatabricksClient: {
+          statementExecution: {
+            executeStatement: vi.fn().mockResolvedValue({
+              status: { state: "SUCCEEDED" },
+              result: { data: [] },
+            }),
+          },
+          warehouses: { get: warehouseGet, start: vi.fn() },
+        },
+      });
       const mockReq = createMockRequest({
         params: { key: "revenue" },
         body: { measures: ["arr"] },
       });
-      mockReq.serviceWorkspaceClient.warehouses.get = warehouseGet;
-      mockReq.userWorkspaceClient.warehouses.get = warehouseGet;
       const mockRes = createMockResponse();
 
-      vi.useFakeTimers();
-      const handlerPromise = handler(mockReq, mockRes);
-      await vi.runAllTimersAsync();
-      await handlerPromise;
-      vi.useRealTimers();
+      await handler(mockReq, mockRes);
 
       const eventLines = (mockRes.write as any).mock.calls
         .map((call: any[]) => call[0] as string)

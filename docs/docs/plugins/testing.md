@@ -145,7 +145,7 @@ await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
 
 The kit re-exports the request/response/context fixtures AppKit uses internally:
 
-- `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`) and a mock `WorkspaceClient`. Pass `obo: true` (or `obo: { userId, token, email }`) to set the forwarded identity headers `asUser` requires, instead of hand-adding them. `createMockResponse()` also captures everything a handler writes; pass it to `expectStream` (or call `sseResponse()`) to assert a streaming route's SSE.
+- `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`). Pass `obo: true` (or `obo: { userId, token, email }`) to set the forwarded identity headers `asUser` requires, instead of hand-adding them. `createMockResponse()` also captures everything a handler writes; pass it to `expectStream` (or call `sseResponse()`) to assert a streaming route's SSE. (Plugins resolve the workspace client through `getWorkspaceClient()`, not the request — use `mockServiceContext` to control it.)
 - `mockServiceContext(options?)` — spy the `ServiceContext` singleton so code that resolves the service principal or a user context gets test doubles. Call in `beforeEach`, and call the returned `restore()` in `afterEach`.
 - `useServiceContextMock(options?)` — the same, in one line: it registers the `beforeEach` install and `afterEach` restore for you. Call it at the top of a `describe` block (not inside a test), and read the live `.current` handle from within a test:
   ```ts
