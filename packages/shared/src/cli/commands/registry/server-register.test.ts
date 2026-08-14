@@ -101,15 +101,17 @@ describe("registerPluginInServer", () => {
     expect(written).toContain('import { HelloPlugin } from "./plugins/hello";');
   });
 
-  it("does not duplicate the import when the binding already exists", () => {
-    // The binding `hello` is already imported but not yet in the array — wire
-    // the array element without adding a second (conflicting) import.
+  it("does not add a conflicting import when the binding already exists", () => {
+    // The binding `hello` is already imported (from another module) but not yet
+    // in the array. De-dup keys on the binding, so no second `hello` import is
+    // added — that would be a duplicate declaration. Path-based de-dup would
+    // miss this and emit a conflicting `import { hello } from "./plugins/hello"`.
     const dir = makeTempDir();
     const file = path.join(dir, "index.ts");
     fs.writeFileSync(
       file,
       `import { createApp } from "@databricks/appkit";\n` +
-        `import { hello } from "./plugins/hello";\n\n` +
+        `import { hello } from "./elsewhere";\n\n` +
         `const app = await createApp({ plugins: [] });\n`,
     );
 
@@ -117,7 +119,10 @@ describe("registerPluginInServer", () => {
 
     expect(result.status).toBe("wired");
     const written = fs.readFileSync(file, "utf-8");
+    // Exactly one `hello` binding, still the original — no duplicate added.
     expect(written.match(/import \{ hello \} from/g)).toHaveLength(1);
+    expect(written).toContain('import { hello } from "./elsewhere";');
+    expect(written).not.toContain('import { hello } from "./plugins/hello";');
     expect(written).toContain("hello()");
   });
 
