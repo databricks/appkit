@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+
 import { isInternalTelemetryEnabled } from "../config";
 
 afterEach(() => {

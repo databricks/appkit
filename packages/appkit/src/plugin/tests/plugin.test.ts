@@ -21,6 +21,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import { AppManager } from "../../app";
 import { CacheManager } from "../../cache";
 import { ServiceContext } from "../../context/service-context";
@@ -680,9 +681,8 @@ describe("Plugin", () => {
       expect(interceptors).toHaveLength(4); // telemetry + timeout + retry + cache
 
       // Import interceptor classes dynamically to avoid module resolution issues
-      const { TelemetryInterceptor } = await import(
-        "../interceptors/telemetry"
-      );
+      const { TelemetryInterceptor } =
+        await import("../interceptors/telemetry");
       const { TimeoutInterceptor } = await import("../interceptors/timeout");
       const { RetryInterceptor } = await import("../interceptors/retry");
       const { CacheInterceptor } = await import("../interceptors/cache");

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+
 import { formatZodError, tool } from "../tools/tool";
 
 describe("tool()", () => {

@@ -1,4 +1,5 @@
 import { Command } from "commander";
+
 import { pluginAddResourceCommand } from "./add-resource/add-resource";
 import { pluginCreateCommand } from "./create/create";
 import { pluginListCommand } from "./list/list";

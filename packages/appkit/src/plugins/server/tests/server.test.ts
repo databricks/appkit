@@ -1,5 +1,6 @@
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { PluginContext } from "../../../core/plugin-context";
 
 // Use vi.hoisted for mocks that need to be available before module loading
@@ -191,7 +192,9 @@ vi.mock("../client-config-sanitizer", () => ({
 }));
 
 import fs from "node:fs";
+
 import express from "express";
+
 import { LifecycleManager } from "../../../core/lifecycle-manager";
 import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";

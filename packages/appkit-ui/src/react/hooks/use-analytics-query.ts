@@ -6,7 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { ArrowClient, connectSSE } from "@/js";
+
 import {
   type AnalyticsSseHandlerContext,
   GENERIC_LOAD_ERROR,

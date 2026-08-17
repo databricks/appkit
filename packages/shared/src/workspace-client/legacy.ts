@@ -1,6 +1,6 @@
 /**
  * The single module in AppKit allowed to import `@databricks/sdk-experimental`
- * directly (enforced by the Biome `noRestrictedImports` boundary rule). Every
+ * directly (enforced by the oxlint `no-restricted-imports` boundary rule). Every
  * other AppKit module reaches the SDK through the wrapper's re-exports and the
  * {@link WorkspaceClient} facade.
  *

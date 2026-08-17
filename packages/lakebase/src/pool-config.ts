@@ -1,4 +1,5 @@
 import type { PoolConfig } from "pg";
+
 import { getUsernameSync, parsePoolConfig } from "./config";
 import { type DriverTelemetry, initTelemetry } from "./telemetry";
 import { createTokenRefreshCallback } from "./token-refresh";

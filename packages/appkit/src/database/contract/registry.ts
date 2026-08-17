@@ -16,7 +16,7 @@ export interface DatabaseRegistryEntry {
  * CANONICAL augmentation target. Empty by default; the generated `database.d.ts`
  * augments it via `declare module "@databricks/appkit" { interface DatabaseRegistry { ... } }`.
  */
-// biome-ignore lint/suspicious/noEmptyInterface: augmentation target, populated by typegen.
+// oxlint-disable-next-line typescript/no-empty-object-type -- augmentation target, populated by typegen.
 export interface DatabaseRegistry {}
 
 /** Literal entity keys present after typegen, or `never` before it has run. */

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { SQLWarehouseConnector } from "../sql-warehouse";
 
 // Mock telemetry to pass through span callbacks

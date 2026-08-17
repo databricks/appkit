@@ -22,10 +22,4 @@ export {
   Time,
   TimeUnits,
 } from "./legacy";
-export type {
-  files,
-  jobs,
-  serving,
-  sql,
-  WorkspaceClient,
-} from "./types";
+export type { files, jobs, serving, sql, WorkspaceClient } from "./types";

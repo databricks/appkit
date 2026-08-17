@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
+
 import dotenv from "dotenv";
 import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { camelToKebab } from "shared";
+
 import { AppKitError, ServerError } from "../../errors";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
@@ -71,7 +73,7 @@ export class ServerPlugin extends Plugin {
   private remoteTunnelController?: RemoteTunnelController;
   /** Bound listen port after optional dev-time resolution. */
   private resolvedListenPort?: number;
-  protected declare config: ServerConfig;
+  declare protected config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
   /**

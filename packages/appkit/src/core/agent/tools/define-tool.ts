@@ -1,5 +1,6 @@
 import type { AgentToolDefinition, ToolAnnotations } from "shared";
 import type { z } from "zod";
+
 import { toToolJSONSchema } from "./json-schema";
 import { formatZodError } from "./tool";
 

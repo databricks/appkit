@@ -23,6 +23,7 @@
  * transport.
  */
 import type { AgentToolDefinition } from "shared";
+
 import { APPKIT_USER_AGENT } from "../../context/client-options";
 import { createLogger } from "../../logging/logger";
 import {

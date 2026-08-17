@@ -1,5 +1,6 @@
 import type { Context } from "@opentelemetry/api";
 import type { IAppResponse } from "shared";
+
 import type { EventRingBuffer } from "./buffers";
 
 export const SSEWarningCode = {

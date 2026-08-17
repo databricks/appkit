@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import type { Highlight } from "../hooks/use-action-dispatcher";
 import { useChartColors } from "../hooks/use-chart-colors";
 import type { TripOverTime } from "../hooks/use-dashboard-data";

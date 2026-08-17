@@ -1,8 +1,10 @@
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
 import pc from "picocolors";
 import { parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
+
 import {
   APP_YAML_FILE,
   type AppYamlEnvEntry,

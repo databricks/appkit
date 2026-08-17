@@ -251,7 +251,6 @@ describe("useAnalyticsQuery", () => {
   test("does not refetch when params object is structurally equal across renders", () => {
     const { rerender } = renderHook(
       ({ limit }: { limit: number }) =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any, { limit } as any),
       { initialProps: { limit: 10 } },
     );
@@ -268,7 +267,6 @@ describe("useAnalyticsQuery", () => {
   test("does refetch when a param value actually changes", () => {
     const { rerender } = renderHook(
       ({ limit }: { limit: number }) =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any, { limit } as any),
       { initialProps: { limit: 10 } },
     );
@@ -282,7 +280,6 @@ describe("useAnalyticsQuery", () => {
 
   test("does not refetch when params is undefined across renders", () => {
     const { rerender } = renderHook(() =>
-      // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
       useAnalyticsQuery("test_query" as any),
     );
 
@@ -296,7 +293,6 @@ describe("useAnalyticsQuery", () => {
 
   test("treats two empty object literals as equal", () => {
     const { rerender } = renderHook(() =>
-      // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
       useAnalyticsQuery("test_query" as any, {} as any),
     );
 
@@ -321,7 +317,6 @@ describe("useAnalyticsQuery", () => {
       );
 
       const { result } = renderHook(() =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any),
       );
 
@@ -397,7 +392,6 @@ describe("useAnalyticsQuery", () => {
         .mockImplementation(() => {});
 
       const { result } = renderHook(() =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any),
       );
 
@@ -419,7 +413,6 @@ describe("useAnalyticsQuery", () => {
   describe("aborted controller", () => {
     test("ignores late error envelope after the controller was aborted", async () => {
       const { result } = renderHook(() =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any),
       );
 
@@ -442,7 +435,6 @@ describe("useAnalyticsQuery", () => {
 
     test("ignores late result envelope after the controller was aborted", async () => {
       const { result } = renderHook(() =>
-        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
         useAnalyticsQuery("test_query" as any),
       );
 

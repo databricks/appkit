@@ -1,5 +1,6 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
+
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
@@ -95,9 +96,7 @@ export type PluginPhase = "core" | "normal" | "deferred";
 export type PluginConstructor<
   C = BasePluginConfig,
   I extends BasePlugin = BasePlugin,
-> = (new (
-  config: C,
-) => I) & {
+> = (new (config: C) => I) & {
   DEFAULT_CONFIG?: Record<string, unknown>;
   phase?: PluginPhase;
   /**
@@ -121,25 +120,24 @@ export type PluginConstructor<
  * @see {@link GeneratedPluginManifest} — Zod-inferred base from `schemas/manifest`
  * @see `packages/appkit/src/registry/types.ts` `PluginManifest` — strict appkit narrowing (enum types)
  */
-export interface PluginManifest<TName extends string = string>
-  extends Omit<
-    GeneratedPluginManifest,
-    | "name"
-    | "config"
-    | "$schema"
-    | "resources"
-    | "displayName"
-    | "description"
-    | "author"
-    | "version"
-    | "repository"
-    | "keywords"
-    | "license"
-    | "onSetupMessage"
-    | "hidden"
-    | "devOnly"
-    | "stability"
-  > {
+export interface PluginManifest<TName extends string = string> extends Omit<
+  GeneratedPluginManifest,
+  | "name"
+  | "config"
+  | "$schema"
+  | "resources"
+  | "displayName"
+  | "description"
+  | "author"
+  | "version"
+  | "repository"
+  | "keywords"
+  | "license"
+  | "onSetupMessage"
+  | "hidden"
+  | "devOnly"
+  | "stability"
+> {
   name: TName;
   resources: {
     required: Omit<ResourceRequirement, "required">[];
@@ -198,9 +196,7 @@ export interface ResourceRequirement {
 
 export type ConfigFor<T> = T extends { DEFAULT_CONFIG: infer D }
   ? D
-  : T extends new (
-        ...args: any[]
-      ) => { config: infer C }
+  : T extends new (...args: any[]) => { config: infer C }
     ? C
     : BasePluginConfig;
 

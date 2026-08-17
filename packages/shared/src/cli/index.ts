@@ -3,7 +3,9 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { Command } from "commander";
+
 import { codemodCommand } from "./commands/codemod/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { doctorCommand } from "./commands/doctor/index.js";

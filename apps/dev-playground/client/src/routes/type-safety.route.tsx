@@ -9,6 +9,7 @@ import {
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
+
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/type-safety")({

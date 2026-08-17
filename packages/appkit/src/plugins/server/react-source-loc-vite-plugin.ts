@@ -1,4 +1,5 @@
 import path from "node:path";
+
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import MagicString from "magic-string";
 import type { Plugin } from "vite";

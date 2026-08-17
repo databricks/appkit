@@ -13,6 +13,7 @@ import type {
   StreamExecutionSettings,
 } from "shared";
 import { camelToKebab } from "shared";
+
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
@@ -217,8 +218,7 @@ const EXCLUDED_FROM_PROXY = new Set([
  */
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
-> implements BasePlugin
-{
+> implements BasePlugin {
   protected isReady = false;
   protected cache!: CacheManager;
   protected app: AppManager;

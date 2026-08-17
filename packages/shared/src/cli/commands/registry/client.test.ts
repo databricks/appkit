@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { isValidItemName, stripNamespace } from "./client";
 
 describe("stripNamespace", () => {

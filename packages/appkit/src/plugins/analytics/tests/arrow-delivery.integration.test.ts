@@ -1,5 +1,6 @@
 import { tableFromIPC } from "apache-arrow";
 import { describe, expect, test } from "vitest";
+
 import { SQLWarehouseConnector } from "../../../connectors";
 import { createWorkspaceClient } from "../../../workspace-client";
 import { deliverArrowBytes, type QueryExecutor } from "../result-delivery";

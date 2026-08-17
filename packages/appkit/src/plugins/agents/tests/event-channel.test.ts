@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { EventChannel } from "../event-channel";
 
 async function collect<T>(ch: EventChannel<T>): Promise<T[]> {

@@ -6,6 +6,7 @@ import type {
   MetricPredicate as SharedMetricPredicate,
 } from "shared";
 import { describe, expect, expectTypeOf, test } from "vitest";
+
 import {
   type MetricFilter,
   type MetricFilterOperatorName,

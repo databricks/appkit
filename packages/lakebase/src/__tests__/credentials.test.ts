@@ -1,6 +1,7 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { ApiClient, Config } from "@databricks/sdk-experimental";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { generateDatabaseCredential } from "../credentials";
 import {
   type DatabaseCredential,

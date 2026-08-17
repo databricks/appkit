@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { isHostedTool, resolveHostedTools } from "../tools/hosted-tools";
 
 describe("isHostedTool", () => {

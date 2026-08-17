@@ -7,6 +7,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type { PendingApproval } from "./approval-card";
 
 export interface ChatMessage {
@@ -86,7 +87,6 @@ export function ChatDrawer({
     if (pendingApprovals.length > 0) onOpenChange(true);
   }, [pendingApprovals.length, onOpenChange]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, messages[messages.length - 1]?.content]);

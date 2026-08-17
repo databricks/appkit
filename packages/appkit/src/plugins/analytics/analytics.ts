@@ -10,6 +10,7 @@ import {
   type ToolProvider,
 } from "shared";
 import { z } from "zod";
+
 import { SQLWarehouseConnector } from "../../connectors";
 import {
   DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
@@ -112,7 +113,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   static manifest = manifest as PluginManifest<"analytics">;
 
   protected static description = "Analytics plugin for data analysis";
-  protected declare config: IAnalyticsConfig;
+  declare protected config: IAnalyticsConfig;
 
   // analytics services
   private SQLClient: SQLWarehouseConnector;

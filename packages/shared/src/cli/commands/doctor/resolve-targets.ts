@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+
 import { computeOriginFromField } from "../../../schemas/manifest";
 import type { ResourceTarget } from "./types";
 import { errorMessage } from "./utils";

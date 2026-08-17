@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { WorkspaceClient } from "../../workspace-client";
 import {
   getWarehouseState,

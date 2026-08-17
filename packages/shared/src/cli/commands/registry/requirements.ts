@@ -1,5 +1,7 @@
 import path from "node:path";
+
 import pc from "picocolors";
+
 import { computeOriginFromField } from "../../../schemas/manifest";
 import type { RegistryItem } from "./client";
 

@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+
 import type { Plugin } from "vite";
+
 import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
 import { createWorkspaceClient } from "../workspace-client";

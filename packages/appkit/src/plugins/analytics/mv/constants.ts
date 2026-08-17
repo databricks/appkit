@@ -1,4 +1,5 @@
 import type { MetricFilterOperatorName, MetricOrderDirection } from "shared";
+
 import { METRIC_CONFIG_FILE } from "../../../../../shared/src/schemas/metric-fqn";
 import type { MetricLane } from "../types";
 

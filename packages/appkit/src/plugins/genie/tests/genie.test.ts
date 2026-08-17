@@ -6,6 +6,7 @@ import {
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { genieConnectorDefaults } from "../../../connectors/genie/defaults";
 import { ServiceContext } from "../../../context/service-context";
 import { Plugin } from "../../../plugin";

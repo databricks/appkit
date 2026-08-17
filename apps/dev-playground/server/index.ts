@@ -21,6 +21,7 @@ import {
   tool,
 } from "@databricks/appkit/beta";
 import { z } from "zod";
+
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";

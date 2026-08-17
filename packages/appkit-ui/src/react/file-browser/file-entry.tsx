@@ -1,11 +1,14 @@
 import { ChevronRight, FileIcon, FolderIcon } from "lucide-react";
+
 import { formatFileSize } from "../lib/format";
 import { cn } from "../lib/utils";
 import type { DirectoryEntry } from "./types";
 
 /** Props for the FileEntry component */
-export interface FileEntryProps
-  extends Omit<React.ComponentProps<"button">, "children"> {
+export interface FileEntryProps extends Omit<
+  React.ComponentProps<"button">,
+  "children"
+> {
   /** The directory entry to render */
   entry: DirectoryEntry;
   /** Resolved full path for this entry */

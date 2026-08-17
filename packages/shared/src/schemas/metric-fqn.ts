@@ -49,7 +49,7 @@ export const METRIC_CONFIG_FILE = "definitions.json";
  * UC_FQN_PATTERN.test("bad name");         // false (space is prohibited)
  * UC_FQN_PATTERN.test("a/b");              // false (slash is prohibited)
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: UC explicitly prohibits ASCII control characters in object names; this negated class encodes that rule.
+// oxlint-disable-next-line no-control-regex -- UC explicitly prohibits ASCII control characters in object names; this negated class encodes that rule.
 export const UC_FQN_PATTERN = /^[^\x00-\x20\x7f./]+$/;
 
 /** A metric view FQN is exactly three segments: catalog.schema.metric_view. */

@@ -1,4 +1,5 @@
 import { AlertCircle, ArrowLeft, FileIcon } from "lucide-react";
+
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
@@ -6,8 +7,10 @@ import { FileEntry } from "./file-entry";
 import type { DirectoryEntry, FileBrowserLabels } from "./types";
 
 /** Props for the DirectoryList component */
-export interface DirectoryListProps
-  extends Omit<React.ComponentProps<"div">, "children"> {
+export interface DirectoryListProps extends Omit<
+  React.ComponentProps<"div">,
+  "children"
+> {
   /** Directory entries to display */
   entries: DirectoryEntry[];
   /** Whether the directory is currently loading */

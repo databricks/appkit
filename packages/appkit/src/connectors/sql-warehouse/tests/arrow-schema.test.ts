@@ -22,6 +22,7 @@ import {
   Utf8,
 } from "apache-arrow";
 import { describe, expect, test } from "vitest";
+
 import { buildEmptyArrowIPCBase64, parseDatabricksType } from "../arrow-schema";
 
 // ============================================================================

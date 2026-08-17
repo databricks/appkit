@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
+
 import { JS_IDENTIFIER } from "./constants";
 
 /** Server entry candidates within the server root, in priority order. */

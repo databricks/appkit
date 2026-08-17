@@ -1,4 +1,5 @@
 import http, { type Server } from "node:http";
+
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import {
   afterAll,
@@ -9,6 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { server as serverPlugin } from "../../server";

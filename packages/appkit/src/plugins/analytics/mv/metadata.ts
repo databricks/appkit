@@ -1,4 +1,5 @@
 import type { MetricViewColumnDisplay, MetricViewsMetadata } from "shared";
+
 import {
   METRIC_METADATA_BUNDLE_VERSION,
   METRIC_METADATA_FILE,

@@ -5,6 +5,7 @@ import {
   CardTitle,
   Skeleton,
 } from "@databricks/appkit-ui/react";
+
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 interface SummaryCardsProps {
@@ -78,7 +79,8 @@ export function SummaryCards({
           <p className="text-sm text-muted-foreground">
             {metrics.forecasted > 0 && metrics.total > 0
               ? `+${(
-                  ((metrics.forecasted - metrics.total) / metrics.total) * 100
+                  ((metrics.forecasted - metrics.total) / metrics.total) *
+                  100
                 ).toFixed(0)}% vs current period`
               : "Next period"}
           </p>

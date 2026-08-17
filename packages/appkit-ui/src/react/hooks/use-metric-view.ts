@@ -7,7 +7,9 @@ import {
   useState,
 } from "react";
 import type { MetricViewColumnDisplay } from "shared";
+
 import { connectSSE } from "@/js";
+
 import {
   type AnalyticsSseHandlerContext,
   getDevMode,

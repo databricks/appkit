@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { normalizeChartData, normalizeHeatmapData } from "../normalize";
 
 describe("normalizeChartData", () => {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 /** Exercises the blocking fallback gate through the real query path. */

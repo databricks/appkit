@@ -5,6 +5,7 @@ import {
   TabsTrigger,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
+
 import {
   ActivityLogsPanel,
   OboProductsPanel,

@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
+
 import { buildConfigPlan } from "./config-plan";
 import { writeConfig } from "./config-writer";
 import type { ResourceRequirementRow } from "./requirements";
@@ -125,7 +127,6 @@ describe("writeConfig — additive patching", () => {
         "      resources:",
         "        - name: sql-warehouse",
         "          sql_warehouse:",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal DABs ${var.…} bundle syntax, not a JS template placeholder
         "            id: ${var.sql_warehouse_id}",
         "            permission: CAN_USE",
         "targets:",

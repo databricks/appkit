@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+
 import type { WorkspaceClient } from "../../workspace-client";
 import { TelemetryReporter } from "../reporter";
 
