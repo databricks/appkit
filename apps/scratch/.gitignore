@@ -1,0 +1,6 @@
+# Scratch apps live here — resolved as workspace packages (deps link to the
+# monorepo) and ignored by knip (apps/** is in ignoreWorkspaces), but never
+# committed. Keep this dir tracked via .gitkeep; ignore everything else.
+*
+!.gitignore
+!.gitkeep
