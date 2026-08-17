@@ -114,6 +114,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.61.0](https://github.com/databricks/appkit/compare/v0.60.0...v0.61.0) (2026-08-17)
+
+### cli
+
+* **cli:** add 'appkit add' and 'appkit registry' commands ([#462](https://github.com/databricks/appkit/issues/462)) ([c4861c8](https://github.com/databricks/appkit/commit/c4861c86cf0d4454c9165176a43b59a22c30b2c7))
+
+
 ## [0.60.0](https://github.com/databricks/appkit/compare/v0.59.0...v0.60.0) (2026-08-13)
 
 ### appkit
