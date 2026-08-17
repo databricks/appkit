@@ -26,10 +26,17 @@ import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
 
+type AppKitHandle<
+  TPlugins extends readonly PluginData<PluginConstructor, unknown, string>[],
+> = PluginMap<TPlugins> & {
+  shutdown(): Promise<void>;
+};
+
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
+  #lifecycleManager?: LifecycleManager;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
@@ -190,13 +197,27 @@ export class AppKit<TPlugins extends InputPluginMap> {
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
     } = {},
-  ): Promise<PluginMap<T>> {
-    // Initialize core services
-    TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
-
+  ): Promise<AppKitHandle<T>> {
     const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
     const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
+    const agentsEnabled = rawPlugins.some(
+      (plugin) => plugin?.name === "agents",
+    );
+    const requestedMlflowUc = config.telemetry?.mlflowUc;
+
+    // Configuration is resolved before plugin construction or server startup.
+    // The agents plugin enables UC tracing by default; adjacent AppKit projects
+    // can opt in explicitly without installing that plugin.
+    await TelemetryManager.initialize(
+      {
+        ...config.telemetry,
+        mlflowUc: agentsEnabled
+          ? (requestedMlflowUc ?? true)
+          : requestedMlflowUc,
+      },
+      config.client,
+    );
+    await CacheManager.getInstance(config?.cache);
 
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();
@@ -224,7 +245,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     await Promise.all(instance.#setupPromises);
     await instance.#context.emitLifecycle("setup:complete");
 
-    const handle = instance as unknown as PluginMap<T>;
+    const handle = instance as unknown as AppKitHandle<T>;
 
     if (config.onPluginsReady) {
       logger.debug("Running onPluginsReady hook");
@@ -245,9 +266,15 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // plugin has started. Applies uniformly whether or not a server plugin
     // is present — server-less apps still get their telemetry flushed and
     // plugin shutdown() hooks run.
-    new LifecycleManager(instance.#context).installSignalHandlers();
+    instance.#lifecycleManager = new LifecycleManager(instance.#context);
+    instance.#lifecycleManager.installSignalHandlers();
 
     return handle;
+  }
+
+  /** Gracefully release plugins, servers, caches, telemetry, and signal hooks. */
+  async shutdown(): Promise<void> {
+    await this.#lifecycleManager?.shutdown({ exitProcess: false });
   }
 
   private static bootstrapInternalTelemetry(): void {
@@ -384,6 +411,6 @@ export async function createApp<
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     disableInternalTelemetry?: boolean;
   } = {},
-): Promise<PluginMap<T>> {
+): Promise<AppKitHandle<T>> {
   return AppKit._createApp(config);
 }

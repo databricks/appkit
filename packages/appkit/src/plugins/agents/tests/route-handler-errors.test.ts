@@ -1,27 +1,14 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  type ReadableSpan,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type express from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
-
-// Partial-mock the tracing module: traceAgent/traceTool still run their
-// callbacks, but the trace id is deterministic and run-linking is a spy.
-const linkTraceToRun = vi.hoisted(() => vi.fn());
-let mockTraceId: string | undefined;
-vi.mock("../mlflow", () => ({
-  initAgentTracing: vi.fn(async () => {}),
-  traceAgent: (
-    _name: string,
-    _inputs: unknown,
-    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
-  ) => fn({ setOutputs: () => {} }),
-  traceTool: (
-    _name: string,
-    _inputs: unknown,
-    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
-  ) => fn({ setOutputs: () => {} }),
-  currentTraceId: () => mockTraceId,
-  linkTraceToRun,
-}));
 
 /**
  * Surface-level guarantees on the agents plugin's HTTP route handlers when
@@ -39,8 +26,6 @@ vi.mock("../mlflow", () => ({
  */
 
 beforeEach(() => {
-  linkTraceToRun.mockClear();
-  mockTraceId = undefined;
   // biome-ignore lint/suspicious/noExplicitAny: test seam, mirrors other suites
   (CacheManager as any).instance = {
     get: vi.fn(),
@@ -53,10 +38,15 @@ beforeEach(() => {
   };
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 function mockReq(body: unknown, userId = "alice"): express.Request {
   const headers: Record<string, string> = {
     "x-forwarded-user": userId,
     "x-forwarded-access-token": "fake-token",
+    "x-request-id": "request-early",
   };
   return {
     body,
@@ -65,9 +55,13 @@ function mockReq(body: unknown, userId = "alice"): express.Request {
   } as unknown as express.Request;
 }
 
-function mockRes() {
-  const json = vi.fn();
-  const setHeader = vi.fn();
+function mockRes(order?: string[]) {
+  const json = vi.fn((body: unknown) => {
+    order?.push(`body:${JSON.stringify(body)}`);
+  });
+  const setHeader = vi.fn((name: string, value: unknown) => {
+    order?.push(`header:${name}:${String(value)}`);
+  });
   let statusCode = 200;
   const status = vi.fn((code: number) => {
     statusCode = code;
@@ -79,22 +73,297 @@ function mockRes() {
       return statusCode;
     },
     json,
+    setHeader,
   };
 }
 
-function seedPlugin(adapter: unknown = { async *run() {} }): AgentsPlugin {
+async function captureRouteSpans(
+  operation: () => Promise<void>,
+): Promise<{ spans: ReadableSpan[]; error?: unknown }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { spans, ...(error !== undefined ? { error } : {}) };
+}
+
+function requestForRoute(
+  route: "chat" | "invocations" | "responses",
+  body: unknown,
+  userId = "alice",
+): express.Request {
+  const req = mockReq(body, userId);
+  Object.assign(req, {
+    path: `/${route}`,
+    url: `/${route}`,
+    originalUrl: `/${route}`,
+  });
+  return req;
+}
+
+function expectEarlyErrorTrace(
+  spans: ReadableSpan[],
+  order: string[],
+  route: "chat" | "invocations" | "responses",
+  inputKey: "message" | "input",
+): void {
+  const roots = spans.filter(
+    (span) => span.attributes["mlflow.spanType"] === "AGENT",
+  );
+  expect(roots).toHaveLength(1);
+  const root = roots[0];
+  expect(root.status.code).toBe(SpanStatusCode.ERROR);
+  expect(root.attributes).toMatchObject({
+    "appkit.route": route,
+    "appkit.request.id": "request-early",
+  });
+  expect(String(root.attributes["mlflow.spanInputs"])).toContain(inputKey);
+  expect(String(root.attributes["mlflow.spanOutputs"]).length).toBeGreaterThan(
+    2,
+  );
+  expect(
+    spans.filter((span) => span.attributes["mlflow.spanType"] === "AGENT"),
+  ).toHaveLength(1);
+  const headerIndex = order.findIndex((entry) =>
+    entry.startsWith("header:X-MLflow-Trace-Id:"),
+  );
+  const bodyIndex = order.findIndex((entry) => entry.startsWith("body:"));
+  expect(headerIndex).toBeGreaterThanOrEqual(0);
+  expect(bodyIndex).toBeGreaterThan(headerIndex);
+}
+
+function seedPlugin(): AgentsPlugin {
   const plugin = new AgentsPlugin({ dir: false });
   // biome-ignore lint/suspicious/noExplicitAny: seed private state
   (plugin as any).agents.set("default", {
     name: "default",
     instructions: "hi",
-    adapter,
+    adapter: { async *run() {} },
     toolIndex: new Map(),
   });
   // biome-ignore lint/suspicious/noExplicitAny: seed private state
   (plugin as any).defaultAgentName = "default";
   return plugin;
 }
+
+describe("early HTTP failures create one semantic root before writing", () => {
+  test("/chat schema failure traces raw input and sets discovery before the body", async () => {
+    const plugin = seedPlugin();
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", { message: "" });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+  });
+
+  test("/chat missing-agent lookup finalizes the provisional root as ERROR", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", {
+      message: "hello",
+      agent: "missing-agent",
+    });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+  });
+
+  test("/chat thread setup failure updates resolved identity and ends one root", async () => {
+    const plugin = seedPlugin();
+    (plugin as any).threadStore = {
+      get: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockRejectedValue(new Error("DB unavailable")),
+      addMessage: vi.fn(),
+    };
+    const order: string[] = [];
+    const { res } = mockRes(order);
+    const req = requestForRoute("chat", { message: "hello" });
+
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
+
+    expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes).toMatchObject({
+      "appkit.agent.name": "default",
+      "mlflow.trace.user": "alice",
+    });
+  });
+
+  test("/chat user-context failure still sets discovery before middleware error body", async () => {
+    const plugin = seedPlugin();
+    const order: string[] = [];
+    const { res, json } = mockRes(order);
+    const req = requestForRoute("chat", { message: "hello" }, "");
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleChat: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleChat(req, res),
+      );
+      expect(observed.error).toBeDefined();
+      json({ error: "Authentication failed" });
+      expectEarlyErrorTrace(observed.spans, order, "chat", "message");
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  describe.each(["invocations", "responses"] as const)("/%s", (route) => {
+    test("schema failure creates and finalizes one root", async () => {
+      const plugin = seedPlugin();
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+    });
+
+    test("missing-agent lookup creates and finalizes one root", async () => {
+      const plugin = new AgentsPlugin({ dir: false });
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+    });
+
+    test("thread setup failure creates and finalizes one root", async () => {
+      const plugin = seedPlugin();
+      (plugin as any).threadStore = {
+        create: vi.fn().mockRejectedValue(new Error("DB unavailable")),
+        addMessage: vi.fn(),
+      };
+      const order: string[] = [];
+      const { res } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" });
+
+      const observed = await captureRouteSpans(() =>
+        (
+          plugin as unknown as {
+            _handleInvoke: (
+              request: express.Request,
+              response: express.Response,
+            ) => Promise<void>;
+          }
+        )._handleInvoke(req, res),
+      );
+
+      expectEarlyErrorTrace(observed.spans, order, route, "input");
+      const root = observed.spans.find(
+        (span) => span.attributes["mlflow.spanType"] === "AGENT",
+      );
+      expect(root?.attributes).toMatchObject({
+        "appkit.agent.name": "default",
+        "mlflow.trace.user": "alice",
+      });
+    });
+
+    test("user-context failure sets discovery before middleware error body", async () => {
+      const plugin = seedPlugin();
+      const order: string[] = [];
+      const { res, json } = mockRes(order);
+      const req = requestForRoute(route, { input: "hello" }, "");
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const observed = await captureRouteSpans(() =>
+          (
+            plugin as unknown as {
+              _handleInvoke: (
+                request: express.Request,
+                response: express.Response,
+              ) => Promise<void>;
+            }
+          )._handleInvoke(req, res),
+        );
+        expect(observed.error).toBeDefined();
+        json({ error: "Authentication failed" });
+        expectEarlyErrorTrace(observed.spans, order, route, "input");
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+  });
+});
 
 describe("POST /chat — threadStore failure", () => {
   test("returns 500 when threadStore.get rejects (existing thread path)", async () => {
@@ -300,6 +569,72 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
     }
   });
 
+  test("rejects when a nested sub-agent exposes an approval-gated tool", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const childToolIndex = new Map();
+    childToolIndex.set("delete_records", {
+      source: "function",
+      def: {
+        name: "delete_records",
+        description: "deletes records",
+        parameters: { type: "object", properties: {} },
+        annotations: { effect: "destructive" },
+      },
+    });
+    const parentToolIndex = new Map();
+    parentToolIndex.set("agent-helper", {
+      source: "subagent",
+      agentName: "helper",
+      def: {
+        name: "agent-helper",
+        description: "delegate to helper",
+        parameters: { type: "object", properties: {} },
+      },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "delegate",
+      adapter: { async *run() {} },
+      toolIndex: parentToolIndex,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("helper", {
+      name: "helper",
+      instructions: "delete when asked",
+      adapter: { async *run() {} },
+      toolIndex: childToolIndex,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).defaultAgentName = "default";
+    // biome-ignore lint/suspicious/noExplicitAny: prove the pre-flight rejects before execution
+    (plugin as any)._runAgentNonStreaming = vi.fn(async () => undefined);
+    // biome-ignore lint/suspicious/noExplicitAny: stub
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-1", messages: [] }),
+      addMessage: vi.fn(),
+    };
+
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq({ input: "hi" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringMatching(/delete_records/),
+      }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: rejection must happen before adapter execution
+    expect((plugin as any)._runAgentNonStreaming).not.toHaveBeenCalled();
+  });
+
   test("passes pre-flight when approval.requireForDestructive is disabled", async () => {
     const plugin = seedPluginWithTools(
       { effect: "destructive" },
@@ -355,6 +690,72 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
 });
 
 describe("POST /invocations & /responses — successful invoke", () => {
+  test.each(["invocations", "responses"] as const)(
+    "passes Supervisor hosted-tool extensions through /%s",
+    async (route) => {
+      const observed: unknown[] = [];
+      const plugin = new AgentsPlugin({ dir: false });
+      // biome-ignore lint/suspicious/noExplicitAny: seed private runtime state
+      (plugin as any).agents.set("default", {
+        name: "default",
+        instructions: "hi",
+        adapter: {
+          acceptsExtensions: ["databricks.supervisor"],
+          async *run(input: unknown) {
+            observed.push(input);
+            yield { type: "message", content: "done" };
+          },
+        },
+        toolIndex: new Map([
+          [
+            "genie",
+            {
+              source: "hosted-supervisor",
+              def: { name: "genie", description: "hosted", parameters: {} },
+              spec: {
+                type: "genie_space",
+                genie_space: { id: "space-1", description: "hosted" },
+              },
+            },
+          ],
+        ]),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: seed private runtime state
+      (plugin as any).defaultAgentName = "default";
+      // biome-ignore lint/suspicious/noExplicitAny: stub persistence
+      (plugin as any).threadStore = {
+        create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+        addMessage: vi.fn(),
+        delete: vi.fn(),
+      };
+
+      const { res } = mockRes();
+      await (
+        plugin as unknown as {
+          _handleInvoke: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleInvoke(requestForRoute(route, { input: "hi" }), res);
+
+      expect(observed).toHaveLength(1);
+      expect(observed[0]).toMatchObject({
+        tools: [],
+        extensions: {
+          "databricks.supervisor": {
+            hostedTools: [
+              {
+                type: "genie_space",
+                genie_space: { id: "space-1", description: "hosted" },
+              },
+            ],
+          },
+        },
+      });
+    },
+  );
+
   test("returns OpenAI Responses-shaped JSON with aggregated assistant text", async () => {
     const plugin = new AgentsPlugin({ dir: false });
     // biome-ignore lint/suspicious/noExplicitAny: seed
@@ -378,15 +779,17 @@ describe("POST /invocations & /responses — successful invoke", () => {
       delete: vi.fn(),
     };
 
-    const { res, json } = mockRes();
-    await (
-      plugin as unknown as {
-        _handleInvoke: (
-          r: express.Request,
-          w: express.Response,
-        ) => Promise<void>;
-      }
-    )._handleInvoke(mockReq({ input: "hi" }), res);
+    const { res, json, setHeader } = mockRes();
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleInvoke: (
+            r: express.Request,
+            w: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleInvoke(mockReq({ input: "hi", mlflowRunId: "run-99" }), res),
+    );
 
     expect(res.status).not.toHaveBeenCalledWith(500);
     expect(json).toHaveBeenCalledTimes(1);
@@ -400,6 +803,8 @@ describe("POST /invocations & /responses — successful invoke", () => {
         role: string;
         content: Array<{ type: string; text: string }>;
       }>;
+      trace_id: string;
+      mlflow_trace_id: string;
     };
     expect(payload.object).toBe("response");
     expect(payload.status).toBe("completed");
@@ -412,28 +817,42 @@ describe("POST /invocations & /responses — successful invoke", () => {
       type: "output_text",
       text: "hello world",
     });
+    expect(payload.trace_id).toMatch(/^[0-9a-f]{32}$/);
+    expect(payload.mlflow_trace_id).toBe(payload.trace_id);
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes["mlflow.sourceRun"]).toBe("run-99");
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      payload.trace_id,
+    );
   });
 
-  function seedEchoPlugin(): AgentsPlugin {
-    const plugin = seedPlugin({
-      async *run() {
-        yield { type: "message_delta", content: "ok" };
+  test("sets trace discovery headers even when the adapter throws", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "hi",
+      adapter: {
+        async *run() {
+          yield { type: "message_delta", content: "partial" };
+          throw new Error("adapter failed");
+        },
       },
+      toolIndex: new Map(),
     });
+    // biome-ignore lint/suspicious/noExplicitAny: seed private state
+    (plugin as any).defaultAgentName = "default";
     // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
       addMessage: vi.fn(),
       delete: vi.fn(),
     };
-    return plugin;
-  }
 
-  async function invoke(
-    plugin: AgentsPlugin,
-    body: unknown,
-  ): Promise<Record<string, unknown>> {
-    const { res, json } = mockRes();
+    const { res, json, setHeader } = mockRes();
     await (
       plugin as unknown as {
         _handleInvoke: (
@@ -441,42 +860,142 @@ describe("POST /invocations & /responses — successful invoke", () => {
           w: express.Response,
         ) => Promise<void>;
       }
-    )._handleInvoke(mockReq(body), res);
-    return json.mock.calls[0]?.[0] as Record<string, unknown>;
-  }
+    )._handleInvoke(mockReq({ input: "hi" }), res);
 
-  test("links the trace to the run and echoes mlflow_trace_id when tracing is on", async () => {
-    mockTraceId = "tr-abc123";
-    const plugin = seedEchoPlugin();
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      expect.stringMatching(/^[0-9a-f]{32}$/),
+    );
+    expect(json).toHaveBeenCalledWith({
+      error: "adapter failed",
+      trace_id: expect.stringMatching(/^[0-9a-f]{32}$/),
+    });
+  });
+});
 
-    const payload = await invoke(plugin, {
-      input: "hi",
-      mlflowRunId: "run-99",
+describe("POST /chat — trace discovery ordering", () => {
+  test("sets the trace header and emits trace metadata before any streamed content", async () => {
+    vi.stubEnv("DATABRICKS_HOST", "https://example.cloud.databricks.com/");
+    vi.stubEnv("MLFLOW_EXPERIMENT_ID", "123456789");
+    const plugin = new AgentsPlugin({ dir: false });
+    const order: string[] = [];
+    const streamed: Array<Record<string, unknown>> = [];
+    // biome-ignore lint/suspicious/noExplicitAny: drive the real stream producer without StreamManager transport
+    (plugin as any).executeStream = async (
+      _res: express.Response,
+      source: (signal?: AbortSignal) => AsyncIterable<Record<string, unknown>>,
+    ) => {
+      for await (const event of source(new AbortController().signal)) {
+        streamed.push(event);
+        order.push(`body:${String(event.type)}`);
+      }
+    };
+    const registered = {
+      name: "planner",
+      instructions: "help",
+      adapter: {
+        async *run() {
+          const startedAt = Date.now() - 10;
+          yield {
+            type: "model_start" as const,
+            stepId: "step-1",
+            model: "model-a",
+            provider: "databricks",
+            input: { prompt: "hi" },
+            startedAt,
+          };
+          yield { type: "message_delta" as const, content: "hello" };
+          yield {
+            type: "model_end" as const,
+            stepId: "step-1",
+            model: "model-a",
+            provider: "databricks",
+            output: { text: "hello" },
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              totalTokens: 2,
+              costAvailable: false,
+            },
+            streamDurationMs: 10,
+            endedAt: startedAt + 10,
+          };
+        },
+      },
+      toolIndex: new Map(),
+    };
+    const thread = {
+      id: "thread-1",
+      userId: "alice",
+      messages: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: seed private route state
+    (plugin as any).agents.set("planner", registered);
+    // biome-ignore lint/suspicious/noExplicitAny: seed private route state
+    (plugin as any).defaultAgentName = "planner";
+    // biome-ignore lint/suspicious/noExplicitAny: stub persistence
+    (plugin as any).threadStore = {
+      get: vi.fn(),
+      create: vi.fn().mockResolvedValue(thread),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    const req = mockReq({
+      message: "hi",
+      agent: "planner",
+      mlflowRunId: "run-chat-99",
+    });
+    const { res, setHeader } = mockRes();
+    setHeader.mockImplementation((name, value) => {
+      if (name === "X-MLflow-Trace-Id") order.push(`header:${String(value)}`);
     });
 
-    expect(linkTraceToRun).toHaveBeenCalledWith("run-99");
-    expect(payload.mlflow_trace_id).toBe("tr-abc123");
-  });
+    const observed = await captureRouteSpans(() =>
+      (
+        plugin as unknown as {
+          _handleChat: (
+            request: express.Request,
+            response: express.Response,
+          ) => Promise<void>;
+        }
+      )._handleChat(req, res),
+    );
 
-  test("omits mlflow_trace_id and does not link when tracing is off", async () => {
-    mockTraceId = undefined; // currentTraceId() no-ops when disabled
-    const plugin = seedEchoPlugin();
-
-    const payload = await invoke(plugin, { input: "hi" });
-
-    expect(linkTraceToRun).not.toHaveBeenCalled();
-    expect(payload).not.toHaveProperty("mlflow_trace_id");
-  });
-
-  test("does not link when no run id is supplied even if tracing is on", async () => {
-    mockTraceId = "tr-standalone";
-    const plugin = seedEchoPlugin();
-
-    const payload = await invoke(plugin, { input: "hi" });
-
-    expect(linkTraceToRun).not.toHaveBeenCalled();
-    // Trace still exists and its id is surfaced — just not linked to a run.
-    expect(payload.mlflow_trace_id).toBe("tr-standalone");
+    const metadata = streamed[0] as {
+      type?: string;
+      data?: {
+        traceId?: string;
+        mlflowTraceId?: string;
+        threadId?: string;
+      };
+    };
+    expect(order[0]).toMatch(/^header:[0-9a-f]{32}$/);
+    expect(order[1]).toBe("body:appkit.metadata");
+    expect(metadata).toMatchObject({
+      type: "appkit.metadata",
+      data: {
+        threadId: "thread-1",
+        traceId: expect.any(String),
+        mlflowTraceId: expect.any(String),
+        traceUrl: expect.stringMatching(
+          /^https:\/\/example\.cloud\.databricks\.com\/ml\/experiments\/123456789\/traces\?selectedTraceId=/,
+        ),
+      },
+    });
+    expect(setHeader).toHaveBeenCalledWith(
+      "X-MLflow-Trace-Id",
+      metadata.data?.traceId,
+    );
+    expect(metadata.data?.mlflowTraceId).toBe(metadata.data?.traceId);
+    const root = observed.spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    expect(root?.attributes["mlflow.sourceRun"]).toBe("run-chat-99");
+    expect(JSON.stringify(streamed)).not.toContain("model_start");
+    expect(JSON.stringify(streamed)).not.toContain("model_end");
   });
 });
 

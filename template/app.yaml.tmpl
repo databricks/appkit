@@ -1,5 +1,19 @@
 command: ['npm', 'run', 'start']
-{{- if .appEnv}}
+{{- if or .appEnv .plugins.agents}}
 env:
+{{- if .appEnv}}
 {{.appEnv}}
+{{- end}}
+{{- if .plugins.agents}}
+  # UC coordinates are runtime configuration, not fields on the experiment
+  # resource binding. `npm run setup` replaces these defaults after provisioning.
+  - name: MLFLOW_UC_CATALOG
+    value: main
+  - name: MLFLOW_UC_SCHEMA
+    value: agent_traces
+  - name: MLFLOW_UC_TABLE_PREFIX
+    value: appkit
+  - name: MLFLOW_OTEL_SPANS_TABLE
+    value: main.agent_traces.appkit_otel_spans
+{{- end}}
 {{- end}}

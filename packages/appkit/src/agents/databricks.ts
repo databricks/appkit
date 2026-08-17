@@ -1,15 +1,30 @@
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type {
   AgentAdapter,
   AgentEvent,
   AgentInput,
+  AgentRemoteTraceEvent,
   AgentRunContext,
   AgentToolDefinition,
+  AgentUsage,
 } from "shared";
 import {
+  getResponseHeaders,
+  retainResponseHeaders,
   type StreamBody,
   stream as servingStream,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
+import {
+  captureTraceValue,
+  injectActiveTraceContext,
+  normalizeFailureOutput,
+  verifiedAgentRemoteTrace,
+} from "../telemetry/agent-tracing";
+import {
+  DEFAULT_TRACE_REDACT_KEYS,
+  REDACTED_TRACE_VALUE,
+} from "../telemetry/agent-tracing/attributes";
 import { createWorkspaceClient } from "../workspace-client";
 
 /** Default cap for a single incomplete SSE line tail (DoS guard). */
@@ -27,8 +42,179 @@ const PYTHON_STYLE_TOOL_PARSE_MAX_INPUT = 64 * 1024;
 /** Fallback HTTP timeout when the raw fetch adapter path receives no AbortSignal from the runner. */
 const RAW_FETCH_DEFAULT_TIMEOUT_MS = 120_000;
 
+const ERROR_SENSITIVE_KEY_PATTERN = new RegExp(
+  `\\b(${[...DEFAULT_TRACE_REDACT_KEYS]
+    .sort((left, right) => right.length - left.length)
+    .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})\\b\\s*[:=]\\s*(?:"[^"]*"|'[^']*'|[^\\s,;&#]+)`,
+  "gi",
+);
+const ERROR_AUTHORIZATION_PATTERN =
+  /\b((?:proxy-)?authorization)\s*[:=]\s*(?:(?:Basic|Bearer)\s+)?[^\s,;]+/gi;
+const ERROR_AUTH_SCHEME_PATTERN = /\b(Basic|Bearer)\s+[^\s,;]+/gi;
+const ERROR_COOKIE_PATTERN = /\b(cookie|set-cookie)\s*[:=]\s*[^\r\n]*/gi;
+const ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s]+/gi;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function finiteNonNegativeNumber(
+  record: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeUsage(
+  parsed: Record<string, unknown>,
+  previous: AgentUsage,
+): AgentUsage | undefined {
+  const raw = isRecord(parsed.usage) ? parsed.usage : undefined;
+  const providerCost =
+    finiteNonNegativeNumber(raw, "cost_usd", "cost", "total_cost_usd") ??
+    finiteNonNegativeNumber(parsed, "cost_usd", "cost", "total_cost_usd");
+  if (!raw) {
+    if (providerCost === undefined) return undefined;
+    return {
+      ...previous,
+      costUsd: providerCost,
+      costAvailable: true,
+    };
+  }
+
+  const inputTokens =
+    finiteNonNegativeNumber(raw, "input_tokens", "prompt_tokens") ?? 0;
+  const outputTokens =
+    finiteNonNegativeNumber(raw, "output_tokens", "completion_tokens") ?? 0;
+  const totalTokens =
+    finiteNonNegativeNumber(raw, "total_tokens") ?? inputTokens + outputTokens;
+  const details = isRecord(raw.input_tokens_details)
+    ? raw.input_tokens_details
+    : isRecord(raw.prompt_tokens_details)
+      ? raw.prompt_tokens_details
+      : undefined;
+  const cacheReadInputTokens =
+    finiteNonNegativeNumber(raw, "cache_read_input_tokens", "cached_tokens") ??
+    finiteNonNegativeNumber(
+      details,
+      "cache_read_input_tokens",
+      "cached_tokens",
+    );
+  const cacheCreationInputTokens =
+    finiteNonNegativeNumber(raw, "cache_creation_input_tokens") ??
+    finiteNonNegativeNumber(
+      details,
+      "cache_creation_input_tokens",
+      "cache_creation_tokens",
+    );
+  const retainedCost =
+    providerCost ?? (previous.costAvailable ? previous.costUsd : undefined);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
+    ...(cacheCreationInputTokens !== undefined
+      ? { cacheCreationInputTokens }
+      : {}),
+    ...(retainedCost !== undefined ? { costUsd: retainedCost } : {}),
+    costAvailable: retainedCost !== undefined,
+  };
+}
+
+function emptyUsage(): AgentUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costAvailable: false,
+  };
+}
+
+function firstChoice(
+  parsed: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const choices = parsed.choices;
+  if (!Array.isArray(choices) || !isRecord(choices[0])) return undefined;
+  return choices[0];
+}
+
+function remoteTraceFromPayload(
+  parsed: Record<string, unknown>,
+): AgentRemoteTraceEvent | undefined {
+  const nested = isRecord(parsed.remote_trace)
+    ? parsed.remote_trace
+    : undefined;
+  const traceIdCandidates = [
+    nested?.trace_id,
+    nested?.traceId,
+    parsed.mlflow_trace_id,
+    parsed.databricks_trace_id,
+  ];
+  const traceId = traceIdCandidates.find(
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
+  );
+  if (!traceId) return undefined;
+
+  const spanIdCandidates = [
+    nested?.span_id,
+    nested?.spanId,
+    parsed.mlflow_span_id,
+    parsed.databricks_span_id,
+  ];
+  const spanId = spanIdCandidates.find(
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
+  );
+  return verifiedAgentRemoteTrace(traceId, spanId, "model-serving");
+}
+
+function sanitizedModelError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Model request failed";
+  const redacted = raw
+    .replace(
+      ERROR_COOKIE_PATTERN,
+      (_match, key: string) => `${key}: ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(ERROR_URL_PATTERN, REDACTED_TRACE_VALUE)
+    .replace(
+      ERROR_AUTHORIZATION_PATTERN,
+      (_match, key: string) => `${key}: ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(
+      ERROR_AUTH_SCHEME_PATTERN,
+      (_match, scheme: string) => `${scheme} ${REDACTED_TRACE_VALUE}`,
+    )
+    .replace(
+      ERROR_SENSITIVE_KEY_PATTERN,
+      (_match, key: string) => `${key}=${REDACTED_TRACE_VALUE}`,
+    );
+  const withoutControls = Array.from(redacted, (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 ? " " : character;
+  }).join("");
+  const singleLine = withoutControls.replace(/\s+/g, " ").trim();
+  return (singleLine || "Model request failed").slice(0, 512);
+}
+
+function modelFromEndpointUrl(endpointUrl: string): string {
+  try {
+    const parts = new URL(endpointUrl).pathname.split("/");
+    const endpointIndex = parts.indexOf("serving-endpoints");
+    const encoded = parts[endpointIndex + 1];
+    return encoded ? decodeURIComponent(encoded) : endpointUrl;
+  } catch {
+    return endpointUrl;
+  }
 }
 
 /**
@@ -80,11 +266,7 @@ function extractLlamaToolJsonSlice(text: string): string | undefined {
 /** OpenAI SSE payload: `{ choices: [{ delta }] }`. */
 function openAiChoicesDelta(parsed: unknown): unknown {
   if (!isRecord(parsed)) return undefined;
-  const choices = parsed.choices;
-  if (!Array.isArray(choices) || choices.length < 1) return undefined;
-  const first = choices[0];
-  if (!isRecord(first)) return undefined;
-  return first.delta;
+  return firstChoice(parsed)?.delta;
 }
 
 function isStreamingDeltaToolCall(value: unknown): value is DeltaToolCall {
@@ -113,6 +295,8 @@ function throwIfExceedsStreamLimit(
 interface RawFetchAdapterOptions {
   endpointUrl: string;
   authenticate: () => Promise<Record<string, string>>;
+  /** Model/endpoint name recorded in lifecycle telemetry. */
+  model?: string;
   maxSteps?: number;
   maxTokens?: number;
   /** Optional generation params forwarded to the serving request body. */
@@ -133,6 +317,8 @@ interface RawFetchAdapterOptions {
  */
 interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
+  /** Model/endpoint name recorded in lifecycle telemetry. */
+  model?: string;
   maxSteps?: number;
   maxTokens?: number;
   generationParams?: GenerationParams;
@@ -271,6 +457,7 @@ interface DeltaToolCall {
  */
 export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
+  private model: string;
   private maxSteps: number;
   private maxTokens: number;
   private generationParams: GenerationParams;
@@ -291,30 +478,32 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (isStreamBodyOptions(options)) {
       this.streamBody = options.streamBody;
+      this.model = options.model ?? "databricks-model-serving";
     } else {
       const { endpointUrl, authenticate } = options;
+      this.model = options.model ?? modelFromEndpointUrl(endpointUrl);
       this.streamBody = async (body, signal) => {
         const fetchSignal =
           signal ?? AbortSignal.timeout(RAW_FETCH_DEFAULT_TIMEOUT_MS);
         const authHeaders = await authenticate();
-        const response = await fetch(endpointUrl, {
-          method: "POST",
-          headers: {
+        const headers = injectActiveTraceContext(
+          new Headers({
             "User-Agent": APPKIT_USER_AGENT,
             "Content-Type": "application/json",
             ...authHeaders,
-          },
+          }),
+        );
+        const response = await fetch(endpointUrl, {
+          method: "POST",
+          headers,
           body: JSON.stringify(body),
           signal: fetchSignal,
         });
         if (!response.ok) {
-          const errorText = await response.text().catch(() => "Unknown error");
-          throw new Error(
-            `Databricks API error (${response.status}): ${errorText}`,
-          );
+          throw new Error(`Databricks API error (${response.status})`);
         }
         if (!response.body) throw new Error("No response body");
-        return response.body;
+        return retainResponseHeaders(response.body, response.headers);
       };
     }
   }
@@ -351,6 +540,7 @@ export class DatabricksAdapter implements AgentAdapter {
           body,
           signal,
         ),
+      model: endpointName,
       maxSteps,
       maxTokens,
       generationParams,
@@ -363,11 +553,13 @@ export class DatabricksAdapter implements AgentAdapter {
   /**
    * Creates a DatabricksAdapter from a Model Serving endpoint name.
    * Auto-creates a WorkspaceClient internally. Reads the endpoint name
-   * from the argument or the `DATABRICKS_SERVING_ENDPOINT_NAME` env var.
+   * from the argument, the agents resource env var, or the legacy serving
+   * plugin env var (in that order).
    *
    * @example
    * ```ts
-   * // Reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var
+   * // Reads DATABRICKS_AGENT_SERVING_ENDPOINT_NAME, falling back to the
+   * // backward-compatible DATABRICKS_SERVING_ENDPOINT_NAME env var
    * const adapter = await DatabricksAdapter.fromModelServing();
    *
    * // Explicit endpoint
@@ -385,12 +577,14 @@ export class DatabricksAdapter implements AgentAdapter {
     options?: ModelServingOptions,
   ): Promise<DatabricksAdapter> {
     const resolvedEndpoint =
-      endpointName ?? process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
+      endpointName ??
+      process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME ??
+      process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
 
     if (!resolvedEndpoint) {
       throw new Error(
-        "No endpoint name provided and DATABRICKS_SERVING_ENDPOINT_NAME env var is not set. " +
-          "Pass an endpoint name or set DATABRICKS_SERVING_ENDPOINT_NAME.",
+        "No endpoint name provided and neither DATABRICKS_AGENT_SERVING_ENDPOINT_NAME nor " +
+          "DATABRICKS_SERVING_ENDPOINT_NAME is set. Pass an endpoint name or bind an agents serving endpoint.",
       );
     }
 
@@ -567,20 +761,25 @@ export class DatabricksAdapter implements AgentAdapter {
       body.tools = tools;
     }
 
-    let responseBody: ReadableStream<Uint8Array>;
-    try {
-      responseBody = await this.streamBody(body, context.signal);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Stream request failed";
-      yield { type: "status", status: "error", error: msg };
-      throw err;
-    }
+    const stepId = globalThis.crypto.randomUUID();
+    const startedAt = Date.now();
+    const startEvent: AgentEvent = {
+      type: "model_start",
+      stepId,
+      model: this.model,
+      provider: "databricks",
+      input: structuredClone(body),
+      startedAt,
+    };
 
-    const reader = responseBody.getReader();
-
-    const decoder = new TextDecoder();
-    let buffer = "";
     let fullText = "";
+    let finalUsage = emptyUsage();
+    let finishReason: string | undefined;
+    let firstTokenAt: number | undefined;
+    let streamStartedAt: number | undefined;
+    let modelError: string | undefined;
+    let caughtError: unknown;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const toolCallAccumulator = new Map<
       number,
       {
@@ -590,8 +789,52 @@ export class DatabricksAdapter implements AgentAdapter {
         thoughtSignature?: string;
       }
     >();
+    const emittedRemoteTraces = new Set<string>();
+    const snapshotToolCalls = (
+      normalizeCompletedArguments = false,
+    ): OpenAIToolCall[] =>
+      Array.from(toolCallAccumulator.values()).map((tc) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: {
+          name: tc.name,
+          arguments:
+            normalizeCompletedArguments && tc.arguments === ""
+              ? "{}"
+              : tc.arguments,
+        },
+        ...(tc.thoughtSignature
+          ? { thoughtSignature: tc.thoughtSignature }
+          : {}),
+      }));
 
     try {
+      yield startEvent;
+      const responseBody = await this.streamBody(body, context.signal);
+      streamStartedAt = Date.now();
+      const headerTraceId = getResponseHeaders(responseBody)?.get(
+        "x-databricks-trace-id",
+      );
+      if (headerTraceId?.trim()) {
+        const headerSpanId = getResponseHeaders(responseBody)?.get(
+          "x-databricks-span-id",
+        );
+        const remoteTrace = verifiedAgentRemoteTrace(
+          headerTraceId,
+          headerSpanId ?? undefined,
+          "model-serving",
+        );
+        if (remoteTrace) {
+          emittedRemoteTraces.add(
+            `${remoteTrace.traceId}:${remoteTrace.spanId ?? ""}`,
+          );
+          yield remoteTrace;
+        }
+      }
+
+      reader = responseBody.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
       while (true) {
         if (context.signal?.aborted) break;
 
@@ -632,8 +875,37 @@ export class DatabricksAdapter implements AgentAdapter {
             continue;
           }
 
+          if (!isRecord(parsed)) continue;
+
+          const usage = normalizeUsage(parsed, finalUsage);
+          if (usage) finalUsage = usage;
+
+          const choice = firstChoice(parsed);
+          if (typeof choice?.finish_reason === "string") {
+            finishReason = choice.finish_reason;
+          }
+
+          const remoteTrace = remoteTraceFromPayload(parsed);
+          if (remoteTrace) {
+            const key = `${remoteTrace.traceId}:${remoteTrace.spanId ?? ""}`;
+            if (!emittedRemoteTraces.has(key)) {
+              emittedRemoteTraces.add(key);
+              yield remoteTrace;
+            }
+          }
+
           const deltaUnknown = openAiChoicesDelta(parsed);
           if (!isRecord(deltaUnknown)) continue;
+
+          const toolCallsRaw = deltaUnknown.tool_calls;
+          if (
+            firstTokenAt === undefined &&
+            ((typeof deltaUnknown.content === "string" &&
+              deltaUnknown.content.length > 0) ||
+              (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0))
+          ) {
+            firstTokenAt = Date.now();
+          }
 
           if (typeof deltaUnknown.content === "string") {
             const content = deltaUnknown.content;
@@ -647,7 +919,6 @@ export class DatabricksAdapter implements AgentAdapter {
             yield { type: "message_delta" as const, content };
           }
 
-          const toolCallsRaw = deltaUnknown.tool_calls;
           if (!Array.isArray(toolCallsRaw)) continue;
 
           for (const tc of toolCallsRaw) {
@@ -684,35 +955,59 @@ export class DatabricksAdapter implements AgentAdapter {
           }
         }
       }
+      if (context.signal?.aborted && !finishReason) {
+        finishReason = "cancelled";
+      }
+    } catch (err) {
+      if (context.signal?.aborted) {
+        finishReason ??= "cancelled";
+      } else {
+        modelError = sanitizedModelError(err);
+        caughtError = err;
+        yield { type: "status", status: "error", error: modelError };
+      }
     } finally {
-      try {
-        await reader.cancel();
-      } catch (cancelErr) {
-        console.debug(
-          "[DatabricksAdapter] reader.cancel() failed during teardown",
-          cancelErr,
-        );
+      if (reader) {
+        try {
+          await reader.cancel();
+        } catch (cancelErr) {
+          console.debug(
+            "[DatabricksAdapter] reader.cancel() failed during teardown",
+            cancelErr,
+          );
+        }
+        try {
+          reader.releaseLock();
+        } catch (unlockErr) {
+          console.debug(
+            "[DatabricksAdapter] reader.releaseLock() failed during teardown",
+            unlockErr,
+          );
+        }
       }
-      try {
-        reader.releaseLock();
-      } catch (unlockErr) {
-        console.debug(
-          "[DatabricksAdapter] reader.releaseLock() failed during teardown",
-          unlockErr,
-        );
-      }
+
+      const endedAt = Date.now();
+      yield {
+        type: "model_end",
+        stepId,
+        model: this.model,
+        provider: "databricks",
+        output: { text: fullText, toolCalls: snapshotToolCalls() },
+        usage: finalUsage,
+        ...(finishReason ? { finishReason } : {}),
+        ...(firstTokenAt !== undefined ? { firstTokenAt } : {}),
+        streamDurationMs:
+          streamStartedAt === undefined
+            ? 0
+            : Math.max(0, endedAt - streamStartedAt),
+        endedAt,
+        ...(modelError ? { error: modelError } : {}),
+      };
     }
 
-    const toolCalls: OpenAIToolCall[] = Array.from(
-      toolCallAccumulator.values(),
-    ).map((tc) => ({
-      id: tc.id,
-      type: "function" as const,
-      function: { name: tc.name, arguments: tc.arguments || "{}" },
-      ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
-    }));
+    if (caughtError !== undefined) throw caughtError;
 
-    return { text: fullText, toolCalls };
+    return { text: fullText, toolCalls: snapshotToolCalls(true) };
   }
 
   private async *executeToolCalls(
@@ -828,15 +1123,98 @@ export class DatabricksAdapter implements AgentAdapter {
 export function parseTextToolCalls(
   text: string,
 ): Array<{ name: string; args: unknown }> {
+  const span = trace
+    .getTracer("@databricks/appkit-agent-tracing")
+    .startSpan("databricks text tool-call parser", {
+      attributes: {
+        "mlflow.spanType": "PARSER",
+        "appkit.parser.source": "databricks.text_tool_calls",
+      },
+    });
+  const startedAt = Date.now();
+  setParserCapturedAttribute(span, "mlflow.spanInputs", { source: text });
   const trimmed = text.trim();
+  try {
+    const jsonResult = tryParseLlamaJsonToolCalls(trimmed);
+    const result =
+      jsonResult.length > 0
+        ? jsonResult
+        : tryParsePythonStyleToolCalls(trimmed);
+    const validationFailure =
+      result.length === 0 && looksLikeTextToolCall(trimmed);
+    span.setAttribute("appkit.parser.validation_error", validationFailure);
+    if (validationFailure) {
+      setParserCapturedAttribute(
+        span,
+        "mlflow.spanOutputs",
+        normalizeFailureOutput([], "Tool-call text failed validation"),
+        ["error"],
+      );
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: "Parser validation failed",
+      });
+    } else {
+      setParserCapturedAttribute(span, "mlflow.spanOutputs", result);
+      span.setStatus({ code: SpanStatusCode.OK });
+    }
+    return result;
+  } finally {
+    span.setAttribute(
+      "appkit.parser.duration_ms",
+      Math.max(0, Date.now() - startedAt),
+    );
+    span.end();
+  }
+}
 
-  const jsonResult = tryParseLlamaJsonToolCalls(trimmed);
-  if (jsonResult.length > 0) return jsonResult;
+function looksLikeTextToolCall(text: string): boolean {
+  let arrayStartPending = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
 
-  const pyResult = tryParsePythonStyleToolCalls(trimmed);
-  if (pyResult.length > 0) return pyResult;
+    if (arrayStartPending) {
+      if (character === "{") return true;
+      if (!isWhitespace(character)) {
+        arrayStartPending = character === "[";
+      }
+    } else if (character === "[") {
+      arrayStartPending = true;
+    }
 
-  return [];
+    if (!isIdentifierStart(character)) continue;
+    let cursor = index + 1;
+    while (cursor < text.length && isIdentifierPart(text[cursor])) cursor += 1;
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor += 1;
+    if (text[cursor] === "(") return true;
+    index = Math.max(index, cursor - 1);
+  }
+  return false;
+}
+
+function isIdentifierStart(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z_]/.test(character);
+}
+
+function isIdentifierPart(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z0-9_.]/.test(character);
+}
+
+function isWhitespace(character: string | undefined): boolean {
+  return character !== undefined && /\s/.test(character);
+}
+
+function setParserCapturedAttribute(
+  span: import("@opentelemetry/api").Span,
+  key: string,
+  value: unknown,
+  redactKeys?: readonly string[],
+): void {
+  const captured = captureTraceValue(value, { redactKeys });
+  span.setAttribute(key, captured.value);
+  span.setAttribute(`${key}.original_bytes`, captured.originalBytes);
+  span.setAttribute(`${key}.sha256`, captured.sha256);
+  span.setAttribute(`${key}.truncated`, captured.truncated);
 }
 
 function isLlamaToolJsonItem(value: unknown): value is Record<

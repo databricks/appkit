@@ -1,4 +1,5 @@
 import { createLogger } from "../../logging/logger";
+import { injectActiveTraceContext } from "../../telemetry/agent-tracing";
 import type { serving, WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
@@ -10,13 +11,20 @@ const logger = createLogger("connectors:serving");
  * don't want a hard dependency on the concrete `WorkspaceClient` type.
  */
 export interface ApiClientLike {
+  config?: object;
   apiClient: {
+    config?: object;
     request(
       options: Record<string, unknown>,
       context?: unknown,
     ): Promise<unknown>;
   };
 }
+
+const responseHeadersByStream = new WeakMap<
+  ReadableStream<Uint8Array>,
+  Headers
+>();
 
 /**
  * Transport shim shared by the agent adapters: given a request body, returns
@@ -29,6 +37,33 @@ export type StreamBody = (
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<ReadableStream<Uint8Array>>;
+
+/**
+ * Retains response headers without changing or mutating the byte-stream API
+ * consumed by existing adapters. Weak ownership lets metadata be collected
+ * with the stream and avoids a discoverable property-name collision.
+ */
+export function retainResponseHeaders(
+  stream: ReadableStream<Uint8Array>,
+  headers: unknown,
+): ReadableStream<Uint8Array> {
+  if (headers == null) return stream;
+  const normalized =
+    headers instanceof Headers
+      ? headers
+      : new Headers(
+          headers as Headers | Record<string, string> | [string, string][],
+        );
+  responseHeadersByStream.set(stream, normalized);
+  return stream;
+}
+
+/** Reads response metadata retained by {@link retainResponseHeaders}. */
+export function getResponseHeaders(
+  stream: ReadableStream<Uint8Array>,
+): Headers | undefined {
+  return responseHeadersByStream.get(stream);
+}
 
 /**
  * Invokes a serving endpoint using the SDK's high-level query API.
@@ -79,26 +114,82 @@ export async function streamPath(
   logger.debug("Streaming from path %s", path);
 
   const context = contextFromAbortSignal(signal);
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  });
 
-  const response = (await client.apiClient.request(
+  const response = (await requestWithPostAuthTraceContext(
+    client,
     {
       path,
       method: "POST",
-      headers: new Headers({
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      }),
+      headers,
       payload: body,
       raw: true,
     },
     context,
-  )) as { contents: ReadableStream<Uint8Array> | null };
+  )) as {
+    contents: ReadableStream<Uint8Array> | null;
+    headers?: unknown;
+  };
 
   if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");
   }
 
-  return response.contents;
+  return retainResponseHeaders(response.contents, response.headers);
+}
+
+async function requestWithPostAuthTraceContext(
+  client: ApiClientLike,
+  options: Record<string, unknown> & { headers: Headers },
+  requestContext?: unknown,
+): Promise<unknown> {
+  const apiClient = client.apiClient;
+  type AuthenticatingConfig = {
+    authenticate(headers: Headers): Promise<void>;
+  };
+  const apiConfig = apiClient.config as AuthenticatingConfig | undefined;
+  const clientConfig = client.config as AuthenticatingConfig | undefined;
+  const config =
+    typeof apiConfig?.authenticate === "function"
+      ? apiConfig
+      : typeof clientConfig?.authenticate === "function"
+        ? clientConfig
+        : undefined;
+  if (!config) {
+    return apiClient.request(
+      { ...options, headers: injectActiveTraceContext(options.headers) },
+      requestContext,
+    );
+  }
+
+  // The SDK owns authentication inside `request()`. A request-scoped receiver
+  // lets that exact code path run unchanged while decorating only its config's
+  // authenticate step: propagation occurs after fresh credentials resolve and
+  // before the SDK builds its fetch options. Shared client/config objects are
+  // never mutated, so concurrent streams cannot exchange trace contexts.
+  const traceAwareConfig = new Proxy(config, {
+    get(target, property) {
+      if (property === "authenticate") {
+        return async (headers: Headers) => {
+          await target.authenticate(headers);
+          injectActiveTraceContext(headers);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const traceAwareApiClient = new Proxy(apiClient, {
+    get(target, property, receiver) {
+      if (property === "config") return traceAwareConfig;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+
+  return apiClient.request.call(traceAwareApiClient, options, requestContext);
 }
 
 /**

@@ -10,8 +10,12 @@ export type {
   AgentAdapter,
   AgentEvent,
   AgentInput,
+  AgentModelEndEvent,
+  AgentModelStartEvent,
+  AgentRemoteTraceEvent,
   AgentRunContext,
   AgentToolDefinition,
+  AgentUsage,
   Message,
   Thread,
   ThreadStore,
@@ -101,3 +105,9 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
+export {
+  AgentUsageAccumulator,
+  type CapturedTraceValue,
+  type CaptureTraceValueOptions,
+  captureTraceValue,
+} from "./telemetry/agent-tracing";

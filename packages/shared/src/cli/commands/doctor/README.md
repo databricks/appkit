@@ -45,15 +45,9 @@ pool's `connectionTimeoutMillis`.)
 `plugin sync` writes `appkit.plugins.json` cataloguing *every* plugin the
 installed packages ship (for `apps init`), and marks the ones actually wired
 into `createApp` with `requiredByTemplate: true`. Doctor checks exactly those, so
-an unused built-in doesn't produce phantom "missing env var" errors.
-
-> **Known limitation — non-GA plugins aren't checked yet.** `plugin sync` strips
-> `requiredByTemplate` for beta/experimental plugins (its step 6b), so a *used*
-> non-GA plugin (e.g. the agents plugin requiring a serving endpoint) is
-> currently skipped. A proper fix needs a usage signal that survives sync
-> regardless of stability tier (e.g. a separate `used` marker written before the
-> strip); that's a `plugin sync` change tracked as a fast-follow. Until then,
-> doctor covers GA plugins wired into your app.
+an unused built-in doesn't produce phantom "missing env var" errors. The usage
+signal is retained for every stability tier, so a beta plugin wired into the app
+(for example, agents) receives the same resource checks as a GA plugin.
 
 ## Resource provenance: external vs bundle-managed
 

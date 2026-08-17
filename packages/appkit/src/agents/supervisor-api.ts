@@ -346,7 +346,8 @@ interface SupervisorApiAdapterCtorOptions {
  * same mechanism used by `DatabricksAdapter.fromModelServing`. The transport
  * is injected via {@link SupervisorApiAdapterCtorOptions.streamBody}; the
  * {@link fromSupervisorApi} factory wires it through the SDK's
- * `apiClient.request({ raw: true })`.
+ * `apiClient.request({ raw: true })`, with active W3C context injected by the
+ * shared serving transport immediately before each request.
  *
  * Set `DEBUG=appkit:agents:supervisor-api` to log the outbound request
  * shape (model, instructions length, input shape, tool count) and to be

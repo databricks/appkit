@@ -50,6 +50,7 @@ vi.mock("../../../telemetry", () => ({
           _telemetryOpts?: unknown,
         ) =>
           fn({
+            end: vi.fn(),
             setAttribute: vi.fn(),
             setStatus: vi.fn(),
             recordException: vi.fn(),

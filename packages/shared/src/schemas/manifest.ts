@@ -484,6 +484,23 @@ function refineResourceDependsOn(
   }
 }
 
+/**
+ * MLflow experiment bindings are keyed by experiment ID in Databricks Apps.
+ * Keeping that requirement in the schema prevents a manifest from declaring an
+ * experiment that passes validation but cannot populate MLFLOW_EXPERIMENT_ID.
+ */
+function refineExperimentId(
+  resource: { fields?: Record<string, { env?: string }> },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (resource.fields?.id?.env) return;
+  ctx.addIssue({
+    code: "custom",
+    path: ["fields", "id"],
+    message: "experiment resources must expose an id environment binding",
+  });
+}
+
 function makeResourceVariant<
   TType extends z.ZodLiteral<string>,
   TPerm extends z.ZodTypeAny,
@@ -525,7 +542,10 @@ export const resourceRequirementSchema = z
     makeResourceVariant(z.literal("database"), databasePermissionSchema),
     makeResourceVariant(z.literal("postgres"), postgresPermissionSchema),
     makeResourceVariant(z.literal("genie_space"), genieSpacePermissionSchema),
-    makeResourceVariant(z.literal("experiment"), experimentPermissionSchema),
+    makeResourceVariant(
+      z.literal("experiment"),
+      experimentPermissionSchema,
+    ).superRefine(refineExperimentId),
     makeResourceVariant(z.literal("app"), appPermissionSchema),
   ])
   .describe(
@@ -896,7 +916,7 @@ export const templateResourceRequirementSchema = z
     makeTemplateResourceVariant(
       z.literal("experiment"),
       experimentPermissionSchema,
-    ),
+    ).superRefine(refineExperimentId),
     makeTemplateResourceVariant(z.literal("app"), appPermissionSchema),
   ])
   .describe(

@@ -15,6 +15,7 @@ vi.mock("../../cache", () => ({
     getInstanceSync: vi.fn().mockReturnValue({
       close: vi.fn().mockResolvedValue(undefined),
     }),
+    shutdown: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -227,6 +228,7 @@ describe("LifecycleManager", () => {
       vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
         close,
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(close);
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: flush,
       } as any);
@@ -266,6 +268,7 @@ describe("LifecycleManager", () => {
       vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
         close: hangingClose,
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(hangingClose);
 
       const done = new LifecycleManager(contextWithPlugins({})).shutdown();
       await vi.advanceTimersByTimeAsync(2_000);
@@ -318,6 +321,9 @@ describe("LifecycleManager", () => {
           order.push("cache-close");
         }),
       } as any);
+      vi.mocked(CacheManager.shutdown).mockImplementationOnce(async () => {
+        order.push("cache-close");
+      });
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: vi.fn(async () => {
           order.push("flush");
@@ -379,6 +385,54 @@ describe("LifecycleManager", () => {
       expect(signals).toContain("SIGTERM");
       expect(signals).toContain("SIGINT");
       onceSpy.mockRestore();
+    });
+
+    test("programmatic shutdown removes installed handlers without exiting", async () => {
+      const baselineSigterm = process.listenerCount("SIGTERM");
+      const baselineSigint = process.listenerCount("SIGINT");
+      const manager = new LifecycleManager(contextWithPlugins({}));
+      manager.installSignalHandlers();
+      expect(process.listenerCount("SIGTERM")).toBe(baselineSigterm + 1);
+      expect(process.listenerCount("SIGINT")).toBe(baselineSigint + 1);
+
+      await manager.shutdown({ exitProcess: false });
+
+      expect(process.listenerCount("SIGTERM")).toBe(baselineSigterm);
+      expect(process.listenerCount("SIGINT")).toBe(baselineSigint);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("a signal during programmatic shutdown exits only after the shared teardown completes", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      const shutdownHook = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = resolve;
+          }),
+      );
+      const manager = new LifecycleManager(
+        contextWithPlugins({
+          agent: { name: "agent", shutdown: shutdownHook },
+        }),
+      );
+      manager.installSignalHandlers();
+      const sigterm = process.listeners("SIGTERM").at(-1) as () => void;
+      const sigint = process.listeners("SIGINT").at(-1) as () => void;
+
+      const programmaticShutdown = manager.shutdown({ exitProcess: false });
+      await vi.waitFor(() => expect(shutdownHook).toHaveBeenCalledTimes(1));
+
+      sigterm();
+      sigint();
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(shutdownHook).toHaveBeenCalledTimes(1);
+
+      releaseShutdown?.();
+      await programmaticShutdown;
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(shutdownHook).toHaveBeenCalledTimes(1);
     });
   });
 });

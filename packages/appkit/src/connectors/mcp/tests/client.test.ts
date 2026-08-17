@@ -1,9 +1,67 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  context,
+  createTraceState,
+  propagation,
+  TraceFlags,
+  trace,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { APPKIT_USER_AGENT } from "../../../context/client-options";
+import {
+  MlflowUcTraceRegistry,
+  setActiveMlflowUcTraceRegistry,
+} from "../../../telemetry/mlflow-uc";
 import { AppKitMcpClient } from "../client";
 import type { DnsLookup, McpHostPolicy } from "../host-policy";
 
 const WORKSPACE = "https://test-workspace.cloud.databricks.com";
+const TRACE_ID = "0123456789abcdef0123456789abcdef";
+const SPAN_ID = "0123456789abcdef";
+const TRACEPARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+  propagation.disable();
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+});
+
+afterEach(() => {
+  setActiveMlflowUcTraceRegistry(undefined);
+});
+
+afterAll(() => {
+  propagation.disable();
+  context.disable();
+});
+
+function withActiveTrace<T>(operation: () => T): T {
+  const span = trace.wrapSpanContext({
+    traceId: TRACE_ID,
+    spanId: SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    traceState: createTraceState("vendor=value"),
+  });
+  return context.with(trace.setSpan(context.active(), span), operation);
+}
 
 const workspacePolicy: McpHostPolicy = {
   workspaceHostname: "test-workspace.cloud.databricks.com",
@@ -142,10 +200,10 @@ describe("AppKitMcpClient — host allowlist", () => {
       `${WORKSPACE}/api/2.0/mcp/genie/abc`,
     ]);
     for (const call of calls) {
-      const headers = call.init.headers as Record<string, string>;
-      expect(headers.Authorization).toBe("Bearer SP-TOKEN");
+      const headers = new Headers(call.init.headers);
+      expect(headers.get("authorization")).toBe("Bearer SP-TOKEN");
       // Every MCP request is attributed to AppKit via User-Agent.
-      expect(headers["User-Agent"]).toBe(APPKIT_USER_AGENT);
+      expect(headers.get("user-agent")).toBe(APPKIT_USER_AGENT);
     }
     expect(client.canForwardWorkspaceAuth("genie-1")).toBe(true);
   });
@@ -177,8 +235,8 @@ describe("AppKitMcpClient — host allowlist", () => {
     await client.connect({ name: "ext", url: "https://mcp.example.com/mcp" });
 
     for (const call of calls) {
-      const headers = call.init.headers as Record<string, string>;
-      expect(headers.Authorization).toBeUndefined();
+      const headers = new Headers(call.init.headers);
+      expect(headers.get("authorization")).toBeNull();
     }
     expect(authSpy).not.toHaveBeenCalled();
     expect(client.canForwardWorkspaceAuth("ext")).toBe(false);
@@ -308,6 +366,166 @@ describe("AppKitMcpClient — connectAll partial failures", () => {
 });
 
 describe("AppKitMcpClient — callTool auth scoping", () => {
+  test("injects one fresh active context into initialize, notification, tools/list, and tools/call", async () => {
+    const { fetchImpl, calls } = recordingFetch([
+      () =>
+        jsonResponse(
+          { jsonrpc: "2.0", id: 1, result: {} },
+          { "mcp-session-id": "sess-1" },
+        ),
+      () => jsonResponse({ jsonrpc: "2.0", result: null }),
+      () =>
+        jsonResponse({
+          jsonrpc: "2.0",
+          id: 3,
+          result: { tools: [{ name: "do" }] },
+        }),
+      () =>
+        jsonResponse({
+          jsonrpc: "2.0",
+          id: 4,
+          result: { content: [{ type: "text", text: "ok" }] },
+        }),
+    ]);
+    const client = new AppKitMcpClient(
+      WORKSPACE,
+      workspaceAuth,
+      workspacePolicy,
+      { fetchImpl, dnsLookup: publicDnsLookup },
+    );
+
+    await withActiveTrace(async () => {
+      await client.connect({
+        name: "genie-1",
+        url: `${WORKSPACE}/api/2.0/mcp/genie/abc`,
+      });
+      await client.callTool(
+        "mcp.genie-1.do",
+        {},
+        { Authorization: "Bearer OBO-USER-TOKEN" },
+      );
+    });
+
+    expect(calls).toHaveLength(4);
+    expect(new Set(calls.map((call) => call.init.headers)).size).toBe(4);
+    for (const call of calls) {
+      const headers = new Headers(call.init.headers);
+      expect(headers.get("traceparent")).toBe(TRACEPARENT);
+      expect(headers.get("tracestate")).toBe("vendor=value");
+      expect(headers.get("content-type")).toBe("application/json");
+    }
+    expect(new Headers(calls[3].init.headers).get("authorization")).toBe(
+      "Bearer OBO-USER-TOKEN",
+    );
+  });
+
+  test("keeps MCP trace headers internal and links only a different MLflow location on the active TOOL span", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const registry = new MlflowUcTraceRegistry({
+      experimentId: "experiment-1",
+      catalogName: "main",
+      schemaName: "agent_traces",
+      tablePrefix: "appkit",
+      otelSpansTableName: "main.agent_traces.appkit_otel_spans",
+    });
+    setActiveMlflowUcTraceRegistry(registry);
+    let toolCall = 0;
+    const { fetchImpl } = recordingFetch([
+      () =>
+        jsonResponse(
+          { jsonrpc: "2.0", id: 1, result: {} },
+          { "mcp-session-id": "sess-1" },
+        ),
+      () => jsonResponse({ jsonrpc: "2.0", result: null }),
+      () =>
+        jsonResponse({
+          jsonrpc: "2.0",
+          id: 3,
+          result: { tools: [{ name: "do" }] },
+        }),
+      (call) => {
+        const traceparent = new Headers(call.init.headers).get("traceparent");
+        const otelTraceId = traceparent?.split("-")[1] ?? "missing";
+        toolCall++;
+        return jsonResponse(
+          {
+            jsonrpc: "2.0",
+            id: 3 + toolCall,
+            result: {
+              content: [{ type: "text", text: `content-${toolCall}` }],
+            },
+          },
+          {
+            "X-MLflow-Trace-Id": `trace:/${
+              toolCall === 1 ? "main.agent_traces.appkit" : "other.remote.agent"
+            }/${otelTraceId}`,
+            "X-MLflow-Span-Id":
+              toolCall === 1 ? "1111111111111111" : "2222222222222222",
+          },
+        );
+      },
+      (call) => {
+        const traceparent = new Headers(call.init.headers).get("traceparent");
+        const otelTraceId = traceparent?.split("-")[1] ?? "missing";
+        toolCall++;
+        return jsonResponse(
+          {
+            jsonrpc: "2.0",
+            id: 3 + toolCall,
+            result: {
+              content: [{ type: "text", text: `content-${toolCall}` }],
+            },
+          },
+          {
+            "X-MLflow-Trace-Id": `trace:/other.remote.agent/${otelTraceId}`,
+            "X-MLflow-Span-Id": "2222222222222222",
+          },
+        );
+      },
+    ]);
+    const client = new AppKitMcpClient(
+      WORKSPACE,
+      workspaceAuth,
+      workspacePolicy,
+      { fetchImpl, dnsLookup: publicDnsLookup },
+    );
+    await client.connect({
+      name: "genie-1",
+      url: `${WORKSPACE}/api/2.0/mcp/genie/abc`,
+    });
+
+    const outputs = await provider
+      .getTracer("mcp-test")
+      .startActiveSpan(
+        "mcp.genie-1.do tool",
+        { attributes: { "mlflow.spanType": "TOOL" } },
+        async (span) => {
+          registry.ensureTrace(span.spanContext().traceId);
+          const first = await client.callTool("mcp.genie-1.do", {});
+          const second = await client.callTool("mcp.genie-1.do", {});
+          span.end();
+          return [first, second];
+        },
+      );
+
+    await provider.forceFlush();
+    expect(outputs).toEqual(["content-1", "content-2"]);
+    const tool = exporter.getFinishedSpans()[0];
+    expect(tool.links).toHaveLength(1);
+    expect(tool.links[0].context).toMatchObject({
+      traceId: tool.spanContext().traceId,
+      spanId: "2222222222222222",
+    });
+    expect(tool.links[0].attributes).toEqual({
+      "appkit.remote_trace.source": "mcp",
+      "mlflow.traceRequestId": `trace:/other.remote.agent/${tool.spanContext().traceId}`,
+    });
+    await provider.shutdown();
+  });
+
   test("drops caller-supplied OBO token when destination is not workspace-origin", async () => {
     const connectResponders = [
       () =>
@@ -353,8 +571,8 @@ describe("AppKitMcpClient — callTool auth scoping", () => {
     expect(output).toBe("ok");
 
     const toolCall = calls[calls.length - 1];
-    const headers = toolCall.init.headers as Record<string, string>;
-    expect(headers.Authorization).toBeUndefined();
+    const headers = new Headers(toolCall.init.headers);
+    expect(headers.get("authorization")).toBeNull();
   });
 
   test("forwards caller-supplied OBO token when destination is workspace-origin", async () => {
@@ -407,8 +625,8 @@ describe("AppKitMcpClient — callTool auth scoping", () => {
     );
 
     const toolCall = calls[calls.length - 1];
-    const headers = toolCall.init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer OBO-USER-TOKEN");
+    const headers = new Headers(toolCall.init.headers);
+    expect(headers.get("authorization")).toBe("Bearer OBO-USER-TOKEN");
   });
 
   test("falls back to SP auth when no OBO override is provided and destination is workspace", async () => {
@@ -451,8 +669,8 @@ describe("AppKitMcpClient — callTool auth scoping", () => {
     await client.callTool("mcp.genie-1.do", {}, undefined);
 
     const toolCall = calls[calls.length - 1];
-    const headers = toolCall.init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer SP-TOKEN");
+    const headers = new Headers(toolCall.init.headers);
+    expect(headers.get("authorization")).toBe("Bearer SP-TOKEN");
   });
 });
 

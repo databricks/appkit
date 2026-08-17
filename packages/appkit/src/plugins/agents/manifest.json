@@ -5,7 +5,38 @@
   "stability": "beta",
   "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
   "resources": {
-    "required": [],
+    "required": [
+      {
+        "type": "experiment",
+        "alias": "MLflow agent trace experiment",
+        "resourceKey": "mlflow-experiment",
+        "description": "MLflow experiment bound to immutable Unity Catalog trace tables",
+        "permission": "CAN_MANAGE",
+        "fields": {
+          "id": {
+            "env": "MLFLOW_EXPERIMENT_ID",
+            "description": "MLflow experiment ID"
+          }
+        }
+      },
+      {
+        "type": "sql_warehouse",
+        "alias": "MLflow tracing SQL warehouse",
+        "resourceKey": "mlflow-tracing-warehouse",
+        "description": "SQL warehouse used to provision and query MLflow UC trace tables",
+        "permission": "CAN_USE",
+        "fields": {
+          "id": {
+            "env": "MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+            "description": "SQL warehouse ID for MLflow UC tracing",
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "warehouse"
+            }
+          }
+        }
+      }
+    ],
     "optional": [
       {
         "type": "serving_endpoint",
@@ -15,21 +46,8 @@
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
-            "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
+            "env": "DATABRICKS_AGENT_SERVING_ENDPOINT_NAME",
             "description": "Default LLM serving endpoint name"
-          }
-        }
-      },
-      {
-        "type": "experiment",
-        "alias": "MLflow experiment for agent traces",
-        "resourceKey": "agents-mlflow-experiment",
-        "description": "When bound, agent turns and tool calls are traced to this MLflow experiment via OpenTelemetry. Tracing is a no-op when unset.",
-        "permission": "CAN_EDIT",
-        "fields": {
-          "experimentId": {
-            "env": "MLFLOW_EXPERIMENT_ID",
-            "description": "MLflow experiment id traces are logged to"
           }
         }
       }

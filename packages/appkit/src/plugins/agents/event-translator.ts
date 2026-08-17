@@ -73,6 +73,10 @@ export class AgentEventTranslator {
         ];
       case "status":
         return this.handleStatus(event.status, event.error);
+      case "model_start":
+      case "model_end":
+      case "remote_trace":
+        return [];
     }
   }
 

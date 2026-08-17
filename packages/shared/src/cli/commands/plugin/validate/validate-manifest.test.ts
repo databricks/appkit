@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   RESOURCE_KIND_COMMANDS,
@@ -47,6 +49,33 @@ const VALID_MANIFEST_WITH_RESOURCE = {
 };
 
 describe("validate-manifest", () => {
+  it("requires MLflow experiment and tracing warehouse resources for agents", () => {
+    const agentsManifest = JSON.parse(
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "../../../../../../appkit/src/plugins/agents/manifest.json",
+        ),
+        "utf8",
+      ),
+    );
+
+    const result = validateManifest(agentsManifest);
+    expect(result.valid).toBe(true);
+    expect(result.manifest?.resources.required).toEqual([
+      expect.objectContaining({
+        type: "experiment",
+        resourceKey: "mlflow-experiment",
+        permission: "CAN_MANAGE",
+      }),
+      expect.objectContaining({
+        type: "sql_warehouse",
+        resourceKey: "mlflow-tracing-warehouse",
+        permission: "CAN_USE",
+      }),
+    ]);
+  });
+
   describe("detectSchemaType", () => {
     it('returns "plugin-manifest" for plugin manifest $schema', () => {
       expect(
@@ -97,6 +126,30 @@ describe("validate-manifest", () => {
       const result = validateManifest(VALID_MANIFEST_WITH_RESOURCE);
       expect(result.valid).toBe(true);
       expect(result.manifest?.resources.required).toHaveLength(1);
+    });
+
+    it("requires experiment resources to expose an id binding", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "experiment",
+              alias: "MLflow experiment",
+              resourceKey: "mlflow-experiment",
+              description: "MLflow trace destination",
+              permission: "CAN_MANAGE",
+              fields: { name: { env: "MLFLOW_EXPERIMENT_NAME" } },
+            },
+          ],
+          optional: [],
+        },
+      });
+
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "resources.required[0].fields.id",
+      );
     });
 
     it("rejects non-object input", () => {

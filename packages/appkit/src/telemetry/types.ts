@@ -1,6 +1,7 @@
 import type { Meter, Span, SpanOptions, Tracer } from "@opentelemetry/api";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
+import type { MlflowUcConfig } from "./mlflow-uc";
 
 /** OpenTelemetry configuration for AppKit applications */
 export interface TelemetryConfig {
@@ -9,6 +10,8 @@ export interface TelemetryConfig {
   instrumentations?: Instrumentation[];
   exportIntervalMs?: number;
   headers?: Record<string, string>;
+  /** Export agent traces to an MLflow experiment backed by Unity Catalog. */
+  mlflowUc?: boolean | Partial<MlflowUcConfig>;
 }
 
 /**

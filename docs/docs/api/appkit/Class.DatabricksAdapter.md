@@ -96,7 +96,8 @@ static fromModelServing(endpointName?: string, options?: ModelServingOptions): P
 
 Creates a DatabricksAdapter from a Model Serving endpoint name.
 Auto-creates a WorkspaceClient internally. Reads the endpoint name
-from the argument or the `DATABRICKS_SERVING_ENDPOINT_NAME` env var.
+from the argument, the agents resource env var, or the legacy serving
+plugin env var (in that order).
 
 #### Parameters
 
@@ -112,7 +113,8 @@ from the argument or the `DATABRICKS_SERVING_ENDPOINT_NAME` env var.
 #### Example
 
 ```ts
-// Reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var
+// Reads DATABRICKS_AGENT_SERVING_ENDPOINT_NAME, falling back to the
+// backward-compatible DATABRICKS_SERVING_ENDPOINT_NAME env var
 const adapter = await DatabricksAdapter.fromModelServing();
 
 // Explicit endpoint

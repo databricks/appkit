@@ -42,7 +42,10 @@ type AgentEvent =
   streamId: string;
   toolName: string;
   type: "approval_pending";
-};
+}
+  | AgentModelStartEvent
+  | AgentModelEndEvent
+  | AgentRemoteTraceEvent;
 ```
 
 ## Type Declaration
@@ -268,3 +271,9 @@ is awaiting human approval — fires for tools annotated with
 legacy `destructive: true` boolean. Clients should render an approval
 prompt and POST to `/chat/approve` with the matching `approvalId` and
 a `decision` of `approve` or `deny`.
+
+[`AgentModelStartEvent`](Interface.AgentModelStartEvent.md)
+
+[`AgentModelEndEvent`](Interface.AgentModelEndEvent.md)
+
+[`AgentRemoteTraceEvent`](TypeAlias.AgentRemoteTraceEvent.md)

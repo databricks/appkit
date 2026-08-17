@@ -22,9 +22,16 @@
  * inject our host policy and per-URL auth without fighting the default
  * transport.
  */
+
+import { trace } from "@opentelemetry/api";
 import type { AgentToolDefinition } from "shared";
 import { APPKIT_USER_AGENT } from "../../context/client-options";
 import { createLogger } from "../../logging/logger";
+import {
+  attachRemoteTraceLink,
+  injectActiveTraceContext,
+  type RemoteTraceReference,
+} from "../../telemetry/agent-tracing";
 import {
   assertResolvedHostSafe,
   checkMcpUrl,
@@ -370,6 +377,10 @@ export class AppKitMcpClient {
         callerSignal,
       },
     );
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan && rpcResult.remoteTrace) {
+      attachRemoteTraceLink(activeSpan, rpcResult.remoteTrace);
+    }
     const result = rpcResult.result as McpToolCallResult;
 
     // `text` is optional on `McpToolCallResult.content[]` per the MCP
@@ -412,7 +423,11 @@ export class AppKitMcpClient {
        */
       callerSignal?: AbortSignal;
     },
-  ): Promise<{ result: unknown; sessionId?: string }> {
+  ): Promise<{
+    result: unknown;
+    sessionId?: string;
+    remoteTrace?: RemoteTraceReference;
+  }> {
     if (this.closed) throw new Error("MCP client is closed");
 
     const request: JsonRpcRequest = {
@@ -423,14 +438,14 @@ export class AppKitMcpClient {
     };
 
     const authHeaders = await this.resolveAuthHeaders(options);
-    const headers: Record<string, string> = {
+    const headers = new Headers({
       "User-Agent": APPKIT_USER_AGENT,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...authHeaders,
-    };
+    });
     if (options?.sessionId) {
-      headers["Mcp-Session-Id"] = options.sessionId;
+      headers.set("Mcp-Session-Id", options.sessionId);
     }
 
     const fetchImpl = this.options.fetchImpl ?? fetch;
@@ -438,7 +453,7 @@ export class AppKitMcpClient {
     if (options?.callerSignal) signals.push(options.callerSignal);
     const response = await fetchImpl(url, {
       method: "POST",
-      headers,
+      headers: injectActiveTraceContext(headers),
       body: JSON.stringify(request),
       signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
     });
@@ -484,7 +499,25 @@ export class AppKitMcpClient {
     }
 
     const sid = response.headers.get("mcp-session-id") ?? undefined;
-    return { result: json.result, sessionId: sid };
+    const mlflowTraceId = response.headers.get("x-mlflow-trace-id")?.trim();
+    const mlflowSpanId = response.headers.get("x-mlflow-span-id")?.trim();
+    const otelTraceId = mlflowTraceId?.slice(
+      mlflowTraceId.lastIndexOf("/") + 1,
+    );
+    const remoteTrace =
+      mlflowTraceId && mlflowSpanId && otelTraceId
+        ? {
+            traceId: mlflowTraceId,
+            otelTraceId,
+            spanId: mlflowSpanId,
+            source: "mcp" as const,
+          }
+        : undefined;
+    return {
+      result: json.result,
+      sessionId: sid,
+      ...(remoteTrace ? { remoteTrace } : {}),
+    };
   }
 
   private async sendNotification(
@@ -498,14 +531,14 @@ export class AppKitMcpClient {
     if (this.closed) return;
 
     const authHeaders = await this.resolveAuthHeaders(options);
-    const headers: Record<string, string> = {
+    const headers = new Headers({
       "User-Agent": APPKIT_USER_AGENT,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...authHeaders,
-    };
+    });
     if (options?.sessionId) {
-      headers["Mcp-Session-Id"] = options.sessionId;
+      headers.set("Mcp-Session-Id", options.sessionId);
     }
 
     const fetchImpl = this.options.fetchImpl ?? fetch;
@@ -518,7 +551,7 @@ export class AppKitMcpClient {
     try {
       const response = await fetchImpl(url, {
         method: "POST",
-        headers,
+        headers: injectActiveTraceContext(headers),
         body: JSON.stringify({ jsonrpc: "2.0", method }),
         signal: AbortSignal.timeout(30_000),
       });

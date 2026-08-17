@@ -3,6 +3,7 @@ import type {
   AgentAdapter,
   AgentEvent,
   AgentToolDefinition,
+  AgentUsage,
   Message,
   PluginConstructor,
   PluginData,
@@ -14,6 +15,11 @@ import {
   type SupervisorTool,
 } from "../../agents/supervisor-api";
 import { createLogger } from "../../logging/logger";
+import {
+  type AgentTraceObserver,
+  resolveAgentTraceAppName,
+  runWithAgentTrace,
+} from "../../telemetry/agent-tracing";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
@@ -23,6 +29,7 @@ import {
   isFunctionTool,
 } from "./tools/function-tool";
 import { isHostedTool } from "./tools/hosted-tools";
+import { traceToolCall } from "./trace-tool-call";
 import type {
   AgentDefinition,
   AgentTool,
@@ -47,6 +54,11 @@ export interface RunAgentInput {
    * there is no HTTP request in standalone mode).
    */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
+  sessionId?: string;
+  userId?: string;
+  requestId?: string;
+  threadId?: string;
+  appName?: string;
 }
 
 export interface RunAgentResult {
@@ -54,7 +66,17 @@ export interface RunAgentResult {
   text: string;
   /** Every event the adapter yielded, in order. Useful for inspection/tests. */
   events: AgentEvent[];
+  traceId: string;
+  usage: AgentUsage;
 }
+
+type ResolvedRunAgentInput = RunAgentInput & {
+  appName: string;
+  requestId: string;
+  sessionId: string;
+  threadId: string;
+  userId: string;
+};
 
 /**
  * Standalone agent execution without `createApp`. Resolves the adapter, binds
@@ -94,15 +116,52 @@ export async function runAgent(
   // plugin, and silently diverge in-instance state between parent and child
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
-  await initStandalonePlugins(input.plugins ?? [], providerCache);
-  return runAgentInternal(def, input, providerCache);
+  const threadId = input.threadId ?? randomUUID();
+  const requestId = input.requestId ?? randomUUID();
+  const appName = resolveAgentTraceAppName(input.appName);
+  const sessionId = input.sessionId ?? threadId;
+  const userId = input.userId ?? "service-principal";
+  const traced = await runWithAgentTrace(
+    {
+      appName,
+      agentName: def.name ?? "agent",
+      route: "runAgent",
+      sessionId,
+      userId,
+      requestId,
+      threadId,
+    },
+    { messages: input.messages },
+    async (observer) => {
+      await initStandalonePlugins(input.plugins ?? [], providerCache);
+      return runAgentInternal(
+        def,
+        {
+          ...input,
+          appName,
+          requestId,
+          sessionId,
+          threadId,
+          userId,
+        },
+        providerCache,
+        observer,
+      );
+    },
+  );
+  return {
+    ...traced.value,
+    traceId: traced.traceId,
+    usage: traced.usage,
+  };
 }
 
 async function runAgentInternal(
   def: AgentDefinition,
-  input: RunAgentInput,
+  input: ResolvedRunAgentInput,
   providerCache: Map<string, ToolProvider>,
-): Promise<RunAgentResult> {
+  observer: AgentTraceObserver,
+): Promise<Pick<RunAgentResult, "text" | "events">> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
@@ -123,48 +182,81 @@ async function runAgentInternal(
   const executeTool = async (name: string, args: unknown): Promise<unknown> => {
     const entry = toolIndex.get(name);
     if (!entry) throw new Error(`Unknown tool: ${name}`);
-    if (entry.kind === "function") {
-      return entry.tool.execute(args as Record<string, unknown>);
-    }
-    if (entry.kind === "toolkit") {
-      return entry.provider.executeAgentTool(
-        entry.localName,
-        args as Record<string, unknown>,
-        signal,
-      );
-    }
-    if (entry.kind === "subagent") {
-      const subInput: RunAgentInput = {
-        messages:
-          typeof args === "object" &&
-          args !== null &&
-          typeof (args as { input?: unknown }).input === "string"
-            ? (args as { input: string }).input
-            : JSON.stringify(args),
-        signal,
-        plugins: input.plugins,
-      };
-      // Reuse the same `providerCache` so sub-agent plugin tools dispatch
-      // through the same instances the parent constructed.
-      const res = await runAgentInternal(
-        entry.agentDef,
-        subInput,
-        providerCache,
-      );
-      return res.text;
-    }
-    if (entry.kind === "hosted-supervisor") {
-      // Defense-in-depth: should never fire. The placeholder def is
-      // filtered out of `tools` above, so the model never sees a callable
-      // schema for hosted-supervisor entries. If we ever reach here, the
-      // model was somehow handed the def and tried to invoke it directly.
-      throw new Error(
-        `runAgent: tool "${name}" is a hosted-supervisor tool, executed server-side by the Databricks AI Gateway. It must not be invoked from the Node process.`,
-      );
-    }
-    throw new Error(
-      `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
-        "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
+    return traceToolCall(
+      {
+        name,
+        source: entry.kind,
+        effect: entry.def.annotations?.effect,
+        args,
+      },
+      async () => {
+        if (entry.kind === "function") {
+          return entry.tool.execute(args as Record<string, unknown>);
+        }
+        if (entry.kind === "toolkit") {
+          return entry.provider.executeAgentTool(
+            entry.localName,
+            args as Record<string, unknown>,
+            signal,
+          );
+        }
+        if (entry.kind === "subagent") {
+          const childThreadId = randomUUID();
+          const subInput: ResolvedRunAgentInput = {
+            messages:
+              typeof args === "object" &&
+              args !== null &&
+              typeof (args as { input?: unknown }).input === "string"
+                ? (args as { input: string }).input
+                : JSON.stringify(args),
+            signal,
+            plugins: input.plugins,
+            sessionId: input.sessionId,
+            userId: input.userId,
+            requestId: input.requestId,
+            threadId: childThreadId,
+            appName: input.appName,
+          };
+          const childTrace = await runWithAgentTrace(
+            {
+              appName: resolveAgentTraceAppName(input.appName),
+              agentName: entry.agentDef.name ?? "agent",
+              route: "runAgent",
+              sessionId: input.sessionId,
+              userId: input.userId,
+              requestId: input.requestId,
+              threadId: childThreadId,
+            },
+            { messages: subInput.messages },
+            (childObserver) =>
+              runAgentInternal(
+                entry.agentDef,
+                subInput,
+                providerCache,
+                childObserver,
+              ),
+            (childUsage) => observer.addChildUsage(childUsage),
+          );
+          const childResult = {
+            text: childTrace.value.text,
+            usage: childTrace.usage,
+          };
+          return childResult.text;
+        }
+        if (entry.kind === "hosted-supervisor") {
+          // Defense-in-depth: should never fire. The placeholder def is
+          // filtered out of `tools` above, so the model never sees a callable
+          // schema for hosted-supervisor entries. If we ever reach here, the
+          // model was somehow handed the def and tried to invoke it directly.
+          throw new Error(
+            `runAgent: tool "${name}" is a hosted-supervisor tool, executed server-side by the Databricks AI Gateway. It must not be invoked from the Node process.`,
+          );
+        }
+        throw new Error(
+          `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
+            "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
+        );
+      },
     );
   };
 
@@ -174,7 +266,7 @@ async function runAgentInternal(
     {
       messages,
       tools,
-      threadId: randomUUID(),
+      threadId: input.threadId ?? randomUUID(),
       signal,
       extensions: buildStandaloneExtensions(toolIndex),
     },
@@ -184,14 +276,28 @@ async function runAgentInternal(
   // Shared accumulation rule (deltas append, `message` replaces). The
   // `events` array is filled via the `onEvent` side effect so callers that
   // inspect the raw stream still get the full record.
-  const text = await consumeAdapterStream(stream, {
+  const consumed = await consumeAdapterStream(stream, {
     signal,
     onEvent: (event) => {
       events.push(event);
+      observer.onEvent(event);
     },
   });
 
-  return { text, events };
+  if (signal?.aborted) {
+    throw agentAbortError();
+  }
+
+  return {
+    text: consumed.text,
+    events,
+  };
+}
+
+function agentAbortError(): Error {
+  const error = new Error("Agent run aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 /**

@@ -56,6 +56,7 @@ export class CacheManager {
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
+  private static shutdownPromise: Promise<void> | null = null;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -119,20 +120,57 @@ export class CacheManager {
   static async getInstance(
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
+    if (CacheManager.shutdownPromise) {
+      await CacheManager.shutdownPromise;
+    }
     if (CacheManager.instance) {
       return CacheManager.instance;
     }
 
     if (!CacheManager.initPromise) {
-      CacheManager.initPromise = CacheManager.create(userConfig).then(
-        (instance) => {
+      let ownedInitialization: Promise<CacheManager>;
+      ownedInitialization = CacheManager.create(userConfig).then((instance) => {
+        if (CacheManager.initPromise === ownedInitialization) {
           CacheManager.instance = instance;
-          return instance;
-        },
-      );
+        }
+        return instance;
+      });
+      CacheManager.initPromise = ownedInitialization;
     }
 
     return CacheManager.initPromise;
+  }
+
+  /**
+   * Close and retire the process-owned cache singleton.
+   *
+   * Concurrent shutdown callers share one close. A later `getInstance()`
+   * waits for that close and creates fresh storage, so an ended persistent
+   * pool can never remain reachable through the singleton.
+   */
+  static shutdown(): Promise<void> {
+    if (CacheManager.shutdownPromise) return CacheManager.shutdownPromise;
+
+    const detachedInstance = CacheManager.instance;
+    const detachedInitialization = CacheManager.initPromise;
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
+
+    const detachedOwner = detachedInstance
+      ? Promise.resolve(detachedInstance)
+      : detachedInitialization;
+    let ownedShutdown: Promise<void>;
+    ownedShutdown = (
+      detachedOwner
+        ? detachedOwner.then((instance) => instance.close())
+        : Promise.resolve()
+    ).finally(() => {
+      if (CacheManager.shutdownPromise === ownedShutdown) {
+        CacheManager.shutdownPromise = null;
+      }
+    });
+    CacheManager.shutdownPromise = ownedShutdown;
+    return ownedShutdown;
   }
 
   /**

@@ -6,6 +6,7 @@ import type {
   AgentAdapter,
   AgentRunContext,
   AgentToolDefinition,
+  AgentUsage,
   IAppRouter,
   Message,
   PluginPhase,
@@ -36,6 +37,7 @@ import {
   isHostedTool,
   resolveHostedTools,
 } from "../../core/agent/tools";
+import { traceToolCall } from "../../core/agent/trace-tool-call";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -51,29 +53,29 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import {
+  type AgentTraceObserver,
+  resolveAgentTraceAppName,
+  runWithAgentTrace,
+} from "../../telemetry/agent-tracing";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
-import {
-  currentTraceId,
-  initAgentTracing,
-  linkTraceToRun,
-  traceAgent,
-  traceTool,
-} from "./mlflow";
 import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
   invocationsRequestSchema,
 } from "./schemas";
-import { InMemoryThreadStore } from "./thread-store";
+import { InMemoryThreadStore, TracedThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 
 const logger = createLogger("agents");
 
 const DEFAULT_AGENTS_DIR = "./config/agents";
+
+export { traceToolCall } from "../../core/agent/trace-tool-call";
 
 /**
  * Context flag recorded on the in-memory AgentDefinition to indicate whether
@@ -135,16 +137,20 @@ interface RunState {
   };
   translator: AgentEventTranslator;
   outboundEvents: EventChannel<ResponseStreamEvent>;
+  traceObserver?: AgentTraceObserver;
+  traceIdentity: {
+    appName: string;
+    route: "chat" | "invocations" | "responses";
+    sessionId: string;
+    userId: string;
+    requestId: string;
+  };
   /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
   toolCallsUsed: { count: number };
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
-  // Routed through `unknown`: the optional resources have differing `fields`
-  // keys (serving `name`, experiment `experimentId`), which TS widens to an
-  // incompatible union on the JSON import. The shape is validated at runtime
-  // against the plugin-manifest schema.
-  static manifest = manifest as unknown as PluginManifest;
+  static manifest = manifest as PluginManifest;
   static phase: PluginPhase = "deferred";
 
   protected declare config: AgentsPluginConfig;
@@ -170,9 +176,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     super(config);
     this.config = config;
     if (config.threadStore) {
-      this.threadStore = config.threadStore;
+      this.threadStore =
+        config.threadStore instanceof TracedThreadStore
+          ? config.threadStore
+          : new TracedThreadStore(config.threadStore);
     } else {
-      this.threadStore = new InMemoryThreadStore();
+      this.threadStore = new TracedThreadStore(new InMemoryThreadStore());
       if (process.env.NODE_ENV === "production") {
         logger.warn(
           "InMemoryThreadStore is in use in a production build (NODE_ENV=production). " +
@@ -261,12 +270,31 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     requestId: string,
     userId: string,
     controller: AbortController,
-  ): void {
+  ): boolean {
+    if (this.activeStreams.has(requestId)) return false;
     this.activeStreams.set(requestId, { controller, userId });
     this.userStreamCounts.set(
       userId,
       (this.userStreamCounts.get(userId) ?? 0) + 1,
     );
+    return true;
+  }
+
+  /** Atomically enforce the per-user limit and reserve a server-owned key. */
+  private reserveStream(
+    userId: string,
+    maxConcurrentStreams: number,
+  ): { requestId: string; controller: AbortController } | undefined {
+    if (this.countUserStreams(userId) >= maxConcurrentStreams) {
+      return undefined;
+    }
+    for (;;) {
+      const requestId = randomUUID();
+      const controller = new AbortController();
+      if (this.trackStream(requestId, userId, controller)) {
+        return { requestId, controller };
+      }
+    }
   }
 
   /**
@@ -287,7 +315,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   async setup() {
-    await initAgentTracing();
     const { agents, defaultAgentName } = await this.buildAgentRegistry();
     this.agents = agents;
     this.defaultAgentName = defaultAgentName;
@@ -495,7 +522,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         );
       } catch (err) {
         throw new Error(
-          `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
+          `Agent '${name}' has no model configured and neither DATABRICKS_AGENT_SERVING_ENDPOINT_NAME nor DATABRICKS_SERVING_ENDPOINT_NAME is available`,
           { cause: err instanceof Error ? err : undefined },
         );
       }
@@ -877,69 +904,114 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async _handleChat(req: express.Request, res: express.Response) {
+    const requestId = requestTraceId(req) ?? randomUUID();
+    await runWithAgentTrace(
+      provisionalTraceIdentity(req, "chat", requestId),
+      req.body,
+      async (observer) => {
+        res.setHeader("X-MLflow-Trace-Id", observer.traceId);
+        await this._handleChatWithinTrace(req, res, observer, requestId);
+      },
+    );
+  }
+
+  private async _handleChatWithinTrace(
+    req: express.Request,
+    res: express.Response,
+    observer: AgentTraceObserver,
+    traceRequestId: string,
+  ): Promise<void> {
     const parsed = chatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: "Invalid request",
         details: parsed.error.flatten().fieldErrors,
       });
       return;
     }
     const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
+    if (mlflowRunId) observer.linkToRun(mlflowRunId);
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: agentName
           ? `Agent "${agentName}" not found`
           : "No agent registered",
       });
       return;
     }
+    observer.updateIdentity({ agentName: registered.name });
 
     const userId = this.resolveUserId(req);
+    observer.updateIdentity({ userId });
 
     // Reject early (before allocating a thread) when the user is already at
     // their concurrent-stream limit. Prevents a misbehaving client from
     // churning thread rows while being denied elsewhere.
     const limits = this.resolvedLimits;
-    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+    const reservation = this.reserveStream(
+      userId,
+      limits.maxConcurrentStreamsPerUser,
+    );
+    if (!reservation) {
       res.setHeader("Retry-After", "5");
-      res.status(429).json({
+      respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
     }
+    const { requestId, controller } = reservation;
 
-    // ThreadStore can throw on backing-storage failures (DB unreachable,
-    // permission errors, transient I/O). Without a try/catch the
-    // `async` Express handler bubbles the rejection without a response and
-    // the client connection hangs until the proxy times out. Surface the
-    // failure as a 500 so the SSE client falls back instead of waiting.
-    let thread: Thread;
     try {
-      const existing = threadId
-        ? await this.threadStore.get(threadId, userId)
-        : null;
-      if (threadId && !existing) {
-        res.status(404).json({ error: `Thread ${threadId} not found` });
+      // ThreadStore can throw on backing-storage failures (DB unreachable,
+      // permission errors, transient I/O). Surface the failure as a 500 so
+      // the client does not hang until the proxy times out.
+      let thread: Thread;
+      try {
+        const existing = threadId
+          ? await this.threadStore.get(threadId, userId)
+          : null;
+        if (threadId && !existing) {
+          respondWithTraceError(observer, res, 404, {
+            error: `Thread ${threadId} not found`,
+          });
+          return;
+        }
+        thread = existing ?? (await this.threadStore.create(userId));
+        observer.updateIdentity({
+          threadId: thread.id,
+          sessionId: requestSessionId(req) ?? thread.id,
+        });
+
+        const userMessage: Message = {
+          id: randomUUID(),
+          role: "user",
+          content: message,
+          createdAt: new Date(),
+        };
+        await this.threadStore.addMessage(thread.id, userId, userMessage);
+      } catch (err) {
+        logger.error("threadStore failed in /chat: %O", err);
+        respondWithTraceError(observer, res, 500, {
+          error: "Thread operation failed",
+        });
         return;
       }
-      thread = existing ?? (await this.threadStore.create(userId));
-
-      const userMessage: Message = {
-        id: randomUUID(),
-        role: "user",
-        content: message,
-        createdAt: new Date(),
-      };
-      await this.threadStore.addMessage(thread.id, userId, userMessage);
-    } catch (err) {
-      logger.error("threadStore failed in /chat: %O", err);
-      res.status(500).json({ error: "Thread operation failed" });
-      return;
+      return await this._streamAgent(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        observer,
+        requestId,
+        controller,
+        traceRequestId,
+      );
+    } finally {
+      this.untrackStream(requestId);
     }
-    return this._streamAgent(req, res, registered, thread, userId, mlflowRunId);
   }
 
   /**
@@ -957,13 +1029,23 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
   ): string[] {
     if (!this.resolvedApprovalPolicy.requireForDestructive) return [];
-    const names: string[] = [];
-    for (const entry of registered.toolIndex.values()) {
-      if (requiresApproval(entry.def.annotations)) {
-        names.push(entry.def.name);
+    const names = new Set<string>();
+    const visitedAgents = new Set<string>();
+    const visit = (agent: RegisteredAgent): void => {
+      if (visitedAgents.has(agent.name)) return;
+      visitedAgents.add(agent.name);
+      for (const entry of agent.toolIndex.values()) {
+        if (requiresApproval(entry.def.annotations)) {
+          names.add(entry.def.name);
+        }
+        if (entry.source === "subagent") {
+          const child = this.agents.get(entry.agentName);
+          if (child) visit(child);
+        }
       }
-    }
-    return names;
+    };
+    visit(registered);
+    return [...names];
   }
 
   /**
@@ -977,20 +1059,42 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * does not provide. See {@link collectApprovalRequiredToolNames}.
    */
   private async _handleInvoke(req: express.Request, res: express.Response) {
+    const route = invokeTraceRoute(req);
+    const requestId = requestTraceId(req) ?? randomUUID();
+    await runWithAgentTrace(
+      provisionalTraceIdentity(req, route, requestId),
+      req.body,
+      async (observer) => {
+        res.setHeader("X-MLflow-Trace-Id", observer.traceId);
+        await this._handleInvokeWithinTrace(req, res, observer, requestId);
+      },
+    );
+  }
+
+  private async _handleInvokeWithinTrace(
+    req: express.Request,
+    res: express.Response,
+    observer: AgentTraceObserver,
+    traceRequestId: string,
+  ): Promise<void> {
     const parsed = invocationsRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error: "Invalid request",
         details: parsed.error.flatten().fieldErrors,
       });
       return;
     }
     const { input, mlflowRunId } = parsed.data;
+    if (mlflowRunId) observer.linkToRun(mlflowRunId);
     const registered = this.resolveAgent();
     if (!registered) {
-      res.status(400).json({ error: "No agent registered" });
+      respondWithTraceError(observer, res, 400, {
+        error: "No agent registered",
+      });
       return;
     }
+    observer.updateIdentity({ agentName: registered.name });
 
     // Pre-flight HITL gate. The non-streaming invoke surface has no way to
     // surface an approval prompt back to the caller and no way to receive
@@ -999,7 +1103,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // with a confusing "denied by user" tool result in the final text).
     const approvalGated = this.collectApprovalRequiredToolNames(registered);
     if (approvalGated.length > 0) {
-      res.status(400).json({
+      respondWithTraceError(observer, res, 400, {
         error:
           `Agent '${registered.name}' exposes ${approvalGated.length} approval-gated tool(s) ` +
           `(${approvalGated.join(", ")}); /invocations and /responses are non-streaming and ` +
@@ -1010,61 +1114,79 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     const userId = this.resolveUserId(req);
+    observer.updateIdentity({ userId });
 
     // Match the rate-limit gate on /chat. Without this, a client can bypass
     // `limits.maxConcurrentStreamsPerUser` by hitting /invocations instead.
     const limits = this.resolvedLimits;
-    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+    const reservation = this.reserveStream(
+      userId,
+      limits.maxConcurrentStreamsPerUser,
+    );
+    if (!reservation) {
       res.setHeader("Retry-After", "5");
-      res.status(429).json({
+      respondWithTraceError(observer, res, 429, {
         error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
       });
       return;
     }
+    const { requestId, controller } = reservation;
 
-    // Same rationale as `_handleChat`: surface threadStore failures as a
-    // 500 instead of letting the async handler hang the client connection.
-    let thread: Thread;
     try {
-      thread = await this.threadStore.create(userId);
-
-      if (typeof input === "string") {
-        await this.threadStore.addMessage(thread.id, userId, {
-          id: randomUUID(),
-          role: "user",
-          content: input,
-          createdAt: new Date(),
+      // Same rationale as `_handleChat`: surface threadStore failures as a
+      // 500 instead of letting the async handler hang the client connection.
+      let thread: Thread;
+      try {
+        thread = await this.threadStore.create(userId);
+        observer.updateIdentity({
+          threadId: thread.id,
+          sessionId: requestSessionId(req) ?? thread.id,
         });
-      } else {
-        for (const item of input) {
-          const role = (item.role ?? "user") as Message["role"];
-          const content =
-            typeof item.content === "string"
-              ? item.content
-              : JSON.stringify(item.content ?? "");
-          if (!content) continue;
+
+        if (typeof input === "string") {
           await this.threadStore.addMessage(thread.id, userId, {
             id: randomUUID(),
-            role,
-            content,
+            role: "user",
+            content: input,
             createdAt: new Date(),
           });
+        } else {
+          for (const item of input) {
+            const role = (item.role ?? "user") as Message["role"];
+            const content =
+              typeof item.content === "string"
+                ? item.content
+                : JSON.stringify(item.content ?? "");
+            if (!content) continue;
+            await this.threadStore.addMessage(thread.id, userId, {
+              id: randomUUID(),
+              role,
+              content,
+              createdAt: new Date(),
+            });
+          }
         }
+      } catch (err) {
+        logger.error("threadStore failed in /invocations: %O", err);
+        respondWithTraceError(observer, res, 500, {
+          error: "Thread operation failed",
+        });
+        return;
       }
-    } catch (err) {
-      logger.error("threadStore failed in /invocations: %O", err);
-      res.status(500).json({ error: "Thread operation failed" });
-      return;
+      return await this._runAgentNonStreaming(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        observer,
+        requestId,
+        controller,
+        traceRequestId,
+      );
+    } finally {
+      this.untrackStream(requestId);
     }
-
-    return this._runAgentNonStreaming(
-      req,
-      res,
-      registered,
-      thread,
-      userId,
-      mlflowRunId,
-    );
   }
 
   private async _streamAgent(
@@ -1073,12 +1195,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
-    mlflowRunId?: string,
+    observer: AgentTraceObserver,
+    requestId: string,
+    abortController: AbortController,
+    traceRequestId: string,
   ): Promise<void> {
-    const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = randomUUID();
-    this.trackStream(requestId, userId, abortController);
 
     // `hosted-supervisor` entries are not callable from the Node process
     // (the SA endpoint executes them server-side). Their `def` is a
@@ -1108,119 +1230,105 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
+      traceObserver: observer,
+      traceIdentity: {
+        appName: resolveAgentTraceAppName(),
+        route: "chat",
+        sessionId: requestSessionId(req) ?? thread.id,
+        userId,
+        requestId: traceRequestId,
+      },
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
       this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
 
+    const pluginNames = this.context
+      ? this.context
+          .getPluginNames()
+          .filter((n) => n !== this.name && n !== "server")
+      : [];
+    const fullPrompt = composePromptForAgent(
+      registered,
+      this.config.baseSystemPrompt,
+      {
+        agentName: registered.name,
+        pluginNames,
+        toolNames: tools.map((t) => t.name),
+      },
+    );
+    const messagesWithSystem: Message[] = [
+      {
+        id: "system",
+        role: "system",
+        content: fullPrompt,
+        createdAt: new Date(),
+      },
+      ...thread.messages,
+    ];
+
+    // Trace discovery is committed by the outer request handler before any
+    // SSE event. Queue the matching metadata before the adapter can emit.
+    const traceUrl = buildMlflowTraceUrl(observer.traceId);
+    for (const evt of translator.translate({
+      type: "metadata",
+      data: {
+        threadId: thread.id,
+        traceId: observer.traceId,
+        mlflowTraceId: observer.traceId,
+        ...(traceUrl ? { traceUrl } : {}),
+      },
+    })) {
+      outboundEvents.push(evt);
+    }
+
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
     // generator below drains the channel in order. executeTool pushes
     // approval-pending events into the same channel before awaiting the gate.
+    let driverFailure: { error: unknown } | undefined;
     const driver = (async () => {
       try {
-        for (const evt of translator.translate({
-          type: "metadata",
-          data: { threadId: thread.id },
-        })) {
-          outboundEvents.push(evt);
-        }
-
-        // Root MLflow span for the turn; tool-call spans nest under it.
-        await traceAgent(
-          registered.name ?? "agent",
+        const stream = registered.adapter.run(
           {
-            messages: thread.messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            messages: messagesWithSystem,
+            tools,
+            threadId: thread.id,
+            signal,
+            extensions: buildAdapterExtensions(registered.toolIndex),
           },
-          async (span) => {
-            // Link this turn's trace to an eval run when the eval runner
-            // supplied one, so the trace shows under the MLflow evaluation run.
-            if (mlflowRunId) linkTraceToRun(mlflowRunId);
-
-            const pluginNames = this.context
-              ? this.context
-                  .getPluginNames()
-                  .filter((n) => n !== this.name && n !== "server")
-              : [];
-            const fullPrompt = composePromptForAgent(
-              registered,
-              this.config.baseSystemPrompt,
-              {
-                agentName: registered.name,
-                pluginNames,
-                toolNames: tools.map((t) => t.name),
-              },
-            );
-
-            const messagesWithSystem: Message[] = [
-              {
-                id: "system",
-                role: "system",
-                content: fullPrompt,
-                createdAt: new Date(),
-              },
-              ...thread.messages,
-            ];
-
-            const stream = registered.adapter.run(
-              {
-                messages: messagesWithSystem,
-                tools,
-                threadId: thread.id,
-                signal,
-                extensions: buildAdapterExtensions(registered.toolIndex),
-              },
-              { executeTool, signal },
-            );
-
-            // The accumulation rule (deltas append, `message` replaces) is
-            // shared with `runAgent` and `runSubAgent`; see
-            // `consumeAdapterStream` for the rationale.
-            const fullContent = await consumeAdapterStream(stream, {
-              signal,
-              onEvent: (event) => {
-                for (const translated of translator.translate(event)) {
-                  outboundEvents.push(translated);
-                }
-              },
-            });
-
-            if (fullContent) {
-              span.setOutputs({ role: "assistant", content: fullContent });
-              await this.threadStore.addMessage(thread.id, userId, {
-                id: randomUUID(),
-                role: "assistant",
-                content: fullContent,
-                createdAt: new Date(),
-              });
-            }
-
-            // Surface the MLflow trace id so eval runs can attach assessments
-            // to this turn's trace. No-op when tracing is disabled.
-            const mlflowTraceId = currentTraceId();
-            if (mlflowTraceId) {
-              for (const evt of translator.translate({
-                type: "metadata",
-                data: { mlflowTraceId },
-              })) {
-                outboundEvents.push(evt);
-              }
-            }
-          },
+          { executeTool, signal },
         );
 
-        for (const evt of translator.finalize()) outboundEvents.push(evt);
-      } catch (error) {
-        if (signal.aborted) {
-          outboundEvents.close();
-          return;
+        const { text: fullContent } = await consumeAdapterStream(stream, {
+          signal,
+          onEvent: (event) => {
+            observer.onEvent(event);
+            for (const translated of translator.translate(event)) {
+              outboundEvents.push(translated);
+            }
+          },
+        });
+
+        if (signal.aborted) throw agentRequestAbortError();
+
+        if (fullContent) {
+          await this.threadStore.addMessage(thread.id, userId, {
+            id: randomUUID(),
+            role: "assistant",
+            content: fullContent,
+            createdAt: new Date(),
+          });
         }
-        logger.error("Agent chat error: %O", error);
+
+        for (const evt of translator.finalize()) outboundEvents.push(evt);
+        observer.setOutput({ text: fullContent });
+      } catch (error) {
+        driverFailure = { error };
+        if (!signal.aborted) {
+          logger.error("Agent chat error: %O", error);
+        }
         outboundEvents.close(error);
-        return;
       } finally {
         // Any pending approval gates for this stream are auto-denied so the
         // adapter can unwind if it was still waiting.
@@ -1241,18 +1349,26 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             );
           }
         }
+        outboundEvents.close();
       }
-      outboundEvents.close();
     })();
 
     await this.executeStream<ResponseStreamEvent>(
       res,
-      async function* () {
+      async function* (streamSignal?: AbortSignal) {
+        const abortFromTransport = () => {
+          if (!signal.aborted) abortController.abort("Stream cancelled");
+        };
+        if (streamSignal?.aborted) abortFromTransport();
+        streamSignal?.addEventListener("abort", abortFromTransport, {
+          once: true,
+        });
         try {
           for await (const ev of outboundEvents) {
             yield ev;
           }
         } finally {
+          streamSignal?.removeEventListener("abort", abortFromTransport);
           await driver.catch(() => undefined);
         }
       },
@@ -1261,6 +1377,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         stream: { ...agentStreamDefaults.stream, streamId: requestId },
       },
     );
+    await driver;
+    if (driverFailure) throw driverFailure.error;
   }
 
   /**
@@ -1292,19 +1410,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
-    mlflowRunId?: string,
+    observer: AgentTraceObserver,
+    requestId: string,
+    abortController: AbortController,
+    traceRequestId: string,
   ): Promise<void> {
-    const abortController = new AbortController();
     const signal = abortController.signal;
-    const requestId = randomUUID();
-    this.trackStream(requestId, userId, abortController);
 
-    const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
+    const tools = Array.from(registered.toolIndex.values())
+      .filter((e) => e.source !== "hosted-supervisor")
+      .map((e) => e.def);
     const limits = this.resolvedLimits;
-
-    // Assigned inside the span below (the only place the active trace id
-    // resolves), read into the response envelope after.
-    let mlflowTraceId: string | undefined;
 
     const runState: RunState = {
       req,
@@ -1320,82 +1436,77 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
+      traceObserver: observer,
+      traceIdentity: {
+        appName: resolveAgentTraceAppName(),
+        route: invokeTraceRoute(req),
+        sessionId: requestSessionId(req) ?? thread.id,
+        userId,
+        requestId: traceRequestId,
+      },
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
       this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
 
+    const pluginNames = this.context
+      ? this.context
+          .getPluginNames()
+          .filter((n) => n !== this.name && n !== "server")
+      : [];
+    const fullPrompt = composePromptForAgent(
+      registered,
+      this.config.baseSystemPrompt,
+      {
+        agentName: registered.name,
+        pluginNames,
+        toolNames: tools.map((t) => t.name),
+      },
+    );
+    const messagesWithSystem: Message[] = [
+      {
+        id: "system",
+        role: "system",
+        content: fullPrompt,
+        createdAt: new Date(),
+      },
+      ...thread.messages,
+    ];
+
     let fullContent = "";
     try {
-      // Root MLflow span for the turn; tool-call spans nest under it. Mirrors
-      // the streaming path so the invoke surface produces the same trace shape
-      // instead of orphan root TOOL spans.
-      await traceAgent(
-        registered.name ?? "agent",
+      const stream = registered.adapter.run(
         {
-          messages: thread.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: messagesWithSystem,
+          tools,
+          threadId: thread.id,
+          signal,
+          extensions: buildAdapterExtensions(registered.toolIndex),
         },
-        async (span) => {
-          // Link this turn's trace to an eval run when the eval runner
-          // supplied one, so the trace shows under the MLflow evaluation run.
-          if (mlflowRunId) linkTraceToRun(mlflowRunId);
-
-          const pluginNames = this.context
-            ? this.context
-                .getPluginNames()
-                .filter((n) => n !== this.name && n !== "server")
-            : [];
-          const fullPrompt = composePromptForAgent(
-            registered,
-            this.config.baseSystemPrompt,
-            {
-              agentName: registered.name,
-              pluginNames,
-              toolNames: tools.map((t) => t.name),
-            },
-          );
-
-          const messagesWithSystem: Message[] = [
-            {
-              id: "system",
-              role: "system",
-              content: fullPrompt,
-              createdAt: new Date(),
-            },
-            ...thread.messages,
-          ];
-
-          const stream = registered.adapter.run(
-            {
-              messages: messagesWithSystem,
-              tools,
-              threadId: thread.id,
-              signal,
-            },
-            { executeTool, signal },
-          );
-
-          fullContent = await consumeAdapterStream(stream, { signal });
-
-          if (fullContent) {
-            span.setOutputs({ role: "assistant", content: fullContent });
-            await this.threadStore.addMessage(thread.id, userId, {
-              id: randomUUID(),
-              role: "assistant",
-              content: fullContent,
-              createdAt: new Date(),
-            });
-          }
-
-          mlflowTraceId = currentTraceId();
-        },
+        { executeTool, signal },
       );
+      const consumed = await consumeAdapterStream(stream, {
+        signal,
+        onEvent: observer.onEvent,
+      });
+      if (signal.aborted) throw agentRequestAbortError();
+      fullContent = consumed.text;
+      if (fullContent) {
+        await this.threadStore.addMessage(thread.id, userId, {
+          id: randomUUID(),
+          role: "assistant",
+          content: fullContent,
+          createdAt: new Date(),
+        });
+      }
     } catch (error) {
       if (signal.aborted) {
-        res.status(499).json({ error: "Request aborted" });
+        const body = {
+          error: "Request aborted",
+          trace_id: observer.traceId,
+        };
+        observer.recordError(error, body);
+        res.status(499).json(body);
         return;
       }
       logger.error("Agent invoke error: %O", error);
@@ -1405,7 +1516,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           : error instanceof Error
             ? error.message
             : String(error);
-      res.status(500).json({ error: message });
+      const body = { error: message, trace_id: observer.traceId };
+      observer.recordError(error, body);
+      res.status(500).json(body);
       return;
     } finally {
       this.approvalGate.abortStream(requestId);
@@ -1432,17 +1545,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       role: "assistant",
       content: [{ type: "output_text", text: fullContent }],
     };
-    res.json({
+    const payload = {
       id: responseId,
       object: "response",
       created_at: Math.floor(Date.now() / 1000),
       status: "completed",
       thread_id: thread.id,
-      // Lets an eval runner attach assessments to this turn's trace; absent
-      // when tracing is disabled.
-      ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
+      trace_id: observer.traceId,
+      mlflow_trace_id: observer.traceId,
       output: [message],
-    });
+    };
+    observer.setOutput(payload);
+    res.json(payload);
   }
 
   /**
@@ -1463,120 +1577,138 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     args: unknown,
     depth: number,
   ): Promise<unknown> {
-    if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
-      runState.abortController.abort(
-        new Error(
-          `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
-        ),
-      );
-      throw new Error(
-        `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
-      );
-    }
-    runState.toolCallsUsed.count++;
-
     const entry = toolIndex.get(name);
-    if (!entry) throw new Error(`Unknown tool: ${name}`);
-
-    if (
-      runState.approvalPolicy.requireForDestructive &&
-      requiresApproval(entry.def.annotations)
-    ) {
-      const approvalId = randomUUID();
-      for (const ev of runState.translator.translate({
-        type: "approval_pending",
-        approvalId,
-        streamId: runState.requestId,
-        toolName: name,
+    return traceToolCall(
+      {
+        name,
+        source: entry?.source ?? "unknown",
+        effect: entry?.def.annotations?.effect,
         args,
-        annotations: entry.def.annotations,
-      })) {
-        runState.outboundEvents.push(ev);
-      }
-      const decision = await this.approvalGate.wait({
-        approvalId,
-        streamId: runState.requestId,
-        userId: runState.userId,
-        timeoutMs: runState.approvalPolicy.timeoutMs,
-      });
-      if (decision === "deny") {
-        return `Tool execution denied by user approval gate (tool: ${name}).`;
-      }
-    }
-
-    // Traced from here so the span covers execution only, not the approval
-    // wait above (which is human latency).
-    const toolResult = await traceTool(name, args, async () => {
-      let result: unknown;
-      if (entry.source === "toolkit") {
-        if (!this.context) {
+      },
+      async () => {
+        if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
+          runState.abortController.abort(
+            new Error(
+              `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
+            ),
+          );
           throw new Error(
-            "Plugin tool execution requires PluginContext; this should never happen through createApp",
+            `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
           );
         }
-        result = await this.context.executeTool(
-          runState.req,
-          entry.pluginName,
-          entry.localName,
-          args,
-          runState.signal,
-          runState.limits.toolCallTimeoutMs,
-        );
-      } else if (entry.source === "function") {
-        // Function tools declare their parameters as a JSON-object schema,
-        // so adapters always serialize `args` as an object. A non-object
-        // value here means the upstream model emitted malformed tool-call
-        // JSON; surface a clear error rather than silently passing through
-        // a wrong-shape value the tool will then choke on.
-        if (typeof args !== "object" || args === null || Array.isArray(args)) {
+        runState.toolCallsUsed.count++;
+
+        if (!entry) throw new Error(`Unknown tool: ${name}`);
+
+        if (
+          runState.approvalPolicy.requireForDestructive &&
+          requiresApproval(entry.def.annotations)
+        ) {
+          const approvalId = randomUUID();
+          for (const ev of runState.translator.translate({
+            type: "approval_pending",
+            approvalId,
+            streamId: runState.requestId,
+            toolName: name,
+            args,
+            annotations: entry.def.annotations,
+          })) {
+            runState.outboundEvents.push(ev);
+          }
+          const decision = await this.approvalGate.wait({
+            approvalId,
+            streamId: runState.requestId,
+            userId: runState.userId,
+            timeoutMs: runState.approvalPolicy.timeoutMs,
+            toolName: name,
+            effect: entry.def.annotations?.effect,
+            args,
+          });
+          if (decision === "deny") {
+            return `Tool execution denied by user approval gate (tool: ${name}).`;
+          }
+        }
+
+        let result: unknown;
+        if (entry.source === "toolkit") {
+          if (!this.context) {
+            throw new Error(
+              "Plugin tool execution requires PluginContext; this should never happen through createApp",
+            );
+          }
+          result = await this.context.executeTool(
+            runState.req,
+            entry.pluginName,
+            entry.localName,
+            args,
+            runState.signal,
+            runState.limits.toolCallTimeoutMs,
+            { name, source: entry.source },
+          );
+        } else if (entry.source === "function") {
+          // Function tools declare their parameters as a JSON-object schema,
+          // so adapters always serialize `args` as an object. A non-object
+          // value here means the upstream model emitted malformed tool-call
+          // JSON; surface a clear error rather than silently passing through
+          // a wrong-shape value the tool will then choke on.
+          if (
+            typeof args !== "object" ||
+            args === null ||
+            Array.isArray(args)
+          ) {
+            throw new Error(
+              `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+            );
+          }
+          result = await entry.functionTool.execute(
+            args as Record<string, unknown>,
+          );
+        } else if (entry.source === "mcp") {
+          if (!this.mcpClient) throw new Error("MCP client not connected");
+          const oboToken = runState.req.headers["x-forwarded-access-token"];
+          const mcpAuth =
+            typeof oboToken === "string"
+              ? { Authorization: `Bearer ${oboToken}` }
+              : undefined;
+          result = await this.mcpClient.callTool(
+            entry.mcpToolName,
+            args,
+            mcpAuth,
+          );
+        } else if (entry.source === "subagent") {
+          const childAgent = this.agents.get(entry.agentName);
+          if (!childAgent)
+            throw new Error(`Sub-agent not found: ${entry.agentName}`);
+          const childResult = await this.runSubAgent(
+            runState,
+            childAgent,
+            args,
+            depth + 1,
+          );
+          result = childResult.text;
+        } else if (entry.source === "hosted-supervisor") {
+          // Defense-in-depth: should never fire. Hosted-supervisor entries are
+          // routed via `AgentInput.extensions` and the SA endpoint executes
+          // them server-side; their `def` is filtered out of the adapter's
+          // `tools` array, so the model never sees a callable schema for them.
+          // If we reach here, the agent is paired with a non-SA adapter that
+          // somehow surfaced the placeholder def to the model — surface a
+          // clear error rather than crash later in `normalizeToolResult`.
           throw new Error(
-            `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+            `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+              "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
           );
         }
-        result = await entry.functionTool.execute(
-          args as Record<string, unknown>,
-        );
-      } else if (entry.source === "mcp") {
-        if (!this.mcpClient) throw new Error("MCP client not connected");
-        const oboToken = runState.req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        result = await this.mcpClient.callTool(
-          entry.mcpToolName,
-          args,
-          mcpAuth,
-        );
-      } else if (entry.source === "subagent") {
-        const childAgent = this.agents.get(entry.agentName);
-        if (!childAgent)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        result = await this.runSubAgent(runState, childAgent, args, depth + 1);
-      } else if (entry.source === "hosted-supervisor") {
-        // Defense-in-depth: should never fire. Hosted-supervisor entries are
-        // routed via `AgentInput.extensions` and the SA endpoint executes
-        // them server-side; their `def` is filtered out of the adapter's
-        // `tools` array, so the model never sees a callable schema for them.
-        // If we reach here, the agent is paired with a non-SA adapter that
-        // somehow surfaced the placeholder def to the model — surface a
-        // clear error rather than crash later in `normalizeToolResult`.
-        throw new Error(
-          `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-            "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
-        );
-      }
 
-      return result;
-    });
-
-    return normalizeToolResult(toolResult);
+        return normalizeToolResult(result);
+      },
+    );
   }
 
   /**
-   * Runs a sub-agent in response to an `agent-<key>` tool call. Returns the
-   * concatenated text output to hand back to the parent adapter as the tool
-   * result.
+   * Runs a sub-agent in response to an `agent-<key>` tool call. Returns its
+   * concatenated text and aggregate usage; dispatch folds that usage into the
+   * owning trace once, then hands only the text to outer tool normalization.
    *
    * `depth` starts at 1 for a top-level sub-agent invocation (i.e. the
    * outer `_streamAgent` calls `runSubAgent(..., 1)`) and increments on
@@ -1592,7 +1724,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     child: RegisteredAgent,
     args: unknown,
     depth: number,
-  ): Promise<string> {
+  ): Promise<{ text: string; usage: AgentUsage }> {
     if (depth > runState.limits.maxSubAgentDepth) {
       throw new Error(
         `Sub-agent depth exceeded (limit ${runState.limits.maxSubAgentDepth}). ` +
@@ -1612,14 +1744,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const childTools = Array.from(child.toolIndex.values())
       .filter((e) => e.source !== "hosted-supervisor")
       .map((e) => e.def);
-
-    const childExecute = (name: string, childArgs: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, child.toolIndex, name, childArgs, depth);
-
-    const runContext: AgentRunContext = {
-      executeTool: childExecute,
-      signal: runState.signal,
-    };
 
     const pluginNames = this.context
       ? this.context
@@ -1651,37 +1775,71 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       },
     ];
 
-    return consumeAdapterStream(
-      child.adapter.run(
-        {
-          messages,
-          tools: childTools,
-          threadId: randomUUID(),
-          signal: runState.signal,
-          extensions: buildAdapterExtensions(child.toolIndex),
-        },
-        runContext,
-      ),
+    const childThreadId = randomUUID();
+    const traced = await runWithAgentTrace(
       {
-        signal: runState.signal,
-        // Forward every sub-agent event into the parent's outbound SSE
-        // stream so the client sees nested tool_call / tool_result events
-        // (UI-action tools like apply_filter / highlight_period rely on
-        // this) and the sub-agent's streaming text as it's generated.
-        //
-        // `metadata` is the one exception: sub-agents have their own
-        // threadId, and forwarding it would overwrite the parent's
-        // thread state on the client and break multi-turn continuity.
-        // Approval-pending events emitted by `dispatchToolCall` already
-        // reach `outboundEvents` directly, so they are not routed here.
-        onEvent: (event) => {
-          if (event.type === "metadata") return;
-          for (const translated of runState.translator.translate(event)) {
-            runState.outboundEvents.push(translated);
-          }
-        },
+        ...runState.traceIdentity,
+        agentName: child.name,
+        threadId: childThreadId,
       },
+      { messages: input },
+      async (childObserver) => {
+        const childRunState: RunState = {
+          ...runState,
+          traceObserver: childObserver,
+        };
+        const childExecute = (
+          name: string,
+          childArgs: unknown,
+        ): Promise<unknown> =>
+          this.dispatchToolCall(
+            childRunState,
+            child.toolIndex,
+            name,
+            childArgs,
+            depth,
+          );
+        const runContext: AgentRunContext = {
+          executeTool: childExecute,
+          signal: runState.signal,
+        };
+        const consumed = await consumeAdapterStream(
+          child.adapter.run(
+            {
+              messages,
+              tools: childTools,
+              threadId: childThreadId,
+              signal: runState.signal,
+              extensions: buildAdapterExtensions(child.toolIndex),
+            },
+            runContext,
+          ),
+          {
+            signal: runState.signal,
+            // Forward every sub-agent event into the parent's outbound SSE
+            // stream so the client sees nested tool_call / tool_result events
+            // (UI-action tools like apply_filter / highlight_period rely on
+            // this) and the sub-agent's streaming text as it's generated.
+            //
+            // `metadata` is the one exception: sub-agents have their own
+            // threadId, and forwarding it would overwrite the parent's
+            // thread state on the client and break multi-turn continuity.
+            // Approval-pending events emitted by `dispatchToolCall` already
+            // reach `outboundEvents` directly, so they are not routed here.
+            onEvent: (event) => {
+              childObserver.onEvent(event);
+              if (event.type === "metadata") return;
+              for (const translated of runState.translator.translate(event)) {
+                runState.outboundEvents.push(translated);
+              }
+            },
+          },
+        );
+        return consumed.text;
+      },
+      (childUsage) => runState.traceObserver?.addChildUsage(childUsage),
     );
+    return { text: traced.value, usage: traced.usage };
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
@@ -1837,6 +1995,80 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.agents.set(name, registered);
     if (!this.defaultAgentName) this.defaultAgentName = name;
   }
+}
+
+function requestTraceId(req: express.Request): string | undefined {
+  return (
+    req.header("x-request-id")?.trim() ||
+    req.header("x-databricks-request-id")?.trim() ||
+    undefined
+  );
+}
+
+function provisionalTraceIdentity(
+  req: express.Request,
+  route: "chat" | "invocations" | "responses",
+  requestId: string,
+) {
+  const body =
+    req.body && typeof req.body === "object"
+      ? (req.body as Record<string, unknown>)
+      : undefined;
+  const threadId = traceIdentityValue(body?.threadId) ?? requestId;
+  return {
+    appName: resolveAgentTraceAppName(),
+    agentName: traceIdentityValue(body?.agent) ?? "unresolved-agent",
+    route,
+    sessionId: requestSessionId(req) ?? threadId,
+    userId:
+      traceIdentityValue(req.header("x-forwarded-user")) ?? "unresolved-user",
+    requestId,
+    threadId,
+  };
+}
+
+function traceIdentityValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function buildMlflowTraceUrl(traceId: string): string | undefined {
+  const workspaceHost = process.env.DATABRICKS_HOST?.trim().replace(/\/$/, "");
+  const experimentId = process.env.MLFLOW_EXPERIMENT_ID?.trim();
+  if (!workspaceHost || !experimentId) return undefined;
+  return `${workspaceHost}/ml/experiments/${encodeURIComponent(experimentId)}/traces?selectedTraceId=${encodeURIComponent(traceId)}`;
+}
+
+function respondWithTraceError(
+  observer: AgentTraceObserver,
+  res: express.Response,
+  status: number,
+  body: Record<string, unknown>,
+): void {
+  observer.recordError(body.error ?? `HTTP ${status}`, body);
+  res.status(status).json(body);
+}
+
+function requestSessionId(req: express.Request): string | undefined {
+  return (
+    req.header("x-mlflow-session-id")?.trim() ||
+    req.header("x-session-id")?.trim() ||
+    undefined
+  );
+}
+
+function invokeTraceRoute(req: express.Request): "invocations" | "responses" {
+  const requestPath =
+    req.route?.path ?? req.path ?? req.originalUrl ?? req.url ?? "";
+  return String(requestPath).includes("responses")
+    ? "responses"
+    : "invocations";
+}
+
+function agentRequestAbortError(): Error {
+  const error = new Error("Agent request aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {

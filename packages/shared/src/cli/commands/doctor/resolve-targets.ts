@@ -128,9 +128,8 @@ export function targetsFromManifestFile(
   // `plugin sync` catalogues every plugin the installed packages ship, marking
   // only those wired into `createApp` with `requiredByTemplate`. Check exactly
   // those, else doctor reports phantom "missing env var" errors for unimported
-  // plugins.
-  // KNOWN LIMITATION: sync strips `requiredByTemplate` for non-GA plugins, so a
-  // used beta/experimental plugin is not checked here yet. See the README.
+  // plugins. Stability does not erase that usage signal: a beta plugin wired
+  // into the generated app must receive the same resource checks as a GA one.
   const selected = Object.entries(data.plugins ?? {}).filter(
     ([, plugin]) => plugin.requiredByTemplate === true,
   );

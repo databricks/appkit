@@ -112,6 +112,55 @@ export interface ThreadStore {
 // Agent events (SSE protocol)
 // ---------------------------------------------------------------------------
 
+export interface AgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  costUsd?: number;
+  costAvailable: boolean;
+}
+
+export interface AgentModelStartEvent {
+  type: "model_start";
+  stepId: string;
+  model: string;
+  provider: string;
+  input: unknown;
+  startedAt: number;
+}
+
+export interface AgentModelEndEvent {
+  type: "model_end";
+  stepId: string;
+  model: string;
+  provider: string;
+  output: unknown;
+  usage: AgentUsage;
+  finishReason?: string;
+  firstTokenAt?: number;
+  streamDurationMs: number;
+  endedAt: number;
+  error?: string;
+}
+
+export type AgentRemoteTraceEvent =
+  | {
+      type: "remote_trace";
+      traceId: string;
+      spanId?: string;
+      source: "model-serving" | "supervisor" | "remote-agent";
+      relation: "continued";
+    }
+  | {
+      type: "remote_trace";
+      traceId: string;
+      spanId: string;
+      source: "model-serving" | "supervisor" | "remote-agent";
+      relation: "linked";
+    };
+
 export type AgentEvent =
   | { type: "message_delta"; content: string }
   | { type: "message"; content: string }
@@ -144,7 +193,10 @@ export type AgentEvent =
       toolName: string;
       args: unknown;
       annotations?: ToolAnnotations;
-    };
+    }
+  | AgentModelStartEvent
+  | AgentModelEndEvent
+  | AgentRemoteTraceEvent;
 
 // ---------------------------------------------------------------------------
 // Responses API types (OpenAI-compatible wire format for HTTP boundary)
@@ -232,7 +284,10 @@ export interface AppKitThinkingEvent {
 
 export interface AppKitMetadataEvent {
   type: "appkit.metadata";
-  data: Record<string, unknown>;
+  data: Record<string, unknown> & {
+    threadId?: string;
+    traceId?: string;
+  };
   sequence_number: number;
 }
 

@@ -129,6 +129,47 @@ describe("AgentEventTranslator", () => {
     }
   });
 
+  test("keeps model lifecycle and remote trace events off the user-visible SSE stream", () => {
+    const translator = new AgentEventTranslator();
+
+    expect(
+      translator.translate({
+        type: "model_start",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        input: { prompt: "hello" },
+        startedAt: 100,
+      }),
+    ).toEqual([]);
+    expect(
+      translator.translate({
+        type: "model_end",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        output: { text: "hello" },
+        usage: {
+          inputTokens: 2,
+          outputTokens: 1,
+          totalTokens: 3,
+          costAvailable: false,
+        },
+        streamDurationMs: 20,
+        endedAt: 120,
+      }),
+    ).toEqual([]);
+    expect(
+      translator.translate({
+        type: "remote_trace",
+        traceId: "abcdef0123456789abcdef0123456789",
+        spanId: "0123456789abcdef",
+        source: "model-serving",
+        relation: "linked",
+      }),
+    ).toEqual([]);
+  });
+
   test("status:complete triggers finalize with response.completed", () => {
     const translator = new AgentEventTranslator();
     translator.translate({ type: "message_delta", content: "Hi" });

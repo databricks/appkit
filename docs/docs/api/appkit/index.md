@@ -14,6 +14,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Class | Description |
 | ------ | ------ |
+| [AgentUsageAccumulator](Class.AgentUsageAccumulator.md) | - |
 | [AppKitError](Class.AppKitError.md) | Base error class for all AppKit errors. Provides a consistent structure for error handling across the framework. |
 | [AppKitMcpClient](Class.AppKitMcpClient.md) | Lightweight MCP client for Databricks-hosted MCP servers. |
 | [AuthenticationError](Class.AuthenticationError.md) | Error thrown when authentication fails. Use for missing tokens, invalid credentials, or authorization failures. |
@@ -37,12 +38,17 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentAdapter](Interface.AgentAdapter.md) | - |
 | [AgentDefinition](Interface.AgentDefinition.md) | - |
 | [AgentInput](Interface.AgentInput.md) | - |
+| [AgentModelEndEvent](Interface.AgentModelEndEvent.md) | - |
+| [AgentModelStartEvent](Interface.AgentModelStartEvent.md) | - |
 | [AgentRunContext](Interface.AgentRunContext.md) | - |
 | [AgentsPluginConfig](Interface.AgentsPluginConfig.md) | Base configuration interface for AppKit plugins |
 | [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
+| [AgentUsage](Interface.AgentUsage.md) | - |
 | [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:` (object or function form in code, `plugin:NAME` entries in markdown frontmatter). |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
+| [CapturedTraceValue](Interface.CapturedTraceValue.md) | - |
+| [CaptureTraceValueOptions](Interface.CaptureTraceValueOptions.md) | - |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
@@ -101,6 +107,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | Type Alias | Description |
 | ------ | ------ |
 | [AgentEvent](TypeAlias.AgentEvent.md) | - |
+| [AgentRemoteTraceEvent](TypeAlias.AgentRemoteTraceEvent.md) | - |
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
@@ -142,6 +149,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [agentIdFromMarkdownPath](Function.agentIdFromMarkdownPath.md) | Derives the logical agent id from a markdown path. When the file is named `agent.md`, the id is the parent directory name (folder-based layout); otherwise the id is the file stem (e.g. legacy single-file paths). |
 | [appKitServingTypesPlugin](Function.appKitServingTypesPlugin.md) | Vite plugin to generate TypeScript types for AppKit serving endpoints. Fetches OpenAPI schemas from Databricks and generates a .d.ts with ServingEndpointRegistry module augmentation. |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
+| [captureTraceValue](Function.captureTraceValue.md) | - |
 | [createAgent](Function.createAgent.md) | Pure factory for agent definitions. Returns the passed-in definition after cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape and is safe to call at module top-level. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |

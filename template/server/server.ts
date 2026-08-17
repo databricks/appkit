@@ -19,11 +19,19 @@ import { setupSampleLakebaseRoutes } from './routes/lakebase/todo-routes';
 import { helper } from './agents/helper';
 {{- end}}
 
-createApp({
+export const app = createApp({
+{{- if .plugins.agents}}
+  // Uses AppKit's existing TelemetryManager / OTel provider. The setup
+  // command provisions the immutable UC trace location before first run.
+  telemetry: { mlflowUc: true },
+{{- end}}
   plugins: [
 {{- range $name, $_ := .plugins}}
 {{- if eq $name "agents"}}
-    agents({ agents: { helper } }),
+    agents({
+      defaultModel: process.env.DATABRICKS_AGENT_SERVING_ENDPOINT_NAME,
+      agents: { helper },
+    }),
 {{- else}}
     {{$name}}(),
 {{- end}}
@@ -34,4 +42,6 @@ createApp({
     await setupSampleLakebaseRoutes(appkit);
   },
 {{- end}}
-}).catch(console.error);
+});
+
+app.catch(console.error);

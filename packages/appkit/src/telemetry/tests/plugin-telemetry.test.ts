@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { PluginContext } from "../../core/plugin-context";
 import { NOOP_LOGGER, NOOP_METER, NOOP_TRACER } from "../noop";
 import type { TelemetryManager } from "../telemetry-manager";
 import { TelemetryProvider } from "../telemetry-provider";
@@ -188,6 +189,66 @@ describe("TelemetryProvider", () => {
       callback,
     );
     expect(result).toBe("result");
+  });
+
+  test("should tag the plugin execution child with its semantic tool identity", async () => {
+    const ctx = new PluginContext();
+    const span = {
+      setAttribute: vi.fn(),
+      setStatus: vi.fn(),
+      recordException: vi.fn(),
+      end: vi.fn(),
+    };
+    mockTracer.startActiveSpan.mockImplementation(
+      async (
+        _name: string,
+        optionsOrFn: unknown,
+        maybeFn?: (activeSpan: typeof span) => Promise<unknown>,
+      ) => {
+        const fn =
+          maybeFn ??
+          (optionsOrFn as (activeSpan: typeof span) => Promise<unknown>);
+        return fn(span);
+      },
+    );
+    const provider = {
+      getAgentTools: vi.fn().mockReturnValue([]),
+      executeAgentTool: vi.fn().mockResolvedValue("rows"),
+      asUser: vi.fn().mockReturnThis(),
+    };
+    ctx.registerToolProvider("analytics", provider as any);
+
+    type ExecuteToolWithTraceIdentity = (
+      req: unknown,
+      pluginName: string,
+      toolName: string,
+      args: unknown,
+      signal: AbortSignal | undefined,
+      timeoutMs: number,
+      traceIdentity: { name: string; source: string },
+    ) => Promise<unknown>;
+    await (ctx.executeTool as unknown as ExecuteToolWithTraceIdentity)(
+      { headers: {} },
+      "analytics",
+      "query",
+      { sql: "SELECT 1" },
+      undefined,
+      90_000,
+      { name: "renamed-query", source: "toolkit" },
+    );
+
+    expect(mockTracer.startActiveSpan).toHaveBeenCalledWith(
+      "executeTool:analytics.query",
+      expect.any(Function),
+    );
+    expect(span.setAttribute).toHaveBeenCalledWith(
+      "appkit.tool.name",
+      "renamed-query",
+    );
+    expect(span.setAttribute).toHaveBeenCalledWith(
+      "appkit.tool.source",
+      "toolkit",
+    );
   });
 
   test("should delegate registerInstrumentations to global manager", () => {

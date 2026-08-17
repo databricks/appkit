@@ -1,3 +1,11 @@
+import { context, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  type ReadableSpan,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type {
   AgentAdapter,
   AgentEvent,
@@ -8,7 +16,7 @@ import type {
   PluginData,
   ToolProvider,
 } from "shared";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createAgent } from "../create-agent";
 import { runAgent } from "../run-agent";
@@ -23,6 +31,69 @@ function scriptedAdapter(events: AgentEvent[]): AgentAdapter {
       }
     },
   };
+}
+
+beforeAll(() => {
+  context.disable();
+  context.setGlobalContextManager(
+    new AsyncLocalStorageContextManager().enable(),
+  );
+});
+
+afterAll(() => {
+  context.disable();
+});
+
+async function captureAgentSpans<T>(
+  operation: () => Promise<T>,
+): Promise<{ result: T; spans: ReadableSpan[] }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let result!: T;
+  let spans: ReadableSpan[] = [];
+  try {
+    result = await operation();
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+  } finally {
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { result, spans };
+}
+
+async function captureFailedAgentSpans(
+  operation: () => Promise<unknown>,
+): Promise<{ error: unknown; spans: ReadableSpan[] }> {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  const getTracerSpy = vi
+    .spyOn(trace, "getTracer")
+    .mockImplementation((name: string, version?: string) =>
+      provider.getTracer(name, version),
+    );
+  let error: unknown;
+  let spans: ReadableSpan[] = [];
+  try {
+    await operation();
+  } catch (caught) {
+    error = caught;
+  } finally {
+    await provider.forceFlush();
+    spans = exporter.getFinishedSpans();
+    getTracerSpy.mockRestore();
+    await provider.shutdown();
+  }
+  return { error, spans };
 }
 
 describe("runAgent", () => {
@@ -40,6 +111,96 @@ describe("runAgent", () => {
     const result = await runAgent(def, { messages: "hi" });
     expect(result.text).toBe("Hello world");
     expect(result.events).toHaveLength(3);
+  });
+
+  test("creates the standalone semantic root and returns its trace and aggregate usage", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const getTracerSpy = vi
+      .spyOn(trace, "getTracer")
+      .mockImplementation((name: string, version?: string) =>
+        provider.getTracer(name, version),
+      );
+    const events: AgentEvent[] = [
+      {
+        type: "model_start",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        input: { messages: [{ role: "user", content: "hi" }] },
+        startedAt: Date.now() - 10,
+      },
+      { type: "message_delta", content: "done" },
+      {
+        type: "model_end",
+        stepId: "step-1",
+        model: "model-a",
+        provider: "databricks",
+        output: { text: "done" },
+        usage: {
+          inputTokens: 7,
+          outputTokens: 2,
+          totalTokens: 9,
+          costUsd: 0.01,
+          costAvailable: true,
+        },
+        streamDurationMs: 10,
+        endedAt: 110,
+      },
+    ];
+    const def = createAgent({
+      name: "planner",
+      instructions: "x",
+      model: scriptedAdapter(events),
+    });
+
+    let result!: Awaited<ReturnType<typeof runAgent>>;
+    let spans = exporter.getFinishedSpans();
+    try {
+      result = await runAgent(def, {
+        messages: "hi",
+        sessionId: "session-1",
+        userId: "user-1",
+        requestId: "request-1",
+        threadId: "thread-1",
+        appName: "test-app",
+      });
+      await provider.forceFlush();
+      spans = exporter.getFinishedSpans();
+    } finally {
+      getTracerSpy.mockRestore();
+      await provider.shutdown();
+    }
+
+    const roots = spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const model = spans.find(
+      (span) => span.attributes["mlflow.spanType"] === "CHAT_MODEL",
+    );
+    expect(roots).toHaveLength(1);
+    expect(roots[0].attributes).toMatchObject({
+      "appkit.app.name": "test-app",
+      "appkit.agent.name": "planner",
+      "appkit.route": "runAgent",
+      "appkit.request.id": "request-1",
+      "appkit.thread.id": "thread-1",
+      "mlflow.trace.session": "session-1",
+      "mlflow.trace.user": "user-1",
+    });
+    expect(model?.parentSpanContext?.spanId).toBe(
+      roots[0].spanContext().spanId,
+    );
+    expect(result.traceId).toBe(roots[0].spanContext().traceId);
+    expect(result.usage).toEqual({
+      inputTokens: 7,
+      outputTokens: 2,
+      totalTokens: 9,
+      costUsd: 0.01,
+      costAvailable: true,
+    });
   });
 
   test("prefers terminal 'message' event over deltas when present", async () => {
@@ -255,6 +416,250 @@ describe("runAgent", () => {
       await // biome-ignore lint/style/noNonNullAssertion: asserted above
       capturedCtx!.executeTool("agent-helper", { input: "say hi" });
     expect(result).toBe("child says hi");
+  });
+
+  test("nests a local agent's model and tool and rolls its usage into the planner once", async () => {
+    const helperTool = tool({
+      name: "helper.tool",
+      description: "Look up a fact",
+      schema: z.object({ topic: z.string() }),
+      execute: async ({ topic }) => `fact:${topic}`,
+    });
+    const helperStartedAt = Date.now();
+    const helperAdapter: AgentAdapter = {
+      async *run(_input, runContext) {
+        yield {
+          type: "model_start",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "research" }] },
+          startedAt: helperStartedAt,
+        } satisfies AgentEvent;
+        const fact = await runContext.executeTool("helper.tool", {
+          topic: "tracing",
+        });
+        yield { type: "message_delta", content: `helper:${fact}` };
+        yield {
+          type: "model_end",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          output: { text: `helper:${fact}` },
+          usage: {
+            inputTokens: 6,
+            outputTokens: 3,
+            totalTokens: 9,
+            costAvailable: false,
+          },
+          streamDurationMs: 5,
+          endedAt: helperStartedAt + 5,
+        } satisfies AgentEvent;
+      },
+    };
+    const plannerStartedAt = Date.now();
+    const plannerAdapter: AgentAdapter = {
+      async *run(_input, runContext) {
+        yield {
+          type: "model_start",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "plan" }] },
+          startedAt: plannerStartedAt,
+        } satisfies AgentEvent;
+        const delegated = await runContext.executeTool("agent-helper", {
+          input: "research",
+        });
+        yield { type: "message_delta", content: `planner:${delegated}` };
+        yield {
+          type: "model_end",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          output: { text: `planner:${delegated}` },
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            totalTokens: 14,
+            costUsd: 0.04,
+            costAvailable: true,
+          },
+          streamDurationMs: 8,
+          endedAt: plannerStartedAt + 8,
+        } satisfies AgentEvent;
+      },
+    };
+    const planner = createAgent({
+      name: "planner",
+      instructions: "plan",
+      model: plannerAdapter,
+      agents: {
+        helper: createAgent({
+          name: "helper",
+          instructions: "research",
+          model: helperAdapter,
+          tools: { "helper.tool": helperTool },
+        }),
+      },
+    });
+
+    const observed = await captureAgentSpans(() =>
+      runAgent(planner, {
+        appName: "test-app",
+        messages: "plan",
+        requestId: "request-1",
+        sessionId: "session-1",
+        threadId: "planner-thread",
+        userId: "user-1",
+      }),
+    );
+
+    expect(observed.result.usage).toEqual({
+      inputTokens: 16,
+      outputTokens: 7,
+      totalTokens: 23,
+      costAvailable: false,
+    });
+    const agentSpans = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "AGENT",
+    );
+    const toolSpans = observed.spans.filter(
+      (span) => span.attributes["mlflow.spanType"] === "TOOL",
+    );
+    const plannerSpan = agentSpans.find(
+      (span) => span.attributes["appkit.agent.name"] === "planner",
+    );
+    const helperSpan = agentSpans.find(
+      (span) => span.attributes["appkit.agent.name"] === "helper",
+    );
+    const delegation = toolSpans.find(
+      (span) => span.attributes["appkit.tool.name"] === "agent-helper",
+    );
+    const helperToolSpan = toolSpans.find(
+      (span) => span.attributes["appkit.tool.name"] === "helper.tool",
+    );
+    const helperModel = observed.spans.find(
+      (span) => span.attributes["mlflow.chat.model"] === "helper.model",
+    );
+    expect(agentSpans).toHaveLength(2);
+    expect(plannerSpan).toBeDefined();
+    expect(delegation?.parentSpanContext?.spanId).toBe(
+      plannerSpan?.spanContext().spanId,
+    );
+    expect(helperSpan?.parentSpanContext?.spanId).toBe(
+      delegation?.spanContext().spanId,
+    );
+    expect(helperModel?.parentSpanContext?.spanId).toBe(
+      helperSpan?.spanContext().spanId,
+    );
+    expect(helperToolSpan?.parentSpanContext?.spanId).toBe(
+      helperSpan?.spanContext().spanId,
+    );
+    expect(helperSpan?.attributes).toMatchObject({
+      "appkit.agent.name": "helper",
+      "appkit.app.name": "test-app",
+      "appkit.request.id": "request-1",
+      "mlflow.trace.session": "session-1",
+      "mlflow.trace.user": "user-1",
+    });
+    expect(helperSpan?.attributes["appkit.thread.id"]).not.toBe(
+      "planner-thread",
+    );
+    expect(plannerSpan?.attributes["mlflow.trace.tokenUsage"]).toBe(
+      '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',
+    );
+    expect(plannerSpan?.attributes["appkit.cost.available"]).toBe(false);
+    expect(plannerSpan?.attributes["mlflow.llm.cost"]).toBeUndefined();
+  });
+
+  test("rolls failed unpriced child usage into the planner once and rethrows the original error", async () => {
+    const failure = new Error("helper failed after model usage");
+    const plannerStartedAt = Date.now();
+    const helperStartedAt = plannerStartedAt + 10;
+    const helperAdapter: AgentAdapter = {
+      async *run() {
+        yield {
+          type: "model_start",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "research" }] },
+          startedAt: helperStartedAt,
+        } satisfies AgentEvent;
+        yield {
+          type: "model_end",
+          stepId: "helper-step",
+          model: "helper.model",
+          provider: "databricks",
+          output: { text: "partial research" },
+          usage: {
+            inputTokens: 6,
+            outputTokens: 3,
+            totalTokens: 9,
+            costAvailable: false,
+          },
+          streamDurationMs: 5,
+          endedAt: helperStartedAt + 5,
+        } satisfies AgentEvent;
+        throw failure;
+      },
+    };
+    const plannerAdapter: AgentAdapter = {
+      async *run(_input, runContext) {
+        yield {
+          type: "model_start",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          input: { messages: [{ role: "user", content: "plan" }] },
+          startedAt: plannerStartedAt,
+        } satisfies AgentEvent;
+        yield {
+          type: "model_end",
+          stepId: "planner-step",
+          model: "planner.model",
+          provider: "databricks",
+          output: { text: "delegating" },
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            totalTokens: 14,
+            costUsd: 0.04,
+            costAvailable: true,
+          },
+          streamDurationMs: 8,
+          endedAt: plannerStartedAt + 8,
+        } satisfies AgentEvent;
+        await runContext.executeTool("agent-helper", { input: "research" });
+      },
+    };
+    const planner = createAgent({
+      name: "planner",
+      instructions: "plan",
+      model: plannerAdapter,
+      agents: {
+        helper: createAgent({
+          name: "helper",
+          instructions: "research",
+          model: helperAdapter,
+        }),
+      },
+    });
+
+    const observed = await captureFailedAgentSpans(() =>
+      runAgent(planner, { messages: "plan" }),
+    );
+
+    expect(observed.error).toBe(failure);
+    const plannerSpan = observed.spans.find(
+      (span) => span.attributes["appkit.agent.name"] === "planner",
+    );
+    expect(plannerSpan?.attributes["mlflow.trace.tokenUsage"]).toBe(
+      '{"input_tokens":16,"output_tokens":7,"total_tokens":23}',
+    );
+    expect(plannerSpan?.attributes["appkit.cost.available"]).toBe(false);
+    expect(plannerSpan?.attributes["mlflow.llm.cost"]).toBeUndefined();
   });
 
   test("function-form invoked exactly once per runAgent call", async () => {

@@ -18,8 +18,15 @@ the shape they need to satisfy.
 
 ```ts
 apiClient: {
+  config?: object;
   request: Promise<unknown>;
 };
+```
+
+#### config?
+
+```ts
+optional config: object;
 ```
 
 #### request()
@@ -64,3 +71,9 @@ ensureResolved(): Promise<void>;
 ##### Returns
 
 `Promise`\<`void`\>
+
+#### Overrides
+
+```ts
+ApiClientLike.config
+```

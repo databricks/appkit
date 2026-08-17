@@ -49,6 +49,10 @@ const sharedPostinstall = path.join(
   __dirname,
   "../packages/shared/scripts/postinstall.js",
 );
+const appkitMlflowProvisioner = path.join(
+  __dirname,
+  "../packages/appkit/scripts/provision-mlflow-uc.py",
+);
 
 // Add appkit bin and postinstall
 if (fs.existsSync(sharedBin)) {
@@ -138,6 +142,13 @@ if (fs.existsSync(sharedBin)) {
 if (fs.existsSync(sharedPostinstall)) {
   fs.mkdirSync("tmp/scripts", { recursive: true });
   fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
+}
+if (fs.existsSync(appkitMlflowProvisioner)) {
+  fs.mkdirSync("tmp/scripts", { recursive: true });
+  fs.copyFileSync(
+    appkitMlflowProvisioner,
+    "tmp/scripts/provision-mlflow-uc.py",
+  );
 }
 
 // Copy documentation from docs/build into tmp/docs/

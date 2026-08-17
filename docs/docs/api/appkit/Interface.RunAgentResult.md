@@ -19,3 +19,19 @@ text: string;
 ```
 
 Aggregated text output from all `message_delta` events.
+
+***
+
+### traceId
+
+```ts
+traceId: string;
+```
+
+***
+
+### usage
+
+```ts
+usage: AgentUsage;
+```

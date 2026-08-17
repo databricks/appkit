@@ -56,6 +56,7 @@
     "dist": "tsx ../../tools/dist-appkit.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "tarball:prerelease": "rm -rf tmp && SHORTSHA=$(git rev-parse --short HEAD) && pnpm dist --prerelease $SHORTSHA && npm pack ./tmp --pack-destination ./tmp",
+    "test:mlflow-uc-provision": "uv run --with 'mlflow[databricks]>=3.14.0,<4' pytest scripts/test_provision_mlflow_uc.py -v",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -63,6 +64,7 @@
     "@databricks/lakebase": "workspace:*",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/api-logs": "0.219.0",
+    "@opentelemetry/core": "2.8.0",
     "@opentelemetry/auto-instrumentations-node": "0.77.0",
     "@opentelemetry/exporter-logs-otlp-proto": "0.219.0",
     "@opentelemetry/exporter-metrics-otlp-proto": "0.219.0",
@@ -84,7 +86,6 @@
     "get-port": "7.2.0",
     "js-yaml": "4.2.0",
     "magic-string": "0.30.21",
-    "mlflow-tracing": "0.1.3",
     "obug": "2.1.1",
     "pg": "8.18.0",
     "picocolors": "1.1.1",

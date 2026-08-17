@@ -25,6 +25,8 @@ import { z } from 'zod';
  * Tools are intentionally dependency-free (no SQL warehouse, no
  * volumes, no external APIs) so the round-trip works on a bare
  * scaffold regardless of which other plugins were selected.
+ * With MLflow UC tracing enabled, a delegated tool request demonstrates
+ * the semantic AGENT → TOOL → AGENT → TOOL tree in one exported trace.
  */
 export const helper = createAgent({
   name: 'helper',

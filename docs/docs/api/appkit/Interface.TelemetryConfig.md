@@ -28,6 +28,16 @@ optional instrumentations: Instrumentation<InstrumentationConfig>[];
 
 ***
 
+### mlflowUc?
+
+```ts
+optional mlflowUc: boolean | Partial<MlflowUcConfig>;
+```
+
+Export agent traces to an MLflow experiment backed by Unity Catalog.
+
+***
+
 ### serviceName?
 
 ```ts

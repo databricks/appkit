@@ -8,7 +8,7 @@ function createApp<T>(config: {
   onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
   plugins?: T;
   telemetry?: TelemetryConfig;
-}): Promise<PluginMap<T>>;
+}): Promise<AppKitHandle<T>>;
 ```
 
 Bootstraps AppKit with the provided configuration.
@@ -41,7 +41,7 @@ with an `asUser(req)` method for user-scoped execution.
 
 ## Returns
 
-`Promise`\<`PluginMap`\<`T`\>\>
+`Promise`\<`AppKitHandle`\<`T`\>\>
 
 A `PluginMap` keyed by plugin name with typed exports
 
