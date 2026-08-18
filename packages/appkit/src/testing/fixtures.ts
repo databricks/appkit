@@ -6,6 +6,7 @@ import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
+import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
 // repo-wide (see .oxlintrc.json), so a local alias keeps the intent readable.
@@ -327,28 +328,6 @@ export interface TestContextOptions {
 }
 
 /**
- * Creates a default mock WorkspaceClient for testing (SQL succeeds, warehouse
- * RUNNING).
- */
-export function createMockWorkspaceClient() {
-  return {
-    statementExecution: {
-      executeStatement: vi.fn().mockResolvedValue({
-        status: { state: "SUCCEEDED" },
-        result: { data: [] },
-      }),
-    },
-    // Analytics route now calls `warehouses.get` before issuing SQL to
-    // ensure the warehouse is RUNNING. Default to RUNNING so existing
-    // tests that only care about SQL behaviour aren't affected.
-    warehouses: {
-      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
-      start: vi.fn().mockResolvedValue(undefined),
-    },
-  };
-}
-
-/**
  * Builds a {@link ServiceContextState} value for testing without touching the
  * singleton. Internal building block for {@link mockServiceContext}, which
  * installs the state as spies — that installer is the public entry point.
@@ -533,6 +512,16 @@ export function createFailedSQLResponse(errorMessage: string) {
  * A WorkspaceClient whose `executeStatement`/`getStatement` are bare `vi.fn()`s
  * (no default resolution) so a test can script exactly what SQL returns.
  * `warehouses.get` defaults to RUNNING.
+ *
+ * @deprecated Use `createMockWorkspaceClient({ defaults: false })` with
+ * `getMockFn(client, "statementExecution.executeStatement")` instead — it fakes
+ * the whole facade rather than two services, so a plugin that reaches any other
+ * service does not crash.
+ *
+ * Left byte-for-byte unchanged rather than reimplemented on the new builder,
+ * because the semantics differ in a way its one remaining caller can observe:
+ * these bare `vi.fn()`s return `undefined` **synchronously**, whereas the new
+ * floor returns `Promise<undefined>`.
  */
 export function createConfigurableMockWorkspaceClient() {
   const executeStatement = vi.fn();

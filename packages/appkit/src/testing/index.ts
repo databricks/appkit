@@ -57,7 +57,6 @@ export {
   createMockResponse,
   createMockRouter,
   createMockTelemetry,
-  createMockWorkspaceClient,
   createSuccessfulSQLResponse,
   mockServiceContext,
   type OboOption,
@@ -69,6 +68,7 @@ export {
   useServiceContextMock,
 } from "./fixtures";
 export {
+  createMockWorkspaceClient,
   type CreateMockWorkspaceClientOptions,
   getMockFn,
   type MockWorkspaceClient,

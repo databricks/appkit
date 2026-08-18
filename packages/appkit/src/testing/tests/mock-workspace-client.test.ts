@@ -2,6 +2,8 @@ import { inspect } from "node:util";
 
 import { describe, expect, test, vi } from "vitest";
 
+import { ServiceContext } from "../../context/service-context";
+import { mockServiceContext } from "../fixtures";
 import { createMockWorkspaceClient, getMockFn } from "../mock-workspace-client";
 
 describe("createMockWorkspaceClient", () => {
@@ -340,9 +342,8 @@ describe("createMockWorkspaceClient", () => {
 
   describe("integration with existing seam", () => {
     test("the new mock client has all 9 facade members and works with defaults", async () => {
-      // This test proves that the new implementation provides all 9 facade members
-      // with working defaults, which will preserve behavior for the 13 files that
-      // use mockServiceContext once U2 converges them.
+      // Never-crash is the headline claim, so all 9 are asserted explicitly
+      // rather than sampled.
       const client = createMockWorkspaceClient();
 
       // All 9 facade members should be present and callable.
@@ -508,5 +509,65 @@ describe("compile-time contract", () => {
     const getRun = getMockFn(client, "jobs.getRun");
     getRun.mockResolvedValue({ state: "TERMINATED" });
     expect(getRun.mock.calls).toEqual([]);
+  });
+});
+
+/**
+ * The convergence guard. `mockServiceContext` hands this client to 13 test
+ * files that never name it — they just call `mockServiceContext()` and let the
+ * default client through. These assertions are what prove pointing that default
+ * at the new builder is a fix rather than a break.
+ */
+describe("convergence with mockServiceContext (D4)", () => {
+  test("the historical canned defaults are unchanged", async () => {
+    const client = createMockWorkspaceClient();
+
+    // Byte-identical to the shape the old two-service fixture returned.
+    await expect(
+      client.statementExecution.executeStatement({} as never),
+    ).resolves.toEqual({
+      status: { state: "SUCCEEDED" },
+      result: { data: [] },
+    });
+    await expect(client.warehouses.get({} as never)).resolves.toEqual({
+      state: "RUNNING",
+    });
+    await expect(client.warehouses.start({} as never)).resolves.toBeUndefined();
+  });
+
+  test("the default client from mockServiceContext no longer crashes on jobs", async () => {
+    const mock = mockServiceContext();
+    try {
+      const client = mock.serviceContext.client;
+
+      // The whole point of U1+U2: before convergence this threw
+      // "Cannot read properties of undefined (reading 'getRun')", because the
+      // default client only had statementExecution and warehouses.
+      await expect(client.jobs.getRun({ run_id: 1 })).resolves.toBeUndefined();
+      await expect(
+        (
+          client.genie as never as Record<string, () => Promise<unknown>>
+        ).getMessage(),
+      ).resolves.toBeUndefined();
+
+      // ...while the SQL path 13 files depend on still succeeds.
+      await expect(
+        client.statementExecution.executeStatement({} as never),
+      ).resolves.toMatchObject({ status: { state: "SUCCEEDED" } });
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("the user-context client is faked too, not just the service one", async () => {
+    const mock = mockServiceContext();
+    try {
+      const userCtx = ServiceContext.createUserContext("tok", "u-1", "alice");
+      await expect(
+        userCtx.client.jobs.getRun({ run_id: 1 }),
+      ).resolves.toBeUndefined();
+    } finally {
+      mock.restore();
+    }
   });
 });

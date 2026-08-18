@@ -12,38 +12,47 @@ import {
 import { mapParams } from "../params";
 import { JobsPlugin, jobs } from "../plugin";
 
-const { mockClient, mockCacheInstance } = vi.hoisted(() => {
-  const mockJobsApi = {
-    runNow: vi.fn(),
-    submit: vi.fn(),
-    getRun: vi.fn(),
-    getRunOutput: vi.fn(),
-    cancelRun: vi.fn(),
-    listRuns: vi.fn(),
-    get: vi.fn(),
-  };
+const { mockClient, jobsApi, mockCacheInstance } = await vi.hoisted(
+  async () => {
+    // The testing kit's fake, not a hand-rolled literal: the seven jobs methods,
+    // `config.host` as a real string, and `config.authenticate` all come for free,
+    // and any *other* service this plugin grows into resolves instead of throwing.
+    // Imported inside the hoisted factory because the factory runs before the
+    // file's own imports are evaluated.
+    const { createMockWorkspaceClient, getMockFn } =
+      await import("../../../testing/mock-workspace-client");
 
-  const mockClient = {
-    jobs: mockJobsApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
+    const mockClient = createMockWorkspaceClient();
 
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(),
-  };
+    // Facade accessors are typed against the legacy SDK, so `.mockResolvedValue`
+    // on them would not typecheck. `getMockFn` is the typed handle; it mints
+    // idempotently, so these are the very functions the plugin will call.
+    const jobsApi = {
+      runNow: getMockFn(mockClient, "jobs.runNow"),
+      submit: getMockFn(mockClient, "jobs.submit"),
+      getRun: getMockFn(mockClient, "jobs.getRun"),
+      getRunOutput: getMockFn(mockClient, "jobs.getRunOutput"),
+      cancelRun: getMockFn(mockClient, "jobs.cancelRun"),
+      listRuns: getMockFn(mockClient, "jobs.listRuns"),
+      get: getMockFn(mockClient, "jobs.get"),
+    };
 
-  return { mockJobsApi, mockClient, mockCacheInstance };
-});
+    const mockCacheInstance = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      getOrExecute: vi.fn(
+        async (
+          _key: unknown[],
+          fn: (signal?: AbortSignal) => Promise<unknown>,
+        ) => fn(),
+      ),
+      generateKey: vi.fn(),
+    };
+
+    return { mockClient, jobsApi, mockCacheInstance };
+  },
+);
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =
@@ -290,7 +299,7 @@ describe("JobsPlugin", () => {
     test("runNow passes configured job_id to connector", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
@@ -298,7 +307,7 @@ describe("JobsPlugin", () => {
 
       await handle.runNow();
 
-      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+      expect(jobsApi.runNow).toHaveBeenCalledWith(
         expect.objectContaining({ job_id: 123 }),
         expect.anything(),
       );
@@ -307,7 +316,7 @@ describe("JobsPlugin", () => {
     test("runNow merges user params with configured job_id (no taskType)", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
@@ -317,7 +326,7 @@ describe("JobsPlugin", () => {
         notebook_params: { key: "value" },
       });
 
-      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+      expect(jobsApi.runNow).toHaveBeenCalledWith(
         expect.objectContaining({
           job_id: 123,
           notebook_params: { key: "value" },
@@ -349,7 +358,7 @@ describe("JobsPlugin", () => {
     test("runNow maps validated params to SDK fields when taskType is set", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({
         jobs: {
@@ -363,7 +372,7 @@ describe("JobsPlugin", () => {
 
       await handle.runNow({ key: "value" });
 
-      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+      expect(jobsApi.runNow).toHaveBeenCalledWith(
         expect.objectContaining({
           job_id: 123,
           notebook_params: { key: "value" },
@@ -375,7 +384,7 @@ describe("JobsPlugin", () => {
     test("runNow skips validation when no schema is configured", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -388,7 +397,7 @@ describe("JobsPlugin", () => {
     test("getRun wraps call in execute", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({
+      jobsApi.getRun.mockResolvedValue({
         run_id: 1,
         state: { life_cycle_state: "TERMINATED" },
       });
@@ -415,7 +424,7 @@ describe("JobsPlugin", () => {
     test("getJob wraps call in execute", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.get.mockResolvedValue({ job_id: 123 });
+      jobsApi.get.mockResolvedValue({ job_id: 123 });
 
       const plugin = new JobsPlugin({});
       const executeSpy = vi.spyOn(plugin as any, "execute");
@@ -439,7 +448,7 @@ describe("JobsPlugin", () => {
     test("listRuns clamps caller-supplied limit before calling the SDK", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+      jobsApi.listRuns.mockReturnValue((async function* () {})());
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -447,7 +456,7 @@ describe("JobsPlugin", () => {
       await handle.listRuns({ limit: 10000 });
 
       // SDK should receive the clamped limit, not the caller-supplied 10000.
-      expect(mockClient.jobs.listRuns).toHaveBeenCalledWith(
+      expect(jobsApi.listRuns).toHaveBeenCalledWith(
         expect.objectContaining({ limit: 100 }),
         expect.anything(),
       );
@@ -457,8 +466,8 @@ describe("JobsPlugin", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       // Pre-flight getRun verifies the run belongs to the configured jobId.
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 1, job_id: 123 });
-      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+      jobsApi.getRun.mockResolvedValue({ run_id: 1, job_id: 123 });
+      jobsApi.cancelRun.mockResolvedValue(undefined);
 
       const plugin = new JobsPlugin({});
       const executeSpy = vi.spyOn(plugin as any, "execute");
@@ -478,8 +487,8 @@ describe("JobsPlugin", () => {
     test("runAndWait yields status updates and terminates on TERMINATED", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
-      mockClient.jobs.getRun
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.getRun
         .mockResolvedValueOnce({
           run_id: 42,
           state: { life_cycle_state: "RUNNING" },
@@ -505,7 +514,7 @@ describe("JobsPlugin", () => {
     test("runAndWait throws when runNow returns no run_id", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({});
+      jobsApi.runNow.mockResolvedValue({});
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -521,7 +530,7 @@ describe("JobsPlugin", () => {
     test("runNow returns error result on execute failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockRejectedValue(new Error("API timeout"));
+      jobsApi.runNow.mockRejectedValue(new Error("API timeout"));
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -538,9 +547,7 @@ describe("JobsPlugin", () => {
     test("cancelRun returns error result on execute failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.cancelRun.mockRejectedValue(
-        new Error("Permission denied"),
-      );
+      jobsApi.cancelRun.mockRejectedValue(new Error("Permission denied"));
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -556,9 +563,7 @@ describe("JobsPlugin", () => {
     test("getRun returns error result on execute failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockRejectedValue(
-        new Error("Internal server error"),
-      );
+      jobsApi.getRun.mockRejectedValue(new Error("Internal server error"));
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -574,7 +579,7 @@ describe("JobsPlugin", () => {
     test("listRuns returns error result on execute failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.listRuns.mockImplementation(() => {
+      jobsApi.listRuns.mockImplementation(() => {
         throw new Error("Auth failure");
       });
 
@@ -594,7 +599,7 @@ describe("JobsPlugin", () => {
 
       const error = new Error("Detailed internal failure: db connection reset");
       (error as any).statusCode = 403;
-      mockClient.jobs.getRun.mockRejectedValue(error);
+      jobsApi.getRun.mockRejectedValue(error);
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -611,7 +616,7 @@ describe("JobsPlugin", () => {
     test("successful operations return ok result with data", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -628,7 +633,7 @@ describe("JobsPlugin", () => {
     test("getRun returns 404 when run.job_id does not match configured jobId", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
+      jobsApi.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -641,8 +646,8 @@ describe("JobsPlugin", () => {
     test("getRunOutput returns 404 when run belongs to another job", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
-      mockClient.jobs.getRunOutput.mockResolvedValue({ logs: "nope" });
+      jobsApi.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
+      jobsApi.getRunOutput.mockResolvedValue({ logs: "nope" });
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -651,14 +656,14 @@ describe("JobsPlugin", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.status).toBe(404);
       // Should never have called getRunOutput on the upstream SDK
-      expect(mockClient.jobs.getRunOutput).not.toHaveBeenCalled();
+      expect(jobsApi.getRunOutput).not.toHaveBeenCalled();
     });
 
     test("cancelRun returns 404 when run belongs to another job", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
-      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+      jobsApi.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
+      jobsApi.cancelRun.mockResolvedValue(undefined);
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -666,13 +671,13 @@ describe("JobsPlugin", () => {
       const result = await handle.cancelRun(99);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.status).toBe(404);
-      expect(mockClient.jobs.cancelRun).not.toHaveBeenCalled();
+      expect(jobsApi.cancelRun).not.toHaveBeenCalled();
     });
 
     test("getRun succeeds when run.job_id matches configured jobId", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({
+      jobsApi.getRun.mockResolvedValue({
         run_id: 42,
         job_id: 123,
         state: { life_cycle_state: "TERMINATED" },
@@ -696,7 +701,7 @@ describe("JobsPlugin", () => {
       const { JobsConnector } = await import("../../../connectors/jobs");
       const connector = new JobsConnector({});
 
-      mockClient.jobs.get.mockResolvedValue({ job_id: 123 });
+      jobsApi.get.mockResolvedValue({ job_id: 123 });
 
       const controller = new AbortController();
       await connector.getJob(
@@ -718,8 +723,8 @@ describe("JobsPlugin", () => {
     test("runAndWait stops polling when signal is aborted", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
-      mockClient.jobs.getRun.mockResolvedValue({
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.getRun.mockResolvedValue({
         run_id: 42,
         state: { life_cycle_state: "RUNNING" },
       });
@@ -829,21 +834,21 @@ describe("JobsPlugin", () => {
       process.env.DATABRICKS_JOB_ETL = "100";
       process.env.DATABRICKS_JOB_ML = "200";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 1 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 1 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
 
       await exported("etl").runNow();
-      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+      expect(jobsApi.runNow).toHaveBeenCalledWith(
         expect.objectContaining({ job_id: 100 }),
         expect.anything(),
       );
 
-      mockClient.jobs.runNow.mockClear();
+      jobsApi.runNow.mockClear();
 
       await exported("ml").runNow();
-      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+      expect(jobsApi.runNow).toHaveBeenCalledWith(
         expect.objectContaining({ job_id: 200 }),
         expect.anything(),
       );
@@ -1081,7 +1086,7 @@ describe("injectRoutes", () => {
     test("returns runId on successful non-streaming run", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1203,7 +1208,7 @@ describe("injectRoutes", () => {
         { run_id: 1, state: { life_cycle_state: "TERMINATED" } },
         { run_id: 2, state: { life_cycle_state: "RUNNING" } },
       ];
-      mockClient.jobs.listRuns.mockReturnValue(
+      jobsApi.listRuns.mockReturnValue(
         (async function* () {
           for (const run of mockRuns) yield run;
         })(),
@@ -1241,7 +1246,7 @@ describe("injectRoutes", () => {
     test("passes limit query param to listRuns", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+      jobsApi.listRuns.mockReturnValue((async function* () {})());
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1268,7 +1273,7 @@ describe("injectRoutes", () => {
       await handler(mockReq, mockRes);
 
       // Verify the connector was called with limit 5
-      expect(mockClient.jobs.listRuns).toHaveBeenCalledWith(
+      expect(jobsApi.listRuns).toHaveBeenCalledWith(
         expect.objectContaining({ limit: 5 }),
         expect.anything(),
       );
@@ -1284,7 +1289,7 @@ describe("injectRoutes", () => {
         job_id: 123,
         state: { life_cycle_state: "TERMINATED" },
       };
-      mockClient.jobs.getRun.mockResolvedValue(mockRun);
+      jobsApi.getRun.mockResolvedValue(mockRun);
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1351,7 +1356,7 @@ describe("injectRoutes", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       // Run exists upstream but is owned by job 456, not the configured 123.
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
+      jobsApi.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1393,7 +1398,7 @@ describe("injectRoutes", () => {
         run_id: 42,
         state: { life_cycle_state: "TERMINATED" },
       };
-      mockClient.jobs.listRuns.mockReturnValue(
+      jobsApi.listRuns.mockReturnValue(
         (async function* () {
           yield mockRun;
         })(),
@@ -1432,7 +1437,7 @@ describe("injectRoutes", () => {
     test("returns null status when no runs exist", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+      jobsApi.listRuns.mockReturnValue((async function* () {})());
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1469,8 +1474,8 @@ describe("injectRoutes", () => {
     test("cancels run and returns 204", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 42, job_id: 123 });
-      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+      jobsApi.getRun.mockResolvedValue({ run_id: 42, job_id: 123 });
+      jobsApi.cancelRun.mockResolvedValue(undefined);
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1540,8 +1545,8 @@ describe("injectRoutes", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       // Pre-flight getRun reports a run owned by a different job.
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
-      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+      jobsApi.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
+      jobsApi.cancelRun.mockResolvedValue(undefined);
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1570,7 +1575,7 @@ describe("injectRoutes", () => {
 
       expect(mockRes.status).toHaveBeenCalledWith(404);
       // Must not fall through to the cancel call or the 204.
-      expect(mockClient.jobs.cancelRun).not.toHaveBeenCalled();
+      expect(jobsApi.cancelRun).not.toHaveBeenCalled();
       expect(mockRes.end).not.toHaveBeenCalled();
     });
 
@@ -1722,7 +1727,7 @@ describe("injectRoutes", () => {
     test("allows exactly MAX_UNVALIDATED_PARAM_KEYS (50) keys without schema", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({
         jobs: { etl: { taskType: "notebook" } },
@@ -1760,13 +1765,13 @@ describe("injectRoutes", () => {
 
       // 50 keys is under the cap — request proceeds to the SDK.
       expect(mockRes.json).toHaveBeenCalledWith({ runId: 42 });
-      expect(mockClient.jobs.runNow).toHaveBeenCalled();
+      expect(jobsApi.runNow).toHaveBeenCalled();
     });
 
     test("allows undefined params", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      jobsApi.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1807,7 +1812,7 @@ describe("injectRoutes", () => {
 
       const error = new Error("Sensitive internal detail: token expired");
       (error as any).statusCode = 403;
-      mockClient.jobs.runNow.mockRejectedValue(error);
+      jobsApi.runNow.mockRejectedValue(error);
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1849,7 +1854,7 @@ describe("injectRoutes", () => {
 
       const error = new Error("Unauthorized");
       (error as any).statusCode = 401;
-      mockClient.jobs.listRuns.mockImplementation(() => {
+      jobsApi.listRuns.mockImplementation(() => {
         throw error;
       });
 
@@ -1884,10 +1889,10 @@ describe("injectRoutes", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       // Pre-flight succeeds so we reach the actual cancel call.
-      mockClient.jobs.getRun.mockResolvedValue({ run_id: 42, job_id: 123 });
+      jobsApi.getRun.mockResolvedValue({ run_id: 42, job_id: 123 });
       const error = new Error("Forbidden");
       (error as any).statusCode = 403;
-      mockClient.jobs.cancelRun.mockRejectedValue(error);
+      jobsApi.cancelRun.mockRejectedValue(error);
 
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
