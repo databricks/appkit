@@ -80,7 +80,11 @@ const DEFAULT_RESPONSES: Record<string, Any> = {
   },
 };
 
-/** The 9 typed facade members, for routing the legacy view back onto them. */
+/**
+ * The seven services that get a generic never-crash Proxy. `config` and
+ * `apiClient` are the other two facade members and are handled separately as
+ * seeded objects, because some of their members must not be mocks.
+ */
 const FACADE_SERVICES = [
   "files",
   "warehouses",
@@ -140,6 +144,13 @@ function neverCrashGet(namespace: string, mint: (path: string) => Mock) {
     return mint(`${namespace}.${String(prop)}`);
   };
 }
+
+/**
+ * Path map per client, kept in a `WeakMap` rather than on the client itself so
+ * the fake stays structurally identical to the real facade — a stray own
+ * property would show up in `util.inspect`, `toEqual`, and key enumeration.
+ */
+const clientFns = new WeakMap<WorkspaceClient, Map<string, Mock>>();
 
 /**
  * Creates a fake `WorkspaceClient` that survives any facade access.
@@ -307,13 +318,6 @@ export function createMockWorkspaceClient(
   clientFns.set(client, fns);
   return client;
 }
-
-/**
- * Path map per client, kept in a `WeakMap` rather than on the client itself so
- * the fake stays structurally identical to the real facade — a stray own
- * property would show up in `util.inspect`, `toEqual`, and key enumeration.
- */
-const clientFns = new WeakMap<WorkspaceClient, Map<string, Mock>>();
 
 /**
  * The typed assertion path onto a mocked method.

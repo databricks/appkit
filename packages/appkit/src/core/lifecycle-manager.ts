@@ -234,6 +234,30 @@ export class LifecycleManager {
   private async runPhases(): Promise<number> {
     logger.info("Starting graceful shutdown...");
 
+    // Captured up front, before any `await`, and deliberately not re-read later.
+    //
+    // `close()` stops waiting once its budget is spent, and then resets the core
+    // singletons — but these phases keep running. Re-reading the static slots in
+    // phase 5 would therefore either find them empty (and silently skip draining
+    // this app's cache pool) or find the *next* app's singletons and tear those
+    // down instead. A plugin `shutdown()` hook taking longer than close()'s
+    // budget but under its own per-plugin budget is enough to reach that state,
+    // which the files plugin's 10s drain can do.
+    let capturedCache: CacheManager | undefined;
+    try {
+      capturedCache = CacheManager.getInstanceSync();
+    } catch {
+      // Never initialized — nothing to close in phase 5.
+    }
+    let capturedTelemetry: TelemetryManager | undefined;
+    try {
+      capturedTelemetry = TelemetryManager.getInstance();
+    } catch {
+      // Unavailable (or mocked away in a test) — nothing to flush in phase 5.
+      // Reading it here rather than inside the phase means a resolution failure
+      // would otherwise escape the phase's own error isolation.
+    }
+
     let exitCode = 0;
 
     try {
@@ -293,7 +317,10 @@ export class LifecycleManager {
       //    cache), so they run concurrently — each bounded so a stuck pool
       //    drain or stalled OTLP export cannot eat the remaining budget.
       this.shutdownPhase = "cache storage close + telemetry flush";
-      await Promise.all([this.closeCacheStorage(), this.flushTelemetry()]);
+      await Promise.all([
+        this.closeCacheStorage(capturedCache),
+        this.flushTelemetry(capturedTelemetry),
+      ]);
 
       logger.info("Graceful shutdown complete");
     } catch (err) {
@@ -306,12 +333,17 @@ export class LifecycleManager {
     return exitCode;
   }
 
-  /** Close the cache storage, bounded and error-isolated. */
-  private async closeCacheStorage(): Promise<void> {
-    let cache: CacheManager;
-    try {
-      cache = CacheManager.getInstanceSync();
-    } catch {
+  /**
+   * Close the cache storage, bounded and error-isolated.
+   *
+   * Takes the manager as an argument rather than reading the singleton, because
+   * this phase can run *after* `close()` has already given up waiting and reset
+   * the static slots — see the capture in {@link runPhases}.
+   */
+  private async closeCacheStorage(
+    cache: CacheManager | undefined,
+  ): Promise<void> {
+    if (!cache) {
       // Cache was never initialized — nothing to close.
       return;
     }
@@ -326,11 +358,19 @@ export class LifecycleManager {
     }
   }
 
-  /** Flush and shut down the telemetry SDK, bounded and error-isolated. */
-  private async flushTelemetry(): Promise<void> {
+  /**
+   * Flush and shut down the telemetry SDK, bounded and error-isolated.
+   *
+   * Takes the manager as an argument for the same reason as
+   * {@link closeCacheStorage} — see the capture in {@link runPhases}.
+   */
+  private async flushTelemetry(
+    telemetry: TelemetryManager | undefined,
+  ): Promise<void> {
+    if (!telemetry) return;
     try {
       await this.raceWithTimeout(
-        TelemetryManager.getInstance().shutdown(),
+        telemetry.shutdown(),
         LifecycleManager.PHASE_SHUTDOWN_TIMEOUT_MS,
         "telemetry flush",
       );

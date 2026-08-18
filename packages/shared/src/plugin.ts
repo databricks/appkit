@@ -279,7 +279,11 @@ export type PluginMap<
 export type AppHandle<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],
 > = PluginMap<U> & {
-  close(): Promise<void>;
+  /**
+   * @param options.timeoutMs - Overall teardown budget. Defaults to AppKit's
+   *   programmatic budget, which is shorter than the signal path's.
+   */
+  close(options?: { timeoutMs?: number }): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 };
 

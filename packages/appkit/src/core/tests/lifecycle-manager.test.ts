@@ -480,10 +480,17 @@ describe("LifecycleManager", () => {
 
     test("close() after a signal-initiated teardown awaits the in-flight one", async () => {
       let releaseShutdown: (() => void) | undefined;
+      // Sentinel rather than a tick count: `close()` reaches the memo through
+      // raceWithTimeout, so "how many microtasks until it would have settled" is
+      // not a property the test can rely on.
+      let teardownFinished = false;
       const shutdown = vi.fn(
         () =>
           new Promise<void>((resolve) => {
-            releaseShutdown = resolve;
+            releaseShutdown = () => {
+              teardownFinished = true;
+              resolve();
+            };
           }),
       );
       const ctx = contextWithPlugins({
@@ -494,18 +501,21 @@ describe("LifecycleManager", () => {
       const signalPath = manager.shutdown();
       await Promise.resolve();
 
-      let closeSettled = false;
+      let closeSawFinishedTeardown: boolean | undefined;
       const closePath = manager.close().then(() => {
-        closeSettled = true;
+        closeSawFinishedTeardown = teardownFinished;
       });
-      await Promise.resolve();
-      expect(closeSettled).toBe(false);
+
+      // A full macrotask turn, so a close() that resolved early would have.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(closeSawFinishedTeardown).toBeUndefined();
 
       releaseShutdown?.();
       await Promise.all([signalPath, closePath]);
 
       expect(shutdown).toHaveBeenCalledTimes(1);
-      expect(closeSettled).toBe(true);
+      // It joined the in-flight teardown rather than resolving alongside it.
+      expect(closeSawFinishedTeardown).toBe(true);
       // The signal wanted the process dead, and still gets it.
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -597,6 +607,62 @@ describe("LifecycleManager", () => {
     test("removeSignalHandlers is safe when none were installed", () => {
       const manager = new LifecycleManager(contextWithPlugins({}));
       expect(() => manager.removeSignalHandlers()).not.toThrow();
+    });
+  });
+  describe("a teardown that outlives close()'s budget", () => {
+    test("phase 5 still closes the app's own cache and telemetry, not the next app's", async () => {
+      vi.useFakeTimers();
+
+      // The app being torn down owns these.
+      const ownCacheClose = vi.fn().mockResolvedValue(undefined);
+      const ownTelemetryShutdown = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
+        close: ownCacheClose,
+      } as never);
+      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
+        shutdown: ownTelemetryShutdown,
+      } as never);
+
+      // A plugin hook slower than close()'s budget but inside its own per-plugin
+      // budget — the files plugin's 10s drain reaches exactly this state.
+      let releaseHook: (() => void) | undefined;
+      const ctx = contextWithPlugins({
+        slow: {
+          name: "slow",
+          shutdown: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                releaseHook = resolve;
+              }),
+          ),
+        } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const closing = manager.close({ timeoutMs: 50 });
+      await vi.advanceTimersByTimeAsync(60);
+      await expect(closing).resolves.toBeUndefined();
+
+      // close() has given up waiting and already dropped the singletons, so the
+      // static slots now answer with a *different* app's resources.
+      const nextCacheClose = vi.fn().mockResolvedValue(undefined);
+      const nextTelemetryShutdown = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
+        close: nextCacheClose,
+      } as never);
+      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
+        shutdown: nextTelemetryShutdown,
+      } as never);
+
+      // Now let the orphaned teardown finish and reach phase 5.
+      releaseHook?.();
+      await vi.advanceTimersByTimeAsync(10);
+
+      // It must act on what it captured at the start, never on the current slots.
+      expect(ownCacheClose).toHaveBeenCalledTimes(1);
+      expect(ownTelemetryShutdown).toHaveBeenCalledTimes(1);
+      expect(nextCacheClose).not.toHaveBeenCalled();
+      expect(nextTelemetryShutdown).not.toHaveBeenCalled();
     });
   });
 });

@@ -312,6 +312,8 @@ An undeclared method resolves `undefined` instead of throwing. That's the point 
 
 TypeScript covers more of this than you might expect: because each accessor is typed against the SDK's own service class, both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
 
+One more divergence to know about: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than it does in production. This is a deliberate trade: reporting those keys would make `util.inspect` probe each one, minting a mock per probe, which is the runaway recursion the default traps avoid.
+
 Separately, `createLakebasePool({ workspaceClient })` will build a pool whose password callback resolves to a mock: the pool exists but cannot connect. A Lakebase test needs a real database or a purpose-built fake pool, not this.
 :::
 

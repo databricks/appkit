@@ -1,10 +1,9 @@
-import type { Server } from "node:http";
-
 import {
+  getListeningPort,
   mockServiceContext,
   setupDatabricksEnv,
 } from "@databricks/appkit/testing";
-import type { PluginManifest } from "shared";
+import type { AppHandle, PluginManifest, PluginMap } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { CacheManager } from "../../cache";
@@ -58,24 +57,6 @@ class ClosePlugin extends Plugin {
 }
 const closeNamed = toPlugin(ClosePlugin);
 
-/**
- * `server.start()` returns as soon as `listen()` is invoked, before the bind
- * completes, so `address()` is null until the `listening` event fires.
- */
-async function listeningPort(server: Server): Promise<number> {
-  const addr = server.address();
-  if (addr && typeof addr === "object") return addr.port;
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", () => resolve());
-    server.once("error", reject);
-  });
-  const ready = server.address();
-  if (!ready || typeof ready !== "object") {
-    throw new Error("listening but address() was null");
-  }
-  return ready.port;
-}
-
 describe("app handle close()", () => {
   let serviceContextMock: ReturnType<typeof mockServiceContext>;
 
@@ -99,7 +80,7 @@ describe("app handle close()", () => {
     // AppKit installed its handlers, so the count went up.
     expect(process.listenerCount("SIGTERM")).toBe(termBaseline + 1);
 
-    const port = await listeningPort(app.server.getServer());
+    const port = await getListeningPort(app.server.getServer());
     const baseUrl = `http://127.0.0.1:${port}`;
     await expect(
       fetch(`${baseUrl}/health`).then((r) => r.status),
@@ -120,7 +101,7 @@ describe("app handle close()", () => {
     const app = await createApp({
       plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
     });
-    await listeningPort(app.server.getServer());
+    await getListeningPort(app.server.getServer());
 
     await app.close();
     await expect(app.close()).resolves.toBeUndefined();
@@ -133,7 +114,7 @@ describe("app handle close()", () => {
     const app = await createApp({
       plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
     });
-    await listeningPort(app.server.getServer());
+    await getListeningPort(app.server.getServer());
 
     try {
       // Adding `close` to the handle must not shadow or be shadowed by the
@@ -164,7 +145,7 @@ describe("app handle close()", () => {
       await using app = await createApp({
         plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
       });
-      captured = await listeningPort(app.server.getServer());
+      captured = await getListeningPort(app.server.getServer());
       probeHandle = app.probe;
       await expect(
         fetch(`http://127.0.0.1:${captured}/health`).then((r) => r.status),
@@ -202,7 +183,7 @@ describe("app handle close()", () => {
     const first = await createApp({
       plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
     });
-    const firstPort = await listeningPort(first.server.getServer());
+    const firstPort = await getListeningPort(first.server.getServer());
     await expect(
       fetch(`http://127.0.0.1:${firstPort}/health`).then((r) => r.status),
     ).resolves.toBe(200);
@@ -216,7 +197,7 @@ describe("app handle close()", () => {
     const second = await createApp({
       plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
     });
-    const secondPort = await listeningPort(second.server.getServer());
+    const secondPort = await getListeningPort(second.server.getServer());
 
     expect(secondPort).not.toBe(firstPort);
     await expect(
@@ -236,5 +217,33 @@ describe("app handle close()", () => {
     ).rejects.toThrow();
     // Two boots and two closes leave no listener residue.
     expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
+  });
+  /**
+   * Compile-time contract for the return-type widening, enforced by `tsc --noEmit`
+   * rather than at runtime.
+   *
+   * `createApp` used to return `PluginMap<T>` and now returns
+   * `AppHandle<T>` (= `PluginMap<T>` plus `close()` and `Symbol.asyncDispose`).
+   * That is only source-compatible if `AppHandle` really is assignable to
+   * `PluginMap` — so an existing caller who annotated the old type still compiles.
+   * A regression in that type algebra would break every such caller without
+   * failing a single runtime assertion, which is why this lives here.
+   */
+  describe("createApp return-type widening is source-compatible", () => {
+    test("an AppHandle still satisfies a PluginMap annotation", async () => {
+      const app = await createApp({ plugins: [probe()] });
+      try {
+        // The pre-widening annotation, unchanged.
+        const asPluginMap: PluginMap<[ReturnType<typeof probe>]> = app;
+        expect(typeof asPluginMap.probe.shutdownCalls).toBe("function");
+
+        // And the added members are visible on the widened type.
+        const asHandle: AppHandle<[ReturnType<typeof probe>]> = app;
+        expect(typeof asHandle.close).toBe("function");
+        expect(typeof asHandle[Symbol.asyncDispose]).toBe("function");
+      } finally {
+        await app.close();
+      }
+    });
   });
 });

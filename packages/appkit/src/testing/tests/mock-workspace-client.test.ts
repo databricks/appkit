@@ -266,13 +266,18 @@ describe("createMockWorkspaceClient", () => {
     test("client.config.authenticate(new Headers()) sets an Authorization header", async () => {
       const client = createMockWorkspaceClient();
       const headers = new Headers();
-      const mockFn = client.config.authenticate;
-      if (mockFn) {
-        // The mock is a vi.fn(), so we can verify it was called.
-        // In a real implementation, authenticate would set the header.
-        await mockFn(headers);
-        expect(mockFn).toHaveBeenCalledWith(headers);
-      }
+
+      // Unconditional: `authenticate` is always seeded, so a guard here would
+      // let the whole assertion be skipped if it ever stopped being.
+      await client.config.authenticate(headers);
+
+      // The side effect is the point — asserting only "was called" would pass
+      // against a bare vi.fn() that does nothing, which is what the header-
+      // stamping paths in AppKit actually depend on.
+      expect(headers.get("Authorization")).toBe("Bearer test-token");
+      expect(getMockFn(client, "config.authenticate")).toHaveBeenCalledWith(
+        headers,
+      );
     });
 
     test("client.config.ensureResolved() resolves", async () => {

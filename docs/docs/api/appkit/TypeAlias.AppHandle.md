@@ -33,8 +33,17 @@ asyncDispose: Promise<void>;
 ### close()
 
 ```ts
-close(): Promise<void>;
+close(options?: {
+  timeoutMs?: number;
+}): Promise<void>;
 ```
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `options?` | \{ `timeoutMs?`: `number`; \} | - |
+| `options.timeoutMs?` | `number` | Overall teardown budget. Defaults to AppKit's programmatic budget, which is shorter than the signal path's. |
 
 #### Returns
 

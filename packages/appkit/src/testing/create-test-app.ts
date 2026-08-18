@@ -27,6 +27,39 @@ import { resetAppKitSingletons } from "./reset";
 // repo-wide (see .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
+/**
+ * One authoritative `process.env` baseline shared by every live harness app,
+ * with a reference count.
+ *
+ * `process.env` is global, so a per-app snapshot does not compose: with two apps
+ * booted concurrently, the second captures the first's mutations, and whichever
+ * closes last re-applies them — leaving harness keys (and the first app's `env`
+ * entries) set after both apps are gone. Anchoring on the *first* boot and
+ * restoring only when the *last* app closes makes the outcome independent of
+ * close order, which is the only sane semantics for a shared global.
+ */
+let envBaseline: NodeJS.ProcessEnv | undefined;
+let liveHarnessApps = 0;
+
+/** Take the baseline on the first live app; count this app in. */
+function acquireEnvBaseline(): void {
+  if (liveHarnessApps === 0) envBaseline = { ...process.env };
+  liveHarnessApps += 1;
+}
+
+/** Count this app out, and restore the baseline once none are left. */
+function releaseEnvBaseline(): void {
+  liveHarnessApps = Math.max(0, liveHarnessApps - 1);
+  if (liveHarnessApps > 0 || !envBaseline) return;
+
+  const baseline = envBaseline;
+  envBaseline = undefined;
+  for (const key of Object.keys(process.env)) {
+    if (!(key in baseline)) delete process.env[key];
+  }
+  Object.assign(process.env, baseline);
+}
+
 /** Plugin descriptors, exactly as `createApp` takes them. */
 type Plugins = PluginData<PluginConstructor, unknown, string>[];
 
@@ -200,17 +233,12 @@ export async function createTestApp<T extends Plugins>(
     );
   }
 
-  // 1. Snapshot wholesale. Restoring a whitelist is fragile — plugins read env
-  //    vars the harness cannot enumerate.
-  const envSnapshot = { ...process.env };
-
-  /** Put `process.env` back exactly as it was, including keys we added. */
-  const restoreEnv = () => {
-    for (const key of Object.keys(process.env)) {
-      if (!(key in envSnapshot)) delete process.env[key];
-    }
-    Object.assign(process.env, envSnapshot);
-  };
+  // 1. Join the shared env baseline. Snapshotting wholesale (rather than a
+  //    whitelist) is still right — plugins read vars the harness cannot
+  //    enumerate — but the baseline and the restore are process-wide, not
+  //    per-app, so overlapping boots compose.
+  acquireEnvBaseline();
+  const restoreEnv = releaseEnvBaseline;
 
   let app: Awaited<ReturnType<typeof createApp>> | undefined;
 
@@ -251,6 +279,16 @@ export async function createTestApp<T extends Plugins>(
     //    the server plugin runs dotenv.config() at module load — a static
     //    import would mutate a consumer's env merely by importing this kit.
     const hasServer = plugins.some((p) => p?.name === "server");
+    if (serverOption === false && hasServer) {
+      // Refused rather than half-honoured: the supplied plugin would still bind
+      // a socket, while the handle reported no server and threw from `baseUrl`
+      // and `port`. Two contradictory instructions, so neither is guessed.
+      throw new Error(
+        "createTestApp: `server: false` conflicts with the server plugin in " +
+          "`plugins`. Drop one — omit `server: false` to use your plugin, or " +
+          "remove the plugin to boot without a socket.",
+      );
+    }
     const bootPlugins = [...plugins] as Plugins;
     if (serverOption !== false && !hasServer) {
       const { server: serverPlugin } = await import("../plugins/server");
@@ -284,7 +322,7 @@ export async function createTestApp<T extends Plugins>(
     const close = () => {
       closed ??= (async () => {
         try {
-          await (bootedApp as Any).close(
+          await bootedApp.close(
             closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
           );
         } finally {

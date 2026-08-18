@@ -245,6 +245,16 @@ describe("createTestApp", () => {
     }
   });
 
+  test("server: false together with a server plugin is refused", async () => {
+    const { server: serverPlugin } = await import("../../plugins/server");
+    await expect(
+      createTestApp({
+        plugins: [echo(), serverPlugin({ port: 0, host: "127.0.0.1" })],
+        server: false,
+      }),
+    ).rejects.toThrow(/conflicts with the server plugin/);
+  });
+
   test("server: false boots without a socket and request methods explain why", async () => {
     const app = await createTestApp({ plugins: [echo()], server: false });
     try {
@@ -386,6 +396,47 @@ describe("createTestApp", () => {
       } finally {
         await second.close();
       }
+    });
+
+    test("overlapping boots restore env regardless of close order", async () => {
+      const before = { ...process.env };
+
+      // The second boot's view of "original" already contains the first boot's
+      // mutations. A per-app snapshot would let whichever closes last re-apply
+      // them, stranding harness keys and `A_ONLY` after both apps are gone.
+      const a = await createTestApp({
+        plugins: [echo()],
+        env: { OVERLAP_A: "a" },
+      });
+      const b = await createTestApp({
+        plugins: [echo()],
+        env: { OVERLAP_B: "b" },
+      });
+
+      await a.close();
+      await b.close();
+
+      const leaked = Object.keys(process.env).filter((k) => !(k in before));
+      expect(leaked).toEqual([]);
+      expect(process.env.OVERLAP_A).toBeUndefined();
+      expect(process.env.OVERLAP_B).toBeUndefined();
+      expect(Object.keys(process.env).sort()).toEqual(
+        Object.keys(before).sort(),
+      );
+    });
+
+    test("closing in reverse order also restores env", async () => {
+      const before = { ...process.env };
+      const a = await createTestApp({ plugins: [echo()], env: { REV_A: "a" } });
+      const b = await createTestApp({ plugins: [echo()], env: { REV_B: "b" } });
+
+      // Reverse of boot order — the outcome must not depend on it.
+      await b.close();
+      await a.close();
+
+      expect(Object.keys(process.env).filter((k) => !(k in before))).toEqual(
+        [],
+      );
     });
 
     test("close() is idempotent", async () => {

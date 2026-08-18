@@ -23,7 +23,7 @@ import { analytics } from "../index";
 const getAppQuerySpy = vi.spyOn(AppManager.prototype, "getAppQuery");
 
 describe("Analytics Plugin Integration", () => {
-  let app: TestApp<never>;
+  let app: TestApp<[ReturnType<typeof analytics>]>;
   /** The SQL mock the analytics route drives, via the harness's client. */
   let executeStatement: ReturnType<typeof getMockFn>;
   let getStatement: ReturnType<typeof getMockFn>;
@@ -32,7 +32,7 @@ describe("Analytics Plugin Integration", () => {
     // The harness owns the env setup, the singleton resets, the mock client, the
     // server plugin on an ephemeral port, and the teardown. What used to be ~45
     // lines of setup plus a local getListeningPort helper is this call.
-    app = (await createTestApp({ plugins: [analytics({})] })) as never;
+    app = await createTestApp({ plugins: [analytics({})] });
     executeStatement = getMockFn(
       app.client,
       "statementExecution.executeStatement",
