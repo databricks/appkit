@@ -1,7 +1,9 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import pc from "picocolors";
+
 import { createLogger } from "../logging/logger";
 
 const logger = createLogger("type-generator:migration");

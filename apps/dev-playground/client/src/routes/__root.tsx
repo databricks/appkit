@@ -18,6 +18,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { MenuIcon } from "lucide-react";
+
 import { ErrorComponent } from "@/components/error-component";
 import { ThemeSelector } from "@/components/theme-selector";
 import { findNavItemForPath, NAV_GROUPS } from "@/lib/nav";

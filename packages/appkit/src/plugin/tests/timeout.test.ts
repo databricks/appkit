@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { TimeoutInterceptor } from "../interceptors/timeout";
 import type { InterceptorContext } from "../interceptors/types";
 

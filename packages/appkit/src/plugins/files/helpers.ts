@@ -27,6 +27,6 @@ export function parentDirectory(path: string): string {
  * HTTP header injection if upstream constraints ever change.
  */
 export function sanitizeFilename(raw: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping control chars for security
+  // oxlint-disable-next-line no-control-regex -- filenames must not contain ASCII control characters
   return raw.replace(/["\\]/g, "\\$&").replace(/[\x00-\x1f]/g, "");
 }

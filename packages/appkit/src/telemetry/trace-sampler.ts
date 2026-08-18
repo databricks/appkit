@@ -1,6 +1,7 @@
 import type { Attributes, Context, Link } from "@opentelemetry/api";
 import type { Sampler, SamplingResult } from "@opentelemetry/sdk-trace-base";
 import { SamplingDecision } from "@opentelemetry/sdk-trace-base";
+
 import { shouldExcludePath } from "../utils/path-exclusions";
 
 /**

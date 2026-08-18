@@ -1,5 +1,6 @@
 import type express from "express";
 import { describe, expect, test } from "vitest";
+
 import { PluginContext } from "../../core/plugin-context";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";

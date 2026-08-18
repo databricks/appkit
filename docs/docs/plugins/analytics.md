@@ -129,6 +129,7 @@ Content-Type: application/json
   "timeGrain": "month",
   "timeDimension": "order_date",
   "filter": { "member": "region", "operator": "in", "values": ["EMEA", "APAC"] },
+  "orderBy": [{ "field": "revenue", "direction": "DESC" }],
   "limit": 100
 }
 ```
@@ -142,6 +143,7 @@ Content-Type: application/json
 | `filter`        | object     | no       | Structured predicate tree translated into a parameterized `WHERE` clause (see [Filters](#filters)).          |
 | `timeGrain`     | `string`   | no       | Bucket a time dimension via `date_trunc('<grain>', …)` — e.g. `day`, `month`. Requires `timeDimension`.      |
 | `timeDimension` | `string`   | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`. Required whenever `timeGrain` is set. |
+| `orderBy`       | array      | no       | Array of `{field, direction}` sort keys (max 20). `field` must be a selected measure or dimension. `direction` is `"ASC"` (default, omitted from SQL) or `"DESC"`. Order measures by their SELECT alias. |
 | `limit`         | `number`   | no       | Positive integer row cap (max 100000).                                                                       |
 | `format`        | `string`   | no       | `JSON_ARRAY` (default). `JSON` is accepted as a deprecated alias for it; Arrow formats (`ARROW`, `ARROW_STREAM`) are rejected on this route. |
 
@@ -157,10 +159,27 @@ SELECT MEASURE(`arr`) AS `arr`, MEASURE(`revenue`) AS `revenue`,
 FROM `catalog`.`schema`.`revenue_metrics`
 WHERE `region` IN (:f_0, :f_1)
 GROUP BY ALL
+ORDER BY `revenue` DESC, `order_date`, `region`
 LIMIT 100
 ```
 
 The metric view's FQN and every measure/dimension identifier are backtick-quoted; filter values are bound as parameters (`:f_0`, `:f_1`, …), never interpolated into the SQL string.
+
+### Deterministic results with `limit`
+
+When `limit` is set, the route automatically appends all grouped dimensions to the `ORDER BY` clause as tie-breakers (unless they are already named in `orderBy`). Under `GROUP BY ALL`, the full dimension tuple is unique per row, so ordering by all dimensions produces a **TOTAL order** — every run returns the same rows, not an arbitrary sample.
+
+This matters because `LIMIT` without `ORDER BY` is a row *sample*, not "the top n": Spark returns whichever rows it produced first, which varies with partitioning, parallelism and cache state. A card built on such a request can show a different number run to run with nothing erroring. The tie-breakers close that gap — over unchanged data, the same request now returns the same rows.
+
+If you want **top-N by a measure**, order that measure explicitly and provide `limit`:
+
+```json
+{ "orderBy": [{ "field": "revenue", "direction": "DESC" }], "limit": 100 }
+```
+
+The route adds the remaining dimensions (`order_date`, `region` in the example above) after your explicit entry, so the result is stable across runs.
+
+**Important:** order measures by their **SELECT alias**. Spark rejects `ORDER BY MEASURE(\`revenue\`)` with `METRIC_VIEW_INVALID_MEASURE_FUNCTION_INPUT`. The generated SQL aliases every measure (e.g. `MEASURE(\`revenue\`) AS \`revenue\``), so always reference the alias — in this case, just `"revenue"`.
 
 ### Filters
 
@@ -290,7 +309,7 @@ If the configured SQL warehouse is `STOPPED` or `STARTING` when a query is reque
 2. Poll the warehouse state and stream `warehouse_status` events over SSE until it reaches `RUNNING`.
 3. Execute the SQL statement.
 
-This means a cold start no longer freezes the UI on a stalled spinner. Render the new `warehouseStatus` field to give users feedback:
+This means a cold start no longer freezes the UI on a stalled spinner. Both `useAnalyticsQuery` and `useMetricView` expose the latest status for their current request through `warehouseStatus`; render it to give users feedback:
 
 ```tsx
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
@@ -310,7 +329,7 @@ function SpendTable() {
 }
 ```
 
-`warehouseStatus` is `null` until the first status event arrives. After the server has observed the warehouse `RUNNING` once, subsequent requests within ~30s skip the readiness check entirely and `warehouseStatus` stays `null`, so the steady-state hot path isn't taxed any extra round-trips.
+For both hooks, `warehouseStatus` resets to `null` when a request starts and remains there until the first status event arrives. After the server has observed the warehouse `RUNNING` once, subsequent requests within ~30s skip the readiness check entirely and `warehouseStatus` stays `null`, so the steady-state hot path isn't taxed any extra round-trips.
 
 If the warehouse is `DELETED`/`DELETING` or fails to reach `RUNNING` within the configured timeout, the route emits an `error` event (surfaced via the `error` field).
 
@@ -336,7 +355,7 @@ export function AppShell({ children }) {
 }
 ```
 
-`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders only the `<Toaster />` mount point while every resource is healthy; it pops a single sticky toast — `toast.loading` for cold starts, `toast.error` for unrecoverable states — keyed by the worst kind, and dismisses it when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
+`useAnalyticsQuery` and `useMetricView` register themselves with the nearest provider, so no per-chart wiring is needed. The indicator renders only the `<Toaster />` mount point while every resource is healthy; it pops a single sticky toast — `toast.loading` for cold starts, `toast.error` for unrecoverable states — keyed by the worst kind, and dismisses it when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
 
 If you already render your own `<Toaster />` for unrelated app toasts, drop the indicator and call `useResourceStatusToaster()` instead so resource-status toasts share that single Toaster:
 
@@ -493,3 +512,251 @@ const { data } = useAnalyticsQuery("users", params);
 // Bad - creates a new object every render, causing infinite refetches
 const { data } = useAnalyticsQuery("users", { status: sql.string("active") });
 ```
+
+### useMetricView
+
+React hook that measures a [metric view](#metric-views) over SSE — the client twin of `POST /api/analytics/metric/:key`. Instead of writing SQL, you pass the measures, dimensions, and filter as a structured request; the hook streams back rows with typed column names plus per-column display metadata.
+
+```ts
+import { useMetricView } from "@databricks/appkit-ui/react";
+
+const { data, loading, error, errorCode, metadata, warehouseStatus } =
+  useMetricView("revenue", {
+    measures: ["arr", "mrr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+```
+
+When `"revenue"` is a key in the generated `MetricRegistry` (see [Metric-view types](../development/type-generation.md#metric-view-types)), the measure/dimension names, the allowed `timeGrain` values, and the selected row keys are all inferred — passing an unknown measure is a type error. JSON_ARRAY preserves SQL scalar cells as strings and allows SQL NULL for every column, so `data` is typed as `Array<{ arr: string | null; mrr: string | null; created_at: string | null }> | null`; use `metadata[col].type` when intentionally parsing a value.
+
+Time-series queries should explicitly order their selected time dimension ascending, as above. SQL result order is otherwise unspecified; chart helpers may normalize chronological data defensively, but consumers should not rely on that for query ordering.
+
+**Options:**
+
+| Option          | Type                        | Required | Description                                                                                     |
+| --------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `measures`      | `string[]`                  | yes      | Measures to aggregate. Inferred from `MetricRegistry[key].measureKeys` for a known key.          |
+| `dimensions`    | `string[]`                  | no       | Dimensions to group by. Inferred from `measureKeys` / `dimensionKeys`.                           |
+| `filter`        | `MetricFilter`              | no       | Recursive predicate tree (same grammar as the route — see [Filters](#filters)).                  |
+| `timeGrain`     | `string`                    | no       | Bucket a time dimension (`day`, `month`, …). Requires `timeDimension`. Inferred `timeGrains`.    |
+| `timeDimension` | `string`                    | no       | The single dimension `timeGrain` buckets. Must be one of `dimensions`.                           |
+| `orderBy`       | `{field, direction?}[]`     | no       | Sort keys. `field` is narrowed to the measures/dimensions this call selected, so ordering by an unselected column is a type error. See [Deterministic results with `limit`](#deterministic-results-with-limit). |
+| `limit`         | `number`                    | no       | Positive integer row cap.                                                                        |
+| `autoStart`     | `boolean`                   | no       | Start the metric query automatically. Defaults to `true`; set to `false` to defer it until the option becomes `true`. |
+
+**Return type:**
+
+```ts
+{
+  data: T | null; // selected row keys with JSON_ARRAY string | null values
+  loading: boolean; // true while the metric query is executing
+  error: string | null; // sanitized human-readable message, or null on success
+  errorCode: string | null; // stable upstream code (branch on this, not the message)
+  metadata: Record<string, MetricViewColumnDisplay> | undefined; // per-column display metadata (see below)
+  warehouseStatus: WarehouseStatus | null; // latest readiness status for the current request
+}
+```
+
+Like `useAnalyticsQuery`, the option object is serialized (`JSON.stringify`) internally, so object/array literals passed fresh each render do **not** trigger a refetch as long as they serialize to the same string — you do **not** need to `useMemo` the options. (This is same-serialization, not deep structural equality: reordering keys within `filter` changes the string and does re-query. Hoisting `measures`/`dimensions` to module scope or memoizing is still fine, and keeps the arrays type-narrowed to their literal tuple.)
+
+`metadata` is the per-column display metadata for **only the columns you queried**, scoped and carried in the SSE `result` payload. It is `undefined` when the server resolved no metadata (the metric key is unknown, or types have not been generated) — so always treat it as optional.
+
+### Metadata
+
+The metric route stamps per-column display metadata (`display_name`, `format`, `type`, `description`) onto each `result` message. This metadata is **build-generated** by the metric-view type generator, which writes it to `config/metric-views/metadata.generated.json` beside your hand-authored `definitions.json`.
+
+**No wiring required.** The plugin discovers the bundle the same way it discovers `definitions.json`, so `analytics({})` is enough:
+
+```ts
+// server/index.ts
+import { analytics, createApp, server } from "@databricks/appkit";
+
+createApp({
+  plugins: [
+    server(),
+    analytics({}),
+    // …
+  ],
+});
+```
+
+Commit `metadata.generated.json` alongside your generated types — it is the runtime half of the same generation pass, and the route reads it from disk at request time.
+
+This is **pure response decoration**: the metadata never enters the cache key and never changes the SQL. Every metric `result` message carries a `metadata` field scoped to the requested columns; when no bundle is present the message is byte-identical to a plain `/query` result and the hook's `metadata` is `undefined`. A missing or malformed bundle degrades to unlabeled columns and logs a warning — it never fails the query. Because the metadata rides on the payload, the client never has to import the generated file or hardcode a format string — it is **payload-carried and client-agnostic**.
+
+To bypass the file entirely — an app that builds its metadata some other way, or pins it deliberately — pass `analytics({ metricViewsMetadata })`. An explicit value always wins over the discovered bundle.
+
+### Format utilities
+
+`@databricks/appkit-ui/js` ships small, pure, tree-shakeable formatters that turn raw values + the metadata above into display strings. They take the format spec (or `MetricViewColumnDisplay`) as **arguments** — no React, no chart-library coupling — so they work in tables, tooltips, and chart configs alike.
+
+| Function                       | Purpose                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `formatValue(value, format?)`  | Format a raw value with a UC/spreadsheet format spec (`"$#,##0.00"`, `"#,##0"`, `"0.0%"`). No spec → sensible default. |
+| `formatLabel(name, columnMeta?)` | Human label for a column: prefers `columnMeta.display_name`, else humanizes the raw name.                    |
+| `toD3Format(format?)`          | Split a UC format into a [d3-format](https://d3js.org/d3-format) `specifier` and literal currency `prefix`. |
+
+The golden rule: **source the format from `metadata`, never hand-type it.** When `metadata` is `undefined`, `metadata?.[col]?.format` is `undefined` and `formatValue` degrades gracefully to a default:
+
+```tsx
+import { formatLabel, formatValue } from "@databricks/appkit-ui/js";
+import { useMetricView } from "@databricks/appkit-ui/react";
+
+function RevenueTable() {
+  const { data, metadata } = useMetricView("revenue", {
+    measures: ["arr", "mrr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+  const columns = ["created_at", "arr", "mrr"] as const;
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          {columns.map((col) => (
+            // Header text from display_name (or a humanized fallback).
+            <th key={col}>{formatLabel(col, metadata?.[col])}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {data?.map((row, i) => (
+          <tr key={i}>
+            {columns.map((col) => (
+              // Format string comes from metadata, never hand-typed.
+              <td key={col}>{formatValue(row[col], metadata?.[col]?.format)}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+```
+
+#### Feeding the format into charts
+
+Because `metadata[col].format` is just a string on the payload, the same spec drives axis ticks and tooltips in any chart library.
+
+**AppKit charts** — pass a `valueFormatter` to the built-in chart. The second argument is the measure field, so one callback can select the catalog format for each series. The chart applies it to its built-in value axis and per-series tooltips without replacing the internal ECharts `yAxis` or `tooltip` defaults:
+
+```tsx
+import { formatValue } from "@databricks/appkit-ui/js";
+import { LineChart, useMetricView } from "@databricks/appkit-ui/react";
+
+function RevenueChart() {
+  const { data, metadata } = useMetricView("revenue", {
+    measures: ["arr", "mrr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+
+  if (!data) return null;
+
+  return (
+    <LineChart
+      data={data}
+      xKey="created_at"
+      yKey={["arr", "mrr"]}
+      valueFormatter={(value, field) =>
+        formatValue(value, metadata?.[field]?.format)
+      }
+    />
+  );
+}
+```
+
+When multiple series share one value axis, its ticks use the first `yKey`; each tooltip uses the matching series field.
+
+The `selected` prop adds declarative emphasis only to bar, pie, and donut charts. Line, area, scatter, heatmap, and radar charts ignore it because category-selection semantics are not defined for those chart types.
+
+**[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
+
+```tsx
+import Plot from "react-plotly.js";
+import { toD3Format } from "@databricks/appkit-ui/js";
+import { useMetricView } from "@databricks/appkit-ui/react";
+
+function RevenuePlot() {
+  const { data, metadata } = useMetricView("revenue", {
+    measures: ["arr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+  const arrFormat = toD3Format(metadata?.arr?.format);
+  // "€#,##0.00" → { specifier: ",.2f", prefix: "€" }
+
+  return (
+    <Plot
+      data={[
+        {
+          type: "scatter",
+          mode: "lines+markers",
+          x: data?.map((r) => r.created_at) ?? [],
+          y: data?.map((r) => r.arr) ?? [],
+          name: metadata?.arr?.display_name ?? "arr",
+        },
+      ]}
+      layout={{
+        yaxis: {
+          tickformat: arrFormat?.specifier,
+          tickprefix: arrFormat?.prefix,
+        },
+        hoverlabel: { namelength: -1 },
+      }}
+    />
+  );
+}
+```
+
+**[ECharts](https://echarts.apache.org/)** — use the format spec inside `axisLabel.formatter` / `tooltip.formatter` via `formatValue`:
+
+```tsx
+import ReactECharts from "echarts-for-react";
+import { formatLabel, formatValue } from "@databricks/appkit-ui/js";
+import { useMetricView } from "@databricks/appkit-ui/react";
+
+function RevenueECharts() {
+  const { data, metadata } = useMetricView("revenue", {
+    measures: ["arr"],
+    dimensions: ["created_at"],
+    timeGrain: "month",
+    timeDimension: "created_at",
+    orderBy: [{ field: "created_at", direction: "ASC" }],
+  });
+  const arrFormat = metadata?.arr?.format;
+
+  const option = {
+    xAxis: { type: "category", data: data?.map((r) => r.created_at) ?? [] },
+    yAxis: {
+      type: "value",
+      axisLabel: { formatter: (v: number) => formatValue(v, arrFormat) },
+    },
+    tooltip: {
+      trigger: "axis",
+      valueFormatter: (v: number) => formatValue(v, arrFormat),
+    },
+    series: [
+      {
+        name: formatLabel("arr", metadata?.arr),
+        type: "line",
+        data: data?.map((r) => r.arr) ?? [],
+      },
+    ],
+  };
+
+  return <ReactECharts option={option} />;
+}
+```
+
+In both cases the format string originates from the server-injected `metadata` and is never written into the component — swapping the YAML `format` attribute on the metric view re-flows every axis, tooltip, and table cell without a client change.

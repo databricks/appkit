@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
+
 import {
   createTimeSeriesData,
   escapeHtml,
   formatLabel,
+  mapToDatum,
   sortTimeSeriesAscending,
   toChartArray,
   toChartValue,
@@ -283,18 +285,50 @@ describe("sortTimeSeriesAscending", () => {
     expect(result.yDataMap.val).toEqual([30, 10, 20]);
   });
 
-  test("does not sort partially unsorted data where first <= last", () => {
-    // Documents current behavior: only sorts when first > last (fully reversed)
-    // Partially unsorted data like [1, 3, 2] is NOT sorted because first (1) <= last (2)
+  test("sorts partially shuffled timestamps where first <= last", () => {
     const xData = [1, 3, 2];
     const yDataMap = { val: [10, 30, 20] };
     const yFields = ["val"];
 
     const result = sortTimeSeriesAscending(xData, yDataMap, yFields);
 
-    // Returns unsorted - this is the current behavior
-    expect(result.xData).toEqual([1, 3, 2]);
-    expect(result.yDataMap.val).toEqual([10, 30, 20]);
+    expect(result.xData).toEqual([1, 2, 3]);
+    expect(result.yDataMap.val).toEqual([10, 20, 30]);
+  });
+
+  test("sorts shuffled ISO date strings and keeps series correlated", () => {
+    const xData = ["2025-01-01", "2025-03-01", "2025-02-01"];
+    const yDataMap = {
+      sales: [10, 30, 20],
+      profit: [1, 3, 2],
+    };
+
+    const result = sortTimeSeriesAscending(xData, yDataMap, [
+      "sales",
+      "profit",
+    ]);
+
+    expect(result.xData).toEqual(["2025-01-01", "2025-02-01", "2025-03-01"]);
+    expect(result.yDataMap.sales).toEqual([10, 20, 30]);
+    expect(result.yDataMap.profit).toEqual([1, 2, 3]);
+  });
+
+  test("sorts SQL timestamp strings returned by JSON_ARRAY", () => {
+    const xData = [
+      "2025-02-01 12:00:00",
+      "2025-01-01 12:00:00",
+      "2025-03-01 12:00:00",
+    ];
+    const yDataMap = { val: [20, 10, 30] };
+
+    const result = sortTimeSeriesAscending(xData, yDataMap, ["val"]);
+
+    expect(result.xData).toEqual([
+      "2025-01-01 12:00:00",
+      "2025-02-01 12:00:00",
+      "2025-03-01 12:00:00",
+    ]);
+    expect(result.yDataMap.val).toEqual([10, 20, 30]);
   });
 });
 
@@ -332,5 +366,242 @@ describe("createTimeSeriesData", () => {
       [2, 20],
       [3, undefined],
     ]);
+  });
+});
+
+describe("mapToDatum", () => {
+  test("normalizes a scalar (bar/pie) click: name + value, no x/y", () => {
+    const d = mapToDatum({
+      name: "EMEA",
+      value: 42,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d).toMatchObject({
+      name: "EMEA",
+      value: 42,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d.x).toBeUndefined();
+    expect(d.y).toBeUndefined();
+  });
+
+  test("splits an [x, y] tuple point into x/y and surfaces y as value", () => {
+    // A time-series point: value is [epochMs, amount].
+    const d = mapToDatum({
+      value: [1704067200000, 8_100_000],
+      seriesName: "ARR",
+      seriesIndex: 0,
+      dataIndex: 3,
+    });
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(8_100_000);
+    expect(d.value).toBe(8_100_000);
+    // No explicit name → the x component's string form fills in.
+    expect(d.name).toBe("1704067200000");
+  });
+
+  test("keeps an explicit name even for a tuple datum", () => {
+    const d = mapToDatum({ name: "Apr 2026", value: [1704067200000, 5] });
+    expect(d.name).toBe("Apr 2026");
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(5);
+  });
+
+  test("missing name and non-tuple value falls back to empty string / null", () => {
+    const d = mapToDatum({ seriesIndex: 0 });
+    expect(d.name).toBe("");
+    expect(d.value).toBeNull();
+    expect(d.dataIndex).toBe(-1);
+    expect(d.seriesIndex).toBe(0);
+  });
+
+  test("preserves the raw params untouched", () => {
+    const params = { name: "X", value: 1, extra: { deep: true } };
+    expect(mapToDatum(params).raw).toBe(params);
+  });
+
+  // Heatmap data items are `[xIndex, yIndex, value]` INDEX triples, so the
+  // generic [x, y] tuple reading would report the y *index* as the cell value.
+  test("reads a heatmap triple's cell value, not an axis index", () => {
+    const d = mapToDatum(
+      {
+        seriesType: "heatmap",
+        value: [2, 1, 87],
+        dataIndex: 5,
+        seriesIndex: 0,
+      },
+      { xLabels: ["Jan", "Feb", "Mar"], yLabels: ["EMEA", "APAC"] },
+    );
+    expect(d.value).toBe(87);
+    expect(d.x).toBe("Mar");
+    expect(d.y).toBe("APAC");
+  });
+
+  test("falls back to raw heatmap indices when axis labels are absent", () => {
+    const d = mapToDatum({ seriesType: "heatmap", value: [2, 1, 87] });
+    expect(d.value).toBe(87);
+    expect(d.x).toBe(2);
+    expect(d.y).toBe(1);
+  });
+
+  test("uses an out-of-range heatmap index verbatim", () => {
+    const d = mapToDatum(
+      { seriesType: "heatmap", value: [9, 0, 3] },
+      { xLabels: ["Jan"], yLabels: ["EMEA"] },
+    );
+    expect(d.x).toBe(9);
+    expect(d.y).toBe("EMEA");
+    expect(d.value).toBe(3);
+  });
+
+  // A radar item holds one value per indicator; no single scalar is honest.
+  test("reports no scalar value for a radar multi-measure item", () => {
+    const d = mapToDatum({
+      seriesType: "radar",
+      name: "ACME",
+      value: [10, 20, 30],
+      seriesIndex: 0,
+    });
+    expect(d.name).toBe("ACME");
+    expect(d.value).toBeNull();
+    expect(d.x).toBeUndefined();
+    expect(d.y).toBeUndefined();
+    // The full vector stays reachable through `raw`.
+    expect((d.raw as { value: number[] }).value).toEqual([10, 20, 30]);
+  });
+
+  test("still splits [x, y] tuples for line/scatter series types", () => {
+    const d = mapToDatum({ seriesType: "line", value: [1704067200000, 5] });
+    expect(d.x).toBe(1704067200000);
+    expect(d.y).toBe(5);
+    expect(d.value).toBe(5);
+  });
+
+  test("resolves a series-level line stroke click to the nearest point", () => {
+    const params = {
+      seriesType: "line",
+      seriesName: "ARR",
+      seriesIndex: 0,
+      event: { offsetX: 218, offsetY: 75 },
+    };
+    const instance = {
+      getOption: () => ({
+        series: [
+          {
+            data: [
+              [1000, 10],
+              [2000, 20],
+              [3000, 30],
+            ],
+          },
+        ],
+      }),
+      convertToPixel: (
+        _finder: { seriesIndex: number },
+        value: (string | number)[],
+      ) => [Number(value[0]) / 10, Number(value[1])],
+    };
+
+    const d = mapToDatum(params, {}, instance);
+
+    expect(d).toMatchObject({
+      name: "2000",
+      value: 20,
+      x: 2000,
+      y: 20,
+      seriesName: "ARR",
+      dataIndex: 1,
+      seriesIndex: 0,
+    });
+    expect(d.raw).toBe(params);
+  });
+
+  test("resolves a categorical line stroke using axis labels", () => {
+    const labels = ["Jan", "Feb", "Mar"];
+    const instance = {
+      getOption: () => ({ series: [{ data: [10, 20, 30] }] }),
+      convertToPixel: (
+        _finder: { seriesIndex: number },
+        value: (string | number)[],
+      ) => [labels.indexOf(String(value[0])) * 100, Number(value[1])],
+    };
+
+    const d = mapToDatum(
+      {
+        seriesType: "line",
+        seriesIndex: 0,
+        event: { offsetX: 185, offsetY: 25 },
+      },
+      { xLabels: labels },
+      instance,
+    );
+
+    expect(d).toMatchObject({
+      name: "Mar",
+      value: 30,
+      x: "Mar",
+      y: 30,
+      dataIndex: 2,
+      seriesIndex: 0,
+    });
+  });
+
+  test("tolerates a non-object payload", () => {
+    const d = mapToDatum(null);
+    expect(d.name).toBe("");
+    expect(d.value).toBeNull();
+    expect(d.raw).toBeNull();
+  });
+
+  describe("sentinel-based category clicks (round-trip)", () => {
+    // When chart data is pre-normalized with sentinels (e.g., __empty__ for "",
+    // __none__ for NULL), a click on that sentinel bar/pie slice emits the sentinel
+    // name, which can then be decoded back to the original value. These tests
+    // verify mapToDatum round-trips sentinel names correctly.
+
+    test("preserves __empty__ sentinel in a bar click (pre-normalized empty string)", () => {
+      // A bar chart with pre-normalized data: "" became __empty__
+      const EMPTY = "__empty__";
+      const d = mapToDatum({
+        name: EMPTY,
+        value: 42,
+        seriesName: "ARR",
+        dataIndex: 1,
+        seriesIndex: 0,
+      });
+      expect(d.name).toBe(EMPTY);
+      expect(d.value).toBe(42);
+    });
+
+    test("preserves __none__ sentinel in a pie click (pre-normalized NULL)", () => {
+      // A pie chart with pre-normalized data: NULL became __none__
+      const NONE = "__none__";
+      const d = mapToDatum({
+        name: NONE,
+        value: 20,
+        seriesName: "ARR",
+        dataIndex: 0,
+        seriesIndex: 0,
+      });
+      expect(d.name).toBe(NONE);
+      expect(d.value).toBe(20);
+    });
+
+    test("distinguishes sentinels: __empty__ vs __none__ vs regular values", () => {
+      const EMPTY = "__empty__";
+      const NONE = "__none__";
+
+      const empty = mapToDatum({ name: EMPTY, value: 100 });
+      const none = mapToDatum({ name: NONE, value: 200 });
+      const regular = mapToDatum({ name: "EMEA", value: 300 });
+
+      expect(empty.name).toBe(EMPTY);
+      expect(none.name).toBe(NONE);
+      expect(regular.name).toBe("EMEA");
+    });
   });
 });

@@ -11,6 +11,7 @@
  */
 
 import type { BasePluginConfig, PluginConstructor, PluginData } from "shared";
+
 import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { formatWarningBanner } from "../utils/banner";

@@ -24,8 +24,12 @@ interface OrderAttributes {
   updatedAt: Date;
 }
 
-interface OrderCreationAttributes
-  extends Omit<OrderAttributes, "id" | "createdAt" | "updatedAt"> {}
+// oxlint-disable typescript/no-empty-object-type -- Sequelize creation-attributes interface; empty by design
+interface OrderCreationAttributes extends Omit<
+  OrderAttributes,
+  "id" | "createdAt" | "updatedAt"
+> {}
+// oxlint-enable typescript/no-empty-object-type
 
 class Order
   extends Model<OrderAttributes, OrderCreationAttributes>

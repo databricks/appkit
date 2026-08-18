@@ -1,5 +1,6 @@
 import type { AgentEvent } from "shared";
 import { describe, expect, test } from "vitest";
+
 import { consumeAdapterStream } from "../consume-adapter-stream";
 
 async function* streamOf(

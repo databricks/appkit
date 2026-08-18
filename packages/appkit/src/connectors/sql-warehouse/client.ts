@@ -1,4 +1,5 @@
 import type { TelemetryOptions } from "shared";
+
 import {
   AppKitError,
   ConfigurationError,

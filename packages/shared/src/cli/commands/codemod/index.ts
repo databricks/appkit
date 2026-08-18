@@ -1,4 +1,5 @@
 import { Command } from "commander";
+
 import { onPluginsReadyCommand } from "./on-plugins-ready";
 
 /**

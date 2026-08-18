@@ -1,6 +1,6 @@
 /**
  * The single module in AppKit allowed to import `@databricks/sdk-experimental`
- * directly (enforced by the Biome `noRestrictedImports` boundary rule). Every
+ * directly (enforced by the oxlint `no-restricted-imports` boundary rule). Every
  * other AppKit module reaches the SDK through the wrapper's re-exports and the
  * {@link WorkspaceClient} facade.
  *
@@ -29,6 +29,8 @@ export type LegacyWorkspaceClient = SdkWorkspaceClient;
 export interface WorkspaceClientOptions {
   /** Databricks host, e.g. https://my-workspace.cloud.databricks.com. Defaults to DATABRICKS_HOST / profile resolution. */
   host?: string;
+  /** `~/.databrickscfg` profile name. Used when no host/token is provided. */
+  profile?: string;
   /** Bearer token. When set, `authType` defaults to "pat". */
   token?: string;
   /** Authentication strategy passed to the legacy client. */
@@ -60,7 +62,9 @@ export function buildLegacyWorkspaceClient(
       ? { host: opts.host, token: opts.token, authType: opts.authType ?? "pat" }
       : opts.host
         ? { host: opts.host }
-        : {};
+        : opts.profile
+          ? { profile: opts.profile }
+          : {};
   return new SdkWorkspaceClientCtor(cfg, opts.clientOptions);
 }
 
@@ -83,7 +87,7 @@ export type {
 // named 'Time'" at ESM link time. `Time` is only reachable via the module
 // object, so we fall back to `SDK.default.Time` (matching the original genie
 // connector's `SDK.Time ?? SDK.default.Time` guard).
-export const { ConfigError, Context, TimeUnits } = SDK;
+export const { ConfigError, Context, TimeUnits, loadConfigFile } = SDK;
 export const Time =
   SDK.Time ?? (SDK as unknown as { default: typeof SDK }).default.Time;
 

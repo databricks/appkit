@@ -1,6 +1,7 @@
 import type { Instrumentation } from "@opentelemetry/instrumentation";
 import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
+
 import { shouldIgnoreRequest } from "../utils/path-exclusions";
 
 /**

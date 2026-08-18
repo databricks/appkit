@@ -1,5 +1,6 @@
 import type { CacheConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { CacheInterceptor } from "../interceptors/cache";
 import type { InterceptorContext } from "../interceptors/types";
 

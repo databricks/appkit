@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { lintSource } from "./lint";
 
 const RULE = "ai-search-index-requires-columns";

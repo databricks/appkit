@@ -101,6 +101,20 @@ if (fs.existsSync(sharedBin)) {
     fs.copyFileSync(sharedNaming, "tmp/dist/naming.js");
   }
 
+  // The doctor command reaches the SDK through the shared workspace-client
+  // facade, whose modules live outside dist/cli. Copy them so the CLI's
+  // relative imports (../../../workspace-client/*) resolve in the published
+  // tarball — appkit's own dist/workspace-client is only a re-export shim.
+  const sharedWorkspaceClient = path.join(
+    __dirname,
+    "../packages/shared/dist/workspace-client",
+  );
+  if (fs.existsSync(sharedWorkspaceClient)) {
+    fs.cpSync(sharedWorkspaceClient, "tmp/dist/workspace-client", {
+      recursive: true,
+    });
+  }
+
   // Copy JSON schemas so CLI (e.g. plugin validate/sync) can load them at runtime.
   // Place in both dist/schemas and dist/cli/schemas so resolution works whether
   // the running module's __dirname is under dist/ or dist/cli/ (e.g. after bundling).

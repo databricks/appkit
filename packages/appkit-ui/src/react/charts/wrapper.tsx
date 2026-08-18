@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+
 import type { WarehouseStatus } from "../hooks/types";
 import { useChartData } from "../hooks/use-chart-data";
 import { ChartErrorBoundary } from "./chart-error-boundary";

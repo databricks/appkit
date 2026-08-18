@@ -1,4 +1,5 @@
 import type { BasePluginConfig, IAppRouter } from "shared";
+
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";

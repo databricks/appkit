@@ -1,5 +1,6 @@
 import { ChevronDownIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
+
 import {
   clearInspectorHistory,
   closeInspector,
@@ -178,8 +179,7 @@ export function StreamInspector() {
 
   return (
     <>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop dismiss */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss handled globally via Esc */}
+      {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- backdrop dismiss handled globally via Esc */}
       <div
         onClick={closeInspector}
         className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"

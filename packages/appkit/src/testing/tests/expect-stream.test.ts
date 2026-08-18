@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { expectStream, parseSSEResponse } from "../expect-stream";
 import { createMockResponse } from "../fixtures";
 

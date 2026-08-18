@@ -2,7 +2,7 @@ import { defineConfig } from "tsdown";
 
 export default defineConfig({
   name: "shared",
-  entry: ["src/index.ts", "src/cli/index.ts"],
+  entry: ["src/index.ts", "src/cli/index.ts", "src/workspace-client/index.ts"],
   outDir: "dist",
   minify: false,
   format: "esm",

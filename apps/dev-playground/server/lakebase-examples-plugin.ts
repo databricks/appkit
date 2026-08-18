@@ -5,6 +5,7 @@ import {
   toPlugin,
 } from "@databricks/appkit";
 import type { IAppRouter } from "shared";
+
 import * as drizzleExample from "./lakebase-examples/drizzle-example";
 import * as rawExample from "./lakebase-examples/raw-driver-example";
 import * as sequelizeExample from "./lakebase-examples/sequelize-example";

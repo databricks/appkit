@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import type {
   AgentAdapter,
   AgentInput,
@@ -10,6 +11,7 @@ import type {
 } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
+
 import { CacheManager } from "../../../cache";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
@@ -95,7 +97,6 @@ beforeEach(async () => {
     healthCheck: vi.fn(async () => true),
     close: vi.fn(async () => {}),
   };
-  // biome-ignore lint/suspicious/noExplicitAny: test-only CacheManager wiring
   await CacheManager.getInstance({ storage: storage as any });
 });
 
@@ -192,13 +193,11 @@ describe("AgentsPlugin", () => {
       connectAll: vi.fn(async () => ({ connected: [], failed: [] })),
       getAllToolDefinitions: () => [],
     };
-    // biome-ignore lint/suspicious/noExplicitAny: seeding private mcpClient
     (plugin as any).mcpClient = fakeClient;
     await plugin.setup();
     await plugin.reload();
 
     expect(closeSpy).not.toHaveBeenCalled();
-    // biome-ignore lint/suspicious/noExplicitAny: read private mcpClient
     expect((plugin as any).mcpClient).toBe(fakeClient);
   });
 
@@ -668,9 +667,8 @@ describe("AgentsPlugin", () => {
 
   describe("hosted-supervisor tools and capability negotiation", () => {
     test("indexes supervisorTools.* entries with source 'hosted-supervisor'", async () => {
-      const { supervisorTools, SUPERVISOR_EXTENSION_KEY } = await import(
-        "../../../agents/supervisor-api"
-      );
+      const { supervisorTools, SUPERVISOR_EXTENSION_KEY } =
+        await import("../../../agents/supervisor-api");
       const ctx = fakeContext([]);
 
       const saAdapter: AgentAdapter = {
@@ -702,7 +700,6 @@ describe("AgentsPlugin", () => {
       await plugin.setup();
 
       const api = plugin.exports() as {
-        // biome-ignore lint/suspicious/noExplicitAny: structural test access
         get: (name: string) => any;
       };
       const entry = api.get("assistant").toolIndex.get("nyc");
@@ -714,9 +711,8 @@ describe("AgentsPlugin", () => {
     });
 
     test("warns at setup when hosted-supervisor tools paired with non-supervisor adapter", async () => {
-      const { supervisorTools } = await import(
-        "../../../agents/supervisor-api"
-      );
+      const { supervisorTools } =
+        await import("../../../agents/supervisor-api");
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const ctx = fakeContext([]);
 

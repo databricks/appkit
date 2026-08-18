@@ -17,11 +17,7 @@ export {
   parseFrontmatter,
 } from "./load-agents";
 export { normalizeToolResult } from "./normalize-result";
-export {
-  type RunAgentInput,
-  type RunAgentResult,
-  runAgent,
-} from "./run-agent";
+export { type RunAgentInput, type RunAgentResult, runAgent } from "./run-agent";
 export { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
 export { resolveToolkitFromProvider } from "./toolkit-resolver";
 export {

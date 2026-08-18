@@ -441,11 +441,8 @@
     *,
     *::before,
     *::after {
-      /* biome-ignore lint/complexity/noImportantStyles: !important is intentional for accessibility - forces reduced motion regardless of specificity */
       animation-duration: 0.01ms !important;
-      /* biome-ignore lint/complexity/noImportantStyles: !important is intentional for accessibility - forces reduced motion regardless of specificity */
       animation-iteration-count: 1 !important;
-      /* biome-ignore lint/complexity/noImportantStyles: !important is intentional for accessibility - forces reduced motion regardless of specificity */
       transition-duration: 0.01ms !important;
     }
   }

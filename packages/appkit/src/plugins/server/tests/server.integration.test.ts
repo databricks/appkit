@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -7,6 +8,7 @@ process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
 import type { IAppResponse, IAppRouter, PluginManifest } from "shared";
+
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";

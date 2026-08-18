@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type {
   AiSearchClientConfig,
   AiSearchIndexSummary,
@@ -111,7 +112,6 @@ export function useAiSearchQuery<
   // Reset when the target alias changes: abort any in-flight request (its
   // result would otherwise land under the new alias) and clear stale data +
   // fetch error. `error` re-derives from the new alias's validation state.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `alias` is the intended trigger — the effect runs to reset on every alias change, not because it reads alias.
   useEffect(() => {
     abortControllerRef.current?.abort();
     setData(null);

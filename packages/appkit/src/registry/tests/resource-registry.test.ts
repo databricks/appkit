@@ -1,5 +1,6 @@
 import type { PluginConstructor, PluginData } from "shared";
 import { describe, expect, it, vi } from "vitest";
+
 import { ResourceRegistry } from "../resource-registry";
 import type { ResourceRequirement } from "../types";
 import { ResourceType } from "../types";

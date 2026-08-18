@@ -10,6 +10,7 @@ import type {
 } from "shared";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
+
 import { createAgent } from "../create-agent";
 import { runAgent } from "../run-agent";
 import { mcpServer } from "../tools/hosted-tools";
@@ -80,7 +81,7 @@ describe("runAgent", () => {
 
     await runAgent(def, { messages: "hi" });
     expect(capturedCtx).not.toBeNull();
-    // biome-ignore lint/style/noNonNullAssertion: asserted above
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- asserted above
     const result = await capturedCtx!.executeTool("get_weather", {
       city: "NYC",
     });
@@ -136,7 +137,7 @@ describe("runAgent", () => {
 
     await runAgent(def, { messages: "hi", plugins: [pluginData] });
     expect(capturedCtx).not.toBeNull();
-    // biome-ignore lint/style/noNonNullAssertion: asserted above
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- asserted above
     const result = await capturedCtx!.executeTool("ping.ping", {});
     expect(result).toBe("pong");
     expect(pingExec).toHaveBeenCalled();
@@ -208,7 +209,6 @@ describe("runAgent", () => {
     // emits a function_call mid-conversation.
     const def = createAgent({
       instructions: "x",
-      // biome-ignore lint/suspicious/noExplicitAny: stub adapter — we never reach it
       model: { async *run() {} } as any,
       tools: {
         analytics: mcpServer("analytics-mcp", "https://example.com/mcp"),
@@ -252,8 +252,8 @@ describe("runAgent", () => {
     await runAgent(parent, { messages: "go" });
     expect(capturedCtx).not.toBeNull();
     const result =
-      await // biome-ignore lint/style/noNonNullAssertion: asserted above
-      capturedCtx!.executeTool("agent-helper", { input: "say hi" });
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- asserted above
+      await capturedCtx!.executeTool("agent-helper", { input: "say hi" });
     expect(result).toBe("child says hi");
   });
 
@@ -441,9 +441,8 @@ describe("runAgent", () => {
     // gets classified as `hosted-supervisor`; its placeholder def is kept
     // out of `input.tools` (the spec doesn't expose a callable function)
     // and the spec is routed via `input.extensions[SUPERVISOR_EXTENSION_KEY]`.
-    const { supervisorTools, SUPERVISOR_EXTENSION_KEY } = await import(
-      "../../../agents/supervisor-api"
-    );
+    const { supervisorTools, SUPERVISOR_EXTENSION_KEY } =
+      await import("../../../agents/supervisor-api");
 
     let captured: AgentInput | null = null;
     const adapter: AgentAdapter = {
@@ -470,7 +469,7 @@ describe("runAgent", () => {
     expect(result.text).toBe("ok");
 
     expect(captured).not.toBeNull();
-    // biome-ignore lint/style/noNonNullAssertion: asserted above
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- asserted above
     const inp = captured!;
     expect(inp.tools).toEqual([]);
     expect(inp.extensions?.[SUPERVISOR_EXTENSION_KEY]).toEqual({

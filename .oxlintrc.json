@@ -1,0 +1,82 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "jsx-a11y", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "typescript/no-explicit-any": "off",
+    "unicorn/no-static-only-class": "off",
+    "react/no-danger": "off",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-empty-object-type": "error",
+    "no-control-regex": "error",
+    "jsx-a11y/click-events-have-key-events": "error",
+    "jsx-a11y/no-static-element-interactions": "error",
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "@databricks/sdk-experimental",
+              "@databricks/sdk-experimental/**"
+            ],
+            "message": "Import the Databricks SDK only through the wrapper in packages/shared/src/workspace-client. Add a re-export there if you need a new symbol."
+          }
+        ]
+      }
+    ],
+    // Stricter than Biome's former bar; the flagged sites are pre-existing,
+    // working code (Biome's CI was green over them). Disabled to keep the
+    // tooling swap behavior-preserving. Re-enable and fix in a follow-up to
+    // tighten the lint bar.
+    "react/no-array-index-key": "off",
+    "react/exhaustive-deps": "off",
+    "no-unsafe-optional-chaining": "off",
+    "typescript/no-this-alias": "off",
+    "oxc/only-used-in-recursion": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-new-array": "off",
+    "unicorn/no-empty-file": "off",
+    "unicorn/prefer-string-starts-ends-with": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "jsx-a11y/control-has-associated-label": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "packages/shared/src/workspace-client/**",
+        "packages/lakebase/**"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/.claude",
+    "**/dist",
+    "**/tmp",
+    "**/*.d.ts",
+    "**/build",
+    "**/coverage",
+    "packages/appkit-ui/src/react/ui",
+    "**/routeTree.gen.ts",
+    "docs/.docusaurus",
+    "**/*.gen.css",
+    "**/*.gen.ts",
+    "**/typedoc-sidebar.ts",
+    "**/template",
+    "**/appkit-types/metric-views.ts"
+  ]
+}

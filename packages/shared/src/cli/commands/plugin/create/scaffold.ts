@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { humanizeResourceType, MANIFEST_SCHEMA_ID } from "./resource-defaults";
 import type { CreateAnswers } from "./types";
 

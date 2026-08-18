@@ -1,9 +1,20 @@
+import { builtinModules } from "node:module";
 import path from "node:path";
+
 import type * as Preset from "@docusaurus/preset-classic";
 import type { Config } from "@docusaurus/types";
 import type { PluginOptions } from "@signalwire/docusaurus-plugin-llms-txt/public";
 import { themes as prismThemes } from "prism-react-renderer";
 import webpack from "webpack";
+
+// appkit is a Node/server package; the docs only reference its API (they never
+// execute the SDK in the browser). Stub every Node built-in for the client
+// bundle so webpack doesn't try to bundle `@databricks/sdk-experimental`'s
+// Node deps (fs, crypto, stream, …). `fallback` only triggers when a module is
+// unresolvable, so it's a no-op for the Node-target server bundle.
+const nodeBuiltinFallbacks = Object.fromEntries(
+  builtinModules.map((m) => [m, false]),
+) as Record<string, false>;
 
 function appKitAliasPlugin() {
   return {
@@ -11,6 +22,7 @@ function appKitAliasPlugin() {
     configureWebpack() {
       return {
         resolve: {
+          fallback: nodeBuiltinFallbacks,
           alias: {
             "@": path.resolve(__dirname, "../packages/appkit-ui/src"),
             shared: path.resolve(__dirname, "../packages/shared/src"),
@@ -33,6 +45,11 @@ function appKitAliasPlugin() {
           new webpack.DefinePlugin({
             "import.meta.env.DEV": JSON.stringify(false),
             "import.meta.hot": JSON.stringify(undefined),
+          }),
+          // Rewrite `node:fs` → `fs` so scheme imports fall through to the
+          // built-in fallbacks above instead of erroring as unhandled schemes.
+          new webpack.NormalModuleReplacementPlugin(/^node:/, (resource) => {
+            resource.request = resource.request.replace(/^node:/, "");
           }),
         ],
       };

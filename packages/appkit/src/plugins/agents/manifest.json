@@ -19,6 +19,19 @@
             "description": "Default LLM serving endpoint name"
           }
         }
+      },
+      {
+        "type": "experiment",
+        "alias": "MLflow experiment for agent traces",
+        "resourceKey": "agents-mlflow-experiment",
+        "description": "When bound, agent turns and tool calls are traced to this MLflow experiment via OpenTelemetry. Tracing is a no-op when unset.",
+        "permission": "CAN_EDIT",
+        "fields": {
+          "experimentId": {
+            "env": "MLFLOW_EXPERIMENT_ID",
+            "description": "MLflow experiment id traces are logged to"
+          }
+        }
       }
     ]
   }

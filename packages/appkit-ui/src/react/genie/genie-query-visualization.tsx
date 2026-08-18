@@ -1,6 +1,7 @@
 import { BarChart3Icon, ChevronDownIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { GenieStatementResponse } from "shared";
+
 import { BaseChart } from "../charts/base";
 import { ChartErrorBoundary } from "../charts/chart-error-boundary";
 import type { ChartType } from "../charts/types";
@@ -99,7 +100,6 @@ export function GenieQueryVisualization({
         </TableHeader>
         <TableBody>
           {displayRows.map((row, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: tabular data rows have no unique identifier
             <TableRow key={i}>
               {columns.map((col) => (
                 <TableCell key={col.name}>

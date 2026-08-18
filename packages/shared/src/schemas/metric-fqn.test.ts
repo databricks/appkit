@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { MAX_UC_OBJECT_NAME_LENGTH, UC_FQN_PATTERN } from "./metric-fqn";
 
 /**

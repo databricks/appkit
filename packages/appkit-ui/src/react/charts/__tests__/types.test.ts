@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { isArrowTable, isDataProps, isQueryProps } from "../types";
 
 describe("isArrowTable", () => {

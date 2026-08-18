@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import {
   RESOURCE_KIND_COMMANDS,
   scaffoldingDescriptorSchema,

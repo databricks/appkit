@@ -1,12 +1,15 @@
 import { FolderPlus, Loader2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
+
 import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 import type { FileBrowserLabels } from "./types";
 
 /** Props for the NewFolderInput component */
-export interface NewFolderInputProps
-  extends Omit<React.ComponentProps<"div">, "children" | "onChange"> {
+export interface NewFolderInputProps extends Omit<
+  React.ComponentProps<"div">,
+  "children" | "onChange"
+> {
   /** Current folder name value */
   value: string;
   /** Called when folder name changes */

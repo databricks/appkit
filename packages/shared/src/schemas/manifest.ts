@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+
 import { PLUGIN_NAME_PATTERN } from "../naming";
 
 // ── Resource type + per-type permission enums ────────────────────────────
@@ -784,11 +785,11 @@ export const originSchema = z
  * - `resolve !== undefined` → `"cli"` (resolved by the CLI during init).
  * - else → `"user"` (user must provide the value at init time).
  *
- * Co-located with `templateFieldEntrySchema` because the transform is the
- * only consumer. Kept private so any other "origin computation" goes
- * through the schema rather than re-implementing the rules.
+ * The single source for this rule: `plugin sync`'s transform stamps `origin`
+ * with it, and consumers that read an authored manifest (no stamped `origin`)
+ * derive it through this rather than re-implementing the cascade.
  */
-function computeOriginFromField(field: {
+export function computeOriginFromField(field: {
   localOnly?: boolean;
   value?: string;
   resolve?: string;

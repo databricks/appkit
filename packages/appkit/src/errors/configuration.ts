@@ -1,4 +1,5 @@
 import pc from "picocolors";
+
 import { AppKitError } from "./base";
 
 function authSetupVerbose(): boolean {

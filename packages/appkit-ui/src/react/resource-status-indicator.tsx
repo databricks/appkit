@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { type ToasterProps, toast } from "sonner";
+
 import {
   type AggregatedResourceStatus,
   type ResourceStatus,
@@ -150,8 +151,7 @@ export function useResourceStatusToaster(
 }
 
 export interface ResourceStatusIndicatorProps
-  extends ResourceStatusToasterOptions,
-    Omit<ToasterProps, "className"> {
+  extends ResourceStatusToasterOptions, Omit<ToasterProps, "className"> {
   /** Class name applied to the Toaster wrapper. */
   className?: string;
 }

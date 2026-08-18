@@ -1,6 +1,7 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { ServiceContext } from "../../context/service-context";
 import { uiVariants } from "../../plugins/ui-variants";
 import type { PluginManifest } from "../../registry/types";
@@ -804,9 +805,8 @@ describe("AppKit", () => {
     });
 
     test("skips bootstrap when isInternalTelemetryEnabled returns false", async () => {
-      const { isInternalTelemetryEnabled, TelemetryReporter } = await import(
-        "../../internal-telemetry"
-      );
+      const { isInternalTelemetryEnabled, TelemetryReporter } =
+        await import("../../internal-telemetry");
       vi.mocked(TelemetryReporter.initialize).mockClear();
       mockReporter.sendStartup.mockClear();
       vi.mocked(isInternalTelemetryEnabled).mockReturnValue(false);

@@ -1,6 +1,7 @@
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
+
 import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";

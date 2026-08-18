@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
+
 // esbuild ships as a transitive of the build toolchain (tsdown/rolldown) and is
 // hoisted to the root node_modules (see .npmrc `public-hoist-pattern[]=*`), so
 // it resolves here without a root devDependency. Declaring it directly would
@@ -589,7 +590,10 @@ function renderMarkdown(
     const pkgExceeded = packageExceedsBudget(pkg, base, bundleDeps);
     exceeded = exceeded || pkgExceeded;
 
-    lines.push(`### \`${pkg.name}\`${pkgExceeded ? " ⚠️ over budget" : ""}`, "");
+    lines.push(
+      `### \`${pkg.name}\`${pkgExceeded ? " ⚠️ over budget" : ""}`,
+      "",
+    );
     const hasBaseline = Boolean(baseline);
     lines.push(
       `**npm tarball (packed): ${cell(pkg.tarball?.packed ?? null, base?.tarball?.packed ?? null, hasBaseline)}** — gzipped download (dist + bin; excludes release-only docs/NOTICE).`,

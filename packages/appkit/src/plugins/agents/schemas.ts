@@ -34,6 +34,12 @@ export const chatRequestSchema = z.object({
     ),
   threadId: z.string().optional(),
   agent: z.string().optional(),
+  /**
+   * MLflow run id to link this turn's trace to (via `mlflow.sourceRun`), set by
+   * the eval runner so each case's trace shows under the evaluation run. Capped
+   * to a run-id-shaped length since it reaches trace metadata and logs.
+   */
+  mlflowRunId: z.string().max(64).optional(),
 });
 
 const messageItemSchema = z.object({
@@ -59,6 +65,12 @@ export const invocationsRequestSchema = z.object({
       ),
   ]),
   model: z.string().optional(),
+  /**
+   * MLflow run id to link this turn's trace to. Same as `chatRequestSchema`,
+   * but the trace id comes back in the response body (`mlflow_trace_id`) since
+   * this surface has no `metadata` event.
+   */
+  mlflowRunId: z.string().max(64).optional(),
 });
 
 export const approvalRequestSchema = z.object({

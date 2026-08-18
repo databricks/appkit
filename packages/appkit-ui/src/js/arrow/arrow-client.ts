@@ -1,4 +1,5 @@
 import type { Field, Table, Vector } from "apache-arrow";
+
 import {
   DATE_FIELD_PATTERNS,
   METADATA_DATE_PATTERNS,

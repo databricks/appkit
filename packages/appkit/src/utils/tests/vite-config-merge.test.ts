@@ -1,5 +1,6 @@
 import type { Plugin } from "vite";
 import { describe, expect, test } from "vitest";
+
 import { mergeConfigDedup } from "../vite-config-merge";
 
 const plugin = (name: string): Plugin => ({ name, enforce: "pre" });

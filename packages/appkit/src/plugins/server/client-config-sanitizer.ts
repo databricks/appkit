@@ -1,4 +1,5 @@
 import pc from "picocolors";
+
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("server:config");
@@ -349,7 +350,7 @@ function formatLeakedVarsBanner(
     `Example: ${pc.dim('PUBLIC_APPKIT_MY_VAR="safe-value"')}`,
   ];
 
-  // biome-ignore lint: stripping ANSI escape sequences requires matching the ESC control character
+  // oxlint-disable-next-line no-control-regex -- stripping ANSI escape sequences requires matching the ESC control character
   const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, "");
   const maxLen = Math.max(...contentLines.map((l) => stripAnsi(l).length));
   const border = pc.yellow("=".repeat(maxLen + 4));

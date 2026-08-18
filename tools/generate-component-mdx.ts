@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import * as docgen from "react-docgen-typescript";
 
 type ComponentDoc = docgen.ComponentDoc;

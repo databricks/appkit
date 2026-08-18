@@ -1,4 +1,4 @@
-import type { MetricFilter } from "../types";
+import type { MetricFilter, MetricOrderBy } from "../types";
 
 export interface FilterRenderState {
   counter: number;
@@ -16,4 +16,5 @@ export interface MetricCacheKeyInput {
   format: string;
   executorKey: string;
   limit?: number;
+  orderBy?: MetricOrderBy[];
 }

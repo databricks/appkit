@@ -1,4 +1,5 @@
 import { sql } from "@databricks/appkit-ui/js";
+
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 const ALLOWED_PERIODS = ["day", "week", "month"] as const;

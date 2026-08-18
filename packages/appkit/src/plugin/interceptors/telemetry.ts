@@ -1,4 +1,5 @@
 import type { TelemetryConfig } from "shared";
+
 import {
   getCurrentUserId,
   isInUserContext,

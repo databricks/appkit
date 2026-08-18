@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
+
 import {
   type AppKitTable,
   bigint,

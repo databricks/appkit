@@ -1,5 +1,6 @@
 import type { Table } from "apache-arrow";
 import { useMemo } from "react";
+
 import type { ChartData, DataFormat } from "../charts/types";
 import type { WarehouseStatus } from "./types";
 import { useAnalyticsQuery } from "./use-analytics-query";

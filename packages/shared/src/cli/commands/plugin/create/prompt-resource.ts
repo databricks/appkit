@@ -1,4 +1,5 @@
 import { isCancel, select, text } from "@clack/prompts";
+
 import {
   getDefaultFieldsForType,
   humanizeResourceType,

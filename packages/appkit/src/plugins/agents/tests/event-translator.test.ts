@@ -1,5 +1,6 @@
 import type { ResponseStreamEvent } from "shared";
 import { describe, expect, test } from "vitest";
+
 import { AgentEventTranslator } from "../event-translator";
 
 describe("AgentEventTranslator", () => {
