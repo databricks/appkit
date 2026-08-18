@@ -58,6 +58,11 @@ export class CacheManager {
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
+  /**
+   * Bumped by {@link reset}, so an initialization already in flight cannot
+   * publish its result over a caller that has since discarded the singleton.
+   */
+  private static generation = 0;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -126,9 +131,16 @@ export class CacheManager {
     }
 
     if (!CacheManager.initPromise) {
+      const generation = CacheManager.generation;
       CacheManager.initPromise = CacheManager.create(userConfig).then(
         (instance) => {
-          CacheManager.instance = instance;
+          // A reset() while this was in flight means the caller discarded this
+          // manager before it existed. Installing it anyway would resurrect it
+          // and hand the next boot storage the caller never asked for, so the
+          // result is returned to whoever is awaiting but not published.
+          if (CacheManager.generation === generation) {
+            CacheManager.instance = instance;
+          }
           return instance;
         },
       );
@@ -555,6 +567,31 @@ export class CacheManager {
   /** Close the cache */
   async close(): Promise<void> {
     await this.storage.close();
+  }
+
+  /**
+   * Drop the singleton so the next {@link getInstance} builds a fresh manager.
+   *
+   * Both fields must be cleared: `getInstance()` returns `initPromise` when
+   * `instance` is null, so clearing only `instance` would leave the next boot
+   * awaiting a promise that resolves to the dead manager.
+   *
+   * Clearing `initPromise` is not enough on its own either: an initialization
+   * already in flight would still run its continuation and re-publish the very
+   * instance being discarded. The generation counter is what makes the reset
+   * hold in that case.
+   *
+   * Deliberately does **not** call {@link close} — a reset is a pointer drop,
+   * `close()` is I/O. Callers close first, then reset, which is the order
+   * `LifecycleManager.close()` uses. Resetting without closing leaks whatever
+   * the old storage held (under `PersistentStorage` that is a `pg.Pool`).
+   *
+   * @internal
+   */
+  static reset(): void {
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
+    CacheManager.generation += 1;
   }
 
   /**

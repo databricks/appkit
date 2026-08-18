@@ -4,6 +4,7 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { PluginManifest } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
+import { CacheManager } from "../../cache";
 import { ServiceContext } from "../../context/service-context";
 import { ConfigurationError } from "../../errors";
 import { Plugin, toPlugin } from "../../plugin";
@@ -183,5 +184,54 @@ describe("app handle close()", () => {
     await expect(createApp({ plugins: [closeNamed()] })).rejects.toThrow(
       /"close" is reserved|Plugin name "close" is reserved/,
     );
+  });
+  test("boot, close, boot again in one file — the second app gets a live cache", async () => {
+    // The stated driver for the whole close() effort: two real boots, two real
+    // sockets, one process.
+    //
+    // Note what this does *not* prove. The cache here is InMemoryStorage, whose
+    // close() merely clears a Map and stays usable, so this passes with or
+    // without the singleton resets. The reset's necessity is proven in
+    // cache/tests/cache-manager-reset.test.ts against storage whose close() is
+    // terminal, the way PersistentStorage's pool.end() is.
+    const termBaseline = process.listenerCount("SIGTERM");
+
+    const first = await createApp({
+      plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
+    });
+    const firstPort = await listeningPort(first.server.getServer());
+    await expect(
+      fetch(`http://127.0.0.1:${firstPort}/health`).then((r) => r.status),
+    ).resolves.toBe(200);
+    await first.close();
+
+    // ServiceContext was reset by close(), so the mock has to be reinstalled —
+    // exactly what createTestApp will do for the caller.
+    serviceContextMock.restore();
+    serviceContextMock = mockServiceContext();
+
+    const second = await createApp({
+      plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
+    });
+    const secondPort = await listeningPort(second.server.getServer());
+
+    expect(secondPort).not.toBe(firstPort);
+    await expect(
+      fetch(`http://127.0.0.1:${secondPort}/health`).then((r) => r.status),
+    ).resolves.toBe(200);
+
+    // The second boot's cache round-trips a write.
+    const cache = CacheManager.getInstanceSync();
+    const key = cache.generateKey(["second-boot"], "test-user");
+    await cache.set(key, { alive: true });
+    await expect(cache.get(key)).resolves.toEqual({ alive: true });
+
+    await second.close();
+
+    await expect(
+      fetch(`http://127.0.0.1:${secondPort}/health`),
+    ).rejects.toThrow();
+    // Two boots and two closes leave no listener residue.
+    expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
   });
 });

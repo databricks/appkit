@@ -73,6 +73,7 @@ export {
   getMockFn,
   type MockWorkspaceClient,
 } from "./mock-workspace-client";
+export { resetAppKitSingletons } from "./reset";
 export {
   createTestPluginContext,
   type FakeProvider,

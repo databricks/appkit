@@ -5,6 +5,7 @@ import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { TelemetryManager } from "../telemetry";
 import type { PluginContext } from "./plugin-context";
+import { resetCoreSingletons } from "./reset-singletons";
 
 const logger = createLogger("lifecycle");
 
@@ -205,6 +206,12 @@ export class LifecycleManager {
         err,
       );
     }
+
+    // Only on this path. On the signal path the process is dying, so dropping
+    // singleton pointers is pure cost. Safe here because the phases above
+    // already closed the cache storage and flushed telemetry, so these are
+    // pointer drops over released resources.
+    resetCoreSingletons();
   }
 
   /**
