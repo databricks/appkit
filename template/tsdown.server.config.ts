@@ -1,18 +1,7 @@
-import { defineConfig } from 'tsdown';
+import { appkitServerConfig } from '@databricks/appkit/tsdown';
 
-export default defineConfig({
-{{- if .plugins.agents}}
-  // server/agents/*/agent.ts aren't imported anywhere; list them as entries so the build emits dist/agents/*/agent.js for runtime discovery.
-  entry: ['server/server.ts', 'server/agents/*/agent.ts'],
-  // Clear the out dir so a deleted agent can't linger in dist/agents/.
-  clean: true,
-{{- else}}
-  entry: 'server/server.ts',
-{{- end}}
-  unbundle: true,
-  external: (id) => /^[^./]/.test(id) || id.includes('/node_modules/'),
-  tsconfig: 'tsconfig.server.json',
-  outExtensions: () => ({
-    js: '.js',
-  }),
-});
+// AppKit's server build preset. When you keep code agents in `server/agents/`,
+// it auto-includes them as build entries so discovery works in a bundled build.
+// Customize with overrides — `appkitServerConfig({ external, define, ... })` —
+// or a function form for full control: `appkitServerConfig((base) => ({ ...base }))`.
+export default appkitServerConfig();
