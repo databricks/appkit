@@ -1,8 +1,6 @@
 /**
- * `createTestApp` — boot a real AppKit app with no workspace, no credentials,
- * and no network, then call it over real HTTP.
- *
- * @module
+ * Boot a real AppKit app with no workspace, credentials, or network, then call it
+ * over real HTTP.
  */
 
 import type { Server } from "node:http";
@@ -23,31 +21,25 @@ import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 import { resetAppKitSingletons } from "./reset";
 
-// Test fixtures intentionally use loose shapes; `no-explicit-any` is disabled
-// repo-wide (see .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
 /**
- * One authoritative `process.env` baseline shared by every live harness app,
- * with a reference count.
+ * One baseline shared by every live harness app, reference-counted.
  *
- * `process.env` is global, so a per-app snapshot does not compose: with two apps
- * booted concurrently, the second captures the first's mutations, and whichever
- * closes last re-applies them — leaving harness keys (and the first app's `env`
- * entries) set after both apps are gone. Anchoring on the *first* boot and
- * restoring only when the *last* app closes makes the outcome independent of
- * close order, which is the only sane semantics for a shared global.
+ * A per-app snapshot does not compose: the second boot captures the first's
+ * mutations and whichever closes last re-applies them. Anchoring on the first
+ * boot and restoring on the last close makes the result order-independent.
  */
 let envBaseline: NodeJS.ProcessEnv | undefined;
 let liveHarnessApps = 0;
 
-/** Take the baseline on the first live app; count this app in. */
+/** Take the baseline on the first live app. */
 function acquireEnvBaseline(): void {
   if (liveHarnessApps === 0) envBaseline = { ...process.env };
   liveHarnessApps += 1;
 }
 
-/** Count this app out, and restore the baseline once none are left. */
+/** Restore the baseline once no apps are left. */
 function releaseEnvBaseline(): void {
   liveHarnessApps = Math.max(0, liveHarnessApps - 1);
   if (liveHarnessApps > 0 || !envBaseline) return;
@@ -68,77 +60,54 @@ export interface CreateTestAppOptions<T extends Plugins> {
   /** The plugins under test, as `createApp` takes them. */
   plugins?: T;
 
-  /**
-   * Client responses keyed by dotted path (`"jobs.getRun"`), forwarded to the
-   * built-in mock workspace client. Ignored when `client` is supplied.
-   */
+  /** Dotted-path responses for the built-in mock. Ignored when `client` is set. */
   responses?: CreateMockWorkspaceClientOptions["responses"];
 
   /**
-   * Use this workspace client instead of the built-in mock. Supplying one means
-   * you own its `currentUser.me()` — `ServiceContext.createContext` reads
-   * `currentUser.id` off the result and cannot boot without it.
+   * Replaces the built-in mock. You then own `currentUser.me()` — boot reads
+   * `currentUser.id` and fails without it.
    */
   client?: WorkspaceClient;
 
-  /**
-   * Extra environment variables for the boot, restored on `close()`. This is how
-   * you satisfy a plugin's declared resource requirements.
-   */
+  /** Extra env for the boot, restored on `close()`; satisfies declared resources. */
   env?: Record<string, string>;
 
-  /**
-   * Skip the injected server plugin. No socket is bound and the request methods
-   * throw, but plugin setup, resource validation, and teardown still run.
-   */
+  /** No socket; setup, validation, and teardown still run, request methods throw. */
   server?: false;
 
   /**
-   * Override the pinned `NODE_ENV`. Defaults to `"test"`.
-   *
-   * `"development"` is refused: dev mode routes the injected `port: 0` through
-   * `get-port`, where `portNumbers(0, …)` throws a `RangeError`, and it also
-   * boots a real Vite dev server, downgrades resource validation to a warning,
-   * and stops filtering dev-only plugins.
+   * Defaults to `"test"`. `"development"` is refused — it throws a `RangeError`
+   * in `get-port` on `port: 0`, boots Vite, and relaxes validation.
    */
   nodeEnv?: string;
 
-  /** Cache configuration. Defaults to in-memory, which is what keeps boot offline. */
+  /** Defaults to in-memory, which is what keeps boot offline. */
   cache?: CacheConfig;
 
-  /** Budget for the app's teardown. Defaults to AppKit's programmatic budget. */
+  /** Teardown budget. Defaults to AppKit's programmatic budget. */
   closeTimeoutMs?: number;
 }
 
 /** Per-request options for the {@link TestApp} HTTP methods. */
 export interface TestRequestOptions {
-  /**
-   * Request body. A non-string value is JSON-encoded and
-   * `content-type: application/json` is set unless `headers` overrides it.
-   */
+  /** A non-string value is JSON-encoded with `content-type: application/json`. */
   body?: unknown;
-  /** Extra headers. These win over anything the harness sets. */
+  /** Merged last, so they win over anything the harness sets. */
   headers?: Record<string, string>;
-  /**
-   * On-behalf-of shorthand, the same convention as `createMockRequest({ obo })`:
-   * `true` for the default test user, an object to pick the identity.
-   */
+  /** Same convention as `createMockRequest({ obo })`. */
   obo?: OboOption;
-  /** Abort signal forwarded to `fetch`. */
+  /** Forwarded to `fetch`. */
   signal?: AbortSignal;
 }
 
 /** A booted test app. */
 export interface TestApp<T extends Plugins> {
   /**
-   * Plugin exports, keyed by manifest name — `app.plugins.analytics.query(...)`.
-   *
-   * Deliberately nested rather than spread onto the handle: `get` and `delete`
-   * are plausible plugin names, and spreading would collide with the request
-   * methods.
+   * Plugin exports by manifest name. Nested rather than spread because `get` and
+   * `delete` are plausible plugin names and would collide with the request methods.
    */
   plugins: PluginMap<T>;
-  /** The workspace client the app booted with — the same object a handler resolves. */
+  /** The same object a handler resolves at runtime. */
   client: WorkspaceClient;
   /** e.g. `http://127.0.0.1:54321`. Throws when `server: false`. */
   baseUrl: string;
@@ -147,7 +116,7 @@ export interface TestApp<T extends Plugins> {
   /** The underlying HTTP server, or `undefined` with `server: false`. */
   server?: Server;
 
-  /** Release the app and restore `process.env`. Idempotent. */
+  /** Release the app and restore env. Idempotent. */
   close(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 
@@ -159,11 +128,8 @@ export interface TestApp<T extends Plugins> {
 }
 
 /**
- * Resolve the port a server actually bound to.
- *
- * `ServerPlugin.start()` returns as soon as `listen()` has been *invoked*, which
- * is before the bind completes — so `server.address()` is `null` until the
- * `listening` event fires.
+ * `start()` returns once `listen()` is invoked, before the bind completes, so
+ * `address()` is null until the `listening` event fires.
  *
  * @internal
  */
@@ -184,15 +150,12 @@ export async function getListeningPort(server: Server): Promise<number> {
 }
 
 /**
- * Boot a real AppKit app for testing — real Express wiring, real routes, real
- * resource validation — with no workspace, no credentials, and no network.
+ * Boot a real app — real Express wiring, routes, and resource validation — with
+ * no workspace, credentials, or network. `createTestPluginContext` is cheaper
+ * when you only need to unit-test wiring.
  *
- * Use this to test a plugin end-to-end through HTTP. For unit-testing plugin
- * wiring without binding a socket, `createTestPluginContext` is cheaper.
- *
- * What it does **not** check: config values against `manifest.config.schema`.
- * No runtime validator exists for that; `enforceValidation()` checks env-var
- * presence only.
+ * Does **not** validate config values against `manifest.config.schema`; no
+ * runtime validator exists for that.
  *
  * @example
  * ```ts
@@ -220,9 +183,6 @@ export async function createTestApp<T extends Plugins>(
   } = options;
 
   if (nodeEnv === "development") {
-    // Refused rather than worked around: the RangeError from get-port must never
-    // reach the caller, and dev mode changes validation and plugin filtering in
-    // ways that would make the harness unrepresentative anyway.
     throw new Error(
       'createTestApp: nodeEnv "development" is not supported. Dev mode routes ' +
         "the harness's ephemeral `port: 0` through get-port, which throws a " +
@@ -233,56 +193,39 @@ export async function createTestApp<T extends Plugins>(
     );
   }
 
-  // 1. Join the shared env baseline. Snapshotting wholesale (rather than a
-  //    whitelist) is still right — plugins read vars the harness cannot
-  //    enumerate — but the baseline and the restore are process-wide, not
-  //    per-app, so overlapping boots compose.
+  // Wholesale rather than a whitelist: plugins read vars we cannot enumerate.
   acquireEnvBaseline();
   const restoreEnv = releaseEnvBaseline;
 
   let app: Awaited<ReturnType<typeof createApp>> | undefined;
 
   try {
-    // 2. Pin NODE_ENV away from development (see the guard above).
     process.env.NODE_ENV = nodeEnv;
 
-    // 3. Belt-and-braces on the validation posture. Step 2 already guarantees
-    //    it: enforceValidation() computes `shouldThrow = !isDevelopment ||
-    //    strict`, so with NODE_ENV pinned away from "development" a missing
-    //    required resource throws regardless of this flag. It is set anyway so
-    //    the contract survives a future change to the NODE_ENV pin.
-    //
-    //    There is deliberately no opt-out: an option to downgrade validation to
-    //    a warning could not work here, since that path is reachable only in
-    //    development mode, which the harness refuses.
+    // Redundant while NODE_ENV is pinned, but keeps the throw-on-missing-resource
+    // contract if that pin ever changes. No opt-out: the warning path is
+    // dev-only, and dev is refused.
     process.env.APPKIT_STRICT_VALIDATION = "true";
 
-    // 4. DATABRICKS_WORKSPACE_ID short-circuits the SCIM probe in
-    //    getWorkspaceId, which would otherwise be an apiClient.request call and
-    //    pollute request assertions.
+    // The workspace ID short-circuits getWorkspaceId's SCIM probe, which would
+    // otherwise show up as an apiClient.request call.
     setupDatabricksEnv({
       DATABRICKS_WORKSPACE_ID: "test-workspace-id",
       ...env,
     });
 
-    // 5. Drop any singletons a previous test leaked.
     resetAppKitSingletons();
 
-    // 6. The data-plane fake. createApp({ client }) runs ServiceContext
-    //    .createContext for real, which reads currentUser.id — the mock's
-    //    built-in currentUser.me default is what makes the boot possible.
+    // Boot runs ServiceContext.createContext for real, which reads
+    // currentUser.id — the mock's built-in default is what lets it through.
     const client = suppliedClient ?? createMockWorkspaceClient({ responses });
 
-    // 7. Inject a server plugin unless the caller supplied one. createApp
-    //    auto-adds only uiVariants(), never a server, so without this there is
-    //    no listener to fetch against. Reached through a lazy import because
-    //    the server plugin runs dotenv.config() at module load — a static
-    //    import would mutate a consumer's env merely by importing this kit.
+    // createApp never auto-adds a server, so without this there is nothing to
+    // fetch. Lazily imported: the plugin runs dotenv.config() at module load, so
+    // a static import would mutate a consumer's env on import of this kit.
     const hasServer = plugins.some((p) => p?.name === "server");
     if (serverOption === false && hasServer) {
-      // Refused rather than half-honoured: the supplied plugin would still bind
-      // a socket, while the handle reported no server and threw from `baseUrl`
-      // and `port`. Two contradictory instructions, so neither is guessed.
+      // The plugin would still bind a socket while the handle denied one existed.
       throw new Error(
         "createTestApp: `server: false` conflicts with the server plugin in " +
           "`plugins`. Drop one — omit `server: false` to use your plugin, or " +
@@ -295,10 +238,9 @@ export async function createTestApp<T extends Plugins>(
       bootPlugins.push(serverPlugin({ port: 0, host: "127.0.0.1" }));
     }
 
-    // 8. Both extras are load-bearing. Without explicit storage the cache
-    //    builds its own workspace client and probes Lakebase over the network;
-    //    without the telemetry opt-out, TelemetryReporter fires an
-    //    apiClient.request on boot.
+    // Both extras are load-bearing: without explicit storage the cache builds its
+    // own client and probes Lakebase over the network, and without the opt-out
+    // TelemetryReporter fires an apiClient.request on boot.
     app = await createApp({
       plugins: bootPlugins as Any,
       client,
@@ -308,7 +250,6 @@ export async function createTestApp<T extends Plugins>(
       disableInternalTelemetry: true,
     });
 
-    // 9. Resolve the port the OS actually assigned.
     const serverExports = (app as Any).server;
     const httpServer: Server | undefined =
       serverOption === false ? undefined : serverExports?.getServer?.();
@@ -318,7 +259,7 @@ export async function createTestApp<T extends Plugins>(
     const bootedApp = app;
     let closed: Promise<void> | undefined;
 
-    /** Teardown, memoized so repeated calls are safe in nested `finally`s. */
+    /** Memoized, so repeated calls are safe in nested `finally`s. */
     const close = () => {
       closed ??= (async () => {
         try {
@@ -326,8 +267,8 @@ export async function createTestApp<T extends Plugins>(
             closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
           );
         } finally {
-          // Belt and braces: close() resets these already, but a caller who
-          // supplied their own server plugin may have bypassed parts of it.
+          // close() resets these already; belt and braces for a caller who
+          // supplied their own server plugin.
           resetAppKitSingletons();
           restoreEnv();
         }
@@ -402,14 +343,12 @@ export async function createTestApp<T extends Plugins>(
       delete: (path, o) => request("DELETE", path, o),
     };
   } catch (err) {
-    // Boot failed — a plugin's setup() threw, or resource validation rejected.
-    // Teardown must still run, or the failure leaks env mutations and
-    // singletons into every later test in the file.
+    // Teardown must run from the failure path too, or the boot leaks env
+    // mutations and singletons into every later test in the file.
     try {
       await (app as Any)?.close?.();
     } catch {
-      // The boot error is the interesting one; a teardown failure on an
-      // half-built app must not mask it.
+      // The boot error is the interesting one; don't let teardown mask it.
     }
     resetAppKitSingletons();
     restoreEnv();

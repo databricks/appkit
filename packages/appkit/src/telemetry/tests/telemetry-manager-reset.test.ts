@@ -1,20 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 /**
- * Re-bootability coverage for TelemetryManager.
+ * `_initialize` builds no SDK without `OTEL_EXPORTER_OTLP_ENDPOINT`, so these set
+ * it and mock `NodeSDK` to make the shutdown path observable.
  *
- * `_initialize` returns early without building an SDK when
- * `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, so nothing about the shutdown path is
- * observable in the default test environment. These tests set the endpoint and
- * mock `NodeSDK` so repeated initialize/shutdown cycles can be asserted.
- *
- * The plan behind this work claimed a bug here — that a never-cleared
- * `shutdownPromise` made a second `shutdown()` return the first call's stale
- * promise and skip flushing a re-initialized SDK. That claim does not hold, and
- * the first test is what disproves it: `shutdown()` only returns the memo after
- * reassigning it for whatever SDK is currently live, so a stale promise can be
- * returned only when there is no SDK to flush. The behaviour is asserted here so
- * a future "cleanup" of that memo cannot silently change it.
+ * The never-cleared `shutdownPromise` was suspected of skipping a re-initialized
+ * SDK's flush. It does not — the memo is reassigned whenever an SDK is live — and
+ * the first test pins that so a future "cleanup" cannot change it.
  */
 
 const { sdkShutdown, NodeSDKMock } = vi.hoisted(() => {

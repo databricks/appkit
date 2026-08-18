@@ -14,12 +14,8 @@ import { server as serverPlugin } from "../../plugins/server";
 import { createApp } from "../appkit";
 
 /**
- * Integration coverage for the app handle's `close()`.
- *
- * Deliberately unmocked: the whole claim is that `close()` releases *real*
- * resources — a bound socket, the plugin hooks, the signal handlers — so a
- * mocked lifecycle would assert nothing. Every boot here uses `port: 0` so the
- * OS assigns an ephemeral port and the suite stays parallel-safe.
+ * Deliberately unmocked — the claim is that `close()` releases *real* resources,
+ * so a mocked lifecycle would assert nothing. `port: 0` keeps it parallel-safe.
  */
 
 /** Minimal plugin with a route, so there is something real to serve. */
@@ -219,15 +215,9 @@ describe("app handle close()", () => {
     expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
   });
   /**
-   * Compile-time contract for the return-type widening, enforced by `tsc --noEmit`
-   * rather than at runtime.
-   *
-   * `createApp` used to return `PluginMap<T>` and now returns
-   * `AppHandle<T>` (= `PluginMap<T>` plus `close()` and `Symbol.asyncDispose`).
-   * That is only source-compatible if `AppHandle` really is assignable to
-   * `PluginMap` — so an existing caller who annotated the old type still compiles.
-   * A regression in that type algebra would break every such caller without
-   * failing a single runtime assertion, which is why this lives here.
+   * Enforced by `tsc --noEmit`, not at runtime: the widening to `AppHandle<T>` is
+   * only source-compatible if it stays assignable to `PluginMap<T>`, and a
+   * regression there would break existing callers without failing any assertion.
    */
   describe("createApp return-type widening is source-compatible", () => {
     test("an AppHandle still satisfies a PluginMap annotation", async () => {

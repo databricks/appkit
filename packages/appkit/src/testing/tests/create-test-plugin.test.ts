@@ -5,11 +5,8 @@ import { Plugin, toPlugin } from "../../plugin";
 import { createTestPlugin } from "../create-test-plugin";
 
 /**
- * Coverage for the `createTestPluginContext` unit path's ergonomics.
- *
- * The behaviour that matters is the *merge*: an instance built by hand skips
- * DEFAULT_CONFIG and forgets `name`, so it is configured differently from the one
- * production builds — and a test against it can pass for the wrong reason.
+ * The behaviour that matters is the merge: an instance built by hand skips
+ * DEFAULT_CONFIG and forgets `name`, so a test against it can pass wrongly.
  */
 
 interface WidgetConfig extends BasePluginConfig {

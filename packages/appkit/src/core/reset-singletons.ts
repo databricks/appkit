@@ -7,20 +7,11 @@ import { TelemetryManager } from "../telemetry";
 const logger = createLogger("lifecycle");
 
 /**
- * Drop the four process-wide singletons `AppKit._createApp` initializes, so a
- * later `createApp()` builds fresh ones.
+ * Drop the four singletons `AppKit._createApp` initializes.
  *
- * These are **pointer drops, not teardown**. Callers close first, then reset —
- * resetting a live app leaks whatever its cache storage and exporters hold. The
- * two callers both honour that: `LifecycleManager.close()` runs the shutdown
- * phases first, and the published `resetAppKitSingletons()` documents the order.
- *
- * Symmetry is the justification for the set: core initialized all four in
- * `_createApp`, so core drops all four. This is a semantic expansion rather than
- * purely a bug fix — a host that closes and then expects `ServiceContext.get()`
- * to work will now get an `InitializationError`.
- *
- * Each reset is isolated so one failure cannot skip the others.
+ * Pointer drops, not teardown — callers close first, or the old app's storage and
+ * exporters leak. Core initializes all four, so core drops all four; a host that
+ * closes then calls `ServiceContext.get()` will get an `InitializationError`.
  *
  * @internal
  */

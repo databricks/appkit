@@ -8,16 +8,10 @@ import { describe, expect, test } from "vitest";
 import { Plugin, toPlugin } from "../../plugin";
 
 /**
- * The acceptance test for the whole published surface.
- *
- * Everything the *test* needs comes from `@databricks/appkit/testing` and
- * nothing else — no `@tools/test-helpers` shim, no deep import of
- * `../context/service-context` to reach a reset. If a plugin author outside this
- * repo can write this file, the surface is self-sufficient.
- *
- * `Plugin`/`toPlugin` are imported from the main entry because they are how you
- * *write* a plugin, not how you test one; an external author gets them from
- * `@databricks/appkit`.
+ * Acceptance test for the published surface: everything the test needs comes from
+ * `@databricks/appkit/testing` — no `@tools` shim, no deep imports.
+ * `Plugin`/`toPlugin` come from the main entry because they are how you *write* a
+ * plugin, not how you test one.
  */
 
 class WidgetPlugin extends Plugin {

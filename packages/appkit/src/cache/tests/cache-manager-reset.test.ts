@@ -5,16 +5,9 @@ import { InitializationError } from "../../errors";
 import { InMemoryStorage } from "../storage/memory";
 
 /**
- * Re-bootability coverage for the cache singleton.
- *
- * This is the reset that actually fixes a bug. `getInstance()` returns the
- * existing instance when one is set, so after a shutdown has called
- * `cache.close()` -> `storage.close()`, the singleton still points at **closed**
- * storage. Under `PersistentStorage` that close is `pool.end()`, so the next
- * `createApp()` silently reuses a dead `pg.Pool`.
- *
- * Every test passes explicit `storage` so `CacheManager.create` takes the
- * provided-storage branch and never probes Lakebase over the network.
+ * `getInstance()` returns the existing instance, so after `cache.close()` the
+ * singleton still points at closed storage — under `PersistentStorage` an ended
+ * `pg.Pool`. Every test passes explicit `storage` so nothing probes Lakebase.
  */
 describe("CacheManager.reset", () => {
   beforeEach(() => {

@@ -46,49 +46,23 @@ export class LifecycleManager {
    */
   private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
-  /**
-   * Default budget for {@link close}. Deliberately shorter than
-   * {@link SHUTDOWN_TIMEOUT_MS}: the signal path is racing a container's kill
-   * deadline and wants every available second, whereas a programmatic caller
-   * (a test harness, an embedding host) wants its `await` back promptly.
-   */
+  /** Shorter than the signal path's: a programmatic caller wants its await back. */
   private static readonly CLOSE_TIMEOUT_MS = 5_000;
 
   /**
-   * The in-flight teardown, memoized. Guards against re-entrant shutdown
-   * (e.g. SIGTERM followed by SIGINT) *and* gives every later caller
-   * something to await.
-   *
-   * This replaces an `isShuttingDown` boolean, which made a second caller
-   * return immediately while teardown was still running. Harmless for a
-   * signal — the first caller exits the process anyway — but for `close()` it
-   * would resolve before resources were released, which is the difference
-   * between a correct handle and a misleading one.
+   * The in-flight teardown, memoized. A boolean guard would let a second caller
+   * return while teardown was still running — fine for a signal, wrong for
+   * `close()`, which must not resolve before resources are released.
    */
   private teardown: Promise<number> | undefined;
-  /**
-   * Name of the shutdown phase currently in flight, so the force-exit log
-   * can say where shutdown got stuck without extra bookkeeping.
-   */
+  /** Reported by the force-exit log so a stuck shutdown names its phase. */
   private shutdownPhase = "not started";
-  /**
-   * The exact `[signal, handler]` pairs this instance registered, so
-   * {@link close} can remove its own listeners and nothing else.
-   */
+  /** Retained so {@link close} removes its own listeners and nothing else. */
   private signalHandlers: [NodeJS.Signals, () => void][] = [];
 
   constructor(private readonly context: PluginContext) {}
 
-  /**
-   * Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}.
-   *
-   * Uses `process.once` (not `on`) so a repeated signal cannot register the
-   * handler twice; re-entrancy from a *different* signal is guarded by the
-   * {@link teardown} memo.
-   *
-   * The handler references are retained because anonymous arrows cannot be
-   * removed later — {@link close} needs to detach exactly these.
-   */
+  /** Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}. */
   installSignalHandlers(): void {
     this.signalHandlers = [
       ["SIGTERM", () => void this.shutdown()],
@@ -100,11 +74,8 @@ export class LifecycleManager {
   }
 
   /**
-   * Detach the signal handlers this instance installed.
-   *
-   * Removes the retained pairs individually rather than calling
-   * `removeAllListeners(signal)`, so a host process that embeds AppKit keeps
-   * its own SIGTERM/SIGINT handlers.
+   * Detach only this instance's handlers — never `removeAllListeners`, so an
+   * embedding host keeps its own.
    */
   removeSignalHandlers(): void {
     for (const [signal, handler] of this.signalHandlers) {
@@ -114,9 +85,8 @@ export class LifecycleManager {
   }
 
   /**
-   * Run the graceful-shutdown sequence and **exit the process**. This is the
-   * signal path; {@link close} is the programmatic one that runs the same
-   * phases without exiting.
+   * Run the graceful-shutdown sequence and **exit the process**. See
+   * {@link close} for the non-exiting twin.
    *
    * Phases:
    * 1. stop the internal-telemetry reporter
@@ -130,20 +100,14 @@ export class LifecycleManager {
    * shutdown is not a crash. Exit 1 is reserved for an unexpected error
    * thrown by the sequence itself.
    *
-   * One behaviour changed when `close()` was added: a *second* signal now
-   * awaits the first teardown instead of returning immediately. The first
-   * caller still exits the process, so this is unobservable in production.
+   * A second signal now awaits the first teardown rather than returning at once;
+   * the first caller still exits, so this is unobservable in production.
    */
   async shutdown(): Promise<void> {
-    // Force exit once the overall budget is spent. Exit 0 is deliberate:
-    // a force-timeout still happens on a routine deploy (deliberate
-    // shutdown, not a crash), and orchestrators record nonzero exits on
-    // deploys as crashes. The error log below is the stuck-shutdown
-    // signal instead of the exit code.
-    //
-    // The timer lives here rather than in the phase runner because it is the
-    // one thing `close()` must not inherit: a programmatic caller wants a
-    // rejected/logged promise when teardown hangs, not a dead process.
+    // Exit 0 on force-timeout: a stuck deploy shutdown is not a crash, and
+    // orchestrators read nonzero deploy exits as one. The error log is the
+    // signal instead. Lives here, not in runPhases, because close() must not
+    // inherit it.
     const forceExitTimer = setTimeout(() => {
       logger.error(
         "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
@@ -152,11 +116,8 @@ export class LifecycleManager {
       );
       process.exit(0);
     }, LifecycleManager.SHUTDOWN_TIMEOUT_MS);
-    // unref so this backstop timer never by itself keeps the process alive.
-    // Any real pending teardown (OTEL export timer, DB pool sockets, the
-    // still-open HTTP listener) is a ref'd handle that holds the loop open
-    // until this fires; if nothing is ref'd, there is nothing left to tear
-    // down and exiting early is correct.
+    // unref'd so the backstop alone never holds the process open; real pending
+    // teardown is ref'd and keeps the loop alive until this fires.
     forceExitTimer.unref();
 
     const exitCode = await this.runOnce();
@@ -166,32 +127,16 @@ export class LifecycleManager {
   }
 
   /**
-   * Release everything AppKit acquired **without terminating the process**.
+   * Release everything AppKit acquired **without terminating the process** —
+   * same phases and per-phase budgets as {@link shutdown}, no `process.exit`.
    *
-   * The programmatic twin of {@link shutdown}: same phases, same per-phase
-   * budgets, no `process.exit` and no force-exit timer. This is what makes an
-   * app handle's `close()` — and therefore repeated boots inside one test file
-   * — possible.
-   *
-   * Signal handlers are detached **before the first `await`**, which shrinks
-   * the SIGTERM-mid-close window to near zero. The four orderings:
-   *
-   * | Order | Outcome |
-   * | --- | --- |
-   * | `close()` twice | Second awaits the same memo; teardown runs once |
-   * | `close()` then SIGTERM | AppKit no longer listens, so Node's default terminates. Correct: the host asked AppKit to release its resources, and owns its own signal policy from then on. |
-   * | SIGTERM mid-`close()` | Narrow window; the handler joins the memo and then exits. **The signal wins** — it wanted the process dead — so `close()`'s promise never settles. Documented, not "fixed". |
-   * | SIGTERM then `close()` | `close()` joins the memo; the signal path exits when the phases finish |
-   *
-   * Never throws: a hung phase is logged (naming the phase) and `close()`
-   * resolves once its budget is spent, so an `afterEach` cannot hang forever.
-   *
-   * @param options.timeoutMs - Overall budget. Defaults to
-   *   {@link LifecycleManager.CLOSE_TIMEOUT_MS}.
+   * Handlers are detached before the first `await`, so the SIGTERM-mid-close
+   * window is near zero; if one does land there the signal wins and this promise
+   * never settles. Never throws — a hung phase is logged and `close()` resolves
+   * once its budget is spent, so an `afterEach` cannot hang.
    */
   async close(options: { timeoutMs?: number } = {}): Promise<void> {
-    // Before the first await: a signal arriving after this point finds no
-    // AppKit listener, so it cannot re-enter the sequence.
+    // Before the first await, so a later signal finds no AppKit listener.
     this.removeSignalHandlers();
 
     const timeoutMs = options.timeoutMs ?? LifecycleManager.CLOSE_TIMEOUT_MS;
@@ -207,42 +152,23 @@ export class LifecycleManager {
       );
     }
 
-    // Only on this path. On the signal path the process is dying, so dropping
-    // singleton pointers is pure cost. Safe here because the phases above
-    // already closed the cache storage and flushed telemetry, so these are
-    // pointer drops over released resources.
+    // close() only — on the signal path the process is dying and this is pure cost.
     resetCoreSingletons();
   }
 
-  /**
-   * Memoize the teardown so it runs exactly once and every caller awaits the
-   * same result.
-   *
-   * There must be no `await` between reading and assigning `this.teardown` —
-   * that gap is precisely the re-entrancy window the old synchronous
-   * `isShuttingDown` flag was protecting.
-   */
+  /** No `await` between read and assign — that gap is the re-entrancy window. */
   private runOnce(): Promise<number> {
     this.teardown ??= this.runPhases();
     return this.teardown;
   }
 
-  /**
-   * Run the shutdown phases and report the exit code the signal path should
-   * use. Contains no process-termination concerns of its own.
-   */
+  /** Run the phases and report an exit code; no process-termination concerns. */
   private async runPhases(): Promise<number> {
     logger.info("Starting graceful shutdown...");
 
-    // Captured up front, before any `await`, and deliberately not re-read later.
-    //
-    // `close()` stops waiting once its budget is spent, and then resets the core
-    // singletons — but these phases keep running. Re-reading the static slots in
-    // phase 5 would therefore either find them empty (and silently skip draining
-    // this app's cache pool) or find the *next* app's singletons and tear those
-    // down instead. A plugin `shutdown()` hook taking longer than close()'s
-    // budget but under its own per-plugin budget is enough to reach that state,
-    // which the files plugin's 10s drain can do.
+    // Captured before the first await and never re-read: close() may give up
+    // waiting and reset the singletons while these phases still run, so phase 5
+    // would otherwise skip this app's pool or tear down the *next* app's.
     let capturedCache: CacheManager | undefined;
     try {
       capturedCache = CacheManager.getInstanceSync();
@@ -253,9 +179,7 @@ export class LifecycleManager {
     try {
       capturedTelemetry = TelemetryManager.getInstance();
     } catch {
-      // Unavailable (or mocked away in a test) — nothing to flush in phase 5.
-      // Reading it here rather than inside the phase means a resolution failure
-      // would otherwise escape the phase's own error isolation.
+      // Unavailable or mocked away — nothing to flush.
     }
 
     let exitCode = 0;
@@ -333,13 +257,7 @@ export class LifecycleManager {
     return exitCode;
   }
 
-  /**
-   * Close the cache storage, bounded and error-isolated.
-   *
-   * Takes the manager as an argument rather than reading the singleton, because
-   * this phase can run *after* `close()` has already given up waiting and reset
-   * the static slots — see the capture in {@link runPhases}.
-   */
+  /** Bounded and error-isolated. Takes the manager — see the capture in {@link runPhases}. */
   private async closeCacheStorage(
     cache: CacheManager | undefined,
   ): Promise<void> {
@@ -358,12 +276,7 @@ export class LifecycleManager {
     }
   }
 
-  /**
-   * Flush and shut down the telemetry SDK, bounded and error-isolated.
-   *
-   * Takes the manager as an argument for the same reason as
-   * {@link closeCacheStorage} — see the capture in {@link runPhases}.
-   */
+  /** Bounded and error-isolated. Takes the manager — see {@link closeCacheStorage}. */
   private async flushTelemetry(
     telemetry: TelemetryManager | undefined,
   ): Promise<void> {
