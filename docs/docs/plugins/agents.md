@@ -6,7 +6,7 @@ This plugin is currently **beta**. APIs may change between minor releases. Impor
 :::
 <!-- AUTO-GENERATED: stability-banner-end -->
 
-The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown on disk (one folder per agent: `config/agents/<id>/agent.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` and `POST /responses` (non-streaming, aliases) alongside `POST /chat` (streaming) and routes for thread management, cancellation, and HITL approval.
+The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It discovers agent definitions from disk — one folder per agent under `server/agents/`, holding either `agent.md` (markdown) or `agent.ts` (code) — and exposes them at `POST /invocations` and `POST /responses` (non-streaming, aliases) alongside `POST /chat` (streaming) and routes for thread management, cancellation, and HITL approval. In every case the agent's id is its folder name; there's no map to maintain and no id to restate.
 
 This page covers the full lifecycle. For the hand-written primitives (`tool()`, `mcpServer()`), see [tools](./server.md).
 
@@ -37,14 +37,15 @@ That alone gives you a live HTTP server with `POST /invocations` (and its alias 
 
 ## Level 1: drop a markdown agent package
 
-Each agent lives in its own directory with a fixed entry file `agent.md`. A reserved top-level folder named `skills` is ignored until per-agent skills ship (you can add other asset folders beside `agent.md` under each agent id).
+Each agent lives in its own folder under `server/agents/` with entry file `agent.md`. A folder is an agent only if it holds an entry file (`agent.md` or `agent.ts`); a folder without one is skipped, so per-agent asset folders like `skills/` sit beside the entry.
 
 ```
 my-app/
-  server.ts
-  config/agents/
-    assistant/
-      agent.md
+  server/
+    server.ts
+    agents/
+      assistant/
+        agent.md
 ```
 
 ```md
@@ -60,12 +61,16 @@ Use the available tools to query data, browse files, and help users.
 
 On startup the plugin:
 
-1. Discovers `./config/agents/assistant/agent.md` and registers agent id `assistant`.
+1. Discovers `server/agents/assistant/agent.md` and registers agent id `assistant`.
 2. Parses the YAML frontmatter and markdown body as the agent's `instructions`.
 3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_AGENT_ENDPOINT`).
 4. Mounts the agent at the default name (`assistant`).
 
 The agent starts with **no tools**. Tools are opt-in — declare them in frontmatter (Level 2 below) or opt into auto-inherit explicitly with `agents({ autoInheritTools: { file: true } })`. See "Auto-inherit posture" further down for what that costs and why it's off by default.
+
+:::note Migrating from `config/agents/`
+Earlier versions kept markdown agents under `config/agents/<id>/agent.md`. That location is still read as a deprecated fallback (one-time warning on boot); move each folder to `server/agents/<id>/agent.md` so every agent — markdown and code — lives in one place.
+:::
 
 Requests land at `POST /invocations` (or its alias `POST /responses`) with an OpenAI Responses-compatible body. These endpoints run the agent to completion and return a single JSON response — no SSE. Streaming clients should use `POST /chat`. Every tool call runs through `asUser(req)` so SQL executes as the requesting user, file access respects Unity Catalog ACLs, and telemetry spans are created automatically.
 
@@ -100,12 +105,14 @@ When any `tools:` is declared the auto-inherit default is turned off — the age
 
 ## Level 3: code-defined agents
 
+Code agents live one-per-folder under `server/agents/`, with entry file `agent.ts` (mirroring markdown's `agent.md`). The entry exports a created agent and its **id is the folder name** (`server/agents/support/agent.ts` → `support`). Nothing restates the id.
+
 ```ts
-import { analytics, createApp, files, server } from "@databricks/appkit";
-import { agents, createAgent, tool } from "@databricks/appkit/beta";
+// server/agents/support/agent.ts
+import { createAgent, tool } from "@databricks/appkit/beta";
 import { z } from "zod";
 
-const support = createAgent({
+export default createAgent({           // id derived from folder name: "support"
   instructions: "You help customers with data and files.",
   model: "databricks-claude-sonnet-4-5",                      // string sugar
   tools(plugins) {
@@ -120,17 +127,37 @@ const support = createAgent({
     };
   },
 });
+```
+
+The `agents` plugin discovers these files at startup — no registration, no map:
+
+```ts
+// server/server.ts
+import { analytics, createApp, files, server } from "@databricks/appkit";
+import { agents } from "@databricks/appkit/beta";
 
 await createApp({
-  plugins: [server(), analytics(), files(), agents({ agents: { support } })],
+  plugins: [server(), analytics(), files(), agents()],   // no agent map, no import
 });
 ```
 
+Discovery imports each `server/agents/<id>/agent.ts` — the source `.ts` under `tsx` in dev, and the compiled `dist/agents/<id>/agent.js` in a production build (built output wins over source, independent of `NODE_ENV`). Because the production server is bundled and only imports things reachable from `server/server.ts`, the template's `tsdown` config lists `server/agents/*/agent.ts` as build entries so `dist/agents/*/agent.js` are emitted for the scan — that wiring is what lets a dropped-in folder survive the prod bundle. (Markdown `agent.md` is read from source in both dev and prod — it's data, not compiled.) The root is `server/agents` by default; override with `agents({ dir })` (a relative path is resolved built-first the same way; an absolute path is scanned verbatim; `false` disables discovery, including the `config/agents/` fallback).
+
+:::note Built output shadows source in dev
+Because compiled output wins over source, a stale `dist/agents` / `build/agents` left over from a previous `npm run build` will be picked up by `npm run dev` instead of your live `server/agents/*.ts`, so edits appear ignored. Delete the build dir (or re-run the build) if a code agent seems frozen. Markdown is always read from source, so `agent.md` edits are never shadowed.
+:::
+
+The entry may `export default createAgent({...})` or export a single named created agent; either way the id is the folder name. A folder whose entry exports no created agent (or has no `agent.ts`/`agent.md` at all) is skipped. Mark one agent as the default with `createAgent({ default: true })` (mirrors markdown frontmatter `default: true`); an explicit `agents({ defaultAgent })` still wins.
+
 Code-defined agents start with no tools by default. The function form `tools(plugins) => Record<string, AgentTool>` is the primary way to pull in plugin tools: each plugin registered in `createApp({ plugins: [...] })` shows up on the `plugins` parameter, and you call `.toolkit(opts?)` on it to get a spread-friendly record. The runtime invokes the function once at agent setup and caches the result — every plugin is mentioned exactly once (in `createApp`), with no held variables or marker imports.
 
-Inline `tool({...})` calls live in the same record. `name` is optional — the agents plugin overrides it with the record key (`get_weather` above).
+Inline `tool({...})` calls live in the same record. Their `name` is optional — the agents plugin overrides it with the record key (`get_weather` above).
 
 The asymmetry (file: auto-inherit, code: strict) matches the personas: prompt authors want zero ceremony, engineers want no surprises.
+
+:::warning Deprecated: the `agents({ agents: { ... } })` map
+Passing a hand-built agent map still works and is honored for backward compatibility, but it emits a one-time deprecation warning and will be removed in a future minor. It restates each agent's id (once in `createAgent`, once as the map key); discovery from `server/agents/` removes both the map and the restatement. Migrate by moving each `createAgent(...)` into its own `server/agents/<id>/agent.ts` (default or single named export) and dropping the map. A discovered agent and a map entry may not share an id. (Inline sub-agents — `createAgent({ agents: { ... } })` on a definition — are unaffected; only the plugin-level map is deprecated.)
+:::
 
 ### Scoping tools in code
 
@@ -167,15 +194,15 @@ const supervisor = createAgent({
   agents: { researcher, writer },  // exposed as agent-researcher, agent-writer
 });
 
+// server/agents/{supervisor,researcher,writer}/agent.ts — one folder each
+export default supervisor;
+
 await createApp({
-  plugins: [
-    server(),
-    agents({ agents: { supervisor, researcher, writer } }),
-  ],
+  plugins: [server(), agents()],  // discovered from server/agents/
 });
 ```
 
-Each key in `agents: {...}` on an `AgentDefinition` becomes an `agent-<key>` tool on the parent. When invoked, the agents plugin runs the child's adapter with a fresh message list (no shared thread state) and returns the aggregated text. Cycles are rejected at load time.
+Put `supervisor`, `researcher`, and `writer` in their own `server/agents/<id>/agent.ts` folders (default export each) — a markdown parent can also delegate to a code child in a sibling folder via `agents: [helper]` frontmatter. Each key in `agents: {...}` on an `AgentDefinition` becomes an `agent-<key>` tool on the parent. When invoked, the agents plugin runs the child's adapter with a fresh message list (no shared thread state) and returns the aggregated text. Cycles are rejected at load time.
 
 ## Level 5: standalone (no `createApp`)
 
@@ -351,8 +378,8 @@ Some hosted tool kinds return their final assistant text without incremental `ou
 
 ```ts
 agents({
-  dir?: string | false,         // "./config/agents" default; false disables
-  agents?: Record<string, AgentDefinition>,
+  dir?: string | false,         // agents root; "server/agents" default; false disables (config/agents read as deprecated fallback)
+  agents?: Record<string, AgentDefinition>,  // DEPRECATED — use server/agents/<id>/ discovery
   defaultAgent?: string,
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string,
   tools?: Record<string, AgentTool>,

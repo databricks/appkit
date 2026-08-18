@@ -184,14 +184,10 @@ describe("loadAgentsFromDir", () => {
     );
   });
 
-  test("throws when a subdirectory lacks agent.md", async () => {
-    fs.mkdirSync(path.join(workDir, "broken"), { recursive: true });
-    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
-      /must contain agent\.md/,
-    );
-  });
-
-  test("ignores reserved skills directory without agent.md", async () => {
+  test("skips a subdirectory that lacks agent.md", async () => {
+    // A folder with no agent.md is a code-agent folder (agent.ts) or an asset
+    // dir (skills/), not a markdown agent — skip it, don't throw.
+    fs.mkdirSync(path.join(workDir, "code-only"), { recursive: true });
     fs.mkdirSync(path.join(workDir, "skills"), { recursive: true });
     writeAgent("solo", "---\nendpoint: e\n---\nOnly real agent.");
     const res = await loadAgentsFromDir(workDir, {});

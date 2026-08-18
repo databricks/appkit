@@ -127,7 +127,7 @@ export interface AgentDefinition {
   /**
    * Stable identifier for the agent. **Optional and informational** —
    * when the definition is registered via `agents: { foo: def }` (code) or
-   * lives at `config/agents/<id>/agent.md` (markdown), the **registry key
+   * lives at `server/agents/<id>/agent.md` (markdown), the **registry key
    * always wins** and `name` is ignored. The agent will be reachable as
    * `foo` (or `<id>`) regardless of what this field contains.
    *
@@ -143,6 +143,13 @@ export interface AgentDefinition {
    * entirely.
    */
   name?: string;
+  /**
+   * Marks this agent as the default one chosen when a client doesn't name an
+   * agent. Mirrors markdown frontmatter `default: true`. When several agents
+   * set it, the first in stable id order wins; an explicit
+   * `agents({ defaultAgent })` always overrides it. Defaults to `false`.
+   */
+  default?: boolean;
   /** System prompt body. For markdown-loaded agents this is the file body. */
   instructions: string;
   /**
@@ -207,9 +214,28 @@ export interface AutoInheritToolsConfig {
 }
 
 export interface AgentsPluginConfig extends BasePluginConfig {
-  /** Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable. */
+  /**
+   * Unified agents root. Each `<id>/` folder holds either `agent.md` (markdown)
+   * or `agent.ts` (code, `export default createAgent({ ... })`); the folder
+   * name is the agent id. Default `server/agents` — leave unset. In a built
+   * server, code agents are loaded from the compiled output (`dist/<name>` /
+   * `build/<name>`, where `<name>` is this dir's basename) and markdown is read
+   * from source. A **relative** custom path is resolved this way too; an
+   * **absolute** path is scanned verbatim (you own compiling it for prod). Set
+   * to `false` to disable all file discovery — including the `config/agents/`
+   * fallback below. Markdown still under `config/agents/` is otherwise read as a
+   * deprecated fallback (one-time warning).
+   */
   dir?: string | false;
-  /** Code-defined agents, merged with file-loaded ones (code wins on key collision). */
+  /**
+   * @deprecated Put each code agent in its own folder under
+   * `server/agents/<id>/agent.ts` (`export default createAgent({ ... })`); it is
+   * discovered automatically at startup and the call collapses to
+   * `agents({ ... })` with no map. Still honored for backward compatibility
+   * (emits a one-time deprecation warning) but will be removed in a future
+   * minor. If both discovery and this map define the same id, discovery wins
+   * and the map entry is ignored.
+   */
   agents?: Record<string, AgentDefinition>;
   /** Agent used when clients don't specify one. Defaults to the first-registered agent or the file with `default: true` frontmatter. */
   defaultAgent?: string;

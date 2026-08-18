@@ -14,13 +14,21 @@ Base configuration interface for AppKit plugins
 
 ## Properties
 
-### agents?
+### ~~agents?~~
 
 ```ts
 optional agents: Record<string, AgentDefinition>;
 ```
 
-Code-defined agents, merged with file-loaded ones (code wins on key collision).
+#### Deprecated
+
+Put each code agent in its own folder under
+`server/agents/<id>/agent.ts` (`export default createAgent({ ... })`); it is
+discovered automatically at startup and the call collapses to
+`agents({ ... })` with no map. Still honored for backward compatibility
+(emits a one-time deprecation warning) but will be removed in a future
+minor. If both discovery and this map define the same id, discovery wins
+and the map entry is ignored.
 
 ***
 
@@ -112,7 +120,16 @@ Default model for agents that don't specify their own (in code or frontmatter).
 optional dir: string | false;
 ```
 
-Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable.
+Unified agents root. Each `<id>/` folder holds either `agent.md` (markdown)
+or `agent.ts` (code, `export default createAgent({ ... })`); the folder
+name is the agent id. Default `server/agents` — leave unset. In a built
+server, code agents are loaded from the compiled output (`dist/<name>` /
+`build/<name>`, where `<name>` is this dir's basename) and markdown is read
+from source. A **relative** custom path is resolved this way too; an
+**absolute** path is scanned verbatim (you own compiling it for prod). Set
+to `false` to disable all file discovery — including the `config/agents/`
+fallback below. Markdown still under `config/agents/` is otherwise read as a
+deprecated fallback (one-time warning).
 
 ***
 

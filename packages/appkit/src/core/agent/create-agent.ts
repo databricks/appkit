@@ -2,13 +2,23 @@ import { ConfigurationError } from "../../errors";
 import type { AgentDefinition } from "./types";
 
 /**
- * Pure factory for agent definitions. Returns the passed-in definition after
- * cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape
- * and is safe to call at module top-level.
+ * Non-enumerable brand stamped on every {@link createAgent} result. The
+ * code-agent loader ({@link loadCodeAgentsFromDir}) uses it to tell a real
+ * agent export from any other value a module in `server/agents/` might
+ * export, without duck-typing or guessing from the filename.
  *
- * The returned value is a plain `AgentDefinition` — no adapter construction,
- * no side effects. Register it with `agents({ agents: { name: def } })` or run
- * it standalone via `runAgent(def, input)`.
+ * A registered (`Symbol.for`) symbol so the check still holds if two copies
+ * of the package end up loaded in one process — the app's agent files and
+ * the plugin can resolve `@databricks/appkit` independently.
+ */
+const AGENT_BRAND: unique symbol = Symbol.for("appkit.agent");
+
+/**
+ * Pure factory for agent definitions: cycle-detects the sub-agent graph and
+ * returns the same object, stamped with a non-enumerable {@link AGENT_BRAND}
+ * so discovery recognizes it. Safe at module top-level; no adapter is built.
+ * Don't `Object.freeze` the definition before passing it in — the brand is
+ * written onto the argument.
  *
  * @example
  * ```ts
@@ -23,7 +33,25 @@ import type { AgentDefinition } from "./types";
  */
 export function createAgent(def: AgentDefinition): AgentDefinition {
   detectCycles(def);
+  // Non-enumerable + in-place: identity, JSON, and spread are unaffected.
+  Object.defineProperty(def, AGENT_BRAND, {
+    value: true,
+    enumerable: false,
+    configurable: true,
+  });
   return def;
+}
+
+/**
+ * Type guard: true when `value` was produced by {@link createAgent}. Used by
+ * the code-agent loader to pick the agent export out of a discovered module.
+ */
+export function isCreatedAgent(value: unknown): value is AgentDefinition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<PropertyKey, unknown>)[AGENT_BRAND] === true
+  );
 }
 
 /**

@@ -206,13 +206,11 @@ export async function loadAgentsFromDir(
     );
   }
 
-  /** Reserved folder name until per-agent skills land; not an agent package. */
-  const RESERVED_DIRS = new Set(["skills"]);
-
   const agentIds = entries
-    .filter((e) => e.isDirectory())
+    // Symlinked agent folders count; a symlink to a file is filtered out below
+    // when reading agent.md (ENOTDIR).
+    .filter((e) => e.isDirectory() || e.isSymbolicLink())
     .map((e) => e.name)
-    .filter((name) => !RESERVED_DIRS.has(name))
     .sort();
 
   const defs: Record<string, AgentDefinition> = {};
@@ -226,11 +224,10 @@ export async function loadAgentsFromDir(
     try {
       raw = await fs.readFile(agentPath, "utf-8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `Agents subdirectory '${path.join(dir, id)}' must contain agent.md.`,
-        );
-      }
+      // No agent.md → a code-agent folder (agent.ts) or an asset dir (skills/);
+      // ENOTDIR → the entry is a symlink to a file, not an agent folder.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") continue;
       throw err;
     }
     defs[id] = buildDefinition(id, raw, agentPath, ctx);

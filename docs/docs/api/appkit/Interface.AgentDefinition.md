@@ -22,6 +22,19 @@ Override the plugin's baseSystemPrompt for this agent only.
 
 ***
 
+### default?
+
+```ts
+optional default: boolean;
+```
+
+Marks this agent as the default one chosen when a client doesn't name an
+agent. Mirrors markdown frontmatter `default: true`. When several agents
+set it, the first in stable id order wins; an explicit
+`agents({ defaultAgent })` always overrides it. Defaults to `false`.
+
+***
+
 ### ephemeral?
 
 ```ts
@@ -100,7 +113,7 @@ optional name: string;
 
 Stable identifier for the agent. **Optional and informational** —
 when the definition is registered via `agents: { foo: def }` (code) or
-lives at `config/agents/<id>/agent.md` (markdown), the **registry key
+lives at `server/agents/<id>/agent.md` (markdown), the **registry key
 always wins** and `name` is ignored. The agent will be reachable as
 `foo` (or `<id>`) regardless of what this field contains.
 
