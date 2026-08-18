@@ -381,4 +381,222 @@ describe("LifecycleManager", () => {
       onceSpy.mockRestore();
     });
   });
+  describe("close (the programmatic path)", () => {
+    test("runs the full teardown sequence without exiting the process", async () => {
+      const stop = vi.fn();
+      vi.mocked(TelemetryReporter.getInstance).mockReturnValue({
+        stop,
+      } as never);
+      const cacheClose = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
+        close: cacheClose,
+      } as never);
+      const telemetryShutdown = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
+        shutdown: telemetryShutdown,
+      } as never);
+
+      const abortActiveOperations = vi.fn();
+      const shutdown = vi.fn().mockResolvedValue(undefined);
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", abortActiveOperations, shutdown } as never,
+      });
+      const emit = vi.spyOn(ctx, "emitLifecycle");
+      const manager = new LifecycleManager(ctx);
+
+      await manager.close();
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(abortActiveOperations).toHaveBeenCalledTimes(1);
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(emit).toHaveBeenCalledWith("shutdown");
+      expect(cacheClose).toHaveBeenCalledTimes(1);
+      expect(telemetryShutdown).toHaveBeenCalledTimes(1);
+
+      // The whole point of the split.
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("is idempotent: teardown runs once and the second call awaits it", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      // Set only once the plugin hook has actually finished. Asserting against
+      // this flag (rather than counting microtask ticks) is what makes the test
+      // sensitive to a guard that returns early while teardown is in flight.
+      let teardownFinished = false;
+      const shutdown = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = () => {
+              teardownFinished = true;
+              resolve();
+            };
+          }),
+      );
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const observed: string[] = [];
+      const first = manager
+        .close()
+        .then(() => observed.push(`first:${teardownFinished}`));
+      const second = manager
+        .close()
+        .then(() => observed.push(`second:${teardownFinished}`));
+
+      // A full macrotask turn, so a guard that resolves the second caller
+      // early has every chance to settle before the assertion below.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(observed).toEqual([]);
+
+      releaseShutdown?.();
+      await Promise.all([first, second]);
+
+      // Both callers must observe a *completed* teardown. The old boolean
+      // guard resolved the second caller with teardown still running.
+      expect(observed).toEqual(
+        expect.arrayContaining(["first:true", "second:true"]),
+      );
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("a signal arriving after close() joins the same teardown, not a second one", async () => {
+      const shutdown = vi.fn().mockResolvedValue(undefined);
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+      manager.installSignalHandlers();
+
+      await manager.close();
+      // The signal path after a close: teardown is memoized, so the phases do
+      // not run twice even though shutdown() is still callable.
+      await manager.shutdown();
+
+      expect(shutdown).toHaveBeenCalledTimes(1);
+    });
+
+    test("close() after a signal-initiated teardown awaits the in-flight one", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      const shutdown = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = resolve;
+          }),
+      );
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const signalPath = manager.shutdown();
+      await Promise.resolve();
+
+      let closeSettled = false;
+      const closePath = manager.close().then(() => {
+        closeSettled = true;
+      });
+      await Promise.resolve();
+      expect(closeSettled).toBe(false);
+
+      releaseShutdown?.();
+      await Promise.all([signalPath, closePath]);
+
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(closeSettled).toBe(true);
+      // The signal wanted the process dead, and still gets it.
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    test("a rejecting plugin shutdown() is isolated and close() still resolves", async () => {
+      const ctx = contextWithPlugins({
+        bad: {
+          name: "bad",
+          shutdown: vi.fn().mockRejectedValue(new Error("teardown blew up")),
+        } as never,
+        good: {
+          name: "good",
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      await expect(manager.close()).resolves.toBeUndefined();
+      expect(mockLoggerError).toHaveBeenCalled();
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("a hung teardown is bounded by close()'s budget, logged, and never exits", async () => {
+      vi.useFakeTimers();
+      const ctx = contextWithPlugins({
+        stuck: {
+          name: "stuck",
+          shutdown: vi.fn(() => new Promise<void>(() => {})),
+        } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const closing = manager.close({ timeoutMs: 50 });
+      await vi.advanceTimersByTimeAsync(60);
+      await expect(closing).resolves.toBeUndefined();
+
+      // The error names the phase that was in flight, which is the whole
+      // reason the phase tracker is retained.
+      const logged = mockLoggerError.mock.calls
+        .map((c) => String(c[0]))
+        .join("\n");
+      expect(logged).toContain("close() did not complete");
+      const phases = mockLoggerError.mock.calls.flat().map(String).join(" ");
+      expect(phases).toContain("plugin shutdown() hooks");
+
+      // A hung teardown must not kill the process on the programmatic path.
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("signal-handler ownership", () => {
+    test("close() removes only this manager's listeners", async () => {
+      const foreign = vi.fn();
+      process.on("SIGTERM", foreign);
+      const baseline = process.listenerCount("SIGTERM");
+
+      const a = new LifecycleManager(contextWithPlugins({}));
+      const b = new LifecycleManager(contextWithPlugins({}));
+      a.installSignalHandlers();
+      b.installSignalHandlers();
+      expect(process.listenerCount("SIGTERM")).toBe(baseline + 2);
+
+      await a.close();
+
+      // b's pair survives, and so does the unrelated host listener.
+      expect(process.listenerCount("SIGTERM")).toBe(baseline + 1);
+
+      await b.close();
+      expect(process.listenerCount("SIGTERM")).toBe(baseline);
+      expect(process.listeners("SIGTERM")).toContain(foreign);
+
+      process.removeListener("SIGTERM", foreign);
+    });
+
+    test("listener counts return to the pre-install baseline", async () => {
+      const termBaseline = process.listenerCount("SIGTERM");
+      const intBaseline = process.listenerCount("SIGINT");
+
+      const manager = new LifecycleManager(contextWithPlugins({}));
+      manager.installSignalHandlers();
+      await manager.close();
+
+      // This is what keeps repeated boots in one test file from tripping
+      // MaxListenersExceededWarning at ~6 un-closed apps.
+      expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
+      expect(process.listenerCount("SIGINT")).toBe(intBaseline);
+    });
+
+    test("removeSignalHandlers is safe when none were installed", () => {
+      const manager = new LifecycleManager(contextWithPlugins({}));
+      expect(() => manager.removeSignalHandlers()).not.toThrow();
+    });
+  });
 });
