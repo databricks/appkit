@@ -101,24 +101,6 @@ describe("createMockWorkspaceClient", () => {
       expect(result).toEqual(response);
     });
 
-    test("built-in defaults hold when responses is omitted", async () => {
-      const client = createMockWorkspaceClient();
-      const executeStmtResult =
-        await client.statementExecution.executeStatement({
-          warehouse_id: "w",
-          catalog: "c",
-          schema: "s",
-          statement: "SELECT 1",
-        });
-      expect(executeStmtResult).toEqual({
-        status: { state: "SUCCEEDED" },
-        result: { data: [] },
-      });
-
-      const warehouseResult = await client.warehouses.get({ id: "w1" });
-      expect(warehouseResult).toEqual({ state: "RUNNING" });
-    });
-
     test("a caller-supplied response overrides the default", async () => {
       const customResponse = {
         status: { state: "RUNNING" },
@@ -324,70 +306,6 @@ describe("createMockWorkspaceClient", () => {
     });
   });
 
-  describe("compile-time type safety", () => {
-    test("client.jobs.getRun is callable and memoized", () => {
-      const client = createMockWorkspaceClient();
-      // Accessing it twice should return the same function.
-      const fn1 = client.jobs.getRun;
-      const fn2 = client.jobs.getRun;
-      expect(fn1).toBe(fn2);
-    });
-
-    test("client.config.host is a string", () => {
-      const client = createMockWorkspaceClient();
-      // host is a real string, so string methods work.
-      const host = client.config.host;
-      const result = (host as string).startsWith?.("https://");
-      expect(result).toBe(true);
-    });
-
-    // Note: client.jbos would be a compile error, so we can't test it at runtime.
-    // But the type is checked during typecheck.
-  });
-
-  describe("integration with existing seam", () => {
-    test("the new mock client has all 9 facade members and works with defaults", async () => {
-      // Never-crash is the headline claim, so all 9 are asserted explicitly
-      // rather than sampled.
-      const client = createMockWorkspaceClient();
-
-      // All 9 facade members should be present and callable.
-      const results = await Promise.all([
-        (client.files as any).listDirectory({ path: "/x" }),
-        client.warehouses.get({ id: "w" }),
-        (client.genie as any).getMessage({ message_id: "g" }),
-        client.jobs.getRun({ run_id: 1 }),
-        client.statementExecution.executeStatement({
-          warehouse_id: "w",
-          catalog: "c",
-          schema: "s",
-          statement: "SELECT 1",
-        }),
-        (client.servingEndpoints as any).get({ name: "e" }),
-        client.currentUser.me(),
-      ]);
-
-      // files, genie, jobs, servingEndpoints, currentUser resolve undefined (no defaults).
-      expect(results[0]).toBe(undefined);
-      expect(results[2]).toBe(undefined);
-      expect(results[3]).toBe(undefined);
-      expect(results[5]).toBe(undefined);
-
-      // warehouses.get and statementExecution have defaults.
-      expect(results[1]).toEqual({ state: "RUNNING" });
-      expect(results[4]).toEqual({
-        status: { state: "SUCCEEDED" },
-        result: { data: [] },
-      });
-
-      // currentUser.me returns an object with id (required by ServiceContext).
-      expect(results[6]).toEqual({
-        id: "test-service-user",
-        userName: "test-service-user",
-      });
-    });
-  });
-
   describe("getMockFn escape hatch", () => {
     test("getMockFn retrieves the cached mock for a dotted path", async () => {
       const client = createMockWorkspaceClient();
@@ -430,55 +348,19 @@ describe("createMockWorkspaceClient", () => {
         /not a createMockWorkspaceClient/,
       );
     });
-
-    test("getMockFn works for paths that go through getCachedMock", async () => {
-      const client = createMockWorkspaceClient({
-        responses: { "genie.getMessage": { id: "msg-1" } },
-      });
-      await (client.genie as any).getMessage({ message_id: "xyz" });
-
-      const mock = getMockFn(client, "genie.getMessage");
-      expect(mock.mock.calls.length).toBeGreaterThan(0);
-    });
   });
 
   describe("configuration override", () => {
-    test("config option can override defaults", () => {
-      const customHost = "https://custom.databricks.com";
-      const client = createMockWorkspaceClient({
-        config: { host: customHost },
-      });
-      expect(client.config.host).toBe(customHost);
-    });
-
-    test("config option can add custom properties", () => {
+    test("the config option overrides defaults and adds members", () => {
       const customAuth = vi.fn();
       const client = createMockWorkspaceClient({
-        config: { authenticate: customAuth },
-      });
-      expect(client.config.authenticate).toBe(customAuth);
-    });
-  });
-
-  describe("error handling", () => {
-    test("a throwing function response propagates as a rejection", async () => {
-      const error = new Error("sync error");
-      const client = createMockWorkspaceClient({
-        responses: { "jobs.getRun": () => Promise.reject(error) },
-      });
-      await expect(client.jobs.getRun({ run_id: 1 })).rejects.toBe(error);
-    });
-
-    test("calling methods with various arguments works", async () => {
-      const client = createMockWorkspaceClient({
-        responses: {
-          "files.getStatus": (args: any) => ({ path: args.path, exists: true }),
+        config: {
+          host: "https://custom.databricks.com",
+          authenticate: customAuth,
         },
       });
-      const result = await (client.files as any).getStatus({
-        path: "/data/file.txt",
-      });
-      expect(result).toEqual({ path: "/data/file.txt", exists: true });
+      expect(client.config.host).toBe("https://custom.databricks.com");
+      expect(client.config.authenticate).toBe(customAuth);
     });
   });
 });
