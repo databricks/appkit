@@ -64,7 +64,6 @@
     }
   ],
   "ignorePatterns": [
-    "**/.claude",
     "**/dist",
     "**/tmp",
     "**/*.d.ts",
