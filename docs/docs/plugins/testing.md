@@ -75,7 +75,7 @@ A function value receives the call arguments, so you can script per-argument beh
 
 For the response *shapes*, follow the service types on the Databricks SDK — the kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
 
-`app.client` is the very object your handler resolves through `getWorkspaceClient()`, so you can assert calls on it:
+`app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
 
 ```ts
 import { getMockFn } from "@databricks/appkit/testing";
@@ -308,7 +308,9 @@ How it works, and what to expect:
 - Sensible defaults are built in: SQL statements succeed, warehouses report `RUNNING`, and `currentUser.me()` returns a service user. Pass `defaults: false` to script everything yourself.
 
 :::caution The honest catch
-An undeclared method resolves `undefined` instead of throwing. That's the point — your plugin survives touching services the test doesn't care about — but it also means a **misspelled method name** returns `undefined` rather than failing loudly, so a test can pass for the wrong reason. The typed facade still catches a misspelled *service*.
+An undeclared method resolves `undefined` instead of throwing. That's the point — your plugin survives touching services the test doesn't care about — but it means a call whose response you *forgot* to declare silently returns `undefined` rather than failing loudly, so a test can pass for the wrong reason.
+
+TypeScript covers more of this than you might expect: because each accessor is typed against the SDK's own service class, both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
 
 Separately, `createLakebasePool({ workspaceClient })` will build a pool whose password callback resolves to a mock: the pool exists but cannot connect. A Lakebase test needs a real database or a purpose-built fake pool, not this.
 :::

@@ -494,6 +494,17 @@ describe("compile-time contract", () => {
     // @ts-expect-error - `jbos` is not a facade member
     expect(client.jbos).toBeUndefined();
 
+    // And so is a misspelled *method*, because each accessor is typed against
+    // the SDK's own service class. The runtime floor is a fallback for calls
+    // that bypass the types, not the first line of defence — verified against a
+    // packed tarball from outside the monorepo.
+    // @ts-expect-error - `getRunz` is not a jobs method
+    void client.jobs.getRunz;
+    // @ts-expect-error - `getMessagez` is not a genie method
+    void client.genie.getMessagez;
+    // @ts-expect-error - `anything` is not a files method
+    void client.files.anything;
+
     // `config.host` is typed `string | undefined` by the SDK (production code
     // guards it — see connectors/files/client.ts, which throws when falsy), so
     // the honest compile-time claim is that it narrows to a *string*, not that
