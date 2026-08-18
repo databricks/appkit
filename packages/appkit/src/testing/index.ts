@@ -42,6 +42,13 @@
 // path (../core/plugin-context) that is not part of the package's exports map.
 export type { PluginContext } from "../core/plugin-context";
 export {
+  createTestApp,
+  type CreateTestAppOptions,
+  getListeningPort,
+  type TestApp,
+  type TestRequestOptions,
+} from "./create-test-app";
+export {
   type CapturedSSEResponse,
   type ExpectStreamOptions,
   expectStream,

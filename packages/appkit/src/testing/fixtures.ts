@@ -122,8 +122,17 @@ export type OboOption =
       email?: string;
     };
 
-/** Build the forwarded identity headers an `obo` option implies. */
-function oboHeaders(obo: Exclude<OboOption, false>): Record<string, string> {
+/**
+ * Build the forwarded identity headers an `obo` option implies.
+ *
+ * Exported so `createTestApp`'s request methods use the same convention as
+ * `createMockRequest` rather than a second one.
+ *
+ * @internal
+ */
+export function oboHeaders(
+  obo: Exclude<OboOption, false>,
+): Record<string, string> {
   const opts = obo === true ? {} : obo;
   const headers: Record<string, string> = {
     "x-forwarded-access-token": opts.token ?? "test-user-token",
