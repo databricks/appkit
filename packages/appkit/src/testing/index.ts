@@ -9,9 +9,11 @@
  * buffering, tool dispatch, timeout composition, user scoping — run under test
  * with no credentials.
  *
- * Two entry points:
+ * Three entry points:
+ * - {@link createTestApp} — boot a real app with a faked data plane and call it
+ *   over real HTTP. The recommended starting point.
  * - {@link createTestPluginContext} — build a real `PluginContext` with faked edges
- *   and attach it to a plugin.
+ *   and attach it to a plugin, with no boot and no socket.
  * - {@link expectStream} — assert the ordered event types a stream emits.
  *
  * Plus the fixture helpers (`createMockRequest`, `mockServiceContext`, …) for
@@ -80,6 +82,7 @@ export {
   getMockFn,
   type MockWorkspaceClient,
 } from "./mock-workspace-client";
+export { createTestPlugin } from "./create-test-plugin";
 export { resetAppKitSingletons } from "./reset";
 export {
   createTestPluginContext,

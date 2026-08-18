@@ -1,6 +1,9 @@
 import type { Server } from "node:http";
 
-import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
+import {
+  mockServiceContext,
+  setupDatabricksEnv,
+} from "@databricks/appkit/testing";
 import type { PluginManifest } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 

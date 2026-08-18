@@ -10,13 +10,128 @@ AppKit ships a testing kit at `@databricks/appkit/testing` so you can test a plu
 
 Exercise a plugin's real code paths — route registration, cross-plugin tool dispatch, user-scoped (on-behalf-of) execution, and per-call timeouts — against a real `PluginContext` with only its outer edges faked. Nothing about the context is reimplemented, so a test can't drift from production behavior.
 
-The kit has two entry points plus a set of fixture helpers:
+The kit has three entry points plus a set of fixture helpers:
 
-- **`createTestPluginContext()`** — build a real `PluginContext` with faked edges and attach it to a plugin.
+- **`createTestApp({ plugins })`** — boot a real app and call it over real HTTP. Start here.
+- **`createTestPluginContext()`** — build a real `PluginContext` with faked edges and attach it to a plugin, with no boot and no socket.
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
-- **Fixtures** — `createMockRequest`, `createMockResponse`, `mockServiceContext`, and SQL response builders.
+- **Fixtures** — `createMockRequest`, `createMockResponse`, `createMockWorkspaceClient`, `mockServiceContext`, and SQL response builders.
 
 The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is an **optional peer dependency**: you already have it (you're writing Vitest tests), and the kit resolves to your copy rather than bundling a second one. Because it's optional, it is not installed into apps that never import `@databricks/appkit/testing` — production installs stay free of the test framework. Any Vitest v3 or v4 works.
+
+## Testing your plugin
+
+`createTestApp({ plugins })` boots a **real** AppKit app — real Express wiring, real routes, real resource validation — and hands you methods to call it like a client would:
+
+```ts
+import { createTestApp, expectStream } from "@databricks/appkit/testing";
+
+test("my plugin answers a request", async () => {
+  const app = await createTestApp({ plugins: [myPlugin()] });
+  try {
+    const res = await app.post("/api/my-plugin/thing", { body: { q: 1 }, obo: true });
+    expect(res.status).toBe(200);
+    await expectStream(res).toEmit("status", "result");
+  } finally {
+    await app.close();
+  }
+});
+```
+
+No workspace, no credentials, no network. The harness pins a non-development `NODE_ENV`, binds an ephemeral port, installs a fake workspace client, and keeps the cache in memory so nothing reaches out.
+
+Paths are the full mounted route. A plugin's prefix is `/api/` plus its manifest name in kebab-case, so a plugin named `mySearch` serves at `/api/my-search/…`.
+
+### Which harness?
+
+| | `createTestApp` | `createTestPluginContext` |
+| --- | --- | --- |
+| Boots the app | Yes | No |
+| Binds a socket | Yes (ephemeral port) | No |
+| Express middleware, error handler | Real | Not involved |
+| Resource / env validation | Real, and strict | Not involved |
+| Workspace client | Faked and injected | Fake it yourself with `mockServiceContext` |
+| Needs `close()` | **Yes** | No |
+| Speed | Fast, but pays for a socket | Fastest |
+
+Use `createTestApp` for a plugin's HTTP behaviour end to end. Use `createTestPluginContext` to unit-test wiring — route registration, tool dispatch, timeout composition. Name harness suites `*.integration.test.ts`, matching the existing convention.
+
+### Faking what your plugin reads
+
+Declare responses by dotted path — `"<service>.<method>"` on AppKit's workspace-client facade:
+
+```ts
+const app = await createTestApp({
+  plugins: [myPlugin()],
+  responses: {
+    "jobs.getRun": { state: "TERMINATED", result_state: "SUCCESS" },
+    "statementExecution.executeStatement": { status: { state: "SUCCEEDED" } },
+    "apiClient.request": { results: [] },
+  },
+});
+```
+
+A function value receives the call arguments, so you can script per-argument behaviour or reject to test an error path. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services) for the trade-off that buys.
+
+For the response *shapes*, follow the service types on the Databricks SDK — the kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
+
+`app.client` is the very object your handler resolves through `getWorkspaceClient()`, so you can assert calls on it:
+
+```ts
+import { getMockFn } from "@databricks/appkit/testing";
+
+expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
+```
+
+`getMockFn` exists because facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck.
+
+### Requests
+
+`app.get/post/put/patch/delete(path, options?)` return a native `Response`, so `expectStream` composes directly with no bridge.
+
+- `body` — a non-string value is JSON-encoded with `content-type: application/json`. A string is sent as-is.
+- `headers` — merged last, so they win over anything the harness set.
+- `obo` — `true` for the default test user, or `{ userId, token, email }`. Same shorthand as `createMockRequest({ obo })`, so a handler using `asUser(req)` resolves that identity.
+- `signal` — forwarded to `fetch`.
+
+### Teardown
+
+The harness binds a socket and installs signal handlers, so **every boot needs a `close()`**. `close()` releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
+
+Use `try/finally`, or let the runtime do it:
+
+```ts
+await using app = await createTestApp({ plugins: [myPlugin()] });
+// released at scope exit
+```
+
+Skip the `close()` and you'll leak a listener per boot — Node warns at about six.
+
+### Satisfying declared resources
+
+The harness runs the real validator with a strict posture, so a plugin whose manifest requires a resource fails the boot unless its env var is set. Supply it with `env`:
+
+```ts
+// Throws: MY_WAREHOUSE_ID is required by the manifest.
+await createTestApp({ plugins: [myPlugin()] });
+
+// Boots.
+await createTestApp({ plugins: [myPlugin()], env: { MY_WAREHOUSE_ID: "w-1" } });
+```
+
+That makes "my plugin declares its resources correctly" a genuine assertion. `env` is restored on `close()`.
+
+:::note What this does not check
+The harness validates that required resources' **environment variables are present**. It does **not** validate config *values* against your manifest's `config.schema` — no runtime validator exists for that yet. A test that boots successfully tells you your resource declarations and env are wired up; it says nothing about whether your config values are well-formed.
+:::
+
+### Other options
+
+- `server: false` — no socket. Plugin setup, validation, and teardown still run; the request methods throw if called. Useful when you only care that a plugin boots.
+- `client` — supply your own workspace client instead of the built-in fake. You then own its `currentUser.me()`: AppKit reads `currentUser.id` during boot and can't start without it.
+- `nodeEnv` — defaults to `"test"`. `"development"` is **refused**: dev mode routes the harness's ephemeral port through `get-port`, which throws on port `0`, and it also boots a real Vite server and relaxes validation.
+- `cache` — defaults to in-memory. Overriding it is what would let the cache reach the network, so leave it alone unless that's the point of the test.
+- `closeTimeoutMs` — teardown budget.
 
 ## `createTestPluginContext()`
 
@@ -143,6 +258,10 @@ await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
 
 ## Fixtures
 
+AppKit has two contexts, and they're faked by different tools. `PluginContext` is the mediator between plugins — routes, tool dispatch, user scoping — and `createTestPluginContext()` gives you the real thing with faked edges. `ServiceContext` is the **data plane**: it resolves the workspace client, the service principal, and the warehouse ID that plugins reach through `getWorkspaceClient()`.
+
+The kit now covers both. `createTestApp` fakes the data plane for you by injecting a mock workspace client at the real seam; below that, `mockServiceContext` spies the singleton directly, and `createMockWorkspaceClient` builds the client either of them installs.
+
 The kit re-exports the request/response/context fixtures AppKit uses internally:
 
 - `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`). Pass `obo: true` (or `obo: { userId, token, email }`) to set the forwarded identity headers `asUser` requires, instead of hand-adding them. `createMockResponse()` also captures everything a handler writes; pass it to `expectStream` (or call `sseResponse()`) to assert a streaming route's SSE. (Plugins resolve the workspace client through `getWorkspaceClient()`, not the request — use `mockServiceContext` to control it.)
@@ -160,10 +279,57 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
+- `resetAppKitSingletons()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
+- `createTestPlugin(factory, config?)` — instantiate a plugin from its factory with the same config merge AppKit applies. See [Full example](#full-example).
+
+## Mocking Databricks services
+
+Every core plugin's real work goes through `getWorkspaceClient()`. `createMockWorkspaceClient()` fakes that whole surface, so a plugin touching `jobs`, `genie`, `servingEndpoints`, or `files` is testable without hand-building a nested client:
+
+```ts
+import { createMockWorkspaceClient, getMockFn } from "@databricks/appkit/testing";
+
+const client = createMockWorkspaceClient({
+  responses: { "jobs.getRun": { state: "TERMINATED" } },
+  config: { host: "https://my-test-host.example.com" },
+});
+
+await client.jobs.getRun({ run_id: 1 });        // → { state: "TERMINATED" }
+await client.genie.getMessage({ id: "m-1" });   // → undefined, does not throw
+```
+
+`createTestApp` installs one of these for you, so reach for it directly only when you're driving a plugin through `createTestPluginContext` or `mockServiceContext`.
+
+How it works, and what to expect:
+
+- The **facade is typed**, so `client.jbos` is a compile error. AppKit owns that 9-member interface, so it's a closed set, not an open-ended chase of the SDK.
+- Each **service** is a proxy that mints a memoized mock per method. `client.jobs.getRun === client.jobs.getRun`, so call assertions are stable, and `toLegacyWorkspaceClient()` shares the same functions — one `responses` entry covers both views.
+- `config.host` is a real **string** (not a mock), because AppKit builds URLs from it. `apiClient.userAgent()` is synchronous for the same reason, and `apiClient.request` resolves `{}` so destructuring its result doesn't throw.
+- Sensible defaults are built in: SQL statements succeed, warehouses report `RUNNING`, and `currentUser.me()` returns a service user. Pass `defaults: false` to script everything yourself.
+
+:::caution The honest catch
+An undeclared method resolves `undefined` instead of throwing. That's the point — your plugin survives touching services the test doesn't care about — but it also means a **misspelled method name** returns `undefined` rather than failing loudly, so a test can pass for the wrong reason. The typed facade still catches a misspelled *service*.
+
+Separately, `createLakebasePool({ workspaceClient })` will build a pool whose password callback resolves to a mock: the pool exists but cannot connect. A Lakebase test needs a real database or a purpose-built fake pool, not this.
+:::
 
 ## Full example
 
-Instantiate the plugin **class** directly with `new`. The `analytics()` / `agents()` factory functions you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance itself.
+For a plugin you wrote, instantiate the class directly with `new`. The `analytics()` / `agents()` factory functions you pass to `createApp` return a *descriptor* for the app to construct, not an instance.
+
+When you want an instance from one of those factories, use `createTestPlugin` rather than reaching through the descriptor:
+
+```ts
+import { createTestPlugin } from "@databricks/appkit/testing";
+
+const plugin = createTestPlugin(genie, { spaceId: "s-1" });
+
+// Not this — it skips DEFAULT_CONFIG and forgets `name`, so the instance is
+// configured differently from the one production builds:
+//   const plugin = new (genie({}).plugin)({ spaceId: "s-1" });
+```
+
+`createTestPlugin` applies the same merge AppKit does at registration: `DEFAULT_CONFIG`, then your config, then the manifest `name`. It's for this unit-test path only — `createTestApp` takes descriptors and builds the instances itself.
 
 ```ts
 import { Plugin, type PluginManifest } from "@databricks/appkit";

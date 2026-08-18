@@ -435,6 +435,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AppHandle",
+          label: "AppHandle"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.BaseSystemPromptOption",
           label: "BaseSystemPromptOption"
         },

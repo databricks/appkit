@@ -5,6 +5,10 @@
  * `@tools/test-helpers` importers keep working; new code (inside or outside
  * this repo) should import from `@databricks/appkit/testing` instead.
  *
+ * The integration suites have already moved to the public entry point, which is
+ * what verifies the published surface is self-sufficient. The remaining
+ * importers are unit suites, migrated opportunistically.
+ *
  * Note: `mockServiceContext` is now synchronous (the previous dynamic
  * `import()` became a static one to avoid a circular-init trap once packaged).
  * Existing `await mockServiceContext(...)` call sites are unaffected — awaiting
@@ -22,9 +26,17 @@ export {
   createTestPluginContext,
   expectStream,
   mockServiceContext,
+  createTestApp,
+  type CreateTestAppOptions,
+  getListeningPort,
+  getMockFn,
+  type MockWorkspaceClient,
   parseSSEResponse,
+  resetAppKitSingletons,
   runWithRequestContext,
   setupDatabricksEnv,
+  type TestApp,
   type TestContextOptions,
+  type TestRequestOptions,
   useServiceContextMock,
 } from "../packages/appkit/src/testing";
