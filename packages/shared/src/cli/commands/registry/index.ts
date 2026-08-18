@@ -1,4 +1,5 @@
 import { Command } from "commander";
+
 import { registryInfoCommand } from "./info";
 import { registryListCommand, registrySearchCommand } from "./list";
 

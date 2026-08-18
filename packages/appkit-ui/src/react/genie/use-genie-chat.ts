@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { connectSSE } from "@/js";
+
 import {
   type GenieChatStatus,
   type GenieMessageItem,

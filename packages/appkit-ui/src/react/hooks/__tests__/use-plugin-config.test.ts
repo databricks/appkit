@@ -1,6 +1,8 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, test } from "vitest";
+
 import { _resetConfigCache } from "@/js/config";
+
 import { usePluginClientConfig } from "../use-plugin-config";
 
 describe("usePluginClientConfig", () => {

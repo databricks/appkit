@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { APPKIT_USER_AGENT } from "../../../context/client-options";
 import { AppKitMcpClient } from "../client";
 import type { DnsLookup, McpHostPolicy } from "../host-policy";

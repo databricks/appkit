@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { mockAnalyticsData } from "./utils/mock-data";
 import { setupMockAPI } from "./utils/test-utils";
 

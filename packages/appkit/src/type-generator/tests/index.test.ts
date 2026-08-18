@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import {
   afterAll,
   beforeAll,
@@ -9,6 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import type { DatabricksStatementExecutionResponse } from "../types";
 
 const mocks = vi.hoisted(() => ({
@@ -109,7 +111,7 @@ const outputDir = path.join(__dirname, "__output__");
 
 // Strip ANSI SGR escape sequences so warning/error messages assert as plain
 // text (and match CI logs). The ESC byte is built via String.fromCharCode so
-// no control character appears in a regex literal (Biome noControlCharactersInRegex).
+// no control character appears in a regex literal (oxlint no-control-regex).
 const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const stripAnsi = (s: string): string => s.replace(ANSI_SGR, "");
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import {
   CHART_COLOR_VARS_CATEGORICAL,
   CHART_COLOR_VARS_DIVERGING,

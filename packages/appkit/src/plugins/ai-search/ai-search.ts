@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+
 import type express from "express";
 import type { CacheConfig, IAppRouter, PluginExecutionSettings } from "shared";
+
 import { AiSearchConnector } from "../../connectors/ai-search/client";
 import type {
   VsQueryParams,
@@ -34,7 +36,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
 
   protected static description =
     "Query Databricks Vector Search indexes with hybrid search, reranking, and pagination";
-  protected declare config: IAiSearchConfig;
+  declare protected config: IAiSearchConfig;
 
   private connector: AiSearchConnector;
 

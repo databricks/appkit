@@ -1,5 +1,6 @@
 import type { RetryConfig } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { AuthenticationError } from "../../errors/authentication";
 import { ConnectionError } from "../../errors/connection";
 import { ExecutionError } from "../../errors/execution";

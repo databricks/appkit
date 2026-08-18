@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -7,6 +8,7 @@ import type {
   ToolProvider,
 } from "shared";
 import { z } from "zod";
+
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
@@ -35,7 +37,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
 
   protected static description =
     "AI/BI Genie space integration for natural language data queries";
-  protected declare config: IGenieConfig;
+  declare protected config: IGenieConfig;
 
   private readonly genieConnector: GenieConnector;
   private tools: ToolRegistry = {};

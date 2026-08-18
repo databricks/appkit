@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+
 import type express from "express";
 import pc from "picocolors";
 import type {
@@ -15,6 +16,7 @@ import type {
   ToolAnnotations,
   ToolProvider,
 } from "shared";
+
 import {
   isSupervisorTool,
   SUPERVISOR_EXTENSION_KEY,
@@ -147,7 +149,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   static manifest = manifest as unknown as PluginManifest;
   static phase: PluginPhase = "deferred";
 
-  protected declare config: AgentsPluginConfig;
+  declare protected config: AgentsPluginConfig;
 
   private agents = new Map<string, RegisteredAgent>();
   private defaultAgentName: string | null = null;

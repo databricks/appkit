@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+
 import type { SSEEvent } from "./use-agent-stream";
 
 /**

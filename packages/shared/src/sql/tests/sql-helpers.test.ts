@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { isSQLTypeMarker, sql } from "../helpers";
 
 describe("SQL Helpers", () => {

@@ -1,4 +1,5 @@
 import { ActivityIcon } from "lucide-react";
+
 import {
   toggleInspector,
   useStreamInspector,

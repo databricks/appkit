@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+
 import { PLUGIN_NAME_PATTERN } from "../naming";
 
 // ── Resource type + per-type permission enums ────────────────────────────

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { AnalyticsPlugin } from "../../plugins/analytics/analytics";
 import { ServerPlugin } from "../../plugins/server";
 import { getPluginManifest, getResourceRequirements } from "../manifest-loader";

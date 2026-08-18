@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+
 import { resolveLogger } from "../logger";
 import type { Logger, LoggerConfig } from "../types";
 

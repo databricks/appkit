@@ -1,6 +1,8 @@
 import process from "node:process";
+
 import { Command } from "commander";
 import pc from "picocolors";
+
 import { registryAuthHeaders } from "./client";
 import {
   REGISTRY_INDEX_API_URL,

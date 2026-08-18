@@ -61,11 +61,7 @@ export {
 // Theme Hooks
 // ============================================================================
 
-export {
-  useAllThemeColors,
-  useChartUITokens,
-  useThemeColors,
-} from "./theme";
+export { useAllThemeColors, useChartUITokens, useThemeColors } from "./theme";
 
 // ============================================================================
 // Utilities

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { TelemetryReporter } from "../../../internal-telemetry";
 import { requestMetricsMiddleware } from "../index";
 

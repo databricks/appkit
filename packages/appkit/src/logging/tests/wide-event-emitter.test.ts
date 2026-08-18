@@ -1,5 +1,6 @@
 import { logs } from "@opentelemetry/api-logs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { WideEventData } from "../wide-event";
 import { WideEventEmitter } from "../wide-event-emitter";
 

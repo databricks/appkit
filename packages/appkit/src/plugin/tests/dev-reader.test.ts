@@ -1,5 +1,6 @@
 import type { TunnelConnection } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { TunnelError } from "../../errors";
 
 // Mock the gate to allow remote tunnel in tests

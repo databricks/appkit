@@ -1,4 +1,5 @@
 import { assertType, describe, expectTypeOf, test } from "vitest";
+
 import type { ServingEndpointHandle } from "../types";
 
 /**

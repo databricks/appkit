@@ -1,5 +1,6 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 
@@ -23,7 +24,6 @@ import { AgentsPlugin } from "../agents";
 beforeEach(() => {
   // dispatchToolCall is exercised without going through setup(), so we
   // need the cache singleton to be initialised before the plugin reads it.
-  // biome-ignore lint/suspicious/noExplicitAny: test seam, mirrors other suites
   (CacheManager as any).instance = {
     get: vi.fn(),
     set: vi.fn(),
@@ -124,7 +124,6 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
       ],
     ]);
 
-    // biome-ignore lint/suspicious/noExplicitAny: stub the gate to simulate user approval
     (plugin as any).approvalGate.wait = vi.fn().mockResolvedValue("approve");
 
     await callDispatch(plugin, {
@@ -134,7 +133,6 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
       args: {},
     });
 
-    // biome-ignore lint/suspicious/noExplicitAny: gate is private but stubbed above
     expect((plugin as any).approvalGate.wait).toHaveBeenCalledTimes(1);
     expect(pushed.length).toBeGreaterThan(0);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -166,7 +164,6 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
         ],
       ]);
 
-      // biome-ignore lint/suspicious/noExplicitAny: stub gate
       (plugin as any).approvalGate.wait = vi.fn();
 
       await callDispatch(plugin, {
@@ -176,7 +173,6 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
         args: {},
       });
 
-      // biome-ignore lint/suspicious/noExplicitAny: assertions on stub
       expect((plugin as any).approvalGate.wait).toHaveBeenCalledTimes(
         expectGate ? 1 : 0,
       );
@@ -204,7 +200,6 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
       ],
     ]);
 
-    // biome-ignore lint/suspicious/noExplicitAny: stub deny
     (plugin as any).approvalGate.wait = vi.fn().mockResolvedValue("deny");
 
     const result = await callDispatch(plugin, {
@@ -295,7 +290,6 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     runState.limits.toolCallTimeoutMs = 90_000;
 
     const executeTool = vi.fn().mockResolvedValue("rows");
-    // biome-ignore lint/suspicious/noExplicitAny: stub PluginContext shape
     (plugin as any).context = { executeTool };
 
     const toolIndex = new Map<string, unknown>([
@@ -331,7 +325,6 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
 
   test("resolvedLimits exposes the documented 5-minute default", () => {
     const plugin = new AgentsPlugin({ dir: false });
-    // biome-ignore lint/suspicious/noExplicitAny: read private getter
     const limits = (plugin as any).resolvedLimits;
     expect(limits.toolCallTimeoutMs).toBe(300_000);
   });
@@ -341,7 +334,6 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
       dir: false,
       limits: { toolCallTimeoutMs: 600_000 },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: read private
     const limits = (plugin as any).resolvedLimits;
     expect(limits.toolCallTimeoutMs).toBe(600_000);
   });
@@ -374,11 +366,9 @@ describe("runSubAgent — sub-agent event forwarding", () => {
       instructions: "test",
       adapter: { run: childRun },
       toolIndex: new Map(),
-      // biome-ignore lint/suspicious/noExplicitAny: minimal stub
     } as any;
 
     await expect(
-      // biome-ignore lint/suspicious/noExplicitAny: call private
       (plugin as any).runSubAgent(runState, child, { input: "go" }, 3),
     ).rejects.toThrow(/Sub-agent depth exceeded \(limit 2\)/);
     expect(childRun).not.toHaveBeenCalled();
@@ -392,7 +382,6 @@ describe("runSubAgent — sub-agent event forwarding", () => {
       name: "child",
       instructions: "test",
       adapter: {
-        // biome-ignore lint/suspicious/noExplicitAny: stub adapter shape
         async *run(): any {
           yield { type: "metadata", data: { threadId: "child-thread" } };
           yield {
@@ -406,10 +395,8 @@ describe("runSubAgent — sub-agent event forwarding", () => {
         },
       },
       toolIndex: new Map(),
-      // biome-ignore lint/suspicious/noExplicitAny: minimal stub
     } as any;
 
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     await (plugin as any).runSubAgent(runState, child, { input: "go" }, 1);
 
     const types = pushed.map((e) => (e as { type: string }).type);

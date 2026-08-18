@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "node:http";
+
 import type express from "express";
 import type {
   IAppRouter,
@@ -6,6 +7,7 @@ import type {
   StreamExecutionSettings,
 } from "shared";
 import { toJSONSchema } from "zod";
+
 import { JobsConnector } from "../../connectors/jobs";
 import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { ExecutionError, ValidationError } from "../../errors";
@@ -85,7 +87,7 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
 class JobsPlugin extends Plugin {
   static manifest = manifest as PluginManifest;
 
-  protected declare config: IJobsConfig;
+  declare protected config: IJobsConfig;
   private connector: JobsConnector;
   private jobIds: Record<string, number> = {};
   private jobConfigs: Record<string, JobConfig> = {};

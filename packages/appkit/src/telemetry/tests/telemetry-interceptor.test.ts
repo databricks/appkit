@@ -1,6 +1,7 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { TelemetryConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import * as executionContext from "../../context/execution-context";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
 import type { InterceptorContext } from "../../plugin/interceptors/types";

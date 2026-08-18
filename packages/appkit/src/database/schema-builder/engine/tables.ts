@@ -17,6 +17,7 @@ import {
   varchar as pgVarchar,
   serial,
 } from "drizzle-orm/pg-core";
+
 import type { ReferentialAction } from "../../contract";
 import { APPKIT_TABLE } from "../private";
 import {
@@ -95,7 +96,7 @@ function baseColumn(
       builder = pgJsonb(col);
       break;
     case "enum":
-      // biome-ignore lint/style/noNonNullAssertion: enum metas always carry an enumName.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- enum metas always carry an enumName.
       builder = getEnum(enums, meta.enumName!, meta.enumValues ?? [])(col);
       break;
   }

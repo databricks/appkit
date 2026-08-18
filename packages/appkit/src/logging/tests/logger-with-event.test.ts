@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { createLogger } from "../logger";
 import { WideEvent } from "../wide-event";
 

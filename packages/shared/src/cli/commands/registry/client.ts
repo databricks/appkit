@@ -1,4 +1,5 @@
 import process from "node:process";
+
 import {
   REGISTRY_INDEX_API_URL,
   REGISTRY_INDEX_URL,

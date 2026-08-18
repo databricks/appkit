@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
 import {
   createMockRequest,
   createMockResponse,
@@ -10,6 +11,7 @@ import {
 } from "@tools/test-helpers";
 import type { MetricViewsMetadata } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";

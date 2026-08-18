@@ -1,6 +1,8 @@
 import process from "node:process";
+
 import { Command } from "commander";
 import pc from "picocolors";
+
 import { fetchRegistryItem, isValidItemName, stripNamespace } from "./client";
 import { resolveToken } from "./constants";
 import { extractRequirements, renderRequirements } from "./requirements";

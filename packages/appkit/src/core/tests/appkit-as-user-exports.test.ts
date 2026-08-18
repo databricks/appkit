@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { UserContext } from "../../context/user-context";
 
 /**
@@ -83,6 +84,7 @@ vi.mock("../../internal-telemetry", () => ({
 // ── Imports (after mocks) ───────────────────────────────────────────
 
 import { createMockRequest, setupDatabricksEnv } from "@tools/test-helpers";
+
 import { getUserContext } from "../../context/execution-context";
 import { ServiceContext } from "../../context/service-context";
 import { Plugin } from "../../plugin/plugin";

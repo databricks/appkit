@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { readSseEvents, type SseEvent } from "../sse-reader";
 
 function streamOf(chunks: string[]): ReadableStream<Uint8Array> {

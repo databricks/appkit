@@ -142,7 +142,7 @@ block yet, they haven't clicked Confirm — ask them to, don't finalize nothing.
    the chosen `<Variant>`'s inner JSX** — remove the `<Variants>`/`<Variant>`
    wrapper, drop the now-unused import if nothing else uses it, reconcile
    surrounding code, then format/lint the file
-   (`pnpm check:fix`, or `pnpm biome check --write <file>`).
+   (`pnpm check:fix`, or `pnpm exec oxlint --fix <file> && pnpm exec oxfmt --write <file>`).
 4. **Remove the consumed line** for that `blockId` from the choices file. Match the
    `blockId` structurally (not a loose substring) so a label containing the text
    can't delete the wrong line:

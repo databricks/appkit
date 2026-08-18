@@ -1,4 +1,5 @@
 import path from "node:path";
+
 // Canonical metric-source schema — the single source of truth for
 // `config/metric-views/definitions.json`. Imported from the shared source
 // directly (matching the type-generator's runtime, which pulls the zod-free

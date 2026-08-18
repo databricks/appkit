@@ -20,6 +20,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import { BaseChart } from "../base";
 import type { ChartType } from "../types";
 

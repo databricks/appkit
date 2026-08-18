@@ -1,4 +1,5 @@
 import type { CacheConfig } from "shared";
+
 import type { CacheManager } from "../../cache";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
 

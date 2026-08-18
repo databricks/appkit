@@ -1,5 +1,6 @@
 import type { Page, Request } from "@playwright/test";
 import { tableFromJSON, tableToIPC } from "apache-arrow";
+
 import {
   mockAnalyticsData,
   mockReconnectMessages,

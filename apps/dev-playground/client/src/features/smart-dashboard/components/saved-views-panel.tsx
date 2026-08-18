@@ -59,10 +59,9 @@ export function SavedViewsPanel({
   }, []);
 
   // Load on mount + whenever the parent bumps refreshToken. The dep on
-  // refreshToken is intentional — biome flags it because it's an opaque
-  // number with no direct read inside the effect body, but the whole
-  // point is that changing it in the parent invalidates the cached list.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  // refreshToken is intentional — it's an opaque number with no direct
+  // read inside the effect body, but the whole point is that changing it
+  // in the parent invalidates the cached list.
   useEffect(() => {
     load();
   }, [load, refreshToken]);

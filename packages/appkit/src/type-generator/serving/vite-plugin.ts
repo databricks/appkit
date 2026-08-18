@@ -1,5 +1,7 @@
 import path from "node:path";
+
 import type { Plugin } from "vite";
+
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
 import { generateServingTypes, SERVING_TYPES_FILE, TYPES_DIR } from "../index";

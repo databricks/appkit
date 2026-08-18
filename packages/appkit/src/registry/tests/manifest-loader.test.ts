@@ -1,5 +1,6 @@
 import type { PluginConstructor } from "shared";
 import { describe, expect, it } from "vitest";
+
 import { ConfigurationError } from "../../errors";
 import {
   getPluginManifest,

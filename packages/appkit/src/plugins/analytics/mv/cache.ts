@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+
 import { AuthenticationError } from "../../../errors";
 import type { MetricFilter, MetricLane, MetricPredicate } from "../types";
 import { sortFilterChildren } from "./formatters";

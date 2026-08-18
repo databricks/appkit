@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+
 import {
   type AnalyticsSseHandlerContext,
   GENERIC_LOAD_ERROR,

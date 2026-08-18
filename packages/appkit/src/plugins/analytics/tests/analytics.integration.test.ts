@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+
 import {
   createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
@@ -17,6 +18,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";

@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { autocomplete, isCancel, select, text } from "@clack/prompts";
 import pc from "picocolors";
+
 import type { BindingValueNeed } from "./config-plan";
 import {
   collectEnvNeeds,

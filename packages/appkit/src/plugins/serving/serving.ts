@@ -1,8 +1,10 @@
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
 import type express from "express";
 import type { IAppRouter } from "shared";
+
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
@@ -44,7 +46,7 @@ export class ServingPlugin extends Plugin {
 
   protected static description =
     "Authenticated proxy to Databricks Model Serving endpoints";
-  protected declare config: IServingConfig;
+  declare protected config: IServingConfig;
 
   private readonly endpoints: Record<string, EndpointConfig>;
   private readonly isNamedMode: boolean;

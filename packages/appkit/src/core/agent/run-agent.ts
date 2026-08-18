@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+
 import type {
   AgentAdapter,
   AgentEvent,
@@ -8,6 +9,7 @@ import type {
   PluginData,
   ToolProvider,
 } from "shared";
+
 import {
   isSupervisorTool,
   SUPERVISOR_EXTENSION_KEY,

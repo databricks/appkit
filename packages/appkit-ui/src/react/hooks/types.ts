@@ -143,31 +143,34 @@ export type AugmentedRegistry<T> = keyof {
 };
 
 /** Resolves to registry keys if defined, otherwise string */
-export type QueryKey = AugmentedRegistry<QueryRegistry> extends never
-  ? string
-  : AugmentedRegistry<QueryRegistry>;
+export type QueryKey =
+  AugmentedRegistry<QueryRegistry> extends never
+    ? string
+    : AugmentedRegistry<QueryRegistry>;
 
 /**
  * Infers result type from QueryRegistry[K]["result"]
  * Returns the JSON array type for the query.
  */
-export type InferResult<T, K> = K extends AugmentedRegistry<QueryRegistry>
-  ? QueryRegistry[K] extends { result: infer R }
-    ? R
-    : T
-  : T;
+export type InferResult<T, K> =
+  K extends AugmentedRegistry<QueryRegistry>
+    ? QueryRegistry[K] extends { result: infer R }
+      ? R
+      : T
+    : T;
 
 /**
  * Infers the row type from a query result array.
  * Used for TypedArrowTable row typing.
  */
-export type InferRowType<K> = K extends AugmentedRegistry<QueryRegistry>
-  ? QueryRegistry[K] extends { result: Array<infer R> }
-    ? R extends Record<string, unknown>
-      ? R
+export type InferRowType<K> =
+  K extends AugmentedRegistry<QueryRegistry>
+    ? QueryRegistry[K] extends { result: Array<infer R> }
+      ? R extends Record<string, unknown>
+        ? R
+        : Record<string, unknown>
       : Record<string, unknown>
-    : Record<string, unknown>
-  : Record<string, unknown>;
+    : Record<string, unknown>;
 
 /**
  * Conditionally infers result type based on format.
@@ -183,11 +186,12 @@ export type InferResultByFormat<T, K, F extends AnalyticsFormat> = F extends
 /**
  * Infers parameters type from QueryRegistry[K]["parameters"]
  */
-export type InferParams<K> = K extends AugmentedRegistry<QueryRegistry>
-  ? QueryRegistry[K] extends { parameters: infer P }
-    ? P
-    : Record<string, unknown>
-  : Record<string, unknown>;
+export type InferParams<K> =
+  K extends AugmentedRegistry<QueryRegistry>
+    ? QueryRegistry[K] extends { parameters: infer P }
+      ? P
+      : Record<string, unknown>
+    : Record<string, unknown>;
 
 export interface PluginRegistry {
   [key: string]: Record<string, any>;
@@ -261,7 +265,7 @@ export interface AiSearchResponse<
  * }
  * ```
  */
-// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation
+// oxlint-disable-next-line typescript/no-empty-object-type -- intentionally empty — populated via module augmentation
 export interface ServingEndpointRegistry {}
 
 /** Resolves to registry keys if populated, otherwise string */
@@ -299,63 +303,70 @@ export type InferServingRequest<K> =
 // ============================================================================
 
 /** Metric view registry for type-safe metric keys */
-// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation (generated metric-views.ts)
+// oxlint-disable-next-line typescript/no-empty-object-type -- intentionally empty — populated via module augmentation
 export interface MetricRegistry {}
 
-export type MetricKey = AugmentedRegistry<MetricRegistry> extends never
-  ? string
-  : AugmentedRegistry<MetricRegistry>;
+export type MetricKey =
+  AugmentedRegistry<MetricRegistry> extends never
+    ? string
+    : AugmentedRegistry<MetricRegistry>;
 
-export type InferMeasureKeys<K> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends { measureKeys: infer M }
-    ? M
-    : string
-  : string;
+export type InferMeasureKeys<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends { measureKeys: infer M }
+      ? M
+      : string
+    : string;
 
-export type InferDimensionKeys<K> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends { dimensionKeys: infer D }
-    ? D
-    : string
-  : string;
+export type InferDimensionKeys<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends { dimensionKeys: infer D }
+      ? D
+      : string
+    : string;
 
-export type InferTimeGrains<K> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends { timeGrains: infer G }
-    ? G
-    : string
-  : string;
+export type InferTimeGrains<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends { timeGrains: infer G }
+      ? G
+      : string
+    : string;
 
 /**
  * Infers the full row shape (every measure + dimension) from registry
  * otherwise a total `Record<string, unknown>`.
  */
-export type InferMetricRow<K> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends {
-      measures: infer Meas;
-      dimensions: infer Dim;
-    }
-    ? Meas & Dim
-    : Record<string, unknown>
-  : Record<string, unknown>;
+export type InferMetricRow<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends {
+        measures: infer Meas;
+        dimensions: infer Dim;
+      }
+      ? Meas & Dim
+      : Record<string, unknown>
+    : Record<string, unknown>;
 
 export type PickMetricRow<
   K,
   M extends ReadonlyArray<PropertyKey>,
   D extends ReadonlyArray<PropertyKey>,
-> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends {
-      measures: infer Meas;
-      dimensions: infer Dim;
-    }
-    ? Pick<Meas, Extract<M[number], keyof Meas>> &
-        Pick<Dim, Extract<D[number], keyof Dim>>
-    : Record<string, unknown>
-  : Record<string, unknown>;
+> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends {
+        measures: infer Meas;
+        dimensions: infer Dim;
+      }
+      ? Pick<Meas, Extract<M[number], keyof Meas>> &
+          Pick<Dim, Extract<D[number], keyof Dim>>
+      : Record<string, unknown>
+    : Record<string, unknown>;
 
-type MetricDimensionMeta<K> = K extends AugmentedRegistry<MetricRegistry>
-  ? MetricRegistry[K] extends { metadata: { dimensions: infer DM } }
-    ? DM
-    : never
-  : never;
+type MetricDimensionMeta<K> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? MetricRegistry[K] extends { metadata: { dimensions: infer DM } }
+      ? DM
+      : never
+    : never;
 
 /**
  * The dimension keys of K that are TEMPORAL — i.e. carry a `time_grain` tuple in
@@ -380,21 +391,19 @@ export type InferTimeDimensionKeys<K> =
  * the union is exactly the grains applicable to the query. Falls back to the
  * metric's whole `timeGrains` union (or `string`) for an unknown/degraded key.
  */
-export type GrainsForSelectedTimeDims<
-  K,
-  D extends ReadonlyArray<PropertyKey>,
-> = K extends AugmentedRegistry<MetricRegistry>
-  ? {
-      [P in Extract<
-        D[number],
-        keyof MetricDimensionMeta<K>
-      >]: MetricDimensionMeta<K>[P] extends {
-        time_grain: infer G extends readonly unknown[];
-      }
-        ? G[number]
-        : never;
-    }[Extract<D[number], keyof MetricDimensionMeta<K>>]
-  : string;
+export type GrainsForSelectedTimeDims<K, D extends ReadonlyArray<PropertyKey>> =
+  K extends AugmentedRegistry<MetricRegistry>
+    ? {
+        [P in Extract<
+          D[number],
+          keyof MetricDimensionMeta<K>
+        >]: MetricDimensionMeta<K>[P] extends {
+          time_grain: infer G extends readonly unknown[];
+        }
+          ? G[number]
+          : never;
+      }[Extract<D[number], keyof MetricDimensionMeta<K>>]
+    : string;
 
 export type {
   MetricFilter,

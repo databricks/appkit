@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+
 import { Command } from "commander";
+
 import {
   loadManifestFromFile,
   resolveManifestInDir,

@@ -1,6 +1,7 @@
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { vi } from "vitest";
+
 import type { ServiceContextState } from "../packages/appkit/src/context/service-context";
 import type { UserContext } from "../packages/appkit/src/context/user-context";
 import type {
@@ -290,9 +291,8 @@ export function createMockUserContext(
 export async function mockServiceContext(options: TestContextOptions = {}) {
   const serviceContext = createMockServiceContext(options);
 
-  const contextModule = await import(
-    "../packages/appkit/src/context/service-context"
-  );
+  const contextModule =
+    await import("../packages/appkit/src/context/service-context");
 
   const getSpy = vi
     .spyOn(contextModule.ServiceContext, "get")

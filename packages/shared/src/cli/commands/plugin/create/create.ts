@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+
 import {
   cancel,
   confirm,
@@ -13,6 +14,7 @@ import {
   text,
 } from "@clack/prompts";
 import { Command, Option } from "commander";
+
 import { PLUGIN_NAME_PATTERN } from "../../../../naming";
 import { promptOneResource } from "./prompt-resource";
 import {

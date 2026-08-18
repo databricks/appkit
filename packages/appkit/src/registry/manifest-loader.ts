@@ -1,4 +1,5 @@
 import type { PluginConstructor } from "shared";
+
 import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type {

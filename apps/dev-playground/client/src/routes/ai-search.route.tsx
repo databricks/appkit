@@ -10,6 +10,7 @@ import { useAiSearchQuery } from "@databricks/appkit-ui/react/beta";
 import { createFileRoute } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { useState } from "react";
+
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/ai-search")({

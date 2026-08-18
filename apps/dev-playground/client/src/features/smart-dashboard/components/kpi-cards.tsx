@@ -1,5 +1,6 @@
 import { CarIcon, DollarSignIcon, MapPinIcon, RulerIcon } from "lucide-react";
 import { useId, useMemo } from "react";
+
 import { useChartColors } from "../hooks/use-chart-colors";
 import type { KPIData, SparklineRow } from "../hooks/use-dashboard-data";
 

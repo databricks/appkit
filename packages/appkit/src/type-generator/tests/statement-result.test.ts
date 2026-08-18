@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { describe, expect, test } from "vitest";
+
 import type { WorkspaceClient } from "../../workspace-client";
 import {
   type DescribeFormatMemo,

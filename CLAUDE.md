@@ -100,12 +100,12 @@ pnpm test:watch       # Run tests in watch mode
 
 ### Code Quality
 ```bash
-pnpm lint             # Lint with Biome
+pnpm lint             # Lint with oxlint
 pnpm lint:fix         # Lint and auto-fix
-pnpm format           # Format with Biome
+pnpm format           # Format with oxfmt
 pnpm format:check     # Check formatting
-pnpm check            # Run Biome check (lint + format)
-pnpm check:fix        # Auto-fix with Biome
+pnpm check            # Run oxlint + oxfmt --check (lint + format)
+pnpm check:fix        # Auto-fix lint (oxlint --fix) and format (oxfmt)
 pnpm typecheck        # TypeScript type checking across all packages
 ```
 
@@ -305,11 +305,13 @@ The frontend uses `rolldown-vite@7.1.14`, a performance-optimized Vite fork.
 - `@vitejs/plugin-react` - React Fast Refresh
 - `@tanstack/router-plugin` - File-based routing with auto code-splitting
 
-### Formatter/Linter: Biome
+### Linter: oxlint / Formatter: oxfmt
 
-Biome is used instead of ESLint/Prettier for faster performance:
+The oxc (VoidZero) toolchain is used instead of ESLint/Prettier for faster performance:
+- `oxlint` for linting (config in `.oxlintrc.json`)
+- `oxfmt` for formatting + import sorting (config in `.oxfmtrc.json`)
 - Lint-staged integration via husky
-- Configured in `biome.json` (if present)
+- Note: oxc does not lint/format CSS
 
 ## Working with the Monorepo
 

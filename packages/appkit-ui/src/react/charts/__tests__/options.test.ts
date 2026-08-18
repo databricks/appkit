@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+
 import { FALLBACK_UI_TOKENS } from "../constants";
 import {
   applySelectionEmphasis,

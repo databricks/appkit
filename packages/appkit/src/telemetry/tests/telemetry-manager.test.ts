@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { TelemetryManager } from "../telemetry-manager";
 
 // Mock only exporters to prevent network calls
@@ -156,9 +157,8 @@ describe("TelemetryManager", () => {
   test("should pass headers to exporters", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
-    const { OTLPTraceExporter } = await import(
-      "@opentelemetry/exporter-trace-otlp-proto"
-    );
+    const { OTLPTraceExporter } =
+      await import("@opentelemetry/exporter-trace-otlp-proto");
     vi.clearAllMocks();
 
     TelemetryManager.initialize({
