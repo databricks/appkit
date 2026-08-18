@@ -69,6 +69,11 @@ export {
   useServiceContextMock,
 } from "./fixtures";
 export {
+  type CreateMockWorkspaceClientOptions,
+  getMockFn,
+  type MockWorkspaceClient,
+} from "./mock-workspace-client";
+export {
   createTestPluginContext,
   type FakeProvider,
   type FakeProviders,

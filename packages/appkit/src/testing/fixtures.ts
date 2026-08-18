@@ -8,7 +8,7 @@ import { ServiceContext } from "../context/service-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
-// repo-wide (see biome.json), so a local alias keeps the intent readable.
+// repo-wide (see .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
 /**
