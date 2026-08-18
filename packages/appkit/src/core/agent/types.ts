@@ -146,8 +146,9 @@ export interface AgentDefinition {
   /**
    * Marks this agent as the default one chosen when a client doesn't name an
    * agent. Mirrors markdown frontmatter `default: true`. When several agents
-   * set it, the first in stable id order wins; an explicit
-   * `agents({ defaultAgent })` always overrides it. Defaults to `false`.
+   * set it, a code (discovered) agent wins over a markdown one, then the
+   * lowest id; an explicit `agents({ defaultAgent })` always overrides it.
+   * Defaults to `false`.
    */
   default?: boolean;
   /** System prompt body. For markdown-loaded agents this is the file body. */
@@ -237,7 +238,7 @@ export interface AgentsPluginConfig extends BasePluginConfig {
    * and the map entry is ignored.
    */
   agents?: Record<string, AgentDefinition>;
-  /** Agent used when clients don't specify one. Defaults to the first-registered agent or the file with `default: true` frontmatter. */
+  /** Agent used when clients don't specify one. Precedence: this value, else a code agent with `default: true`, else a markdown agent with `default: true`, else the first-registered agent. */
   defaultAgent?: string;
   /** Default model for agents that don't specify their own (in code or frontmatter). */
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string;
@@ -261,7 +262,7 @@ export interface AgentsPluginConfig extends BasePluginConfig {
    * (the default), the agents plugin emits an `appkit.approval_pending` SSE
    * event before executing any tool whose annotation flags it as mutating —
    * `effect: "write" | "update" | "destructive"` (preferred) or the legacy
-   * `destructive: true` boolean — and waits for a `POST /chat/approve`
+   * `destructive: true` boolean — and waits for a `POST /api/agents/approve`
    * decision from the same user who initiated the stream. A missing decision
    * after `timeoutMs` auto-denies the call.
    */

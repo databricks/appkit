@@ -390,8 +390,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // deprecated map only warns). A folder with both agent.ts and
         // agent.md lands here too: one kind per folder.
         throw new Error(
-          `Agent '${name}' is defined as both a code agent (agent.ts) and a markdown agent (agent.md). ` +
-            `Keep one kind per folder. Available: ${Object.keys(merged).sort().join(", ")}`,
+          `Agent '${name}' is defined as both a code agent (agent.ts) and a markdown agent (agent.md) — ` +
+            `in one folder, or across server/agents and the deprecated config/agents fallback. ` +
+            `Keep a single kind per id. Available: ${Object.keys(merged).sort().join(", ")}`,
         );
       }
       merged[name] = { def, src: { origin: "code" } };

@@ -266,5 +266,5 @@ Emitted by the agents plugin (not adapters) when a mutating tool call
 is awaiting human approval — fires for tools annotated with
 `effect: "write" | "update" | "destructive"` (preferred) or the
 legacy `destructive: true` boolean. Clients should render an approval
-prompt and POST to `/chat/approve` with the matching `approvalId` and
+prompt and POST to `/api/agents/approve` with the matching `approvalId` and
 a `decision` of `approve` or `deny`.

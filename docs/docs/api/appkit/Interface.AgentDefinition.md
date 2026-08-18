@@ -30,8 +30,9 @@ optional default: boolean;
 
 Marks this agent as the default one chosen when a client doesn't name an
 agent. Mirrors markdown frontmatter `default: true`. When several agents
-set it, the first in stable id order wins; an explicit
-`agents({ defaultAgent })` always overrides it. Defaults to `false`.
+set it, a code (discovered) agent wins over a markdown one, then the
+lowest id; an explicit `agents({ defaultAgent })` always overrides it.
+Defaults to `false`.
 
 ***
 

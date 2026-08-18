@@ -70,8 +70,12 @@ async function findEntryFile(
   let files: string[];
   try {
     files = await fs.readdir(agentDir);
-  } catch {
-    return null;
+  } catch (err) {
+    // Absent (ENOENT) or a symlink to a file (ENOTDIR) → not an agent folder.
+    // Surface anything else (e.g. EACCES) rather than silently dropping it.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw err;
   }
   for (const ext of extensions) {
     const name = `${ENTRY_BASENAME}${ext}`;

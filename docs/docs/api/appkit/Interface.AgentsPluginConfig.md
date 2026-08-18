@@ -45,7 +45,7 @@ Human-in-the-loop approval gate for mutating tool calls. When enabled
 (the default), the agents plugin emits an `appkit.approval_pending` SSE
 event before executing any tool whose annotation flags it as mutating —
 `effect: "write" | "update" | "destructive"` (preferred) or the legacy
-`destructive: true` boolean — and waits for a `POST /chat/approve`
+`destructive: true` boolean — and waits for a `POST /api/agents/approve`
 decision from the same user who initiated the stream. A missing decision
 after `timeoutMs` auto-denies the call.
 
@@ -97,7 +97,7 @@ Customize or disable the AppKit base system prompt.
 optional defaultAgent: string;
 ```
 
-Agent used when clients don't specify one. Defaults to the first-registered agent or the file with `default: true` frontmatter.
+Agent used when clients don't specify one. Precedence: this value, else a code agent with `default: true`, else a markdown agent with `default: true`, else the first-registered agent.
 
 ***
 
