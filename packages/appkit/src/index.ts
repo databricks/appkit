@@ -7,6 +7,7 @@
 
 // Types from shared
 export type {
+  AppHandle,
   BasePluginConfig,
   CacheConfig,
   IAppRouter,

@@ -264,6 +264,25 @@ export type PluginMap<
   >;
 };
 
+/**
+ * What `createApp()` returns: every plugin's exports keyed by manifest name,
+ * plus the app's own teardown handle.
+ *
+ * `close()` releases what AppKit acquired — sockets, timers, pools, cache, and
+ * telemetry — without terminating the process, so a host can embed AppKit and a
+ * test can boot more than once in a file.
+ *
+ * `Symbol.asyncDispose` is exposed alongside it because a plugin's manifest name
+ * can never be a symbol: `await using app = await createApp(...)` is safe even
+ * if a plugin were somehow named `close`.
+ */
+export type AppHandle<
+  U extends readonly PluginData<PluginConstructor, unknown, string>[],
+> = PluginMap<U> & {
+  close(): Promise<void>;
+  [Symbol.asyncDispose](): Promise<void>;
+};
+
 /** Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. */
 export type PluginData<T, U, N> = { plugin: T; config: U; name: N };
 /** Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. */
