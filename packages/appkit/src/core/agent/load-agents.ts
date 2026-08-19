@@ -15,6 +15,7 @@ import type {
 } from "../../core/agent/types";
 import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
+import { agentDirNames } from "./agent-dirs";
 
 const logger = createLogger("agents:loader");
 
@@ -206,12 +207,8 @@ export async function loadAgentsFromDir(
     );
   }
 
-  const agentIds = entries
-    // Symlinked agent folders count; a symlink to a file is filtered out below
-    // when reading agent.md (ENOTDIR).
-    .filter((e) => e.isDirectory() || e.isSymbolicLink())
-    .map((e) => e.name)
-    .sort();
+  // A symlink to a file is filtered out below when reading agent.md (ENOTDIR).
+  const agentIds = agentDirNames(entries);
 
   const defs: Record<string, AgentDefinition> = {};
   const subAgentRefs: Record<string, string[]> = {};

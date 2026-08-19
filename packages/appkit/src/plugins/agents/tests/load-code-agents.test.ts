@@ -11,7 +11,7 @@ import {
 const fixtureDir = (name: string) =>
   fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 
-const TS = { extensions: [".ts", ".tsx"] };
+const TS = { extensions: [".ts"] };
 
 describe("loadCodeAgentsFromDir", () => {
   it("returns an empty record when the directory does not exist", async () => {
@@ -91,7 +91,7 @@ describe("resolveCodeAgentsDir", () => {
     // No built output → falls back to the source `.ts` dir.
     expect(
       resolveCodeAgentsDir({ cwd, override: "my-agents", exists: () => false }),
-    ).toEqual({ dir: customSrc, extensions: [".ts", ".tsx"] });
+    ).toEqual({ dir: customSrc, extensions: [".ts"] });
   });
 
   it("stays built-first when dir is set to the default value explicitly", () => {
@@ -117,11 +117,11 @@ describe("resolveCodeAgentsDir", () => {
 
   it("uses server/agents (.ts) only when no built dir exists", () => {
     const r = resolveCodeAgentsDir({ cwd, exists: existsIn(source) });
-    expect(r).toEqual({ dir: source, extensions: [".ts", ".tsx"] });
+    expect(r).toEqual({ dir: source, extensions: [".ts"] });
   });
 
   it("targets server/agents when nothing exists (empty scan downstream)", () => {
     const r = resolveCodeAgentsDir({ cwd, exists: () => false });
-    expect(r).toEqual({ dir: source, extensions: [".ts", ".tsx"] });
+    expect(r).toEqual({ dir: source, extensions: [".ts"] });
   });
 });

@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createLogger } from "../../logging/logger";
+import { agentDirNames } from "./agent-dirs";
 import { isCreatedAgent } from "./create-agent";
 import type { AgentDefinition } from "./types";
 
@@ -44,7 +45,9 @@ export function resolveCodeAgentsDir(opts: {
   const name = path.basename(sourceRel);
   const source: ResolvedCodeAgentsDir = {
     dir: path.resolve(opts.cwd, sourceRel),
-    extensions: [".ts", ".tsx"],
+    // `.ts` only: the build entry glob is `<dir>/*/agent.ts`, so an `agent.tsx`
+    // would load in dev but never be emitted for a prod bundle.
+    extensions: [".ts"],
   };
   const built: ResolvedCodeAgentsDir[] = CODE_AGENTS_BUILT_ROOTS.map(
     (root) => ({
@@ -130,12 +133,9 @@ export async function loadCodeAgentsFromDir(
     throw err;
   }
 
-  const folders = entries
-    // Include symlinked agent folders; findEntryFile's readdir follows the link
-    // and returns null for anything that isn't a real directory.
-    .filter((e) => e.isDirectory() || e.isSymbolicLink())
-    .map((e) => e.name)
-    .sort();
+  // findEntryFile's readdir follows a symlinked folder and returns null for
+  // anything that isn't a real directory.
+  const folders = agentDirNames(entries);
 
   const agents: Record<string, AgentDefinition> = {};
 

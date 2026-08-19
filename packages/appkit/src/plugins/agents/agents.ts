@@ -539,15 +539,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return discovered;
   }
 
-  /** True when `dir` holds at least one `<id>/agent.{ts,tsx}` folder. */
+  /** True when `dir` holds at least one `<id>/agent.ts` folder. */
   private hasCodeAgentSources(dir: string): boolean {
     try {
       return readdirSync(dir, { withFileTypes: true }).some((e) => {
         if (!e.isDirectory() && !e.isSymbolicLink()) return false;
         try {
-          return readdirSync(path.join(dir, e.name)).some(
-            (f) => f === "agent.ts" || f === "agent.tsx",
-          );
+          return readdirSync(path.join(dir, e.name)).includes("agent.ts");
         } catch {
           return false;
         }
