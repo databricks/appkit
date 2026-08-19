@@ -29,6 +29,10 @@ vi.mock("../../telemetry", () => ({
   },
 }));
 
+vi.mock("../reset-singletons", () => ({
+  releaseCoreSingletons: vi.fn(),
+}));
+
 vi.mock("../../internal-telemetry", () => ({
   TelemetryReporter: {
     getInstance: vi.fn().mockReturnValue(null),
@@ -53,6 +57,7 @@ import { TelemetryReporter } from "../../internal-telemetry";
 import { TelemetryManager } from "../../telemetry";
 import { LifecycleManager } from "../lifecycle-manager";
 import { PluginContext } from "../plugin-context";
+import { releaseCoreSingletons } from "../reset-singletons";
 
 function contextWithPlugins(plugins: Record<string, Partial<BasePlugin>>) {
   const ctx = new PluginContext();
@@ -416,6 +421,7 @@ describe("LifecycleManager", () => {
 
       // The whole point of the split.
       expect(exitSpy).not.toHaveBeenCalled();
+      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
     });
 
     test("is idempotent: teardown runs once and the second call awaits it", async () => {
@@ -564,6 +570,11 @@ describe("LifecycleManager", () => {
 
       // A hung teardown must not kill the process on the programmatic path.
       expect(exitSpy).not.toHaveBeenCalled();
+
+      // And it must not drop the singletons: the phases are still running and
+      // still own those instances, so releasing here hands the next boot a
+      // half-released app.
+      expect(releaseCoreSingletons).not.toHaveBeenCalled();
     });
   });
 
@@ -645,8 +656,8 @@ describe("LifecycleManager", () => {
       await vi.advanceTimersByTimeAsync(60);
       await expect(closing).resolves.toBeUndefined();
 
-      // close() has given up waiting and already dropped the singletons, so the
-      // static slots now answer with a *different* app's resources.
+      // close() has given up waiting. Simulate the next app booting into the
+      // static slots, so they now answer with a *different* app's resources.
       const nextCacheClose = vi.fn().mockResolvedValue(undefined);
       const nextTelemetryShutdown = vi.fn().mockResolvedValue(undefined);
       vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
