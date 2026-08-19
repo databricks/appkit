@@ -252,6 +252,34 @@ const result = await runAgent(classifier, {
 
 MCP hosted tools (`mcpServer(...)`) still require `agents()` (they need a live MCP client). Supervisor-API hosted tools (`supervisorTools.*`), by contrast, **work in standalone `runAgent`** — the adapter has everything it needs to execute them server-side. This makes batch-eval / CI use of supervisor agents possible without `createApp`. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
 
+## Adding agents to an existing app
+
+Already have an app and want to add agents? What you touch depends on the kind:
+
+**Markdown agents** — just the plugin. Drop `server/agents/<id>/agent.md`, add `agents()` to your `plugins`, done. Markdown is read from source at runtime in both dev and prod, so there is no build change.
+
+**Code agents** (`server/agents/<id>/agent.ts`) — also update your server build so a production bundle emits them. Code agents aren't imported anywhere, so a build that only compiles `server/server.ts` never produces `dist/agents/*/agent.js`, and a bundled `npm run build` + start would discover **zero** code agents.
+
+:::warning Dev hides this
+`npm run dev` (tsx) imports the `.ts` source directly, so code agents work there with no build change — the gap only appears in a bundled build. If you add code agents but forget the build change, the plugin warns at startup (and names the fix) rather than failing silently.
+:::
+
+The one-line fix is to adopt the build preset:
+
+```ts
+// tsdown.server.config.ts
+import { appkitServerConfig } from '@databricks/appkit/tsdown';
+
+export default appkitServerConfig();
+```
+
+`appkitServerConfig()` auto-detects `server/agents/` and adds the entry glob + `clean` only when code agents exist; pass overrides as `appkitServerConfig({ external, define, ... })`, or a function `appkitServerConfig((base) => ({ ...base }))` for full control. It's also the last time you touch this file — future build-wiring changes ship with the package. If you'd rather keep a hand-written config, add the entries yourself:
+
+```ts
+entry: ['server/server.ts', 'server/agents/*/agent.ts'],
+clean: true,
+```
+
 ## Managed agents: the Supervisor API adapter
 
 `DatabricksAdapter.fromSupervisorApi` (beta) is the zero-config way to run an agent: instead of provisioning and pointing at a model-serving endpoint, you run the agentic loop in the Databricks workspace by targeting the AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`), which runs the LLM — and any hosted tools — as a managed service on Databricks. No `DATABRICKS_SERVING_ENDPOINT_NAME`, no stream-capability check, no JS tool plumbing for the common cases.
