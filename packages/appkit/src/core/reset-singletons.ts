@@ -7,23 +7,16 @@ import { TelemetryManager } from "../telemetry";
 const logger = createLogger("lifecycle");
 
 /**
- * How many apps currently own the core singletons.
- *
- * They are process-wide, so a per-app "reset on boot, reset on close" model
- * cross-wires overlapping apps: booting B rebinds A's `ServiceContext` and
- * `CacheManager` to B's, and closing A while B is live leaves B with none at all
- * (`ServiceContext.get()` throws `InitializationError`). Refcounting means the
- * first boot claims them and only the last close drops them — the same model the
- * harness already uses for its `process.env` baseline.
+ * How many apps own the core singletons. Refcounted because they are
+ * process-wide: resetting per app would have booting B rebind A's
+ * `ServiceContext`, and closing A leave a still-live B with none.
  */
 let owners = 0;
 
 /**
- * Claim the singletons for a booting app, resetting only when it is the first.
- *
- * The reset is what clears leakage from a previous test; a *second* concurrent
- * app must not repeat it.
- *
+ * Claim for a booting app, resetting only when it is the first — the reset
+ * clears leakage from a previous test, so a concurrent second app must not
+ * repeat it.
  * @internal
  */
 export function claimCoreSingletons(): void {
@@ -33,7 +26,6 @@ export function claimCoreSingletons(): void {
 
 /**
  * Release one app's claim, dropping the singletons once none are left.
- *
  * @internal
  */
 export function releaseCoreSingletons(): void {
@@ -44,10 +36,9 @@ export function releaseCoreSingletons(): void {
 /**
  * Drop the four singletons `AppKit._createApp` initializes, ignoring refcounts.
  *
- * Pointer drops, not teardown — callers close first, or the old app's storage and
- * exporters leak. Core initializes all four, so core drops all four; a host that
- * closes then calls `ServiceContext.get()` will get an `InitializationError`.
- *
+ * Pointer drops, not teardown — close first or the old app's storage and
+ * exporters leak. A host that closes then calls `ServiceContext.get()` gets an
+ * `InitializationError`.
  * @internal
  */
 export function dropCoreSingletons(): void {

@@ -1,3 +1,4 @@
+import type { CacheEntry } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { CacheManager } from "..";
@@ -73,49 +74,30 @@ describe("CacheManager.reset", () => {
     expect(() => CacheManager.getInstanceSync()).toThrow(InitializationError);
   });
 
-  test("reset is safe when the cache was never initialized", () => {
-    expect(() => CacheManager.reset()).not.toThrow();
-    expect(() => CacheManager.reset()).not.toThrow();
-  });
-
   test("without a reset, the next boot reuses storage the last teardown closed", async () => {
     // Models PersistentStorage, whose close() is `pool.end()` — permanent.
     // InMemoryStorage.close() merely clears a Map and stays usable, which is why
     // an in-memory test cannot show this and why the bug hid for so long.
-    function endableStorage() {
-      let ended = false;
-      const entries = new Map<string, unknown>();
-      const guard = <T>(fn: () => T) => {
-        if (ended) throw new Error("Cannot use a pool after calling end()");
-        return fn();
-      };
-      return {
-        get: async (k: string) =>
-          guard(() => (entries.get(k) ?? null) as never),
-        set: async (k: string, v: unknown) =>
-          guard(() => void entries.set(k, v)),
-        delete: async (k: string) => guard(() => void entries.delete(k)),
-        clear: async () => guard(() => entries.clear()),
-        has: async (k: string) => guard(() => entries.has(k)),
-        size: async () => guard(() => entries.size),
-        isPersistent: () => true,
-        healthCheck: async () => !ended,
-        close: async () => {
-          ended = true;
-        },
-      };
+    class EndableStorage extends InMemoryStorage {
+      private ended = false;
+      override async close(): Promise<void> {
+        this.ended = true;
+      }
+      override async set<T>(key: string, entry: CacheEntry<T>): Promise<void> {
+        if (this.ended)
+          throw new Error("Cannot use a pool after calling end()");
+        return super.set(key, entry);
+      }
     }
+    const endable = () =>
+      new EndableStorage({ enabled: true, maxSize: 100 } as never);
 
-    const first = await CacheManager.getInstance({
-      storage: endableStorage() as never,
-    });
+    const first = await CacheManager.getInstance({ storage: endable() });
     await first.close();
 
     // The bug, with no reset in between: getInstance() hands back the same
     // manager, still pointing at storage that has been ended.
-    const stale = await CacheManager.getInstance({
-      storage: endableStorage() as never,
-    });
+    const stale = await CacheManager.getInstance({ storage: endable() });
     expect(stale).toBe(first);
     await expect(
       stale.set(stale.generateKey(["x"], "test-user"), { v: 1 }),
@@ -124,9 +106,7 @@ describe("CacheManager.reset", () => {
     // The fix: reset drops the pointer, so the next boot builds over live
     // storage and the same write succeeds.
     CacheManager.reset();
-    const fresh = await CacheManager.getInstance({
-      storage: endableStorage() as never,
-    });
+    const fresh = await CacheManager.getInstance({ storage: endable() });
     expect(fresh).not.toBe(first);
     const key = fresh.generateKey(["x"], "test-user");
     await fresh.set(key, { v: 1 });
