@@ -95,6 +95,8 @@ async function connectSSE({
     }, 2000);
     return promise;
   }
+
+  return undefined;
 }
 
 export function useReconnectStream(url: string, resetTrigger = 0) {

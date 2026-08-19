@@ -14,7 +14,6 @@ const config = {
   workspaceDir: process.env.DATABRICKS_WORKSPACE_DIR,
 };
 
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PLAYGROUND_FOLDER = path.join(process.cwd(), "apps", "dev-playground");
 const TMP_FOLDER = path.join(process.cwd(), "deployable");
 
@@ -63,47 +62,22 @@ async function deployPlayground() {
   const playgroundPackageJson = JSON.parse(
     fs.readFileSync(path.join(TMP_FOLDER, "package.json"), "utf-8"),
   );
-  const clientPackageJson = JSON.parse(
-    fs.readFileSync(path.join(TMP_FOLDER, "client", "package.json"), "utf-8"),
-  );
-  const rootPreparedTSConfig = path.join(
-    __dirname,
-    "prepared-files",
-    "root-tsconfig.json",
-  );
-  const clientPreparedTSConfig = path.join(
-    __dirname,
-    "prepared-files",
-    "client-tsconfig.json",
-  );
-  const clientPreparedViteConfig = path.join(
-    __dirname,
-    "prepared-files",
-    "client-viteconfig.ts",
-  );
-  const clientTsConfig = path.join(TMP_FOLDER, "client", "tsconfig.json");
-  const rootTsConfig = path.join(TMP_FOLDER, "tsconfig.json");
-  const clientViteConfig = path.join(TMP_FOLDER, "client", "vite.config.ts");
 
   const appName = playgroundPackageJson.name;
 
+  // Single-package layout: both SDK tarballs become file: deps in the one
+  // package.json. The committed tsconfig/vite configs are already
+  // standalone (no monorepo paths, appkit-ui resolves from node_modules),
+  // so no prepared-config swap is needed here anymore.
   playgroundPackageJson.dependencies = {
     ...playgroundPackageJson.dependencies,
     "@databricks/appkit": `file:./databricks-appkit-${appKitPackageJson.version}.tgz`,
-  };
-
-  clientPackageJson.dependencies = {
-    ...clientPackageJson.dependencies,
     "@databricks/appkit-ui": `file:./databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
   };
 
   fs.writeFileSync(
     path.join(TMP_FOLDER, "package.json"),
     JSON.stringify(playgroundPackageJson, null, 2),
-  );
-  fs.writeFileSync(
-    path.join(TMP_FOLDER, "client", "package.json"),
-    JSON.stringify(clientPackageJson, null, 2),
   );
   fs.copyFileSync(
     appKitTarball,
@@ -113,14 +87,9 @@ async function deployPlayground() {
     appKitUiTarball,
     path.join(
       TMP_FOLDER,
-      "client",
       `databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
     ),
   );
-
-  fs.copyFileSync(clientPreparedTSConfig, clientTsConfig);
-  fs.copyFileSync(clientPreparedViteConfig, clientViteConfig);
-  fs.copyFileSync(rootPreparedTSConfig, rootTsConfig);
 
   process.chdir(TMP_FOLDER);
 

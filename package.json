@@ -42,7 +42,7 @@
     "release:sbom": "pnpm exec cdxgen -t js --no-recurse --required-only -o packages/appkit/tmp/sbom.cdx.json packages/appkit && pnpm exec cdxgen -t js --no-recurse --required-only -o packages/appkit-ui/tmp/sbom.cdx.json packages/appkit-ui",
     "release:dry": "release-it --dry-run",
     "setup:repo": "./tools/setup.sh",
-    "start": "NODE_ENV=production pnpm build && pnpm --filter=dev-playground build:app && pnpm --filter=dev-playground start:local",
+    "start": "NODE_ENV=production pnpm build && pnpm --filter=dev-playground build && pnpm --filter=dev-playground start",
     "test:watch": "vitest",
     "test": "vitest run --coverage",
     "typecheck": "pnpm -r typecheck",
@@ -93,7 +93,9 @@
       "@opentelemetry/core@<2.8.0": "2.8.0",
       "protobufjs@<7.6.2": "7.6.2",
       "qs@<6.15.2": "6.15.2",
-      "size-sensor": "1.0.3"
+      "size-sensor": "1.0.3",
+      "@databricks/appkit": "workspace:*",
+      "@databricks/appkit-ui": "workspace:*"
     }
   }
 }
