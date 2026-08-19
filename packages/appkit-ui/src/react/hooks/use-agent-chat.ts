@@ -85,8 +85,13 @@ export interface UseAgentChatResult {
   /**
    * Send a user turn and stream the response. Aborts any in-flight
    * stream. Resolves when the stream completes (success or error).
+   *
+   * Pass `opts.skill` to force-load a skill for this turn, or prefix the
+   * message with `/skill-name` as sugar (the leading token is parsed off and
+   * sent as the skill; the rest becomes the message). An explicit
+   * `opts.skill` wins over a `/`-prefix.
    */
-  send: (message: string) => Promise<void>;
+  send: (message: string, opts?: { skill?: string }) => Promise<void>;
   /**
    * Discard accumulated content, events, and threadId. Aborts any
    * in-flight stream. Use when switching agents or starting a fresh
@@ -158,7 +163,7 @@ export function useAgentChat({
   }, []);
 
   const send = useCallback(
-    async (message: string) => {
+    async (message: string, opts?: { skill?: string }) => {
       // Abort any previous stream — only one chat turn in flight per hook.
       abortControllerRef.current?.abort();
       const controller = new AbortController();
@@ -170,9 +175,24 @@ export function useAgentChat({
       setError(null);
       setIsStreaming(true);
 
+      // Resolve the forced skill: explicit opts.skill wins; otherwise parse a
+      // leading `/skill-name` token off the message. When the message is only
+      // the token, fall back to a minimal instruction so the turn isn't empty.
+      let text = message;
+      let skill = opts?.skill;
+      if (!skill) {
+        const match = text.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
+        if (match) {
+          skill = match[1];
+          text = text.slice(match[0].length);
+          if (text.trim() === "") text = `Use the ${skill} skill.`;
+        }
+      }
+
       const payload = {
-        message,
+        message: text,
         agent,
+        ...(skill ? { skill } : {}),
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
       };
 

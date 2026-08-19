@@ -77,6 +77,51 @@ describe("useAgentChat", () => {
     expect(capturedCallbacks.maxRetries).toBe(0);
   });
 
+  test("send(message, { skill }) includes the skill in the payload", async () => {
+    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+
+    act(() => {
+      void result.current.send("summarize", { skill: "pdf" });
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "summarize",
+      agent: "helper",
+      skill: "pdf",
+    });
+  });
+
+  test("parses a leading /skill-name token off the message", async () => {
+    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+
+    act(() => {
+      void result.current.send("/pdf extract the tables");
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "extract the tables",
+      agent: "helper",
+      skill: "pdf",
+    });
+  });
+
+  test("/skill-name with no text falls back to a non-empty message", async () => {
+    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+
+    act(() => {
+      void result.current.send("/pdf");
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "Use the pdf skill.",
+      agent: "helper",
+      skill: "pdf",
+    });
+  });
+
   test("custom endpoint is forwarded to connectSSE", async () => {
     const { result } = renderHook(() =>
       useAgentChat({ agent: "helper", endpoint: "/v2/chat" }),
