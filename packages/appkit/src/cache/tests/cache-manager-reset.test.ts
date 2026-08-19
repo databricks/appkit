@@ -81,37 +81,25 @@ describe("CacheManager.reset", () => {
     // Models PersistentStorage, whose close() is `pool.end()` — permanent.
     // InMemoryStorage.close() merely clears a Map and stays usable, which is why
     // an in-memory test cannot show this and why the bug hid for so long.
+    // Models PersistentStorage, whose close() is pool.end() — permanent.
+    // InMemoryStorage.close() only clears a Map and stays usable, which is why an
+    // in-memory test cannot show this and why the bug hid.
     function endableStorage() {
       let ended = false;
       const entries = new Map<string, unknown>();
-      const guard = () => {
+      const guard = <T>(fn: () => T) => {
         if (ended) throw new Error("Cannot use a pool after calling end()");
+        return fn();
       };
       return {
-        get: async (key: string) => {
-          guard();
-          return (entries.get(key) ?? null) as never;
-        },
-        set: async (key: string, entry: unknown) => {
-          guard();
-          entries.set(key, entry);
-        },
-        delete: async (key: string) => {
-          guard();
-          entries.delete(key);
-        },
-        clear: async () => {
-          guard();
-          entries.clear();
-        },
-        has: async (key: string) => {
-          guard();
-          return entries.has(key);
-        },
-        size: async () => {
-          guard();
-          return entries.size;
-        },
+        get: async (k: string) =>
+          guard(() => (entries.get(k) ?? null) as never),
+        set: async (k: string, v: unknown) =>
+          guard(() => void entries.set(k, v)),
+        delete: async (k: string) => guard(() => void entries.delete(k)),
+        clear: async () => guard(() => entries.clear()),
+        has: async (k: string) => guard(() => entries.has(k)),
+        size: async () => guard(() => entries.size),
         isPersistent: () => true,
         healthCheck: async () => !ended,
         close: async () => {
