@@ -9,6 +9,7 @@ import {
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/query-dedup")({

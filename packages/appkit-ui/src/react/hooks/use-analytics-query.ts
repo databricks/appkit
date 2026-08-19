@@ -6,6 +6,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+
 import * as store from "./analytics-request-store";
 import { getDevMode } from "./analytics-sse";
 import type {

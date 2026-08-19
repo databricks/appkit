@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+
 import { setupMockAPI, trackApiCalls } from "./utils/test-utils";
 
 test.describe("Data Visualization Route Tests", () => {
