@@ -6,22 +6,23 @@ import {
   handleAnalyticsSseMessage,
   userFacingFetchError,
 } from "./analytics-sse";
+import {
+  createRequestStore,
+  type RequestControls,
+  type RequestRunner,
+} from "./request-store";
 import type { WarehouseStatus } from "./types";
 
 /**
- * Shared in-flight request store for `useAnalyticsQuery`.
+ * Shared in-flight request store for `useAnalyticsQuery`: an instance of the
+ * generic {@link createRequestStore} lifecycle wired to the analytics
+ * transports. Multiple hook instances resolving to the same request (query
+ * key, parameters, format, dev mode) share one network request and see the
+ * same result and mid-flight `warehouse_status` updates.
  *
- * Multiple hook instances that resolve to the same request (same query key,
- * parameters, format, and dev mode) share a single network request keyed by a
- * cache key. Each keyed {@link Entry} owns one transport (SSE or direct Arrow
- * fetch) and fans both the final result and mid-flight `warehouse_status`
- * updates out to every subscriber via `useSyncExternalStore`.
- *
- * Dedup-only: a keyed entry lives exactly as long as it has subscribers. When
- * the last one releases, teardown is deferred a tick (so a StrictMode
- * unmount→remount reuses the in-flight request instead of aborting it); if no
- * one has re-subscribed by then, the request is aborted and the entry dropped.
- * There is no cross-lifecycle result cache.
+ * The lifecycle (dedup, refcount, deferred teardown) lives in the factory; this
+ * module only supplies the snapshot shape and how a request runs — SSE via
+ * `analytics-sse.ts` or a direct Arrow fetch.
  */
 
 /** Options describing the request a keyed entry runs. */
@@ -61,37 +62,7 @@ const LOADING_SNAPSHOT: AnalyticsRequestSnapshot = {
   warehouseStatus: null,
 };
 
-interface Entry {
-  snapshot: AnalyticsRequestSnapshot;
-  refCount: number;
-  abortController: AbortController | null;
-  teardownTimer: ReturnType<typeof setTimeout> | null;
-  /** True once `start` has run at least once; guards re-run on late `retain`. */
-  started: boolean;
-  options: AnalyticsRequestOptions;
-}
-
-const entries = new Map<string, Entry>();
-
-// Keyed separately from `entries`: `subscribe` can run before `retain` creates
-// the entry, so listeners must survive independently of entry lifetime.
-const listenersByKey = new Map<string, Set<() => void>>();
-
-function notify(key: string): void {
-  const listeners = listenersByKey.get(key);
-  if (!listeners) return;
-  for (const listener of listeners) listener();
-}
-
-/** Replace an entry's snapshot immutably and notify subscribers. */
-function patch(
-  key: string,
-  entry: Entry,
-  next: Partial<AnalyticsRequestSnapshot>,
-): void {
-  entry.snapshot = { ...entry.snapshot, ...next };
-  notify(key);
-}
+type Controls = RequestControls<AnalyticsRequestSnapshot>;
 
 /**
  * Fetch the real column names for a statement from the fallback endpoint,
@@ -123,15 +94,15 @@ async function fetchArrowColumns(
  * body; errors before the first byte arrive as a JSON `{ error, errorCode }`.
  */
 async function fetchArrowDirect(
-  key: string,
-  entry: Entry,
-  signal: AbortSignal,
+  controls: Controls,
+  options: AnalyticsRequestOptions,
 ): Promise<void> {
+  const { signal } = controls;
   try {
-    const response = await fetch(entry.options.url, {
+    const response = await fetch(options.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: entry.options.payload,
+      body: options.payload,
       signal,
     });
     if (signal.aborted) return;
@@ -149,7 +120,7 @@ async function fetchArrowDirect(
       } catch {
         // Non-JSON error body — keep the generic message.
       }
-      patch(key, entry, { loading: false, error: message, errorCode: code });
+      controls.patch({ loading: false, error: message, errorCode: code });
       return;
     }
 
@@ -178,146 +149,77 @@ async function fetchArrowDirect(
       new Uint8Array(buffer),
       columnNames,
     );
-    patch(key, entry, { loading: false, data: table });
+    controls.patch({ loading: false, data: table });
   } catch (error) {
     if (signal.aborted) return;
-    patch(key, entry, { loading: false, error: userFacingFetchError(error) });
+    controls.patch({ loading: false, error: userFacingFetchError(error) });
   }
 }
 
 /**
- * (Re)start the request for a keyed entry: abort any in-flight transport,
- * reset the snapshot to loading, and run the format-appropriate transport.
- * The new state fans out to every current subscriber.
+ * Build the runner for a request: reset to loading, then run the
+ * format-appropriate transport, reporting state through `controls.patch`.
  */
-export function start(key: string): void {
-  const entry = entries.get(key);
-  if (!entry) return;
+function runAnalyticsRequest(
+  options: AnalyticsRequestOptions,
+): RequestRunner<AnalyticsRequestSnapshot> {
+  return (controls) => {
+    controls.patch(LOADING_SNAPSHOT);
 
-  entry.abortController?.abort();
+    // ARROW_STREAM: the server streams raw Arrow IPC bytes back on the query
+    // response body (no SSE). Fetch and decode directly.
+    if (options.format === "ARROW_STREAM") {
+      void fetchArrowDirect(controls, options);
+      return;
+    }
 
-  entry.started = true;
-  entry.snapshot = LOADING_SNAPSHOT;
-  notify(key);
+    // Adapt the shared SSE handler onto the snapshot model. No warehouse
+    // publisher lives here — the hook mirrors status from the snapshot — so
+    // `unpublishWarehouseStatus` is a no-op.
+    const sseContext: AnalyticsSseHandlerContext = {
+      source: "useAnalyticsQuery",
+      resource: { url: options.url },
+      defaultExecutionError: "Unable to execute query",
+      unpublishOnMalformedMessage: false,
+      signal: controls.signal,
+      abort: controls.abort,
+      setLoading: (loading) => controls.patch({ loading }),
+      setError: (error) => controls.patch({ error }),
+      setErrorCode: (errorCode) => controls.patch({ errorCode }),
+      onWarehouseStatus: (status) =>
+        controls.patch({ warehouseStatus: status }),
+      onResult: (message) => controls.patch({ data: message.data }),
+      unpublishWarehouseStatus: () => {},
+    };
 
-  const abortController = new AbortController();
-  entry.abortController = abortController;
-  const { signal } = abortController;
-
-  // ARROW_STREAM: the server streams raw Arrow IPC bytes back on the query
-  // response body (no SSE). Fetch and decode directly.
-  if (entry.options.format === "ARROW_STREAM") {
-    void fetchArrowDirect(key, entry, signal);
-    return;
-  }
-
-  // Adapts the shared SSE handler onto the snapshot model. No warehouse
-  // publisher lives here — the hook mirrors status from the snapshot — so
-  // `unpublishWarehouseStatus` is a no-op.
-  const sseContext: AnalyticsSseHandlerContext = {
-    source: "useAnalyticsQuery",
-    resource: { url: entry.options.url },
-    defaultExecutionError: "Unable to execute query",
-    unpublishOnMalformedMessage: false,
-    signal,
-    abort: () => abortController.abort(),
-    setLoading: (loading) => patch(key, entry, { loading }),
-    setError: (error) => patch(key, entry, { error }),
-    setErrorCode: (errorCode) => patch(key, entry, { errorCode }),
-    onWarehouseStatus: (status) =>
-      patch(key, entry, { warehouseStatus: status }),
-    onResult: (message) => patch(key, entry, { data: message.data }),
-    unpublishWarehouseStatus: () => {},
+    connectSSE({
+      url: options.url,
+      payload: options.payload,
+      signal: controls.signal,
+      onMessage: (message) =>
+        handleAnalyticsSseMessage(message.data, sseContext),
+      onError: (error) => handleAnalyticsSseError(error, sseContext),
+    });
   };
-
-  connectSSE({
-    url: entry.options.url,
-    payload: entry.options.payload,
-    signal,
-    onMessage: (message) => handleAnalyticsSseMessage(message.data, sseContext),
-    onError: (error) => handleAnalyticsSseError(error, sseContext),
-  });
 }
 
+const store = createRequestStore<AnalyticsRequestSnapshot>(EMPTY_SNAPSHOT);
+
 /**
- * Register a subscriber for `key`, creating and starting the shared request
- * on first use. Returns a `release` function that must be called on unmount.
- *
- * @param key      Cache key uniquely identifying the request.
- * @param options  Request options; only used when the entry is first created.
- * @param autoStart Whether to start the request on creation. Default true.
+ * Register a subscriber for `key`, starting the shared request on first use.
+ * Returns a `release` function that must be called on unmount.
  */
 export function retain(
   key: string,
   options: AnalyticsRequestOptions,
   autoStart = true,
 ): () => void {
-  let entry = entries.get(key);
-  if (!entry) {
-    entry = {
-      snapshot: EMPTY_SNAPSHOT,
-      refCount: 0,
-      abortController: null,
-      teardownTimer: null,
-      started: false,
-      options,
-    };
-    entries.set(key, entry);
-  }
-
-  // A late joiner cancels any pending teardown so it keeps the live request.
-  if (entry.teardownTimer !== null) {
-    clearTimeout(entry.teardownTimer);
-    entry.teardownTimer = null;
-  }
-  entry.refCount += 1;
-
-  if (autoStart && !entry.started) {
-    start(key);
-  }
-
-  return () => release(key);
+  return store.retain(key, runAnalyticsRequest(options), autoStart);
 }
 
-function release(key: string): void {
-  const entry = entries.get(key);
-  if (!entry) return;
-  entry.refCount -= 1;
-  if (entry.refCount > 0) return;
-
-  // Defer teardown one tick: a StrictMode unmount→remount (or a fast
-  // route swap) re-`retain`s within the same tick and reuses the request.
-  entry.teardownTimer = setTimeout(() => {
-    const current = entries.get(key);
-    if (!current || current.refCount > 0) return;
-    current.abortController?.abort();
-    entries.delete(key);
-  }, 0);
-}
-
-export function subscribe(key: string, listener: () => void): () => void {
-  let listeners = listenersByKey.get(key);
-  if (!listeners) {
-    listeners = new Set();
-    listenersByKey.set(key, listeners);
-  }
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) listenersByKey.delete(key);
-  };
-}
-
-export function getSnapshot(key: string): AnalyticsRequestSnapshot {
-  return entries.get(key)?.snapshot ?? EMPTY_SNAPSHOT;
-}
+export const start = store.start;
+export const subscribe = store.subscribe;
+export const getSnapshot = store.getSnapshot;
 
 /** Test-only: abort every in-flight request and clear the store. */
-export function resetAnalyticsRequestStore(): void {
-  for (const entry of entries.values()) {
-    if (entry.teardownTimer !== null) clearTimeout(entry.teardownTimer);
-    entry.abortController?.abort();
-  }
-  entries.clear();
-  listenersByKey.clear();
-}
+export const resetAnalyticsRequestStore = store.reset;
