@@ -77,13 +77,11 @@ describe("CacheManager.reset", () => {
     expect(() => CacheManager.reset()).not.toThrow();
     expect(() => CacheManager.reset()).not.toThrow();
   });
+
   test("without a reset, the next boot reuses storage the last teardown closed", async () => {
     // Models PersistentStorage, whose close() is `pool.end()` — permanent.
     // InMemoryStorage.close() merely clears a Map and stays usable, which is why
     // an in-memory test cannot show this and why the bug hid for so long.
-    // Models PersistentStorage, whose close() is pool.end() — permanent.
-    // InMemoryStorage.close() only clears a Map and stays usable, which is why an
-    // in-memory test cannot show this and why the bug hid.
     function endableStorage() {
       let ended = false;
       const entries = new Map<string, unknown>();

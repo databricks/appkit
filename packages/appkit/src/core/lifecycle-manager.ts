@@ -5,7 +5,7 @@ import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { TelemetryManager } from "../telemetry";
 import type { PluginContext } from "./plugin-context";
-import { resetCoreSingletons } from "./reset-singletons";
+import { releaseCoreSingletons } from "./reset-singletons";
 
 const logger = createLogger("lifecycle");
 
@@ -59,6 +59,8 @@ export class LifecycleManager {
   private shutdownPhase = "not started";
   /** Retained so {@link close} removes its own listeners and nothing else. */
   private signalHandlers: [NodeJS.Signals, () => void][] = [];
+  /** Memoizes {@link close}, so the singleton release happens once. */
+  private closed: Promise<void> | undefined;
 
   constructor(private readonly context: PluginContext) {}
 
@@ -136,14 +138,26 @@ export class LifecycleManager {
    * once its budget is spent, so an `afterEach` cannot hang.
    */
   async close(options: { timeoutMs?: number } = {}): Promise<void> {
+    // Memoized separately from the phases: `runOnce()` already guarantees the
+    // teardown body runs once, but the singleton reset below must also happen
+    // once. Without this a stale handle's second close() resets whatever app is
+    // live *now* — `await a.close(); createApp(); await a.close()` broke the
+    // second app.
+    this.closed ??= this.closeOnce(options);
+    return this.closed;
+  }
+
+  private async closeOnce(options: { timeoutMs?: number }): Promise<void> {
     // Before the first await, so a later signal finds no AppKit listener.
     this.removeSignalHandlers();
 
     const timeoutMs = options.timeoutMs ?? LifecycleManager.CLOSE_TIMEOUT_MS;
 
+    let timedOut = false;
     try {
       await this.raceWithTimeout(this.runOnce(), timeoutMs, "close");
     } catch (err) {
+      timedOut = true;
       logger.error(
         "close() did not complete within the %dms budget (phase in flight: %s): %O",
         timeoutMs,
@@ -152,8 +166,11 @@ export class LifecycleManager {
       );
     }
 
-    // close() only — on the signal path the process is dying and this is pure cost.
-    resetCoreSingletons();
+    // Skipped on timeout: the phases are still running and still own these
+    // instances, so dropping the pointers now would hand the next boot a
+    // half-released app. Skipped on the signal path too, where the process is
+    // dying and this is pure cost.
+    if (!timedOut) releaseCoreSingletons();
   }
 
   /** No `await` between read and assign — that gap is the re-entrancy window. */

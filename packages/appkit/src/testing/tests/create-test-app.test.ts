@@ -98,6 +98,14 @@ class ProbePlugin extends Plugin {
       res.json(ex.whoami());
     });
 
+    // Calls the client *inside* asUser, unlike /as-user which only reads userId.
+    r("get", "/as-user-client", async (req, res) => {
+      const ex = this.asUser(req).exports() as {
+        probeClient: () => Promise<unknown>;
+      };
+      res.json({ run: (await ex.probeClient()) ?? null });
+    });
+
     r("get", "/boom", async () => {
       throw new Error("handler exploded");
     });
@@ -123,6 +131,10 @@ class ProbePlugin extends Plugin {
     return {
       seenClient: () => this.seenClient,
       whoami: () => ({ userId: getUserContext()?.userId }),
+      // Calls through the client so the harness's mock records it — a real
+      // OBO client would record nothing here.
+      probeClient: () =>
+        getWorkspaceClient().jobs.getRun({ run_id: 42 } as never),
     };
   }
 }
@@ -613,5 +625,75 @@ describe("createTestApp HTTP layer", () => {
     await expect(
       app.get("/api/probe/json", { signal: controller.signal }),
     ).rejects.toThrow();
+  });
+  test("an obo request gets the mock client, not a real one", async () => {
+    await withApp(
+      { plugins: [probe()], responses: { "jobs.getRun": { via: "mock" } } },
+      async (app) => {
+        const res = await app.get("/api/probe/as-user-client", {
+          obo: { userId: "carol" },
+        });
+        expect(res.status).toBe(200);
+
+        // Asserting the host would not discriminate — a real client built from
+        // DATABRICKS_HOST carries the same string. What only the mock can do is
+        // record the call and return the declared response.
+        await expect(res.json()).resolves.toEqual({ run: { via: "mock" } });
+        expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({
+          run_id: 42,
+        });
+      },
+    );
+  });
+
+  describe("overlapping apps", () => {
+    test("booting a second app does not rebind the first's singletons", async () => {
+      const a = await createTestApp({ plugins: [probe()] });
+      const b = await createTestApp({ plugins: [probe()] });
+      try {
+        // Both must still resolve their own client through the real seam. Before
+        // the singletons were refcounted, B's boot reset and rebound A's.
+        await expect(
+          a.get("/api/probe/from-client").then((r) => r.status),
+        ).resolves.toBe(200);
+        await expect(
+          b.get("/api/probe/from-client").then((r) => r.status),
+        ).resolves.toBe(200);
+      } finally {
+        await a.close();
+        await b.close();
+      }
+    });
+
+    test("closing one app leaves the other's context intact", async () => {
+      const a = await createTestApp({ plugins: [probe()] });
+      const b = await createTestApp({ plugins: [probe()] });
+      try {
+        await a.close();
+        // Previously A's close dropped the singletons, so this threw
+        // InitializationError from ServiceContext.get().
+        await expect(
+          b.get("/api/probe/from-client").then((r) => r.status),
+        ).resolves.toBe(200);
+      } finally {
+        await b.close();
+      }
+    });
+
+    test("a stale handle's second close cannot reset a newer app", async () => {
+      const first = await createTestApp({ plugins: [probe()] });
+      await first.close();
+
+      const second = await createTestApp({ plugins: [probe()] });
+      try {
+        // close() is memoized, so this is a no-op rather than a second release.
+        await first.close();
+        await expect(
+          second.get("/api/probe/from-client").then((r) => r.status),
+        ).resolves.toBe(200);
+      } finally {
+        await second.close();
+      }
+    });
   });
 });

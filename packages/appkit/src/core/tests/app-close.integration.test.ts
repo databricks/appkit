@@ -84,12 +84,10 @@ describe("app handle close()", () => {
 
     await app.close();
 
-    // The plugin's own teardown hook ran...
     expect(app.probe.shutdownCalls()).toBe(1);
-    // ...the listener is gone...
     await expect(fetch(`${baseUrl}/health`)).rejects.toThrow();
-    // ...and the signal handlers came back off, which is what keeps repeated
-    // boots from tripping MaxListenersExceededWarning.
+    // Signal handlers came back off — what keeps repeated boots from tripping
+    // MaxListenersExceededWarning.
     expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
   });
 
@@ -165,6 +163,7 @@ describe("app handle close()", () => {
       /"close" is reserved|Plugin name "close" is reserved/,
     );
   });
+
   test("boot, close, boot again in one file — the second app gets a live cache", async () => {
     // The stated driver for the whole close() effort: two real boots, two real
     // sockets, one process.
@@ -235,5 +234,33 @@ describe("app handle close()", () => {
         await app.close();
       }
     });
+  });
+
+  test("a stale handle's second close() cannot reset a newer app", async () => {
+    // Only reachable through the raw handle: createTestApp's wrapper memoizes
+    // close(), which masked this.
+    const first = await createApp({ plugins: [probe()] });
+    await first.close();
+
+    serviceContextMock.restore();
+    serviceContextMock = mockServiceContext();
+    const second = await createApp({
+      plugins: [probe(), serverPlugin({ port: 0, host: "127.0.0.1" })],
+    });
+    const port = await getListeningPort(second.server.getServer());
+
+    try {
+      // The phases are memoized, but the singleton release was not — so this
+      // second call used to drop the singletons the *second* app was using.
+      await first.close();
+
+      await expect(
+        fetch(`http://127.0.0.1:${port}/health`).then((r) => r.status),
+      ).resolves.toBe(200);
+      expect(() => CacheManager.getInstanceSync()).not.toThrow();
+      expect(() => ServiceContext.get()).not.toThrow();
+    } finally {
+      await second.close();
+    }
   });
 });

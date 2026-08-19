@@ -11,15 +11,17 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { vi } from "vitest";
 
 import { InMemoryStorage } from "../cache/storage/memory";
+import { ServiceContext } from "../context/service-context";
 import { createApp } from "../core/appkit";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { oboHeaders, setupDatabricksEnv } from "./fixtures";
 import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
-import { resetAppKitSingletons } from "./reset";
+import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
 
 type Any = any;
 
@@ -128,6 +130,32 @@ export interface TestApp<T extends Plugins> {
 }
 
 /**
+ * Point `ServiceContext.createUserContext` at the harness's mock so an `obo`
+ * request does not construct a real SDK client from `DATABRICKS_HOST`.
+ *
+ * Mirrors the `createUserContextSpy` in `fixtures.ts`; returns its restore.
+ */
+function stubUserContext(client: WorkspaceClient): () => void {
+  const spy = vi
+    .spyOn(ServiceContext, "createUserContext")
+    .mockImplementation((token, userId, userName, userEmail) => {
+      if (!token) throw new Error("createTestApp: obo requires a token");
+      const service = ServiceContext.get();
+      return {
+        client,
+        userId,
+        userName,
+        userEmail,
+        tokenFingerprint: `test-${userId}`,
+        warehouseId: service.warehouseId,
+        workspaceId: service.workspaceId,
+        isUserContext: true,
+      };
+    });
+  return () => spy.mockRestore();
+}
+
+/**
  * `start()` returns once `listen()` is invoked, before the bind completes, so
  * `address()` is null until the `listening` event fires.
  *
@@ -198,6 +226,7 @@ export async function createTestApp<T extends Plugins>(
   const restoreEnv = releaseEnvBaseline;
 
   let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  let restoreUserContext: (() => void) | undefined;
 
   try {
     process.env.NODE_ENV = nodeEnv;
@@ -214,11 +243,17 @@ export async function createTestApp<T extends Plugins>(
       ...env,
     });
 
-    resetAppKitSingletons();
+    claimAppKitSingletons();
 
     // Boot runs ServiceContext.createContext for real, which reads
     // currentUser.id — the mock's built-in default is what lets it through.
     const client = suppliedClient ?? createMockWorkspaceClient({ responses });
+
+    // createApp({ client }) installs only the service-principal client. An `obo`
+    // request reaches ServiceContext.createUserContext, which builds a *real*
+    // client from process.env.DATABRICKS_HOST — so the user-scoped path is faked
+    // here too, or "no network" is false the moment a handler calls asUser.
+    restoreUserContext = stubUserContext(client);
 
     // createApp never auto-adds a server, so without this there is nothing to
     // fetch. Lazily imported: the plugin runs dotenv.config() at module load, so
@@ -267,9 +302,10 @@ export async function createTestApp<T extends Plugins>(
             closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
           );
         } finally {
-          // close() resets these already; belt and braces for a caller who
-          // supplied their own server plugin.
-          resetAppKitSingletons();
+          // No release here: app.close() -> LifecycleManager.close() already
+          // drops this app's claim, once. Releasing twice would pull the
+          // singletons out from under a still-live sibling app.
+          restoreUserContext?.();
           restoreEnv();
         }
       })();
@@ -350,7 +386,8 @@ export async function createTestApp<T extends Plugins>(
     } catch {
       // The boot error is the interesting one; don't let teardown mask it.
     }
-    resetAppKitSingletons();
+    restoreUserContext?.();
+    releaseAppKitSingletons();
     restoreEnv();
     throw err;
   }

@@ -30,8 +30,7 @@ describe("Analytics Plugin Integration", () => {
 
   beforeAll(async () => {
     // The harness owns the env setup, the singleton resets, the mock client, the
-    // server plugin on an ephemeral port, and the teardown. What used to be ~45
-    // lines of setup plus a local getListeningPort helper is this call.
+    // server plugin on an ephemeral port, and the teardown.
     app = await createTestApp({ plugins: [analytics({})] });
     executeStatement = getMockFn(
       app.client,

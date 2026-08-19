@@ -381,6 +381,7 @@ describe("LifecycleManager", () => {
       onceSpy.mockRestore();
     });
   });
+
   describe("close (the programmatic path)", () => {
     test("runs the full teardown sequence without exiting the process", async () => {
       const stop = vi.fn();
@@ -609,6 +610,7 @@ describe("LifecycleManager", () => {
       expect(() => manager.removeSignalHandlers()).not.toThrow();
     });
   });
+
   describe("a teardown that outlives close()'s budget", () => {
     test("phase 5 still closes the app's own cache and telemetry, not the next app's", async () => {
       vi.useFakeTimers();

@@ -1708,7 +1708,6 @@ describe("Analytics Plugin", () => {
       expect(resultIdx).toBeGreaterThanOrEqual(0);
       expect(warehouseIdx).toBeLessThan(resultIdx);
 
-      // The status payload should include the RUNNING state.
       expect(mockRes.write).toHaveBeenCalledWith(
         expect.stringMatching(/"type":"warehouse_status".*"state":"RUNNING"/),
       );

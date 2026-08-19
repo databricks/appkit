@@ -222,15 +222,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
        * half-booted app. The value passed at runtime is the same object —
        * the narrower type is the point, not an oversight.
        */
-      /**
-       * Runs after plugin setup but **before** the server starts.
-       *
-       * Deliberately typed `PluginMap<T>` rather than the `AppHandle<T>`
-       * that `createApp` returns: at this point the app is not fully
-       * started, so offering `close()` here would invite tearing down a
-       * half-booted app. The value passed at runtime is the same object —
-       * the narrower type is the point, not an oversight.
-       */
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
     } = {},
