@@ -8,10 +8,11 @@ export default createAgent({
   instructions:
     "You are a demo helper. Use analytics tools to answer data questions, " +
     "or get_weather for light small-talk.",
-  // Opts into the global `haiku` skill (server/agents/skills/haiku/SKILL.md).
-  // The model auto-loads it when a request matches, or the user can force it
-  // with `/haiku …` in the chat box.
-  skills: ["haiku"],
+  // Opts into two global skills (server/agents/skills/<name>/SKILL.md). A code
+  // agent has no per-agent skills/ folder, so opting in is the only way it
+  // reaches the shared pool. The model auto-loads a skill when a request
+  // matches, or the user can force one with `/haiku …` / `/bullet-brief …`.
+  skills: ["haiku", "bullet-brief"],
   tools(plugins) {
     return {
       ...plugins.analytics.toolkit(),

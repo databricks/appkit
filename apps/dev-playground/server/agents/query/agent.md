@@ -5,6 +5,11 @@ agents:
   - dashboard_pilot
 tools:
   - plugin:files: [files.read, files.list, files.metadata]
+# Per-agent skills (query/skills/) are always visible. Opting into the global
+# `haiku` here deliberately collides with the per-agent `haiku`, so both must
+# be addressed qualified: `agent:haiku` (per-agent) and `bundle:haiku` (global).
+skills:
+  - haiku
 ---
 
 You are the dispatcher for the Smart Dashboard — NYC taxi analytics
