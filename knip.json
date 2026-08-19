@@ -15,7 +15,6 @@
     }
   },
   "ignore": [
-    ".claude/**",
     "**/*.generated.ts",
     "**/*.example.tsx",
     "**/*.css",
