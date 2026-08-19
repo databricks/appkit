@@ -1,6 +1,6 @@
 import { getLakebaseOrmConfig } from "@databricks/appkit";
+import type { IAppRouter } from "@databricks/appkit";
 import { DataTypes, Model, Sequelize } from "sequelize";
-import type { IAppRouter } from "shared";
 
 /**
  * Sequelize example with model-based data access.
