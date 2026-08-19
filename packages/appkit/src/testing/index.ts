@@ -60,7 +60,6 @@ export {
   type StreamSource,
 } from "./expect-stream";
 export {
-  createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,

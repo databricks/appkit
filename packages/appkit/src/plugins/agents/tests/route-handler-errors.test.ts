@@ -2,7 +2,7 @@ import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CacheManager } from "../../../cache";
-import { createTestPluginContext } from "../../../testing";
+import { createMockRequest, createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 // Partial-mock the tracing module: traceAgent/traceTool still run their
@@ -55,15 +55,10 @@ beforeEach(() => {
 });
 
 function mockReq(body: unknown, userId = "alice"): express.Request {
-  const headers: Record<string, string> = {
-    "x-forwarded-user": userId,
-    "x-forwarded-access-token": "fake-token",
-  };
-  return {
+  return createMockRequest({
     body,
-    headers,
-    header: (name: string) => headers[name.toLowerCase()],
-  } as unknown as express.Request;
+    obo: { token: "fake-token", userId },
+  }) as unknown as express.Request;
 }
 
 function mockRes() {

@@ -153,24 +153,24 @@ export class LifecycleManager {
 
     const timeoutMs = options.timeoutMs ?? LifecycleManager.CLOSE_TIMEOUT_MS;
 
-    let timedOut = false;
     try {
       await this.raceWithTimeout(this.runOnce(), timeoutMs, "close");
     } catch (err) {
-      timedOut = true;
       logger.error(
         "close() did not complete within the %dms budget (phase in flight: %s): %O",
         timeoutMs,
         this.shutdownPhase,
         err,
       );
+      // Returning early leaves the singletons in place: the phases are still
+      // running and still own these instances, so dropping the pointers now
+      // would hand the next boot a half-released app.
+      return;
     }
 
-    // Skipped on timeout: the phases are still running and still own these
-    // instances, so dropping the pointers now would hand the next boot a
-    // half-released app. Skipped on the signal path too, where the process is
-    // dying and this is pure cost.
-    if (!timedOut) releaseCoreSingletons();
+    // Here rather than in runPhases so the signal path skips it — the process is
+    // dying there, and dropping pointers is pure cost.
+    releaseCoreSingletons();
   }
 
   /** No `await` between read and assign — that gap is the re-entrancy window. */

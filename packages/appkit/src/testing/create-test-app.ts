@@ -223,7 +223,6 @@ export async function createTestApp<T extends Plugins>(
 
   // Wholesale rather than a whitelist: plugins read vars we cannot enumerate.
   acquireEnvBaseline();
-  const restoreEnv = releaseEnvBaseline;
 
   let app: Awaited<ReturnType<typeof createApp>> | undefined;
   let restoreUserContext: (() => void) | undefined;
@@ -306,7 +305,7 @@ export async function createTestApp<T extends Plugins>(
           // drops this app's claim, once. Releasing twice would pull the
           // singletons out from under a still-live sibling app.
           restoreUserContext?.();
-          restoreEnv();
+          releaseEnvBaseline();
         }
       })();
       return closed;
@@ -381,14 +380,20 @@ export async function createTestApp<T extends Plugins>(
   } catch (err) {
     // Teardown must run from the failure path too, or the boot leaks env
     // mutations and singletons into every later test in the file.
-    try {
-      await (app as Any)?.close?.();
-    } catch {
-      // The boot error is the interesting one; don't let teardown mask it.
+    if (app) {
+      // No release alongside this: close() drops the claim itself, and a second
+      // release would pull the singletons out from under a live sibling app.
+      try {
+        await app.close();
+      } catch {
+        // The boot error is the interesting one; don't let teardown mask it.
+      }
+    } else {
+      // Nothing was booted, so nothing else will drop the claim taken above.
+      releaseAppKitSingletons();
     }
     restoreUserContext?.();
-    releaseAppKitSingletons();
-    restoreEnv();
+    releaseEnvBaseline();
     throw err;
   }
 }

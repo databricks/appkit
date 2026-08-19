@@ -15,7 +15,6 @@
  * a non-promise is a no-op, and `Awaited<ReturnType<...>>` unwraps identically.
  */
 export {
-  createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,
