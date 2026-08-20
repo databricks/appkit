@@ -34,19 +34,33 @@ describe("createMockRequest — obo option", () => {
   });
 
   test("case-insensitive header lookup mirrors Express", () => {
-    const req = createMockRequest({ obo: { userId: "bob" } });
+    const req = createMockRequest({
+      obo: { userId: "bob" },
+      headers: { "Content-Type": "application/json" },
+    });
     expect(req.header("X-Forwarded-User")).toBe("bob");
+    // Stored lowercased, as Node hands them to Express — `header()` lowercases
+    // the lookup, so a stored mixed-case key would be unreachable.
+    expect(Object.keys(req.headers)).toEqual(
+      Object.keys(req.headers).map((k) => k.toLowerCase()),
+    );
   });
 
-  test("an explicit headers override wins over the obo-generated header", () => {
-    const req = createMockRequest({
-      obo: { userId: "alice" },
-      headers: { "x-forwarded-user": "override" },
-    });
-    // The explicit override wins; the obo token it did not touch remains.
-    expect(req.header("x-forwarded-user")).toBe("override");
-    expect(req.header("x-forwarded-access-token")).toBe("test-user-token");
-  });
+  test.each([
+    ["lowercase", "x-forwarded-user"],
+    ["mixed-case", "X-Forwarded-User"],
+  ])(
+    "an explicit %s override wins over the obo-generated header",
+    (_c, key) => {
+      const req = createMockRequest({
+        obo: { userId: "alice" },
+        headers: { [key]: "override" },
+      });
+      // The explicit override wins; the obo token it did not touch remains.
+      expect(req.header("x-forwarded-user")).toBe("override");
+      expect(req.header("x-forwarded-access-token")).toBe("test-user-token");
+    },
+  );
 
   test("other overrides (params, body) still apply alongside obo", () => {
     const req = createMockRequest({

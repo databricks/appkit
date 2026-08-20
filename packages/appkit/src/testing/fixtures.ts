@@ -162,10 +162,16 @@ export function createMockRequest(overrides: Any = {}) {
 
   // `obo` seeds the forwarded identity headers; an explicit `headers` override
   // still wins (merged last) so a test can tweak or drop a single field.
-  const headers = {
-    ...(obo ? oboHeaders(obo) : {}),
-    ...headerOverrides,
-  };
+  //
+  // Keys are lowercased on the way in, the way Node's parser gives them to
+  // Express. `header()` looks up lowercased, so storing as-given would file a
+  // mixed-case override under a second key and leave the obo one winning.
+  const headers: Record<string, unknown> = Object.fromEntries(
+    Object.entries({
+      ...(obo ? oboHeaders(obo) : {}),
+      ...headerOverrides,
+    }).map(([name, value]) => [name.toLowerCase(), value]),
+  );
 
   const req = {
     params: {},
