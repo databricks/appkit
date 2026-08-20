@@ -51,11 +51,27 @@ export function columnOf(table: AppKitTable, key: string): AnyPgColumn {
   return columnMetaOf(table, key).engineColumn as unknown as AnyPgColumn;
 }
 
+/** Column names that default reads and mutation returns may expose. */
+export function publicColumnNames(table: AppKitTable): string[] {
+  return Object.values(table.$columns)
+    .filter((column) => !column.isPrivate)
+    .map((column) => column.columnName);
+}
+
 /** Default reads select all finalized columns except private application data. */
 export function defaultColumns(table: AppKitTable): Record<string, true> {
   const columns: Record<string, true> = {};
-  for (const column of Object.values(table.$columns)) {
-    if (!column.isPrivate) columns[column.columnName] = true;
+  for (const name of publicColumnNames(table)) columns[name] = true;
+  return columns;
+}
+
+/** Drizzle `.returning()` fields that omit private application columns. */
+export function returningColumns(
+  table: AppKitTable,
+): Record<string, AnyPgColumn> {
+  const columns: Record<string, AnyPgColumn> = {};
+  for (const name of publicColumnNames(table)) {
+    columns[name] = columnOf(table, name);
   }
   return columns;
 }

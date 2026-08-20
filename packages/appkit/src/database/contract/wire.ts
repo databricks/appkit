@@ -2,6 +2,8 @@
 export const IN_CAP = 100;
 /** Hard ceiling for a runtime query limit. */
 export const MAX_LIMIT = 500;
+/** Hard ceiling for a runtime query offset. OFFSET scans are unbounded in cost. */
+export const MAX_OFFSET = 10_000;
 /** Default page size when no `.limit()` is supplied. */
 export const DEFAULT_LIMIT = 50;
 /** Max number of relations resolvable in a single `.include()`. */

@@ -20,6 +20,7 @@ import { filterOperatorsForKind } from "../../schema-builder/types";
 import { DataPathError } from "../data-path";
 import {
   defaultColumns,
+  returningColumns,
   selectToColumns,
   translateInclude,
   translateOrder,
@@ -206,6 +207,18 @@ describe("ordering and selection", () => {
       status: true,
       metadata: true,
     });
+    expect(returningColumns(users)).toEqual({
+      id: users.$columns.id.engineColumn,
+      name: users.$columns.name.engineColumn,
+      age: users.$columns.age.engineColumn,
+      active: users.$columns.active.engineColumn,
+      large: users.$columns.large.engineColumn,
+      createdAt: users.$columns.createdAt.engineColumn,
+      externalId: users.$columns.externalId.engineColumn,
+      status: users.$columns.status.engineColumn,
+      metadata: users.$columns.metadata.engineColumn,
+    });
+    expect(returningColumns(users)).not.toHaveProperty("secret");
   });
 
   it("resolves only declared columns", () => {

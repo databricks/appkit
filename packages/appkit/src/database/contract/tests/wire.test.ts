@@ -8,18 +8,24 @@ import {
   isFilterOperator,
   MAX_INCLUDES,
   MAX_LIMIT,
+  MAX_OFFSET,
 } from "../index";
 
 describe("wire caps", () => {
   it("pins the literal cap values", () => {
     expect(IN_CAP).toBe(100);
     expect(MAX_LIMIT).toBe(500);
+    expect(MAX_OFFSET).toBe(10_000);
     expect(DEFAULT_LIMIT).toBe(50);
     expect(MAX_INCLUDES).toBe(10);
   });
 
   it("keeps DEFAULT_LIMIT within MAX_LIMIT", () => {
     expect(DEFAULT_LIMIT).toBeLessThanOrEqual(MAX_LIMIT);
+  });
+
+  it("keeps MAX_LIMIT within MAX_OFFSET", () => {
+    expect(MAX_LIMIT).toBeLessThanOrEqual(MAX_OFFSET);
   });
 
   it("pins the filter-operator set (snapshot of the supported operators)", () => {

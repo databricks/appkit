@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { DEFAULT_LIMIT, MAX_LIMIT } from "../../contract";
+import { DEFAULT_LIMIT, MAX_LIMIT, MAX_OFFSET } from "../../contract";
 import { defineSchema, id, text } from "../../schema-builder";
 import {
   conflictTargetMeta,
@@ -73,10 +73,13 @@ describe("runtime bounds and metadata", () => {
     expect(() => validateLimit(MAX_LIMIT + 1)).toThrow(DataPathError);
   });
 
-  it("accepts only non-negative safe offsets", () => {
+  it("accepts only non-negative offsets within MAX_OFFSET", () => {
     expect(validateOffset(0)).toBe(0);
     expect(validateOffset(10)).toBe(10);
+    expect(validateOffset(MAX_OFFSET)).toBe(MAX_OFFSET);
     expect(() => validateOffset(-1)).toThrow(DataPathError);
+    expect(() => validateOffset(1.5)).toThrow(DataPathError);
+    expect(() => validateOffset(MAX_OFFSET + 1)).toThrow(DataPathError);
     expect(() => validateOffset(Number.MAX_VALUE)).toThrow(DataPathError);
   });
 

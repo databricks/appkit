@@ -1,4 +1,9 @@
-import { DEFAULT_LIMIT, type FilterOperator, MAX_LIMIT } from "../contract";
+import {
+  DEFAULT_LIMIT,
+  type FilterOperator,
+  MAX_LIMIT,
+  MAX_OFFSET,
+} from "../contract";
 import type { AppKitTable, ColumnMeta } from "../schema-builder";
 
 export type IdValue = string | number | bigint;
@@ -92,10 +97,12 @@ export function limitOrDefault(limit?: number): number {
   return limit === undefined ? DEFAULT_LIMIT : validateLimit(limit);
 }
 
-/** Reject offsets that PostgreSQL cannot represent safely as JS integers. */
+/** Validate an explicit root or relation row offset. */
 export function validateOffset(offset: number): number {
-  if (!Number.isSafeInteger(offset) || offset < 0) {
-    throw new DataPathError("offset must be a non-negative safe integer");
+  if (!Number.isInteger(offset) || offset < 0 || offset > MAX_OFFSET) {
+    throw new DataPathError(
+      `offset must be an integer between 0 and ${MAX_OFFSET}`,
+    );
   }
   return offset;
 }

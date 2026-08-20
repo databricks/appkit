@@ -3,7 +3,7 @@ import { PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { DEFAULT_LIMIT, MAX_LIMIT } from "../../contract";
+import { DEFAULT_LIMIT, MAX_LIMIT, MAX_OFFSET } from "../../contract";
 import { boolean, defineSchema, fk, id, text } from "../../schema-builder";
 import { DataPathError, type Row } from "../data-path";
 import {
@@ -11,6 +11,7 @@ import {
   createDrizzleDb,
   type DrizzleDb,
 } from "../engine/drizzle-data-path";
+import { returningColumns } from "../engine/translate";
 
 const schema = defineSchema((builder) => {
   const users = builder.table("users", {
@@ -53,12 +54,13 @@ interface FakeCalls {
   findMany: { table: string; config: Record<string, unknown> }[];
   findFirst: { table: string; config: Record<string, unknown> }[];
   count: { table: unknown; filter: unknown }[];
-  insert: { table: unknown; values: Row }[];
-  update: { table: unknown; values: Row; where: unknown }[];
+  insert: { table: unknown; values: Row; returning: unknown }[];
+  update: { table: unknown; values: Row; where: unknown; returning: unknown }[];
   upsert: {
     table: unknown;
     values: Row;
     config: { target: unknown; set: Row };
+    returning: unknown;
   }[];
   delete: { table: unknown; where: unknown; returning: unknown }[];
   execute: unknown[];
@@ -106,14 +108,14 @@ function makeFakeDb(results: FakeResults = {}): {
       return {
         values(values: Row) {
           return {
-            async returning() {
-              calls.insert.push({ table, values });
+            async returning(returning: unknown) {
+              calls.insert.push({ table, values, returning });
               return results.insert ?? [];
             },
             onConflictDoUpdate(config: { target: unknown; set: Row }) {
               return {
-                async returning() {
-                  calls.upsert.push({ table, values, config });
+                async returning(returning: unknown) {
+                  calls.upsert.push({ table, values, config, returning });
                   return results.upsert ?? [];
                 },
               };
@@ -128,8 +130,8 @@ function makeFakeDb(results: FakeResults = {}): {
           return {
             where(where: unknown) {
               return {
-                async returning() {
-                  calls.update.push({ table, values, where });
+                async returning(returning: unknown) {
+                  calls.update.push({ table, values, where, returning });
                   return results.update ?? [];
                 },
               };
@@ -220,6 +222,9 @@ describe("createDrizzleDataPath reads", () => {
     });
     await expect(
       dataPath.select(users, { limit: MAX_LIMIT + 1 }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(
+      dataPath.select(users, { offset: MAX_OFFSET + 1 }),
     ).rejects.toBeInstanceOf(DataPathError);
   });
 
@@ -346,6 +351,45 @@ describe("Drizzle mutation cardinality", () => {
         schema,
       ).update(users, 1, {}),
     ).rejects.toBeInstanceOf(DataPathError);
+  });
+
+  it("omits private columns from mutation returning projections and results", async () => {
+    const leaked = { id: 1, email: "a@example.com", secret: "hashed" };
+    const publicRow = { id: 1, email: "a@example.com" };
+
+    const insertFake = makeFakeDb({ insert: [leaked] });
+    await expect(
+      createDrizzleDataPath(insertFake.db, schema).insert(users, {
+        email: "a@example.com",
+        secret: "hashed",
+      }),
+    ).resolves.toEqual(publicRow);
+    expect(insertFake.calls.insert[0].returning).toEqual(
+      returningColumns(users),
+    );
+    expect(insertFake.calls.insert[0].returning).not.toHaveProperty("secret");
+
+    const updateFake = makeFakeDb({ update: [leaked] });
+    await expect(
+      createDrizzleDataPath(updateFake.db, schema).update(users, 1, {
+        name: "Ada",
+      }),
+    ).resolves.toEqual(publicRow);
+    expect(updateFake.calls.update[0].returning).toEqual(
+      returningColumns(users),
+    );
+
+    const upsertFake = makeFakeDb({ upsert: [leaked] });
+    await expect(
+      createDrizzleDataPath(upsertFake.db, schema).upsert(
+        users,
+        { email: "a@example.com" },
+        "email",
+      ),
+    ).resolves.toEqual(publicRow);
+    expect(upsertFake.calls.upsert[0].returning).toEqual(
+      returningColumns(users),
+    );
   });
 
   it("accepts zero or one delete row and rejects more", async () => {

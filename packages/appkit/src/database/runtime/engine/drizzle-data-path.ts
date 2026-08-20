@@ -18,6 +18,8 @@ import {
 import {
   columnOf,
   defaultColumns,
+  publicColumnNames,
+  returningColumns,
   selectToColumns,
   translateInclude,
   translateOrder,
@@ -101,6 +103,18 @@ async function runDatabaseOperation<T>(
   }
 }
 
+/** Drop private columns before cardinality checks so expect* never sees them. */
+function publicMutationRows(table: AppKitTable, rows: Row[]): Row[] {
+  const names = publicColumnNames(table);
+  return rows.map((row) => {
+    const projected: Row = {};
+    for (const name of names) {
+      if (Object.hasOwn(row, name)) projected[name] = row[name];
+    }
+    return projected;
+  });
+}
+
 // Enforce the single-row DataPath contract before results reach callers.
 function expectExactlyOne(rows: Row[]): Row {
   if (rows.length !== 1) {
@@ -174,9 +188,12 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
       const engineTable = pgTable(table);
       const parameters = mutationValues(table, values);
       const rows = await runDatabaseOperation(() =>
-        db.insert(engineTable).values(parameters).returning(),
+        db
+          .insert(engineTable)
+          .values(parameters)
+          .returning(returningColumns(table)),
       );
-      return expectExactlyOne(rows as Row[]);
+      return expectExactlyOne(publicMutationRows(table, rows as Row[]));
     },
 
     async update(table, id, values) {
@@ -188,9 +205,9 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
           .update(engineTable)
           .set(parameters)
           .where(eq(columnOf(table, primaryKey.columnName), id))
-          .returning(),
+          .returning(returningColumns(table)),
       );
-      return expectZeroOrOne(rows as Row[]);
+      return expectZeroOrOne(publicMutationRows(table, rows as Row[]));
     },
 
     async upsert(table, values, onConflict) {
@@ -205,9 +222,9 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
             target: columnOf(table, target.columnName),
             set: parameters,
           })
-          .returning(),
+          .returning(returningColumns(table)),
       );
-      return expectExactlyOne(rows as Row[]);
+      return expectExactlyOne(publicMutationRows(table, rows as Row[]));
     },
 
     async delete(table, id) {
