@@ -51,7 +51,7 @@ describe("skills are wired uniformly for every registered agent", () => {
   // buildRegisteredAgent, so opting one into a skill gives it the same
   // catalog + load_skill/read_skill_file tools as a top-level agent.
   test("buildRegisteredAgent gives a code agent its catalog and skill tools", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // biome-ignore lint/suspicious/noExplicitAny: seed the shared pool
     (plugin as any).globalSkills = [skill("x", { description: "X skill" })];
 
@@ -76,7 +76,7 @@ describe("skills are wired uniformly for every registered agent", () => {
   });
 
   test("an agent with no visible skills gets no skill tools", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // biome-ignore lint/suspicious/noExplicitAny: call private with a stub adapter
     const registered = await (plugin as any).buildRegisteredAgent(
       "bare",
@@ -90,7 +90,7 @@ describe("skills are wired uniformly for every registered agent", () => {
 
 describe("clientConfig — skills", () => {
   test("exposes each agent's skill catalog keyed by agent name", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // biome-ignore lint/suspicious/noExplicitAny: seed private registry
     (plugin as any).agents = new Map([
       [
@@ -109,7 +109,7 @@ describe("clientConfig — skills", () => {
   });
 
   test("omits agents that have no visible catalog", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // biome-ignore lint/suspicious/noExplicitAny: seed private registry
     (plugin as any).agents = new Map([["bare", registeredWith()]]);
     expect(plugin.clientConfig().skills).toEqual({});
@@ -118,7 +118,7 @@ describe("clientConfig — skills", () => {
 
 describe("renderForcedSkill", () => {
   test("renders the resolved skill body with a request note", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const registered = registeredWith(
       catalogOf(skill("pdf", { body: "PDF steps." })),
     );
@@ -130,7 +130,7 @@ describe("renderForcedSkill", () => {
 
   test("returns null for an unknown forced skill", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const registered = registeredWith(catalogOf(skill("pdf")));
     // biome-ignore lint/suspicious/noExplicitAny: call private
     expect((plugin as any).renderForcedSkill(registered, "ghost")).toBeNull();
@@ -139,7 +139,7 @@ describe("renderForcedSkill", () => {
   });
 
   test("returns null when the agent has no catalog", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // biome-ignore lint/suspicious/noExplicitAny: call private
     expect(
       (plugin as any).renderForcedSkill(registeredWith(), "pdf"),
