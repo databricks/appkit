@@ -9,7 +9,7 @@ export default defineConfig([
       excludeEntrypoints: ["./type-generator"],
     },
     name: "@databricks/appkit",
-    entry: ["src/index.ts", "src/beta.ts"],
+    entry: ["src/index.ts", "src/beta.ts", "src/testing/index.ts"],
     outDir: "dist",
     hash: false,
     format: "esm",

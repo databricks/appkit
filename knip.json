@@ -7,6 +7,9 @@
     "docs"
   ],
   "workspaces": {
+    "packages/appkit": {
+      "ignoreDependencies": ["vitest"]
+    },
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
     }
