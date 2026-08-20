@@ -1,5 +1,6 @@
 import { type Relation, relations } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
+
 import { type AppKitTable, SchemaBuildError } from "../types";
 
 function columnOf(table: AppKitTable, name: string): AnyPgColumn {

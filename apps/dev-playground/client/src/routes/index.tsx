@@ -5,6 +5,7 @@ import {
   retainSearchParams,
 } from "@tanstack/react-router";
 import { ArrowRightIcon, SparklesIcon } from "lucide-react";
+
 import { ThemeSelector } from "@/components/theme-selector";
 import { ALL_NAV_ITEMS, NAV_GROUPS, type NavItem } from "@/lib/nav";
 

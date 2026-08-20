@@ -17,12 +17,7 @@ import type { LegacyWorkspaceClient } from "./legacy";
 
 // SDK type namespaces, re-exported so AppKit modules import them from the
 // wrapper rather than the SDK directly.
-export type {
-  files,
-  jobs,
-  serving,
-  sql,
-} from "@databricks/sdk-experimental";
+export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
 
 /**
  * AppKit's workspace client facade. Mirrors the multi-client shape of the

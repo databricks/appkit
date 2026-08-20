@@ -38,6 +38,12 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
+/** Formats a measure value for chart axes, tooltips, and value labels. */
+export type ChartValueFormatter = (
+  value: string | number,
+  field: string,
+) => string;
+
 // ============================================================================
 // Base Props (shared by all charts)
 // ============================================================================
@@ -89,6 +95,66 @@ export interface ChartBaseProps {
 
   /** Additional ECharts options to merge */
   options?: Record<string, unknown>;
+
+  /**
+   * Formats measure values in the chart's built-in value axes, tooltips, and
+   * value labels. `field` is the corresponding `yKey`, so one formatter can
+   * select a different format for each series.
+   *
+   * For charts with multiple series on one value axis, axis ticks use the
+   * first `yKey`; each tooltip uses its own series field.
+   */
+  valueFormatter?: ChartValueFormatter;
+
+  /**
+   * Pointer-only: charts render to <canvas>, so this does not fire for keyboard
+   * users. Provide a keyboard-accessible equivalent (e.g. a table row action) for
+   * the same action.
+   */
+  onDataClick?: (datum: ChartClickDatum) => void;
+
+  /**
+   * Controlled selection by category name. Matching data element(s) render at full
+   * prominence while the rest are dimmed. Drive it from your own state to reflect a
+   * cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis;
+   * other chart types ignore it.
+   */
+  selected?: string | string[];
+}
+
+// ============================================================================
+// Interaction / Click Events
+// ============================================================================
+
+/**
+ * A normalized description of a clicked chart element.
+ *
+ * In the common cross-filter case, {@link ChartClickDatum.name} carries the
+ * dimension value of the clicked element.
+ */
+export interface ChartClickDatum {
+  /** Category label of the clicked element — the dimension value in the common cross-filter case. */
+  name: string;
+  /**
+   * The datum's scalar value:
+   * - bar / pie — the datum itself.
+   * - time-series / scatter — the y-component of the `[x, y]` point (see
+   *   {@link ChartClickDatum.x} / {@link ChartClickDatum.y}).
+   * - heatmap — the cell value (the third entry of ECharts'
+   *   `[xIndex, yIndex, value]` triple), *not* an axis index.
+   * - radar — `null`; the item holds one value per indicator, so there is no
+   *   single scalar to report. Read the vector from {@link ChartClickDatum.raw}.
+   *
+   * `null` whenever there is no scalar value to surface.
+   */
+  value: number | string | null;
+  x?: number | string;
+  y?: number | string;
+  seriesName?: string;
+  dataIndex: number;
+  seriesIndex: number;
+  // Untouched ECharts event params.
+  raw: unknown;
 }
 
 // ============================================================================

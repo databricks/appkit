@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { normalizeTelemetryOptions } from "../config";
 
 describe("normalizeTelemetryOptions", () => {

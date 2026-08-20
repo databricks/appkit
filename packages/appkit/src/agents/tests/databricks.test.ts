@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentToolDefinition, Message } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import {
   DatabricksAdapter,
   type GenerationParams,

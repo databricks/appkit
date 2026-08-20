@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { describe, expect, test, vi } from "vitest";
+
 import { RoutingPool } from "../routing-pool";
 
 vi.mock("../../../cache", () => ({
@@ -45,9 +46,8 @@ describe("RoutingPool", () => {
   });
 
   test("routes to user pool inside runInUserContext", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
 
     const spPool = makeMockPool("sp");
     const userPool = makeMockPool("user");
@@ -71,9 +71,8 @@ describe("RoutingPool", () => {
   });
 
   test("connect() routes to user pool inside runInUserContext", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
 
     const spPool = makeMockPool("sp");
     const userPool = makeMockPool("user");
@@ -93,9 +92,8 @@ describe("RoutingPool", () => {
   });
 
   test("forwards query values to user pool inside runInUserContext", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
 
     const spPool = makeMockPool("sp");
     const userPool = makeMockPool("user");

@@ -1,6 +1,7 @@
 import { createTableRelationsHelpers, Many, One } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
+
 import { buildEngineRelations } from "../engine/relations";
 import { defineSchema, fk, id, text } from "../index";
 

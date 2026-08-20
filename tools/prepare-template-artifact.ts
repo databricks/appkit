@@ -43,7 +43,7 @@ const { values } = parseArgs({
 });
 
 const tarballDir = values["tarball-dir"];
-// biome-ignore lint/style/noNonNullAssertion: default value guarantees this is defined
+// oxlint-disable-next-line typescript/no-non-null-assertion -- default value guarantees this is defined
 const outputDir = values["output-dir"]!;
 
 const STAGING_DIR = join(ROOT, outputDir);

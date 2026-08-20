@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+
 import { getWorkspaceClient } from "./config";
 import { generateDatabaseCredential } from "./credentials";
 import { type DriverTelemetry, SpanStatusCode } from "./telemetry";

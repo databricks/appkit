@@ -261,6 +261,16 @@ console.log(result.results);
 
 Pass optional overrides as a second argument to `query` to adjust `numResults` or other per-call settings.
 
+## Caching
+
+Query results are cached with a short TTL (60s) so repeated identical queries — including a component that re-renders or mounts twice — reuse a single Vector Search call instead of hitting the index each time. The next-page route is not cached: a page token is a single-use cursor and already identifies the exact page.
+
+The cache key covers everything that changes results: the resolved index, `queryText`, `queryVector` (hashed), `queryType`, `numResults`, the resolved `columns`, `filters`, and whether reranking is on. Two queries that differ in any of these are cached separately.
+
+### Per-user isolation
+
+For `auth: "on-behalf-of-user"` indexes the caller's identity is part of the cache key, so one user never sees another user's cached results — and an on-behalf-of-user query never reads a service-principal-populated entry. Service-principal indexes share a single cache entry across callers.
+
 ## React hook
 
 `useAiSearchQuery` reads the configured indexes from the plugin's client config and posts to the right `/:alias/query` route, so the UI never hardcodes an alias. With one index configured it needs no arguments; pass `{ alias }` to target a specific one.

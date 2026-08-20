@@ -1,5 +1,6 @@
 import { type DataType, type Field, Type, tableFromIPC } from "apache-arrow";
 import type { SQLTypeMarker } from "shared";
+
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { RefreshChunkLink } from "../../stream/arrow-stream-processor";

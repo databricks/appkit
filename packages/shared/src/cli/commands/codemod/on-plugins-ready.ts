@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { Lang, parse } from "@ast-grep/napi";
 import { Command } from "commander";
 

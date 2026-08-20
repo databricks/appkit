@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+
 // `quoteFqnForSql` now lives in the shared zod-free leaf alongside the FQN
 // grammar (moved so the analytics runtime can reuse it); the describe seam
 // imports it from there.
@@ -14,7 +16,10 @@ import {
   extractMetricColumns,
   parseDescribeTableExtendedJson,
 } from "../mv-registry/describe";
-import { generateMetricTypeDeclarations } from "../mv-registry/render-types";
+import {
+  buildMetricMetadataBundle,
+  generateMetricTypeDeclarations,
+} from "../mv-registry/render-types";
 import { syncMetrics } from "../mv-registry/sync";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
@@ -1531,6 +1536,12 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain('lane: "obo"');
     expect(output).toContain('format: "$#,##0.00"');
     expect(output).toContain('format: "0.0%"');
+    // Metric queries use the JSON_ARRAY wire contract: scalar cells arrive as
+    // strings and every selected column may be SQL NULL. Generated row values
+    // must describe that runtime shape rather than claiming JS numbers.
+    expect(output).toContain('"arr": string | null');
+    expect(output).toContain('"churn_rate": string | null');
+    expect(output).not.toContain('"arr": number');
   });
 
   test("emits an empty MetricRegistry interface when no metrics are registered", () => {
@@ -1617,16 +1628,16 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain(
       "@timeGrain day|hour|minute|month|quarter|week|year",
     );
-    expect(output).toContain('"created_at": string');
-    expect(output).toContain('"region": string');
+    expect(output).toContain('"created_at": string | null');
+    expect(output).toContain('"region": string | null');
   });
 });
 
-// ── The emitted file is a real `.ts` carrying the erasable `declare module`
-// augmentation alongside a runtime `metricViewsMetadata` value, so its header
-// must stay a type-only import. See `generateMetricTypeDeclarations`.
-describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value", () => {
-  test("emits both the declare-module augmentation and the metricViewsMetadata const", async () => {
+// ── The declaration file is ambient (`.d.ts`) and carries only the erasable
+// `declare module` augmentation; the runtime metadata twin ships as the JSON
+// bundle built by `buildMetricMetadataBundle`.
+describe("metric metadata bundle", () => {
+  test("the declaration output carries the augmentation and no runtime value", async () => {
     const resolution = resolveMetricConfig({
       metricViews: {
         revenue: { source: "appkit_demo.public.revenue_metrics" },
@@ -1648,38 +1659,74 @@ describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value",
     const { schemas } = await syncMetrics(resolution, fetcher);
     const output = generateMetricTypeDeclarations(schemas);
 
-    // Type half: the augmentation is still present, unchanged in shape.
     expect(output).toContain('declare module "@databricks/appkit-ui/react"');
     expect(output).toContain("interface MetricRegistry");
-    // Value half: a runtime const conforming to MetricViewsMetadata, `as const`.
-    expect(output).toContain("export const metricViewsMetadata = {");
-    expect(output).toContain("} as const;");
-    // The measure/dimension maps carry the same per-column fields as the type
-    // block (type/display_name/format), keyed by column name.
-    expect(output).toContain(
-      '"arr": { type: "DECIMAL(38,2)", display_name: "Annual Recurring Revenue", format: "$#,##0.00" }',
-    );
-    expect(output).toContain('"region": { type: "STRING" }');
+    // No `export const` at all: an object-literal const in an ambient
+    // declaration file is a TS1254 error, which is what forced the artifact to
+    // be a real `.ts` before the bundle took the runtime half.
+    expect(output).not.toContain("export const");
   });
 
-  test("uses a zero-runtime type-only import, never a side-effect import", () => {
-    const output = generateMetricTypeDeclarations([]);
-    // A bare `import "..."` in a `.ts` would execute the client entry on the
-    // Node server.
-    expect(output).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(output).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
-    );
+  test("bundles per-column metadata keyed by metric, measure and dimension", async () => {
+    const resolution = resolveMetricConfig({
+      metricViews: {
+        revenue: { source: "appkit_demo.public.revenue_metrics" },
+      },
+    });
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            display_name: "Annual Recurring Revenue",
+            format: "$#,##0.00",
+          },
+          { name: "region", type: "STRING", is_measure: false },
+        ],
+      });
+    const { schemas } = await syncMetrics(resolution, fetcher);
+
+    expect(buildMetricMetadataBundle(schemas)).toEqual({
+      version: 1,
+      metricViews: {
+        revenue: {
+          measures: {
+            arr: {
+              type: "DECIMAL(38,2)",
+              display_name: "Annual Recurring Revenue",
+              format: "$#,##0.00",
+            },
+          },
+          dimensions: { region: { type: "STRING" } },
+        },
+      },
+    });
   });
 
-  test("emits an empty metricViewsMetadata for no registered metrics", () => {
+  test("anchors the augmentation with an import of the module it augments", () => {
     const output = generateMetricTypeDeclarations([]);
-    expect(output).toContain("export const metricViewsMetadata = {} as const;");
+    // Load-bearing: the import marks the file a module, which is what makes
+    // `declare module` merge into the real one. Drop it and the block becomes an
+    // ambient declaration that shadows the module, hiding its real exports.
+    // Matches the sibling analytics.d.ts / serving.d.ts header form.
+    expect(output).toContain('import "@databricks/appkit-ui/react";');
+    expect(output).toContain('declare module "@databricks/appkit-ui/react"');
+  });
+
+  test("bundles no metric views for no registered metrics", () => {
+    expect(buildMetricMetadataBundle([])).toEqual({
+      version: 1,
+      metricViews: {},
+    });
     // Empty type augmentation stays too.
-    expect(output).toContain("interface MetricRegistry {}");
+    expect(generateMetricTypeDeclarations([])).toContain(
+      "interface MetricRegistry {}",
+    );
   });
 
-  test("a degraded schema contributes empty measures/dimensions value maps", async () => {
+  test("a degraded schema contributes empty measures/dimensions maps", async () => {
     const resolution = resolveMetricConfig({
       metricViews: { cold: { source: "appkit_demo.public.cold" } },
     });
@@ -1690,16 +1737,16 @@ describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value",
         status: { state: "PENDING" },
       });
     const { schemas } = await syncMetrics(resolution, fetcher);
-    const output = generateMetricTypeDeclarations(schemas);
-    // Value side of a degraded entry: empty maps, consistent with its
-    // `Record<string, never>` metadata type block.
-    expect(output).toContain(`"cold": {
-    measures: {},
-    dimensions: {},
-  }`);
+
+    // Consistent with the degraded entry's `Record<string, never>` metadata
+    // type block: the warehouse never described these columns.
+    expect(buildMetricMetadataBundle(schemas).metricViews.cold).toEqual({
+      measures: {},
+      dimensions: {},
+    });
   });
 
-  test("escapes quotes/backticks in display_name and description via JSON.stringify", async () => {
+  test("carries quotes and backticks verbatim (JSON encoding, not TS literals)", async () => {
     const resolution = resolveMetricConfig({
       metricViews: { revenue: { source: "appkit_demo.public.revenue" } },
     });
@@ -1710,20 +1757,22 @@ describe("generateMetricTypeDeclarations — runtime metricViewsMetadata value",
             name: "arr",
             type: "DECIMAL(38,2)",
             is_measure: true,
-            // A double quote AND a backtick — both must survive into a valid
-            // TS string literal in the runtime const.
             display_name: 'Net "ARR" `growth`',
             comment: 'Revenue with a " quote',
           },
         ],
       });
     const { schemas } = await syncMetrics(resolution, fetcher);
-    const output = generateMetricTypeDeclarations(schemas);
+    const bundle = buildMetricMetadataBundle(schemas);
 
-    // JSON.stringify escapes the embedded double quotes; the backtick rides
-    // through unescaped inside a double-quoted literal (valid TS).
-    expect(output).toContain('display_name: "Net \\"ARR\\" `growth`"');
-    expect(output).toContain('description: "Revenue with a \\" quote"');
+    // The value round-trips through JSON.stringify at the write site, so the
+    // in-memory bundle holds the raw string rather than an escaped literal.
+    expect(bundle.metricViews.revenue.measures.arr).toEqual({
+      type: "DECIMAL(38,2)",
+      display_name: 'Net "ARR" `growth`',
+      description: 'Revenue with a " quote',
+    });
+    expect(JSON.parse(JSON.stringify(bundle))).toEqual(bundle);
   });
 });
 

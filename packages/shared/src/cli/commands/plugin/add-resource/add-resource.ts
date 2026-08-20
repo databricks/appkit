@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+
 import { cancel, intro, outro } from "@clack/prompts";
 import { Command } from "commander";
+
 import { promptOneResource } from "../create/prompt-resource";
 import {
   DEFAULT_PERMISSION_BY_TYPE,

@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
+
 import type { DatabaseRegistryEntry, RegisteredEntity } from "../index";
 
 /**

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+
 import { cn } from "../lib/utils";
 import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
@@ -66,7 +67,6 @@ function useScrollManagement(
     return () => observer.disconnect();
   }, [scrollRef]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: react to message count AND status so prevScrollHeightRef stays accurate when the loading indicator appears/disappears
   useLayoutEffect(() => {
     const viewport = getViewport(scrollRef);
     if (!viewport) return;

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { printReport, printReportJson } from "./report";
 import type { DoctorReport, ResourceCheckResult } from "./types";
 
@@ -14,7 +15,7 @@ function report(overrides: Partial<DoctorReport> = {}): DoctorReport {
   };
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes
+// oxlint-disable-next-line no-control-regex -- matches ANSI SGR escape sequences (ESC control char is intentional)
 const ANSI = /\x1b\[[0-9;]*m/g;
 
 /** Runs `fn` with console.log captured; returns the printed lines with any ANSI

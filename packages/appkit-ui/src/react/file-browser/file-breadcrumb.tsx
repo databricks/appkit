@@ -8,8 +8,10 @@ import {
 } from "../ui/breadcrumb";
 
 /** Props for the FileBreadcrumb component */
-export interface FileBreadcrumbProps
-  extends Omit<React.ComponentProps<"nav">, "children"> {
+export interface FileBreadcrumbProps extends Omit<
+  React.ComponentProps<"nav">,
+  "children"
+> {
   /** Label for the root breadcrumb item */
   rootLabel: string;
   /** Path segments after the root */

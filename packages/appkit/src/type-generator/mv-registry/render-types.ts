@@ -1,35 +1,16 @@
+import type { MetricViewColumnDisplay } from "../../../../shared/src/metric-metadata";
+import {
+  METRIC_METADATA_BUNDLE_VERSION,
+  type MetricMetadataBundle,
+} from "../../../../shared/src/schemas/metric-metadata-bundle";
 import type { MetricColumnMetadata, MetricSchema } from "./types";
 
 /**
- * @todo unify with query-registry.ts
- * Map a Databricks SQL type to a TypeScript primitive.
- * Centralized here (not imported from query-registry) so this module
- * stays self-contained.
+ * Metric results use Databricks' JSON_ARRAY delivery, whose scalar cells are
+ * strings regardless of their SQL type. Every selected column can also be SQL
+ * NULL.
  */
-function tsTypeFor(sqlType: string): string {
-  const normalized = sqlType
-    .toUpperCase()
-    .replace(/\(.*\)$/, "")
-    .replace(/<.*>$/, "")
-    .split(" ")[0];
-
-  switch (normalized) {
-    case "BOOLEAN":
-      return "boolean";
-    case "TINYINT":
-    case "SMALLINT":
-    case "INT":
-    case "INTEGER":
-    case "BIGINT":
-    case "FLOAT":
-    case "DOUBLE":
-    case "DECIMAL":
-    case "NUMERIC":
-      return "number";
-    default:
-      return "string";
-  }
-}
+const JSON_ARRAY_WIRE_TYPE = "string | null";
 
 // Render a MetricRegistry interface entry from a MetricSchema.
 function renderMetricEntry(schema: MetricSchema): string {
@@ -45,7 +26,7 @@ function renderMetricEntry(schema: MetricSchema): string {
           ? ` @timeGrain ${col.timeGrains.join("|")}`
           : "";
         return `${indent}/** @sqlType ${col.type.replace(/\*\//g, "* /")}${grainComment} */
-${indent}${JSON.stringify(col.name)}: ${tsTypeFor(col.type)}`;
+${indent}${JSON.stringify(col.name)}: ${JSON_ARRAY_WIRE_TYPE}`;
       })
       .join(";\n");
     return `{
@@ -170,52 +151,42 @@ ${inner};
     }`;
 }
 
-// Value-side twin of a `renderMetadataMap` entry, minus `time_grain` (not part
-// of MetricViewColumnDisplay).
-function renderMetadataValueField(col: MetricColumnMetadata): string {
-  const fields = metadataFields(col).map(
-    ([name, value]) => `${name}: ${value}`,
-  );
-  return `{ ${fields.join(", ")} }`;
+// Value-side twin of a `renderMetadataMap` entry, minus `time_grain` (which is
+// type-only and not part of MetricViewColumnDisplay).
+function metadataValue(col: MetricColumnMetadata): MetricViewColumnDisplay {
+  const value: MetricViewColumnDisplay = { type: col.type };
+  if (col.displayName) value.display_name = col.displayName;
+  if (col.format) value.format = col.format;
+  if (col.description) value.description = col.description;
+  return value;
 }
 
-// Render one metric's runtime measures/dimensions map, keyed by column name.
-function renderMetadataValueMap(
+function metadataValueMap(
   cols: MetricColumnMetadata[],
-  indent: string,
-): string {
-  if (cols.length === 0) return "{}";
-  const inner = cols
-    .map(
-      (col) =>
-        `${indent}  ${JSON.stringify(col.name)}: ${renderMetadataValueField(col)}`,
-    )
-    .join(",\n");
-  return `{
-${inner},
-${indent}}`;
+): Record<string, MetricViewColumnDisplay> {
+  const map: Record<string, MetricViewColumnDisplay> = {};
+  for (const col of cols) {
+    map[col.name] = metadataValue(col);
+  }
+  return map;
 }
 
-// Render the runtime `metricViewsMetadata` const, emitted `as const` in the
-// same key order as the augmentation.
-function renderMetricViewsMetadata(schemas: MetricSchema[]): string {
-  if (schemas.length === 0) {
-    return "export const metricViewsMetadata = {} as const;\n";
+/**
+ * Entries keep the same key order as the augmentation. Degraded schemas
+ * contribute empty maps — the warehouse could not describe their columns, so
+ * there is no display metadata to stamp.
+ */
+export function buildMetricMetadataBundle(
+  schemas: MetricSchema[],
+): MetricMetadataBundle {
+  const metricViews: MetricMetadataBundle["metricViews"] = {};
+  for (const schema of schemas) {
+    metricViews[schema.key] = {
+      measures: metadataValueMap(schema.measures),
+      dimensions: metadataValueMap(schema.dimensions),
+    };
   }
-  const entries = schemas
-    .map((schema) => {
-      const measures = renderMetadataValueMap(schema.measures, "    ");
-      const dimensions = renderMetadataValueMap(schema.dimensions, "    ");
-      return `  ${JSON.stringify(schema.key)}: {
-    measures: ${measures},
-    dimensions: ${dimensions},
-  }`;
-    })
-    .join(",\n");
-  return `export const metricViewsMetadata = {
-${entries},
-} as const;
-`;
+  return { version: METRIC_METADATA_BUNDLE_VERSION, metricViews };
 }
 
 // Render the augmentation block for the appkit-ui MetricRegistry interface.
@@ -235,20 +206,11 @@ ${entries};
 `;
 }
 
-/**
- * Build the full metric-views.ts file from a list of metric schemas.
- *
- * The header must stay a type-only `import type {} from`: it anchors the module
- * so the augmentation resolves while compiling to zero runtime code, whereas a
- * bare `import "@databricks/appkit-ui/react"` would execute the client package
- * entry on the Node server.
- */
 export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
 ): string {
   return `// Auto-generated by AppKit - DO NOT EDIT
 // Generated by 'npx @databricks/appkit generate-types' or Vite plugin during build
-import type {} from "@databricks/appkit-ui/react";
-${renderMetricRegistry(schemas)}
-${renderMetricViewsMetadata(schemas)}`;
+import "@databricks/appkit-ui/react";
+${renderMetricRegistry(schemas)}`;
 }

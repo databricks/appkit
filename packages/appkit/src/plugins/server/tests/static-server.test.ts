@@ -1,4 +1,5 @@
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Mock fs
@@ -39,7 +40,9 @@ vi.mock("../utils", () => ({
 }));
 
 import fs from "node:fs";
+
 import express from "express";
+
 import { StaticServer } from "../static-server";
 import { getConfigScript } from "../utils";
 

@@ -5,6 +5,7 @@ import {
   ShieldAlertIcon,
 } from "lucide-react";
 import { useCallback, useState } from "react";
+
 import type { Highlight } from "../hooks/use-action-dispatcher";
 import type { DashboardFilters } from "../hooks/use-dashboard-data";
 import { captureDashboardAsDataUrl } from "../lib/capture-dashboard";

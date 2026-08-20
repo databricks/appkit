@@ -1,0 +1,183 @@
+import type { AppYamlEnvEntry, ResourceBinding } from "../../deploy-config";
+import {
+  fieldOrigin,
+  isValidEnvName,
+  type ResourceRequirementRow,
+} from "./requirements";
+
+/**
+ * Deploy-config generation for a plugin's resources, reproducing what
+ * `databricks apps init` renders. Verified byte-for-byte against golden
+ * fixtures (see __fixtures__/) for the resource types listed in
+ * {@link BINDING_SPECS}. Unverified types degrade safely: their env entries
+ * are still produced (that shape is uniform), but the databricks.yml resource
+ * binding is skipped with a warning rather than guessed.
+ */
+
+/** A `databricks.yml` top-level bundle variable. */
+export interface BundleVariable {
+  name: string;
+  description?: string;
+  /** The value placed under targets.default.variables. */
+  value?: string;
+}
+
+export interface ConfigPlan {
+  appYamlEnv: AppYamlEnvEntry[];
+  bundleVariables: BundleVariable[];
+  resourceBindings: ResourceBinding[];
+  /** Resource types encountered that have no verified binding spec. */
+  unverifiedTypes: string[];
+}
+
+/**
+ * Per-type rules for producing databricks.yml bundle variables and the app
+ * resource binding. Only types verified against golden fixtures appear here.
+ *
+ * - `variableFields`: field keys that become bundle variables (a superset of
+ *   the binding fields; e.g. postgres declares project+branch+database).
+ * - `bindingFields`: field keys included in the resource binding (a subset;
+ *   e.g. postgres binds branch+database but not project).
+ * - `variable(field)`: the bundle-variable name for a given field key.
+ */
+interface BindingSpec {
+  variableFields: string[];
+  bindingFields: string[];
+  variable: (fieldKey: string) => string;
+}
+
+const BINDING_SPECS: Record<string, BindingSpec> = {
+  // Verified against __fixtures__/analytics.
+  sql_warehouse: {
+    variableFields: ["id"],
+    bindingFields: ["id"],
+    // fixture: variable is `sql_warehouse_id`
+    variable: (f) => `sql_warehouse_${f}`,
+  },
+  // Verified against __fixtures__/lakebase.
+  postgres: {
+    variableFields: ["project", "branch", "database"],
+    bindingFields: ["branch", "database"],
+    // fixture: variables are `postgres_<fieldKey>` (project/branch/database)
+    variable: (f) => `postgres_${f}`,
+  },
+};
+
+/**
+ * Builds the deploy-config plan for a set of resource rows. `values` supplies
+ * the concrete values for the target-level bundle variables (keyed by the
+ * manifest field's env var name for env-bearing fields, else by field key);
+ * missing values leave the variable value undefined.
+ */
+export function buildConfigPlan(
+  rows: ResourceRequirementRow[],
+  values: Record<string, string> = {},
+): ConfigPlan {
+  const appYamlEnv: AppYamlEnvEntry[] = [];
+  const bundleVariables: BundleVariable[] = [];
+  const resourceBindings: ResourceBinding[] = [];
+  const unverifiedTypes: string[] = [];
+  const seenEnv = new Set<string>();
+  const seenVar = new Set<string>();
+
+  for (const row of rows) {
+    // app.yaml env: every env-bearing field maps to valueFrom = resourceKey,
+    // except platform-injected fields (the platform provides those directly).
+    const resourceKey = row.resourceKey ?? row.type;
+    for (const field of row.fields) {
+      if (!field.env || fieldOrigin(field) === "platform") continue;
+      // env names are untrusted manifest data emitted into app.yaml — drop
+      // anything that isn't a plain env identifier (mirrors the .env guard).
+      if (!isValidEnvName(field.env)) continue;
+      if (seenEnv.has(field.env)) continue;
+      seenEnv.add(field.env);
+      appYamlEnv.push({ name: field.env, valueFrom: resourceKey });
+    }
+
+    const spec = BINDING_SPECS[row.type];
+    if (!spec) {
+      if (!unverifiedTypes.includes(row.type)) unverifiedTypes.push(row.type);
+      continue;
+    }
+
+    // Bundle variables (superset of binding fields for this type).
+    for (const fieldKey of spec.variableFields) {
+      const varName = spec.variable(fieldKey);
+      if (seenVar.has(varName)) continue;
+      seenVar.add(varName);
+      const field = row.fields.find((f) => f.key === fieldKey);
+      const valueKey = field?.env ?? fieldKey;
+      bundleVariables.push({
+        name: varName,
+        description: field?.description,
+        value: values[valueKey] ?? field?.value,
+      });
+    }
+
+    // Resource binding: only the spec's binding fields, referencing ${var.X}.
+    const fields: Record<string, string> = {};
+    for (const fieldKey of spec.bindingFields) {
+      fields[fieldKey] = `\${var.${spec.variable(fieldKey)}}`;
+    }
+    resourceBindings.push({
+      name: resourceKey,
+      type: row.type,
+      permission: row.permission,
+      fields,
+    });
+  }
+
+  return { appYamlEnv, bundleVariables, resourceBindings, unverifiedTypes };
+}
+
+/**
+ * A bundle-variable value the user must supply that the .env reconciliation
+ * flow can't collect — a binding field with NO `env` name (e.g. postgres
+ * project/branch/database). Without collecting these, databricks.yml declares
+ * `${var.postgres_branch}` but never assigns it, and `bundle validate` fails.
+ * Keyed by `fieldKey` (matching how buildConfigPlan looks up `values`).
+ */
+export interface BindingValueNeed {
+  fieldKey: string;
+  resourceType: string;
+  description?: string;
+}
+
+/**
+ * Binding fields that carry a bundle-variable value but have no `env` name and
+ * no static default — so they're invisible to collectEnvNeeds and must be
+ * collected separately (keyed by fieldKey) to produce a valid databricks.yml.
+ */
+export function collectBindingValueNeeds(
+  rows: ResourceRequirementRow[],
+): BindingValueNeed[] {
+  const needs: BindingValueNeed[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const spec = BINDING_SPECS[row.type];
+    if (!spec) continue;
+    for (const fieldKey of spec.variableFields) {
+      const field = row.fields.find((f) => f.key === fieldKey);
+      // Skip fields that already flow through .env (have an env name) or carry
+      // a static default — those get their value elsewhere.
+      if (field?.env || field?.value !== undefined) continue;
+      if (seen.has(fieldKey)) continue;
+      seen.add(fieldKey);
+      needs.push({
+        fieldKey,
+        resourceType: row.type,
+        description: field?.description,
+      });
+    }
+  }
+  return needs;
+}
+
+/** True when the plan has any deploy-config content to write. */
+export function planHasContent(plan: ConfigPlan): boolean {
+  return (
+    plan.appYamlEnv.length > 0 ||
+    plan.bundleVariables.length > 0 ||
+    plan.resourceBindings.length > 0
+  );
+}

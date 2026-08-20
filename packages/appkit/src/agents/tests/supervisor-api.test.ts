@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentInput } from "shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
+
 import {
   fromSupervisorApi,
   isSupervisorTool,

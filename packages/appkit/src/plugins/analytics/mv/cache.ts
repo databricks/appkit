@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+
 import { AuthenticationError } from "../../../errors";
 import type { MetricFilter, MetricLane, MetricPredicate } from "../types";
 import { sortFilterChildren } from "./formatters";
@@ -12,23 +13,27 @@ export function composeMetricCacheKey(input: MetricCacheKeyInput): string[] {
   // `timeDimension` only changes the SQL when `timeGrain` is set (see renderDimensionClause)
   const timeDimensionPart =
     input.timeGrain != null ? (input.timeDimension ?? "_") : "_";
+  // Preserve `orderBy` sequence: under LIMIT, `a, b` and `b, a` return different rows.
+  const orderByPart =
+    input.orderBy !== undefined && input.orderBy.length > 0
+      ? JSON.stringify(
+          input.orderBy.map((o) => [o.field, o.direction ?? "ASC"]),
+        )
+      : "_";
   return [
     "metric",
     input.metricKey,
     input.source,
     input.format,
-    // JSON-encode (not raw `.join(",")`): a comma is a legal identifier
-    // character (`isValidColumnName` rejects only control chars / newlines), so
-    // joining on `,` would collapse `["a,b"]` and `["a","b"]` to the same key
-    // element despite rendering different SQL. JSON quoting keeps the key
-    // one-to-one with the generated SQL — the same encoding `canonicalizeFilter`
-    // uses for predicate members below.
+    // Commas are valid in identifiers, so JSON-encode: `["a,b"]` must not
+    // collide with `["a","b"]`.
     JSON.stringify(sortedMeasures),
     JSON.stringify(sortedDimensions),
     input.timeGrain ?? "_",
     timeDimensionPart,
     filterFingerprint,
     typeof input.limit === "number" ? String(input.limit) : "_",
+    orderByPart,
     input.executorKey,
   ];
 }

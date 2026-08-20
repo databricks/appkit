@@ -1,5 +1,6 @@
 import type { ToolAnnotations } from "shared";
 import type { z } from "zod";
+
 import type { FunctionTool } from "./function-tool";
 import { toToolJSONSchema } from "./json-schema";
 

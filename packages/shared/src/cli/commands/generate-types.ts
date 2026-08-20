@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
 import { Command, Option } from "commander";
+
 import { METRIC_CONFIG_FILE } from "../../schemas/metric-fqn";
 import {
   acquireSpawnLock,

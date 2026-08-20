@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import {
   DEFAULT_FIELDS_BY_TYPE,
   DEFAULT_PERMISSION_BY_TYPE,

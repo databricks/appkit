@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+
 import { createChart } from "../create-chart";
 import type { LineChartProps } from "../types";
 

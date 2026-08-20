@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import {
   afterAll,
   beforeAll,
@@ -9,6 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import type { DatabricksStatementExecutionResponse } from "../types";
 
 const mocks = vi.hoisted(() => ({
@@ -109,7 +111,7 @@ const outputDir = path.join(__dirname, "__output__");
 
 // Strip ANSI SGR escape sequences so warning/error messages assert as plain
 // text (and match CI logs). The ESC byte is built via String.fromCharCode so
-// no control character appears in a regex literal (Biome noControlCharactersInRegex).
+// no control character appears in a regex literal (oxlint no-control-regex).
 const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const stripAnsi = (s: string): string => s.replace(ANSI_SGR, "");
 
@@ -293,7 +295,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   const metricViewsFolder = path.join(metricsDir, "metric-views");
   const outFile = path.join(metricsDir, "generated", "analytics.d.ts");
   // Default: the metric .ts is a sibling of `outFile`.
-  const metricFile = path.join(metricsDir, "generated", "metric-views.ts");
+  const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
 
   const describeResponse: DatabricksStatementExecutionResponse = {
     statement_id: "stmt-mock",
@@ -326,10 +328,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   };
 
   const writeCommittedMetricTypes = () => {
-    // Mirrors a real committed metric-views.ts: the augmentation plus the
-    // runtime const, so a preserved fallback stays a loadable module.
+    // Mirrors a real committed metric-views.d.ts: augmentation only, since the
+    // runtime metadata twin ships as the JSON bundle.
     const committed =
-      "// committed metric types\nexport const metricViewsMetadata = {};\n";
+      '// committed metric types\nimport "@databricks/appkit-ui/react";\n';
     fs.mkdirSync(path.dirname(metricFile), { recursive: true });
     fs.writeFileSync(metricFile, committed, "utf-8");
     return committed;
@@ -352,7 +354,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     fs.rmSync(metricsDir, { recursive: true, force: true });
   });
 
-  test("writes metric-views.ts when definitions.json exists", async () => {
+  test("writes metric-views.d.ts when definitions.json exists", async () => {
     writeMetricConfig();
 
     await expect(
@@ -367,20 +369,26 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     const declarations = fs.readFileSync(metricFile, "utf-8");
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"region": string');
-    // Semantic metadata (SQL type) rides in the type-level `metadata`
-    // block — the sole carrier now that the JSON bundle is gone.
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"region": string | null');
+    // Semantic metadata (SQL type) rides in the type-level `metadata` block.
     expect(declarations).toContain('"DECIMAL(38,2)"');
-    // The generated file is a real `.ts`, so it also carries the runtime
-    // `metricViewsMetadata` const (value twin of the type-level metadata).
-    expect(declarations).toContain("export const metricViewsMetadata");
-    expect(declarations).toContain("as const");
-    // ...and a type-only import, never a runtime side-effect one.
-    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(declarations).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
+    // Declaration-only: the value twin lives in the JSON bundle beside
+    // definitions.json, so nothing here compiles to runtime code.
+    expect(declarations).not.toContain("export const");
+    expect(declarations).toContain('import "@databricks/appkit-ui/react";');
+
+    const bundle = JSON.parse(
+      fs.readFileSync(
+        path.join(metricViewsFolder, "metadata.generated.json"),
+        "utf-8",
+      ),
     );
+    expect(bundle.version).toBe(1);
+    expect(bundle.metricViews.revenue.measures.total_revenue.type).toBe(
+      "DECIMAL(38,2)",
+    );
+    expect(bundle.metricViews.revenue.dimensions.region.type).toBe("STRING");
   });
 
   test("emits no metric artifacts and no errors when definitions.json is absent", async () => {
@@ -564,7 +572,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
       }),
     );
     const declarations = fs.readFileSync(metricFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
     // The SQL type rides in the .d.ts type-level `metadata` block.
     expect(declarations).toContain('"DECIMAL(38,2)"');
   });
@@ -590,7 +598,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -673,7 +681,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
 
     expect(error).toBeInstanceOf(TypegenFatalError);
-    expect((error as Error).message).toContain("metric-views.ts");
+    expect((error as Error).message).toContain("metric-views.d.ts");
     expect(fs.existsSync(outFile)).toBe(true);
     expect(fs.existsSync(metricFile)).toBe(false);
   });
@@ -783,7 +791,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
 
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -996,7 +1004,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).not.toHaveBeenCalled();
     expect(vi.mocked(createWorkspaceClient)).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1068,7 +1076,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1142,7 +1150,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
   // derives it from queryFolder when not passed explicitly.
   const metricViewsFolder = path.join(cacheTestDir, "metric-views");
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(cacheTestDir, "generated", "metric-views.ts");
+  const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
 
   const describeResponseFor = (
     measure: string,
@@ -1289,7 +1297,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
     // Artifacts mix the cached real schema with the degraded newcomer.
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
 
     // Pass 2: blocking with the warehouse RUNNING. churn is uncached, so it is
@@ -1311,8 +1319,8 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.churn.schema.degraded).not.toBe(true);
 
     const refreshed = fs.readFileSync(metricFile, "utf-8");
-    expect(refreshed).toContain('"monthly_churn": number');
-    expect(refreshed).toContain('"total_revenue": number');
+    expect(refreshed).toContain('"monthly_churn": string | null');
+    expect(refreshed).toContain('"total_revenue": string | null');
     expect(refreshed).not.toContain("measureKeys: string");
   });
 
@@ -1335,7 +1343,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     // The .d.ts carries the cached REAL unions — not degraded-open types —
     // and its type-level `metadata` block still carries the SQL type.
     const declarations = fs.readFileSync(metricFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
     expect(declarations).not.toContain("measureKeys: string");
     expect(declarations).toContain('"DECIMAL(38,2)"');
     // The good entry survived the warehouse-down pass un-overwritten.
@@ -1591,7 +1599,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(savedCache().metrics.revenue.retry).toBe(false);
     expect(savedCache().metrics.revenue.schema.degraded).not.toBe(true);
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1689,7 +1697,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     expect(metrics.revenue.retry).toBe(false);
     expect(metrics.revenue.schema.degraded).toBeUndefined();
     expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-      '"total_revenue": number',
+      '"total_revenue": string | null',
     );
   });
 
@@ -1804,7 +1812,9 @@ describe("generateFromEntryPoint — metric cache section", () => {
     await expect(run()).resolves.toBeUndefined();
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
-    expect(fs.readFileSync(metricFile, "utf-8")).toContain('"m": number');
+    expect(fs.readFileSync(metricFile, "utf-8")).toContain(
+      '"m": string | null',
+    );
   });
 
   test.each<[string, Record<string, unknown>]>([
@@ -1860,7 +1870,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
       );
       // The artifacts render the fresh schema — never the revived garbage.
       expect(fs.readFileSync(metricFile, "utf-8")).toContain(
-        '"total_revenue": number',
+        '"total_revenue": string | null',
       );
     },
   );
@@ -1872,7 +1882,11 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
   const queryFolder = path.join(antiClobberDir, "queries");
   const metricViewsFolder = path.join(antiClobberDir, "metric-views");
   const outFile = path.join(antiClobberDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(antiClobberDir, "generated", "metric-views.ts");
+  const metricFile = path.join(
+    antiClobberDir,
+    "generated",
+    "metric-views.d.ts",
+  );
 
   const degradedQuerySchema = (name: string) => ({
     name,
@@ -1975,7 +1989,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(content).toContain("offline_query");
   });
 
-  test("blocking mode + degraded metric (no failures): no write to metric-views.ts", async () => {
+  test("blocking mode + degraded metric (no failures): no write to metric-views.d.ts", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2035,7 +2049,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     expect(fs.existsSync(outFile)).toBe(false);
   });
 
-  test("blocking mode + non-degraded metric: writes to metric-views.ts normally", async () => {
+  test("blocking mode + non-degraded metric: writes to metric-views.d.ts normally", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2080,10 +2094,10 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     const content = fs.readFileSync(metricFile, "utf-8");
     expect(content).toContain("interface MetricRegistry");
     expect(content).toContain("revenue");
-    expect(content).toContain('"total_revenue": number');
+    expect(content).toContain('"total_revenue": string | null');
   });
 
-  test("non-blocking mode + degraded metric: writes to metric-views.ts anyway", async () => {
+  test("non-blocking mode + degraded metric: writes to metric-views.d.ts anyway", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2175,7 +2189,11 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
   const queryFolder = path.join(warningTestDir, "queries");
   const metricViewsFolder = path.join(warningTestDir, "metric-views");
   const outFile = path.join(warningTestDir, "generated", "analytics.d.ts");
-  const metricFile = path.join(warningTestDir, "generated", "metric-views.ts");
+  const metricFile = path.join(
+    warningTestDir,
+    "generated",
+    "metric-views.d.ts",
+  );
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2395,7 +2413,7 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
     }
   });
 
-  test("metric config + missing metric-views.ts + environmental failure → crash", async () => {
+  test("metric config + missing metric-views.d.ts + environmental failure → crash", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -2426,9 +2444,9 @@ describe("generateFromEntryPoint — warning message with cause labels", () => {
       expect(error).toBeInstanceOf(TypegenFatalError);
       const message = stripAnsi((error as Error).message);
       // Per-surface gate: only the metric surface failed, so the remedy names
-      // metric-views.ts specifically rather than the whole artifact set.
+      // metric-views.d.ts specifically rather than the whole artifact set.
       expect(message).toContain(
-        "required committed type artifact is missing: metric-views.ts",
+        "required committed type artifact is missing: metric-views.d.ts",
       );
       expect(message).toContain("commit the generated type files");
       expect(
@@ -2543,7 +2561,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cacheFile.contents = undefined;
-    // Clean slate: no generated/ dir, so no committed analytics.d.ts / metric-views.ts.
+    // Clean slate: no generated/ dir, so no committed analytics.d.ts / metric-views.d.ts.
     fs.rmSync(gateDir, { recursive: true, force: true });
     fs.mkdirSync(queryFolder, { recursive: true });
     // A degraded query in blocking mode → write suppressed → nothing on disk.
@@ -2581,7 +2599,7 @@ describe("generateFromEntryPoint — has-types gate crash (no committed types)",
   });
 
   test("blocking + environmental failure + only serving.d.ts present → still crashes (serving excluded from gate)", async () => {
-    // Pre-create ONLY a serving.d.ts sibling. analytics.d.ts / metric-views.ts stay absent.
+    // Pre-create ONLY a serving.d.ts sibling. analytics.d.ts / metric-views.d.ts stay absent.
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(
       path.join(path.dirname(outFile), "serving.d.ts"),

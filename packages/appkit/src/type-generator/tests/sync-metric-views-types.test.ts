@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { DescribeFetcher } from "../mv-registry/types";
 import type { DatabricksStatementExecutionResponse } from "../types";
 
@@ -128,7 +130,7 @@ describe("syncMetricViewsTypes", () => {
       tmpRoot,
       "shared",
       "appkit-types",
-      "metric-views.ts",
+      "metric-views.d.ts",
     );
   });
 
@@ -146,7 +148,7 @@ describe("syncMetricViewsTypes", () => {
       metricFetcher: fetcher,
     });
 
-    // The generated .ts exists on disk.
+    // The generated .d.ts exists on disk.
     expect(fs.existsSync(metricOutFile)).toBe(true);
 
     // Result reports both keys, no failures, config present.
@@ -158,15 +160,15 @@ describe("syncMetricViewsTypes", () => {
     ]);
     expect(result.metricOutFile).toBe(metricOutFile);
 
-    // --- metric-views.ts: MetricRegistry augmentation for both metrics ---
+    // --- metric-views.d.ts: MetricRegistry augmentation for both metrics ---
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
     expect(declarations).toContain("interface MetricRegistry");
     expect(declarations).toContain('"revenue"');
     expect(declarations).toContain('"churn"');
-    // Measure + dimension column types render as TS primitives.
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"region": string');
-    expect(declarations).toContain('"churn_rate": number');
+    // Measure + dimension columns reflect nullable JSON_ARRAY wire values.
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"region": string | null');
+    expect(declarations).toContain('"churn_rate": string | null');
     // The OBO metric's lane is captured in its entry.
     expect(declarations).toContain('lane: "obo"');
     expect(declarations).toContain('lane: "sp"');
@@ -175,32 +177,28 @@ describe("syncMetricViewsTypes", () => {
     // The semantic metadata (format spec, SQL type) rides in the type-level
     // `metadata` block — the sole carrier now the JSON is gone.
     expect(declarations).toContain('"$#,##0.00"');
-    // The file is a real `.ts`, so it also carries the runtime const and a
-    // type-only import.
-    expect(declarations).toContain("export const metricViewsMetadata");
-    expect(declarations).toContain("as const");
-    expect(declarations).not.toContain('import "@databricks/appkit-ui/react"');
-    expect(declarations).toContain(
-      'import type {} from "@databricks/appkit-ui/react"',
-    );
+    // Declaration-only: the runtime metadata twin lives in the JSON bundle, so
+    // nothing here compiles to a value. The import anchors the augmentation.
+    expect(declarations).not.toContain("export const");
+    expect(declarations).toContain('import "@databricks/appkit-ui/react";');
   });
 
-  test("removes a stale sibling metric-views.d.ts left by a pre-.ts version on upgrade", async () => {
+  test("removes a stale sibling metric-views.ts left by the interim .ts version on upgrade", async () => {
     writeMixedConfig();
 
-    // Simulate an app upgraded from a version that emitted an ambient
-    // `metric-views.d.ts`, which would duplicate the augmentation if left
-    // beside the new `.ts`.
-    const staleDts = path.join(
+    // Simulate an app upgraded from the interim version that emitted a real
+    // `metric-views.ts` (it carried the runtime metadata const). Left beside the
+    // new `.d.ts` it would duplicate the augmentation.
+    const staleTs = path.join(
       tmpRoot,
       "shared",
       "appkit-types",
-      "metric-views.d.ts",
+      "metric-views.ts",
     );
-    fs.mkdirSync(path.dirname(staleDts), { recursive: true });
+    fs.mkdirSync(path.dirname(staleTs), { recursive: true });
     fs.writeFileSync(
-      staleDts,
-      '// old\nimport "@databricks/appkit-ui/react";\n',
+      staleTs,
+      '// old\nimport type {} from "@databricks/appkit-ui/react";\nexport const metricViewsMetadata = {} as const;\n',
     );
 
     await syncMetricViewsTypes({
@@ -210,12 +208,12 @@ describe("syncMetricViewsTypes", () => {
       metricFetcher: fetcher,
     });
 
-    // The new .ts is written and the stale .d.ts sibling is swept.
+    // The new .d.ts is written and the stale .ts sibling is swept.
     expect(fs.existsSync(metricOutFile)).toBe(true);
-    expect(fs.existsSync(staleDts)).toBe(false);
+    expect(fs.existsSync(staleTs)).toBe(false);
   });
 
-  test("preserves a legacy metric-views.d.ts when a degraded blocking pass suppresses the replacement write", async () => {
+  test("preserves committed metric types when a degraded blocking pass suppresses the replacement write", async () => {
     fs.writeFileSync(
       path.join(metricViewsFolder, "definitions.json"),
       JSON.stringify({
@@ -223,15 +221,9 @@ describe("syncMetricViewsTypes", () => {
       }),
     );
 
-    const legacyDts = path.join(
-      tmpRoot,
-      "shared",
-      "appkit-types",
-      "metric-views.d.ts",
-    );
-    fs.mkdirSync(path.dirname(legacyDts), { recursive: true });
-    const committedContent = "// committed legacy metric types\n";
-    fs.writeFileSync(legacyDts, committedContent);
+    fs.mkdirSync(path.dirname(metricOutFile), { recursive: true });
+    const committedContent = "// committed metric types\n";
+    fs.writeFileSync(metricOutFile, committedContent);
 
     await syncMetricViewsTypes({
       metricViewsFolder,
@@ -245,8 +237,35 @@ describe("syncMetricViewsTypes", () => {
       }),
     });
 
-    expect(fs.existsSync(metricOutFile)).toBe(false);
-    expect(fs.readFileSync(legacyDts, "utf-8")).toBe(committedContent);
+    expect(fs.readFileSync(metricOutFile, "utf-8")).toBe(committedContent);
+    // The bundle is written under the same gate, so a suppressed pass leaves it
+    // absent rather than pairing committed types with emptied-out metadata.
+    expect(
+      fs.existsSync(path.join(metricViewsFolder, "metadata.generated.json")),
+    ).toBe(false);
+  });
+
+  test("writes the metadata bundle beside definitions.json", async () => {
+    writeMixedConfig();
+
+    await syncMetricViewsTypes({
+      metricViewsFolder,
+      warehouseId: "wh-1",
+      metricOutFile,
+      metricFetcher: fetcher,
+    });
+
+    const bundlePath = path.join(metricViewsFolder, "metadata.generated.json");
+    expect(fs.existsSync(bundlePath)).toBe(true);
+
+    const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf-8"));
+    expect(bundle.version).toBe(1);
+    expect(Object.keys(bundle.metricViews).sort()).toEqual([
+      "churn",
+      "revenue",
+    ]);
+    // The format spec that used to ride in the runtime const now rides here.
+    expect(JSON.stringify(bundle)).toContain("$#,##0.00");
   });
 
   test("returns noConfig and writes nothing when definitions.json is absent", async () => {
@@ -295,8 +314,8 @@ describe("syncMetricViewsTypes", () => {
     ]);
     // Cached schemas still render the real (non-degraded) types.
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
-    expect(declarations).toContain('"churn_rate": number');
+    expect(declarations).toContain('"total_revenue": string | null');
+    expect(declarations).toContain('"churn_rate": string | null');
   });
 
   test("cache: false (--no-cache) re-describes every key even when a warm cache exists", async () => {
@@ -359,7 +378,7 @@ describe("syncMetricViewsTypes", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(second.failures).toEqual([]);
     const declarations = fs.readFileSync(metricOutFile, "utf-8");
-    expect(declarations).toContain('"total_revenue": number');
+    expect(declarations).toContain('"total_revenue": string | null');
   });
 
   test("a removed metric key is pruned from the cache section", async () => {

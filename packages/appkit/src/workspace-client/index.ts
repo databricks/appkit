@@ -4,26 +4,24 @@
  * to `./legacy.ts` so services can migrate to the modular SDK incrementally
  * behind a stable facade.
  */
-export { ApiError } from "./errors";
-export { createWorkspaceClient } from "./factory";
+
+export {
+  ApiError,
+  ConfigError,
+  Context,
+  createWorkspaceClient,
+  Time,
+  TimeUnits,
+} from "shared";
 export type {
   CancellationToken,
   ClientOptions,
-  GenieMessage,
-  Waiter,
-  WorkspaceClientOptions,
-} from "./legacy";
-// SDK value + type re-exports so AppKit modules import them from the wrapper.
-export {
-  ConfigError,
-  Context,
-  Time,
-  TimeUnits,
-} from "./legacy";
-export type {
   files,
+  GenieMessage,
   jobs,
   serving,
   sql,
+  Waiter,
   WorkspaceClient,
-} from "./types";
+  WorkspaceClientOptions,
+} from "shared/workspace-client";

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { GenieMessage } from "../../../workspace-client";
 import { GenieConnector } from "../client";
 import type { GenieStreamEvent } from "../types";

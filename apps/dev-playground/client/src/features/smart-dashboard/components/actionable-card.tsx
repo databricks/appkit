@@ -9,6 +9,7 @@ import {
   MapPinIcon,
   MessageSquareIcon,
 } from "lucide-react";
+
 import type { FeedAction } from "../lib/feed-actions";
 
 type Variant = "insight" | "anomaly";

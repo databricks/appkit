@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../../contract";
 import { defineSchema, id, text } from "../../schema-builder";
 import {

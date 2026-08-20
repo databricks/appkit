@@ -7,6 +7,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
+
+import { computeOriginFromField } from "../../../schemas/manifest";
 import type { ResourceTarget } from "./types";
 import { errorMessage } from "./utils";
 
@@ -17,6 +19,8 @@ interface ManifestField {
   /** Static default value baked into the manifest. */
   value?: string;
   origin?: "user" | "platform" | "static" | "cli";
+  /** Resolver key (cli origin), e.g. "postgres:host". */
+  resolve?: string;
   /** Only generated into the local .env; the platform injects it at deploy. */
   localOnly?: boolean;
 }
@@ -47,13 +51,11 @@ interface TemplateManifest {
   plugins?: Record<string, ManifestPlugin>;
 }
 
-/** A field's env var is the developer's to supply only when it has no static
- * default and isn't platform-injected at deploy time. */
+/** A field's env var is the developer's to supply only when its effective
+ * origin is `"user"` — a stamped `origin`, else derived from the field shape. */
 function isUserSuppliedEnv(field: ManifestField): boolean {
-  if (field.value !== undefined) return false;
-  if (field.origin === "platform" || field.origin === "static") return false;
-  if (field.localOnly) return false;
-  return true;
+  const origin = field.origin ?? computeOriginFromField(field);
+  return origin === "user";
 }
 
 /** Env vars the config layer should presence-check (i.e. user-supplied ones). */

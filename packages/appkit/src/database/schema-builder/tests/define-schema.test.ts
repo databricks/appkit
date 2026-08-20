@@ -1,5 +1,6 @@
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
+
 import {
   bigid,
   bigint,

@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+
 import type { WarehouseStatus } from "./types";
 import {
   type ResourceSeverity,

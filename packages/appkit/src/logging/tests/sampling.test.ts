@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { DEFAULT_SAMPLING_CONFIG, shouldSample } from "../sampling";
 import type { WideEventData } from "../wide-event";
 

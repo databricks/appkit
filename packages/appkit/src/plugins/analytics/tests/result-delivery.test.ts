@@ -1,5 +1,6 @@
 import { Table, tableToIPC, Utf8, vectorFromArray } from "apache-arrow";
 import { describe, expect, test, vi } from "vitest";
+
 import { ExecutionError } from "../../../errors";
 import {
   type ArrowChunkStreamer,

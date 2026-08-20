@@ -1,15 +1,23 @@
 import type {
   BasePluginConfig,
+  MetricFilter,
+  MetricOrderBy,
   MetricViewColumnDisplay,
   MetricViewsMetadata,
+} from "shared";
+
+export type {
+  MetricFilter,
+  MetricFilterOperatorName,
+  MetricOrderBy,
+  MetricPredicate,
 } from "shared";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
   /**
-   * Build-generated per-metric column metadata, keyed by metric key. The
-   * metric route scopes this to the requested measures and dimensions before
-   * attaching it to the SSE result.
+   * Per-column display metadata. The metric route stamps the slice scoped to a
+   * request's measures/dimensions into the SSE `result` message.
    */
   metricViewsMetadata?: MetricViewsMetadata;
   /**
@@ -23,22 +31,20 @@ export interface IAnalyticsConfig extends BasePluginConfig {
    * controlled deployments where billable warehouse starts must not be
    * triggered by user requests; in that case `STOPPED` surfaces as a
    * `ConfigurationError`.
+   *
+   * @default true
    */
   autoStartWarehouse?: boolean;
   /**
    * Fail-fast ceiling (ms) for an `ARROW_STREAM` query to produce its first
    * byte (warehouse readiness + execute + first chunk). Past this, a stuck or
    * overloaded warehouse returns a `503` (`WAREHOUSE_UNAVAILABLE`) instead of
-   * hanging until the client disconnects. Defaults to 2 min. Once the first
-   * byte arrives the stream is not time-bounded.
+   * hanging until the client disconnects.
+   * Defaults to 2 min.
    */
   arrowFirstByteTimeoutMs?: number;
 }
 
-/**
- * SQL warehouse lifecycle states surfaced by the analytics route.
- * Mirrors the states emitted by the Databricks SQL SDK (`sql.State`).
- */
 export type WarehouseState =
   | "RUNNING"
   | "STARTING"
@@ -64,10 +70,9 @@ export interface WarehouseStatus {
 }
 
 /**
- * Discriminated union of every SSE message shape emitted by
- * `POST /api/analytics/query/:query_key`. Useful for typing the client-side
- * `onMessage` handler (and is the source of truth re-mirrored in
- * `appkit-ui` since that package can't depend on `appkit`).
+ * Discriminated union of every SSE message shape emitted by the analytics
+ * routes (`POST /api/analytics/query/:query_key` and
+ * `POST /api/analytics/metric/:key`).
  */
 export type AnalyticsStreamMessage =
   | { type: "warehouse_status"; status: WarehouseStatus }
@@ -83,7 +88,7 @@ export type AnalyticsStreamMessage =
       statement_id: string;
       status: { state: string };
     }
-  | { type: "error"; error: string; code?: string };
+  | { type: "error"; error: string; code?: string; errorCode?: string };
 
 /**
  * Supported response formats for analytics queries.
@@ -139,7 +144,7 @@ export interface AnalyticsQueryResponse {
  *   - `"sp"`  ← `executor: "app_service_principal"` — queried as the app
  *     service principal (cache shared across all users).
  *   - `"obo"` ← `executor: "user"` — queried on-behalf-of the requesting
- *     user (per-user cache). OBO dispatch is wired in a later phase.
+ *     user (per-user cache) via `asUser(req)`.
  */
 export type MetricLane = "sp" | "obo";
 
@@ -159,48 +164,6 @@ export interface MetricRegistration {
 }
 
 /**
- * v1 filter operator vocabulary — exactly twelve names. The runtime tuple
- * `METRIC_FILTER_OPERATORS` (next to the validator in `metric.ts`) is the
- * server-side source of truth; this union mirrors it statically.
- */
-export type MetricFilterOperatorName =
-  | "equals"
-  | "notEquals"
-  | "in"
-  | "notIn"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "notContains"
-  | "set"
-  | "notSet";
-
-/**
- * A single filter predicate — the leaf node of the recursive
- * {@link MetricFilter} tree. `member` is a dimension name (grammar-gated, not
- * allowlisted); `values` is bound through parameterized `:f_<idx>` bind vars
- * and never interpolated into the SQL string.
- */
-export interface MetricPredicate {
-  member: string;
-  operator: MetricFilterOperatorName;
-  values?: ReadonlyArray<string | number>;
-}
-
-/**
- * Recursive filter expression for the metric-view request body: a leaf
- * {@link MetricPredicate} or an `{ and: [...] }` / `{ or: [...] }` group. The
- * shape is intentionally non-generic server-side — per-metric narrowing (if
- * any) lives client-side.
- */
-export type MetricFilter =
-  | MetricPredicate
-  | { and: ReadonlyArray<MetricFilter> }
-  | { or: ReadonlyArray<MetricFilter> };
-
-/**
  * Validated request body for `POST /api/analytics/metric/:key`.
  *
  * `measures` is required. `dimensions` drive `GROUP BY ALL`; `filter` is the
@@ -208,7 +171,9 @@ export type MetricFilter =
  * clause. `timeGrain` buckets the single dimension named by `timeDimension`
  * via `date_trunc`; it requires `timeDimension`, and `timeDimension` must be
  * one of `dimensions` so it is selected and in `GROUP BY ALL`. Both tokens are
- * grammar-gated before they reach SQL.
+ * grammar-gated before they reach SQL. `orderBy` controls row ordering; when
+ * `limit` is set, any dimensions not named in `orderBy` are appended as
+ * tie-breakers so the ordering is total and `LIMIT` is deterministic.
  */
 export interface IAnalyticsMetricRequest {
   measures: string[];
@@ -221,6 +186,7 @@ export interface IAnalyticsMetricRequest {
    * required whenever `timeGrain` is set. Grammar-gated as a SQL identifier.
    */
   timeDimension?: string;
+  orderBy?: MetricOrderBy[];
   limit?: number;
   format?: AnalyticsFormat;
 }

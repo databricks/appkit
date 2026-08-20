@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
+
 import { createLogger } from "../logging/logger";
 import { createWorkspaceClient } from "../workspace-client";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";

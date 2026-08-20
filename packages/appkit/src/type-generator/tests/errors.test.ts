@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { classifyBlockingFailure, classifyEnvironmentalCause } from "../errors";
 
 describe("classifyBlockingFailure", () => {

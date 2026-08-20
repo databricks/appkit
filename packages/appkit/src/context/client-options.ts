@@ -1,4 +1,5 @@
 import { coerce } from "semver";
+
 import {
   name as productName,
   version as productVersion,

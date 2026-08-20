@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
+
 import { trace } from "@opentelemetry/api";
 import type { NextFunction, Request, Response } from "express";
 import { createDebug as createObug } from "obug";
+
 import { DEFAULT_SAMPLING_CONFIG, shouldSample } from "./sampling";
 import { WideEvent } from "./wide-event";
 import { WideEventEmitter } from "./wide-event-emitter";

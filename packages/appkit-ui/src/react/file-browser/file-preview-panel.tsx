@@ -1,4 +1,5 @@
 import { AlertCircle, Download, FileIcon, Loader2, Trash2 } from "lucide-react";
+
 import { formatFileSize } from "../lib/format";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -6,8 +7,10 @@ import { Skeleton } from "../ui/skeleton";
 import type { FileBrowserLabels, FilePreview } from "./types";
 
 /** Props for the FilePreviewPanel component */
-export interface FilePreviewPanelProps
-  extends Omit<React.ComponentProps<"div">, "children"> {
+export interface FilePreviewPanelProps extends Omit<
+  React.ComponentProps<"div">,
+  "children"
+> {
   /** Full path of the selected file (null when nothing is selected) */
   selectedFile: string | null;
   /** Preview data for the selected file */

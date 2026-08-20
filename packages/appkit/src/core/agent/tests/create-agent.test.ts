@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+
 import { createAgent } from "../create-agent";
 import { tool } from "../tools/tool";
 import type { AgentDefinition } from "../types";
@@ -47,7 +48,6 @@ describe("createAgent", () => {
 
   test("throws on a direct self-cycle", () => {
     const a: AgentDefinition = { instructions: "a" };
-    // biome-ignore lint/suspicious/noExplicitAny: intentional cycle setup for test
     (a as any).agents = { self: a };
     expect(() => createAgent(a)).toThrow(/cycle/i);
   });

@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+
 import {
   createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
@@ -17,6 +18,7 @@ import {
   test,
   vi,
 } from "vitest";
+
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
@@ -25,12 +27,34 @@ import { analytics } from "../index";
 
 const getAppQuerySpy = vi.spyOn(AppManager.prototype, "getAppQuery");
 
+/**
+ * Wait for the supplied server to finish binding, then return the OS-assigned
+ * port. Required when the test passes `port: 0` to `serverPlugin` —
+ * `app.server.start()` returns as soon as `listen()` is invoked but before the
+ * bind completes, so `server.address()` returns `null` until the `listening`
+ * event fires.
+ */
+async function getListeningPort(server: Server): Promise<number> {
+  const addr = server.address();
+  if (addr && typeof addr === "object" && typeof addr.port === "number") {
+    return addr.port;
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", () => resolve());
+    server.once("error", (err) => reject(err));
+  });
+  const ready = server.address();
+  if (!ready || typeof ready !== "object") {
+    throw new Error("Server is listening but address() returned null");
+  }
+  return ready.port;
+}
+
 describe("Analytics Plugin Integration", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   let mockClient: ReturnType<typeof createConfigurableMockWorkspaceClient>;
-  const TEST_PORT = 9879;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -43,8 +67,11 @@ describe("Analytics Plugin Integration", () => {
 
     const app = await createApp({
       plugins: [
+        // port: 0 → OS assigns an ephemeral port. Avoids EADDRINUSE / cross-test
+        // route bleed when another integration test (e.g. server.integration)
+        // holds a fixed port concurrently in the shared vitest worker pool.
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
         analytics({}),
@@ -52,7 +79,8 @@ describe("Analytics Plugin Integration", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+    const port = await getListeningPort(server);
+    baseUrl = `http://127.0.0.1:${port}`;
   });
 
   afterAll(async () => {

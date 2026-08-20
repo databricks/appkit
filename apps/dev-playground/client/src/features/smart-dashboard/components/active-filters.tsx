@@ -1,4 +1,5 @@
 import { FilterIcon, XIcon } from "lucide-react";
+
 import type { DashboardFilters } from "../hooks/use-dashboard-data";
 
 interface ActiveFiltersProps {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { buildAppkitPayload, wrapAppkitLog } from "../appkit-log";
 
 describe("appkit-log", () => {

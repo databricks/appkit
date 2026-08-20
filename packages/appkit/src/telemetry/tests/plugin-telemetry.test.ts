@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { NOOP_LOGGER, NOOP_METER, NOOP_TRACER } from "../noop";
 import type { TelemetryManager } from "../telemetry-manager";
 import { TelemetryProvider } from "../telemetry-provider";

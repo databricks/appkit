@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import { z } from "zod";
+
 import type { AppKitTable, ColumnMeta } from "./types";
 
 const PG_INTEGER_MIN = -2_147_483_648;

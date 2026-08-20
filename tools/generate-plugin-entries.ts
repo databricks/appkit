@@ -14,11 +14,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import {
   kebabToCamel,
   PLUGIN_NAME_PATTERN,
 } from "../packages/shared/src/naming";
-import { formatWithBiome } from "./format-with-biome.ts";
+import { formatGenerated } from "./format-generated.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -154,10 +155,10 @@ function main(): void {
   fs.writeFileSync(GA_OUT, renderBarrel(ga), "utf-8");
   fs.writeFileSync(BETA_OUT, renderBarrel(beta), "utf-8");
   // Self-format so a fresh `pnpm build` doesn't leave the generated
-  // barrels dirty against biome's canonical formatting (matches the
+  // barrels dirty against oxfmt's canonical formatting (matches the
   // pattern set by tools/generate-registry-types.ts after PR #324).
-  formatWithBiome(GA_OUT);
-  formatWithBiome(BETA_OUT);
+  formatGenerated(GA_OUT);
+  formatGenerated(BETA_OUT);
 
   console.log(
     `Wrote ${path.relative(REPO_ROOT, GA_OUT)} (${ga.length} GA plugin${ga.length === 1 ? "" : "s"})`,

@@ -1,7 +1,28 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
+
+// Partial-mock the tracing module: traceAgent/traceTool still run their
+// callbacks, but the trace id is deterministic and run-linking is a spy.
+const linkTraceToRun = vi.hoisted(() => vi.fn());
+let mockTraceId: string | undefined;
+vi.mock("../mlflow", () => ({
+  initAgentTracing: vi.fn(async () => {}),
+  traceAgent: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  traceTool: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  currentTraceId: () => mockTraceId,
+  linkTraceToRun,
+}));
 
 /**
  * Surface-level guarantees on the agents plugin's HTTP route handlers when
@@ -19,7 +40,8 @@ import { AgentsPlugin } from "../agents";
  */
 
 beforeEach(() => {
-  // biome-ignore lint/suspicious/noExplicitAny: test seam, mirrors other suites
+  linkTraceToRun.mockClear();
+  mockTraceId = undefined;
   (CacheManager as any).instance = {
     get: vi.fn(),
     set: vi.fn(),
@@ -60,16 +82,14 @@ function mockRes() {
   };
 }
 
-function seedPlugin(): AgentsPlugin {
+function seedPlugin(adapter: unknown = { async *run() {} }): AgentsPlugin {
   const plugin = new AgentsPlugin({ dir: false });
-  // biome-ignore lint/suspicious/noExplicitAny: seed private state
   (plugin as any).agents.set("default", {
     name: "default",
     instructions: "hi",
-    adapter: { async *run() {} },
+    adapter,
     toolIndex: new Map(),
   });
-  // biome-ignore lint/suspicious/noExplicitAny: seed private state
   (plugin as any).defaultAgentName = "default";
   return plugin;
 }
@@ -77,7 +97,6 @@ function seedPlugin(): AgentsPlugin {
 describe("POST /chat — threadStore failure", () => {
   test("returns 500 when threadStore.get rejects (existing thread path)", async () => {
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: stub threadStore for failure
     (plugin as any).threadStore = {
       get: vi.fn().mockRejectedValue(new Error("DB unreachable")),
       create: vi.fn(),
@@ -97,7 +116,6 @@ describe("POST /chat — threadStore failure", () => {
 
   test("returns 500 when threadStore.create rejects (new-thread path)", async () => {
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       get: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockRejectedValue(new Error("Disk full")),
@@ -117,7 +135,6 @@ describe("POST /chat — threadStore failure", () => {
 
   test("returns 500 when threadStore.addMessage rejects", async () => {
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       get: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
@@ -139,7 +156,6 @@ describe("POST /chat — threadStore failure", () => {
 describe("POST /invocations — threadStore failure", () => {
   test("returns 500 when threadStore.create rejects", async () => {
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockRejectedValue(new Error("DB unreachable")),
       addMessage: vi.fn(),
@@ -161,7 +177,6 @@ describe("POST /invocations — threadStore failure", () => {
 
   test("returns 500 when threadStore.addMessage rejects mid-loop", async () => {
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
       addMessage: vi
@@ -209,14 +224,12 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
         annotations: toolAnnotations,
       },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: seed private state
     (plugin as any).agents.set("default", {
       name: "default",
       instructions: "hi",
       adapter: { async *run() {} },
       toolIndex,
     });
-    // biome-ignore lint/suspicious/noExplicitAny: seed private state
     (plugin as any).defaultAgentName = "default";
     return plugin;
   }
@@ -283,9 +296,7 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
       { effect: "destructive" },
       { dir: false, approval: { requireForDestructive: false } },
     );
-    // biome-ignore lint/suspicious/noExplicitAny: stub the downstream runner to avoid running the adapter
     (plugin as any)._runAgentNonStreaming = vi.fn(async () => undefined);
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-1", messages: [] }),
       addMessage: vi.fn(),
@@ -302,15 +313,12 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
     )._handleInvoke(mockReq({ input: "hi" }), res);
 
     expect(res.status).not.toHaveBeenCalledWith(400);
-    // biome-ignore lint/suspicious/noExplicitAny: assert delegation
     expect((plugin as any)._runAgentNonStreaming).toHaveBeenCalled();
   });
 
   test("passes pre-flight when the agent has only read-only tools", async () => {
     const plugin = seedPluginWithTools({ effect: "read" });
-    // biome-ignore lint/suspicious/noExplicitAny: stub the runner
     (plugin as any)._runAgentNonStreaming = vi.fn(async () => undefined);
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-1", messages: [] }),
       addMessage: vi.fn(),
@@ -327,7 +335,6 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
     )._handleInvoke(mockReq({ input: "hi" }), res);
 
     expect(res.status).not.toHaveBeenCalledWith(400);
-    // biome-ignore lint/suspicious/noExplicitAny: assert delegation
     expect((plugin as any)._runAgentNonStreaming).toHaveBeenCalled();
   });
 });
@@ -335,7 +342,6 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
 describe("POST /invocations & /responses — successful invoke", () => {
   test("returns OpenAI Responses-shaped JSON with aggregated assistant text", async () => {
     const plugin = new AgentsPlugin({ dir: false });
-    // biome-ignore lint/suspicious/noExplicitAny: seed
     (plugin as any).agents.set("default", {
       name: "default",
       instructions: "hi",
@@ -347,9 +353,7 @@ describe("POST /invocations & /responses — successful invoke", () => {
       },
       toolIndex: new Map(),
     });
-    // biome-ignore lint/suspicious/noExplicitAny: seed
     (plugin as any).defaultAgentName = "default";
-    // biome-ignore lint/suspicious/noExplicitAny: stub
     (plugin as any).threadStore = {
       create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
       addMessage: vi.fn(),
@@ -391,15 +395,77 @@ describe("POST /invocations & /responses — successful invoke", () => {
       text: "hello world",
     });
   });
+
+  function seedEchoPlugin(): AgentsPlugin {
+    const plugin = seedPlugin({
+      async *run() {
+        yield { type: "message_delta", content: "ok" };
+      },
+    });
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    return plugin;
+  }
+
+  async function invoke(
+    plugin: AgentsPlugin,
+    body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq(body), res);
+    return json.mock.calls[0]?.[0] as Record<string, unknown>;
+  }
+
+  test("links the trace to the run and echoes mlflow_trace_id when tracing is on", async () => {
+    mockTraceId = "tr-abc123";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, {
+      input: "hi",
+      mlflowRunId: "run-99",
+    });
+
+    expect(linkTraceToRun).toHaveBeenCalledWith("run-99");
+    expect(payload.mlflow_trace_id).toBe("tr-abc123");
+  });
+
+  test("omits mlflow_trace_id and does not link when tracing is off", async () => {
+    mockTraceId = undefined; // currentTraceId() no-ops when disabled
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    expect(payload).not.toHaveProperty("mlflow_trace_id");
+  });
+
+  test("does not link when no run id is supplied even if tracing is on", async () => {
+    mockTraceId = "tr-standalone";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    // Trace still exists and its id is surfaced — just not linked to a run.
+    expect(payload.mlflow_trace_id).toBe("tr-standalone");
+  });
 });
 
 describe("/invocations and /responses are aliases", () => {
   test("both routes are registered and bound to the same handler", () => {
     const plugin = new AgentsPlugin({ dir: false });
     const addRoute = vi.fn();
-    // biome-ignore lint/suspicious/noExplicitAny: inject minimal fake context
     (plugin as any).context = { addRoute };
-    // biome-ignore lint/suspicious/noExplicitAny: invoke private mounter
     (plugin as any).mountInvokeRoutes();
 
     expect(addRoute).toHaveBeenCalledTimes(2);

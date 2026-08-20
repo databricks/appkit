@@ -1,5 +1,6 @@
 import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { WorkspaceClient } from "../../../workspace-client";
 import { FilesConnector } from "../client";
 import { streamFromChunks, streamFromString } from "./utils";

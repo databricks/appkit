@@ -1,5 +1,6 @@
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type pg from "pg";
+
 import { ConfigurationError, ValidationError } from "./errors";
 import type { LakebasePoolConfig } from "./types";
 

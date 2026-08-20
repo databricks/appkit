@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import { describe, expect, test } from "vitest";
+
 import { migrateFile } from "../on-plugins-ready";
 
 const fixturesDir = path.join(__dirname, "fixtures");

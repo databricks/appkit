@@ -18,6 +18,7 @@ import {
 } from "apache-arrow";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { ServiceContext } from "../../../context/service-context";
 import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";

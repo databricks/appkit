@@ -1,3 +1,5 @@
+import { formatLabel } from "../../js/format";
+
 /**
  * Formats numeric values based on field name context
  * @param value - The numeric value to format
@@ -46,12 +48,10 @@ export function formatChartValue(value: number, fieldName: string): string {
  * formatFieldLabel("revenue") // "Revenue"
  */
 export function formatFieldLabel(field: string): string {
-  const safe = field.replace(/[^a-zA-Z0-9_-]/g, "");
-  return safe
-    .replace(/([A-Z])/g, " $1")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (l) => l.toUpperCase())
-    .trim();
+  // Strip anything outside the identifier charset before humanizing. Table
+  // callers pass a raw `column.id` / `defaultFilterColumn` that has not been
+  // through `SAFE_KEY_REGEX`, so the label must not echo arbitrary input.
+  return formatLabel(field.replace(/[^a-zA-Z0-9_-]/g, ""));
 }
 
 /**

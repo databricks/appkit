@@ -2,6 +2,7 @@ import { eq, isSQLWrapper, type SQL, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PgTable } from "drizzle-orm/pg-core";
 import type { Pool } from "pg";
+
 import type { AppKitTable, Schema } from "../../schema-builder";
 import { buildEngineRelations } from "../../schema-builder/engine/relations";
 import {

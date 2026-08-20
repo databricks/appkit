@@ -1,28 +1,33 @@
 /**
- * The single seam where `appkit doctor` crosses into the Databricks SDK. The
- * SDK-free `shared` package reaches it via a runtime `import(...)`, degrading
- * gracefully when it's absent.
- *
- * `noRestrictedImports` normally routes SDK access through
- * `packages/appkit/src/workspace-client`, but that isn't available here: `appkit`
- * depends on `shared`, so importing it back would be a dependency cycle. `shared`
- * also can't depend on the SDK directly — hence the dynamic `import(...)` and the
- * per-call suppressions below. This file *is* the wrapper for this package, and
- * every SDK reference in the doctor command is confined to it.
+ * The seam where `appkit doctor` crosses into the Databricks SDK. It reaches
+ * the SDK through the shared `workspace-client` facade — the one sanctioned SDK
+ * import site — so no dynamic import or `noRestrictedImports` suppression is
+ * needed. (The Lakebase probe still dynamically imports `@databricks/appkit`
+ * below, since that's an optional peer `shared` deliberately doesn't depend on.)
  */
 
-/** Raised when `@databricks/sdk-experimental` is not resolvable at runtime. */
+import {
+  createWorkspaceClient,
+  loadConfigFile,
+} from "../../../workspace-client";
+
+/**
+ * Retained for backward compatibility. Since `shared` now depends on the SDK
+ * (reached via the workspace-client facade), the SDK is always resolvable at
+ * runtime and this is no longer thrown; kept exported so existing callers and
+ * the `SDK_NOT_INSTALLED` diagnostic branch keep compiling.
+ */
 export class SdkNotInstalledError extends Error {
   constructor() {
     super(
-      "The 'doctor' command requires the Databricks SDK (a dependency of @databricks/appkit). Please install @databricks/appkit to run connection checks.",
+      "The 'doctor' command requires the Databricks SDK (a dependency of @databricks/appkit).",
     );
     this.name = "SdkNotInstalledError";
   }
 }
 
 interface ServiceClientHandle {
-  /** WorkspaceClient, typed as unknown to keep `shared` SDK-free. */
+  /** WorkspaceClient, typed as unknown to keep doctor's call sites SDK-agnostic. */
   client: unknown;
 }
 
@@ -35,24 +40,15 @@ function isModuleNotFound(err: unknown): boolean {
   );
 }
 
-/** Constructs a `WorkspaceClient` via the SDK's unified-auth chain. An explicit
+/** Constructs a workspace client via the SDK's unified-auth chain. An explicit
  * `profile` is passed through `Config.profile` rather than mutating
  * `process.env`, so it doesn't leak beyond this call. */
 export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
-  let sdk: { WorkspaceClient: new (opts: Record<string, unknown>) => unknown };
-  try {
-    // biome-ignore lint/style/noRestrictedImports: shared can't reach appkit's workspace-client wrapper (appkit depends on shared); this file is the SDK seam
-    sdk = (await import("@databricks/sdk-experimental")) as typeof sdk;
-  } catch (err) {
-    if (isModuleNotFound(err)) {
-      throw new SdkNotInstalledError();
-    }
-    throw err;
-  }
-
-  const client = new sdk.WorkspaceClient(profile ? { profile } : {});
+  const client = createWorkspaceClient(
+    profile ? { profile } : {},
+  ).toLegacyWorkspaceClient();
   return { client };
 }
 
@@ -67,13 +63,7 @@ export async function getProfileHost(
   profile: string,
 ): Promise<string | undefined> {
   try {
-    // biome-ignore lint/style/noRestrictedImports: see the note at the top of this file — shared can't import appkit's wrapper
-    const sdk = (await import("@databricks/sdk-experimental")) as {
-      loadConfigFile: (
-        file?: string,
-      ) => Promise<{ iniFile: Record<string, { host?: string }> }>;
-    };
-    const { iniFile } = await sdk.loadConfigFile(
+    const { iniFile } = await loadConfigFile(
       process.env.DATABRICKS_CONFIG_FILE,
     );
     const host = iniFile?.[profile]?.host;

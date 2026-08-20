@@ -61,11 +61,7 @@ export {
 // Theme Hooks
 // ============================================================================
 
-export {
-  useAllThemeColors,
-  useChartUITokens,
-  useThemeColors,
-} from "./theme";
+export { useAllThemeColors, useChartUITokens, useThemeColors } from "./theme";
 
 // ============================================================================
 // Utilities
@@ -85,6 +81,7 @@ export {
 // ============================================================================
 
 export {
+  applySelectionEmphasis,
   buildCartesianOption,
   buildHeatmapOption,
   buildHorizontalBarOption,
@@ -108,10 +105,12 @@ export type {
   BarChartSpecificProps,
   // Base props
   ChartBaseProps,
+  ChartClickDatum,
   ChartColorPalette,
   ChartData,
   ChartType,
   ChartUITokens,
+  ChartValueFormatter,
   // Data formats
   DataFormat,
   DataProps,

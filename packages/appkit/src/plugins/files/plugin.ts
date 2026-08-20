@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
+
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -8,6 +9,7 @@ import type {
   ToolProvider,
 } from "shared";
 import { z } from "zod";
+
 import {
   contentTypeFromPath,
   FILES_MAX_READ_SIZE,
@@ -69,7 +71,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements. */
   static manifest = manifest as PluginManifest;
   protected static description = "Files plugin for Databricks file operations";
-  protected declare config: IFilesConfig;
+  declare protected config: IFilesConfig;
 
   private volumeConnectors: Record<string, FilesConnector> = {};
   private volumeConfigs: Record<string, VolumeConfig> = {};

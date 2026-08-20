@@ -1,6 +1,8 @@
 import path from "node:path";
+
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
+
 import { templateFieldEntrySchema } from "../../../../schemas/manifest";
 import {
   isWithinDirectory,
