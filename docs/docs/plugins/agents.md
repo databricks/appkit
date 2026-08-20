@@ -141,7 +141,7 @@ await createApp({
 });
 ```
 
-Discovery imports each `server/agents/<id>/agent.ts` — the source `.ts` under `tsx` in dev, and the compiled `dist/agents/<id>/agent.js` in a production build (built output wins over source, independent of `NODE_ENV`). Because the production server is bundled and only imports things reachable from `server/server.ts`, the template's `tsdown` config lists `server/agents/*/agent.ts` as build entries so `dist/agents/*/agent.js` are emitted for the scan — that wiring is what lets a dropped-in folder survive the prod bundle. (Markdown `agent.md` is read from source in both dev and prod — it's data, not compiled.) The root is `server/agents` by default; override with `agents({ dir })` (a relative path is resolved built-first the same way; an absolute path is scanned verbatim; `false` disables discovery, including the `config/agents/` fallback).
+Discovery imports each `server/agents/<id>/agent.ts` — the source `.ts` under `tsx` in dev, and the compiled `dist/agents/<id>/agent.js` in a production build (built output wins over source, independent of `NODE_ENV`). Because the production server is bundled and only imports things reachable from `server/server.ts`, the template's `tsdown` config lists `server/agents/*/agent.ts` as build entries so `dist/agents/*/agent.js` are emitted for the scan — that wiring is what lets a dropped-in folder survive the prod bundle. (Markdown `agent.md` is read from source in both dev and prod — it's data, not compiled.) The root is always `server/agents` — there is no config option to relocate it; markdown still under `config/agents/` is read as a deprecated fallback (one-time warning).
 
 :::note Built output shadows source in dev
 Because compiled output wins over source, a stale `dist/agents` / `build/agents` left over from a previous `npm run build` will be picked up by `npm run dev` instead of your live `server/agents/*.ts`, so edits appear ignored. **Delete the build dir** if a code agent seems frozen — a rebuild only swaps in a newer snapshot, so only deleting it restores live-from-source dev reload. Markdown is always read from source, so `agent.md` edits are never shadowed.
@@ -408,7 +408,7 @@ Some hosted tool kinds return their final assistant text without incremental `ou
 
 ```ts
 agents({
-  dir?: string | false,         // unified agents root; default "server/agents". config/agents is read as a deprecated fallback; false disables ALL file discovery (fallback included)
+  // Agents live under server/agents/<id>/ (fixed root). config/agents is read as a deprecated fallback.
   agents?: Record<string, AgentDefinition>,  // DEPRECATED — use server/agents/<id>/ discovery
   defaultAgent?: string,
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string,

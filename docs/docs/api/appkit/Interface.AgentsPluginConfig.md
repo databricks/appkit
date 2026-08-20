@@ -114,25 +114,6 @@ Default model for agents that don't specify their own (in code or frontmatter).
 
 ***
 
-### dir?
-
-```ts
-optional dir: string | false;
-```
-
-Unified agents root. Each `<id>/` folder holds either `agent.md` (markdown)
-or `agent.ts` (code, `export default createAgent({ ... })`); the folder
-name is the agent id. Default `server/agents` — leave unset. In a built
-server, code agents are loaded from the compiled output (`dist/<name>` /
-`build/<name>`, where `<name>` is this dir's basename) and markdown is read
-from source. A **relative** custom path is resolved this way too; an
-**absolute** path is scanned verbatim (you own compiling it for prod). Set
-to `false` to disable all file discovery — including the `config/agents/`
-fallback below. Markdown still under `config/agents/` is otherwise read as a
-deprecated fallback (one-time warning).
-
-***
-
 ### host?
 
 ```ts

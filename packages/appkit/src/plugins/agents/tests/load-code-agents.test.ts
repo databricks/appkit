@@ -59,52 +59,6 @@ describe("resolveCodeAgentsDir", () => {
     (dir: string) =>
       present.includes(dir);
 
-  it("returns null when discovery is disabled", () => {
-    expect(
-      resolveCodeAgentsDir({ cwd, override: false, exists: () => true }),
-    ).toBeNull();
-  });
-
-  it("scans an absolute override verbatim, accepting any module extension", () => {
-    expect(
-      resolveCodeAgentsDir({
-        cwd,
-        override: "/abs/agents",
-        exists: () => true,
-      }),
-    ).toEqual({
-      dir: "/abs/agents",
-      extensions: [".ts", ".tsx", ".js", ".mjs"],
-    });
-  });
-
-  it("resolves a relative override built-first (dist/<name> over source)", () => {
-    const customDist = path.resolve(cwd, "dist/my-agents");
-    const customSrc = path.resolve(cwd, "my-agents");
-    expect(
-      resolveCodeAgentsDir({
-        cwd,
-        override: "my-agents",
-        exists: existsIn(customDist, customSrc),
-      }),
-    ).toEqual({ dir: customDist, extensions: [".js", ".mjs"] });
-    // No built output → falls back to the source `.ts` dir.
-    expect(
-      resolveCodeAgentsDir({ cwd, override: "my-agents", exists: () => false }),
-    ).toEqual({ dir: customSrc, extensions: [".ts"] });
-  });
-
-  it("stays built-first when dir is set to the default value explicitly", () => {
-    // Regression: `agents({ dir: "server/agents" })` must NOT bypass built-first
-    // (previously a string override was scanned verbatim → prod loaded .ts).
-    const r = resolveCodeAgentsDir({
-      cwd,
-      override: "server/agents",
-      exists: existsIn(dist, source),
-    });
-    expect(r).toEqual({ dir: dist, extensions: [".js", ".mjs"] });
-  });
-
   it("prefers compiled dist/agents (.js) over source — built wins", () => {
     const r = resolveCodeAgentsDir({ cwd, exists: existsIn(dist, source) });
     expect(r).toEqual({ dir: dist, extensions: [".js", ".mjs"] });

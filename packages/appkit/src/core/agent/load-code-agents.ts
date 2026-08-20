@@ -25,26 +25,16 @@ interface ResolvedCodeAgentsDir {
 /**
  * Resolves which directory to scan for code agents. Compiled output wins over
  * source unconditionally, so a bundled server never `import()`s a `.ts` (plain
- * Node can't load one): for a relative source dir the matching `dist/<name>` /
- * `build/<name>` is probed first, with the source `.ts` dir as fallback.
- * `override`: `false` disables discovery; a relative string is the source dir
- * (still built-first); an absolute string is scanned verbatim (the caller pins
- * the exact path and owns compiling it for a prod build).
+ * Node can't load one): the matching `dist/agents` / `build/agents` is probed
+ * first, with the source `server/agents` `.ts` dir as fallback.
  */
 export function resolveCodeAgentsDir(opts: {
   cwd: string;
-  override?: string | false;
   exists: (dir: string) => boolean;
-}): ResolvedCodeAgentsDir | null {
-  if (opts.override === false) return null;
-  if (typeof opts.override === "string" && path.isAbsolute(opts.override)) {
-    return { dir: opts.override, extensions: [".ts", ".tsx", ".js", ".mjs"] };
-  }
-
-  const sourceRel = opts.override ?? CODE_AGENTS_SOURCE_DIR;
-  const name = path.basename(sourceRel);
+}): ResolvedCodeAgentsDir {
+  const name = path.basename(CODE_AGENTS_SOURCE_DIR);
   const source: ResolvedCodeAgentsDir = {
-    dir: path.resolve(opts.cwd, sourceRel),
+    dir: path.resolve(opts.cwd, CODE_AGENTS_SOURCE_DIR),
     // `.ts` only: the build entry glob is `<dir>/*/agent.ts`, so an `agent.tsx`
     // would load in dev but never be emitted for a prod bundle.
     extensions: [".ts"],

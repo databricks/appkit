@@ -39,12 +39,39 @@ type ExportsApi = {
   getDefault: () => string | null;
 };
 
+// Discovery scans `<cwd>/server/agents`, so each test runs in a fresh temp cwd.
+// Code fixtures are symlinked in (not copied) so their `.ts` files resolve their
+// relative imports from the committed location; markdown-only cases pass no
+// fixture (an absent server/agents = empty discovery).
 describe("AgentsPlugin agent discovery", () => {
-  test("discovers code agents from the dir with no map at the call site", async () => {
-    const plugin = instantiate({
-      dir: fixtureDir("code-agents"),
-      defaultModel: stubAdapter(),
-    });
+  let restoreCwd: (() => void) | undefined;
+
+  afterEach(() => {
+    restoreCwd?.();
+    restoreCwd = undefined;
+  });
+
+  function chdirWithAgents(fixture?: string) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "agents-discovery-"));
+    if (fixture) {
+      fs.mkdirSync(path.join(tmp, "server"));
+      fs.symlinkSync(
+        fixtureDir(fixture),
+        path.join(tmp, "server", "agents"),
+        "dir",
+      );
+    }
+    const prior = process.cwd();
+    process.chdir(tmp);
+    restoreCwd = () => {
+      process.chdir(prior);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    };
+  }
+
+  test("discovers code agents from server/agents", async () => {
+    chdirWithAgents("code-agents");
+    const plugin = instantiate({ defaultModel: stubAdapter() });
     await plugin.setup();
 
     const api = plugin.exports() as ExportsApi;
@@ -54,10 +81,8 @@ describe("AgentsPlugin agent discovery", () => {
   });
 
   test("honors default: true on a discovered code agent", async () => {
-    const plugin = instantiate({
-      dir: fixtureDir("code-agents-default"),
-      defaultModel: stubAdapter(),
-    });
+    chdirWithAgents("code-agents-default");
+    const plugin = instantiate({ defaultModel: stubAdapter() });
     await plugin.setup();
     expect((plugin.exports() as ExportsApi).getDefault()).toBe("beta");
   });
@@ -65,17 +90,15 @@ describe("AgentsPlugin agent discovery", () => {
   test("a discovered code default: true beats a markdown default: true", async () => {
     // code-agents-default holds beta (code, default:true) + planner (markdown,
     // default:true) side by side; code wins.
-    const plugin = instantiate({
-      dir: fixtureDir("code-agents-default"),
-      defaultModel: stubAdapter(),
-    });
+    chdirWithAgents("code-agents-default");
+    const plugin = instantiate({ defaultModel: stubAdapter() });
     await plugin.setup();
     expect((plugin.exports() as ExportsApi).getDefault()).toBe("beta");
   });
 
   test("explicit defaultAgent overrides a discovered default: true", async () => {
+    chdirWithAgents("code-agents-default");
     const plugin = instantiate({
-      dir: fixtureDir("code-agents-default"),
       defaultAgent: "alpha",
       defaultModel: stubAdapter(),
     });
@@ -84,10 +107,8 @@ describe("AgentsPlugin agent discovery", () => {
   });
 
   test("a markdown parent can delegate to a code sub-agent in a sibling folder", async () => {
-    const plugin = instantiate({
-      dir: fixtureDir("md-parent-code-child"),
-      defaultModel: stubAdapter(),
-    });
+    chdirWithAgents("md-parent-code-child");
+    const plugin = instantiate({ defaultModel: stubAdapter() });
     await plugin.setup();
 
     const api = plugin.exports() as ExportsApi;
@@ -97,9 +118,9 @@ describe("AgentsPlugin agent discovery", () => {
   });
 
   test("discovery wins over a colliding deprecated-map entry (warns, no throw)", async () => {
+    chdirWithAgents("code-agents");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const plugin = instantiate({
-      dir: fixtureDir("code-agents"),
       agents: {
         helper: { instructions: "from the map", model: stubAdapter() },
       },
@@ -122,9 +143,9 @@ describe("AgentsPlugin agent discovery", () => {
     warnSpy.mockRestore();
   });
 
-  test("a map-only app with discovery disabled works unchanged (no throw)", async () => {
+  test("a map-only app works unchanged when server/agents is absent (no throw)", async () => {
+    chdirWithAgents();
     const plugin = instantiate({
-      dir: false,
       agents: {
         legacy: { instructions: "map agent", model: stubAdapter() },
       },
@@ -137,8 +158,8 @@ describe("AgentsPlugin agent discovery", () => {
   });
 
   test("throws when defaultAgent names an unregistered agent", async () => {
+    chdirWithAgents("code-agents");
     const plugin = instantiate({
-      dir: fixtureDir("code-agents"),
       defaultAgent: "nope",
       defaultModel: stubAdapter(),
     });
@@ -146,10 +167,8 @@ describe("AgentsPlugin agent discovery", () => {
   });
 
   test("throws when a folder holds both agent.ts and agent.md", async () => {
-    const plugin = instantiate({
-      dir: fixtureDir("code-md-collision"),
-      defaultModel: stubAdapter(),
-    });
+    chdirWithAgents("code-md-collision");
+    const plugin = instantiate({ defaultModel: stubAdapter() });
     await expect(plugin.setup()).rejects.toThrow(
       /both a code agent .* and a markdown agent/,
     );
@@ -158,8 +177,8 @@ describe("AgentsPlugin agent discovery", () => {
   test("emits a one-time deprecation warning for agents({ agents }) and none for discovery", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
+    chdirWithAgents();
     const deprecated = instantiate({
-      dir: false,
       agents: { legacy: { instructions: "x", model: stubAdapter() } },
     });
     await deprecated.setup();
@@ -171,10 +190,9 @@ describe("AgentsPlugin agent discovery", () => {
     expect(deprecationWarnings).toHaveLength(1);
 
     warnSpy.mockClear();
-    const discoveredPlugin = instantiate({
-      dir: fixtureDir("code-agents"),
-      defaultModel: stubAdapter(),
-    });
+    restoreCwd?.();
+    chdirWithAgents("code-agents");
+    const discoveredPlugin = instantiate({ defaultModel: stubAdapter() });
     await discoveredPlugin.setup();
 
     const discoveryWarnings = warnSpy.mock.calls
@@ -246,16 +264,5 @@ describe("AgentsPlugin config/agents deprecated fallback", () => {
     expect(api.list().sort()).toEqual(["helper", "planner"]);
     expect(api.get("planner")?.toolIndex.has("agent-helper")).toBe(true);
     warnSpy.mockRestore();
-  });
-
-  test("dir:false disables the config/agents fallback too", async () => {
-    write("config/agents/legacy/agent.md", "---\n---\nLegacy only.");
-    const plugin = instantiate({
-      dir: false,
-      agents: { mapped: { instructions: "map", model: stubAdapter() } },
-      defaultModel: stubAdapter(),
-    });
-    await plugin.setup();
-    expect((plugin.exports() as ExportsApi).list()).toEqual(["mapped"]);
   });
 });

@@ -412,7 +412,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     if (Object.keys(merged).length === 0) {
       logger.info(
         "No agents registered (no files in %s, no discovered or code-defined agents)",
-        this.resolvedAgentsDir() ?? "<disabled>",
+        this.resolvedAgentsDir(),
       );
       return { agents, defaultAgentName: null };
     }
@@ -496,10 +496,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     );
   }
 
-  private resolvedAgentsDir(): string | null {
-    if (this.config.dir === false) return null;
-    const dir = this.config.dir ?? CODE_AGENTS_SOURCE_DIR;
-    return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir);
+  private resolvedAgentsDir(): string {
+    return path.resolve(process.cwd(), CODE_AGENTS_SOURCE_DIR);
   }
 
   /**
@@ -511,10 +509,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   private async loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
     const resolved = resolveCodeAgentsDir({
       cwd: process.cwd(),
-      override: this.config.dir,
       exists: existsSync,
     });
-    if (!resolved) return {};
 
     const discovered = await loadCodeAgentsFromDir(resolved.dir, {
       extensions: resolved.extensions,
@@ -525,7 +521,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     if (
       Object.keys(discovered).length === 0 &&
       !usingDeprecatedMap &&
-      sourceDir &&
       this.hasCodeAgentSources(sourceDir)
     ) {
       logger.warn(
@@ -562,7 +557,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     defaultAgent: string | null;
   }> {
     const primaryDir = this.resolvedAgentsDir();
-    if (!primaryDir) return { defs: {}, defaultAgent: null };
 
     // Discovered code agents + the deprecated map resolve markdown `agents:`
     // sub-agent references, so a markdown parent can delegate to a code child.
@@ -572,11 +566,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       plugins: this.pluginProviderIndex(),
     };
 
-    // Configured dir already points at config/agents → single scan, no fallback.
     const legacyDir = path.resolve(process.cwd(), LEGACY_MARKDOWN_DIR);
-    if (primaryDir === legacyDir) {
-      return loadAgentsFromDir(primaryDir, { ...baseCtx, codeAgents });
-    }
 
     // Deprecated fallback: scan config/agents first, then server/agents with the
     // legacy defs added as resolvable sub-agent targets — so a parent already
