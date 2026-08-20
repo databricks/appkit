@@ -37,7 +37,20 @@ vi.mock("../use-query-hmr", () => ({
   useQueryHMR: vi.fn(),
 }));
 
+import {
+  getSnapshot,
+  resetAnalyticsRequestStore,
+  retain,
+  start,
+  subscribe,
+} from "../analytics-request-store";
 import { useAnalyticsQuery } from "../use-analytics-query";
+
+const JSON_OPTS = {
+  url: "/api/analytics/query/q",
+  payload: JSON.stringify({ parameters: null, format: "JSON_ARRAY" }),
+  format: "JSON_ARRAY",
+};
 
 function markAborted() {
   const sig = capturedCallbacks.signal;
@@ -50,6 +63,9 @@ describe("useAnalyticsQuery", () => {
     vi.clearAllMocks();
     lastConnectArgs = null;
     capturedCallbacks = {};
+    // The request store is a module singleton; clear it between tests so
+    // entries (and their `connectSSE` call counts) don't leak across cases.
+    resetAnalyticsRequestStore();
   });
 
   afterEach(() => {
@@ -449,6 +465,112 @@ describe("useAnalyticsQuery", () => {
       });
 
       expect(result.current.data).toBeNull();
+    });
+  });
+
+  describe("shared in-flight requests (dedup)", () => {
+    test("two hook instances with the same key share one request", () => {
+      const { unmount: unmount1 } = renderHook(() =>
+        useAnalyticsQuery("shared" as any, { a: 1 } as any),
+      );
+      const { unmount: unmount2 } = renderHook(() =>
+        useAnalyticsQuery("shared" as any, { a: 1 } as any),
+      );
+
+      // Both instances resolve to the same cache key → one network request.
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      unmount1();
+      unmount2();
+    });
+
+    test("different params do not share a request", () => {
+      renderHook(() => useAnalyticsQuery("shared" as any, { a: 1 } as any));
+      renderHook(() => useAnalyticsQuery("shared" as any, { a: 2 } as any));
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+    });
+
+    test("a late instance sees the in-flight result of an existing request", async () => {
+      const { result: first } = renderHook(() =>
+        useAnalyticsQuery("shared" as any, { a: 1 } as any),
+      );
+
+      // Resolve the shared request via the first instance's SSE stream.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 7 }] }),
+        });
+      });
+      await waitFor(() => expect(first.current.data).toEqual([{ id: 7 }]));
+
+      // A second instance mounting on the same key reads the resolved
+      // snapshot immediately without opening a new stream.
+      const { result: second } = renderHook(() =>
+        useAnalyticsQuery("shared" as any, { a: 1 } as any),
+      );
+
+      expect(second.current.data).toEqual([{ id: 7 }]);
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("request store lifecycle", () => {
+    test("retaining the same key twice starts the request once", () => {
+      const release1 = retain("k", JSON_OPTS);
+      const release2 = retain("k", JSON_OPTS);
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      release1();
+      release2();
+    });
+
+    test("releasing to zero then re-retaining within a tick reuses the request", () => {
+      const release = retain("k", JSON_OPTS);
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Synchronous unmount→remount (StrictMode): teardown is deferred, so the
+      // re-retain cancels it and keeps the same in-flight request.
+      release();
+      retain("k", JSON_OPTS);
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    });
+
+    test("re-retaining after the deferred teardown fires starts a fresh request", async () => {
+      const release = retain("k", JSON_OPTS);
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      release();
+      // Let the deferred teardown run: the entry is dropped.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      retain("k", JSON_OPTS);
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+    });
+
+    test("start fans new state out to every subscriber of a key", async () => {
+      retain("k", JSON_OPTS);
+      const listener = vi.fn();
+      subscribe("k", listener);
+
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+
+      expect(listener).toHaveBeenCalled();
+      expect(getSnapshot("k").data).toEqual([{ id: 1 }]);
+    });
+
+    test("autoStart:false does not start the request until start() is called", () => {
+      retain("k", JSON_OPTS, false);
+      expect(mockConnectSSE).not.toHaveBeenCalled();
+
+      start("k");
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
     });
   });
 });
