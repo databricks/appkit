@@ -118,6 +118,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.62.0](https://github.com/databricks/appkit/compare/v0.61.1...v0.62.0) (2026-08-20)
+
+### appkit
+
+* **appkit:** add testing kit ([#530](https://github.com/databricks/appkit/issues/530)) ([4ea97a4](https://github.com/databricks/appkit/commit/4ea97a4b140c31caadc266d0f18e0a12794b85dc)), closes [#1](https://github.com/databricks/appkit/issues/1) [#2](https://github.com/databricks/appkit/issues/2) [#6](https://github.com/databricks/appkit/issues/6) [#3](https://github.com/databricks/appkit/issues/3) [#12](https://github.com/databricks/appkit/issues/12) [#5](https://github.com/databricks/appkit/issues/5) [#7](https://github.com/databricks/appkit/issues/7) [#13](https://github.com/databricks/appkit/issues/13) [#4](https://github.com/databricks/appkit/issues/4) [#8](https://github.com/databricks/appkit/issues/8) [#11](https://github.com/databricks/appkit/issues/11) [#1](https://github.com/databricks/appkit/issues/1) [#2](https://github.com/databricks/appkit/issues/2) [#3](https://github.com/databricks/appkit/issues/3)
+
+
 ## [0.61.1](https://github.com/databricks/appkit/compare/v0.61.0...v0.61.1) (2026-08-17)
 
 ### cli
