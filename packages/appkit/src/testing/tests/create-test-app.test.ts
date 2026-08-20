@@ -569,6 +569,11 @@ describe("createTestApp HTTP layer", () => {
       },
       { custom: "hello", user: "override", token: "test-user-token" },
     ],
+    [
+      "a mixed-case override wins too, rather than comma-joining",
+      { obo: true as const, headers: { "X-Forwarded-User": "override" } },
+      { user: "override", token: "test-user-token" },
+    ],
   ])("%s", async (_name, options, expected) => {
     const res = await app.get("/api/probe/headers", options);
     await expect(res.json()).resolves.toMatchObject(expected);

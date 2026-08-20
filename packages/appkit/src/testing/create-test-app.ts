@@ -339,7 +339,12 @@ export async function createTestApp<T extends Plugins>(
       }
 
       // Caller headers last, so an explicit content-type or identity wins.
-      Object.assign(headers, reqOptions.headers ?? {});
+      // Lowercased first: `Headers` comma-joins case variants instead of
+      // replacing, so a mixed-case override would corrupt the value into
+      // "alice, bob" rather than win.
+      for (const [name, value] of Object.entries(reqOptions.headers ?? {})) {
+        headers[name.toLowerCase()] = value;
+      }
 
       return fetch(new URL(path, baseUrl), {
         method,
