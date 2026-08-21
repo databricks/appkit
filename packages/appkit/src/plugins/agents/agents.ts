@@ -14,15 +14,10 @@ import type {
   ResponseOutputMessage,
   ResponseStreamEvent,
   Thread,
-  ToolAnnotations,
   ToolProvider,
 } from "shared";
 
-import {
-  isSupervisorTool,
-  SUPERVISOR_EXTENSION_KEY,
-  type SupervisorTool,
-} from "../../agents/supervisor-api";
+import { isSupervisorTool } from "../../agents/supervisor-api";
 import { FilesConnector } from "../../connectors/files";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
@@ -41,15 +36,10 @@ import {
   type ResolvedSkillCatalog,
   readSkillResource,
   renderLoadedSkill,
-  renderSkillCatalog,
   resolveSkill,
   resolveSkillCatalog,
   type SkillDefinition,
 } from "../../core/agent/skills";
-import {
-  buildBaseSystemPrompt,
-  composeSystemPrompt,
-} from "../../core/agent/system-prompt";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
@@ -61,10 +51,8 @@ import type {
   AgentDefinition,
   AgentsPluginConfig,
   AgentTools,
-  BaseSystemPromptOption,
   Plugins,
   PluginToolkitProvider,
-  PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
 } from "../../core/agent/types";
@@ -73,6 +61,13 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import type { WorkspaceClient } from "../../workspace-client";
+import {
+  buildAdapterExtensions,
+  supervisorToolDescription,
+  warnOnCapabilityMismatch,
+} from "./adapter-extensions";
+import { requiresApproval } from "./approval";
+import { LOAD_SKILL_TOOL_DEF, READ_SKILL_FILE_TOOL_DEF } from "./builtin-tools";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -84,6 +79,7 @@ import {
   traceAgent,
   traceTool,
 } from "./mlflow";
+import { composePromptForAgent } from "./prompt";
 import {
   approvalRequestSchema,
   cancelRequestSchema,
@@ -105,33 +101,6 @@ const LEGACY_MARKDOWN_DIR = "config/agents";
  */
 interface AgentSource {
   origin: "file" | "code";
-}
-
-/**
- * Decide whether a tool call must traverse the approval gate. Honours both
- * the modern `effect` field (mutating values: write / update / destructive)
- * and the legacy `destructive: true` boolean. The contract is documented on
- * `ToolAnnotations.effect` in shared/agent.ts.
- *
- * Without this, a tool authored only with `effect: "destructive"` (the
- * preferred API) bypassed the gate entirely.
- */
-function requiresApproval(annotations: ToolAnnotations | undefined): boolean {
-  if (!annotations) return false;
-  if (annotations.destructive === true) return true;
-  switch (annotations.effect) {
-    case "write":
-    case "update":
-    case "destructive":
-      return true;
-    case "read":
-    case undefined:
-      return false;
-    default: {
-      const _exhaustive: never = annotations.effect;
-      return false;
-    }
-  }
 }
 
 /**
@@ -2336,160 +2305,6 @@ function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   if (value === undefined) return { file: false, code: false };
   if (typeof value === "boolean") return { file: value, code: value };
   return { file: value.file ?? false, code: value.code ?? false };
-}
-
-/** Built-in tool the model calls to load a skill's full instructions on demand. */
-const LOAD_SKILL_TOOL_DEF: AgentToolDefinition = {
-  name: "load_skill",
-  description:
-    "Load the full instructions for one of the available skills by name. Call this before acting on a task that matches a skill's description. Returns the skill's instructions plus a list of any bundled files you can read with read_skill_file.",
-  parameters: {
-    type: "object",
-    properties: {
-      skill: {
-        type: "string",
-        description:
-          "The exact skill name to load, as shown in the available-skills list.",
-      },
-    },
-    required: ["skill"],
-  },
-  annotations: { effect: "read" },
-};
-
-/** Built-in tool for reading a resource file that a loaded skill references. */
-const READ_SKILL_FILE_TOOL_DEF: AgentToolDefinition = {
-  name: "read_skill_file",
-  description:
-    "Read a bundled resource file that a loaded skill references (e.g. a reference doc). Only files listed by load_skill for that skill are readable.",
-  parameters: {
-    type: "object",
-    properties: {
-      skill: { type: "string", description: "The skill that owns the file." },
-      path: {
-        type: "string",
-        description:
-          "Relative path of the file within the skill, as listed by load_skill.",
-      },
-    },
-    required: ["skill", "path"],
-  },
-  annotations: { effect: "read" },
-};
-
-function composePromptForAgent(
-  registered: RegisteredAgent,
-  pluginLevel: BaseSystemPromptOption | undefined,
-  ctx: PromptContext,
-): string {
-  const perAgent = registered.baseSystemPrompt;
-  const resolved = perAgent !== undefined ? perAgent : pluginLevel;
-
-  let base = "";
-  if (resolved === false) {
-    base = "";
-  } else if (typeof resolved === "string") {
-    base = resolved;
-  } else if (typeof resolved === "function") {
-    base = resolved(ctx);
-  } else {
-    base = buildBaseSystemPrompt(ctx);
-  }
-
-  const composed = composeSystemPrompt(base, registered.instructions);
-
-  // Append the always-on skill catalog (name + description only). Done here,
-  // after composeSystemPrompt, so it survives a custom/`false` base prompt.
-  const catalog = registered.skills?.catalog;
-  if (!catalog || catalog.length === 0) return composed;
-  return `${composed}\n\n${renderSkillCatalog(catalog)}`;
-}
-
-/**
- * Pulls the LLM-readable description off any {@link SupervisorTool} kind.
- * Used to populate the synthetic placeholder `def.description` on
- * hosted-supervisor tool-index entries.
- */
-function supervisorToolDescription(spec: SupervisorTool): string {
-  switch (spec.type) {
-    case "genie_space":
-      return spec.genie_space.description;
-    case "uc_function":
-      return spec.uc_function.description;
-    case "knowledge_assistant":
-      return spec.knowledge_assistant.description;
-    case "app":
-      return spec.app.description;
-    case "uc_connection":
-      return spec.uc_connection.description;
-  }
-}
-
-/**
- * Builds the `AgentInput.extensions` payload from a tool index, aggregating
- * the hosted-supervisor specs under {@link SUPERVISOR_EXTENSION_KEY}. Returns
- * `undefined` when there are no adapter-side hosted tools so the field stays
- * absent on the wire — adapters that don't read extensions never see it.
- */
-function buildAdapterExtensions(
-  toolIndex: Map<string, ResolvedToolEntry>,
-): Readonly<Record<string, unknown>> | undefined {
-  const supervisorSpecs: SupervisorTool[] = [];
-  for (const entry of toolIndex.values()) {
-    if (entry.source === "hosted-supervisor") {
-      supervisorSpecs.push(entry.spec);
-    }
-  }
-  if (supervisorSpecs.length === 0) return undefined;
-  return {
-    [SUPERVISOR_EXTENSION_KEY]: { hostedTools: supervisorSpecs },
-  };
-}
-
-/**
- * Compares the adapter's declared capabilities against the tool index and
- * logs a warning when the agent's tool declarations would be silently
- * dropped at runtime. Warn-not-throw: misconfiguration is loud enough to
- * notice without taking the whole app down.
- */
-function warnOnCapabilityMismatch(
-  agentName: string,
-  adapter: AgentAdapter,
-  toolIndex: Map<string, ResolvedToolEntry>,
-): void {
-  const accepted = new Set(adapter.acceptsExtensions ?? []);
-
-  const hostedSupervisorKeys: string[] = [];
-  const inputToolKeys: string[] = [];
-  for (const [key, entry] of toolIndex) {
-    if (entry.source === "hosted-supervisor") {
-      hostedSupervisorKeys.push(key);
-    } else {
-      inputToolKeys.push(key);
-    }
-  }
-
-  if (
-    hostedSupervisorKeys.length > 0 &&
-    !accepted.has(SUPERVISOR_EXTENSION_KEY)
-  ) {
-    logger.warn(
-      `Agent '${agentName}' declares hosted-supervisor tools (${hostedSupervisorKeys.join(", ")}) ` +
-        "but its model adapter does not accept the 'databricks.supervisor' extension. " +
-        "These tools will not reach the model. Pair them with `DatabricksAdapter.fromSupervisorApi(...)`, or remove them.",
-    );
-  }
-
-  // `consumesInputTools` defaults to true. Only warn when an adapter
-  // explicitly opts out (`false`) and an input tool would be silently
-  // ignored.
-  if (adapter.consumesInputTools === false && inputToolKeys.length > 0) {
-    logger.warn(
-      `Agent '${agentName}' declares function tools / sub-agents / MCP tools (${inputToolKeys.join(", ")}) ` +
-        "but its model adapter does not consume input.tools (Supervisor API owns its own tool loop). " +
-        "These tools will not be exposed to the model. See docs/plugins/agents.md.",
-    );
-  }
 }
 
 /**
