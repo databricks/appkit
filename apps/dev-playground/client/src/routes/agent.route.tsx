@@ -18,6 +18,7 @@ const AGENT_OPTIONS = [
   { value: "helper", label: "Helper — general assistant" },
   { value: "sql_analyst", label: "SQL Analyst — NYC taxi queries" },
   { value: "supervisor", label: "Supervisor — Databricks-hosted tools" },
+  { value: "query", label: "Query — skills dispatcher" },
 ] as const;
 
 interface SSEEvent {
@@ -151,7 +152,7 @@ function useAutocomplete(enabled: boolean) {
 
 function AgentRoute() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [events, setEvents] = useState<SSEEvent[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -159,6 +160,8 @@ function AgentRoute() {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
   );
+  // Highlighted row in the `/skill` menu.
+  const [skillIndex, setSkillIndex] = useState(0);
 
   const decideApproval = useCallback(
     async (approvalId: string, decision: "approve" | "deny") => {
@@ -191,8 +194,11 @@ function AgentRoute() {
   const agentConfig = getPluginClientConfig<{
     agents?: string[];
     defaultAgent?: string;
+    skills?: Record<string, { name: string; description: string }[]>;
   }>("agents");
   const hasAutocomplete = (agentConfig.agents ?? []).includes("autocomplete");
+  // Skills visible to the selected agent, from the boot config.
+  const activeSkills = agentConfig.skills?.[agent] ?? [];
 
   const {
     suggestion,
@@ -201,6 +207,29 @@ function AgentRoute() {
     clear: clearSuggestion,
   } = useAutocomplete(hasAutocomplete);
 
+  // Slash-command menu: when the input is a leading `/token` (no space yet),
+  // surface matching skills for the active agent.
+  const slashQuery = input.match(/^\/([^\s]*)$/)?.[1] ?? null;
+  const skillMatches =
+    slashQuery !== null && activeSkills.length > 0
+      ? activeSkills.filter((s) =>
+          s.name.toLowerCase().includes(slashQuery.toLowerCase()),
+        )
+      : [];
+  const skillMenuOpen = skillMatches.length > 0;
+
+  const pickSkill = (name: string) => {
+    setInput(`/${name} `);
+    clearSuggestion();
+    inputRef.current?.focus();
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight as the query changes
+  useEffect(() => {
+    setSkillIndex(0);
+  }, [input, agent]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -218,13 +247,25 @@ function AgentRoute() {
     setEvents([]);
     setIsLoading(true);
 
+    // `/skill-name …` forces a skill for this turn (the agents plugin injects
+    // its instructions); the model can still auto-load others via load_skill.
+    let messageBody = userMessage;
+    let skill: string | undefined;
+    const skillMatch = messageBody.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
+    if (skillMatch) {
+      skill = skillMatch[1];
+      messageBody = messageBody.slice(skillMatch[0].length);
+      if (messageBody.trim() === "") messageBody = `Use the ${skill} skill.`;
+    }
+
     try {
       const response = await fetch("/api/agents/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: userMessage,
+          message: messageBody,
           agent,
+          ...(skill && { skill }),
           ...(threadId && { threadId }),
         }),
       });
@@ -506,6 +547,34 @@ function AgentRoute() {
                     value={input}
                     onChange={(e) => handleInputChange(e.target.value)}
                     onKeyDown={(e) => {
+                      if (skillMenuOpen) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setSkillIndex((i) => (i + 1) % skillMatches.length);
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setSkillIndex(
+                            (i) =>
+                              (i - 1 + skillMatches.length) %
+                              skillMatches.length,
+                          );
+                          return;
+                        }
+                        if (e.key === "Enter" || e.key === "Tab") {
+                          e.preventDefault();
+                          pickSkill(
+                            (skillMatches[skillIndex] ?? skillMatches[0]).name,
+                          );
+                          return;
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setInput("");
+                          return;
+                        }
+                      }
                       if (e.key === "Tab" && suggestion) {
                         e.preventDefault();
                         acceptSuggestion();
@@ -518,11 +587,38 @@ function AgentRoute() {
                         sendMessage();
                       }
                     }}
-                    placeholder="Ask a question..."
+                    placeholder={
+                      activeSkills.length > 0
+                        ? "Ask a question…  (type / for skills)"
+                        : "Ask a question..."
+                    }
                     disabled={isLoading}
                     rows={1}
                     className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 resize-none"
                   />
+                  {skillMenuOpen && (
+                    <ul className="absolute bottom-full left-0 mb-1 w-full max-h-48 overflow-y-auto rounded-md border bg-card shadow-md z-10 py-1">
+                      {skillMatches.map((s, i) => (
+                        <li key={s.name}>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              pickSkill(s.name);
+                            }}
+                            className={`block w-full text-left px-3 py-1.5 text-sm ${
+                              i === skillIndex ? "bg-muted" : ""
+                            }`}
+                          >
+                            <span className="font-mono">/{s.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {s.description}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <Button
                   type="submit"
