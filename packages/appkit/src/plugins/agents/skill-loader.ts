@@ -3,6 +3,7 @@ import path from "node:path";
 import { FilesConnector } from "../../connectors/files";
 import {
   loadSkillsFromDir,
+  parseSkill,
   readSkillResource,
   renderLoadedSkill,
   type ResolvedSkillCatalog,
@@ -10,7 +11,6 @@ import {
   resolveSkillCatalog,
   type SkillDefinition,
 } from "../../core/agent/skills";
-import { parseSkill } from "../../core/agent/skills";
 import type {
   AgentDefinition,
   AgentsPluginConfig,

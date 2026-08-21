@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type express from "express";
@@ -22,11 +22,7 @@ import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
-import {
-  CODE_AGENTS_SOURCE_DIR,
-  loadCodeAgentsFromDir,
-  resolveCodeAgentsDir,
-} from "../../core/agent/load-code-agents";
+import { CODE_AGENTS_SOURCE_DIR } from "../../core/agent/load-code-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import { createPluginsProxy } from "../../core/agent/plugins-map";
 import type {
@@ -74,6 +70,11 @@ import {
 } from "./mlflow";
 import { composePromptForAgent } from "./prompt";
 import {
+  type AgentSource,
+  loadCodeAgents,
+  resolveDefaultAgent,
+} from "./registry";
+import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
@@ -93,15 +94,6 @@ const logger = createLogger("agents");
 
 /** Deprecated markdown location, read as a fallback with a one-time warning. */
 const LEGACY_MARKDOWN_DIR = "config/agents";
-
-/**
- * Context flag recorded on the in-memory AgentDefinition to indicate whether
- * it came from markdown (file) or from user code. Drives the asymmetric
- * `autoInheritTools` default.
- */
-interface AgentSource {
-  origin: "file" | "code";
-}
 
 /**
  * Per-stream state shared between the top-level `executeTool` and any
@@ -440,25 +432,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     merged: Record<string, { def: AgentDefinition; src: AgentSource }>,
     fileDefault: string | null,
   ): string | null {
-    if (this.config.defaultAgent) {
-      if (!agents.has(this.config.defaultAgent)) {
-        throw new Error(
-          `defaultAgent '${this.config.defaultAgent}' is not registered. Available: ${Array.from(agents.keys()).join(", ")}`,
-        );
-      }
-      return this.config.defaultAgent;
-    }
-
-    const codeDefault = Object.keys(merged)
-      .filter(
-        (id) => merged[id].src.origin === "code" && merged[id].def.default,
-      )
-      .sort()[0];
-    if (codeDefault) return codeDefault;
-
-    if (fileDefault && agents.has(fileDefault)) return fileDefault;
-
-    return agents.keys().next().value ?? null;
+    return resolveDefaultAgent(
+      agents,
+      merged,
+      fileDefault,
+      this.config.defaultAgent,
+    );
   }
 
   /**
@@ -494,54 +473,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return path.resolve(process.cwd(), CODE_AGENTS_SOURCE_DIR);
   }
 
-  /**
-   * Discovers code agents (see {@link resolveCodeAgentsDir} and
-   * {@link loadCodeAgentsFromDir}). Warns if sources exist but nothing was
-   * discovered — usually the build didn't emit the compiled agents — unless
-   * the deprecated `agents({ agents })` map is carrying them instead.
-   */
-  private async loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
-    const resolved = resolveCodeAgentsDir({
-      cwd: process.cwd(),
-      exists: existsSync,
+  private loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
+    return loadCodeAgents({
+      agentsDir: this.resolvedAgentsDir(),
+      hasDeprecatedMap: Object.keys(this.config.agents ?? {}).length > 0,
     });
-
-    const discovered = await loadCodeAgentsFromDir(resolved.dir, {
-      extensions: resolved.extensions,
-    });
-
-    const usingDeprecatedMap = Object.keys(this.config.agents ?? {}).length > 0;
-    const sourceDir = this.resolvedAgentsDir();
-    if (
-      Object.keys(discovered).length === 0 &&
-      !usingDeprecatedMap &&
-      this.hasCodeAgentSources(sourceDir)
-    ) {
-      logger.warn(
-        "Found code-agent sources in %s but discovered no code agents (scanned %s). " +
-          "In a production build, ensure `<dir>/*/agent.ts` is included as tsdown entries so the compiled agents are emitted.",
-        sourceDir,
-        resolved.dir,
-      );
-    }
-
-    return discovered;
-  }
-
-  /** True when `dir` holds at least one `<id>/agent.ts` folder. */
-  private hasCodeAgentSources(dir: string): boolean {
-    try {
-      return readdirSync(dir, { withFileTypes: true }).some((e) => {
-        if (!e.isDirectory() && !e.isSymbolicLink()) return false;
-        try {
-          return readdirSync(path.join(dir, e.name)).includes("agent.ts");
-        } catch {
-          return false;
-        }
-      });
-    } catch {
-      return false;
-    }
   }
 
   private async loadFileDefinitions(
