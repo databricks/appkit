@@ -1,3 +1,4 @@
+import { SpanKind } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GatedMlflowSpanProcessor } from "../mlflow";
@@ -114,6 +115,24 @@ describe("agent tracing (mlflow)", () => {
     vi.doUnmock("../../../telemetry");
   });
 
+  test("startAgentTracing seeds config eagerly, before any trace", async () => {
+    process.env.MLFLOW_EXPERIMENT_ID = "exp-123";
+    const { sdk } = stubSdk();
+    vi.doMock("../../../telemetry", () => ({
+      TelemetryManager: { registerSpanProcessor: vi.fn() },
+    }));
+    const mod = await import("../mlflow");
+
+    await mod.initAgentTracing();
+    expect(sdk.init).not.toHaveBeenCalled(); // not during setup
+
+    // Fired from the "setup:complete" lifecycle hook, after start(), before any
+    // request — so the first turn's root span is already forwarded.
+    mod.startAgentTracing();
+    expect(sdk.init).toHaveBeenCalledOnce();
+    vi.doUnmock("../../../telemetry");
+  });
+
   test("currentTraceId reads the context-active span, not getLastActiveTraceId", async () => {
     process.env.MLFLOW_EXPERIMENT_ID = "exp-123";
     const { sdk } = stubSdk();
@@ -194,10 +213,19 @@ describe("GatedMlflowSpanProcessor", () => {
     };
   }
 
+  // Defaults to an in-turn child span (INTERNAL, has a parent) — the case we
+  // want forwarded. Override kind/parent for the edge cases.
+  const mkSpan = (over: Record<string, unknown> = {}) => ({
+    name: "s",
+    kind: SpanKind.INTERNAL,
+    parentSpanContext: { spanId: "parent" },
+    ...over,
+  });
+
   test("stays inert before ready(): no forwarding, so onStart can't throw on early spans", () => {
     const inner = fakeInner();
     const gated = new GatedMlflowSpanProcessor(inner as any);
-    const span = { name: "early" };
+    const span = mkSpan();
 
     gated.onStart(span as any, {} as any);
     gated.onEnd(span as any);
@@ -206,23 +234,48 @@ describe("GatedMlflowSpanProcessor", () => {
     expect(inner.onEnd).not.toHaveBeenCalled();
   });
 
-  test("forwards onStart/onEnd once ready()", () => {
+  test("once ready(), forwards in-turn spans and the incoming request root", () => {
     const inner = fakeInner();
     const gated = new GatedMlflowSpanProcessor(inner as any);
     gated.ready();
-    const span = { name: "s" };
 
-    gated.onStart(span as any, {} as any);
-    gated.onEnd(span as any);
+    const child = mkSpan(); // agent/tool span inside the turn
+    const requestRoot = mkSpan({
+      kind: SpanKind.SERVER,
+      parentSpanContext: undefined,
+    }); // incoming /chat span — mlflow roots the trace here
+    const outgoingChild = mkSpan({ kind: SpanKind.CLIENT }); // LLM call under the agent
 
-    expect(inner.onStart).toHaveBeenCalledOnce();
-    expect(inner.onEnd).toHaveBeenCalledOnce();
+    for (const s of [child, requestRoot, outgoingChild]) {
+      gated.onStart(s as any, {} as any);
+      gated.onEnd(s as any);
+    }
+
+    expect(inner.onStart).toHaveBeenCalledTimes(3);
+    expect(inner.onEnd).toHaveBeenCalledTimes(3);
+  });
+
+  test("drops the exporters' own outbound spans (parentless CLIENT) — breaks the loop", () => {
+    const inner = fakeInner();
+    const gated = new GatedMlflowSpanProcessor(inner as any);
+    gated.ready();
+    // An mlflow/OTLP upload: outgoing HTTP with no parent (made outside any turn).
+    const uploadSpan = mkSpan({
+      kind: SpanKind.CLIENT,
+      parentSpanContext: undefined,
+    });
+
+    gated.onStart(uploadSpan as any, {} as any);
+    gated.onEnd(uploadSpan as any);
+
+    expect(inner.onStart).not.toHaveBeenCalled();
+    expect(inner.onEnd).not.toHaveBeenCalled();
   });
 
   test("onEnd is skipped for spans whose onStart was not forwarded (balanced)", () => {
     const inner = fakeInner();
     const gated = new GatedMlflowSpanProcessor(inner as any);
-    const early = { name: "early" };
+    const early = mkSpan();
 
     gated.onStart(early as any, {} as any); // dropped (not ready)
     gated.ready();

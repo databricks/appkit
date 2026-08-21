@@ -1,3 +1,4 @@
+import { SpanKind } from "@opentelemetry/api";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 
 import { createLogger } from "../../logging/logger";
@@ -28,6 +29,11 @@ let gatedProcessor: GatedMlflowSpanProcessor | undefined;
  * `TelemetryManager.start()` and the first agent turn. We contribute this to
  * AppKit's single tracer provider during `setup()`, but only start forwarding
  * once `ready()` is called — right after the lazy `init()` in {@link ensureConfigured}.
+ *
+ * It also drops the exporters' own outbound spans (parentless CLIENT spans —
+ * outgoing requests made outside any agent turn, e.g. mlflow/OTLP shipping a
+ * trace). Forwarding those would loop: each upload is an HTTP call that
+ * auto-instrumentation turns into a new span to trace and upload.
  */
 export class GatedMlflowSpanProcessor implements SpanProcessor {
   #inner: SpanProcessor;
@@ -49,6 +55,15 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
     parentContext: Parameters<SpanProcessor["onStart"]>[1],
   ): void {
     if (!this.#ready) return;
+    // Drop the exporters' own outbound calls. A parentless (root) CLIENT span is
+    // an outgoing request made outside any agent turn — e.g. mlflow or OTLP
+    // shipping a trace. Forwarding those would loop: each upload is itself an
+    // HTTP call that auto-instrumentation turns into a new span to trace and
+    // upload. Spans inside a real request tree keep their parent (or are the
+    // incoming SERVER root), so they still flow through.
+    if (span.kind === SpanKind.CLIENT && !span.parentSpanContext?.spanId) {
+      return;
+    }
     this.#forwarded.add(span);
     this.#inner.onStart(span, parentContext);
   }
@@ -195,6 +210,18 @@ function ensureConfigured(): boolean {
     logger.warn("MLflow agent tracing disabled (init failed): %O", err);
     return false;
   }
+}
+
+/**
+ * Seed mlflow's config eagerly, right after `TelemetryManager.start()` — the
+ * agents plugin wires this to the `"setup:complete"` lifecycle event, before the
+ * server serves any request. Doing it here means the request's own root span is
+ * already forwarded when the first turn runs, so that turn assembles into a
+ * trace instead of being dropped (mlflow roots a trace only at the top-level
+ * span). Idempotent, and `trace()` still seeds lazily as a fallback.
+ */
+export function startAgentTracing(): void {
+  ensureConfigured();
 }
 
 /**

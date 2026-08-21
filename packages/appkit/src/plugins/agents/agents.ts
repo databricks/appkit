@@ -64,6 +64,7 @@ import {
   currentTraceId,
   initAgentTracing,
   linkTraceToRun,
+  startAgentTracing,
   traceAgent,
 } from "./mlflow";
 import { composePromptForAgent } from "./prompt";
@@ -201,6 +202,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   async setup() {
     await initAgentTracing();
+    // Seed mlflow's config right after TelemetryManager.start() (before the
+    // server serves), so the first turn's request-root span is forwarded and
+    // that turn assembles into a trace — not dropped as a cold-start artifact.
+    this.context?.onLifecycle("setup:complete", () => {
+      startAgentTracing();
+    });
     const { agents, defaultAgentName } = await this.buildAgentRegistry();
     this.agents = agents;
     this.defaultAgentName = defaultAgentName;
