@@ -736,37 +736,42 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return [];
     }
 
-    const skills: SkillDefinition[] = [];
-    for (const entry of entries) {
-      if (!entry.is_directory || !entry.name || !entry.path) continue;
-      const skillDir = entry.path;
-      const skillFile = `${skillDir}/SKILL.md`;
-      try {
-        const raw = await connector.read(client, skillFile);
-        const parsed = parseSkill(raw, skillFile);
-        const files = await this.listVolumeSkillFiles(
-          connector,
-          client,
-          skillDir,
-        );
-        skills.push({
-          name: parsed.name,
-          description: parsed.description,
-          body: parsed.body,
-          source: "volume",
-          dir: skillDir,
-          files,
-          allowedTools: parsed.allowedTools,
-        });
-      } catch (err) {
-        logger.warn(
-          "Skipping catalog skill '%s': %s",
-          skillDir,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-    return skills;
+    // Read every skill concurrently — each is a network round-trip to the
+    // volume, so serial reads would add up. A per-skill failure skips only
+    // that skill; Promise.all preserves the (sorted) entry order.
+    const loaded = await Promise.all(
+      entries.map(async (entry): Promise<SkillDefinition | null> => {
+        if (!entry.is_directory || !entry.name || !entry.path) return null;
+        const skillDir = entry.path;
+        const skillFile = `${skillDir}/SKILL.md`;
+        try {
+          const raw = await connector.read(client, skillFile);
+          const parsed = parseSkill(raw, skillFile);
+          const files = await this.listVolumeSkillFiles(
+            connector,
+            client,
+            skillDir,
+          );
+          return {
+            name: parsed.name,
+            description: parsed.description,
+            body: parsed.body,
+            source: "volume",
+            dir: skillDir,
+            files,
+            allowedTools: parsed.allowedTools,
+          };
+        } catch (err) {
+          logger.warn(
+            "Skipping catalog skill '%s': %s",
+            skillDir,
+            err instanceof Error ? err.message : String(err),
+          );
+          return null;
+        }
+      }),
+    );
+    return loaded.filter((s): s is SkillDefinition => s !== null);
   }
 
   /** Lists a volume skill's resource files (one level, excluding SKILL.md). */

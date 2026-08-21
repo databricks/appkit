@@ -79,7 +79,6 @@ afterEach(() => {
 describe("loadVolumeSkills", () => {
   test("discovers, parses, and manifests a volume skill (SP identity)", async () => {
     const plugin = new AgentsPlugin({ dir: false, skillsVolume: VOL });
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const skills = await (plugin as any).loadVolumeSkills();
 
     expect(skills).toHaveLength(1);
@@ -97,7 +96,6 @@ describe("loadVolumeSkills", () => {
 
   test("returns [] when no volume is configured", async () => {
     const plugin = new AgentsPlugin({ dir: false });
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const skills = await (plugin as any).loadVolumeSkills();
     expect(skills).toEqual([]);
     expect(h.list).not.toHaveBeenCalled();
@@ -107,9 +105,7 @@ describe("loadVolumeSkills", () => {
 describe("catalog resolution merges volume skills", () => {
   test("a code agent opts into a volume skill via skills:", async () => {
     const plugin = new AgentsPlugin({ dir: false, skillsVolume: VOL });
-    // biome-ignore lint/suspicious/noExplicitAny: seed the global pool + call private
     (plugin as any).globalSkills = await (plugin as any).loadVolumeSkills();
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const catalog = await (plugin as any).resolveAgentSkills(
       "helper",
       { instructions: "hi", skills: ["pdf"] },
@@ -122,7 +118,6 @@ describe("catalog resolution merges volume skills", () => {
 describe("read_skill_file reads a volume resource", () => {
   test("reads the file through the connector under SP identity", async () => {
     const plugin = new AgentsPlugin({ dir: false, skillsVolume: VOL });
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const skills = await (plugin as any).loadVolumeSkills();
     const catalog = resolveSkillCatalog({
       agentName: "a",
@@ -142,7 +137,6 @@ describe("read_skill_file reads a volume resource", () => {
       },
     };
 
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const result = await (plugin as any).dispatchSkillTool(entry, {
       skill: "pdf",
       path: "reference.md",

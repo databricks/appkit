@@ -100,6 +100,20 @@ export interface UseAgentChatResult {
   reset: () => void;
 }
 
+/** `forced` (opts.skill) wins; otherwise parse a leading `/skill-name` token off the message. */
+function resolveSkill(
+  message: string,
+  forced?: string,
+): { skill?: string; text: string } {
+  if (forced) return { skill: forced, text: message };
+  const match = message.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
+  if (!match) return { text: message };
+  const skill = match[1];
+  const rest = message.slice(match[0].length);
+  // When the message is only the token, fall back to a minimal instruction.
+  return { skill, text: rest.trim() === "" ? `Use the ${skill} skill.` : rest };
+}
+
 /**
  * React hook for chatting with an agent registered via the `agents()`
  * plugin. Wraps {@link connectSSE} (which owns the buffer cap, abort
@@ -175,19 +189,7 @@ export function useAgentChat({
       setError(null);
       setIsStreaming(true);
 
-      // Resolve the forced skill: explicit opts.skill wins; otherwise parse a
-      // leading `/skill-name` token off the message. When the message is only
-      // the token, fall back to a minimal instruction so the turn isn't empty.
-      let text = message;
-      let skill = opts?.skill;
-      if (!skill) {
-        const match = text.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
-        if (match) {
-          skill = match[1];
-          text = text.slice(match[0].length);
-          if (text.trim() === "") text = `Use the ${skill} skill.`;
-        }
-      }
+      const { skill, text } = resolveSkill(message, opts?.skill);
 
       const payload = {
         message: text,

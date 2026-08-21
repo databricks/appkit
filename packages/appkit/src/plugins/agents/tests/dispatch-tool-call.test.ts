@@ -533,7 +533,6 @@ describe("dispatchToolCall — skill built-ins", () => {
         files: ["reference.md"],
       },
     ]);
-    // biome-ignore lint/suspicious/noExplicitAny: stub gate to assert it never fires
     (plugin as any).approvalGate.wait = vi.fn();
 
     const result = await callDispatch(plugin, {
@@ -545,7 +544,6 @@ describe("dispatchToolCall — skill built-ins", () => {
 
     expect(String(result)).toContain("Detailed PDF steps.");
     expect(String(result)).toContain("reference.md");
-    // biome-ignore lint/suspicious/noExplicitAny: assertion on stub
     expect((plugin as any).approvalGate.wait).not.toHaveBeenCalled();
   });
 
