@@ -1,7 +1,9 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
+
 import type { Plugin, ViteDevServer } from "vite";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { WarehouseState } from "../warehouse-status";
 
 const mocks = vi.hoisted(() => ({

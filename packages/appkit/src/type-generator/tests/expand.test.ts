@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { describe, expect, test } from "vitest";
+
 import { expandType } from "../expand";
 
 function createProgramWithSource(

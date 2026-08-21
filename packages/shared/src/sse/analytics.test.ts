@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { AnalyticsSseMessage, makeResultMessage } from "./analytics";
 
 describe("AnalyticsSseMessage schema", () => {

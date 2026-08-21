@@ -7,6 +7,7 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";

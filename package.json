@@ -11,8 +11,8 @@
     "size:compare": "tsx tools/bundle-size.ts --compare",
     "sync:template": "appkit plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
-    "check:fix": "biome check --write .",
-    "check": "biome check .",
+    "check:fix": "oxlint --fix && oxfmt",
+    "check": "oxlint && oxfmt --check",
     "generate:types": "tsx tools/generate-json-schema.ts && tsx tools/generate-registry-types.ts && tsx tools/generate-plugin-entries.ts && tsx tools/generate-plugin-doc-banners.ts",
     "generate:plugin-entries": "tsx tools/generate-plugin-entries.ts",
     "generate:plugin-doc-banners": "tsx tools/generate-plugin-doc-banners.ts",
@@ -28,14 +28,14 @@
     "docs:build": "pnpm --filter=docs build",
     "docs:serve": "pnpm --filter=docs serve",
     "docs:clean": "pnpm --filter=docs clean",
-    "docs:check:fix": "biome check --write docs/",
-    "docs:check": "biome check docs/",
-    "docs:format": "biome format docs/",
-    "docs:lint": "biome lint docs/",
-    "format:check": "biome format .",
-    "format": "biome format --write .",
-    "lint:fix": "biome lint --write .",
-    "lint": "biome lint .",
+    "docs:check:fix": "oxlint docs/ --fix && oxfmt docs/",
+    "docs:check": "oxlint docs/ && oxfmt --check docs/",
+    "docs:format": "oxfmt docs/",
+    "docs:lint": "oxlint docs/",
+    "format:check": "oxfmt --check",
+    "format": "oxfmt",
+    "lint:fix": "oxlint --fix",
+    "lint": "oxlint",
     "pack:sdk": "pnpm build && pnpm --filter=docs build && pnpm -r tarball",
     "pack:prerelease": "pnpm build && pnpm --filter=docs build && pnpm -r --filter='@databricks/*' tarball:prerelease",
     "prepare": "husky",
@@ -50,13 +50,16 @@
     "knip:fix": "knip --fix"
   },
   "lint-staged": {
-    "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
-      "biome check --write --no-errors-on-unmatched"
+    "*.{ts,tsx,js,jsx}": [
+      "oxlint --fix --no-error-on-unmatched-pattern",
+      "oxfmt --write --no-error-on-unmatched-pattern"
+    ],
+    "*.json": [
+      "oxfmt --write --no-error-on-unmatched-pattern"
     ]
   },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.4",
-    "@biomejs/biome": "2.2.6",
     "@commitlint/cli": "19.8.1",
     "@commitlint/config-conventional": "19.8.1",
     "@cyclonedx/cdxgen": "12.1.2",
@@ -70,6 +73,8 @@
     "jsdom": "27.0.0",
     "knip": "5.86.0",
     "lint-staged": "15.5.2",
+    "oxfmt": "0.62.0",
+    "oxlint": "1.77.0",
     "publint": "0.3.15",
     "release-it": "19.2.0",
     "tsdown": "0.20.3",

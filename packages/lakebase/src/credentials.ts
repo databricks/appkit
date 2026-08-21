@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+
 import { ValidationError } from "./errors";
 import type {
   DatabaseCredential,

@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+
 import type express from "express";
 import expressStatic from "express";
+
 import { BaseServer } from "./base-server";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 

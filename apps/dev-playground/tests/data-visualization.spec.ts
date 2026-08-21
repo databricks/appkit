@@ -1,9 +1,6 @@
 import { expect, test } from "@playwright/test";
-import {
-  STRICT_MODE_MULTIPLIER,
-  setupMockAPI,
-  trackApiCalls,
-} from "./utils/test-utils";
+
+import { setupMockAPI, trackApiCalls } from "./utils/test-utils";
 
 test.describe("Data Visualization Route Tests", () => {
   test.beforeEach(async ({ page }) => {
@@ -64,9 +61,11 @@ test.describe("Data Visualization Route Tests", () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForLoadState("networkidle");
 
-    expect(untaggedAppsCalls.length).toBe(2 * STRICT_MODE_MULTIPLIER);
-    expect(spendDataCalls.length).toBe(6 * STRICT_MODE_MULTIPLIER);
-    expect(topContributorsCalls.length).toBe(4 * STRICT_MODE_MULTIPLIER);
+    // Deduplicated by (queryKey, parameters, format): every chart here uses the
+    // same params per key, so all charts of a key collapse to one request.
+    expect(untaggedAppsCalls.length).toBe(1);
+    expect(spendDataCalls.length).toBe(1);
+    expect(topContributorsCalls.length).toBe(1);
   });
 
   test("can toggle code visibility", async ({ page }) => {

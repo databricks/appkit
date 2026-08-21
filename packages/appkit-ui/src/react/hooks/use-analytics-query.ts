@@ -4,17 +4,11 @@ import {
   useId,
   useMemo,
   useRef,
-  useState,
+  useSyncExternalStore,
 } from "react";
-import { ArrowClient, connectSSE } from "@/js";
-import {
-  type AnalyticsSseHandlerContext,
-  GENERIC_LOAD_ERROR,
-  getDevMode,
-  handleAnalyticsSseError,
-  handleAnalyticsSseMessage,
-  userFacingFetchError,
-} from "./analytics-sse";
+
+import * as store from "./analytics-request-store";
+import { getDevMode } from "./analytics-sse";
 import type {
   AnalyticsFormat,
   InferParams,
@@ -22,7 +16,6 @@ import type {
   QueryKey,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
-  WarehouseStatus,
 } from "./types";
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
@@ -64,117 +57,17 @@ function useStableParams<T>(value: T): T {
   return ref.current;
 }
 
-interface ArrowDirectContext {
-  url: string;
-  payload: string;
-  signal: AbortSignal;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  setErrorCode: (code: string | null) => void;
-  setData: (data: unknown) => void;
-  unpublishWarehouseStatus: () => void;
-}
-
-/**
- * Fetch the real column names for a statement from the fallback endpoint,
- * used when a very wide schema's names didn't fit in the response header.
- * Returns undefined on any failure so decoding falls back to the raw Arrow
- * schema names.
- */
-async function fetchArrowColumns(
-  statementId: string,
-  signal: AbortSignal,
-): Promise<string[] | undefined> {
-  try {
-    const res = await fetch(
-      `/api/analytics/columns/${encodeURIComponent(statementId)}`,
-      { signal },
-    );
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { columns?: unknown };
-    return Array.isArray(body.columns) ? (body.columns as string[]) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Fetch an ARROW_STREAM query result as raw Arrow IPC bytes directly from
- * the query endpoint (no SSE, no second /arrow-result request) and decode
- * it into a Table. The server streams the bytes back as the POST response
- * body; errors before the first byte arrive as a JSON `{ error, errorCode }`.
- */
-async function fetchArrowDirect(ctx: ArrowDirectContext): Promise<void> {
-  try {
-    const response = await fetch(ctx.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: ctx.payload,
-      signal: ctx.signal,
-    });
-    if (ctx.signal.aborted) return;
-
-    if (!response.ok) {
-      let message = GENERIC_LOAD_ERROR;
-      let code: string | null = null;
-      try {
-        const body = (await response.json()) as {
-          error?: string;
-          errorCode?: string;
-        };
-        if (body.error) message = body.error;
-        if (typeof body.errorCode === "string") code = body.errorCode;
-      } catch {
-        // Non-JSON error body — keep the generic message.
-      }
-      ctx.setLoading(false);
-      ctx.setError(message);
-      if (code) ctx.setErrorCode(code);
-      ctx.unpublishWarehouseStatus();
-      return;
-    }
-
-    const buffer = await response.arrayBuffer();
-    if (ctx.signal.aborted) return;
-    // Databricks encodes ARROW_STREAM columns positionally (col_0, …); the
-    // server sends the real manifest names so we can relabel the decoded
-    // Table (charts look columns up by name). Normally inline in the
-    // `X-Appkit-Arrow-Columns` header; for very wide schemas the header
-    // carries only a statement-id reference and we fetch the names.
-    let columnNames: string[] | undefined;
-    const header = response.headers.get("X-Appkit-Arrow-Columns");
-    if (header) {
-      try {
-        columnNames = JSON.parse(decodeURIComponent(header));
-      } catch {
-        // Malformed header — fall back to the raw Arrow schema names.
-      }
-    } else {
-      const ref = response.headers.get("X-Appkit-Arrow-Columns-Ref");
-      if (ref) {
-        columnNames = await fetchArrowColumns(ref, ctx.signal);
-      }
-    }
-    const table = await ArrowClient.processArrowBuffer(
-      new Uint8Array(buffer),
-      columnNames,
-    );
-    ctx.setData(table);
-    ctx.setLoading(false);
-    ctx.unpublishWarehouseStatus();
-  } catch (error) {
-    if (ctx.signal.aborted) return;
-    ctx.setLoading(false);
-    ctx.unpublishWarehouseStatus();
-    ctx.setError(userFacingFetchError(error));
-  }
-}
-
 /**
  * Subscribe to an analytics query and return its latest result. JSON_ARRAY
  * results stream over SSE (with warehouse-readiness progress); ARROW_STREAM
  * results are fetched as raw Arrow bytes directly from the query endpoint.
  * Integration hook between client and analytics plugin.
+ *
+ * Identical requests (same query key, parameters, format, and dev mode) share
+ * a single in-flight network request: the first mounting instance starts it,
+ * later instances subscribe to the same {@link store} entry and see the same
+ * result and warehouse-status updates. The request is torn down once its last
+ * subscriber unmounts.
  *
  * The return type is automatically inferred based on the format:
  * - `format: "JSON_ARRAY"` (default): Returns typed array from QueryRegistry
@@ -218,13 +111,6 @@ export function useAnalyticsQuery<
   const urlSuffix = `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`;
 
   type ResultType = InferResultByFormat<T, K, F>;
-  const [data, setData] = useState<ResultType | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<string | null>(null);
-  const [warehouseStatus, setWarehouseStatus] =
-    useState<WarehouseStatus | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   const publisherId = useId();
   const {
@@ -260,87 +146,64 @@ export function useAnalyticsQuery<
     }
   }, [stableParameters, format, maxParametersSize]);
 
-  const start = useCallback(() => {
-    if (payload === null) {
-      setError("Failed to serialize query parameters");
-      return;
+  // Cache key shared across hook instances. `payload` already serializes
+  // `{ parameters, format }`, so identical requests collapse to one key.
+  // On a serialization failure (`payload === null`) the key stays unused: no
+  // request is retained and the store reports the stable idle snapshot.
+  const cacheKey = `${urlSuffix}::${payload}`;
+
+  const subscribe = useCallback(
+    (listener: () => void) => store.subscribe(cacheKey, listener),
+    [cacheKey],
+  );
+  const getSnapshot = useCallback(
+    () => store.getSnapshot(cacheKey),
+    [cacheKey],
+  );
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  const start = useCallback(() => store.start(cacheKey), [cacheKey]);
+
+  // Register with the shared store on mount / key change; release on cleanup.
+  // The store starts the request on first retain of a key and reuses the
+  // in-flight request for later subscribers.
+  useEffect(() => {
+    if (payload === null) return;
+    return store.retain(
+      cacheKey,
+      { url: urlSuffix, payload, format },
+      autoStart,
+    );
+  }, [cacheKey, urlSuffix, payload, format, autoStart]);
+
+  // Mirror this instance's warehouse status into the nearest resource-status
+  // provider while the request is in flight; clear the slot once it settles.
+  useEffect(() => {
+    if (snapshot.loading) {
+      publishWarehouseStatus(snapshot.warehouseStatus);
+    } else {
+      unpublishWarehouseStatus();
     }
-
-    abortControllerRef.current?.abort();
-
-    setLoading(true);
-    setError(null);
-    setErrorCode(null);
-    setData(null);
-    setWarehouseStatus(null);
-    publishWarehouseStatus(null);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    // ARROW_STREAM: the server streams raw Arrow IPC bytes back on the query
-    // response body (no SSE). Fetch and decode directly.
-    if (format === "ARROW_STREAM") {
-      void fetchArrowDirect({
-        url: urlSuffix,
-        payload,
-        signal: abortController.signal,
-        setLoading,
-        setError,
-        setErrorCode,
-        setData: (table) => setData(table as ResultType),
-        unpublishWarehouseStatus,
-      });
-      return;
-    }
-
-    const sseContext: AnalyticsSseHandlerContext = {
-      source: "useAnalyticsQuery",
-      resource: { queryKey },
-      defaultExecutionError: "Unable to execute query",
-      unpublishOnMalformedMessage: false,
-      signal: abortController.signal,
-      abort: () => abortController.abort(),
-      setLoading,
-      setError,
-      setErrorCode,
-      onWarehouseStatus: (status) => {
-        setWarehouseStatus(status);
-        publishWarehouseStatus(status);
-      },
-      onResult: (message) => setData(message.data as ResultType),
-      unpublishWarehouseStatus,
-    };
-
-    connectSSE({
-      url: urlSuffix,
-      payload,
-      signal: abortController.signal,
-      onMessage: (message) =>
-        handleAnalyticsSseMessage(message.data, sseContext),
-      onError: (error) => handleAnalyticsSseError(error, sseContext),
-    });
   }, [
-    queryKey,
-    payload,
-    urlSuffix,
-    format,
+    snapshot.loading,
+    snapshot.warehouseStatus,
     publishWarehouseStatus,
     unpublishWarehouseStatus,
   ]);
 
-  useEffect(() => {
-    if (autoStart) {
-      start();
-    }
-
-    return () => {
-      abortControllerRef.current?.abort();
-      unpublishWarehouseStatus();
-    };
-  }, [start, autoStart, unpublishWarehouseStatus]);
+  useEffect(() => unpublishWarehouseStatus, [unpublishWarehouseStatus]);
 
   useQueryHMR(queryKey, start);
 
-  return { data, loading, error, errorCode, warehouseStatus };
+  return {
+    data: snapshot.data as ResultType | null,
+    loading: snapshot.loading,
+    // A serialization failure never creates a store entry, so surface it here.
+    error:
+      payload === null
+        ? "Failed to serialize query parameters"
+        : snapshot.error,
+    errorCode: snapshot.errorCode,
+    warehouseStatus: snapshot.warehouseStatus,
+  };
 }

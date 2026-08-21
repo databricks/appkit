@@ -3,6 +3,7 @@ import {
   type LakebasePoolConfig,
 } from "@databricks/lakebase";
 import type { Pool } from "pg";
+
 import { createLogger } from "../../logging/logger";
 
 /**

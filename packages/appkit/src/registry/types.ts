@@ -125,8 +125,10 @@ export type ConfigSchema = JSONSchema7;
  * @see `packages/shared/src/schemas/manifest.ts` `pluginManifestSchema` — Zod source of truth
  * @see {@link SharedPluginManifest} — shared re-export with JSONSchema7 config
  */
-export interface PluginManifest<TName extends string = string>
-  extends Omit<SharedPluginManifest, "resources" | "config"> {
+export interface PluginManifest<TName extends string = string> extends Omit<
+  SharedPluginManifest,
+  "resources" | "config"
+> {
   /** Plugin identifier — the single source of truth for the plugin's name */
   name: TName;
 

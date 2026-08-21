@@ -1,5 +1,6 @@
 import { BrainIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import type { Highlight } from "../hooks/use-action-dispatcher";
 import { useAgentStream } from "../hooks/use-agent-stream";
 import type { DashboardFilters, KPIData } from "../hooks/use-dashboard-data";

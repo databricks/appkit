@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import process from "node:process";
+
 import { Command } from "commander";
 import dotenv from "dotenv";
+
 import { printReport, printReportJson } from "./report";
 import { runDoctor } from "./run";
 import type { DoctorOptions } from "./types";

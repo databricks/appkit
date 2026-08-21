@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
+
 import type { SSEEvent } from "./use-agent-stream";
 import type { DashboardFilters } from "./use-dashboard-data";
 import { focusChart, isFocusableChartId } from "./use-focus-registry";

@@ -10,6 +10,7 @@ import {
 } from "@databricks/appkit-ui/react";
 import { Activity, Loader2 } from "lucide-react";
 import { useId, useState } from "react";
+
 import { useLakebaseData, useLakebasePost } from "@/hooks/use-lakebase-data";
 
 interface ActivityLog {

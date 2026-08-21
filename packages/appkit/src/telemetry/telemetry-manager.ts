@@ -34,6 +34,7 @@ import {
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import type { TelemetryOptions } from "shared";
+
 import { createLogger } from "../logging/logger";
 import { TelemetryProvider } from "./telemetry-provider";
 import { AppKitSampler } from "./trace-sampler";

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { StreamManager } from "../index";
 
 function createMockResponse(headers: Record<string, string> = {}) {

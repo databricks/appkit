@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import {
   appPermissionSchema,
   databasePermissionSchema,
@@ -27,7 +28,7 @@ import {
   vectorSearchIndexPermissionSchema,
   volumePermissionSchema,
 } from "../packages/shared/src/schemas/manifest";
-import { formatWithBiome } from "./format-with-biome";
+import { formatGenerated } from "./format-generated";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -146,7 +147,7 @@ function main(): void {
   const out = generate();
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, out, "utf-8");
-  formatWithBiome(OUT_PATH);
+  formatGenerated(OUT_PATH);
   console.log("Wrote", OUT_PATH);
 }
 

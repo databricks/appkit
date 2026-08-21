@@ -1,5 +1,6 @@
 import type { LakebasePoolConfig } from "@databricks/lakebase";
 import type { Pool } from "pg";
+
 import { createLakebasePool } from "./index";
 
 /** Interval for removing empty (connectionless) pools from the Map. */

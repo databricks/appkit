@@ -1,4 +1,5 @@
 import type express from "express";
+
 import {
   getConfigScript,
   type PluginClientConfigs,

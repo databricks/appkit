@@ -1,5 +1,6 @@
 import { type AgentChatEvent, useAgentChat } from "@databricks/appkit-ui/react";
 import { useCallback, useMemo, useRef } from "react";
+
 import { beginStreamRun, recordStreamEvent } from "./use-stream-inspector";
 
 /**

@@ -1,4 +1,5 @@
 import type { BasePlugin } from "shared";
+
 import { CacheManager } from "../cache";
 import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";

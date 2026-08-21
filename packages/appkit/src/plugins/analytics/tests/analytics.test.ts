@@ -2,6 +2,7 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
+  createTestPluginContext,
   mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
@@ -16,8 +17,10 @@ import {
   Vector,
   vectorFromArray,
 } from "apache-arrow";
+import type express from "express";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { ServiceContext } from "../../../context/service-context";
 import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
@@ -1647,7 +1650,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("emits warehouse_status events before the result for a STARTING warehouse", async () => {
+    test("emits warehouse_status events before the result", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1665,27 +1668,30 @@ describe("Analytics Plugin", () => {
 
       const handler = getHandler("POST", "/query/:query_key");
 
-      // Override the default RUNNING mock with a STARTING -> RUNNING sequence
-      // so the route streams a warehouse_status event before the result.
-      const warehouseGet = vi
-        .fn()
-        .mockResolvedValueOnce({ state: "STARTING" })
-        .mockResolvedValueOnce({ state: "RUNNING" });
+      // The route resolves its warehouse client via getWorkspaceClient() ->
+      // ServiceContext (NOT the request), so install it there. A warehouse that
+      // is already RUNNING still emits one warehouse_status event before the
+      // result — which is what this test pins, without a poll/sleep cycle.
+      const warehouseGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
+      serviceContextMock.restore();
+      serviceContextMock = await mockServiceContext({
+        serviceDatabricksClient: {
+          statementExecution: {
+            executeStatement: vi.fn().mockResolvedValue({
+              status: { state: "SUCCEEDED" },
+              result: { data: [] },
+            }),
+          },
+          warehouses: { get: warehouseGet, start: vi.fn() },
+        },
+      });
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
         body: { parameters: {} },
       });
-      mockReq.serviceWorkspaceClient.warehouses.get = warehouseGet;
-      mockReq.userWorkspaceClient.warehouses.get = warehouseGet;
       const mockRes = createMockResponse();
 
-      // The connector polls every 3s between warehouse state checks; use fake
-      // timers so the test doesn't actually sleep.
-      vi.useFakeTimers();
-      const handlerPromise = handler(mockReq, mockRes);
-      await vi.runAllTimersAsync();
-      await handlerPromise;
-      vi.useRealTimers();
+      await handler(mockReq, mockRes);
 
       // Inspect the SSE writes: a `warehouse_status` event must precede the
       // `result` event.
@@ -1702,11 +1708,9 @@ describe("Analytics Plugin", () => {
       expect(resultIdx).toBeGreaterThanOrEqual(0);
       expect(warehouseIdx).toBeLessThan(resultIdx);
 
-      // The status payload should include the state field.
+      // The status payload should include the RUNNING state.
       expect(mockRes.write).toHaveBeenCalledWith(
-        expect.stringMatching(
-          /"type":"warehouse_status".*"state":"(STARTING|RUNNING)"/,
-        ),
+        expect.stringMatching(/"type":"warehouse_status".*"state":"RUNNING"/),
       );
 
       expect(executeMock).toHaveBeenCalledTimes(1);
@@ -1823,5 +1827,66 @@ describe("Analytics Plugin", () => {
       expect(res.write).not.toHaveBeenCalled();
       expect(res.once).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("analytics as a cross-plugin tool provider", () => {
+  // A consumer plugin (e.g. agents) resolves analytics' tools through the
+  // shared PluginContext. These drive that dispatch and assert the on-behalf-of
+  // identity the real executeTool resolves — coverage a bare stub can't give.
+  test("dispatches analytics.query on behalf of the user", async () => {
+    const rows = [{ customer: "Acme", revenue: 1_000_000 }];
+    const mock = createTestPluginContext({
+      analytics: { query: (args) => ({ rows, echoedArgs: args }) },
+    });
+
+    const req = createMockRequest({
+      obo: { userId: "analyst@example.com" },
+    }) as unknown as express.Request;
+    const result = await mock.ctx.executeTool(req, "analytics", "query", {
+      sql: "SELECT * FROM top_customers",
+    });
+
+    expect(result).toEqual({
+      rows,
+      echoedArgs: { sql: "SELECT * FROM top_customers" },
+    });
+    expect(mock.toolCalls).toHaveLength(1);
+    expect(mock.toolCalls[0]).toMatchObject({
+      plugin: "analytics",
+      tool: "query",
+      asUser: true,
+      userId: "analyst@example.com",
+    });
+  });
+
+  test("rejects a token-less request before the tool runs", async () => {
+    const mock = createTestPluginContext({
+      analytics: { query: () => ({ rows: [] }) },
+    });
+    const req = createMockRequest() as unknown as express.Request;
+
+    await expect(
+      mock.ctx.executeTool(req, "analytics", "query", {}),
+    ).rejects.toThrow(/Missing user token/);
+    expect(mock.toolCalls).toHaveLength(0);
+  });
+
+  test("forwards the per-call timeout so a slow tool is aborted", async () => {
+    const mock = createTestPluginContext({
+      analytics: {
+        query: (_args, signal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () =>
+              reject(new Error("aborted by timeout")),
+            );
+          }),
+      },
+    });
+    const req = createMockRequest({ obo: true }) as unknown as express.Request;
+
+    await expect(
+      mock.ctx.executeTool(req, "analytics", "query", {}, undefined, 5),
+    ).rejects.toThrow(/aborted by timeout/);
   });
 });

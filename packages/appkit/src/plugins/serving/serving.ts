@@ -1,14 +1,16 @@
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
 import type express from "express";
 import type { IAppRouter } from "shared";
+
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
 import { type ExecutionResult, Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest, ResourceRequirement } from "../../registry";
-import { ResourceType } from "../../registry";
+import type { ResourceRequirement } from "../../registry";
+import { defineManifest, ResourceType } from "../../registry";
 import { servingInvokeDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
@@ -40,11 +42,11 @@ interface ResolvedEndpoint {
 }
 
 export class ServingPlugin extends Plugin {
-  static manifest = manifest as PluginManifest<"serving">;
+  static manifest = defineManifest<"serving">(manifest);
 
   protected static description =
     "Authenticated proxy to Databricks Model Serving endpoints";
-  protected declare config: IServingConfig;
+  declare protected config: IServingConfig;
 
   private readonly endpoints: Record<string, EndpointConfig>;
   private readonly isNamedMode: boolean;

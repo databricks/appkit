@@ -7,6 +7,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import { useChartColors } from "../hooks/use-chart-colors";
 import type { FareBucket } from "../hooks/use-dashboard-data";
 

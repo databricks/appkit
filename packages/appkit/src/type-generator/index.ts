@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+
 import dotenv from "dotenv";
 import pc from "picocolors";
+
 import { METRIC_METADATA_FILE } from "../../../shared/src/schemas/metric-metadata-bundle";
 import { createLogger } from "../logging/logger";
 import {

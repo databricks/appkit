@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import type { sql } from "../../workspace-client";
 import { ArrowStreamProcessor } from "../arrow-stream-processor";
 

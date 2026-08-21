@@ -10,6 +10,7 @@ import {
 } from "@databricks/appkit-ui/react";
 import { Loader2, Package, ShieldCheck } from "lucide-react";
 import { useId, useState } from "react";
+
 import { useLakebaseData, useLakebasePost } from "@/hooks/use-lakebase-data";
 
 interface Product {

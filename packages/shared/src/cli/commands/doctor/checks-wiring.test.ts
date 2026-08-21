@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import type { BundleInfo } from "./bundle";
 import { checkWiring } from "./checks-wiring";
 import type { ResourceTarget } from "./types";

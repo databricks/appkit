@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LayoutDashboardIcon } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
+
 import { ActionToast } from "@/features/smart-dashboard/components/action-toast";
 import { ActiveFilters } from "@/features/smart-dashboard/components/active-filters";
 import { AgentSidebar } from "@/features/smart-dashboard/components/agent-sidebar";

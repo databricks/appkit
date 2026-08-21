@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { generateServingTypes } from "../generator";
 
 vi.mock("node:fs/promises");

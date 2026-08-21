@@ -10,6 +10,7 @@ import {
   type ToolProvider,
 } from "shared";
 import { z } from "zod";
+
 import { SQLWarehouseConnector } from "../../connectors";
 import {
   DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
@@ -26,7 +27,7 @@ import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
@@ -109,10 +110,10 @@ async function* streamCallbacks<T>(
 
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest<"analytics">;
+  static manifest = defineManifest<"analytics">(manifest);
 
   protected static description = "Analytics plugin for data analysis";
-  protected declare config: IAnalyticsConfig;
+  declare protected config: IAnalyticsConfig;
 
   // analytics services
   private SQLClient: SQLWarehouseConnector;

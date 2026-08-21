@@ -69,6 +69,7 @@ vi.mock("../../../connectors/lakebase", async (importOriginal) => {
 });
 
 import type { Pool, PoolClient } from "pg";
+
 import { LakebasePlugin } from "../lakebase";
 
 function makePlugin(
@@ -214,9 +215,8 @@ describe("LakebasePlugin — readOnly enforcement", () => {
 
 describe("LakebasePlugin — shutdown", () => {
   test("closes the SP pool and all OBO pools via shutdown()", async () => {
-    const { createLakebasePool, createLakebasePoolManager } = await import(
-      "../../../connectors/lakebase"
-    );
+    const { createLakebasePool, createLakebasePoolManager } =
+      await import("../../../connectors/lakebase");
     const plugin = makePlugin({});
     await plugin.setup();
 
@@ -238,9 +238,8 @@ describe("LakebasePlugin — shutdown", () => {
   });
 
   test("abortActiveOperations() does NOT tear down the pools (teardown is shutdown()'s job)", async () => {
-    const { createLakebasePool, createLakebasePoolManager } = await import(
-      "../../../connectors/lakebase"
-    );
+    const { createLakebasePool, createLakebasePoolManager } =
+      await import("../../../connectors/lakebase");
     const plugin = makePlugin({});
     await plugin.setup();
 
@@ -314,9 +313,8 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
     userClientQueries.length = 0;
     clientQueries.length = 0;
 
-    const { createLakebasePoolManager } = await import(
-      "../../../connectors/lakebase"
-    );
+    const { createLakebasePoolManager } =
+      await import("../../../connectors/lakebase");
     vi.mocked(createLakebasePoolManager).mockReturnValue({
       getPool: vi.fn(() => makeUserPool() as unknown as Pool),
       hasPool: vi.fn(() => false),
@@ -329,9 +327,8 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
   });
 
   test("read-only query routes to user pool inside runInUserContext", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
     const plugin = makePlugin({ exposeAsAgentTool: {} });
     await plugin.setup();
 
@@ -358,9 +355,8 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
   });
 
   test("destructive query routes to user pool inside runInUserContext", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
 
     const plugin = makePlugin({ exposeAsAgentTool: { readOnly: false } });
     await plugin.setup();
@@ -388,9 +384,8 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
   });
 
   test("read-only policy still enforced in user context", async () => {
-    const { runInUserContext } = await import(
-      "../../../context/execution-context"
-    );
+    const { runInUserContext } =
+      await import("../../../context/execution-context");
 
     const plugin = makePlugin({ exposeAsAgentTool: {} });
     await plugin.setup();

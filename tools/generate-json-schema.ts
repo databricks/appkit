@@ -9,13 +9,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { z } from "zod";
+
 import {
   pluginManifestSchema,
   templatePluginsManifestSchema,
 } from "../packages/shared/src/schemas/manifest";
 import { metricSourceSchema } from "../packages/shared/src/schemas/metric-source";
-import { formatWithBiome } from "./format-with-biome";
+import { formatGenerated } from "./format-generated";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -83,7 +85,7 @@ function stripTopLevelSchemaKey(
 function writeJson(outPath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
-  formatWithBiome(outPath);
+  formatGenerated(outPath);
   console.log("Wrote", outPath);
 }
 

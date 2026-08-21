@@ -7,6 +7,7 @@ import {
   trace,
 } from "@opentelemetry/api";
 import type pg from "pg";
+
 import type { Logger } from "./types";
 
 export { SpanKind, SpanStatusCode };

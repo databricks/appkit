@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+
 import type { HeatmapCell } from "../hooks/use-dashboard-data";
 
 interface HourlyHeatmapProps {

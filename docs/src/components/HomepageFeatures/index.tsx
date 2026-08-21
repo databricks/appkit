@@ -1,10 +1,12 @@
 import Heading from "@theme/Heading";
 import clsx from "clsx";
 import type { ReactNode } from "react";
+
 import CodeIcon from "./icons/code.svg";
 import LayersIcon from "./icons/layers.svg";
 import PuzzleIcon from "./icons/puzzle.svg";
 import SparklesIcon from "./icons/sparkles.svg";
+
 import styles from "./styles.module.css";
 
 type FeatureItem = {

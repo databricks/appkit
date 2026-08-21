@@ -2,10 +2,12 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
+  expectStream,
   mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import { genieConnectorDefaults } from "../../../connectors/genie/defaults";
 import { ServiceContext } from "../../../context/service-context";
 import { Plugin } from "../../../plugin";
@@ -333,23 +335,23 @@ describe("Genie Plugin", () => {
         "no-cache, no-transform",
       );
 
-      // Verify SSE events are written
-      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
-      const allWritten = writeCalls.join("");
-
-      // Should have message_start event
-      expect(allWritten).toContain("message_start");
-      expect(allWritten).toContain("new-conv-id");
-
-      // Should have status events
-      expect(allWritten).toContain("status");
-      expect(allWritten).toContain("ASKING_AI");
-
-      // Should have message_result event
-      expect(allWritten).toContain("message_result");
-
-      // Should have query_result event
-      expect(allWritten).toContain("query_result");
+      // Assert the emitted SSE via the kit's expectStream, which parses the SSE
+      // the handler actually wrote (captured by the mock response). toEmit pins
+      // the real event ORDER; collect() lets us also pin the key payload values
+      // structurally, not by brittle substring match.
+      await expectStream(mockRes).toEmit(
+        "message_start",
+        "status",
+        "message_result",
+        "query_result",
+      );
+      const events = await expectStream(mockRes).collect();
+      expect(events.find((e) => e.type === "message_start")).toMatchObject({
+        conversationId: "new-conv-id",
+      });
+      expect(events.find((e) => e.type === "status")).toMatchObject({
+        status: "ASKING_AI",
+      });
 
       expect(mockRes.end).toHaveBeenCalled();
     });

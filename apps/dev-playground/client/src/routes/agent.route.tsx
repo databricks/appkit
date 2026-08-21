@@ -201,7 +201,6 @@ function AgentRoute() {
     clear: clearSuggestion,
   } = useAutocomplete(hasAutocomplete);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);

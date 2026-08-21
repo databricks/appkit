@@ -1,6 +1,7 @@
 import type { QueryResult, QueryResultRow } from "pg";
 import type { AgentToolDefinition, ToolProvider } from "shared";
 import { z } from "zod";
+
 import {
   createLakebasePool,
   createLakebasePoolManager,
@@ -22,7 +23,7 @@ import {
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { createWorkspaceClient } from "../../workspace-client";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
@@ -65,9 +66,9 @@ const OBO_POOL_DEFAULTS = {
  */
 export class LakebasePlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest<"lakebase">;
+  static manifest = defineManifest<"lakebase">(manifest);
 
-  protected declare config: ILakebaseConfig;
+  declare protected config: ILakebaseConfig;
   private pool: RoutingPool | null = null;
   private oboPoolManager: LakebasePoolManager | null = null;
 
@@ -142,7 +143,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     text: string,
     values?: unknown[],
   ): Promise<QueryResult<T>> {
-    // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- pool is initialized during setup()
     return this.pool!.query<T>(text, values);
   }
 
@@ -164,7 +165,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     text: string,
     values?: unknown[],
   ): Promise<unknown[]> {
-    // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup()
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- pool is initialized during setup()
     const client = await this.pool!.connect();
     try {
       await client.query("BEGIN READ ONLY");
@@ -324,7 +325,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
    */
   exports() {
     return {
-      // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- pool is initialized during setup()
       pool: this.pool! as LakebasePool,
       query: this.query.bind(this),
       getOrmConfig: () => getLakebaseOrmConfig(this.activePoolConfig()),

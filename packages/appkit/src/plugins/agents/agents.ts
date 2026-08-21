@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
+
 import type express from "express";
 import pc from "picocolors";
 import type {
@@ -15,6 +17,7 @@ import type {
   ToolAnnotations,
   ToolProvider,
 } from "shared";
+
 import {
   isSupervisorTool,
   SUPERVISOR_EXTENSION_KEY,
@@ -23,6 +26,11 @@ import {
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
+import {
+  CODE_AGENTS_SOURCE_DIR,
+  loadCodeAgentsFromDir,
+  resolveCodeAgentsDir,
+} from "../../core/agent/load-code-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import { createPluginsProxy } from "../../core/agent/plugins-map";
 import {
@@ -50,7 +58,7 @@ import type {
 import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -73,7 +81,8 @@ import { ToolApprovalGate } from "./tool-approval-gate";
 
 const logger = createLogger("agents");
 
-const DEFAULT_AGENTS_DIR = "./config/agents";
+/** Deprecated markdown location, read as a fallback with a one-time warning. */
+const LEGACY_MARKDOWN_DIR = "config/agents";
 
 /**
  * Context flag recorded on the in-memory AgentDefinition to indicate whether
@@ -140,14 +149,10 @@ interface RunState {
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
-  // Routed through `unknown`: the optional resources have differing `fields`
-  // keys (serving `name`, experiment `experimentId`), which TS widens to an
-  // incompatible union on the JSON import. The shape is validated at runtime
-  // against the plugin-manifest schema.
-  static manifest = manifest as unknown as PluginManifest;
+  static manifest = defineManifest<"agents">(manifest);
   static phase: PluginPhase = "deferred";
 
-  protected declare config: AgentsPluginConfig;
+  declare protected config: AgentsPluginConfig;
 
   private agents = new Map<string, RegisteredAgent>();
   private defaultAgentName: string | null = null;
@@ -165,6 +170,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
+  /** Guards the `agents({ agents })` deprecation warning to once per instance. */
+  private agentsMapDeprecationWarned = false;
+  /** Guards the `config/agents` deprecation warning to once per instance. */
+  private configAgentsDeprecationWarned = false;
 
   constructor(config: AgentsPluginConfig) {
     super(config);
@@ -331,45 +340,82 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     agents: Map<string, RegisteredAgent>;
     defaultAgentName: string | null;
   }> {
-    const { defs: fileDefs, defaultAgent: fileDefault } =
-      await this.loadFileDefinitions();
+    // Two "code" sources: discovered files and the deprecated `agents({ agents })` map.
+    const discovered = await this.loadCodeAgents();
+    const deprecatedMapRaw = this.config.agents ?? {};
 
-    const codeDefs = this.config.agents ?? {};
-
-    for (const name of Object.keys(fileDefs)) {
-      if (codeDefs[name]) {
-        logger.warn(
-          "Agent '%s' defined in both code and a markdown file. Code definition takes precedence.",
-          name,
-        );
-      }
+    if (Object.keys(deprecatedMapRaw).length > 0) {
+      this.warnAgentsMapDeprecated();
     }
 
+    // On a discovered/map id clash, discovery wins (drop the map entry) rather
+    // than crash boot on upgrade.
+    const deprecatedMap: Record<string, AgentDefinition> = {};
+    for (const [id, def] of Object.entries(deprecatedMapRaw)) {
+      if (discovered[id]) {
+        logger.warn(
+          "Agent '%s' is both discovered in %s and passed to agents({ agents }). " +
+            "Using the discovered file; ignoring the map entry.",
+          id,
+          CODE_AGENTS_SOURCE_DIR,
+        );
+        continue;
+      }
+      deprecatedMap[id] = def;
+    }
+
+    // Code agents also resolve markdown `agents: [child]` sub-agent references.
+    const codeAgents: Record<string, AgentDefinition> = {
+      ...discovered,
+      ...deprecatedMap,
+    };
+
+    const { defs: fileDefs, defaultAgent: fileDefault } =
+      await this.loadFileDefinitions(codeAgents);
+
+    // Merge order (markdown, discovered, map) sets precedence and the
+    // first-registered default fallback.
     const merged: Record<string, { def: AgentDefinition; src: AgentSource }> =
       {};
     for (const [name, def] of Object.entries(fileDefs)) {
       merged[name] = { def, src: { origin: "file" } };
     }
-    for (const [name, def] of Object.entries(codeDefs)) {
+    for (const [name, def] of Object.entries(discovered)) {
+      if (merged[name]?.src.origin === "file") {
+        // Discovery is new API — clash with markdown is a hard error (the
+        // deprecated map only warns). A folder with both agent.ts and
+        // agent.md lands here too: one kind per folder.
+        throw new Error(
+          `Agent '${name}' is defined as both a code agent (agent.ts) and a markdown agent (agent.md) — ` +
+            `in one folder, or across server/agents and the deprecated config/agents fallback. ` +
+            `Keep a single kind per id. Available: ${Object.keys(merged).sort().join(", ")}`,
+        );
+      }
+      merged[name] = { def, src: { origin: "code" } };
+    }
+    for (const [name, def] of Object.entries(deprecatedMap)) {
+      if (merged[name]?.src.origin === "file") {
+        logger.warn(
+          "Agent '%s' defined in both code and a markdown file. Code definition takes precedence.",
+          name,
+        );
+      }
       merged[name] = { def, src: { origin: "code" } };
     }
 
     const agents = new Map<string, RegisteredAgent>();
-    let defaultAgentName: string | null = null;
 
     if (Object.keys(merged).length === 0) {
       logger.info(
-        "No agents registered (no files in %s, no code-defined agents)",
-        this.resolvedAgentsDir() ?? "<disabled>",
+        "No agents registered (no files in %s, no discovered or code-defined agents)",
+        this.resolvedAgentsDir(),
       );
-      return { agents, defaultAgentName };
+      return { agents, defaultAgentName: null };
     }
 
     for (const [name, { def, src }] of Object.entries(merged)) {
       try {
-        const registered = await this.buildRegisteredAgent(name, def, src);
-        agents.set(name, registered);
-        if (!defaultAgentName) defaultAgentName = name;
+        agents.set(name, await this.buildRegisteredAgent(name, def, src));
       } catch (err) {
         throw new Error(
           `Failed to register agent '${name}' (${src.origin}): ${
@@ -380,44 +426,169 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       }
     }
 
+    return {
+      agents,
+      defaultAgentName: this.resolveDefaultAgent(agents, merged, fileDefault),
+    };
+  }
+
+  /**
+   * Resolves the default agent. Precedence: explicit `config.defaultAgent` >
+   * a code/discovered agent flagged `default: true` (stable id order) >
+   * markdown `default: true` > first registered (insertion order).
+   */
+  private resolveDefaultAgent(
+    agents: Map<string, RegisteredAgent>,
+    merged: Record<string, { def: AgentDefinition; src: AgentSource }>,
+    fileDefault: string | null,
+  ): string | null {
     if (this.config.defaultAgent) {
       if (!agents.has(this.config.defaultAgent)) {
         throw new Error(
           `defaultAgent '${this.config.defaultAgent}' is not registered. Available: ${Array.from(agents.keys()).join(", ")}`,
         );
       }
-      defaultAgentName = this.config.defaultAgent;
-    } else if (fileDefault && agents.has(fileDefault)) {
-      defaultAgentName = fileDefault;
+      return this.config.defaultAgent;
     }
 
-    return { agents, defaultAgentName };
+    const codeDefault = Object.keys(merged)
+      .filter(
+        (id) => merged[id].src.origin === "code" && merged[id].def.default,
+      )
+      .sort()[0];
+    if (codeDefault) return codeDefault;
+
+    if (fileDefault && agents.has(fileDefault)) return fileDefault;
+
+    return agents.keys().next().value ?? null;
   }
 
-  private resolvedAgentsDir(): string | null {
-    if (this.config.dir === false) return null;
-    const dir = this.config.dir ?? DEFAULT_AGENTS_DIR;
-    return path.isAbsolute(dir) ? dir : path.resolve(process.cwd(), dir);
+  /**
+   * Emits the one-time deprecation warning for the `agents({ agents })` map.
+   * Guarded so `reload()` (which re-runs `buildAgentRegistry`) doesn't spam it.
+   */
+  private warnAgentsMapDeprecated(): void {
+    if (this.agentsMapDeprecationWarned) return;
+    this.agentsMapDeprecationWarned = true;
+    logger.warn(
+      "agents({ agents: { ... } }) is deprecated. Put each code agent in its own folder under " +
+        "server/agents/<id>/agent.ts (export default createAgent({ ... })) and it is discovered " +
+        "automatically — the call collapses to agents({ ... }) with no agent map. The `agents` field " +
+        "still works but will be removed in a future minor. See docs/plugins/agents.md.",
+    );
   }
 
-  private async loadFileDefinitions(): Promise<{
+  /**
+   * One-time deprecation warning for markdown agents still living in
+   * `config/agents/`. Guarded so `reload()` doesn't spam it.
+   */
+  private warnConfigAgentsDeprecated(): void {
+    if (this.configAgentsDeprecationWarned) return;
+    this.configAgentsDeprecationWarned = true;
+    logger.warn(
+      "Markdown agents under config/agents/ are deprecated. Move each config/agents/<id>/agent.md to " +
+        "server/agents/<id>/agent.md — every agent now lives in one place (server/agents). config/agents " +
+        "is still read for now but will be removed in a future minor. See docs/plugins/agents.md.",
+    );
+  }
+
+  private resolvedAgentsDir(): string {
+    return path.resolve(process.cwd(), CODE_AGENTS_SOURCE_DIR);
+  }
+
+  /**
+   * Discovers code agents (see {@link resolveCodeAgentsDir} and
+   * {@link loadCodeAgentsFromDir}). Warns if sources exist but nothing was
+   * discovered — usually the build didn't emit the compiled agents — unless
+   * the deprecated `agents({ agents })` map is carrying them instead.
+   */
+  private async loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
+    const resolved = resolveCodeAgentsDir({
+      cwd: process.cwd(),
+      exists: existsSync,
+    });
+
+    const discovered = await loadCodeAgentsFromDir(resolved.dir, {
+      extensions: resolved.extensions,
+    });
+
+    const usingDeprecatedMap = Object.keys(this.config.agents ?? {}).length > 0;
+    const sourceDir = this.resolvedAgentsDir();
+    if (
+      Object.keys(discovered).length === 0 &&
+      !usingDeprecatedMap &&
+      this.hasCodeAgentSources(sourceDir)
+    ) {
+      logger.warn(
+        "Found code-agent sources in %s but discovered no code agents (scanned %s). " +
+          "In a production build, ensure `<dir>/*/agent.ts` is included as tsdown entries so the compiled agents are emitted.",
+        sourceDir,
+        resolved.dir,
+      );
+    }
+
+    return discovered;
+  }
+
+  /** True when `dir` holds at least one `<id>/agent.ts` folder. */
+  private hasCodeAgentSources(dir: string): boolean {
+    try {
+      return readdirSync(dir, { withFileTypes: true }).some((e) => {
+        if (!e.isDirectory() && !e.isSymbolicLink()) return false;
+        try {
+          return readdirSync(path.join(dir, e.name)).includes("agent.ts");
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private async loadFileDefinitions(
+    codeAgents: Record<string, AgentDefinition>,
+  ): Promise<{
     defs: Record<string, AgentDefinition>;
     defaultAgent: string | null;
   }> {
-    const dir = this.resolvedAgentsDir();
-    if (!dir) return { defs: {}, defaultAgent: null };
+    const primaryDir = this.resolvedAgentsDir();
 
-    const pluginToolProviders = this.pluginProviderIndex();
-    const ambient = this.config.tools ?? {};
-
-    const result = await loadAgentsFromDir(dir, {
+    // Discovered code agents + the deprecated map resolve markdown `agents:`
+    // sub-agent references, so a markdown parent can delegate to a code child.
+    const baseCtx = {
       defaultModel: this.config.defaultModel,
-      availableTools: ambient,
-      plugins: pluginToolProviders,
-      codeAgents: this.config.agents,
+      availableTools: this.config.tools ?? {},
+      plugins: this.pluginProviderIndex(),
+    };
+
+    const legacyDir = path.resolve(process.cwd(), LEGACY_MARKDOWN_DIR);
+
+    // Common case: no deprecated config/agents/ dir → a single scan of server/agents.
+    if (!existsSync(legacyDir)) {
+      return loadAgentsFromDir(primaryDir, { ...baseCtx, codeAgents });
+    }
+
+    // Deprecated fallback: config/agents/ exists → scan it first, then server/agents
+    // with the legacy defs added as resolvable sub-agent targets, so a parent already
+    // moved to server/agents can still reference a child left in config/agents
+    // mid-migration. Code agents keep precedence; server/agents wins on an id clash.
+    const legacy = await loadAgentsFromDir(legacyDir, {
+      ...baseCtx,
+      codeAgents,
+    });
+    const primary = await loadAgentsFromDir(primaryDir, {
+      ...baseCtx,
+      codeAgents: { ...legacy.defs, ...codeAgents },
     });
 
-    return result;
+    if (Object.keys(legacy.defs).length === 0) return primary;
+
+    this.warnConfigAgentsDeprecated();
+    return {
+      defs: { ...legacy.defs, ...primary.defs },
+      defaultAgent: primary.defaultAgent ?? legacy.defaultAgent,
+    };
   }
 
   /**
@@ -1963,10 +2134,12 @@ function warnOnCapabilityMismatch(
 }
 
 /**
- * Plugin factory for the agents plugin. Reads `config/agents/*.md` by default,
- * resolves toolkits/tools from registered plugins, exposes `appkit.agents.*`
- * runtime API and mounts `POST /invocations` and `POST /responses` (aliased
- * non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable).
+ * Plugin factory for the agents plugin. Discovers agents from
+ * `server/agents/<id>/agent.{ts,md}` by default (markdown still in
+ * `config/agents/` is read as a deprecated fallback), resolves toolkits/tools
+ * from registered plugins, exposes the `appkit.agents.*` runtime API and mounts
+ * `POST /invocations` and `POST /responses` (aliased non-streaming invoke
+ * endpoints) plus `POST /chat` (streaming, HITL-capable).
  *
  * @example
  * ```ts

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { buildBaseSystemPrompt, composeSystemPrompt } from "../system-prompt";
 
 const emptyCtx = {

@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
+
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -8,6 +9,7 @@ import type {
   ToolProvider,
 } from "shared";
 import { z } from "zod";
+
 import {
   contentTypeFromPath,
   FILES_MAX_READ_SIZE,
@@ -35,8 +37,8 @@ import {
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest, ResourceRequirement } from "../../registry";
-import { ResourceType } from "../../registry";
+import type { ResourceRequirement } from "../../registry";
+import { defineManifest, ResourceType } from "../../registry";
 import { ApiError } from "../../workspace-client";
 import {
   FILES_DOWNLOAD_DEFAULTS,
@@ -67,9 +69,9 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
-  static manifest = manifest as PluginManifest;
+  static manifest = defineManifest<"files">(manifest);
   protected static description = "Files plugin for Databricks file operations";
-  protected declare config: IFilesConfig;
+  declare protected config: IFilesConfig;
 
   private volumeConnectors: Record<string, FilesConnector> = {};
   private volumeConfigs: Record<string, VolumeConfig> = {};

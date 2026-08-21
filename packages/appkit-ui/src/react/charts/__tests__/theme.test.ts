@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
 import {
   CHART_COLOR_VARS_CATEGORICAL,
   CHART_COLOR_VARS_DIVERGING,

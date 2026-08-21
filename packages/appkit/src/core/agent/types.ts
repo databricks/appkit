@@ -5,6 +5,7 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
+
 import type { GenerationParams } from "../../agents/databricks";
 import type { McpHostPolicyConfig } from "../../connectors/mcp";
 import type { FunctionTool } from "./tools/function-tool";
@@ -126,7 +127,7 @@ export interface AgentDefinition {
   /**
    * Stable identifier for the agent. **Optional and informational** —
    * when the definition is registered via `agents: { foo: def }` (code) or
-   * lives at `config/agents/<id>/agent.md` (markdown), the **registry key
+   * lives at `server/agents/<id>/agent.md` (markdown), the **registry key
    * always wins** and `name` is ignored. The agent will be reachable as
    * `foo` (or `<id>`) regardless of what this field contains.
    *
@@ -142,6 +143,14 @@ export interface AgentDefinition {
    * entirely.
    */
   name?: string;
+  /**
+   * Marks this agent as the default one chosen when a client doesn't name an
+   * agent. Mirrors markdown frontmatter `default: true`. When several agents
+   * set it, a code (discovered) agent wins over a markdown one, then the
+   * lowest id; an explicit `agents({ defaultAgent })` always overrides it.
+   * Defaults to `false`.
+   */
+  default?: boolean;
   /** System prompt body. For markdown-loaded agents this is the file body. */
   instructions: string;
   /**
@@ -206,11 +215,17 @@ export interface AutoInheritToolsConfig {
 }
 
 export interface AgentsPluginConfig extends BasePluginConfig {
-  /** Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable. */
-  dir?: string | false;
-  /** Code-defined agents, merged with file-loaded ones (code wins on key collision). */
+  /**
+   * @deprecated Put each code agent in its own folder under
+   * `server/agents/<id>/agent.ts` (`export default createAgent({ ... })`); it is
+   * discovered automatically at startup and the call collapses to
+   * `agents({ ... })` with no map. Still honored for backward compatibility
+   * (emits a one-time deprecation warning) but will be removed in a future
+   * minor. If both discovery and this map define the same id, discovery wins
+   * and the map entry is ignored.
+   */
   agents?: Record<string, AgentDefinition>;
-  /** Agent used when clients don't specify one. Defaults to the first-registered agent or the file with `default: true` frontmatter. */
+  /** Agent used when clients don't specify one. Precedence: this value, else a code agent with `default: true`, else a markdown agent with `default: true`, else the first-registered agent. */
   defaultAgent?: string;
   /** Default model for agents that don't specify their own (in code or frontmatter). */
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string;
@@ -234,7 +249,7 @@ export interface AgentsPluginConfig extends BasePluginConfig {
    * (the default), the agents plugin emits an `appkit.approval_pending` SSE
    * event before executing any tool whose annotation flags it as mutating —
    * `effect: "write" | "update" | "destructive"` (preferred) or the legacy
-   * `destructive: true` boolean — and waits for a `POST /chat/approve`
+   * `destructive: true` boolean — and waits for a `POST /api/agents/approve`
    * decision from the same user who initiated the stream. A missing decision
    * after `timeoutMs` auto-denies the call.
    */

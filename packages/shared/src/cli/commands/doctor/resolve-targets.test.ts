@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
+
 import {
   resolveTargetsFromCwd,
   targetsFromManifestFile,
@@ -160,7 +162,9 @@ describe("targetsFromManifestFile", () => {
     expect(targets).toEqual([]);
   });
 
-  it("excludes value-default and platform-injected fields from envVars", () => {
+  it("keeps only user-supplied fields, excluding cli/platform/static ones", () => {
+    // A synced manifest stamps `origin`. Only the user-supplied field should
+    // reach envVars; the cli-, platform-, and static-origin fields are excluded.
     const targets = targetsFromManifestFile(
       writeManifest({
         version: "2.0",
@@ -175,6 +179,10 @@ describe("targetsFromManifestFile", () => {
                   alias: "Postgres",
                   permission: "CAN_CONNECT_AND_CREATE",
                   fields: {
+                    instanceName: {
+                      env: "LAKEBASE_INSTANCE_NAME",
+                      origin: "user",
+                    },
                     endpointPath: { env: "LAKEBASE_ENDPOINT", origin: "cli" },
                     host: {
                       env: "PGHOST",
@@ -203,7 +211,47 @@ describe("targetsFromManifestFile", () => {
       }),
     );
     const pg = targets.find((t) => t.type === "postgres");
-    expect(pg?.envVars).toEqual(["LAKEBASE_ENDPOINT"]);
+    expect(pg?.envVars).toEqual(["LAKEBASE_INSTANCE_NAME"]);
+  });
+
+  it("excludes cli-origin fields, whether stamped or derived from `resolve`", () => {
+    // A stamped `origin: "cli"` (synced manifest) and an unstamped field with
+    // `resolve` (authored manifest) must both be treated as non-user, so
+    // doctor never reports them as MISSING user env vars.
+    const targets = targetsFromManifestFile(
+      writeManifest({
+        version: "2.0",
+        plugins: {
+          lakebase: {
+            requiredByTemplate: true,
+            resources: {
+              required: [
+                {
+                  type: "postgres",
+                  resourceKey: "pg",
+                  alias: "Postgres",
+                  permission: "CAN_CONNECT_AND_CREATE",
+                  fields: {
+                    // synced manifest: origin stamped by `plugin sync`
+                    stampedCli: { env: "LAKEBASE_ENDPOINT", origin: "cli" },
+                    // authored manifest: no stamped origin, resolve → cli
+                    derivedCli: {
+                      env: "LAKEBASE_HOST",
+                      resolve: "postgres:host",
+                    },
+                    // genuine user-supplied field survives
+                    user: { env: "LAKEBASE_INSTANCE_NAME" },
+                  },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      }),
+    );
+    const pg = targets.find((t) => t.type === "postgres");
+    expect(pg?.envVars).toEqual(["LAKEBASE_INSTANCE_NAME"]);
   });
 
   it("resolves fieldValues from a static `value` when the env var is unset", () => {

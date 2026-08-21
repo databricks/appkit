@@ -1,4 +1,5 @@
 import type { BasePluginConfig } from "shared";
+
 import type { LakebasePoolConfig } from "../../connectors/lakebase";
 
 /**

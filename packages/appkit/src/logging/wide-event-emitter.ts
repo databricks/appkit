@@ -1,4 +1,5 @@
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+
 import type { WideEventData } from "./wide-event";
 
 /**

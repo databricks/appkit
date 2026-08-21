@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import { z } from "zod";
+
 import type { AppKitTable, ColumnMeta } from "./types";
 
 /** Map an engine-neutral ColumnMeta.kind to a Zod base type */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import databricksLogo from "@/assets/databricks-logo.svg";
+
 import databricksLogoWhite from "@/assets/databricks-logo-white.svg";
+import databricksLogo from "@/assets/databricks-logo.svg";
 
 function useDarkMode() {
   const [isDark, setIsDark] = useState(() => {

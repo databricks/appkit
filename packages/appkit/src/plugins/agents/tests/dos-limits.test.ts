@@ -1,5 +1,6 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 import { chatRequestSchema, invocationsRequestSchema } from "../schemas";
@@ -57,7 +58,6 @@ beforeEach(() => {
         fn(),
     ),
     generateKey: vi.fn(() => "test-key"),
-    // biome-ignore lint/suspicious/noExplicitAny: test mock
   })) as any;
   process.env.NODE_ENV = "development";
 });
@@ -129,19 +129,17 @@ describe("invocationsRequestSchema — input caps", () => {
 
 describe("POST /chat — per-user concurrent-stream limit", () => {
   function seedPlugin(
-    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = { dir: false },
+    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = {},
   ): AgentsPlugin {
     const plugin = new AgentsPlugin(overrides);
     // Seed the agents map directly so _handleChat can resolve "hello"
     // without running setup() (which would require a live model).
-    // biome-ignore lint/suspicious/noExplicitAny: seeding private state
     (plugin as any).agents.set("hello", {
       name: "hello",
       instructions: "hi",
       adapter: { async *run() {} },
       toolIndex: new Map(),
     });
-    // biome-ignore lint/suspicious/noExplicitAny: seeding private state
     (plugin as any).defaultAgentName = "hello";
     return plugin;
   }
@@ -149,7 +147,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
   test("rejects with 429 + Retry-After when user is at-limit (default 5)", async () => {
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
-      // biome-ignore lint/suspicious/noExplicitAny: seeding
       (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
@@ -172,7 +169,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
   test("does not reject when another user is at-limit (per-user, not global)", async () => {
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
-      // biome-ignore lint/suspicious/noExplicitAny: seeding
       (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
@@ -180,7 +176,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     // Don't bother running the full stream — we assert only that 429 is
     // not the response status.
     const { res } = mockRes();
-    // biome-ignore lint/suspicious/noExplicitAny: stub _streamAgent to avoid needing a real adapter
     (plugin as any)._streamAgent = vi.fn(async () => undefined);
 
     await (
@@ -194,11 +189,9 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
 
   test("honours agents({ limits: { maxConcurrentStreamsPerUser } })", async () => {
     const plugin = seedPlugin({
-      dir: false,
       limits: { maxConcurrentStreamsPerUser: 2 },
     });
     for (let i = 0; i < 2; i++) {
-      // biome-ignore lint/suspicious/noExplicitAny: seeding
       (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
@@ -219,7 +212,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     // must mirror the underlying map across track/untrack and across
     // multiple users.
     const plugin = seedPlugin();
-    // biome-ignore lint/suspicious/noExplicitAny: private state probe
     const t = plugin as any;
 
     expect(t.countUserStreams("alice")).toBe(0);
@@ -252,7 +244,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     // rate-limit gate that /chat enforces, letting clients bypass the cap.
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
-      // biome-ignore lint/suspicious/noExplicitAny: seeding
       (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
@@ -278,8 +269,7 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
 
 describe("resolvedLimits — default values", () => {
   test("exposes the documented MVP defaults when unconfigured", () => {
-    const plugin = new AgentsPlugin({ dir: false });
-    // biome-ignore lint/suspicious/noExplicitAny: read private getter
+    const plugin = new AgentsPlugin({});
     const limits = (plugin as any).resolvedLimits;
     expect(limits).toEqual({
       maxConcurrentStreamsPerUser: 5,
@@ -291,10 +281,8 @@ describe("resolvedLimits — default values", () => {
 
   test("lets callers override any subset", () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxToolCalls: 100 },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: read private
     const limits = (plugin as any).resolvedLimits;
     expect(limits.maxToolCalls).toBe(100);
     expect(limits.maxConcurrentStreamsPerUser).toBe(5);
@@ -344,12 +332,10 @@ describe("runSubAgent — depth guard", () => {
 
   test("rejects when depth exceeds the configured maximum", async () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxSubAgentDepth: 2 },
     });
     const runState = makeRunState(plugin, { maxSubAgentDepth: 2 });
     await expect(
-      // biome-ignore lint/suspicious/noExplicitAny: call private method directly
       (plugin as any).runSubAgent(
         runState,
         { name: "child", toolIndex: new Map() },
@@ -361,13 +347,11 @@ describe("runSubAgent — depth guard", () => {
 
   test("accepts at the boundary (depth === limit)", async () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxSubAgentDepth: 3 },
       agents: {},
     });
 
     const stubAdapter = {
-      // biome-ignore lint/suspicious/noExplicitAny: adapter shape not under test
       async *run(): any {
         yield { type: "message", content: "hello from depth-3" };
       },
@@ -375,13 +359,11 @@ describe("runSubAgent — depth guard", () => {
     const child = {
       name: "child",
       instructions: "test",
-      // biome-ignore lint/suspicious/noExplicitAny: stub shape
       adapter: stubAdapter as any,
       toolIndex: new Map(),
     };
 
     const runState = makeRunState(plugin, { maxSubAgentDepth: 3 });
-    // biome-ignore lint/suspicious/noExplicitAny: call private
     const result = await (plugin as any).runSubAgent(
       runState,
       child,

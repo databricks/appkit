@@ -1,4 +1,5 @@
 import type { AgentToolDefinition } from "shared";
+
 import { applyToolkitOptions } from "./toolkit-options";
 import type { ToolRegistry } from "./tools/define-tool";
 import { toToolJSONSchema } from "./tools/json-schema";

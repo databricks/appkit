@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { formatLabel, formatValue, toD3Format } from "./index";
 
 describe("js/format formatValue", () => {

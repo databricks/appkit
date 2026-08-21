@@ -1,7 +1,8 @@
 import type { BasePluginConfig, IAppRouter } from "shared";
+
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { FileChoiceStore, type UiChoiceRecord } from "./choice-sink";
 import manifest from "./manifest.json";
 
@@ -25,7 +26,7 @@ interface ConfirmRequestBody {
  * per `<Variants>` id — and the plugin only records; it never edits source.
  */
 class UiVariantsPlugin extends Plugin<BasePluginConfig> {
-  static manifest = manifest as PluginManifest<"uiVariants">;
+  static manifest = defineManifest<"uiVariants">(manifest);
 
   protected static description =
     "Dev-only recorder for the <Variants> UI picker";

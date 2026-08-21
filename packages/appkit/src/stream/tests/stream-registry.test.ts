@@ -1,5 +1,6 @@
 import type { Context } from "@opentelemetry/api";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { EventRingBuffer } from "../buffers";
 import { StreamRegistry } from "../stream-registry";
 import type { StreamEntry } from "../types";

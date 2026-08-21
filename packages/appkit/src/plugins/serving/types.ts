@@ -21,7 +21,7 @@ export interface IServingConfig extends BasePluginConfig {
  * Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation.
  * When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint.
  */
-// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation
+// oxlint-disable-next-line typescript/no-empty-object-type -- intentionally empty — populated via module augmentation
 export interface ServingEndpointRegistry {}
 
 /** Shape of a single registry entry. */

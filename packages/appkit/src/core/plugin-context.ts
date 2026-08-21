@@ -1,7 +1,12 @@
 import type express from "express";
 import type { BasePlugin, IAppRequest, ToolProvider } from "shared";
+
 import { createLogger } from "../logging/logger";
-import { SpanStatusCode, TelemetryManager } from "../telemetry";
+import {
+  type ITelemetry,
+  SpanStatusCode,
+  TelemetryManager,
+} from "../telemetry";
 import { forwardAsyncErrors } from "../utils/safe-handler";
 
 const logger = createLogger("plugin-context");
@@ -62,7 +67,20 @@ export class PluginContext {
     LifecycleEvent,
     Set<() => void | Promise<void>>
   >();
-  private telemetry = TelemetryManager.getProvider("plugin-context");
+  private telemetry: ITelemetry;
+
+  /**
+   * @param deps.telemetry - Telemetry provider used for `executeTool` spans.
+   *   Defaults to the shared `"plugin-context"` provider — the production
+   *   path. Injectable so the testing kit can pass a mock provider and run
+   *   `executeTool` without a live OpenTelemetry pipeline. This is the only
+   *   seam the mock context needs; route buffering and the tool registry are
+   *   exercised through the existing public API.
+   */
+  constructor(deps: { telemetry?: ITelemetry } = {}) {
+    this.telemetry =
+      deps.telemetry ?? TelemetryManager.getProvider("plugin-context");
+  }
 
   /**
    * Register a route on the root Express application.

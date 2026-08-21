@@ -1,5 +1,6 @@
 import type { AgentToolDefinition } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
 import { isToolProvider, PluginContext } from "../plugin-context";
 
 /**

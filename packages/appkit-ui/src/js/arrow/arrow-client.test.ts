@@ -1,5 +1,6 @@
 import { Table, tableToIPC, Utf8, vectorFromArray } from "apache-arrow";
 import { describe, expect, test } from "vitest";
+
 import { ArrowClient } from "./arrow-client";
 
 /** Build an Arrow IPC stream (2 cols, 2 rows) with the given field names. */

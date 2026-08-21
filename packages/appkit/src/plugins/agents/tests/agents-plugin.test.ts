@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
 import type {
   AgentAdapter,
   AgentInput,
@@ -10,6 +11,7 @@ import type {
 } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
+
 import { CacheManager } from "../../../cache";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
@@ -84,9 +86,13 @@ function makeToolProvider(
 }
 
 let tmpDir: string;
+let priorCwd: string;
 
 beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agents-plugin-"));
+  // Discovery scans <cwd>/server/agents, so run in tmpDir and write agents there.
+  priorCwd = process.cwd();
+  process.chdir(tmpDir);
   const storage = {
     get: vi.fn(),
     set: vi.fn(),
@@ -95,11 +101,11 @@ beforeEach(async () => {
     healthCheck: vi.fn(async () => true),
     close: vi.fn(async () => {}),
   };
-  // biome-ignore lint/suspicious/noExplicitAny: test-only CacheManager wiring
   await CacheManager.getInstance({ storage: storage as any });
 });
 
 afterEach(() => {
+  process.chdir(priorCwd);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -110,7 +116,7 @@ function instantiate(config: AgentsPluginConfig, ctx?: FakeContext) {
 }
 
 function writeMarkdownAgent(dir: string, id: string, content: string) {
-  const folder = path.join(dir, id);
+  const folder = path.join(dir, "server", "agents", id);
   fs.mkdirSync(folder, { recursive: true });
   fs.writeFileSync(path.join(folder, "agent.md"), content, "utf-8");
 }
@@ -118,7 +124,6 @@ function writeMarkdownAgent(dir: string, id: string, content: string) {
 describe("AgentsPlugin", () => {
   test("registers code-defined agents and exposes them via exports", async () => {
     const plugin = instantiate({
-      dir: false,
       agents: {
         support: {
           instructions: "You help customers.",
@@ -143,7 +148,6 @@ describe("AgentsPlugin", () => {
       "---\ndefault: true\n---\nYou are helpful.",
     );
     const plugin = instantiate({
-      dir: tmpDir,
       defaultModel: stubAdapter(),
     });
     await plugin.setup();
@@ -159,7 +163,6 @@ describe("AgentsPlugin", () => {
   test("code definitions override markdown on key collision", async () => {
     writeMarkdownAgent(tmpDir, "support", "---\n---\nFrom markdown.");
     const plugin = instantiate({
-      dir: tmpDir,
       defaultModel: stubAdapter(),
       agents: {
         support: {
@@ -184,7 +187,7 @@ describe("AgentsPlugin", () => {
     // client is closed" mid-conversation. The fix removes the
     // synchronous close — the existing client survives reload and
     // dispatches keep working.
-    const plugin = instantiate({ dir: false });
+    const plugin = instantiate({});
     const closeSpy = vi.fn(async () => {});
     const fakeClient = {
       close: closeSpy,
@@ -192,13 +195,11 @@ describe("AgentsPlugin", () => {
       connectAll: vi.fn(async () => ({ connected: [], failed: [] })),
       getAllToolDefinitions: () => [],
     };
-    // biome-ignore lint/suspicious/noExplicitAny: seeding private mcpClient
     (plugin as any).mcpClient = fakeClient;
     await plugin.setup();
     await plugin.reload();
 
     expect(closeSpy).not.toHaveBeenCalled();
-    // biome-ignore lint/suspicious/noExplicitAny: read private mcpClient
     expect((plugin as any).mcpClient).toBe(fakeClient);
   });
 
@@ -218,7 +219,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: tmpDir,
         defaultModel: stubAdapter(),
         agents: {
           manual: {
@@ -263,7 +263,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: tmpDir,
         defaultModel: stubAdapter(),
         autoInheritTools: { file: true },
       },
@@ -298,7 +297,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: false,
         defaultModel: stubAdapter(),
         autoInheritTools: true,
         agents: {
@@ -346,10 +344,7 @@ describe("AgentsPlugin", () => {
       "---\ntools:\n  - plugin:analytics\n---\nAnalyst.",
     );
 
-    const plugin = instantiate(
-      { dir: tmpDir, defaultModel: stubAdapter() },
-      ctx,
-    );
+    const plugin = instantiate({ defaultModel: stubAdapter() }, ctx);
     await plugin.setup();
 
     const api = plugin.exports() as {
@@ -363,7 +358,6 @@ describe("AgentsPlugin", () => {
 
   test("registers sub-agents as agent-<key> tools", async () => {
     const plugin = instantiate({
-      dir: false,
       agents: {
         supervisor: {
           instructions: "Supervise",
@@ -416,7 +410,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -455,7 +448,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -490,7 +482,6 @@ describe("AgentsPlugin", () => {
       const ctx = fakeContext([]);
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -539,7 +530,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           autoInheritTools: { code: true },
           agents: {
             support: {
@@ -583,7 +573,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           autoInheritTools: { code: true },
           agents: {
             support: {
@@ -623,7 +612,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -650,7 +638,6 @@ describe("AgentsPlugin", () => {
       const toolsFn = vi.fn(() => ({}));
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -668,9 +655,8 @@ describe("AgentsPlugin", () => {
 
   describe("hosted-supervisor tools and capability negotiation", () => {
     test("indexes supervisorTools.* entries with source 'hosted-supervisor'", async () => {
-      const { supervisorTools, SUPERVISOR_EXTENSION_KEY } = await import(
-        "../../../agents/supervisor-api"
-      );
+      const { supervisorTools, SUPERVISOR_EXTENSION_KEY } =
+        await import("../../../agents/supervisor-api");
       const ctx = fakeContext([]);
 
       const saAdapter: AgentAdapter = {
@@ -683,7 +669,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             assistant: {
               instructions: "x",
@@ -702,7 +687,6 @@ describe("AgentsPlugin", () => {
       await plugin.setup();
 
       const api = plugin.exports() as {
-        // biome-ignore lint/suspicious/noExplicitAny: structural test access
         get: (name: string) => any;
       };
       const entry = api.get("assistant").toolIndex.get("nyc");
@@ -714,15 +698,13 @@ describe("AgentsPlugin", () => {
     });
 
     test("warns at setup when hosted-supervisor tools paired with non-supervisor adapter", async () => {
-      const { supervisorTools } = await import(
-        "../../../agents/supervisor-api"
-      );
+      const { supervisorTools } =
+        await import("../../../agents/supervisor-api");
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const ctx = fakeContext([]);
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             mismatched: {
               instructions: "x",
@@ -761,7 +743,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             leaky: {
               instructions: "x",
