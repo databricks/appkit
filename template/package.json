@@ -17,7 +17,6 @@
     "format:fix": "prettier --write .",
     "test": "vitest run",
     "clean": "rm -rf client/dist dist build node_modules",
-    "postinstall": "npm run typegen",
     "prebuild": "npm run sync && npm run typegen -- --wait",
     "predev": "npm run sync && npm run typegen",
     "sync": "appkit plugin sync --write --silent",
