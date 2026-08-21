@@ -40,6 +40,12 @@ export const chatRequestSchema = z.object({
    * to a run-id-shaped length since it reaches trace metadata and logs.
    */
   mlflowRunId: z.string().max(64).optional(),
+  /**
+   * Optional skill to force-load for this turn (deterministic `/skill-name`
+   * invocation). Its instructions are injected into the turn's context; the
+   * model can still auto-load others via the `load_skill` tool.
+   */
+  skill: z.string().optional(),
 });
 
 const messageItemSchema = z.object({

@@ -1,7 +1,13 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import type express from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CacheManager } from "../../../cache";
+import { resolveSkillCatalog } from "../../../core/agent/skills/resolve-catalog";
+import type { SkillDefinition } from "../../../core/agent/skills/types";
 import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
@@ -456,5 +462,154 @@ describe("runSubAgent — sub-agent event forwarding", () => {
     expect(types).toContain("tool_call");
     expect(types).toContain("tool_result");
     expect(types).toContain("message_delta");
+  });
+});
+
+describe("dispatchToolCall — skill built-ins", () => {
+  let skillDir = "";
+
+  afterEach(() => {
+    if (skillDir) {
+      fs.rmSync(skillDir, { recursive: true, force: true });
+      skillDir = "";
+    }
+  });
+
+  function skillCatalog(skills: SkillDefinition[]) {
+    return resolveSkillCatalog({
+      agentName: "a",
+      perAgentSkills: skills,
+      globalSkills: [],
+      autoInherit: false,
+    });
+  }
+
+  function skillToolIndex(
+    catalog: ReturnType<typeof skillCatalog>,
+  ): Map<string, unknown> {
+    const readOnly = { effect: "read" as const };
+    return new Map<string, unknown>([
+      [
+        "load_skill",
+        {
+          source: "skill",
+          builtin: "load_skill",
+          catalog,
+          def: {
+            name: "load_skill",
+            description: "load",
+            parameters: { type: "object" },
+            annotations: readOnly,
+          },
+        },
+      ],
+      [
+        "read_skill_file",
+        {
+          source: "skill",
+          builtin: "read_skill_file",
+          catalog,
+          def: {
+            name: "read_skill_file",
+            description: "read",
+            parameters: { type: "object" },
+            annotations: readOnly,
+          },
+        },
+      ],
+    ]);
+  }
+
+  test("load_skill returns the skill body + manifest and skips the gate", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    const catalog = skillCatalog([
+      {
+        name: "pdf",
+        description: "d",
+        body: "Detailed PDF steps.",
+        source: "bundle-agent",
+        dir: "/fake/pdf",
+        files: ["reference.md"],
+      },
+    ]);
+    // biome-ignore lint/suspicious/noExplicitAny: stub gate to assert it never fires
+    (plugin as any).approvalGate.wait = vi.fn();
+
+    const result = await callDispatch(plugin, {
+      runState,
+      toolIndex: skillToolIndex(catalog),
+      name: "load_skill",
+      args: { skill: "pdf" },
+    });
+
+    expect(String(result)).toContain("Detailed PDF steps.");
+    expect(String(result)).toContain("reference.md");
+    // biome-ignore lint/suspicious/noExplicitAny: assertion on stub
+    expect((plugin as any).approvalGate.wait).not.toHaveBeenCalled();
+  });
+
+  test("load_skill errors on an unknown skill name", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    const catalog = skillCatalog([
+      {
+        name: "pdf",
+        description: "d",
+        body: "b",
+        source: "bundle-agent",
+        dir: "/fake/pdf",
+        files: [],
+      },
+    ]);
+
+    await expect(
+      callDispatch(plugin, {
+        runState,
+        toolIndex: skillToolIndex(catalog),
+        name: "load_skill",
+        args: { skill: "ghost" },
+      }),
+    ).rejects.toThrow(/Unknown skill/);
+  });
+
+  test("read_skill_file reads a listed file and rejects an unlisted path", async () => {
+    skillDir = fs.mkdtempSync(path.join(os.tmpdir(), "skill-dispatch-"));
+    fs.writeFileSync(
+      path.join(skillDir, "reference.md"),
+      "the reference",
+      "utf-8",
+    );
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    const catalog = skillCatalog([
+      {
+        name: "pdf",
+        description: "d",
+        body: "b",
+        source: "bundle-agent",
+        dir: skillDir,
+        files: ["reference.md"],
+      },
+    ]);
+    const toolIndex = skillToolIndex(catalog);
+
+    await expect(
+      callDispatch(plugin, {
+        runState,
+        toolIndex,
+        name: "read_skill_file",
+        args: { skill: "pdf", path: "reference.md" },
+      }),
+    ).resolves.toContain("the reference");
+
+    await expect(
+      callDispatch(plugin, {
+        runState,
+        toolIndex,
+        name: "read_skill_file",
+        args: { skill: "pdf", path: "../secret" },
+      }),
+    ).rejects.toThrow();
   });
 });

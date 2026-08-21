@@ -27,6 +27,12 @@ type ResolvedToolEntry =
   def: AgentToolDefinition;
   source: "hosted-supervisor";
   spec: SupervisorTool;
+}
+  | {
+  builtin: "load_skill" | "read_skill_file";
+  catalog: ResolvedSkillCatalog;
+  def: AgentToolDefinition;
+  source: "skill";
 };
 ```
 
@@ -179,3 +185,41 @@ is intentionally NOT included in the `tools` array passed to
 ```ts
 spec: SupervisorTool;
 ```
+
+```ts
+{
+  builtin: "load_skill" | "read_skill_file";
+  catalog: ResolvedSkillCatalog;
+  def: AgentToolDefinition;
+  source: "skill";
+}
+```
+
+### builtin
+
+```ts
+builtin: "load_skill" | "read_skill_file";
+```
+
+### catalog
+
+```ts
+catalog: ResolvedSkillCatalog;
+```
+
+### def
+
+```ts
+def: AgentToolDefinition;
+```
+
+### source
+
+```ts
+source: "skill";
+```
+
+Built-in skill tools (`load_skill`, `read_skill_file`) injected into
+any agent that has a visible skill catalog. Executed in-process by the
+agents plugin against the agent's resolved catalog; read-only, so they
+bypass the approval gate.
