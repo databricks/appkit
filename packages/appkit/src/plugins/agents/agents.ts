@@ -48,6 +48,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import type { WorkspaceClient } from "../../workspace-client";
+import { ActiveStreamTracker } from "./active-stream-tracker";
 import {
   buildAdapterExtensions,
   supervisorToolDescription,
@@ -85,7 +86,6 @@ import {
   renderForcedSkill,
   resolveAgentSkills,
 } from "./skill-loader";
-import { StreamRegistry } from "./stream-registry";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 import {
@@ -111,7 +111,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * Active SSE streams + per-user counts (the O(1) concurrency-limit check).
    * Mutated only via {@link trackStream} / {@link untrackStream}.
    */
-  private streams = new StreamRegistry();
+  private streams = new ActiveStreamTracker();
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
