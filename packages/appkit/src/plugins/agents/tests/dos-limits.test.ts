@@ -4,6 +4,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 import { chatRequestSchema, invocationsRequestSchema } from "../schemas";
+import {
+  type RunState,
+  runSubAgent,
+  type ToolDispatchDeps,
+} from "../tool-dispatch";
 
 /**
  * Exercises the four DoS caps landed for MVP:
@@ -290,6 +295,12 @@ describe("resolvedLimits — default values", () => {
   });
 });
 
+function depsOf(plugin: AgentsPlugin): ToolDispatchDeps {
+  return (
+    plugin as unknown as { toolDispatchDeps: () => ToolDispatchDeps }
+  ).toolDispatchDeps();
+}
+
 describe("runSubAgent — depth guard", () => {
   /**
    * Builds a minimal `RunState` matching the shape carried by `_streamAgent`
@@ -336,9 +347,10 @@ describe("runSubAgent — depth guard", () => {
     });
     const runState = makeRunState(plugin, { maxSubAgentDepth: 2 });
     await expect(
-      (plugin as any).runSubAgent(
-        runState,
-        { name: "child", toolIndex: new Map() },
+      runSubAgent(
+        depsOf(plugin),
+        runState as unknown as RunState,
+        { name: "child", toolIndex: new Map() } as any,
         {},
         3, // exceeds limit 2
       ),
@@ -364,9 +376,10 @@ describe("runSubAgent — depth guard", () => {
     };
 
     const runState = makeRunState(plugin, { maxSubAgentDepth: 3 });
-    const result = await (plugin as any).runSubAgent(
-      runState,
-      child,
+    const result = await runSubAgent(
+      depsOf(plugin),
+      runState as unknown as RunState,
+      child as any,
       { input: "test" },
       3, // at the limit, not over
     );

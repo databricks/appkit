@@ -8,8 +8,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { resolveSkillCatalog } from "../../../core/agent/skills/resolve-catalog";
 import type { SkillDefinition } from "../../../core/agent/skills/types";
+import type { ResolvedToolEntry } from "../../../core/agent/types";
 import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
+import {
+  dispatchToolCall,
+  type RunState,
+  runSubAgent,
+  type ToolDispatchDeps,
+} from "../tool-dispatch";
 
 /**
  * Verifies that `dispatchToolCall` is the single source of truth for the
@@ -83,6 +90,13 @@ function makeRunState(plugin: AgentsPlugin) {
   return { runState, pushed, plugin };
 }
 
+/** The plugin's own dispatch-deps builder, reused so tests dispatch exactly as the plugin does. */
+function depsOf(plugin: AgentsPlugin): ToolDispatchDeps {
+  return (
+    plugin as unknown as { toolDispatchDeps: () => ToolDispatchDeps }
+  ).toolDispatchDeps();
+}
+
 function callDispatch(
   plugin: AgentsPlugin,
   args: {
@@ -93,19 +107,10 @@ function callDispatch(
     depth?: number;
   },
 ): Promise<unknown> {
-  return (
-    plugin as unknown as {
-      dispatchToolCall: (
-        runState: unknown,
-        toolIndex: Map<string, unknown>,
-        name: string,
-        args: unknown,
-        depth: number,
-      ) => Promise<unknown>;
-    }
-  ).dispatchToolCall(
-    args.runState,
-    args.toolIndex,
+  return dispatchToolCall(
+    depsOf(plugin),
+    args.runState as RunState,
+    args.toolIndex as unknown as Map<string, ResolvedToolEntry>,
     args.name,
     args.args,
     args.depth ?? 0,
@@ -427,7 +432,13 @@ describe("runSubAgent — sub-agent event forwarding", () => {
     } as any;
 
     await expect(
-      (plugin as any).runSubAgent(runState, child, { input: "go" }, 3),
+      runSubAgent(
+        depsOf(plugin),
+        runState as unknown as RunState,
+        child,
+        { input: "go" },
+        3,
+      ),
     ).rejects.toThrow(/Sub-agent depth exceeded \(limit 2\)/);
     expect(childRun).not.toHaveBeenCalled();
   });
@@ -455,7 +466,13 @@ describe("runSubAgent — sub-agent event forwarding", () => {
       toolIndex: new Map(),
     } as any;
 
-    await (plugin as any).runSubAgent(runState, child, { input: "go" }, 1);
+    await runSubAgent(
+      depsOf(plugin),
+      runState as unknown as RunState,
+      child,
+      { input: "go" },
+      1,
+    );
 
     const types = pushed.map((e) => (e as { type: string }).type);
     expect(types).not.toContain("metadata");
