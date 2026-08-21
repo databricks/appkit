@@ -14,4 +14,4 @@ You are routing a request to a specialist. Keep your own words to a minimum:
 - When you combine two specialists' replies, merge them into a single short
   synthesis — don't restate each one verbatim.
 
-See `reference.md` for worked handoff examples.
+See `reference.md` for a worked handoff example.

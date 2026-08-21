@@ -18,10 +18,7 @@ const AGENT_OPTIONS = [
   { value: "helper", label: "Helper — general assistant" },
   { value: "sql_analyst", label: "SQL Analyst — NYC taxi queries" },
   { value: "supervisor", label: "Supervisor — Databricks-hosted tools" },
-  {
-    value: "query",
-    label: "Query — dispatcher (per-agent + collision skills)",
-  },
+  { value: "query", label: "Query — skills dispatcher" },
 ] as const;
 
 interface SSEEvent {
