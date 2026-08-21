@@ -58,7 +58,7 @@ import type {
 import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
+import { defineManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -149,11 +149,7 @@ interface RunState {
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
-  // Routed through `unknown`: the optional resources have differing `fields`
-  // keys (serving `name`, experiment `experimentId`), which TS widens to an
-  // incompatible union on the JSON import. The shape is validated at runtime
-  // against the plugin-manifest schema.
-  static manifest = manifest as unknown as PluginManifest;
+  static manifest = defineManifest<"agents">(manifest);
   static phase: PluginPhase = "deferred";
 
   declare protected config: AgentsPluginConfig;

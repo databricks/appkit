@@ -147,6 +147,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
+| [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
