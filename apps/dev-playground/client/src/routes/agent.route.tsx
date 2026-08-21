@@ -224,12 +224,10 @@ function AgentRoute() {
     inputRef.current?.focus();
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight as the query changes
   useEffect(() => {
     setSkillIndex(0);
   }, [input, agent]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
