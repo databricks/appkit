@@ -71,6 +71,7 @@ import {
   loadCodeAgents,
   resolveDefaultAgent,
 } from "./registry";
+import { resolveApprovalPolicy, resolveLimits } from "./resolve-config";
 import {
   approvalRequestSchema,
   cancelRequestSchema,
@@ -172,23 +173,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     timeoutMs: number;
   } {
     if (this.cachedApprovalPolicy) return this.cachedApprovalPolicy;
-    const cfg = this.config.approval ?? {};
-    const APPROVAL_TIMEOUT_FLOOR_MS = 1_000;
-    const APPROVAL_TIMEOUT_DEFAULT_MS = 60_000;
-    let timeoutMs = cfg.timeoutMs ?? APPROVAL_TIMEOUT_DEFAULT_MS;
-    if (!Number.isFinite(timeoutMs) || timeoutMs < APPROVAL_TIMEOUT_FLOOR_MS) {
-      logger.warn(
-        "approval.timeoutMs=%s is below the %sms floor; using default %sms instead. Mutating tool calls would otherwise auto-deny before any UI could respond.",
-        cfg.timeoutMs,
-        APPROVAL_TIMEOUT_FLOOR_MS,
-        APPROVAL_TIMEOUT_DEFAULT_MS,
-      );
-      timeoutMs = APPROVAL_TIMEOUT_DEFAULT_MS;
-    }
-    this.cachedApprovalPolicy = {
-      requireForDestructive: cfg.requireForDestructive ?? true,
-      timeoutMs,
-    };
+    this.cachedApprovalPolicy = resolveApprovalPolicy(this.config);
     return this.cachedApprovalPolicy;
   }
 
@@ -199,16 +184,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     maxSubAgentDepth: number;
     toolCallTimeoutMs: number;
   } {
-    const cfg = this.config.limits ?? {};
-    return {
-      maxConcurrentStreamsPerUser: cfg.maxConcurrentStreamsPerUser ?? 5,
-      maxToolCalls: cfg.maxToolCalls ?? 50,
-      maxSubAgentDepth: cfg.maxSubAgentDepth ?? 3,
-      // 5 minutes is the floor for cold SQL Warehouse / long Genie /
-      // long Lakebase calls. The previous PluginContext default of 30s
-      // truncated legitimate analytics queries on cold compute.
-      toolCallTimeoutMs: cfg.toolCallTimeoutMs ?? 300_000,
-    };
+    return resolveLimits(this.config);
   }
 
   /** Count active streams owned by a given user. O(1). */
