@@ -34,11 +34,11 @@ interface AgentsClientConfig {
  * The template ships a single coordinator agent and uses the agents
  * plugin's sub-agent feature to compose two authoring forms behind it:
  *
- *   - `planner` (markdown, `config/agents/planner/agent.md`) is the
+ *   - `planner` (markdown, `server/agents/planner/agent.md`) is the
  *     user-facing chat: pure prose, no tools, opinionated planning
  *     prompt. Declares `agents: [helper]` in its frontmatter so it
  *     can delegate computational actions.
- *   - `helper` (code, `server/agents/helper.ts`) holds the tools
+ *   - `helper` (code, `server/agents/helper/agent.ts`) holds the tools
  *     (`current_time`, `count_words`). It's reachable from planner as
  *     the `agent-helper` tool; planner calls it when the user
  *     explicitly asks for a side-effecty action.
@@ -132,10 +132,10 @@ export function AgentChat() {
         <p className="text-sm text-muted-foreground mt-1">
           You're talking to <code className="mx-1">planner</code>, a
           markdown agent at
-          <code className="mx-1">config/agents/planner/agent.md</code>.
+          <code className="mx-1">server/agents/planner/agent.md</code>.
           For computational actions it delegates to its sub-agent
           <code className="mx-1">helper</code> (code-defined at
-          <code className="mx-1">server/agents/helper.ts</code>), which
+          <code className="mx-1">server/agents/helper/agent.ts</code>), which
           surfaces as an
           <code className="mx-1">agent-helper</code> tool call.
         </p>

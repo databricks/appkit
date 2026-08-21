@@ -86,9 +86,13 @@ function makeToolProvider(
 }
 
 let tmpDir: string;
+let priorCwd: string;
 
 beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agents-plugin-"));
+  // Discovery scans <cwd>/server/agents, so run in tmpDir and write agents there.
+  priorCwd = process.cwd();
+  process.chdir(tmpDir);
   const storage = {
     get: vi.fn(),
     set: vi.fn(),
@@ -101,6 +105,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  process.chdir(priorCwd);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -111,7 +116,7 @@ function instantiate(config: AgentsPluginConfig, ctx?: FakeContext) {
 }
 
 function writeMarkdownAgent(dir: string, id: string, content: string) {
-  const folder = path.join(dir, id);
+  const folder = path.join(dir, "server", "agents", id);
   fs.mkdirSync(folder, { recursive: true });
   fs.writeFileSync(path.join(folder, "agent.md"), content, "utf-8");
 }
@@ -119,7 +124,6 @@ function writeMarkdownAgent(dir: string, id: string, content: string) {
 describe("AgentsPlugin", () => {
   test("registers code-defined agents and exposes them via exports", async () => {
     const plugin = instantiate({
-      dir: false,
       agents: {
         support: {
           instructions: "You help customers.",
@@ -144,7 +148,6 @@ describe("AgentsPlugin", () => {
       "---\ndefault: true\n---\nYou are helpful.",
     );
     const plugin = instantiate({
-      dir: tmpDir,
       defaultModel: stubAdapter(),
     });
     await plugin.setup();
@@ -160,7 +163,6 @@ describe("AgentsPlugin", () => {
   test("code definitions override markdown on key collision", async () => {
     writeMarkdownAgent(tmpDir, "support", "---\n---\nFrom markdown.");
     const plugin = instantiate({
-      dir: tmpDir,
       defaultModel: stubAdapter(),
       agents: {
         support: {
@@ -185,7 +187,7 @@ describe("AgentsPlugin", () => {
     // client is closed" mid-conversation. The fix removes the
     // synchronous close — the existing client survives reload and
     // dispatches keep working.
-    const plugin = instantiate({ dir: false });
+    const plugin = instantiate({});
     const closeSpy = vi.fn(async () => {});
     const fakeClient = {
       close: closeSpy,
@@ -217,7 +219,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: tmpDir,
         defaultModel: stubAdapter(),
         agents: {
           manual: {
@@ -262,7 +263,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: tmpDir,
         defaultModel: stubAdapter(),
         autoInheritTools: { file: true },
       },
@@ -297,7 +297,6 @@ describe("AgentsPlugin", () => {
 
     const plugin = instantiate(
       {
-        dir: false,
         defaultModel: stubAdapter(),
         autoInheritTools: true,
         agents: {
@@ -345,10 +344,7 @@ describe("AgentsPlugin", () => {
       "---\ntools:\n  - plugin:analytics\n---\nAnalyst.",
     );
 
-    const plugin = instantiate(
-      { dir: tmpDir, defaultModel: stubAdapter() },
-      ctx,
-    );
+    const plugin = instantiate({ defaultModel: stubAdapter() }, ctx);
     await plugin.setup();
 
     const api = plugin.exports() as {
@@ -362,7 +358,6 @@ describe("AgentsPlugin", () => {
 
   test("registers sub-agents as agent-<key> tools", async () => {
     const plugin = instantiate({
-      dir: false,
       agents: {
         supervisor: {
           instructions: "Supervise",
@@ -415,7 +410,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -454,7 +448,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -489,7 +482,6 @@ describe("AgentsPlugin", () => {
       const ctx = fakeContext([]);
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -538,7 +530,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           autoInheritTools: { code: true },
           agents: {
             support: {
@@ -582,7 +573,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           autoInheritTools: { code: true },
           agents: {
             support: {
@@ -622,7 +612,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -649,7 +638,6 @@ describe("AgentsPlugin", () => {
       const toolsFn = vi.fn(() => ({}));
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             support: {
               instructions: "...",
@@ -681,7 +669,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             assistant: {
               instructions: "x",
@@ -718,7 +705,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             mismatched: {
               instructions: "x",
@@ -757,7 +743,6 @@ describe("AgentsPlugin", () => {
 
       const plugin = instantiate(
         {
-          dir: false,
           agents: {
             leaky: {
               instructions: "x",

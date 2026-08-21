@@ -3,13 +3,16 @@ import { createAgent, tool } from '@databricks/appkit/beta';
 import { z } from 'zod';
 
 /**
- * Code-defined helper agent: holds the tools. Shipped as a sub-agent of
- * the user-facing `planner` markdown agent (which references it via
- * `agents: [helper]` in its frontmatter) rather than a chat-tab on its
- * own. When the user asks planner for a computational action — "what
- * time is it?", "count the words in this string" — planner calls the
- * `agent-helper` tool, the agents plugin routes the sub-agent
- * invocation here, and the answer flows back into the planner thread.
+ * Code-defined helper agent: holds the tools. This file lives in
+ * `server/agents/helper/`, so the agents plugin discovers it automatically at
+ * startup — its agent id is the folder name (`helper`), and nothing needs to
+ * restate it.
+ * Shipped as a sub-agent of the user-facing `planner` markdown agent (which
+ * references it via `agents: [helper]` in its frontmatter) rather than a
+ * chat-tab on its own. When the user asks planner for a computational action —
+ * "what time is it?", "count the words in this string" — planner calls the
+ * `agent-helper` tool, the agents plugin routes the sub-agent invocation here,
+ * and the answer flows back into the planner thread.
  *
  * Two reasons to keep this code-defined instead of folding it into the
  * markdown:
@@ -26,8 +29,7 @@ import { z } from 'zod';
  * volumes, no external APIs) so the round-trip works on a bare
  * scaffold regardless of which other plugins were selected.
  */
-export const helper = createAgent({
-  name: 'helper',
+export default createAgent({
   instructions: [
     'You are a tool-using helper agent.',
     'When the user asks about the time, call `current_time`.',

@@ -129,7 +129,7 @@ describe("invocationsRequestSchema — input caps", () => {
 
 describe("POST /chat — per-user concurrent-stream limit", () => {
   function seedPlugin(
-    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = { dir: false },
+    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = {},
   ): AgentsPlugin {
     const plugin = new AgentsPlugin(overrides);
     // Seed the agents map directly so _handleChat can resolve "hello"
@@ -189,7 +189,6 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
 
   test("honours agents({ limits: { maxConcurrentStreamsPerUser } })", async () => {
     const plugin = seedPlugin({
-      dir: false,
       limits: { maxConcurrentStreamsPerUser: 2 },
     });
     for (let i = 0; i < 2; i++) {
@@ -270,7 +269,7 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
 
 describe("resolvedLimits — default values", () => {
   test("exposes the documented MVP defaults when unconfigured", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const limits = (plugin as any).resolvedLimits;
     expect(limits).toEqual({
       maxConcurrentStreamsPerUser: 5,
@@ -282,7 +281,6 @@ describe("resolvedLimits — default values", () => {
 
   test("lets callers override any subset", () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxToolCalls: 100 },
     });
     const limits = (plugin as any).resolvedLimits;
@@ -334,7 +332,6 @@ describe("runSubAgent — depth guard", () => {
 
   test("rejects when depth exceeds the configured maximum", async () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxSubAgentDepth: 2 },
     });
     const runState = makeRunState(plugin, { maxSubAgentDepth: 2 });
@@ -350,7 +347,6 @@ describe("runSubAgent — depth guard", () => {
 
   test("accepts at the boundary (depth === limit)", async () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxSubAgentDepth: 3 },
       agents: {},
     });
