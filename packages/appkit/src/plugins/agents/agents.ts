@@ -85,6 +85,7 @@ import {
   renderForcedSkill,
   resolveAgentSkills,
 } from "./skill-loader";
+import { StreamRegistry } from "./stream-registry";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 import {
@@ -106,17 +107,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   private agents = new Map<string, RegisteredAgent>();
   private defaultAgentName: string | null = null;
-  private activeStreams = new Map<
-    string,
-    { controller: AbortController; userId: string }
-  >();
   /**
-   * Per-user stream count, kept in sync with `activeStreams` so the
-   * concurrent-stream rate limit check is O(1) instead of O(n) over every
-   * active stream on every request. Mutated only via {@link trackStream}
-   * and {@link untrackStream}.
+   * Active SSE streams + per-user counts (the O(1) concurrency-limit check).
+   * Mutated only via {@link trackStream} / {@link untrackStream}.
    */
-  private userStreamCounts = new Map<string, number>();
+  private streams = new StreamRegistry();
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
@@ -189,42 +184,19 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   /** Count active streams owned by a given user. O(1). */
   private countUserStreams(userId: string): number {
-    return this.userStreamCounts.get(userId) ?? 0;
+    return this.streams.count(userId);
   }
 
-  /**
-   * Register a stream for `userId` and bump the per-user counter. Paired
-   * with {@link untrackStream}; the two helpers are the only writers to
-   * `activeStreams` + `userStreamCounts`, so the counter cannot drift from
-   * the map.
-   */
   private trackStream(
     requestId: string,
     userId: string,
     controller: AbortController,
   ): void {
-    this.activeStreams.set(requestId, { controller, userId });
-    this.userStreamCounts.set(
-      userId,
-      (this.userStreamCounts.get(userId) ?? 0) + 1,
-    );
+    this.streams.track(requestId, userId, controller);
   }
 
-  /**
-   * Remove a stream from the active map and decrement the per-user
-   * counter. Idempotent — calling twice for the same `requestId` is a
-   * no-op (the second call sees no entry and returns early).
-   */
   private untrackStream(requestId: string): void {
-    const entry = this.activeStreams.get(requestId);
-    if (!entry) return;
-    this.activeStreams.delete(requestId);
-    const next = (this.userStreamCounts.get(entry.userId) ?? 0) - 1;
-    if (next <= 0) {
-      this.userStreamCounts.delete(entry.userId);
-    } else {
-      this.userStreamCounts.set(entry.userId, next);
-    }
+    this.streams.untrack(requestId);
   }
 
   async setup() {
@@ -1633,7 +1605,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
     const { streamId } = parsed.data;
-    const entry = this.activeStreams.get(streamId);
+    const entry = this.streams.get(streamId);
     if (!entry) {
       // Stream is unknown or already completed — idempotent no-op.
       res.json({ cancelled: true });
@@ -1661,7 +1633,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
     const { streamId, approvalId, decision } = parsed.data;
 
-    const streamEntry = this.activeStreams.get(streamId);
+    const streamEntry = this.streams.get(streamId);
     if (!streamEntry) {
       // Stream has already completed or never existed. Return 404 so the UI
       // knows the approval token is no longer valid (the waiter, if any, has

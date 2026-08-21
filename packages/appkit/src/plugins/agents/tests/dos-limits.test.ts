@@ -217,31 +217,31 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     // must mirror the underlying map across track/untrack and across
     // multiple users.
     const plugin = seedPlugin();
-    const t = plugin as any;
+    const reg = (plugin as any).streams;
 
-    expect(t.countUserStreams("alice")).toBe(0);
+    expect(reg.count("alice")).toBe(0);
 
-    t.trackStream("s1", "alice", new AbortController());
-    t.trackStream("s2", "alice", new AbortController());
-    t.trackStream("s3", "bob", new AbortController());
+    reg.track("s1", "alice", new AbortController());
+    reg.track("s2", "alice", new AbortController());
+    reg.track("s3", "bob", new AbortController());
 
-    expect(t.countUserStreams("alice")).toBe(2);
-    expect(t.countUserStreams("bob")).toBe(1);
-    expect(t.activeStreams.size).toBe(3);
+    expect(reg.count("alice")).toBe(2);
+    expect(reg.count("bob")).toBe(1);
+    expect(reg.size).toBe(3);
 
-    t.untrackStream("s1");
-    expect(t.countUserStreams("alice")).toBe(1);
-    expect(t.activeStreams.has("s1")).toBe(false);
+    reg.untrack("s1");
+    expect(reg.count("alice")).toBe(1);
+    expect(reg.get("s1")).toBeUndefined();
 
     // Untrack the last stream for a user → counter map drops the key
     // entirely (avoids unbounded growth across many distinct users).
-    t.untrackStream("s3");
-    expect(t.countUserStreams("bob")).toBe(0);
-    expect(t.userStreamCounts.has("bob")).toBe(false);
+    reg.untrack("s3");
+    expect(reg.count("bob")).toBe(0);
+    expect((reg as any).userStreamCounts.has("bob")).toBe(false);
 
     // Idempotent — untracking a missing stream is a no-op.
-    t.untrackStream("s1");
-    expect(t.countUserStreams("alice")).toBe(1);
+    reg.untrack("s1");
+    expect(reg.count("alice")).toBe(1);
   });
 
   test("/invocations also honours maxConcurrentStreamsPerUser (no bypass)", async () => {
