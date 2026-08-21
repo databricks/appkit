@@ -1,8 +1,10 @@
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { agentDirNames } from "../../../core/agent/agent-dirs";
 import {
   loadCodeAgentsFromDir,
   resolveCodeAgentsDir,
@@ -77,5 +79,32 @@ describe("resolveCodeAgentsDir", () => {
   it("targets server/agents when nothing exists (empty scan downstream)", () => {
     const r = resolveCodeAgentsDir({ cwd, exists: () => false });
     expect(r).toEqual({ dir: source, extensions: [".ts"] });
+  });
+});
+
+describe("agentDirNames", () => {
+  const dirent = (name: string, kind: "dir" | "symlink" | "file"): Dirent =>
+    ({
+      name,
+      isDirectory: () => kind === "dir",
+      isSymbolicLink: () => kind === "symlink",
+    }) as unknown as Dirent;
+
+  it("keeps only real directories — symlinks and files are excluded", () => {
+    // Security: a symlink planted in server/agents must not be followed, so it
+    // can't pull agent code from outside the tree.
+    const names = agentDirNames([
+      dirent("real", "dir"),
+      dirent("linked", "symlink"),
+      dirent("agent.md", "file"),
+    ]);
+    expect(names).toEqual(["real"]);
+  });
+
+  it("sorts the folder names", () => {
+    expect(agentDirNames([dirent("b", "dir"), dirent("a", "dir")])).toEqual([
+      "a",
+      "b",
+    ]);
   });
 });

@@ -568,11 +568,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     const legacyDir = path.resolve(process.cwd(), LEGACY_MARKDOWN_DIR);
 
-    // Deprecated fallback: scan config/agents first, then server/agents with the
-    // legacy defs added as resolvable sub-agent targets — so a parent already
+    // Common case: no deprecated config/agents/ dir → a single scan of server/agents.
+    if (!existsSync(legacyDir)) {
+      return loadAgentsFromDir(primaryDir, { ...baseCtx, codeAgents });
+    }
+
+    // Deprecated fallback: config/agents/ exists → scan it first, then server/agents
+    // with the legacy defs added as resolvable sub-agent targets, so a parent already
     // moved to server/agents can still reference a child left in config/agents
-    // mid-migration. Code agents keep precedence in resolution and in the final
-    // merge (server/agents wins on an id clash).
+    // mid-migration. Code agents keep precedence; server/agents wins on an id clash.
     const legacy = await loadAgentsFromDir(legacyDir, {
       ...baseCtx,
       codeAgents,

@@ -123,54 +123,66 @@ export async function loadCodeAgentsFromDir(
     throw err;
   }
 
-  // findEntryFile's readdir follows a symlinked folder and returns null for
-  // anything that isn't a real directory.
   const folders = agentDirNames(entries);
 
-  const agents: Record<string, AgentDefinition> = {};
+  // Each agent is an independent read + import, so load them concurrently —
+  // startup no longer scales linearly with the agent count. Results stay in
+  // sorted-folder order (the default-agent fallback registers the first).
+  const NO_LOADER = Symbol("no-ts-loader");
+  const loaded = await Promise.all(
+    folders.map(async (id) => {
+      const entryFile = await findEntryFile(
+        path.join(dir, id),
+        opts.extensions,
+      );
+      if (!entryFile) return null;
 
-  for (const id of folders) {
-    const entryFile = await findEntryFile(path.join(dir, id), opts.extensions);
-    if (!entryFile) continue;
-
-    let mod: Record<string, unknown>;
-    try {
-      mod = (await import(pathToFileURL(entryFile).href)) as Record<
-        string,
-        unknown
-      >;
-    } catch (err) {
-      // No TS loader for these `.ts` modules — warn once and bail rather than
-      // crash boot (every folder would fail the same way).
-      if (
-        (err as NodeJS.ErrnoException).code === "ERR_UNKNOWN_FILE_EXTENSION"
-      ) {
-        logger.warn(
-          "Cannot import code agents from %s under this runtime (no TypeScript loader). " +
-            "A production build must compile server/agents/ to JS — check the `server/agents/*/agent.ts` entry glob in the tsdown config. Discovered no code agents.",
-          dir,
+      let mod: Record<string, unknown>;
+      try {
+        mod = (await import(pathToFileURL(entryFile).href)) as Record<
+          string,
+          unknown
+        >;
+      } catch (err) {
+        if (
+          (err as NodeJS.ErrnoException).code === "ERR_UNKNOWN_FILE_EXTENSION"
+        ) {
+          return NO_LOADER;
+        }
+        throw new Error(
+          `Failed to import code agent '${entryFile}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          { cause: err instanceof Error ? err : undefined },
         );
-        return {};
       }
-      throw new Error(
-        `Failed to import code agent '${entryFile}': ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-        { cause: err instanceof Error ? err : undefined },
-      );
-    }
 
-    const agent = pickAgentExport(mod, entryFile);
-    if (!agent) {
-      logger.debug(
-        "Skipping %s — no createAgent export (not a code agent).",
-        entryFile,
-      );
-      continue;
-    }
+      const agent = pickAgentExport(mod, entryFile);
+      if (!agent) {
+        logger.debug(
+          "Skipping %s — no createAgent export (not a code agent).",
+          entryFile,
+        );
+        return null;
+      }
+      return { id, agent };
+    }),
+  );
 
-    agents[id] = agent;
+  // No TS loader for these `.ts` modules — warn once and bail rather than crash
+  // boot (every folder fails the same way).
+  if (loaded.includes(NO_LOADER)) {
+    logger.warn(
+      "Cannot import code agents from %s under this runtime (no TypeScript loader). " +
+        "A production build must compile server/agents/ to JS — check the `server/agents/*/agent.ts` entry glob in the tsdown config. Discovered no code agents.",
+      dir,
+    );
+    return {};
   }
 
+  const agents: Record<string, AgentDefinition> = {};
+  for (const entry of loaded) {
+    if (entry && entry !== NO_LOADER) agents[entry.id] = entry.agent;
+  }
   return agents;
 }
