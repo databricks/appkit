@@ -8,6 +8,12 @@ export const MAX_OFFSET = 10_000;
 export const DEFAULT_LIMIT = 50;
 /** Max number of relations resolvable in a single `.include()`. */
 export const MAX_INCLUDES = 10;
+/** Max nesting depth of `and`/`or` groups in one runtime predicate. */
+export const MAX_WHERE_DEPTH = 5;
+/** Max members accepted by one runtime `and`/`or` group. */
+export const MAX_WHERE_GROUP_ITEMS = 20;
+/** Max column conditions accepted across one runtime predicate tree. */
+export const MAX_WHERE_CONDITIONS = 50;
 /** Filter operators usable in the runtime WHERE translator and the `where` spec type. */
 export const FILTER_OPERATORS = Object.freeze([
   "eq",

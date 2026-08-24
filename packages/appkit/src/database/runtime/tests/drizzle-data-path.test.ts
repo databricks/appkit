@@ -10,6 +10,7 @@ import {
   createDrizzleDataPath,
   createDrizzleDb,
   type DrizzleDb,
+  type DrizzleDataPathOptions,
 } from "../engine/drizzle-data-path";
 import { returningColumns } from "../engine/translate";
 
@@ -25,11 +26,20 @@ const schema = defineSchema((builder) => {
     id: id(),
     authorId: fk(() => users.id),
     title: text(),
+    secret: text().private(),
   });
   return { users, posts };
 });
 
 const users = schema.$tables.users;
+const naturalKeySchema = defineSchema((builder) => ({
+  accounts: builder.table("accounts", {
+    slug: text().primaryKey(),
+    email: text().notNull().unique(),
+    label: text().notNull(),
+  }),
+}));
+const accounts = naturalKeySchema.$tables.accounts;
 const dialect = new PgDialect();
 
 function render(fragment: unknown): { sql: string; params: unknown[] } {
@@ -209,16 +219,16 @@ describe("createDrizzleDataPath reads", () => {
     expect(render(config.where).params).toEqual([true]);
   });
 
-  it("supports explicit selection and rejects excessive limits", async () => {
+  it("supports explicit public selection and rejects excessive limits", async () => {
     const fake = makeFakeDb();
     const dataPath = createDrizzleDataPath(fake.db, schema);
     await dataPath.select(users, {
-      select: ["id", "secret"],
+      select: ["id", "name"],
       limit: MAX_LIMIT,
     });
     expect(fake.calls.findMany[0].config.columns).toEqual({
       id: true,
-      secret: true,
+      name: true,
     });
     await expect(
       dataPath.select(users, { limit: MAX_LIMIT + 1 }),
@@ -226,6 +236,50 @@ describe("createDrizzleDataPath reads", () => {
     await expect(
       dataPath.select(users, { offset: MAX_OFFSET + 1 }),
     ).rejects.toBeInstanceOf(DataPathError);
+  });
+
+  it("denies private read fields by default and requires trusted access", async () => {
+    const fake = makeFakeDb();
+    const publicDataPath = createDrizzleDataPath(fake.db, schema);
+    await expect(
+      publicDataPath.select(users, { select: ["secret"] }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(
+      publicDataPath.select(users, { where: { secret: "hidden" } }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(
+      publicDataPath.select(users, { order: { secret: "asc" } }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(
+      publicDataPath.select(users, {
+        include: { posts: { select: ["secret"] } },
+      }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    expect(fake.calls.findMany).toHaveLength(0);
+
+    const trustedOptions = {
+      columnAccess: "trusted",
+    } satisfies DrizzleDataPathOptions;
+    const trustedDataPath = createDrizzleDataPath(
+      fake.db,
+      schema,
+      trustedOptions,
+    );
+    await trustedDataPath.select(users, {
+      select: ["id", "secret"],
+      where: { secret: "hidden" },
+      order: { secret: "asc" },
+      include: { posts: { select: ["id", "secret"] } },
+    });
+    const config = fake.calls.findMany[0].config;
+    expect(config.columns).toEqual({ id: true, secret: true });
+    expect(config.with).toEqual({
+      posts: { columns: { id: true, secret: true }, limit: DEFAULT_LIMIT },
+    });
+    expect(render(config.where).params).toEqual(["hidden"]);
+    expect(render((config.orderBy as unknown[])[0]).sql).toBe(
+      `"users"."secret" asc`,
+    );
   });
 
   it("finds by primary key and delegates count filters", async () => {
@@ -285,6 +339,9 @@ describe("Drizzle mutation cardinality", () => {
     expect(fake.calls.upsert[0].config.target).toBe(
       users.$columns.email.engineColumn,
     );
+    expect(fake.calls.upsert[0].config.set).toEqual({
+      email: users.$columns.email.engineColumn,
+    });
     await expect(
       createDrizzleDataPath(fake.db, schema).upsert(users, {}, "name"),
     ).rejects.toBeInstanceOf(DataPathError);
@@ -327,6 +384,51 @@ describe("Drizzle mutation cardinality", () => {
     expect(fake.calls.insert).toHaveLength(0);
     expect(fake.calls.update).toHaveLength(0);
     expect(fake.calls.upsert).toHaveLength(0);
+  });
+
+  it("revalidates mutation values against finalized write schemas", async () => {
+    const fake = makeFakeDb();
+    const dataPath = createDrizzleDataPath(fake.db, schema);
+
+    await expect(
+      dataPath.insert(users, { id: 10, email: "a@example.com" }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(dataPath.insert(users, { email: 42 })).rejects.toBeInstanceOf(
+      DataPathError,
+    );
+    await expect(dataPath.update(users, 1, { id: 2 })).rejects.toBeInstanceOf(
+      DataPathError,
+    );
+    await expect(
+      dataPath.update(users, 1, { active: "yes" }),
+    ).rejects.toBeInstanceOf(DataPathError);
+    await expect(
+      dataPath.upsert(users, { id: 10, email: "a@example.com" }, "email"),
+    ).rejects.toBeInstanceOf(DataPathError);
+
+    expect(fake.calls.insert).toHaveLength(0);
+    expect(fake.calls.update).toHaveLength(0);
+    expect(fake.calls.upsert).toHaveLength(0);
+  });
+
+  it("keeps natural keys out of the update half of an upsert", async () => {
+    const fake = makeFakeDb({
+      upsert: [{ slug: "existing", email: "a@example.com", label: "New" }],
+    });
+    await createDrizzleDataPath(fake.db, naturalKeySchema).upsert(
+      accounts,
+      { slug: "replacement", email: "a@example.com", label: "New" },
+      "email",
+    );
+
+    expect(fake.calls.upsert[0].values).toEqual({
+      slug: "replacement",
+      email: "a@example.com",
+      label: "New",
+    });
+    expect(fake.calls.upsert[0].config.set).toEqual({ label: "New" });
+    expect(fake.calls.upsert[0].config.set).not.toHaveProperty("slug");
+    expect(fake.calls.upsert[0].config.set).not.toHaveProperty("email");
   });
 
   it("accepts zero or one update row and rejects more", async () => {
@@ -454,6 +556,18 @@ describe("tagged SQL and transactions", () => {
         throw classifiedError;
       }),
     ).rejects.toBe(classifiedError);
+
+    const trustedDataPath = createDrizzleDataPath(fake.db, schema, {
+      columnAccess: "trusted",
+    });
+    await expect(
+      trustedDataPath.transaction((transaction) =>
+        transaction.select(users, { select: ["secret"] }),
+      ),
+    ).resolves.toEqual([]);
+    expect(fake.calls.findMany.at(-1)?.config.columns).toEqual({
+      secret: true,
+    });
   });
 
   it.each(["begin", "commit", "rollback"] as const)(

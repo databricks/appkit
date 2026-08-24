@@ -24,6 +24,9 @@ import {
   IN_CAP,
   isFilterOperator,
   MAX_INCLUDES,
+  MAX_WHERE_CONDITIONS,
+  MAX_WHERE_DEPTH,
+  MAX_WHERE_GROUP_ITEMS,
 } from "../../contract";
 import type { AppKitTable, ColumnMeta, Schema } from "../../schema-builder";
 import { filterOperatorsForKind } from "../../schema-builder/types";
@@ -38,10 +41,25 @@ import {
   type WhereClause,
 } from "../data-path";
 
+/** Read policy selected by the trusted adapter constructor, never by query input. */
+export type ColumnAccess = "public" | "trusted";
+
 function columnMetaOf(table: AppKitTable, key: string): ColumnMeta {
   const column = table.$columns[key];
   if (!column) {
     throw new DataPathError(`Unknown column "${table.$name}.${key}"`);
+  }
+  return column;
+}
+
+function readableColumnMeta(
+  table: AppKitTable,
+  key: string,
+  access: ColumnAccess,
+): ColumnMeta {
+  const column = columnMetaOf(table, key);
+  if (column.isPrivate && access !== "trusted") {
+    throw new DataPathError(`Column "${table.$name}.${key}" is not readable`);
   }
   return column;
 }
@@ -160,22 +178,57 @@ function translateOperator(
   }
 }
 
-/** Translate direct-column predicates. Relation predicates are not supported. */
-export function translateWhere(
+interface WhereBudget {
+  conditions: number;
+}
+
+function chargeWhereCondition(budget: WhereBudget): void {
+  budget.conditions += 1;
+  if (budget.conditions > MAX_WHERE_CONDITIONS) {
+    throw new DataPathError(
+      `where exceeds the ${MAX_WHERE_CONDITIONS}-condition limit`,
+    );
+  }
+}
+
+function translateWhereNode(
   table: AppKitTable,
   clause: WhereClause,
+  access: ColumnAccess,
+  depth: number,
+  budget: WhereBudget,
 ): SQL | undefined {
+  if (depth > MAX_WHERE_DEPTH) {
+    throw new DataPathError(
+      `where exceeds the ${MAX_WHERE_DEPTH}-level depth limit`,
+    );
+  }
   if (clause === null || typeof clause !== "object" || Array.isArray(clause)) {
     throw new DataPathError("where must be an object");
   }
   const conditions: SQL[] = [];
   for (const [key, value] of Object.entries(clause)) {
     if (key === "and" || key === "or") {
-      if (!Array.isArray(value) || value.length === 0) {
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.length > MAX_WHERE_GROUP_ITEMS
+      ) {
+        if (Array.isArray(value) && value.length > MAX_WHERE_GROUP_ITEMS) {
+          throw new DataPathError(
+            `${key} exceeds the ${MAX_WHERE_GROUP_ITEMS}-predicate limit`,
+          );
+        }
         throw new DataPathError(`${key} requires a non-empty predicate array`);
       }
       const groups = value.map((group) => {
-        const translated = translateWhere(table, group as WhereClause);
+        const translated = translateWhereNode(
+          table,
+          group as WhereClause,
+          access,
+          depth + 1,
+          budget,
+        );
         if (!translated) {
           throw new DataPathError(`${key} predicates cannot be empty`);
         }
@@ -188,9 +241,10 @@ export function translateWhere(
       continue;
     }
 
-    const meta = columnMetaOf(table, key);
+    const meta = readableColumnMeta(table, key, access);
     const column = meta.engineColumn as unknown as AnyPgColumn;
     if (Array.isArray(value)) {
+      chargeWhereCondition(budget);
       conditions.push(translateOperator(table, meta, column, "in", value));
     } else if (
       value !== null &&
@@ -204,6 +258,7 @@ export function translateWhere(
         );
       }
       for (const [operator, operand] of operators) {
+        chargeWhereCondition(budget);
         if (!isFilterOperator(operator)) {
           throw new DataPathError(`Unknown filter operator "${operator}"`);
         }
@@ -212,18 +267,33 @@ export function translateWhere(
         );
       }
     } else {
+      chargeWhereCondition(budget);
       conditions.push(translateOperator(table, meta, column, "eq", value));
     }
   }
   return conditions.length > 0 ? and(...conditions) : undefined;
 }
 
-export function translateOrder(table: AppKitTable, order: OrderSpec): SQL[] {
+/** Translate one bounded direct-column predicate tree. */
+export function translateWhere(
+  table: AppKitTable,
+  clause: WhereClause,
+  access: ColumnAccess = "public",
+): SQL | undefined {
+  return translateWhereNode(table, clause, access, 1, { conditions: 0 });
+}
+
+export function translateOrder(
+  table: AppKitTable,
+  order: OrderSpec,
+  access: ColumnAccess = "public",
+): SQL[] {
   return Object.entries(order).map(([key, direction]) => {
     if (direction !== "asc" && direction !== "desc") {
       throw new DataPathError(`Unknown order direction "${direction}"`);
     }
-    const column = columnOf(table, key);
+    const column = readableColumnMeta(table, key, access)
+      .engineColumn as unknown as AnyPgColumn;
     return direction === "desc" ? desc(column) : asc(column);
   });
 }
@@ -231,10 +301,11 @@ export function translateOrder(table: AppKitTable, order: OrderSpec): SQL[] {
 export function selectToColumns(
   table: AppKitTable,
   select: readonly string[],
+  access: ColumnAccess = "public",
 ): Record<string, true> {
   const columns: Record<string, true> = {};
   for (const key of select) {
-    columnOf(table, key);
+    readableColumnMeta(table, key, access);
     columns[key] = true;
   }
   return columns;
@@ -251,6 +322,7 @@ export function translateInclude(
   table: AppKitTable,
   schema: Schema,
   include: IncludeSpec,
+  access: ColumnAccess = "public",
 ): Record<string, unknown> {
   const entries = Object.entries(include);
   if (entries.length > MAX_INCLUDES) {
@@ -285,13 +357,13 @@ export function translateInclude(
       columns:
         options.select === undefined
           ? defaultColumns(target)
-          : selectToColumns(target, options.select),
+          : selectToColumns(target, options.select, access),
     };
     if (options.where !== undefined) {
-      relationConfig.where = translateWhere(target, options.where);
+      relationConfig.where = translateWhere(target, options.where, access);
     }
     if (options.order !== undefined) {
-      relationConfig.orderBy = translateOrder(target, options.order);
+      relationConfig.orderBy = translateOrder(target, options.order, access);
     }
     if (options.limit !== undefined) {
       if (relation.cardinality !== "toMany") {

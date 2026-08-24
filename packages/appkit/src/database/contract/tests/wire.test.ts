@@ -9,6 +9,9 @@ import {
   MAX_INCLUDES,
   MAX_LIMIT,
   MAX_OFFSET,
+  MAX_WHERE_CONDITIONS,
+  MAX_WHERE_DEPTH,
+  MAX_WHERE_GROUP_ITEMS,
 } from "../index";
 
 describe("wire caps", () => {
@@ -18,6 +21,9 @@ describe("wire caps", () => {
     expect(MAX_OFFSET).toBe(10_000);
     expect(DEFAULT_LIMIT).toBe(50);
     expect(MAX_INCLUDES).toBe(10);
+    expect(MAX_WHERE_DEPTH).toBe(5);
+    expect(MAX_WHERE_GROUP_ITEMS).toBe(20);
+    expect(MAX_WHERE_CONDITIONS).toBe(50);
   });
 
   it("keeps DEFAULT_LIMIT within MAX_LIMIT", () => {

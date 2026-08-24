@@ -17,6 +17,7 @@ import {
 } from "../data-path";
 import {
   columnOf,
+  type ColumnAccess,
   defaultColumns,
   publicColumnNames,
   returningColumns,
@@ -28,6 +29,11 @@ import {
 
 /** Concrete Drizzle seam shared by the adapter and its focused tests. */
 export type DrizzleDb = NodePgDatabase<Record<string, never>>;
+
+export interface DrizzleDataPathOptions {
+  /** Explicit capability for trusted server code that must read private data. */
+  readonly columnAccess?: ColumnAccess;
+}
 
 /** Bind finalized AppKit metadata to a relational Drizzle database. */
 export function createDrizzleDb(pool: Pool, schema: Schema): DrizzleDb {
@@ -69,14 +75,29 @@ function relationalQueryBuilder(
 function selectedColumns(
   table: AppKitTable,
   select?: readonly string[],
+  access: ColumnAccess = "public",
 ): Record<string, true> {
   return select === undefined
     ? defaultColumns(table)
-    : selectToColumns(table, select);
+    : selectToColumns(table, select, access);
 }
 
-/** Keep mutation identifiers schema-owned and every supplied value parameterized. */
-function mutationValues(table: AppKitTable, values: Row): Row {
+type MutationKind = "insert" | "update";
+
+interface MutationSchema {
+  safeParse(
+    value: unknown,
+  ):
+    | { readonly success: true; readonly data: unknown }
+    | { readonly success: false };
+}
+
+/** Apply the finalized write schema again at the persistence boundary. */
+function mutationValues(
+  table: AppKitTable,
+  values: Row,
+  kind: MutationKind,
+): Row {
   if (values === null || typeof values !== "object" || Array.isArray(values)) {
     throw new DataPathError("Database mutation values must be an object");
   }
@@ -88,7 +109,38 @@ function mutationValues(table: AppKitTable, values: Row): Row {
       throw new DataPathError("Database mutation values cannot contain SQL");
     }
   }
-  return values;
+  const schema = (
+    kind === "insert" ? table.$insertSchema : table.$updateSchema
+  ) as MutationSchema;
+  const result = schema.safeParse(values);
+  if (!result.success) {
+    throw new DataPathError(`Invalid database ${kind} values`);
+  }
+  return result.data as Row;
+}
+
+/** Never change row identity or the conflict key during the update half. */
+function upsertUpdateValues(
+  table: AppKitTable,
+  parameters: Row,
+  conflictTarget: string,
+): Row {
+  const updates: Row = {};
+  for (const [key, value] of Object.entries(parameters)) {
+    const column = table.$columns[key];
+    if (
+      column.primaryKey ||
+      column.serverGenerated ||
+      column.columnName === conflictTarget
+    ) {
+      continue;
+    }
+    updates[key] = value;
+  }
+  if (Object.keys(updates).length > 0) return updates;
+
+  // A safe self-assignment preserves the exactly-one-row upsert contract.
+  return { [conflictTarget]: columnOf(table, conflictTarget) };
 }
 
 async function runDatabaseOperation<T>(
@@ -131,7 +183,12 @@ function expectZeroOrOne(rows: Row[]): Row | null {
 }
 
 /** Adapt a Drizzle database to the backend-neutral DataPath contract. */
-export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
+export function createDrizzleDataPath(
+  db: DrizzleDb,
+  schema: Schema,
+  options: DrizzleDataPathOptions = {},
+): DataPath {
+  const columnAccess = options.columnAccess ?? "public";
   const pgTable = (table: AppKitTable): PgTable => {
     assertRegisteredTable(schema, table);
     return table.$engine as unknown as PgTable;
@@ -140,7 +197,9 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
     table: AppKitTable,
     where?: WhereClause,
   ): SQL | undefined =>
-    where === undefined ? undefined : translateWhere(table, where);
+    where === undefined
+      ? undefined
+      : translateWhere(table, where, columnAccess);
 
   return {
     async select(table, spec) {
@@ -150,12 +209,12 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
           orderBy:
             spec.order === undefined
               ? undefined
-              : translateOrder(table, spec.order),
-          columns: selectedColumns(table, spec.select),
+              : translateOrder(table, spec.order, columnAccess),
+          columns: selectedColumns(table, spec.select, columnAccess),
           with:
             spec.include === undefined
               ? undefined
-              : translateInclude(table, schema, spec.include),
+              : translateInclude(table, schema, spec.include, columnAccess),
           limit: limitOrDefault(spec.limit),
           offset:
             spec.offset === undefined ? undefined : validateOffset(spec.offset),
@@ -168,11 +227,11 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
       const row = await runDatabaseOperation(() =>
         relationalQueryBuilder(db, schema, table).findFirst({
           where: eq(columnOf(table, primaryKey.columnName), id),
-          columns: selectedColumns(table, spec?.select),
+          columns: selectedColumns(table, spec?.select, columnAccess),
           with:
             spec?.include === undefined
               ? undefined
-              : translateInclude(table, schema, spec.include),
+              : translateInclude(table, schema, spec.include, columnAccess),
         }),
       );
       return row ?? null;
@@ -186,7 +245,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
 
     async insert(table, values) {
       const engineTable = pgTable(table);
-      const parameters = mutationValues(table, values);
+      const parameters = mutationValues(table, values, "insert");
       const rows = await runDatabaseOperation(() =>
         db
           .insert(engineTable)
@@ -198,7 +257,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
 
     async update(table, id, values) {
       const engineTable = pgTable(table);
-      const parameters = mutationValues(table, values);
+      const parameters = mutationValues(table, values, "update");
       const primaryKey = primaryKeyMeta(table);
       const rows = await runDatabaseOperation(() =>
         db
@@ -212,15 +271,16 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
 
     async upsert(table, values, onConflict) {
       const engineTable = pgTable(table);
-      const parameters = mutationValues(table, values);
+      const parameters = mutationValues(table, values, "insert");
       const target = conflictTargetMeta(table, onConflict);
+      const updates = upsertUpdateValues(table, parameters, target.columnName);
       const rows = await runDatabaseOperation(() =>
         db
           .insert(engineTable)
           .values(parameters)
           .onConflictDoUpdate({
             target: columnOf(table, target.columnName),
-            set: parameters,
+            set: updates,
           })
           .returning(returningColumns(table)),
       );
@@ -264,6 +324,7 @@ export function createDrizzleDataPath(db: DrizzleDb, schema: Schema): DataPath {
               createDrizzleDataPath(
                 transaction as unknown as DrizzleDb,
                 schema,
+                { columnAccess },
               ),
             );
           } catch (error) {

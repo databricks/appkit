@@ -2,7 +2,14 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
-import { IN_CAP, MAX_INCLUDES, MAX_LIMIT } from "../../contract";
+import {
+  IN_CAP,
+  MAX_INCLUDES,
+  MAX_LIMIT,
+  MAX_WHERE_CONDITIONS,
+  MAX_WHERE_DEPTH,
+  MAX_WHERE_GROUP_ITEMS,
+} from "../../contract";
 import {
   bigint,
   boolean,
@@ -17,7 +24,7 @@ import {
   uuid,
 } from "../../schema-builder";
 import { filterOperatorsForKind } from "../../schema-builder/types";
-import { DataPathError } from "../data-path";
+import { DataPathError, type WhereClause } from "../data-path";
 import {
   defaultColumns,
   returningColumns,
@@ -192,6 +199,44 @@ describe("translateWhere", () => {
     expect(query.sql).toContain(" or ");
     expect(query.sql).toContain(" and ");
   });
+
+  it("bounds predicate depth, group width, and aggregate conditions", () => {
+    let deepestAllowed: WhereClause = { name: "Ada" };
+    for (let depth = 1; depth < MAX_WHERE_DEPTH; depth += 1) {
+      deepestAllowed = { and: [deepestAllowed] };
+    }
+    expect(() => translateWhere(users, deepestAllowed)).not.toThrow();
+    expect(() => translateWhere(users, { and: [deepestAllowed] })).toThrow(
+      DataPathError,
+    );
+
+    const widestAllowed = Array.from({ length: MAX_WHERE_GROUP_ITEMS }, () => ({
+      name: "Ada",
+    }));
+    expect(() => translateWhere(users, { or: widestAllowed })).not.toThrow();
+    expect(() =>
+      translateWhere(users, {
+        or: [...widestAllowed, { name: "Grace" }],
+      }),
+    ).toThrow(DataPathError);
+
+    const conditionsPerGroup = 3;
+    const allowedGroups = Math.floor(MAX_WHERE_CONDITIONS / conditionsPerGroup);
+    const conditionGroup = () => ({
+      name: { eq: "Ada", neq: "Grace", like: "A%" },
+    });
+    const exactlyAtLimit = [
+      ...Array.from({ length: allowedGroups }, conditionGroup),
+      { name: { eq: "Ada", neq: "Grace" } },
+    ];
+    expect(exactlyAtLimit).toHaveLength(allowedGroups + 1);
+    expect(() => translateWhere(users, { and: exactlyAtLimit })).not.toThrow();
+    expect(() =>
+      translateWhere(users, {
+        and: [...exactlyAtLimit, { name: "overflow" }],
+      }),
+    ).toThrow(DataPathError);
+  });
 });
 
 describe("ordering and selection", () => {
@@ -221,14 +266,18 @@ describe("ordering and selection", () => {
     expect(returningColumns(users)).not.toHaveProperty("secret");
   });
 
-  it("resolves only declared columns", () => {
+  it("resolves only declared public columns by default", () => {
     const [age, name] = translateOrder(users, { age: "asc", name: "desc" });
     expect(render(age).sql).toBe(`"users"."age" asc`);
     expect(render(name).sql).toBe(`"users"."name" desc`);
-    expect(selectToColumns(users, ["id", "secret"])).toEqual({
-      id: true,
-      secret: true,
-    });
+    expect(selectToColumns(users, ["id"])).toEqual({ id: true });
+    expect(() => selectToColumns(users, ["secret"])).toThrow(DataPathError);
+    expect(() => translateWhere(users, { secret: "hidden" })).toThrow(
+      DataPathError,
+    );
+    expect(() => translateOrder(users, { secret: "asc" })).toThrow(
+      DataPathError,
+    );
     expect(() => translateOrder(users, { missing: "asc" })).toThrow(
       DataPathError,
     );
@@ -236,6 +285,19 @@ describe("ordering and selection", () => {
     expect(() => translateOrder(users, { age: "sideways" as "asc" })).toThrow(
       DataPathError,
     );
+  });
+
+  it("allows private read operations only with explicit trusted access", () => {
+    expect(selectToColumns(users, ["id", "secret"], "trusted")).toEqual({
+      id: true,
+      secret: true,
+    });
+    expect(
+      render(translateWhere(users, { secret: "hidden" }, "trusted")).params,
+    ).toEqual(["hidden"]);
+    expect(
+      render(translateOrder(users, { secret: "asc" }, "trusted")[0]).sql,
+    ).toBe(`"users"."secret" asc`);
   });
 });
 
@@ -250,17 +312,40 @@ describe("translateInclude", () => {
   });
 
   it("translates one-edge include options", () => {
-    const config = translateInclude(users, schema, {
-      posts: {
-        select: ["id", "secret"],
-        where: { title: { ilike: "a%" } },
-        order: { id: "desc" },
-        limit: 5,
+    const config = translateInclude(
+      users,
+      schema,
+      {
+        posts: {
+          select: ["id", "secret"],
+          where: { title: { ilike: "a%" } },
+          order: { id: "desc" },
+          limit: 5,
+        },
       },
-    }) as { posts: Record<string, unknown> };
+      "trusted",
+    ) as { posts: Record<string, unknown> };
     expect(config.posts.columns).toEqual({ id: true, secret: true });
     expect(config.posts.limit).toBe(5);
     expect(render(config.posts.where as SQL).params).toEqual(["a%"]);
+  });
+
+  it("applies public column access to relation options", () => {
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { select: ["secret"] },
+      }),
+    ).toThrow(DataPathError);
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { where: { secret: "hidden" } },
+      }),
+    ).toThrow(DataPathError);
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { order: { secret: "asc" } },
+      }),
+    ).toThrow(DataPathError);
   });
 
   it("rejects unknown relations and invalid relation limits", () => {
