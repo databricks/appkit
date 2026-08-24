@@ -32,8 +32,9 @@ export type MockWorkspaceClient = WorkspaceClient;
 /**
  * Applied beneath caller-supplied `responses`.
  *
- * The first three must stay byte-identical to the old `fixtures.ts` values — 13
- * suites reach them implicitly via `mockServiceContext`. `currentUser.me` is
+ * `statementExecution.executeStatement`, `warehouses.get` and `warehouses.start`
+ * must stay byte-identical to the old `fixtures.ts` values — suites reach them
+ * implicitly through `mockServiceContext`. `currentUser.me` is
  * required: `ServiceContext.createContext` reads `.id`, so `createApp({ client })`
  * cannot boot without it.
  */
@@ -76,18 +77,32 @@ const PASSTHROUGH_DENY: ReadonlySet<string> = new Set([
   "asymmetricMatch",
 ]);
 
+/** Distinguishes "no passthrough rule applied" from a rule answering `undefined`. */
+const NOT_PASSTHROUGH = Symbol("not-passthrough");
+
 /**
- * Symbols and denied names short-circuit before minting; anything already on the
- * target (seeded members, `Object.prototype`) wins.
+ * The passthrough rules every trap in this file shares: symbols delegate to the
+ * target, denied names answer `undefined`, and anything already on the target
+ * (seeded members, `Object.prototype`) wins over minting.
  *
+ * Shared rather than copied so a key added to {@link PASSTHROUGH_DENY} cannot
+ * cover one trap and miss another.
+ */
+function passthroughFor(target: Any, prop: Any): Any {
+  if (typeof prop === "symbol") return Reflect.get(target, prop);
+  if (PASSTHROUGH_DENY.has(prop)) return undefined;
+  if (prop in target) return target[prop];
+  return NOT_PASSTHROUGH;
+}
+
+/**
  * `ownKeys`/`getOwnPropertyDescriptor` stay at their defaults on purpose —
  * reporting keys makes `util.inspect` probe each one, minting a mock per probe.
  */
 function neverCrashGet(namespace: string, mint: (path: string) => Mock) {
   return (target: Any, prop: Any): Any => {
-    if (typeof prop === "symbol") return Reflect.get(target, prop);
-    if (PASSTHROUGH_DENY.has(prop)) return undefined;
-    if (prop in target) return target[prop];
+    const passthrough = passthroughFor(target, prop);
+    if (passthrough !== NOT_PASSTHROUGH) return passthrough;
     return mint(`${namespace}.${String(prop)}`);
   };
 }
@@ -114,7 +129,7 @@ export function createMockWorkspaceClient(
     ? { ...DEFAULT_RESPONSES, ...responses }
     : { ...responses };
 
-  // Shared with the legacy view and getMockFn, so both see the same functions.
+  // Shared with the legacy view and getMock, so both see the same functions.
   const fns = new Map<string, Mock>();
 
   /** Mint once per path, so call assertions see a stable reference. */
@@ -199,8 +214,11 @@ export function createMockWorkspaceClient(
       {},
       {
         get: (target: Any, prop: Any): Any => {
-          if (typeof prop === "symbol") return Reflect.get(target, prop);
-          if (PASSTHROUGH_DENY.has(prop)) return undefined;
+          // Same passthrough rules as `neverCrashGet` — shared, not copied, so a
+          // key added to PASSTHROUGH_DENY cannot cover one trap and miss this
+          // one (miss `then` here and `await client` hangs again).
+          const passthrough = passthroughFor(target, prop);
+          if (passthrough !== NOT_PASSTHROUGH) return passthrough;
           if (prop === "config") return configProxy;
           if (prop === "apiClient") return apiClientProxy;
           if (prop === "toLegacyWorkspaceClient") {
@@ -233,11 +251,11 @@ export function createMockWorkspaceClient(
  * Minting is idempotent, so this can be called before the code under test runs.
  * Throws for a non-function member such as `"config.host"`.
  */
-export function getMockFn(client: MockWorkspaceClient, path: string): Mock {
+export function getMock(client: MockWorkspaceClient, path: string): Mock {
   const fns = clientFns.get(client);
   if (!fns) {
     throw new Error(
-      "getMockFn: not a createMockWorkspaceClient() client. Pass the client " +
+      "getMock: not a createMockWorkspaceClient() client. Pass the client " +
         "the builder returned, not a hand-rolled object.",
     );
   }
@@ -254,7 +272,7 @@ export function getMockFn(client: MockWorkspaceClient, path: string): Mock {
 
   if (typeof resolved !== "function") {
     throw new Error(
-      `getMockFn: "${path}" is not a mocked function (got ${typeof resolved}). ` +
+      `getMock: "${path}" is not a mocked function (got ${typeof resolved}). ` +
         "Members seeded with a real value, such as config.host, have no mock.",
     );
   }

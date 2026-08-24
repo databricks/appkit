@@ -78,11 +78,11 @@ export {
 export {
   createMockWorkspaceClient,
   type CreateMockWorkspaceClientOptions,
-  getMockFn,
+  getMock,
   type MockWorkspaceClient,
 } from "./mock-workspace-client";
 export { createTestPlugin } from "./create-test-plugin";
-export { resetAppKitSingletons } from "./reset";
+export { resetGlobalState } from "./reset";
 export {
   createTestPluginContext,
   type FakeProvider,

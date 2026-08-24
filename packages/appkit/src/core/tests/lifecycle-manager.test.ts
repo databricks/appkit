@@ -547,10 +547,16 @@ describe("LifecycleManager", () => {
 
     test("a hung teardown is bounded by close()'s budget, logged, and never exits", async () => {
       vi.useFakeTimers();
+      let releaseHook: (() => void) | undefined;
       const ctx = contextWithPlugins({
         stuck: {
           name: "stuck",
-          shutdown: vi.fn(() => new Promise<void>(() => {})),
+          shutdown: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                releaseHook = resolve;
+              }),
+          ),
         } as never,
       });
       const manager = new LifecycleManager(ctx);
@@ -571,10 +577,16 @@ describe("LifecycleManager", () => {
       // A hung teardown must not kill the process on the programmatic path.
       expect(exitSpy).not.toHaveBeenCalled();
 
-      // And it must not drop the singletons: the phases are still running and
-      // still own those instances, so releasing here hands the next boot a
-      // half-released app.
+      // Not yet: the phases are still running and still own those instances,
+      // so releasing here would hand the next boot a half-released app.
       expect(releaseCoreSingletons).not.toHaveBeenCalled();
+
+      // But it must release once they settle. Without this the refcount never
+      // returns to zero, so every later boot skips its reset and inherits this
+      // app's singletons — the leak this test used to pin as correct.
+      releaseHook?.();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
     });
   });
 

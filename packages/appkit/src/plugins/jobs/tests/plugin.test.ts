@@ -19,22 +19,22 @@ const { mockClient, jobsApi, mockCacheInstance } = await vi.hoisted(
     // and any *other* service this plugin grows into resolves instead of throwing.
     // Imported inside the hoisted factory because the factory runs before the
     // file's own imports are evaluated.
-    const { createMockWorkspaceClient, getMockFn } =
+    const { createMockWorkspaceClient, getMock } =
       await import("../../../testing/mock-workspace-client");
 
     const mockClient = createMockWorkspaceClient();
 
     // Facade accessors are typed against the legacy SDK, so `.mockResolvedValue`
-    // on them would not typecheck. `getMockFn` is the typed handle; it mints
+    // on them would not typecheck. `getMock` is the typed handle; it mints
     // idempotently, so these are the very functions the plugin will call.
     const jobsApi = {
-      runNow: getMockFn(mockClient, "jobs.runNow"),
-      submit: getMockFn(mockClient, "jobs.submit"),
-      getRun: getMockFn(mockClient, "jobs.getRun"),
-      getRunOutput: getMockFn(mockClient, "jobs.getRunOutput"),
-      cancelRun: getMockFn(mockClient, "jobs.cancelRun"),
-      listRuns: getMockFn(mockClient, "jobs.listRuns"),
-      get: getMockFn(mockClient, "jobs.get"),
+      runNow: getMock(mockClient, "jobs.runNow"),
+      submit: getMock(mockClient, "jobs.submit"),
+      getRun: getMock(mockClient, "jobs.getRun"),
+      getRunOutput: getMock(mockClient, "jobs.getRunOutput"),
+      cancelRun: getMock(mockClient, "jobs.cancelRun"),
+      listRuns: getMock(mockClient, "jobs.listRuns"),
+      get: getMock(mockClient, "jobs.get"),
     };
 
     const mockCacheInstance = {

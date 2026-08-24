@@ -12,7 +12,7 @@ import {
  * exporters leak. `app.close()` does both, so this is only for tests that
  * hand-roll `createApp`.
  */
-export function resetAppKitSingletons(): void {
+export function resetGlobalState(): void {
   dropCoreSingletons();
 }
 

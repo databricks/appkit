@@ -1,7 +1,7 @@
 import {
   createTestApp,
   expectStream,
-  getMockFn,
+  getMock,
 } from "@databricks/appkit/testing";
 import { describe, expect, test } from "vitest";
 
@@ -66,7 +66,7 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       await expect(res.json()).resolves.toEqual({
         run: { state: "TERMINATED" },
       });
-      expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({
+      expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({
         run_id: 42,
       });
 

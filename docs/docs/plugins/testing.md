@@ -78,12 +78,12 @@ For the response *shapes*, follow the service types on the Databricks SDK — th
 `app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
 
 ```ts
-import { getMockFn } from "@databricks/appkit/testing";
+import { getMock } from "@databricks/appkit/testing";
 
-expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
+expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
 ```
 
-`getMockFn` exists because facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck.
+`getMock` exists because facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck.
 
 ### Requests
 
@@ -279,7 +279,7 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
-- `resetAppKitSingletons()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
+- `resetGlobalState()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
 - `createTestPlugin(factory, config?)` — instantiate a plugin from its factory with the same config merge AppKit applies. See [Full example](#full-example).
 
 ## Mocking Databricks services
@@ -287,7 +287,7 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 Every core plugin's real work goes through `getWorkspaceClient()`. `createMockWorkspaceClient()` fakes that whole surface, so a plugin touching `jobs`, `genie`, `servingEndpoints`, or `files` is testable without hand-building a nested client:
 
 ```ts
-import { createMockWorkspaceClient, getMockFn } from "@databricks/appkit/testing";
+import { createMockWorkspaceClient, getMock } from "@databricks/appkit/testing";
 
 const client = createMockWorkspaceClient({
   responses: { "jobs.getRun": { state: "TERMINATED" } },

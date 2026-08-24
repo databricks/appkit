@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../context/service-context";
 import { mockServiceContext } from "../fixtures";
-import { createMockWorkspaceClient, getMockFn } from "../mock-workspace-client";
+import { createMockWorkspaceClient, getMock } from "../mock-workspace-client";
 
 const mk = createMockWorkspaceClient;
 /** Service methods are SDK-typed, so calling an arbitrary one needs a cast. */
@@ -163,26 +163,26 @@ describe("createMockWorkspaceClient", () => {
     });
   });
 
-  describe("getMockFn", () => {
+  describe("getMock", () => {
     test("mints before first use and stays stable after", async () => {
       const client = mk();
-      const getRun = getMockFn(client, "jobs.getRun");
+      const getRun = getMock(client, "jobs.getRun");
       expect(getRun).toHaveBeenCalledTimes(0);
 
       await client.jobs.getRun({ run_id: 7 } as never);
-      expect(getRun).toBe(getMockFn(client, "jobs.getRun"));
+      expect(getRun).toBe(getMock(client, "jobs.getRun"));
       expect(getRun).toHaveBeenCalledWith({ run_id: 7 });
     });
 
     test("resolves seeded members and rejects non-function paths", () => {
       const client = mk();
-      expect(getMockFn(client, "apiClient.request")).toBe(
+      expect(getMock(client, "apiClient.request")).toBe(
         client.apiClient.request,
       );
-      expect(() => getMockFn(client, "config.host")).toThrow(
+      expect(() => getMock(client, "config.host")).toThrow(
         /not a mocked function/,
       );
-      expect(() => getMockFn({} as never, "jobs.getRun")).toThrow(
+      expect(() => getMock({} as never, "jobs.getRun")).toThrow(
         /not a createMockWorkspaceClient/,
       );
     });
@@ -245,7 +245,7 @@ describe("createMockWorkspaceClient", () => {
       const host = client.config.host;
       expect(typeof host).toBe("string");
 
-      const getRun = getMockFn(client, "jobs.getRun");
+      const getRun = getMock(client, "jobs.getRun");
       getRun.mockResolvedValue({ state: "TERMINATED" });
       expect(getRun.mock.calls).toEqual([]);
     });

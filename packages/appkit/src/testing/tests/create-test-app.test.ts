@@ -15,7 +15,7 @@ import type { WorkspaceClient } from "../../workspace-client";
 import type { CreateTestAppOptions, TestApp } from "../create-test-app";
 import { createTestApp } from "../create-test-app";
 import { expectStream } from "../expect-stream";
-import { getMockFn } from "../mock-workspace-client";
+import { createMockWorkspaceClient, getMock } from "../mock-workspace-client";
 
 /**
  * Coverage for the harness itself. Nothing here is mocked beyond the workspace
@@ -189,6 +189,23 @@ class BadSetupPlugin extends Plugin {
 }
 const badSetup = toPlugin(BadSetupPlugin);
 
+/**
+ * Boots cleanly, then throws when the harness asks for the socket — the only way
+ * to reach the failure path *after* `createApp` has already returned an app.
+ * Named `server` so the harness uses it instead of adding the real one.
+ */
+class LateFailurePlugin extends Plugin {
+  static manifest = manifest("server");
+  exports() {
+    return {
+      getServer: () => {
+        throw new Error("getServer exploded");
+      },
+    };
+  }
+}
+const lateFailure = toPlugin(LateFailurePlugin);
+
 describe("createTestApp", () => {
   test("boots with a single plugin and serves a real route", async () => {
     await withApp({ plugins: [probe()] }, async (app) => {
@@ -257,7 +274,7 @@ describe("createTestApp", () => {
         await expect(res.json()).resolves.toEqual({
           run: { state: "TERMINATED" },
         });
-        expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({
+        expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({
           run_id: 1,
         });
       },
@@ -279,9 +296,7 @@ describe("createTestApp", () => {
       // short-circuit the SCIM probe in getWorkspaceId, and internal telemetry
       // must stay off. If either regresses, request assertions get polluted and
       // this fails loudly.
-      expect(getMockFn(app.client, "apiClient.request")).toHaveBeenCalledTimes(
-        0,
-      );
+      expect(getMock(app.client, "apiClient.request")).toHaveBeenCalledTimes(0);
     });
   });
 
@@ -418,6 +433,46 @@ describe("createTestApp", () => {
         app.get("/api/probe/ping").then((r) => r.status),
       ).resolves.toBe(200);
       await app.close();
+    });
+
+    test("a failure after createApp still tears the built app down", async () => {
+      // The other boot-failure test throws inside createApp, so `app` is never
+      // assigned and only the "nothing was built" branch runs. This one gets a
+      // live app first, exercising the branch that has to close it.
+      const before = { ...process.env };
+
+      await expect(
+        createTestApp({ plugins: [lateFailure()], env: { LEAKED: "no" } }),
+      ).rejects.toThrow(/getServer exploded/);
+
+      expect(process.env.LEAKED).toBeUndefined();
+      expect(Object.keys(process.env).sort()).toEqual(
+        Object.keys(before).sort(),
+      );
+
+      // The singleton claim has to be released too, or this boot reuses the
+      // failed app's half-closed singletons.
+      const app = await createTestApp({ plugins: [probe()] });
+      try {
+        await expect(
+          app.get("/api/probe/ping").then((r) => r.status),
+        ).resolves.toBe(200);
+      } finally {
+        await app.close();
+      }
+    });
+
+    test("passing both client and responses is refused, not silently ignored", async () => {
+      // `responses` only seeds the built-in mock, so with a supplied client it
+      // used to do nothing at all — the caller's seeded values never took effect
+      // and nothing said so.
+      await expect(
+        createTestApp({
+          plugins: [probe()],
+          client: createMockWorkspaceClient(),
+          responses: { "jobs.getRun": { state: "IGNORED" } },
+        }),
+      ).rejects.toThrow(/does nothing when you also pass `client`/);
     });
 
     test('nodeEnv: "development" is refused with an explanation', async () => {
@@ -644,7 +699,7 @@ describe("createTestApp HTTP layer", () => {
         // DATABRICKS_HOST carries the same string. What only the mock can do is
         // record the call and return the declared response.
         await expect(res.json()).resolves.toEqual({ run: { via: "mock" } });
-        expect(getMockFn(app.client, "jobs.getRun")).toHaveBeenCalledWith({
+        expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({
           run_id: 42,
         });
       },

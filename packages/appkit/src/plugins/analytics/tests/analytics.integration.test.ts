@@ -2,7 +2,7 @@ import {
   createFailedSQLResponse,
   createSuccessfulSQLResponse,
   createTestApp,
-  getMockFn,
+  getMock,
   parseSSEResponse,
   type TestApp,
 } from "@databricks/appkit/testing";
@@ -25,18 +25,18 @@ const getAppQuerySpy = vi.spyOn(AppManager.prototype, "getAppQuery");
 describe("Analytics Plugin Integration", () => {
   let app: TestApp<[ReturnType<typeof analytics>]>;
   /** The SQL mock the analytics route drives, via the harness's client. */
-  let executeStatement: ReturnType<typeof getMockFn>;
-  let getStatement: ReturnType<typeof getMockFn>;
+  let executeStatement: ReturnType<typeof getMock>;
+  let getStatement: ReturnType<typeof getMock>;
 
   beforeAll(async () => {
     // The harness owns the env setup, the singleton resets, the mock client, the
     // server plugin on an ephemeral port, and the teardown.
     app = await createTestApp({ plugins: [analytics({})] });
-    executeStatement = getMockFn(
+    executeStatement = getMock(
       app.client,
       "statementExecution.executeStatement",
     );
-    getStatement = getMockFn(app.client, "statementExecution.getStatement");
+    getStatement = getMock(app.client, "statementExecution.getStatement");
   });
 
   afterAll(async () => {

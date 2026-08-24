@@ -36,7 +36,17 @@ const logger = createLogger("appkit");
  * would no-op teardown, whereas shadowing an internal method throws
  * `TypeError` on the next registration and needs no guard.
  */
-const RESERVED_PLUGIN_NAMES = new Set(["close"]);
+/**
+ * The handle's own members, i.e. everything {@link AppHandle} adds on top of the
+ * plugin map. `Record` makes it exhaustive: add a named method to `AppHandle`
+ * and this stops compiling until it is reserved here too.
+ */
+const HANDLE_OWN_MEMBERS: Record<
+  Exclude<keyof AppHandle<[]>, keyof PluginMap<[]> | symbol>,
+  true
+> = { close: true };
+
+const RESERVED_PLUGIN_NAMES = new Set(Object.keys(HANDLE_OWN_MEMBERS));
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};

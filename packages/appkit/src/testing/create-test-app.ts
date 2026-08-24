@@ -156,10 +156,11 @@ function stubUserContext(client: WorkspaceClient): () => void {
 }
 
 /**
- * `start()` returns once `listen()` is invoked, before the bind completes, so
- * `address()` is null until the `listening` event fires.
+ * Wait for a server to finish binding and return the port it landed on.
  *
- * @internal
+ * Needed with `port: 0`: `start()` returns once `listen()` is invoked, before
+ * the bind completes, so `address()` is null until the `listening` event fires.
+ * `createTestApp` does this for you — reach for it when hand-rolling a server.
  */
 export async function getListeningPort(server: Server): Promise<number> {
   const addr = server.address();
@@ -243,6 +244,17 @@ export async function createTestApp<T extends Plugins>(
     });
 
     claimAppKitSingletons();
+
+    // `responses` only seeds the built-in mock, so alongside a caller-supplied
+    // client it would silently do nothing. Refuse instead, matching the
+    // `server: false` conflict below.
+    if (suppliedClient && responses !== undefined) {
+      throw new Error(
+        "createTestApp: `responses` configures the built-in mock client, so it " +
+          "does nothing when you also pass `client`. Drop `responses` and " +
+          "configure them on your own client instead.",
+      );
+    }
 
     // Boot runs ServiceContext.createContext for real, which reads
     // currentUser.id — the mock's built-in default is what lets it through.
