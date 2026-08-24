@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -5,6 +7,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
+import { AuthenticationError } from "../errors";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
@@ -121,6 +124,49 @@ export type OboOption =
       /** `x-forwarded-email` — omitted unless provided. */
       email?: string;
     };
+
+/**
+ * The one fake of `ServiceContext.createUserContext` this kit uses, shared by
+ * `mockServiceContext` and `createTestApp`.
+ *
+ * Shared rather than duplicated because the two used to disagree, and neither
+ * matched production: a missing token went unrejected and `tokenFingerprint`
+ * was absent, which silently disables Lakebase pool rotation — `pool-manager`
+ * treats a missing fingerprint as "not stale", so the drain-and-recreate branch
+ * could never run under a fake.
+ *
+ * @internal
+ */
+export function fakeUserContext(
+  client: Any,
+  ids: { warehouseId?: Any; workspaceId: Any },
+) {
+  return (
+    token: string,
+    userId: string,
+    userName?: string,
+    userEmail?: string,
+  ): Any => {
+    // Same rejection as production, so a path that forgets to forward the token
+    // fails here instead of only in a deployed app.
+    if (!token) throw AuthenticationError.missingToken("user token");
+    return {
+      client,
+      userId,
+      userName,
+      userEmail,
+      // Derived from the token exactly as production does. Keyed on the user it
+      // would be constant across tokens, and rotation compares this value.
+      tokenFingerprint: createHash("sha256")
+        .update(token)
+        .digest("hex")
+        .slice(0, 16),
+      warehouseId: ids.warehouseId,
+      workspaceId: ids.workspaceId,
+      isUserContext: true,
+    };
+  };
+}
 
 /**
  * Build the forwarded identity headers an `obo` option implies.
@@ -384,17 +430,12 @@ export function mockServiceContext(options: TestContextOptions = {}) {
 
   const createUserContextSpy = vi
     .spyOn(ServiceContext, "createUserContext")
-    .mockImplementation((_token: string, userId: string, userName?: string) => {
-      return {
-        client: (options.userDatabricksClient ||
-          createMockWorkspaceClient()) as Any,
-        userId,
-        userName,
-        warehouseId: serviceContext.warehouseId,
-        workspaceId: serviceContext.workspaceId,
-        isUserContext: true,
-      };
-    });
+    .mockImplementation(
+      fakeUserContext(
+        options.userDatabricksClient || createMockWorkspaceClient(),
+        serviceContext,
+      ),
+    );
 
   return {
     serviceContext,

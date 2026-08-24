@@ -20,7 +20,7 @@ import { createApp } from "../core/appkit";
 import { AuthenticationError } from "../errors";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
-import { oboHeaders, setupDatabricksEnv } from "./fixtures";
+import { fakeUserContext, oboHeaders, setupDatabricksEnv } from "./fixtures";
 import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
@@ -140,28 +140,14 @@ export interface TestApp<T extends Plugins> {
 function stubUserContext(client: WorkspaceClient): () => void {
   const spy = vi
     .spyOn(ServiceContext, "createUserContext")
-    .mockImplementation((token, userId, userName, userEmail) => {
-      // Same rejection as the real one, so a missing-token bug surfaces here
-      // too instead of only in production.
-      if (!token) throw AuthenticationError.missingToken("user token");
-      const service = ServiceContext.get();
-      return {
-        client,
+    .mockImplementation((token, userId, userName, userEmail) =>
+      fakeUserContext(client, ServiceContext.get())(
+        token,
         userId,
         userName,
         userEmail,
-        // Derived from the token exactly as the real one does. Keying this on the
-        // *user* instead made it constant across tokens, and Lakebase rotates its
-        // pool by comparing this value — so rotation could never fire here.
-        tokenFingerprint: createHash("sha256")
-          .update(token)
-          .digest("hex")
-          .slice(0, 16),
-        warehouseId: service.warehouseId,
-        workspaceId: service.workspaceId,
-        isUserContext: true,
-      };
-    });
+      ),
+    );
   return () => spy.mockRestore();
 }
 
