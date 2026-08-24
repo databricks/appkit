@@ -1,327 +1,378 @@
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
-  APPKIT_TABLE,
-  type AppKitTable,
   bigid,
+  bigint,
   boolean,
   type ColumnBuilder,
   type DefineSchemaOptions,
   defineSchema,
+  enumColumn,
   fk,
   id,
   integer,
-  type ResolvedRelation,
+  jsonb,
   type Schema,
   type SchemaBuilderContext,
   type TableHandle,
   text,
   timestamp,
+  uuid,
+  varchar,
 } from "../index";
 import type { EngineTable } from "../types";
 
-/** Cast the opaque engine handle back to a real PgTable (test-only). */
-const pgOf = (t: EngineTable): PgTable => t as unknown as PgTable;
+const pgOf = (table: EngineTable): PgTable => table as unknown as PgTable;
 
-describe("defineSchema — basic build", () => {
-  const schema: Schema = defineSchema((t) => ({
-    users: t.table("users", {
+describe("defineSchema finalization", () => {
+  const schema = defineSchema((builder) => ({
+    users: builder.table("users", {
       id: id(),
       email: text().notNull().unique(),
       name: text(),
     }),
   }));
 
-  it("returns the table keyed by its return key", () => {
-    expect(Object.keys(schema.$tables)).toEqual(["users"]);
+  it("preserves literal table keys and canonical identity", () => {
+    expectTypeOf(schema.$tables).toHaveProperty("users");
     expect(schema.$tables.users.$name).toBe("users");
+    expect(Object.keys(schema.$tables)).toEqual(["users"]);
+    expect(Object.keys(schema.$tables.users)).toEqual(["id", "email", "name"]);
   });
 
-  it("defaults schemaName to 'public'", () => {
+  it("publishes complete immutable metadata", () => {
+    const users = schema.$tables.users;
+    expect(Object.isFrozen(schema)).toBe(true);
+    expect(Object.isFrozen(schema.$tables)).toBe(true);
+    expect(Object.isFrozen(schema.$engine)).toBe(true);
+    expect(Object.isFrozen(users)).toBe(true);
+    expect(Object.isFrozen(users.$columns)).toBe(true);
+    expect(Object.isFrozen(users.$columns.id)).toBe(true);
+    expect(Object.isFrozen(users.$relations)).toBe(true);
+    expect(users.$insertSchema).toBeDefined();
+    expect(users.$updateSchema).toBeDefined();
+
+    expect(() => {
+      (users.$columns as Record<string, unknown>).rogue = {};
+    }).toThrow(TypeError);
+    expect(() => {
+      (schema.$tables as Record<string, unknown>).rogue = users;
+    }).toThrow(TypeError);
+  });
+
+  it("uses collision-safe registries", () => {
+    expect(Object.getPrototypeOf(schema.$tables)).toBeNull();
+    expect(Object.getPrototypeOf(schema.$engine)).toBeNull();
+    expect(Object.getPrototypeOf(schema.$tables.users.$columns)).toBeNull();
+  });
+
+  it("defaults to public and supports a safe custom schema", () => {
     expect(schema.$schemaName).toBe("public");
-    expect(schema.$tables.users.$schemaName).toBe("public");
+    const options: DefineSchemaOptions = { schemaName: "application" };
+    const custom = defineSchema(
+      (builder) => ({ widgets: builder.table("widgets", { id: id() }) }),
+      options,
+    );
+    expect(custom.$schemaName).toBe("application");
+    expect(custom.$tables.widgets.$schemaName).toBe("application");
   });
 
-  it("marks built tables with the APPKIT_TABLE symbol", () => {
-    expect(
-      (schema.$tables.users as unknown as Record<symbol, unknown>)[
-        APPKIT_TABLE
-      ],
-    ).toBe(true);
+  it("accepts the explicit builder context type", () => {
+    const build = (builder: SchemaBuilderContext) => {
+      const users: TableHandle<{ id: ColumnBuilder; email: ColumnBuilder }> =
+        builder.table("users", { id: id(), email: text() });
+      return { users };
+    };
+    const typed: Schema = defineSchema(build);
+    expect(typed.$tables.users.$name).toBe("users");
   });
 
-  it("stamps column metadata", () => {
-    const cols = schema.$tables.users.$columns;
-    expect(cols.id.serverGenerated).toBe(true);
-    expect(cols.id.primaryKey).toBe(true);
-    expect(cols.id.hasDefault).toBe(true);
-    expect(cols.email.notNull).toBe(true);
-    expect(cols.email.unique).toBe(true);
-    expect(cols.name.notNull).toBe(false);
+  it("allows an explicitly empty schema", () => {
+    const empty = defineSchema(() => ({}));
+    expect(empty.$tables).toEqual({});
+    expect(empty.$engine).toEqual({});
+    expect(Object.isFrozen(empty)).toBe(true);
   });
 
-  it("populates an engine table handle per column", () => {
-    expect(schema.$tables.users.$columns.id.engineColumn).toBeDefined();
+  it("does not partially finalize handles when declaration validation fails", () => {
+    let firstHandle: TableHandle<{ id: ColumnBuilder }> | undefined;
+    expect(() =>
+      defineSchema((builder) => {
+        const first = builder.table("first", { id: id() });
+        const second = builder.table("second", { id: id() });
+        firstHandle = first;
+        Object.preventExtensions(second);
+        return { first, second };
+      }),
+    ).toThrow(/modified during schema declaration/);
+    if (!firstHandle)
+      throw new Error("fixture did not retain the first handle");
+    expect("$name" in firstHandle).toBe(false);
   });
 });
 
-describe("defineSchema — engine maps (no relations)", () => {
-  const schema = defineSchema((t) => ({
-    users: t.table("users", { id: id() }),
-    tags: t.table("tags", { id: id(), label: text() }),
-  }));
-
-  it("$engine carries a handle per table", () => {
-    expect(Object.keys(schema.$engine).sort()).toEqual(["tags", "users"]);
+describe("canonical table identity", () => {
+  it("requires every declared table exactly once", () => {
+    expect(() =>
+      defineSchema((builder) => {
+        const users = builder.table("users", { id: id() });
+        builder.table("omitted", { id: id() });
+        return { users };
+      }),
+    ).toThrow(/omitted declared table: omitted/);
   });
 
-  it("leaves $relations empty on every table", () => {
-    for (const tbl of Object.values(schema.$tables)) {
-      const relations: ResolvedRelation[] = tbl.$relations;
-      expect(relations).toEqual([]);
+  it("rejects aliases and duplicate handles", () => {
+    expect(() =>
+      defineSchema((builder) => {
+        const users = builder.table("users", { id: id() });
+        return { people: users };
+      }),
+    ).toThrow(/aliases are not supported/);
+
+    expect(() =>
+      defineSchema((builder) => {
+        const users = builder.table("users", { id: id() });
+        return { users, duplicate: users };
+      }),
+    ).toThrow(/aliases are not supported|returned more than once/);
+  });
+
+  it("rejects foreign values and duplicate table declarations", () => {
+    expect(() =>
+      defineSchema((builder) => {
+        builder.table("users", { id: id() });
+        return { rogue: {} as never };
+      }),
+    ).toThrow(/was not produced by ctx\.table/);
+    expect(() =>
+      defineSchema((builder) => {
+        const first = builder.table("users", { id: id() });
+        builder.table("users", { id: id() });
+        return { users: first };
+      }),
+    ).toThrow(/Duplicate table/);
+  });
+
+  it("allows ordinary quoted names while rejecting concrete runtime collisions", () => {
+    const quoted = defineSchema((builder) => ({
+      toString: builder.table("toString", { displayName: text() }),
+    }));
+    expect(Object.values(quoted.$tables)[0].$name).toBe("toString");
+
+    expect(() =>
+      defineSchema((builder) => ({
+        users: builder.table("users", { and: text() }),
+      })),
+    ).toThrow(/runtime metadata/);
+
+    const reservedColumns = Object.create(null) as Record<
+      string,
+      ColumnBuilder
+    >;
+    reservedColumns.__proto__ = text();
+    expect(() =>
+      defineSchema((builder) => ({
+        users: builder.table("users", reservedColumns),
+      })),
+    ).toThrow(/reserved/);
+  });
+});
+
+describe("primary-key invariants and Drizzle agreement", () => {
+  it.each([
+    ["id", id()],
+    ["bigid", bigid()],
+  ])("emits %s as an actual identity primary key", (_name, key) => {
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", { key }),
+    }));
+    const config = getTableConfig(pgOf(schema.$tables.records.$engine));
+    const column = config.columns[0];
+    expect(column.primary).toBe(true);
+    expect(column.notNull).toBe(true);
+    expect(column.generatedIdentity).toMatchObject({ type: "byDefault" });
+    expect(schema.$tables.records.$columns.key.primaryKey).toBe(true);
+  });
+
+  it("supports keyless and one application-assigned primary key", () => {
+    const schema = defineSchema((builder) => ({
+      events: builder.table("events", { body: text().notNull() }),
+      accounts: builder.table("accounts", {
+        slug: text().primaryKey(),
+        label: text(),
+      }),
+    }));
+    expect(
+      Object.values(schema.$tables.events.$columns).some(
+        (column) => column.primaryKey,
+      ),
+    ).toBe(false);
+    const config = getTableConfig(pgOf(schema.$tables.accounts.$engine));
+    const slug = config.columns.find((column) => column.name === "slug");
+    expect(slug?.primary).toBe(true);
+    expect(slug?.notNull).toBe(true);
+    expect(slug?.generatedIdentity).toBeUndefined();
+  });
+
+  it("rejects multiple primary-key markers", () => {
+    expect(() =>
+      defineSchema((builder) => ({
+        invalid: builder.table("invalid", {
+          first: text().primaryKey(),
+          second: integer().primaryKey(),
+        }),
+      })),
+    ).toThrow(/multiple primary-key columns/);
+  });
+});
+
+describe("builder reuse and engine metadata", () => {
+  it("clones builder state across columns and schemas", () => {
+    const shared = text();
+    const first = defineSchema((builder) => ({
+      first: builder.table("first", { left: shared, right: shared }),
+    }));
+    shared.private().default("later");
+    const second = defineSchema((builder) => ({
+      second: builder.table("second", { value: shared }),
+    }));
+
+    expect(first.$tables.first.$columns.left.isPrivate).toBe(false);
+    expect(first.$tables.first.$columns.right.hasDefault).toBe(false);
+    expect(second.$tables.second.$columns.value.isPrivate).toBe(true);
+    expect(second.$tables.second.$columns.value.defaultValue).toBe("later");
+    expect(first.$tables.first.$columns.left).not.toBe(
+      first.$tables.first.$columns.right,
+    );
+    expect(first.$tables.first.$columns.left.engineColumn).not.toBe(
+      second.$tables.second.$columns.value.engineColumn,
+    );
+  });
+
+  it("materializes defaults in Drizzle configuration", () => {
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", {
+        id: id(),
+        active: boolean().default(true),
+        count: integer().default(0),
+        createdAt: timestamp().defaultNow(),
+      }),
+    }));
+    const columns = Object.fromEntries(
+      getTableConfig(pgOf(schema.$tables.records.$engine)).columns.map(
+        (column) => [column.name, column],
+      ),
+    );
+    expect(columns.active.default).toBe(true);
+    expect(columns.count.default).toBe(0);
+    expect(columns.createdAt.hasDefault).toBe(true);
+  });
+
+  it("keeps timestamp values in the declared string runtime representation", () => {
+    const value = "2024-01-02T03:04:05Z";
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", {
+        occurredAt: timestamp().default(value),
+      }),
+    }));
+    const [column] = getTableConfig(
+      pgOf(schema.$tables.records.$engine),
+    ).columns;
+    expect(column.mapToDriverValue(value as never)).toBe(value);
+    expect(column.default).toBe(value);
+  });
+
+  it("validates literal defaults against storage and enum values", () => {
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", {
+        status: enumColumn("record_status", ["open", "closed"]).default("open"),
+      }),
+    }));
+    const [status] = getTableConfig(
+      pgOf(schema.$tables.records.$engine),
+    ).columns;
+    expect(status.default).toBe("open");
+
+    const incompatibleDefaults = [
+      text().default(1),
+      integer().default("1"),
+      integer().default(2_147_483_648),
+      boolean().default("true"),
+      varchar(3).default("toolong"),
+      uuid().default("not-a-uuid"),
+      timestamp().default("not-a-timestamp"),
+      enumColumn("invalid_status", ["open", "closed"]).default("missing"),
+      bigint().default(1),
+      jsonb().default("{}"),
+    ];
+    for (const value of incompatibleDefaults) {
+      expect(() =>
+        defineSchema((builder) => ({
+          records: builder.table("records", { value }),
+        })),
+      ).toThrow(/not compatible/);
     }
   });
 });
 
-describe("defineSchema — engine maps (with relations)", () => {
-  const schema = defineSchema((t) => ({
-    users: t.table("users", { id: id() }),
-    posts: t.table("posts", {
-      id: id(),
-      authorId: fk(() => ({
-        __isColumnRef: true,
-        tableName: "users",
-        columnName: "id",
-      })),
-    }),
-  }));
-
-  it("$engine carries only the table handles", () => {
-    expect(Object.keys(schema.$engine).sort()).toEqual(["posts", "users"]);
-  });
-
-  it("resolves the forward toOne on the FK owner", () => {
-    const relations: ResolvedRelation[] = schema.$tables.posts.$relations;
-    expect(relations).toEqual([
-      {
-        name: "users",
-        cardinality: "toOne",
-        localColumn: "authorId",
-        targetTable: "users",
-        targetColumn: "id",
-        inferred: false,
-      },
-    ]);
-  });
-
-  it("infers the reverse toMany on the FK target", () => {
-    const relations: ResolvedRelation[] = schema.$tables.users.$relations;
-    expect(relations).toEqual([
-      {
-        name: "posts",
-        cardinality: "toMany",
-        localColumn: "id",
-        targetTable: "posts",
-        targetColumn: "authorId",
-        inferred: true,
-      },
-    ]);
-  });
-});
-
-describe("defineSchema — typed builder surface", () => {
-  it("accepts a typed SchemaBuilderContext callback", () => {
-    const build = (t: SchemaBuilderContext) => {
-      const users: TableHandle<{ id: ColumnBuilder; email: ColumnBuilder }> =
-        t.table("users", { id: id(), email: text() });
-      return { users };
-    };
-    const schema = defineSchema(build);
-    expect(schema.$tables.users.$name).toBe("users");
-  });
-});
-
-describe("defineSchema — custom schemaName", () => {
-  it("threads schemaName onto the schema and tables", () => {
-    const options: DefineSchemaOptions = { schemaName: "app" };
-    const schema = defineSchema(
-      (t) => ({ users: t.table("users", { id: id() }) }),
-      options,
-    );
-    expect(schema.$schemaName).toBe("app");
-    expect(schema.$tables.users.$schemaName).toBe("app");
-  });
-});
-
-describe("defineSchema — foreign keys", () => {
-  it("forward FK mirrors a serial PK to integer storage", () => {
-    const schema = defineSchema((t) => {
-      const users = t.table("users", { id: id(), email: text() });
-      const posts = t.table("posts", {
-        id: id(),
-        authorId: fk(() => users.id).notNull(),
-      });
-      return { users, posts };
-    });
-    const authorId = schema.$tables.posts.$columns.authorId;
-    expect(authorId.storageKind).toBe("integer");
-    expect(authorId.pgType).toBe("int4");
-    expect(authorId.notNull).toBe(true);
-    expect(authorId.fk).toEqual({
-      targetTable: "users",
-      targetColumn: "id",
-      onDelete: undefined,
-      onUpdate: undefined,
-    });
-  });
-
-  it("forward FK to a bigid PK mirrors to bigint storage", () => {
-    const schema = defineSchema((t) => {
-      const orgs = t.table("orgs", { id: bigid() });
-      const teams = t.table("teams", { id: id(), orgId: fk(() => orgs.id) });
-      return { orgs, teams };
-    });
-    const orgId = schema.$tables.teams.$columns.orgId;
-    expect(orgId.storageKind).toBe("bigint");
-    expect(orgId.pgType).toBe("int8");
-    expect(orgId.kind).toBe("bigint");
-  });
-
-  it("supports self-referencing FKs", () => {
-    const schema = defineSchema((t) => {
-      const nodes = t.table("nodes", {
-        id: id(),
-        // self-ref via a direct ColumnRef thunk (avoids circular type inference).
-        parentId: fk(() => ({
-          __isColumnRef: true,
-          tableName: "nodes",
-          columnName: "id",
-        })),
-      });
-      return { nodes };
-    });
-    expect(schema.$tables.nodes.$columns.parentId.fk?.targetTable).toBe(
-      "nodes",
-    );
-  });
-
-  it("carries onDelete/onUpdate referential actions onto the edge", () => {
-    const schema = defineSchema((t) => {
-      const users = t.table("users", { id: id() });
-      const posts = t.table("posts", {
-        id: id(),
-        authorId: fk(() => users.id)
-          .onDelete("cascade")
-          .onUpdate("restrict"),
-      });
-      return { users, posts };
-    });
-    expect(schema.$tables.posts.$columns.authorId.fk).toMatchObject({
-      onDelete: "cascade",
-      onUpdate: "restrict",
-    });
-  });
-
-  it("throws when fk() targets an unknown table", () => {
+describe("enum identity", () => {
+  it("reuses equal declarations and rejects conflicting values", () => {
     expect(() =>
-      defineSchema((t) => ({
-        posts: t.table("posts", {
-          id: id(),
-          ghost: fk(() => ({
-            __isColumnRef: true,
-            tableName: "missing",
-            columnName: "id",
-          })),
+      defineSchema((builder) => ({
+        first: builder.table("first", {
+          status: enumColumn("status_kind", ["open", "closed"]),
+        }),
+        second: builder.table("second", {
+          status: builder.enum("status_kind", ["open", "closed"]),
         }),
       })),
-    ).toThrow(/unknown table "missing"/);
+    ).not.toThrow();
+
+    expect(() =>
+      defineSchema((builder) => ({
+        first: builder.table("first", {
+          status: enumColumn("status_kind", ["open", "closed"]),
+        }),
+        second: builder.table("second", {
+          status: enumColumn("status_kind", ["open", "archived"]),
+        }),
+      })),
+    ).toThrow(/conflicting values/);
   });
 
-  it("throws when fk() targets an unknown column", () => {
+  it("creates enums in the table's PostgreSQL schema", () => {
+    const schema = defineSchema(
+      (builder) => ({
+        tickets: builder.table("tickets", {
+          status: builder.enum("ticket_status", ["open", "closed"]),
+        }),
+      }),
+      { schemaName: "application" },
+    );
+    const [column] = getTableConfig(
+      pgOf(schema.$tables.tickets.$engine),
+    ).columns;
+    expect(
+      (column as unknown as { enum?: { schema?: string } }).enum?.schema,
+    ).toBe("application");
+    expect(column.enumValues).toEqual(["open", "closed"]);
+  });
+});
+
+describe("generated relation-key collisions", () => {
+  it("rejects a table that would overwrite Drizzle relation metadata", () => {
     expect(() =>
-      defineSchema((t) => {
-        const users = t.table("users", { id: id() });
-        const posts = t.table("posts", {
+      defineSchema((builder) => {
+        const users = builder.table("users", { id: id() });
+        const posts = builder.table("posts", {
           id: id(),
-          ghost: fk(() => ({
-            __isColumnRef: true,
-            tableName: "users",
-            columnName: "nope",
-          })),
+          userId: fk(() => users.id),
         });
-        return { users, posts };
+        const usersRelations = builder.table("usersRelations", { id: id() });
+        return { users, posts, usersRelations };
       }),
-    ).toThrow(/unknown column "users\.nope"/);
-  });
-});
-
-describe("defineSchema — guard rails", () => {
-  it("throws on duplicate table names", () => {
-    expect(() =>
-      defineSchema((t) => {
-        const a = t.table("users", { id: id() });
-        const b = t.table("users", { id: id() });
-        return { a, b };
-      }),
-    ).toThrow(/Duplicate table "users"/);
-  });
-
-  it("throws when a returned value did not come from ctx.table()", () => {
-    const rogue = {
-      $name: "rogue",
-      $schemaName: "public",
-      $columns: {},
-      $relations: [],
-    } as unknown as AppKitTable;
-    expect(() =>
-      defineSchema((t) => {
-        t.table("users", { id: id() });
-        return { rogue };
-      }),
-    ).toThrow(/was not produced by ctx\.table\(\)/);
-  });
-});
-
-describe("defineSchema — real engine wiring (getTableConfig)", () => {
-  const schema = defineSchema((t) => {
-    const users = t.table("users", {
-      id: id(),
-      email: text().notNull(),
-      active: boolean().default(true),
-      createdAt: timestamp().defaultNow(),
-    });
-    const posts = t.table("posts", {
-      id: id(),
-      authorId: fk(() => users.id)
-        .notNull()
-        .onDelete("cascade"),
-      views: integer().default(0),
-    });
-    return { users, posts };
-  });
-
-  it("emits a real FK with the correct local/target columns and action", () => {
-    const config = getTableConfig(pgOf(schema.$tables.posts.$engine));
-    expect(config.foreignKeys).toHaveLength(1);
-    const fkConfig = config.foreignKeys[0];
-    const ref = fkConfig.reference();
-    expect(ref.columns.map((c) => c.name)).toEqual(["authorId"]);
-    expect(ref.foreignColumns.map((c) => c.name)).toEqual(["id"]);
-    expect(fkConfig.onDelete).toBe("cascade");
-  });
-
-  it("wires column names and notNull onto the engine table", () => {
-    const config = getTableConfig(pgOf(schema.$tables.users.$engine));
-    const byName = Object.fromEntries(config.columns.map((c) => [c.name, c]));
-    expect(Object.keys(byName).sort()).toEqual([
-      "active",
-      "createdAt",
-      "email",
-      "id",
-    ]);
-    expect(byName.email.notNull).toBe(true);
-    // identity PK is tracked in our ColumnMeta, not pushed onto the serial builder.
-    expect(schema.$tables.users.$columns.id.primaryKey).toBe(true);
+    ).toThrow(/collides with generated relation metadata/);
   });
 });

@@ -1,29 +1,72 @@
-import type { ColumnInfoKind, ReferentialAction } from "../contract";
+import type { FilterOperator } from "../contract";
 
-/**
- * Opaque handles to the internal query-engine objects.
- */
 declare const ENGINE_TABLE: unique symbol;
 declare const ENGINE_COLUMN: unique symbol;
+/** Opaque handles keep Drizzle types behind the schema/runtime boundary. */
 export type EngineTable = { readonly [ENGINE_TABLE]: true };
 export type EngineColumn = { readonly [ENGINE_COLUMN]: true };
 
-/** Internal description of a column's storage type */
-export type ColumnTypeSpec =
-  | { kind: "id" }
-  | { kind: "bigid" }
-  | { kind: "text" }
-  | { kind: "varchar"; length: number }
-  | { kind: "integer" }
-  | { kind: "bigint" }
-  | { kind: "boolean" }
-  | { kind: "uuid" }
-  | { kind: "timestamp"; withTimezone: boolean }
-  | { kind: "jsonb" }
-  | { kind: "enum"; enumName: string; values: readonly string[] }
-  | { kind: "fk" };
+/** JavaScript value category exposed by a column, independent of its storage. */
+export type ColumnValueKind =
+  | "string"
+  | "number"
+  | "bigint"
+  | "boolean"
+  | "date"
+  | "json"
+  | "uuid"
+  | "enum"
+  | "unknown";
 
-/** Concrete storage kind after FK mirroring */
+/** The filter subset shared by runtime translation and later typed surfaces. */
+export function filterOperatorsForKind(
+  kind: ColumnValueKind,
+): readonly FilterOperator[] {
+  switch (kind) {
+    case "string":
+      return ["eq", "neq", "in", "like", "ilike"];
+    case "number":
+    case "bigint":
+    case "date":
+      return ["eq", "neq", "in", "gt", "gte", "lt", "lte"];
+    case "enum":
+    case "boolean":
+    case "uuid":
+      return ["eq", "neq", "in"];
+    case "json":
+    case "unknown":
+      return [];
+  }
+}
+
+/** PostgreSQL action applied when a referenced row changes or is deleted. */
+export type ReferentialAction =
+  | "cascade"
+  | "set null"
+  | "set default"
+  | "restrict"
+  | "no action";
+
+/** DSL declaration kind, including identity shorthand and unresolved FKs. */
+export type ColumnTypeSpec =
+  | { readonly kind: "id" }
+  | { readonly kind: "bigid" }
+  | { readonly kind: "text" }
+  | { readonly kind: "varchar"; readonly length: number }
+  | { readonly kind: "integer" }
+  | { readonly kind: "bigint" }
+  | { readonly kind: "boolean" }
+  | { readonly kind: "uuid" }
+  | { readonly kind: "timestamp"; readonly withTimezone: boolean }
+  | { readonly kind: "jsonb" }
+  | {
+      readonly kind: "enum";
+      readonly enumName: string;
+      readonly values: readonly string[];
+    }
+  | { readonly kind: "fk" };
+
+/** Resolved PostgreSQL storage used to construct the engine column. */
 export type StorageKind =
   | "id"
   | "bigid"
@@ -37,7 +80,6 @@ export type StorageKind =
   | "jsonb"
   | "enum";
 
-/** A deferred or direct reference to a target column */
 export interface ColumnRef {
   readonly __isColumnRef: true;
   readonly tableName: string;
@@ -46,22 +88,25 @@ export interface ColumnRef {
 
 export type FkRef = ColumnRef | (() => ColumnRef);
 
-/** Mutable working metadata; frozen into {@link ColumnMeta} at the end of the build. */
+export interface ResolvedForeignKey {
+  readonly targetTable: string;
+  readonly targetColumn: string;
+  readonly onDelete?: ReferentialAction;
+  readonly onUpdate?: ReferentialAction;
+}
+
+/** Mutable declaration state. It is cloned per table and never published. */
 export interface MutableColumnMeta {
   name: string;
   columnName: string;
-  kind: ColumnInfoKind;
-  pgType: string;
+  kind: ColumnValueKind;
   storageKind: StorageKind;
   notNull: boolean;
   primaryKey: boolean;
   unique: boolean;
   isPrivate: boolean;
-  /** RLS owner column (`.owner()`) — its email value is compared to current_user_email() by the policy. */
-  isOwner: boolean;
   serverGenerated: boolean;
   hasDefault: boolean;
-  defaultExpr?: string;
   defaultValue?: string | number | boolean;
   defaultNow?: boolean;
   defaultRandom?: boolean;
@@ -72,61 +117,53 @@ export interface MutableColumnMeta {
   fkRef?: FkRef;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
-  fk?: {
-    targetTable: string;
-    targetColumn: string;
-    onDelete?: ReferentialAction;
-    onUpdate?: ReferentialAction;
-  };
-  /** @internal opaque engine column handle */
+  fk?: ResolvedForeignKey;
   engineColumn?: EngineColumn;
 }
 
-/** Resolved, read-only column metadata exposed on a built table. */
-export type ColumnMeta = Readonly<MutableColumnMeta>;
+/** Immutable column metadata published by a finalized schema. */
+export type ColumnMeta = Readonly<
+  Omit<MutableColumnMeta, "enumValues" | "fk" | "fkRef" | "engineColumn"> & {
+    readonly enumValues?: readonly string[];
+    readonly fk?: Readonly<ResolvedForeignKey>;
+    readonly engineColumn: EngineColumn;
+  }
+>;
 
-/**
- * A named, directed relation resolved from FK edges. `toOne` is the forward
- * many-to-one; `toMany` is the inferred reverse one-to-many.
- */
 export interface ResolvedRelation {
-  name: string;
-  cardinality: "toOne" | "toMany";
-  localColumn: string;
-  targetTable: string;
-  targetColumn: string;
-  inferred: boolean;
+  readonly name: string;
+  readonly cardinality: "toOne" | "toMany";
+  readonly localColumn: string;
+  readonly targetTable: string;
+  readonly targetColumn: string;
+  readonly inferred: boolean;
 }
 
-/** A built table: the engine table handle plus AppKit metadata under `$`-keys. */
 export interface AppKitTable {
-  $name: string;
-  $schemaName: string;
-  $columns: Record<string, ColumnMeta>;
-  /** @internal opaque engine table handle */
-  $engine: EngineTable;
-  $relations: ResolvedRelation[];
-  /** @internal insert schema */
-  $insertSchema?: unknown;
-  /** @internal update schema */
-  $updateSchema?: unknown;
+  readonly $name: string;
+  readonly $schemaName: string;
+  readonly $columns: Readonly<Record<string, ColumnMeta>>;
+  readonly $engine: EngineTable;
+  readonly $relations: readonly ResolvedRelation[];
+  /** @internal insert schema retained from the current-main foundation. */
+  readonly $insertSchema: unknown;
+  /** @internal update schema retained from the current-main foundation. */
+  readonly $updateSchema: unknown;
 }
 
-/** The object returned by `ctx.table(...)`: column refs + (after build) the table metadata. */
+/** A declaration handle gains finalized table metadata only at publication. */
 export type TableHandle<C extends Record<string, unknown>> = AppKitTable & {
   readonly [K in keyof C]: ColumnRef;
 };
 
 export interface DefineSchemaOptions {
-  /** Postgres schema name; canonical default is `"public"`. */
-  schemaName?: string;
+  readonly schemaName?: string;
 }
 
 export interface Schema {
-  $schemaName: string;
-  $tables: Record<string, AppKitTable>;
-  /** @internal opaque engine table handles */
-  $engine: Record<string, EngineTable>;
+  readonly $schemaName: string;
+  readonly $tables: Readonly<Record<string, AppKitTable>>;
+  readonly $engine: Readonly<Record<string, EngineTable>>;
 }
 
 export class SchemaBuildError extends Error {
