@@ -7,6 +7,7 @@ export type DatabaseErrorCategory =
   | "INVALID_REQUEST"
   | "CONFLICT"
   | "FORBIDDEN"
+  | "TRANSIENT"
   | "INTERNAL"
   | "SETUP_FAILED";
 
@@ -25,6 +26,10 @@ const definitions: Record<
   INVALID_REQUEST: { message: "Invalid database request", statusCode: 400 },
   CONFLICT: { message: "Database conflict", statusCode: 409 },
   FORBIDDEN: { message: "Database operation forbidden", statusCode: 403 },
+  TRANSIENT: {
+    message: "Database operation temporarily unavailable",
+    statusCode: 503,
+  },
   INTERNAL: { message: "Database operation failed", statusCode: 500 },
   SETUP_FAILED: { message: "Database setup failed", statusCode: 500 },
 };
@@ -33,12 +38,13 @@ const categoryByStatus: Readonly<Record<number, DatabaseErrorCategory>> = {
   400: "INVALID_REQUEST",
   403: "FORBIDDEN",
   409: "CONFLICT",
+  503: "TRANSIENT",
 };
 
 /** AppKit-facing database failure with stable metadata and no driver details. */
 export class DatabasePluginError extends AppKitError {
   readonly code = "DATABASE_PLUGIN_ERROR";
-  readonly isRetryable = false;
+  readonly isRetryable: boolean;
   readonly statusCode: number;
 
   constructor(
@@ -57,6 +63,7 @@ export class DatabasePluginError extends AppKitError {
       },
     );
     this.statusCode = definition.statusCode;
+    this.isRetryable = category === "TRANSIENT";
     this.name = "DatabasePluginError";
   }
 }

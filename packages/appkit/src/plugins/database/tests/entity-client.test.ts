@@ -140,25 +140,30 @@ describe("EntityClient", () => {
   });
 
   test.each([
-    [400, "INVALID_REQUEST"],
-    [403, "FORBIDDEN"],
-    [409, "CONFLICT"],
-    [500, "INTERNAL"],
-  ] as const)("maps executor status %s", async (status, category) => {
-    const failing = new EntityClient({
-      table: schema.$tables.notes,
-      getDataPath: () => {
-        throw new Error("must not run");
-      },
-      assertActive: vi.fn(),
-      execute: async () => ({ ok: false, status, message: "safe" }),
-    });
-    await expect(failing.toArray()).rejects.toMatchObject({
-      category,
-      phase: "read",
-      statusCode: status,
-    });
-  });
+    [400, "INVALID_REQUEST", false],
+    [403, "FORBIDDEN", false],
+    [409, "CONFLICT", false],
+    [500, "INTERNAL", false],
+    [503, "TRANSIENT", true],
+  ] as const)(
+    "maps executor status %s",
+    async (status, category, isRetryable) => {
+      const failing = new EntityClient({
+        table: schema.$tables.notes,
+        getDataPath: () => {
+          throw new Error("must not run");
+        },
+        assertActive: vi.fn(),
+        execute: async () => ({ ok: false, status, message: "safe" }),
+      });
+      await expect(failing.toArray()).rejects.toMatchObject({
+        category,
+        isRetryable,
+        phase: "read",
+        statusCode: status,
+      });
+    },
+  );
 
   test("rechecks activity inside delayed execution before DataPath access", async () => {
     let release!: () => void;

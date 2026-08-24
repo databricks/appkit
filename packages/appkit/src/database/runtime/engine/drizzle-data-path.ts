@@ -180,16 +180,17 @@ function sqlStateOf(error: unknown): string | undefined {
 function classifyDriverError(error: unknown): DatabasePluginError {
   const code = sqlStateOf(error);
   const category: DatabaseErrorCategory =
-    code === "42501"
-      ? "FORBIDDEN"
-      : code?.startsWith("23")
-        ? "CONFLICT"
-        : "INTERNAL";
+    code === "40001" || code === "40P01"
+      ? "TRANSIENT"
+      : code === "42501"
+        ? "FORBIDDEN"
+        : code?.startsWith("23")
+          ? "CONFLICT"
+          : "INTERNAL";
   logger.error(
-    "Database driver error classified as %s (SQLSTATE %s): %O",
+    "Database driver error classified as %s (SQLSTATE %s)",
     category,
     code ?? "unknown",
-    error,
   );
   return new DatabasePluginError(category, "runtime");
 }

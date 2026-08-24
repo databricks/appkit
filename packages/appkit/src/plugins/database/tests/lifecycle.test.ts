@@ -190,6 +190,7 @@ describe("createDatabaseState", () => {
       ["INVALID_REQUEST", "INVALID_REQUEST"],
       ["CONFLICT", "CONFLICT"],
       ["FORBIDDEN", "FORBIDDEN"],
+      ["TRANSIENT", "TRANSIENT"],
       ["INTERNAL", "INTERNAL"],
     ] as const) {
       vi.mocked(path.raw).mockRejectedValueOnce(

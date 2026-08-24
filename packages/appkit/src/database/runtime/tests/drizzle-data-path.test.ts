@@ -1,7 +1,7 @@
 import { sql as drizzleSql, type SQL } from "drizzle-orm";
 import { PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_LIMIT, MAX_LIMIT, MAX_OFFSET } from "../../contract";
 import { DatabasePluginError } from "../../errors";
@@ -713,14 +713,16 @@ describe("database failures", () => {
   });
 
   it.each([
-    ["23505", "CONFLICT"],
-    ["23000", "CONFLICT"],
-    ["42501", "FORBIDDEN"],
-    ["XX000", "INTERNAL"],
-    [42, "INTERNAL"],
+    ["23505", "CONFLICT", false],
+    ["23000", "CONFLICT", false],
+    ["40001", "TRANSIENT", true],
+    ["40P01", "TRANSIENT", true],
+    ["42501", "FORBIDDEN", false],
+    ["XX000", "INTERNAL", false],
+    [42, "INTERNAL", false],
   ] as const)(
     "maps SQLSTATE %s without leaking driver fields",
-    async (code, category) => {
+    async (code, category, isRetryable) => {
       const fake = makeFakeDb();
       const query = fake.db.query as unknown as Record<
         string,
@@ -739,6 +741,7 @@ describe("database failures", () => {
         .catch((caught) => caught);
       expect(error).toMatchObject({
         category,
+        isRetryable,
       });
       expect(error.cause).toBeUndefined();
       expect(JSON.stringify(error)).not.toContain("secret");
@@ -748,12 +751,14 @@ describe("database failures", () => {
   // Drizzle never rethrows the raw driver error; it wraps it in
   // DrizzleQueryError and moves the SQLSTATE onto `cause`.
   it.each([
-    ["23503", "CONFLICT"],
-    ["42501", "FORBIDDEN"],
-    ["XX000", "INTERNAL"],
+    ["23503", "CONFLICT", false],
+    ["40001", "TRANSIENT", true],
+    ["40P01", "TRANSIENT", true],
+    ["42501", "FORBIDDEN", false],
+    ["XX000", "INTERNAL", false],
   ] as const)(
     "maps SQLSTATE %s carried on a wrapped driver cause",
-    async (code, category) => {
+    async (code, category, isRetryable) => {
       const fake = makeFakeDb();
       const query = fake.db.query as unknown as Record<
         string,
@@ -772,11 +777,41 @@ describe("database failures", () => {
       const error = await createDrizzleDataPath(fake.db, schema)
         .select(users, {})
         .catch((caught) => caught);
-      expect(error).toMatchObject({ category });
+      expect(error).toMatchObject({ category, isRetryable });
       expect(error.cause).toBeUndefined();
       expect(JSON.stringify(error)).not.toContain("secret");
     },
   );
+
+  it("logs only safe driver classification metadata", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      throw {
+        code: "23505",
+        detail: "Key (email)=(alice@x.com) already exists",
+      };
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch(() => undefined);
+
+      const output = errorLog.mock.calls.flat().map(String).join(" ");
+      expect(output).toContain("CONFLICT");
+      expect(output).toContain("23505");
+      expect(output).not.toContain("alice@x.com");
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 
   it("stops walking an error cause cycle", async () => {
     const fake = makeFakeDb();
