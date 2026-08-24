@@ -101,7 +101,7 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
     // Regression for finding #1 on PR #304: the gate previously checked
     // only `annotations.destructive === true` and let `effect:"destructive"`
     // through unapproved.
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { runState, pushed } = makeRunState(plugin);
 
     const execute = vi.fn().mockResolvedValue("ok");
@@ -141,7 +141,7 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
   ])(
     "does NOT fire for non-mutating `effect` value %p",
     async (effect, expectGate) => {
-      const plugin = new AgentsPlugin({ dir: false });
+      const plugin = new AgentsPlugin({});
       const { runState } = makeRunState(plugin);
 
       const annotations = effect ? { effect } : undefined;
@@ -177,7 +177,7 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
   );
 
   test("denying the gate returns the deny string and does not invoke the tool", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { runState } = makeRunState(plugin);
 
     const execute = vi.fn();
@@ -215,7 +215,7 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
 
 describe("dispatchToolCall — shared tool-call budget", () => {
   test("subsequent calls increment the shared counter", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { runState } = makeRunState(plugin);
 
     const toolIndex = new Map<string, unknown>([
@@ -242,7 +242,6 @@ describe("dispatchToolCall — shared tool-call budget", () => {
 
   test("rejects + aborts when the budget is exhausted", async () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { maxToolCalls: 2 },
     });
     const { runState } = makeRunState(plugin);
@@ -299,7 +298,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     ]);
 
   test("forwards runState.limits.toolCallTimeoutMs to PluginContext.executeTool", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { runState } = makeRunState(plugin);
     runState.limits.toolCallTimeoutMs = 90_000;
 
@@ -342,7 +341,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     // End-to-end proof that the timeout value the agents plugin forwards
     // reaches real AbortSignal composition inside PluginContext.executeTool —
     // a stubbed executeTool would silently ignore the timeout.
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { runState } = makeRunState(plugin);
     runState.limits.toolCallTimeoutMs = 5;
 
@@ -369,14 +368,13 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
   });
 
   test("resolvedLimits exposes the documented 5-minute default", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const limits = (plugin as any).resolvedLimits;
     expect(limits.toolCallTimeoutMs).toBe(300_000);
   });
 
   test("honours agents({ limits: { toolCallTimeoutMs } })", () => {
     const plugin = new AgentsPlugin({
-      dir: false,
       limits: { toolCallTimeoutMs: 600_000 },
     });
     const limits = (plugin as any).resolvedLimits;
@@ -398,7 +396,6 @@ describe("runSubAgent — sub-agent event forwarding", () => {
     // cycle, two agents delegating to each other will eventually exceed
     // the depth limit and we want a clear error, not an unbounded stack.
     const plugin = new AgentsPlugin({
-      dir: false,
       agents: {},
       limits: { maxSubAgentDepth: 2 },
     });
@@ -420,7 +417,7 @@ describe("runSubAgent — sub-agent event forwarding", () => {
   });
 
   test("forwards every sub-agent event into the parent stream except metadata", async () => {
-    const plugin = new AgentsPlugin({ dir: false, agents: {} });
+    const plugin = new AgentsPlugin({ agents: {} });
     const { runState, pushed } = makeRunState(plugin);
 
     const child = {

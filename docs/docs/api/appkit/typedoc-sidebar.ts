@@ -617,6 +617,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.defineManifest",
+          label: "defineManifest"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.defineTool",
           label: "defineTool"
         },

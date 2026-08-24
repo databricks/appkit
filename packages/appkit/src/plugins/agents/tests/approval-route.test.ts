@@ -63,7 +63,7 @@ beforeEach(() => {
 
 describe("POST /approve route handler", () => {
   test("rejects invalid body shape with 400", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { res, json } = mockRes();
     await (plugin as any)._handleApprove(mockReq({}, "alice"), res);
     expect(res.status).toHaveBeenCalledWith(400);
@@ -73,7 +73,7 @@ describe("POST /approve route handler", () => {
   });
 
   test("returns 404 when the streamId is unknown", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const { res, json } = mockRes();
     await (
       plugin as unknown as {
@@ -96,7 +96,7 @@ describe("POST /approve route handler", () => {
   });
 
   test("returns 403 when submitter is different from stream owner", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     (plugin as any).activeStreams.set("stream-x", {
       controller: new AbortController(),
       userId: "alice",
@@ -135,7 +135,7 @@ describe("POST /approve route handler", () => {
   });
 
   test("returns 404 when approvalId is unknown on an active stream", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     (plugin as any).activeStreams.set("stream-y", {
       controller: new AbortController(),
       userId: "alice",
@@ -164,7 +164,7 @@ describe("POST /approve route handler", () => {
   });
 
   test("happy path: approve resolves pending gate with 'approve'", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     (plugin as any).activeStreams.set("stream-z", {
       controller: new AbortController(),
       userId: "alice",
@@ -198,7 +198,7 @@ describe("POST /approve route handler", () => {
   });
 
   test("happy path: deny resolves pending gate with 'deny'", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     (plugin as any).activeStreams.set("stream-z", {
       controller: new AbortController(),
       userId: "alice",
@@ -233,7 +233,7 @@ describe("POST /approve route handler", () => {
 
 describe("POST /cancel ownership + gate cleanup", () => {
   test("cancelling a stream denies every pending approval on that stream", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const controller = new AbortController();
     (plugin as any).activeStreams.set("stream-c", {
       controller,
@@ -270,7 +270,7 @@ describe("POST /cancel ownership + gate cleanup", () => {
   });
 
   test("cancel from a different user is refused with 403", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     const controller = new AbortController();
     (plugin as any).activeStreams.set("stream-d", {
       controller,

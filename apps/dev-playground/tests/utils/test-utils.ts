@@ -7,15 +7,6 @@ import {
   mockTelemetryResponse,
 } from "./mock-data";
 
-/**
- * React 19 Strict Mode doubles useEffect invocations in development mode
- * to help detect side effects. This multiplier accounts for that behavior
- * when asserting API call counts in tests.
- *
- * @see https://react.dev/reference/react/StrictMode#fixing-bugs-found-by-re-running-effects-in-development
- */
-export const STRICT_MODE_MULTIPLIER = 2;
-
 function createSSEResponse(data: unknown): string {
   const event = JSON.stringify({ type: "result", data });
   return `data: ${event}\n\n`;

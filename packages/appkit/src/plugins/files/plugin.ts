@@ -37,8 +37,8 @@ import {
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest, ResourceRequirement } from "../../registry";
-import { ResourceType } from "../../registry";
+import type { ResourceRequirement } from "../../registry";
+import { defineManifest, ResourceType } from "../../registry";
 import { ApiError } from "../../workspace-client";
 import {
   FILES_DOWNLOAD_DEFAULTS,
@@ -69,7 +69,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
-  static manifest = manifest as PluginManifest;
+  static manifest = defineManifest<"files">(manifest);
   protected static description = "Files plugin for Databricks file operations";
   declare protected config: IFilesConfig;
 

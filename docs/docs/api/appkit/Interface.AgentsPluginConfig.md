@@ -14,13 +14,21 @@ Base configuration interface for AppKit plugins
 
 ## Properties
 
-### agents?
+### ~~agents?~~
 
 ```ts
 optional agents: Record<string, AgentDefinition>;
 ```
 
-Code-defined agents, merged with file-loaded ones (code wins on key collision).
+#### Deprecated
+
+Put each code agent in its own folder under
+`server/agents/<id>/agent.ts` (`export default createAgent({ ... })`); it is
+discovered automatically at startup and the call collapses to
+`agents({ ... })` with no map. Still honored for backward compatibility
+(emits a one-time deprecation warning) but will be removed in a future
+minor. If both discovery and this map define the same id, discovery wins
+and the map entry is ignored.
 
 ***
 
@@ -37,7 +45,7 @@ Human-in-the-loop approval gate for mutating tool calls. When enabled
 (the default), the agents plugin emits an `appkit.approval_pending` SSE
 event before executing any tool whose annotation flags it as mutating —
 `effect: "write" | "update" | "destructive"` (preferred) or the legacy
-`destructive: true` boolean — and waits for a `POST /chat/approve`
+`destructive: true` boolean — and waits for a `POST /api/agents/approve`
 decision from the same user who initiated the stream. A missing decision
 after `timeoutMs` auto-denies the call.
 
@@ -89,7 +97,7 @@ Customize or disable the AppKit base system prompt.
 optional defaultAgent: string;
 ```
 
-Agent used when clients don't specify one. Defaults to the first-registered agent or the file with `default: true` frontmatter.
+Agent used when clients don't specify one. Precedence: this value, else a code agent with `default: true`, else a markdown agent with `default: true`, else the first-registered agent.
 
 ***
 
@@ -103,16 +111,6 @@ optional defaultModel:
 ```
 
 Default model for agents that don't specify their own (in code or frontmatter).
-
-***
-
-### dir?
-
-```ts
-optional dir: string | false;
-```
-
-Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable.
 
 ***
 

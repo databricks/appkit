@@ -120,6 +120,24 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+## [0.64.0](https://github.com/databricks/appkit/compare/v0.63.0...v0.64.0) (2026-08-21)
+
+### appkit
+
+* **appkit:** auto-discover code agents from server/agents/ ([#533](https://github.com/databricks/appkit/issues/533)) ([145b128](https://github.com/databricks/appkit/commit/145b12816d203ae499be4ef228d383b759bf255c))
+
+
+## [0.63.0](https://github.com/databricks/appkit/compare/v0.62.0...v0.63.0) (2026-08-20)
+
+### appkit-ui
+
+* **appkit-ui:** share in-flight useAnalyticsQuery requests ([#524](https://github.com/databricks/appkit/issues/524)) ([a80ac24](https://github.com/databricks/appkit/commit/a80ac2456b0fdd21a8ea6c0486a8787d6d85913f)), closes [#496](https://github.com/databricks/appkit/issues/496)
+
+
 ## [0.62.0](https://github.com/databricks/appkit/compare/v0.61.1...v0.62.0) (2026-08-20)
 
 ### appkit

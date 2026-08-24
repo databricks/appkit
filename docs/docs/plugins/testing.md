@@ -167,7 +167,7 @@ const mock = createTestPluginContext({
 `attach()` wires the context to a plugin the production way: it seeds an in-memory cache (if AppKit hasn't already initialized one), then calls the plugin's `attachContext`, which rebuilds telemetry and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
 
 ```ts
-const plugin = new MyAgentPlugin({ dir: false });
+const plugin = new MyAgentPlugin({});
 await mock.attach(plugin);
 ```
 
@@ -386,7 +386,7 @@ To test a plugin that dispatches cross-plugin tool calls, register fake provider
 
 ```ts
 const mock = createTestPluginContext({ analytics: { query: [{ n: 1 }] } });
-const plugin = new MyAgentPlugin({ dir: false });
+const plugin = new MyAgentPlugin({});
 await mock.attach(plugin);
 
 // `obo` sets the forwarded identity headers `asUser` needs — without them the

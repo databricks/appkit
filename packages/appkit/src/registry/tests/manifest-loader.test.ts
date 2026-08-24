@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ConfigurationError } from "../../errors";
 import {
+  defineManifest,
   getPluginManifest,
   getResourceRequirements,
   isValidManifest,
@@ -553,6 +554,64 @@ describe("Manifest Loader", () => {
       };
 
       expect(isValidManifest(valid)).toBe(true);
+    });
+  });
+
+  describe("defineManifest", () => {
+    const validManifest = {
+      name: "testPlugin",
+      displayName: "Test Plugin",
+      description: "A test plugin",
+      resources: {
+        required: [
+          {
+            type: "sql_warehouse",
+            alias: "warehouse",
+            resourceKey: "sql-warehouse",
+            description: "Test warehouse",
+            permission: "CAN_USE",
+            fields: { id: { env: "TEST_WAREHOUSE_ID" } },
+          },
+        ],
+        optional: [],
+      },
+    };
+
+    it("returns a schema-valid manifest unchanged", () => {
+      const result = defineManifest<"testPlugin">(validManifest);
+      expect(result.name).toBe("testPlugin");
+      expect(result.resources.required[0].type).toBe("sql_warehouse");
+    });
+
+    it("throws when a resource has an unknown type", () => {
+      const bad = {
+        ...validManifest,
+        resources: {
+          required: [
+            { ...validManifest.resources.required[0], type: "not_a_type" },
+          ],
+          optional: [],
+        },
+      };
+      expect(() => defineManifest(bad)).toThrow();
+    });
+
+    it("throws when a permission is invalid for the resource type", () => {
+      const bad = {
+        ...validManifest,
+        resources: {
+          required: [
+            { ...validManifest.resources.required[0], permission: "CAN_QUERY" },
+          ],
+          optional: [],
+        },
+      };
+      expect(() => defineManifest(bad)).toThrow();
+    });
+
+    it("throws when a required top-level field is missing", () => {
+      const { name: _omit, ...noName } = validManifest;
+      expect(() => defineManifest(noName)).toThrow();
     });
   });
 });

@@ -118,15 +118,15 @@ export function scaffoldPlugin(
     );
 
     const pluginTs = `import {
+  defineManifest,
   Plugin,
   toPlugin,
   type IAppRouter,
-  type PluginManifest,
 } from "@databricks/appkit";
 import manifest from "./manifest.json";
 
 export class ${className} extends Plugin {
-  static manifest = manifest as PluginManifest<"${answers.name}">;
+  static manifest = defineManifest<"${answers.name}">(manifest);
 
   injectRoutes(router: IAppRouter): void {
     // Add your routes here, e.g.:

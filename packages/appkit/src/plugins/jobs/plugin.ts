@@ -14,8 +14,8 @@ import { ExecutionError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { ExecutionResult } from "../../plugin";
 import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest, ResourceRequirement } from "../../registry";
-import { ResourceType } from "../../registry";
+import type { ResourceRequirement } from "../../registry";
+import { defineManifest, ResourceType } from "../../registry";
 import type { jobs as jobsTypes } from "../../workspace-client";
 import {
   JOBS_READ_DEFAULTS,
@@ -85,7 +85,7 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 class JobsPlugin extends Plugin {
-  static manifest = manifest as PluginManifest;
+  static manifest = defineManifest<"jobs">(manifest);
 
   declare protected config: IJobsConfig;
   private connector: JobsConnector;
