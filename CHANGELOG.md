@@ -124,6 +124,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.65.0](https://github.com/databricks/appkit/compare/v0.64.0...v0.65.0) (2026-08-24)
+
+### appkit
+
+* **appkit:** add the database runtime and harden its schema builder ([#525](https://github.com/databricks/appkit/issues/525)) ([ccb4c0d](https://github.com/databricks/appkit/commit/ccb4c0df0abbb4b807cf4298ff82e6fb981aa2ec))
+
+
 ## [0.64.0](https://github.com/databricks/appkit/compare/v0.63.0...v0.64.0) (2026-08-21)
 
 ### appkit
