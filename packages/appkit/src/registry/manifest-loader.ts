@@ -1,4 +1,4 @@
-import type { PluginConstructor } from "shared";
+import { type PluginConstructor, pluginManifestSchema } from "shared";
 
 import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -10,6 +10,32 @@ import type {
 import { PERMISSIONS_BY_TYPE, ResourceType } from "./types";
 
 const logger = createLogger("manifest-loader");
+
+/**
+ * Validates a raw manifest (typically a `manifest.json` import) against the
+ * canonical Zod schema and returns it as a strict {@link PluginManifest}.
+ *
+ * Plugins declare `static manifest = defineManifest<"my-plugin">(manifestJson)`
+ * instead of casting. A plain `as PluginManifest` can't work: a JSON import
+ * widens every field to `string`, and `PluginManifest.resources[].type` is the
+ * nominal `ResourceType` enum, so the structural JSON shape never assigns. The
+ * single internal assertion here bridges that gap in one audited place — after
+ * `parse()` has confirmed the values are real `ResourceType`/permission strings
+ * — rather than every plugin repeating `as unknown as PluginManifest`.
+ *
+ * Pass the plugin name as `TName` so the literal is preserved: `toPlugin`
+ * derives the typed plugin key from `manifest.name`, and a widened `string`
+ * there would collapse the typed plugin registry.
+ *
+ * @throws {ZodError} If the manifest doesn't match the schema.
+ */
+export function defineManifest<TName extends string = string>(
+  manifest: unknown,
+): PluginManifest<TName> {
+  return pluginManifestSchema.parse(
+    manifest,
+  ) as unknown as PluginManifest<TName>;
+}
 
 /** Loose resource from shared/manifest (string type and permission). */
 interface LooseResource {

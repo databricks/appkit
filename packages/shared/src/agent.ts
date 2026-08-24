@@ -135,7 +135,7 @@ export type AgentEvent =
        * is awaiting human approval — fires for tools annotated with
        * `effect: "write" | "update" | "destructive"` (preferred) or the
        * legacy `destructive: true` boolean. Clients should render an approval
-       * prompt and POST to `/chat/approve` with the matching `approvalId` and
+       * prompt and POST to `/api/agents/approve` with the matching `approvalId` and
        * a `decision` of `approve` or `deny`.
        */
       type: "approval_pending";
@@ -240,7 +240,7 @@ export interface AppKitMetadataEvent {
  * Emitted when a mutating tool call is awaiting human approval. Fires for
  * tools annotated with `effect: "write" | "update" | "destructive"`
  * (preferred) or the legacy `destructive: true` boolean. The client should
- * render an approval UI and POST the decision to `/chat/approve` with
+ * render an approval UI and POST the decision to `/api/agents/approve` with
  * `{ streamId, approvalId, decision: "approve" | "deny" }`. If no decision
  * arrives before the server-side timeout, the call is auto-denied and the
  * agent receives a denial string as the tool output.

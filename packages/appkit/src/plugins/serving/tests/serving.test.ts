@@ -4,8 +4,8 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
-  mockServiceContext,
   setupDatabricksEnv,
+  useServiceContextMock,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -50,18 +50,18 @@ vi.mock("../../../connectors/serving/client", () => ({
 }));
 
 describe("Serving Plugin", () => {
-  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+  // The service-context spies' setup/teardown are handled by this hook (auto
+  // beforeEach install + afterEach restore); the block only adds its own env
+  // and singleton-reset setup around it.
+  useServiceContextMock();
 
-  beforeEach(async () => {
+  beforeEach(() => {
     setupDatabricksEnv();
     process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "test-endpoint";
     ServiceContext.reset();
-
-    serviceContextMock = await mockServiceContext();
   });
 
   afterEach(() => {
-    serviceContextMock?.restore();
     delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
     vi.restoreAllMocks();
   });

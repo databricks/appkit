@@ -127,7 +127,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Variable | Description |
 | ------ | ------ |
-| [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
+| [agents](Variable.agents.md) | Plugin factory for the agents plugin. Discovers agents from `server/agents/<id>/agent.{ts,md}` by default (markdown still in `config/agents/` is read as a deprecated fallback), resolves toolkits/tools from registered plugins, exposes the `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
 | [aiSearch](Variable.aiSearch.md) | - |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
@@ -142,11 +142,12 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [agentIdFromMarkdownPath](Function.agentIdFromMarkdownPath.md) | Derives the logical agent id from a markdown path. When the file is named `agent.md`, the id is the parent directory name (folder-based layout); otherwise the id is the file stem (e.g. legacy single-file paths). |
 | [appKitServingTypesPlugin](Function.appKitServingTypesPlugin.md) | Vite plugin to generate TypeScript types for AppKit serving endpoints. Fetches OpenAPI schemas from Databricks and generates a .d.ts with ServingEndpointRegistry module augmentation. |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
-| [createAgent](Function.createAgent.md) | Pure factory for agent definitions. Returns the passed-in definition after cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape and is safe to call at module top-level. |
+| [createAgent](Function.createAgent.md) | Pure factory for agent definitions: cycle-detects the sub-agent graph and returns the same object, stamped with a non-enumerable AGENT\_BRAND so discovery recognizes it. Safe at module top-level; no adapter is built. Don't `Object.freeze` the definition before passing it in — the brand is written onto the argument. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
+| [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |

@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit",
   "type": "module",
-  "version": "0.61.1",
+  "version": "0.64.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -41,6 +41,16 @@
       "types": "./dist/type-generator/index.d.ts",
       "development": "./src/type-generator/index.ts",
       "default": "./dist/type-generator/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "development": "./src/testing/index.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./tsdown": {
+      "types": "./dist/tsdown/index.d.ts",
+      "development": "./src/tsdown/index.ts",
+      "default": "./dist/tsdown/index.js"
     },
     "./dist/shared/src/plugin": {
       "types": "./dist/shared/src/plugin.d.ts",
@@ -94,6 +104,14 @@
     "ws": "8.21.0",
     "zod": "4.3.6"
   },
+  "peerDependencies": {
+    "vitest": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@opentelemetry/context-async-hooks": "2.8.0",
     "@types/express": "4.17.25",
@@ -101,7 +119,8 @@
     "@types/json-schema": "7.0.15",
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",
-    "@vitejs/plugin-react": "5.1.1"
+    "@vitejs/plugin-react": "5.1.1",
+    "vitest": "3.2.4"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"
@@ -113,6 +132,14 @@
       "./beta": "./dist/beta.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "./tsdown": {
+        "types": "./dist/tsdown/index.d.ts",
+        "default": "./dist/tsdown/index.js"
+      },
       "./package.json": "./package.json"
     }
   }

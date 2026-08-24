@@ -4,13 +4,11 @@
 function createAgent(def: AgentDefinition): AgentDefinition;
 ```
 
-Pure factory for agent definitions. Returns the passed-in definition after
-cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape
-and is safe to call at module top-level.
-
-The returned value is a plain `AgentDefinition` — no adapter construction,
-no side effects. Register it with `agents({ agents: { name: def } })` or run
-it standalone via `runAgent(def, input)`.
+Pure factory for agent definitions: cycle-detects the sub-agent graph and
+returns the same object, stamped with a non-enumerable AGENT\_BRAND
+so discovery recognizes it. Safe at module top-level; no adapter is built.
+Don't `Object.freeze` the definition before passing it in — the brand is
+written onto the argument.
 
 ## Parameters
 

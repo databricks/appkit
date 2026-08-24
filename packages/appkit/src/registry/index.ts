@@ -12,7 +12,11 @@
  * - (Future) Config generators for app.yaml, databricks.yml, .env.example
  */
 
-export { getPluginManifest, getResourceRequirements } from "./manifest-loader";
+export {
+  defineManifest,
+  getPluginManifest,
+  getResourceRequirements,
+} from "./manifest-loader";
 export { ResourceRegistry } from "./resource-registry";
 export * from "./types";
 

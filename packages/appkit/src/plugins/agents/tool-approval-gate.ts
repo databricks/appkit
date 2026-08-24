@@ -10,7 +10,7 @@
  *    scheduled for auto-deny. The returned promise is what blocks the
  *    adapter until the decision arrives.
  * 2. The client receives an `appkit.approval_pending` SSE event carrying the
- *    `approvalId` + `streamId` and posts a decision to `POST /chat/approve`.
+ *    `approvalId` + `streamId` and posts a decision to `POST /api/agents/approve`.
  *    The route calls {@link ToolApprovalGate.submit} which resolves the
  *    pending promise and clears the timer.
  * 3. If no submit arrives within `timeoutMs`, the timer fires and the

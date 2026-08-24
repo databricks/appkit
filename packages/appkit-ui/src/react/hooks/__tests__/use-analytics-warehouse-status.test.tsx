@@ -36,6 +36,7 @@ vi.mock("../use-query-hmr", () => ({
 }));
 
 import { ResourceStatusIndicator } from "../../resource-status-indicator";
+import { resetAnalyticsRequestStore } from "../analytics-request-store";
 import { useAnalyticsQuery } from "../use-analytics-query";
 import {
   ResourceStatusProvider,
@@ -59,6 +60,11 @@ function queryIndicatorToast(): HTMLElement | null {
 describe("useAnalyticsQuery + ResourceStatusProvider integration", () => {
   afterEach(() => {
     cleanup();
+    // `useAnalyticsQuery` is backed by a module-singleton request store; every
+    // Chart here shares the `chart_one` key, so clear it between tests (after
+    // unmount) to cancel deferred teardowns and avoid entry reuse leaking a
+    // captured `onMessage` across cases.
+    resetAnalyticsRequestStore();
     vi.clearAllMocks();
   });
 

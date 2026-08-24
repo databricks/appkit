@@ -5,6 +5,7 @@ export * from "./genie";
 export * from "./metric-filter";
 export * from "./metric-metadata";
 export * from "./plugin";
+export { pluginManifestSchema } from "./schemas/manifest";
 export * from "./sql";
 export * from "./sse/analytics";
 export * from "./tunnel";

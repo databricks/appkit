@@ -118,6 +118,33 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.64.0](https://github.com/databricks/appkit/compare/v0.63.0...v0.64.0) (2026-08-21)
+
+### appkit
+
+* **appkit:** auto-discover code agents from server/agents/ ([#533](https://github.com/databricks/appkit/issues/533)) ([145b128](https://github.com/databricks/appkit/commit/145b12816d203ae499be4ef228d383b759bf255c))
+
+
+## [0.63.0](https://github.com/databricks/appkit/compare/v0.62.0...v0.63.0) (2026-08-20)
+
+### appkit-ui
+
+* **appkit-ui:** share in-flight useAnalyticsQuery requests ([#524](https://github.com/databricks/appkit/issues/524)) ([a80ac24](https://github.com/databricks/appkit/commit/a80ac2456b0fdd21a8ea6c0486a8787d6d85913f)), closes [#496](https://github.com/databricks/appkit/issues/496)
+
+
+## [0.62.0](https://github.com/databricks/appkit/compare/v0.61.1...v0.62.0) (2026-08-20)
+
+### appkit
+
+* **appkit:** add testing kit ([#530](https://github.com/databricks/appkit/issues/530)) ([4ea97a4](https://github.com/databricks/appkit/commit/4ea97a4b140c31caadc266d0f18e0a12794b85dc)), closes [#1](https://github.com/databricks/appkit/issues/1) [#2](https://github.com/databricks/appkit/issues/2) [#6](https://github.com/databricks/appkit/issues/6) [#3](https://github.com/databricks/appkit/issues/3) [#12](https://github.com/databricks/appkit/issues/12) [#5](https://github.com/databricks/appkit/issues/5) [#7](https://github.com/databricks/appkit/issues/7) [#13](https://github.com/databricks/appkit/issues/13) [#4](https://github.com/databricks/appkit/issues/4) [#8](https://github.com/databricks/appkit/issues/8) [#11](https://github.com/databricks/appkit/issues/11) [#1](https://github.com/databricks/appkit/issues/1) [#2](https://github.com/databricks/appkit/issues/2) [#3](https://github.com/databricks/appkit/issues/3)
+
+
 ## [0.61.1](https://github.com/databricks/appkit/compare/v0.61.0...v0.61.1) (2026-08-17)
 
 ### cli

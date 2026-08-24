@@ -5,6 +5,7 @@ import {
   FileCode2Icon,
   FolderIcon,
   GaugeIcon,
+  LayersIcon,
   LayoutDashboardIcon,
   LineChartIcon,
   type LucideIcon,
@@ -85,6 +86,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Type-safe parameter builders and query generators for Databricks SQL.",
         icon: FileCode2Icon,
+      },
+      {
+        to: "/query-dedup",
+        label: "Query Dedup",
+        description:
+          "Many components, one request: identical analytics queries share a single in-flight fetch.",
+        icon: LayersIcon,
       },
     ],
   },
