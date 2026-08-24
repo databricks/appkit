@@ -64,8 +64,15 @@ export interface CreateTestAppOptions<T extends Plugins> {
   /** The plugins under test, as `createApp` takes them. */
   plugins?: T;
 
-  /** Dotted-path responses for the built-in mock. Ignored when `client` is set. */
+  /** Dotted-path responses for the built-in mock. Refused when `client` is set. */
   responses?: CreateMockWorkspaceClientOptions["responses"];
+
+  /**
+   * Make the built-in mock throw when a path with no declared response is
+   * called, rather than resolving `undefined`. Refused when `client` is set —
+   * configure it on your own client instead.
+   */
+  strict?: CreateMockWorkspaceClientOptions["strict"];
 
   /**
    * Replaces the built-in mock. You then own `currentUser.me()` — boot reads
@@ -199,6 +206,7 @@ export async function createTestApp<T extends Plugins>(
   const {
     plugins = [] as unknown as T,
     responses,
+    strict,
     client: suppliedClient,
     env = {},
     server: serverOption,
@@ -244,17 +252,18 @@ export async function createTestApp<T extends Plugins>(
     // `responses` only seeds the built-in mock, so alongside a caller-supplied
     // client it would silently do nothing. Refuse instead, matching the
     // `server: false` conflict below.
-    if (suppliedClient && responses !== undefined) {
+    if (suppliedClient && (responses !== undefined || strict !== undefined)) {
       throw new Error(
-        "createTestApp: `responses` configures the built-in mock client, so it " +
-          "does nothing when you also pass `client`. Drop `responses` and " +
-          "configure them on your own client instead.",
+        "createTestApp: `responses` and `strict` configure the built-in mock " +
+          "client, so they do nothing when you also pass `client`. Drop them " +
+          "and configure your own client instead.",
       );
     }
 
     // Boot runs ServiceContext.createContext for real, which reads
     // currentUser.id — the mock's built-in default is what lets it through.
-    const client = suppliedClient ?? createMockWorkspaceClient({ responses });
+    const client =
+      suppliedClient ?? createMockWorkspaceClient({ responses, strict });
 
     // createApp({ client }) installs only the service-principal client. An `obo`
     // request reaches ServiceContext.createUserContext, which builds a *real*

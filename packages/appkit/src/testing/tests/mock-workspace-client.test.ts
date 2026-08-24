@@ -163,6 +163,45 @@ describe("createMockWorkspaceClient", () => {
     });
   });
 
+  describe("strict", () => {
+    test("an undeclared call throws, naming the path", async () => {
+      const client = mk({ strict: true, responses: { "jobs.getRun": {} } });
+      await expect(client.jobs.getRun({} as never)).resolves.toEqual({});
+      expect(() => client.jobs.cancelRun({} as never)).toThrow(
+        /"jobs.cancelRun" was called with no declared response/,
+      );
+    });
+
+    test("it throws on call, not on mint, so getMock still hands back a handle", () => {
+      // Grabbing the handle before the code under test runs is the normal
+      // pattern; minting must not be what explodes.
+      const client = mk({ strict: true });
+      const fn = getMock(client, "jobs.cancelRun");
+      expect(fn).toHaveBeenCalledTimes(0);
+      expect(() => fn({} as never)).toThrow(/no declared response/);
+    });
+
+    test("the canned defaults still count as declared", async () => {
+      // Otherwise `strict` would break every harness boot, which reads
+      // currentUser.me through this client.
+      const client = mk({ strict: true });
+      await expect(client.currentUser.me({} as never)).resolves.toMatchObject({
+        id: "test-service-user",
+      });
+    });
+
+    test("with defaults: false even the canned paths are undeclared", async () => {
+      const client = mk({ strict: true, defaults: false });
+      expect(() => client.currentUser.me({} as never)).toThrow(
+        /no declared response/,
+      );
+    });
+
+    test("off by default — an undeclared call still resolves undefined", async () => {
+      await expect(mk().jobs.cancelRun({} as never)).resolves.toBeUndefined();
+    });
+  });
+
   describe("getMock", () => {
     test("mints before first use and stays stable after", async () => {
       const client = mk();

@@ -492,6 +492,18 @@ describe("createTestApp", () => {
       );
     });
 
+    test("strict makes an undeclared data-plane call fail the request", async () => {
+      // Without strict the handler gets `undefined` and the route still 200s,
+      // so a forgotten response passes for the wrong reason.
+      await using app = await createTestApp({
+        plugins: [probe()],
+        strict: true,
+      });
+      const res = await app.get("/api/probe/from-client");
+      expect(res.status).toBe(500);
+      await expect(res.text()).resolves.toMatch(/no declared response/);
+    });
+
     test("passing both client and responses is refused, not silently ignored", async () => {
       // `responses` only seeds the built-in mock, so with a supplied client it
       // used to do nothing at all — the caller's seeded values never took effect
@@ -502,7 +514,7 @@ describe("createTestApp", () => {
           client: createMockWorkspaceClient(),
           responses: { "jobs.getRun": { state: "IGNORED" } },
         }),
-      ).rejects.toThrow(/does nothing when you also pass `client`/);
+      ).rejects.toThrow(/do nothing when you also pass `client`/);
     });
 
     test('nodeEnv: "development" is refused with an explanation', async () => {

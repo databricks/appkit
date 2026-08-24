@@ -322,6 +322,13 @@ How it works, and what to expect:
 :::caution Undeclared methods return undefined
 An undeclared method resolves `undefined` instead of throwing. That's the point — your plugin survives touching services the test doesn't care about — but it means a call whose response you *forgot* to declare silently returns `undefined` rather than failing loudly, so a test can pass for the wrong reason.
 
+Pass `strict: true` to turn that silence into a failure: a call to a path with no declared response throws instead of resolving `undefined`, naming the path. The canned defaults still count as declared, so a harness boot works unchanged.
+
+```ts
+const app = await createTestApp({ plugins: [myPlugin()], strict: true });
+// a handler calling an undeclared path now fails the request
+```
+
 TypeScript covers more of this than you might expect: because each accessor is typed against the SDK's own service class, both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
 
 One more divergence: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than it does in production. This is deliberate: reporting those keys would make `util.inspect` probe each one, minting a mock per probe, which is the runaway recursion the default traps avoid.

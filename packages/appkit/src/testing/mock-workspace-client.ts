@@ -19,6 +19,15 @@ export interface CreateMockWorkspaceClientOptions {
    * with the arguments, so a test can script behaviour or reject.
    */
   responses?: Record<string, Any>;
+  /**
+   * Throw when a path with no declared response is *called*, instead of
+   * resolving `undefined`.
+   *
+   * Off by default: the never-crash floor is what lets a plugin touch services
+   * a test does not care about. Turn it on when a silently `undefined` return
+   * would let the test pass for the wrong reason.
+   */
+  strict?: boolean;
 
   /** Seed `config`; `host` must stay a real string. */
   config?: Partial<WorkspaceClient["config"]>;
@@ -122,7 +131,12 @@ const clientFns = new WeakMap<WorkspaceClient, Map<string, Mock>>();
 export function createMockWorkspaceClient(
   options: CreateMockWorkspaceClientOptions = {},
 ): MockWorkspaceClient {
-  const { responses = {}, config = {}, defaults = true } = options;
+  const {
+    responses = {},
+    config = {},
+    defaults = true,
+    strict = false,
+  } = options;
 
   // Caller entries win over the canned defaults for the same path.
   const merged: Record<string, Any> = defaults
@@ -139,8 +153,21 @@ export function createMockWorkspaceClient(
 
     const response = merged[path];
     const fn = vi.fn();
-    if (typeof response === "function") fn.mockImplementation(response);
-    else fn.mockResolvedValue(response);
+    if (typeof response === "function") {
+      fn.mockImplementation(response);
+    } else if (strict && !(path in merged)) {
+      // Thrown on call, never on mint: `getMock` mints to hand back a handle
+      // before the code under test runs, and that must not blow up.
+      fn.mockImplementation(() => {
+        throw new Error(
+          `createMockWorkspaceClient: "${path}" was called with no declared ` +
+            "response and `strict: true` is set. Add it to `responses`, or drop " +
+            "`strict` to have undeclared paths resolve undefined.",
+        );
+      });
+    } else {
+      fn.mockResolvedValue(response);
+    }
 
     fns.set(path, fn);
     return fn;
