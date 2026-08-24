@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { getWorkspaceClient } from "../../context";
 import { getUserContext } from "../../context/execution-context";
+import { ServiceContext } from "../../context/service-context";
+import { AuthenticationError } from "../../errors";
 import { Plugin, toPlugin } from "../../plugin";
 import type { WorkspaceClient } from "../../workspace-client";
 import type { CreateTestAppOptions, TestApp } from "../create-test-app";
@@ -460,6 +462,34 @@ describe("createTestApp", () => {
       } finally {
         await app.close();
       }
+    });
+
+    test("the obo token fingerprint tracks the token, matching production", async () => {
+      // Lakebase rotates its pool when this value changes (pool-manager compares
+      // it), so a fingerprint keyed on the user would be constant across tokens
+      // and rotation could never fire under the harness.
+      await using app = await createTestApp({ plugins: [probe()] });
+      void app;
+
+      // While a harness app is live, createUserContext *is* the stub.
+      const fingerprint = (token: string) =>
+        ServiceContext.createUserContext(token, "same").tokenFingerprint;
+
+      expect(fingerprint("tok-a")).toBe(fingerprint("tok-a"));
+      expect(fingerprint("tok-a")).not.toBe(fingerprint("tok-b"));
+      // A sha256 prefix, not a label derived from the user.
+      expect(fingerprint("tok-a")).toMatch(/^[0-9a-f]{16}$/);
+      expect(fingerprint("tok-a")).not.toContain("same");
+    });
+
+    test("an obo request with no token is refused, as in production", async () => {
+      await using app = await createTestApp({ plugins: [probe()] });
+      void app;
+      // The same error class production throws, not just a similar message —
+      // a handler that catches AuthenticationError must behave identically here.
+      expect(() => ServiceContext.createUserContext("", "nobody")).toThrow(
+        AuthenticationError,
+      );
     });
 
     test("passing both client and responses is refused, not silently ignored", async () => {

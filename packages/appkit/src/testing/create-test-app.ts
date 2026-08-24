@@ -3,6 +3,7 @@
  * over real HTTP.
  */
 
+import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 
 import type {
@@ -16,6 +17,7 @@ import { vi } from "vitest";
 import { InMemoryStorage } from "../cache/storage/memory";
 import { ServiceContext } from "../context/service-context";
 import { createApp } from "../core/appkit";
+import { AuthenticationError } from "../errors";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { oboHeaders, setupDatabricksEnv } from "./fixtures";
@@ -139,14 +141,22 @@ function stubUserContext(client: WorkspaceClient): () => void {
   const spy = vi
     .spyOn(ServiceContext, "createUserContext")
     .mockImplementation((token, userId, userName, userEmail) => {
-      if (!token) throw new Error("createTestApp: obo requires a token");
+      // Same rejection as the real one, so a missing-token bug surfaces here
+      // too instead of only in production.
+      if (!token) throw AuthenticationError.missingToken("user token");
       const service = ServiceContext.get();
       return {
         client,
         userId,
         userName,
         userEmail,
-        tokenFingerprint: `test-${userId}`,
+        // Derived from the token exactly as the real one does. Keying this on the
+        // *user* instead made it constant across tokens, and Lakebase rotates its
+        // pool by comparing this value — so rotation could never fire here.
+        tokenFingerprint: createHash("sha256")
+          .update(token)
+          .digest("hex")
+          .slice(0, 16),
         warehouseId: service.warehouseId,
         workspaceId: service.workspaceId,
         isUserContext: true,
