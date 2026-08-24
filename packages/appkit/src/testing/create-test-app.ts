@@ -3,7 +3,6 @@
  * over real HTTP.
  */
 
-import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 
 import type {
@@ -17,7 +16,6 @@ import { vi } from "vitest";
 import { InMemoryStorage } from "../cache/storage/memory";
 import { ServiceContext } from "../context/service-context";
 import { createApp } from "../core/appkit";
-import { AuthenticationError } from "../errors";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { fakeUserContext, oboHeaders, setupDatabricksEnv } from "./fixtures";
@@ -25,6 +23,8 @@ import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
 
+// Loose shapes are intentional here; `noExplicitAny` is off repo-wide (see
+// .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
 /**
@@ -89,6 +89,11 @@ export interface CreateTestAppOptions<T extends Plugins> {
   /**
    * Defaults to `"test"`. `"development"` is refused — it throws a `RangeError`
    * in `get-port` on `port: 0`, boots Vite, and relaxes validation.
+   *
+   * Beyond refusing `development`, this decides error-response redaction:
+   * `errorHandlerMiddleware` returns the real message unless `NODE_ENV` is
+   * `production`, where a 5xx becomes `"Server error"`. Pass `"production"` to
+   * assert what a deployed app actually returns to a client.
    */
   nodeEnv?: string;
 
@@ -406,7 +411,9 @@ export async function createTestApp<T extends Plugins>(
       // No release alongside this: close() drops the claim itself, and a second
       // release would pull the singletons out from under a live sibling app.
       try {
-        await app.close();
+        await app.close(
+          closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
+        );
       } catch {
         // The boot error is the interesting one; don't let teardown mask it.
       }

@@ -162,15 +162,12 @@ export class LifecycleManager {
         this.shutdownPhase,
         err,
       );
-      // Not now — the phases are still running and still own these instances,
-      // so dropping the pointers here would hand the next boot a half-released
-      // app. But release once they settle, or the refcount never returns to
-      // zero and every later boot skips its reset.
-      void this.runOnce()
-        .finally(() => releaseCoreSingletons())
-        .catch(() => {
-          // runPhases logs each phase failure itself; nothing to add.
-        });
+      // Release now, not when the orphaned phases settle. Holding the count
+      // makes the next boot skip its reset, so it inherits this app's cache —
+      // which the orphan then closes in phase 5, mid-test. Safe because
+      // runPhases captured its own cache and telemetry before its first await
+      // and never re-reads the shared slots.
+      releaseCoreSingletons();
       return;
     }
 

@@ -577,13 +577,12 @@ describe("LifecycleManager", () => {
       // A hung teardown must not kill the process on the programmatic path.
       expect(exitSpy).not.toHaveBeenCalled();
 
-      // Not yet: the phases are still running and still own those instances,
-      // so releasing here would hand the next boot a half-released app.
-      expect(releaseCoreSingletons).not.toHaveBeenCalled();
+      // Released immediately, not deferred to the orphaned teardown. Holding the
+      // count would make the next boot skip its reset and inherit this app's
+      // cache, which the orphan then closes in phase 5.
+      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
 
-      // But it must release once they settle. Without this the refcount never
-      // returns to zero, so every later boot skips its reset and inherits this
-      // app's singletons — the leak this test used to pin as correct.
+      // And exactly once, even after the abandoned phases finish.
       releaseHook?.();
       await vi.advanceTimersByTimeAsync(10);
       expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);

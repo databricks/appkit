@@ -8,6 +8,8 @@ import { vi } from "vitest";
 
 import type { WorkspaceClient } from "../workspace-client";
 
+// Loose shapes are intentional here; `noExplicitAny` is off repo-wide (see
+// .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
 type LegacyClient = ReturnType<WorkspaceClient["toLegacyWorkspaceClient"]>;
@@ -60,7 +62,7 @@ const DEFAULT_RESPONSES: Record<string, Any> = {
   },
 };
 
-/** The seven generically-proxied services; `config`/`apiClient` are seeded below. */
+/** Generically proxied; `config`/`apiClient` are seeded below instead. */
 const FACADE_SERVICES = [
   "files",
   "warehouses",
@@ -85,6 +87,9 @@ const PASSTHROUGH_DENY: ReadonlySet<string> = new Set([
   "$$typeof",
   "asymmetricMatch",
 ]);
+
+/** `apiClient` members read synchronously; a seeded value must not be resolved. */
+const SYNC_API_CLIENT_MEMBERS: ReadonlySet<string> = new Set(["userAgent"]);
 
 /** Distinguishes "no passthrough rule applied" from a rule answering `undefined`. */
 const NOT_PASSTHROUGH = Symbol("not-passthrough");
@@ -212,7 +217,14 @@ export function createMockWorkspaceClient(
   };
   for (const [key, value] of Object.entries(seededOverrides("apiClient"))) {
     const fn = typeof value === "function" ? vi.fn(value) : vi.fn();
-    if (typeof value !== "function") fn.mockResolvedValue(value);
+    if (typeof value !== "function") {
+      // Match the member's own shape. `userAgent()` is read straight into a
+      // Headers value, so resolving a seed would put "[object Promise]" there —
+      // the failure the synchronous default exists to avoid. Seed a function to
+      // decide for yourself.
+      if (SYNC_API_CLIENT_MEMBERS.has(key)) fn.mockReturnValue(value);
+      else fn.mockResolvedValue(value);
+    }
     apiClientTarget[key] = fn;
     fns.set(`apiClient.${key}`, fn);
   }

@@ -75,7 +75,7 @@ A function value receives the call arguments, so you can script per-argument beh
 
 For the response *shapes*, follow the service types on the Databricks SDK. The kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
 
-`app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
+With one app open, `app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
 
 ```ts
 import { getMock } from "@databricks/appkit/testing";
@@ -184,6 +184,8 @@ await mock.attach(plugin);
 
 Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
 
+The workspace client and the on-behalf-of stub are process-wide too, not per app: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. Boot one harness app at a time — with two open, the second one's `client` and `responses` do not reach the handlers, and closing either removes the shared OBO fake.
+
 The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
 
 ```ts
@@ -291,6 +293,8 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
 - `resetGlobalState()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
+The kit uses both words deliberately: a **mock** records calls so you can assert on them (`createMockWorkspaceClient`, `mockServiceContext`), while a **fake** stands in and simply works (`FakeProvider`, `FakeToolResponse`).
+
 - `createTestPlugin(factory, config?)` — instantiate a plugin from its factory with the same config merge AppKit applies. See [Full example](#full-example).
 - `getListeningPort(server)` — wait for a server to finish binding and return the port it landed on. `createTestApp` does this for you; reach for it when you start a server yourself with `port: 0`.
 

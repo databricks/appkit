@@ -1,3 +1,4 @@
+import * as testing from "@databricks/appkit/testing";
 import {
   createTestApp,
   expectStream,
@@ -54,6 +55,40 @@ class WidgetPlugin extends Plugin {
 const widget = toPlugin(WidgetPlugin);
 
 describe("@databricks/appkit/testing as a standalone surface", () => {
+  test("every documented export is reachable from the entry", () => {
+    // Importing three symbols proves the entry resolves, not that the surface is
+    // intact — everything else could be dropped from the barrel and this file
+    // would still pass. `tsc` would catch it via other suites, but this test
+    // claims to guard the surface, so it should.
+    const expected = [
+      "createTestApp",
+      "createTestPlugin",
+      "createTestPluginContext",
+      "createMockWorkspaceClient",
+      "getMock",
+      "getListeningPort",
+      "expectStream",
+      "resetGlobalState",
+      "mockServiceContext",
+      "createMockRequest",
+      "createMockResponse",
+      "createMockRouter",
+      "createMockTelemetry",
+      "createSuccessfulSQLResponse",
+      "createFailedSQLResponse",
+      "parseSSEResponse",
+      "resetTestCache",
+      "runWithRequestContext",
+      "setupDatabricksEnv",
+      "useServiceContextMock",
+    ];
+    const missing = expected.filter(
+      (name) =>
+        typeof (testing as Record<string, unknown>)[name] !== "function",
+    );
+    expect(missing).toEqual([]);
+  });
+
   test("boot, request, assert a stream, and close — public imports only", async () => {
     const app = await createTestApp({
       plugins: [widget()],

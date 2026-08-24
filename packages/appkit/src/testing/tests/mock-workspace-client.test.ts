@@ -42,6 +42,21 @@ describe("createMockWorkspaceClient", () => {
       expect(typeof client.apiClient.userAgent()).toBe("string");
     });
 
+    test("a seeded userAgent stays synchronous, not a Promise", async () => {
+      // Resolving it would put "[object Promise]" into a Headers value.
+      const client = mk({ responses: { "apiClient.userAgent": "custom/9" } });
+      expect(client.apiClient.userAgent()).toBe("custom/9");
+      const headers = new Headers();
+      headers.set("user-agent", client.apiClient.userAgent());
+      expect(headers.get("user-agent")).toBe("custom/9");
+      // `request` is genuinely async, so its seeds still resolve.
+      await expect(
+        mk({ responses: { "apiClient.request": { ok: 1 } } }).apiClient.request(
+          {} as never,
+        ),
+      ).resolves.toEqual({ ok: 1 });
+    });
+
     test("apiClient.request is depth-2 and destructurable", async () => {
       await expect(mk().apiClient.request({} as never)).resolves.toEqual({});
       const client = mk({
