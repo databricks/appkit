@@ -1,14 +1,14 @@
 ---
-sidebar_position: 8
+sidebar_position: 10
 ---
 
 # Testing
 
-AppKit ships a testing kit at `@databricks/appkit/testing` so you can test a plugin — including its cross-plugin tool calls and streaming responses — without a live Databricks workspace, credentials, or network access. That makes plugin tests fast and lets them run in CI, where no workspace is available.
+AppKit ships a testing kit at `@databricks/appkit/testing` so you can test a plugin, including its cross-plugin tool calls and streaming responses, without a live Databricks workspace, credentials, or network access. Plugin tests stay fast and run in CI, where no workspace is available.
 
 ## Goal
 
-Exercise a plugin's real code paths — route registration, cross-plugin tool dispatch, user-scoped (on-behalf-of) execution, and per-call timeouts — against a real `PluginContext` with only its outer edges faked. Nothing about the context is reimplemented, so a test can't drift from production behavior.
+Exercise a plugin's real code paths against a real `PluginContext` with only its outer edges faked. That covers route registration, cross-plugin tool dispatch, user-scoped (on-behalf-of) execution, and per-call timeouts. Nothing about the context is reimplemented, so a test can't drift from production behavior.
 
 The kit has three entry points plus a set of fixture helpers:
 
@@ -21,7 +21,7 @@ The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is a
 
 ## Testing your plugin
 
-`createTestApp({ plugins })` boots a **real** AppKit app — real Express wiring, real routes, real resource validation — and hands you methods to call it like a client would:
+`createTestApp({ plugins })` boots a **real** AppKit app, with the real Express wiring, routes, and resource validation, then hands you methods to call it like a client would:
 
 ```ts
 import { createTestApp, expectStream } from "@databricks/appkit/testing";
@@ -54,7 +54,7 @@ Paths are the full mounted route. A plugin's prefix is `/api/` plus its manifest
 | Needs `close()` | **Yes** | No |
 | Speed | Fast, but pays for a socket | Fastest |
 
-Use `createTestApp` for a plugin's HTTP behaviour end to end. Use `createTestPluginContext` to unit-test wiring — route registration, tool dispatch, timeout composition. Name harness suites `*.integration.test.ts`, matching the existing convention.
+Use `createTestApp` for a plugin's HTTP behavior end to end. Use `createTestPluginContext` to unit-test wiring: route registration, tool dispatch, timeout composition. Name harness suites `*.integration.test.ts`, matching the existing convention.
 
 ### Faking what your plugin reads
 
@@ -71,9 +71,9 @@ const app = await createTestApp({
 });
 ```
 
-A function value receives the call arguments, so you can script per-argument behaviour or reject to test an error path. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services) for the trade-off that buys.
+A function value receives the call arguments, so you can script per-argument behavior or reject to test an error path. `responses` configures the built-in mock, so passing it alongside your own `client` is rejected rather than silently ignored — configure the responses on that client instead. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services) for the trade-off it makes.
 
-For the response *shapes*, follow the service types on the Databricks SDK — the kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
+For the response *shapes*, follow the service types on the Databricks SDK. The kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
 
 `app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
 
@@ -96,16 +96,27 @@ expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
 
 ### Teardown
 
-The harness binds a socket and installs signal handlers, so **every boot needs a `close()`**. `close()` releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
+The harness binds a socket and installs signal handlers, so **every boot needs a `close()`**. It releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
 
-Use `try/finally`, or let the runtime do it:
+Prefer `await using`, which closes the app at scope exit even if the test throws:
 
 ```ts
 await using app = await createTestApp({ plugins: [myPlugin()] });
 // released at scope exit
 ```
 
-Skip the `close()` and you'll leak a listener per boot — Node warns at about six.
+`try/finally` works too, and is what you need if the app has to outlive a block:
+
+```ts
+const app = await createTestApp({ plugins: [myPlugin()] });
+try {
+  // ...
+} finally {
+  await app.close();
+}
+```
+
+Miss the close and each boot leaks a listener; Node warns at about six.
 
 ### Satisfying declared resources
 
@@ -135,7 +146,7 @@ The harness validates that required resources' **environment variables are prese
 
 ## `createTestPluginContext()`
 
-`PluginContext` is the mediator AppKit passes to every plugin — it buffers routes, tracks tool providers, and runs cross-plugin tool calls with user scoping and a timeout. `createTestPluginContext()` returns the **real** context with three edges faked:
+`PluginContext` is the mediator AppKit passes to every plugin: it buffers routes, tracks tool providers, and runs cross-plugin tool calls with user scoping and a timeout. `createTestPluginContext()` returns the **real** context with three edges faked:
 
 | Edge | How it's faked |
 | --- | --- |
@@ -211,7 +222,7 @@ expect(mock.telemetry.getTracer().startActiveSpan).toHaveBeenCalled();
 
 `mock.telemetry` is injected into the `PluginContext`, so it captures the spans the *context* opens (notably `executeTool`). It is **not** the plugin's own telemetry: `attachContext` rebuilds `this.telemetry` from the real `TelemetryManager`, so spans a plugin opens internally do not land on `mock.telemetry`.
 
-`RecordedToolCall.asUser` is the high-value signal for cross-plugin calls: because the fake `asUser` enforces the same token precondition as the real `Plugin.asUser`, a dispatch that records `asUser: true` (with `userId` set) genuinely resolved the caller's user scope, and a request missing `x-forwarded-access-token` **rejects** instead — the OBO distinction that silent `{ executeTool }` stubs cannot verify. Assert both directions: a well-formed request records the expected `userId`, and a token-less one throws.
+`RecordedToolCall.asUser` is the field to assert for cross-plugin calls: because the fake `asUser` enforces the same token precondition as the real `Plugin.asUser`, a dispatch that records `asUser: true` (with `userId` set) genuinely resolved the caller's user scope, and a request missing `x-forwarded-access-token` **rejects** instead — the OBO distinction that silent `{ executeTool }` stubs cannot verify. Assert both directions: a well-formed request records the expected `userId`, and a token-less one throws.
 
 The fake replicates `asUser`'s **token precondition**, not its internal dev-mode telemetry marker: in `NODE_ENV=development` the real `Plugin.asUser` skips impersonation and sets an OTel `isDevOboFallback()` flag, which the fake does not reproduce. Assert OBO through the recorded `asUser`/`userId` fields rather than `isDevOboFallback()`.
 
@@ -246,7 +257,7 @@ await plugin._handleStream(createMockRequest({ obo: true }), res);
 await expectStream(res).toEmit("status", "result");
 ```
 
-`expectStream(res)` and `expectStream(res.sseResponse())` are equivalent — the latter hands you the raw `Response` if you want it. Do **not** pass the SSE body as a string: a string is an iterable of characters, so `expectStream` rejects it with a pointer to `sseResponse()` rather than emitting one "event" per character.
+`expectStream(res)` and `expectStream(res.sseResponse())` are equivalent; the latter hands you the raw `Response` if you want it. Do **not** pass the SSE body as a string: a string is an iterable of characters, so `expectStream` rejects it with a pointer to `sseResponse()` rather than emitting one "event" per character.
 
 `toEmit` checks that the expected types appear **in order** but tolerates other events before, between, or after them — which is what you want for streams that interleave bookkeeping events like heartbeats or metadata. Use `toEmitExactly` when the stream's shape is fully determined.
 
@@ -258,7 +269,7 @@ await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
 
 ## Fixtures
 
-AppKit has two contexts, and they're faked by different tools. `PluginContext` is the mediator between plugins — routes, tool dispatch, user scoping — and `createTestPluginContext()` gives you the real thing with faked edges. `ServiceContext` is the **data plane**: it resolves the workspace client, the service principal, and the warehouse ID that plugins reach through `getWorkspaceClient()`.
+AppKit has two contexts, and they're faked by different tools. `PluginContext` is the mediator between plugins, handling routes, tool dispatch, and user scoping; `createTestPluginContext()` gives you the real thing with faked edges. `ServiceContext` is the **data plane**: it resolves the workspace client, the service principal, and the warehouse ID that plugins reach through `getWorkspaceClient()`.
 
 The kit now covers both. `createTestApp` fakes the data plane for you by injecting a mock workspace client at the real seam; below that, `mockServiceContext` spies the singleton directly, and `createMockWorkspaceClient` builds the client either of them installs.
 
@@ -281,6 +292,7 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
 - `resetGlobalState()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
 - `createTestPlugin(factory, config?)` — instantiate a plugin from its factory with the same config merge AppKit applies. See [Full example](#full-example).
+- `getListeningPort(server)` — wait for a server to finish binding and return the port it landed on. `createTestApp` does this for you; reach for it when you start a server yourself with `port: 0`.
 
 ## Mocking Databricks services
 
@@ -307,12 +319,12 @@ How it works, and what to expect:
 - `config.host` is a real **string** (not a mock), because AppKit builds URLs from it. `apiClient.userAgent()` is synchronous for the same reason, and `apiClient.request` resolves `{}` so destructuring its result doesn't throw.
 - Sensible defaults are built in: SQL statements succeed, warehouses report `RUNNING`, and `currentUser.me()` returns a service user. Pass `defaults: false` to script everything yourself.
 
-:::caution The honest catch
+:::caution Undeclared methods return undefined
 An undeclared method resolves `undefined` instead of throwing. That's the point — your plugin survives touching services the test doesn't care about — but it means a call whose response you *forgot* to declare silently returns `undefined` rather than failing loudly, so a test can pass for the wrong reason.
 
 TypeScript covers more of this than you might expect: because each accessor is typed against the SDK's own service class, both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
 
-One more divergence to know about: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than it does in production. This is a deliberate trade: reporting those keys would make `util.inspect` probe each one, minting a mock per probe, which is the runaway recursion the default traps avoid.
+One more divergence: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than it does in production. This is deliberate: reporting those keys would make `util.inspect` probe each one, minting a mock per probe, which is the runaway recursion the default traps avoid.
 
 Separately, `createLakebasePool({ workspaceClient })` will build a pool whose password callback resolves to a mock: the pool exists but cannot connect. A Lakebase test needs a real database or a purpose-built fake pool, not this.
 :::
