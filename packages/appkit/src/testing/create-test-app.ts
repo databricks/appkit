@@ -28,11 +28,11 @@ import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
 type Any = any;
 
 /**
- * One baseline shared by every live harness app, reference-counted.
+ * The env snapshot to restore on close, and whether an app currently holds it.
  *
- * A per-app snapshot does not compose: the second boot captures the first's
- * mutations and whichever closes last re-applies them. Anchoring on the first
- * boot and restoring on the last close makes the result order-independent.
+ * One live app at a time (see the guard in `createTestApp`), so the counter is
+ * really a flag. Kept as a count so a stray double release cannot drive it
+ * negative and strand the baseline.
  */
 let envBaseline: NodeJS.ProcessEnv | undefined;
 let liveHarnessApps = 0;
@@ -231,6 +231,20 @@ export async function createTestApp<T extends Plugins>(
     );
   }
 
+  // Refused rather than half-supported: AppKit's workspace client, cache and
+  // on-behalf-of fake are process-wide, so a second live app cannot own its
+  // own. Checked before any mutation, so a refused boot leaves the live app
+  // untouched.
+  if (liveHarnessApps > 0) {
+    throw new Error(
+      "createTestApp: a harness app is already open. AppKit's workspace " +
+        "client, cache, and on-behalf-of fake are process-wide, so a second " +
+        "app would not receive its own `client`/`responses`, and closing " +
+        "either would un-fake the other's on-behalf-of path. Close the first " +
+        "app before booting another — `await using`, or try/finally.",
+    );
+  }
+
   // Wholesale rather than a whitelist: plugins read vars we cannot enumerate.
   acquireEnvBaseline();
 
@@ -324,8 +338,8 @@ export async function createTestApp<T extends Plugins>(
           );
         } finally {
           // No release here: app.close() -> LifecycleManager.close() already
-          // drops this app's claim, once. Releasing twice would pull the
-          // singletons out from under a still-live sibling app.
+          // drops this app's claim. A second release would drop a claim this
+          // app never took.
           restoreUserContext?.();
           releaseEnvBaseline();
         }
@@ -409,7 +423,7 @@ export async function createTestApp<T extends Plugins>(
     // mutations and singletons into every later test in the file.
     if (app) {
       // No release alongside this: close() drops the claim itself, and a second
-      // release would reset singletons a concurrent app is still using.
+      // release would drop a claim this app never took.
       try {
         await app.close(
           closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },

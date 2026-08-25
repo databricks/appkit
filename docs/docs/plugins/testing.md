@@ -184,7 +184,7 @@ await mock.attach(plugin);
 
 Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
 
-The workspace client and the on-behalf-of stub are process-wide too, not per app: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. Boot one harness app at a time — with two open, the second one's `client` and `responses` do not reach the handlers, and closing either removes the shared OBO fake.
+The workspace client and the on-behalf-of stub are process-wide too, not per app: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. Because of that, **`createTestApp` allows one open app at a time** and throws if you boot a second before closing the first — with two open, the second one's `client` and `responses` would not reach the handlers, and closing either would remove the shared OBO fake from the other. Vitest isolates test *files* in separate workers, so this only constrains apps within a single file. One consequence worth knowing: a `describe` that holds an app open in `beforeAll` cannot contain a test that boots its own.
 
 The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
 

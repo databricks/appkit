@@ -220,22 +220,20 @@ describe("createTestApp", () => {
     });
   });
 
-  test("two apps in one file get different ephemeral ports", async () => {
-    const a = await createTestApp({ plugins: [probe()] });
-    const b = await createTestApp({ plugins: [probe()] });
-    try {
-      // No EADDRINUSE, which is what makes the harness parallel-safe and is why
-      // hardcoded test ports are worth removing.
-      expect(a.port).not.toBe(b.port);
-      await expect(
-        a.get("/api/probe/ping").then((r) => r.status),
-      ).resolves.toBe(200);
-      await expect(
-        b.get("/api/probe/ping").then((r) => r.status),
-      ).resolves.toBe(200);
-    } finally {
-      await a.close();
-      await b.close();
+  test("sequential apps in one file each bind their own ephemeral port", async () => {
+    // No EADDRINUSE and no hardcoded port, which is why fixed test ports are
+    // worth removing. Not asserting the two ports differ: the kernel may hand
+    // back the port just released, so that would flake.
+    for (const _ of [1, 2]) {
+      const app = await createTestApp({ plugins: [probe()] });
+      try {
+        expect(app.port).toBeGreaterThan(0);
+        await expect(
+          app.get("/api/probe/ping").then((r) => r.status),
+        ).resolves.toBe(200);
+      } finally {
+        await app.close();
+      }
     }
   });
 
@@ -549,50 +547,29 @@ describe("createTestApp", () => {
       }
     });
 
-    test("overlapping boots restore env regardless of close order", async () => {
+    test("repeated boot/close cycles leave no env residue", async () => {
       const before = { ...process.env };
 
-      // The second boot's view of "original" already contains the first boot's
-      // mutations. A per-app snapshot would let whichever closes last re-apply
-      // them, stranding harness keys and `A_ONLY` after both apps are gone.
-      const a = await createTestApp({
-        plugins: [probe()],
-        env: { OVERLAP_A: "a" },
-      });
-      const b = await createTestApp({
-        plugins: [probe()],
-        env: { OVERLAP_B: "b" },
-      });
-
-      await a.close();
-      await b.close();
+      // Overlapping boots are refused, so each snapshot starts from an already
+      // restored env and the old "whichever closes last wins" hazard cannot
+      // arise. What still has to hold is that a cycle leaves nothing behind.
+      for (const [key, value] of [
+        ["CYCLE_A", "a"],
+        ["CYCLE_B", "b"],
+      ] as const) {
+        const app = await createTestApp({
+          plugins: [probe()],
+          env: { [key]: value },
+        });
+        expect(process.env[key]).toBe(value);
+        await app.close();
+        expect(process.env[key]).toBeUndefined();
+      }
 
       const leaked = Object.keys(process.env).filter((k) => !(k in before));
       expect(leaked).toEqual([]);
-      expect(process.env.OVERLAP_A).toBeUndefined();
-      expect(process.env.OVERLAP_B).toBeUndefined();
       expect(Object.keys(process.env).sort()).toEqual(
         Object.keys(before).sort(),
-      );
-    });
-
-    test("closing in reverse order also restores env", async () => {
-      const before = { ...process.env };
-      const a = await createTestApp({
-        plugins: [probe()],
-        env: { REV_A: "a" },
-      });
-      const b = await createTestApp({
-        plugins: [probe()],
-        env: { REV_B: "b" },
-      });
-
-      // Reverse of boot order — the outcome must not depend on it.
-      await b.close();
-      await a.close();
-
-      expect(Object.keys(process.env).filter((k) => !(k in before))).toEqual(
-        [],
       );
     });
 
@@ -728,6 +705,11 @@ describe("createTestApp HTTP layer", () => {
       app.get("/api/probe/json", { signal: controller.signal }),
     ).rejects.toThrow();
   });
+});
+
+describe("createTestApp — one app at a time", () => {
+  // Top level on purpose: these boot their own apps, so they cannot live
+  // inside a describe that holds one open in beforeAll.
   test("an obo request gets the mock client, not a real one", async () => {
     await withApp(
       { plugins: [probe()], responses: { "jobs.getRun": { via: "mock" } } },
@@ -748,54 +730,93 @@ describe("createTestApp HTTP layer", () => {
     );
   });
 
-  describe("overlapping apps", () => {
-    test("booting a second app does not rebind the first's singletons", async () => {
-      const a = await createTestApp({ plugins: [probe()] });
-      const b = await createTestApp({ plugins: [probe()] });
-      try {
-        // Both must still resolve their own client through the real seam. Before
-        // the singletons were refcounted, B's boot reset and rebound A's.
-        await expect(
-          a.get("/api/probe/from-client").then((r) => r.status),
-        ).resolves.toBe(200);
-        await expect(
-          b.get("/api/probe/from-client").then((r) => r.status),
-        ).resolves.toBe(200);
-      } finally {
-        await a.close();
-        await b.close();
-      }
-    });
+  test("refuses a second app while one is open", async () => {
+    const a = await createTestApp({ plugins: [probe()] });
+    try {
+      await expect(createTestApp({ plugins: [probe()] })).rejects.toThrow(
+        /a harness app is already open/,
+      );
+    } finally {
+      await a.close();
+    }
+  });
 
-    test("closing one app leaves the other's context intact", async () => {
-      const a = await createTestApp({ plugins: [probe()] });
-      const b = await createTestApp({ plugins: [probe()] });
-      try {
-        await a.close();
-        // Previously A's close dropped the singletons, so this threw
-        // InitializationError from ServiceContext.get().
-        await expect(
-          b.get("/api/probe/from-client").then((r) => r.status),
-        ).resolves.toBe(200);
-      } finally {
-        await b.close();
-      }
+  test("a refused boot leaves the open app fully working", async () => {
+    // The guard runs before any mutation, so the refusal must not disturb the
+    // live app's env baseline, singletons, or on-behalf-of fake. Without that
+    // ordering the first app would be collateral damage of someone else's bug.
+    const a = await createTestApp({
+      plugins: [probe()],
+      responses: { "jobs.getRun": { via: "mock" } },
     });
+    try {
+      await expect(createTestApp({ plugins: [probe()] })).rejects.toThrow();
 
-    test("a stale handle's second close cannot reset a newer app", async () => {
-      const first = await createTestApp({ plugins: [probe()] });
+      await expect(
+        a.get("/api/probe/from-client").then((r) => r.status),
+      ).resolves.toBe(200);
+
+      // /as-user-client calls the client *inside* asUser, so it is the one
+      // route that notices a disturbed on-behalf-of fake. Asserting the
+      // declared response discriminates: a real client cannot invent it.
+      const oboRes = await a.get("/api/probe/as-user-client", {
+        obo: { userId: "u@example.com" },
+      });
+      expect(oboRes.status).toBe(200);
+      await expect(oboRes.json()).resolves.toEqual({ run: { via: "mock" } });
+      expect(getMock(a.client, "jobs.getRun")).toHaveBeenCalledWith({
+        run_id: 42,
+      });
+    } finally {
+      await a.close();
+    }
+  });
+
+  test("a refused boot does not strand the env baseline", async () => {
+    const before = { ...process.env };
+    const a = await createTestApp({ plugins: [probe()] });
+    await expect(createTestApp({ plugins: [probe()] })).rejects.toThrow();
+    await a.close();
+
+    // A refusal that had incremented the counter would leave it at 1 here, so
+    // this close would never restore the baseline.
+    expect(process.env.NODE_ENV).toBe(before.NODE_ENV);
+    expect(process.env.DATABRICKS_WORKSPACE_ID).toBe(
+      before.DATABRICKS_WORKSPACE_ID,
+    );
+  });
+
+  test("a new app boots cleanly once the previous one closed", async () => {
+    const a = await createTestApp({ plugins: [probe()] });
+    await expect(
+      a.get("/api/probe/from-client").then((r) => r.status),
+    ).resolves.toBe(200);
+    await a.close();
+
+    // The singletons A dropped on close must be rebuilt for B, not inherited.
+    const b = await createTestApp({ plugins: [probe()] });
+    try {
+      await expect(
+        b.get("/api/probe/from-client").then((r) => r.status),
+      ).resolves.toBe(200);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("a stale handle's second close cannot reset a newer app", async () => {
+    const first = await createTestApp({ plugins: [probe()] });
+    await first.close();
+
+    const second = await createTestApp({ plugins: [probe()] });
+    try {
+      // close() is memoized, so this is a no-op rather than a second release.
       await first.close();
-
-      const second = await createTestApp({ plugins: [probe()] });
-      try {
-        // close() is memoized, so this is a no-op rather than a second release.
-        await first.close();
-        await expect(
-          second.get("/api/probe/from-client").then((r) => r.status),
-        ).resolves.toBe(200);
-      } finally {
-        await second.close();
-      }
-    });
+      await expect(
+        second.get("/api/probe/from-client").then((r) => r.status),
+      ).resolves.toBe(200);
+    } finally {
+      await second.close();
+    }
   });
 });
