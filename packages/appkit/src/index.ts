@@ -93,6 +93,7 @@ export type {
   ValidationResult,
 } from "./registry";
 export {
+  defineManifest,
   getPluginManifest,
   getResourceRequirements,
   ResourceRegistry,

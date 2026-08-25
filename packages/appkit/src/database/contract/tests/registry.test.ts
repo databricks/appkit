@@ -1,11 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest";
 
-import type {
-  DatabaseRegistryEntry,
-  ReferentialAction,
-  RegisteredEntity,
-  RelationEdge,
-} from "../index";
+import type { DatabaseRegistryEntry, RegisteredEntity } from "../index";
 
 /**
  * Type-level tests for the contract. These are verified by `tsc` during
@@ -56,37 +51,5 @@ describe("DatabaseRegistryEntry shape", () => {
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("update");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("filters");
     expectTypeOf<DatabaseRegistryEntry>().toHaveProperty("includes");
-  });
-});
-
-describe("RelationEdge shape", () => {
-  it("requires the from/to columns and allows optional referential actions", () => {
-    const edge: RelationEdge = {
-      fromColumn: "author_id",
-      toTable: "users",
-      toColumn: "id",
-      onDelete: "cascade",
-      onUpdate: "no action",
-    };
-    expectTypeOf(edge.fromColumn).toEqualTypeOf<string>();
-    expectTypeOf(edge.toTable).toEqualTypeOf<string>();
-    expectTypeOf(edge.toColumn).toEqualTypeOf<string>();
-    expectTypeOf(edge.onDelete).toEqualTypeOf<ReferentialAction | undefined>();
-    expectTypeOf(edge.onUpdate).toEqualTypeOf<ReferentialAction | undefined>();
-  });
-
-  it("accepts a minimal edge without referential actions", () => {
-    const edge: RelationEdge = {
-      fromColumn: "author_id",
-      toTable: "users",
-      toColumn: "id",
-    };
-    expectTypeOf(edge).toMatchTypeOf<RelationEdge>();
-  });
-
-  it("pins the referential-action union", () => {
-    expectTypeOf<ReferentialAction>().toEqualTypeOf<
-      "cascade" | "set null" | "set default" | "restrict" | "no action"
-    >();
   });
 });

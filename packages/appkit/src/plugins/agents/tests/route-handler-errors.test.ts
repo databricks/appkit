@@ -62,7 +62,7 @@ function mockRes() {
 }
 
 function seedPlugin(): AgentsPlugin {
-  const plugin = new AgentsPlugin({ dir: false });
+  const plugin = new AgentsPlugin({});
   (plugin as any).agents.set("default", {
     name: "default",
     instructions: "hi",
@@ -190,7 +190,7 @@ describe("POST /invocations — threadStore failure", () => {
 describe("POST /invocations & /responses — HITL pre-flight", () => {
   function seedPluginWithTools(
     toolAnnotations: Record<string, unknown>,
-    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = { dir: false },
+    overrides: ConstructorParameters<typeof AgentsPlugin>[0] = {},
   ): AgentsPlugin {
     const plugin = new AgentsPlugin(overrides);
     const toolIndex = new Map();
@@ -273,7 +273,7 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
   test("passes pre-flight when approval.requireForDestructive is disabled", async () => {
     const plugin = seedPluginWithTools(
       { effect: "destructive" },
-      { dir: false, approval: { requireForDestructive: false } },
+      { approval: { requireForDestructive: false } },
     );
     (plugin as any)._runAgentNonStreaming = vi.fn(async () => undefined);
     (plugin as any).threadStore = {
@@ -320,7 +320,7 @@ describe("POST /invocations & /responses — HITL pre-flight", () => {
 
 describe("POST /invocations & /responses — successful invoke", () => {
   test("returns OpenAI Responses-shaped JSON with aggregated assistant text", async () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     (plugin as any).agents.set("default", {
       name: "default",
       instructions: "hi",
@@ -378,7 +378,7 @@ describe("POST /invocations & /responses — successful invoke", () => {
 
 describe("/invocations and /responses are aliases", () => {
   test("both routes are registered and bound to the same handler", () => {
-    const plugin = new AgentsPlugin({ dir: false });
+    const plugin = new AgentsPlugin({});
     // Attach the real PluginContext via the testing kit. Its route recorder
     // captures the RAW handlers passed to addRoute — the aliasing assertion
     // needs the original references, which the context's forwardAsyncErrors

@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit",
   "type": "module",
-  "version": "0.63.0",
+  "version": "0.65.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -46,6 +46,11 @@
       "types": "./dist/testing/index.d.ts",
       "development": "./src/testing/index.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./tsdown": {
+      "types": "./dist/tsdown/index.d.ts",
+      "development": "./src/tsdown/index.ts",
+      "default": "./dist/tsdown/index.js"
     },
     "./dist/shared/src/plugin": {
       "types": "./dist/shared/src/plugin.d.ts",
@@ -130,6 +135,10 @@
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
+      },
+      "./tsdown": {
+        "types": "./dist/tsdown/index.d.ts",
+        "default": "./dist/tsdown/index.js"
       },
       "./package.json": "./package.json"
     }
