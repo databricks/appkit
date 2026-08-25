@@ -318,7 +318,7 @@ await client.genie.getMessage({ id: "m-1" });   // → undefined, does not throw
 
 How it works, and what to expect:
 
-- The **facade is typed**, so `client.jbos` is a compile error. AppKit owns that 9-member interface, so it's a closed set, not an open-ended chase of the SDK.
+- The **facade is typed**, so `client.jbos` is a compile error. AppKit owns the interface, so it's a closed set, not an open-ended chase of the SDK.
 - Each **service** is a proxy that mints a memoized mock per method. `client.jobs.getRun === client.jobs.getRun`, so call assertions are stable, and `toLegacyWorkspaceClient()` shares the same functions — one `responses` entry covers both views.
 - `config.host` is a real **string** (not a mock), because AppKit builds URLs from it. `apiClient.userAgent()` is synchronous for the same reason, and `apiClient.request` resolves `{}` so destructuring its result doesn't throw.
 - Sensible defaults are built in: SQL statements succeed, warehouses report `RUNNING`, and `currentUser.me()` returns a service user. Pass `defaults: false` to script everything yourself.

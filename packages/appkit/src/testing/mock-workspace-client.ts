@@ -74,7 +74,7 @@ const FACADE_SERVICES = [
 ] as const;
 
 /**
- * Answered with `undefined` rather than a minted mock. `then` is load-bearing:
+ * Answered with `undefined` rather than a minted mock. `then` must stay listed:
  * without it a service is thenable, so `await client.jobs` hangs.
  */
 const PASSTHROUGH_DENY: ReadonlySet<string> = new Set([

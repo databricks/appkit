@@ -294,8 +294,8 @@ export async function createTestApp<T extends Plugins>(
       bootPlugins.push(serverPlugin({ port: 0, host: "127.0.0.1" }));
     }
 
-    // Both extras are load-bearing: without explicit storage the cache builds its
-    // own client and probes Lakebase over the network, and without the opt-out
+    // Both extras are required to stay offline: without explicit storage the
+    // cache builds its own client and probes Lakebase, and without the opt-out
     // TelemetryReporter fires an apiClient.request on boot.
     app = await createApp({
       plugins: bootPlugins as Any,
@@ -409,7 +409,7 @@ export async function createTestApp<T extends Plugins>(
     // mutations and singletons into every later test in the file.
     if (app) {
       // No release alongside this: close() drops the claim itself, and a second
-      // release would pull the singletons out from under a live sibling app.
+      // release would reset singletons a concurrent app is still using.
       try {
         await app.close(
           closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },

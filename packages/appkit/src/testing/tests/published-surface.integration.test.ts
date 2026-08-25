@@ -1,6 +1,8 @@
 import * as testing from "@databricks/appkit/testing";
 import {
+  createMockRequest,
   createTestApp,
+  createTestPluginContext,
   expectStream,
   getMock,
 } from "@databricks/appkit/testing";
@@ -56,7 +58,7 @@ const widget = toPlugin(WidgetPlugin);
 
 describe("@databricks/appkit/testing as a standalone surface", () => {
   test("every documented export is reachable from the entry", () => {
-    // Importing three symbols proves the entry resolves, not that the surface is
+    // Importing a few symbols proves the entry resolves, not that the surface is
     // intact — everything else could be dropped from the barrel and this file
     // would still pass. `tsc` would catch it via other suites, but this test
     // claims to guard the surface, so it should.
@@ -87,6 +89,33 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
         typeof (testing as Record<string, unknown>)[name] !== "function",
     );
     expect(missing).toEqual([]);
+  });
+
+  test("createTestPluginContext runs its real dispatch through the entry", async () => {
+    // The name check above only proves the barrel exports *something*. This
+    // drives the context's real tool registry and on-behalf-of path, so a
+    // hollowed-out export fails here instead of shipping.
+    const mock = createTestPluginContext({
+      widget: { lookup: (args) => ({ echoed: args }) },
+    });
+
+    const req = createMockRequest({ obo: { userId: "analyst@example.com" } });
+    const result = await mock.ctx.executeTool(
+      req as never,
+      "widget",
+      "lookup",
+      {
+        id: 7,
+      },
+    );
+
+    expect(result).toEqual({ echoed: { id: 7 } });
+    expect(mock.toolCalls[0]).toMatchObject({
+      plugin: "widget",
+      tool: "lookup",
+      asUser: true,
+      userId: "analyst@example.com",
+    });
   });
 
   test("boot, request, assert a stream, and close — public imports only", async () => {
