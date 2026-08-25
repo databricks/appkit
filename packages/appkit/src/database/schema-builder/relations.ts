@@ -1,63 +1,85 @@
-import { type AppKitTable, SchemaBuildError } from "./types";
+import type { MutableColumnMeta, ResolvedRelation } from "./types";
+import { SchemaBuildError } from "./types";
 
-export function buildRelations(tables: Record<string, AppKitTable>) {
-  for (const table of Object.values(tables)) {
-    const columnNames = new Set(Object.keys(table.$columns));
-    const seenForward = new Set<string>();
+interface RelationSourceTable {
+  readonly name: string;
+  readonly metas: Readonly<Record<string, MutableColumnMeta>>;
+}
 
-    for (const meta of Object.values(table.$columns)) {
+/** @internal Build the canonical relation metadata before tables are published. */
+export function buildRelations(
+  tables: ReadonlyMap<string, RelationSourceTable>,
+): Map<string, ResolvedRelation[]> {
+  const result = new Map<string, ResolvedRelation[]>();
+  for (const name of tables.keys()) result.set(name, []);
+
+  // Forward pass: each FK adds a to-one edge to its source table.
+  for (const table of tables.values()) {
+    const relations = result.get(table.name);
+    if (!relations)
+      throw new SchemaBuildError("Relation table is not registered");
+    const columnNames = new Set(Object.keys(table.metas));
+    const seenTargets = new Set<string>();
+
+    for (const meta of Object.values(table.metas)) {
       if (!meta.fk) continue;
-
-      const name = meta.fk.targetTable;
-      if (columnNames.has(name))
+      const relationName = meta.fk.targetTable;
+      if (columnNames.has(relationName)) {
         throw new SchemaBuildError(
-          `Forward relation "${table.$name}.${name}" collides with a column of the same name`,
+          `Forward relation "${table.name}.${relationName}" collides with a column of the same name`,
         );
-
-      if (seenForward.has(name))
+      }
+      if (seenTargets.has(relationName)) {
         throw new SchemaBuildError(
-          `Ambiguous forward relation "${table.$name}.${name}": multiple foreign keys target "${name}". Rename one target or model the relation explicitly.`,
+          `Ambiguous forward relation "${table.name}.${relationName}": multiple foreign keys target "${relationName}"`,
         );
-      seenForward.add(name);
-      table.$relations.push({
-        name,
+      }
+      seenTargets.add(relationName);
+      relations.push({
+        name: relationName,
         cardinality: "toOne",
         localColumn: meta.columnName,
-        targetTable: name,
+        targetTable: relationName,
         targetColumn: meta.fk.targetColumn,
         inferred: false,
       });
     }
   }
 
-  for (const table of Object.values(tables)) {
-    for (const meta of Object.values(table.$columns)) {
-      if (!meta.fk) continue;
-      const targetTable = tables[meta.fk.targetTable];
-      if (!targetTable) continue;
-
-      // Skip self-referential relations.
-      if (targetTable === table) continue;
-
-      const name = table.$name;
-      if (Object.keys(targetTable.$columns).includes(name))
+  // Reverse pass: each non-self FK adds a to-many edge to its target table.
+  for (const table of tables.values()) {
+    for (const meta of Object.values(table.metas)) {
+      if (!meta.fk || meta.fk.targetTable === table.name) continue;
+      const target = tables.get(meta.fk.targetTable);
+      const targetRelations = result.get(meta.fk.targetTable);
+      if (!target || !targetRelations) {
         throw new SchemaBuildError(
-          `Reverse relation "${targetTable.$name}.${name}" collides with a column of the same name`,
+          `Relation target "${meta.fk.targetTable}" is not part of the schema`,
         );
+      }
 
-      if (targetTable.$relations.some((r) => r.name === name))
+      const relationName = table.name;
+      if (Object.hasOwn(target.metas, relationName)) {
         throw new SchemaBuildError(
-          `Reverse relation "${targetTable.$name}.${name}" is ambiguous (multiple foreign keys from "${table.$name}"). Disambiguate by renaming the source table.`,
+          `Reverse relation "${target.name}.${relationName}" collides with a column of the same name`,
         );
-
-      targetTable.$relations.push({
-        name,
+      }
+      if (targetRelations.some((relation) => relation.name === relationName)) {
+        throw new SchemaBuildError(
+          `Reverse relation "${target.name}.${relationName}" is ambiguous`,
+        );
+      }
+      // Reverse edges deliberately retain their stable to-many result shape.
+      targetRelations.push({
+        name: relationName,
         cardinality: "toMany",
         localColumn: meta.fk.targetColumn,
-        targetTable: table.$name,
+        targetTable: table.name,
         targetColumn: meta.columnName,
         inferred: true,
       });
     }
   }
+
+  return result;
 }
