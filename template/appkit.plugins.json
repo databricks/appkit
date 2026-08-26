@@ -328,6 +328,7 @@
             "fields": {
               "project": {
                 "description": "Full Lakebase Postgres project resource name. Obtain by running `databricks postgres list-projects`, select the desired item from the output array and use its .name value.",
+                "bundleIgnore": true,
                 "examples": [
                   "projects/{project-id}"
                 ],
