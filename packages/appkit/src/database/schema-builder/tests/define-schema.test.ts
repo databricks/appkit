@@ -26,6 +26,18 @@ import type { EngineTable } from "../types";
 const pgOf = (table: EngineTable): PgTable => table as unknown as PgTable;
 
 describe("defineSchema finalization", () => {
+  it.each(["sql", "transaction"])(
+    "rejects DatabaseExports root key %s",
+    (name) => {
+      expect(() =>
+        defineSchema(({ table }) => {
+          const reserved = table(name, { value: text() });
+          return { [name]: reserved };
+        }),
+      ).toThrow(/reserved/);
+    },
+  );
+
   const schema = defineSchema((builder) => ({
     users: builder.table("users", {
       id: id(),
@@ -282,6 +294,49 @@ describe("builder reuse and engine metadata", () => {
     ).columns;
     expect(column.mapToDriverValue(value as never)).toBe(value);
     expect(column.default).toBe(value);
+  });
+
+  it.each([
+    // text protocol, as a direct select returns it
+    ["2026-06-29 19:05:19.051709+00", "2026-06-29T19:05:19.051709+00:00"],
+    ["2026-06-29 19:05:19+05:30", "2026-06-29T19:05:19+05:30"],
+    ["2026-06-29 19:05:19-03", "2026-06-29T19:05:19-03:00"],
+    // JSON aggregate, as a relation include returns it
+    ["2026-06-29T19:05:19.051709+00:00", "2026-06-29T19:05:19.051709+00:00"],
+    // no timezone declared
+    ["2026-06-29 19:05:19.051709", "2026-06-29T19:05:19.051709"],
+    // non-timestamp sentinels stay untouched
+    ["infinity", "infinity"],
+    ["-infinity", "-infinity"],
+  ])("decodes timestamp %s as ISO-8601", (driverValue, expected) => {
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", {
+        occurredAt: timestamp({ withTimezone: true }),
+      }),
+    }));
+    const [column] = getTableConfig(
+      pgOf(schema.$tables.records.$engine),
+    ).columns;
+    expect(column.mapFromDriverValue(driverValue as never)).toBe(expected);
+  });
+
+  it("returns the same timestamp shape from a direct read and a relation", () => {
+    const schema = defineSchema((builder) => ({
+      records: builder.table("records", {
+        occurredAt: timestamp({ withTimezone: true }),
+      }),
+    }));
+    const [column] = getTableConfig(
+      pgOf(schema.$tables.records.$engine),
+    ).columns;
+    const fromSelect = column.mapFromDriverValue(
+      "2026-06-29 19:05:19.051709+00" as never,
+    );
+    const fromInclude = column.mapFromDriverValue(
+      "2026-06-29T19:05:19.051709+00:00" as never,
+    );
+    expect(fromSelect).toBe(fromInclude);
+    expect(Number.isNaN(Date.parse(fromSelect as string))).toBe(false);
   });
 
   it("validates literal defaults against storage and enum values", () => {

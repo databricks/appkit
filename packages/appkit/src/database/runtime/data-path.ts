@@ -1,12 +1,15 @@
 import {
   DEFAULT_LIMIT,
   type FilterOperator,
+  type IdValue,
   MAX_LIMIT,
   MAX_OFFSET,
+  type OrderDirection,
 } from "../contract";
+import { invalidDatabaseRequest } from "../errors";
 import type { AppKitTable, ColumnMeta } from "../schema-builder";
 
-export type IdValue = string | number | bigint;
+export type { IdValue, OrderDirection };
 export type ScalarValue = string | number | bigint | boolean | null;
 /** Operators for one column; array operands are reserved for `in`. */
 export type FilterOps = Partial<
@@ -18,7 +21,6 @@ export type WhereClause = Readonly<
   Record<string, WhereValue | readonly WhereClause[]>
 >;
 
-export type OrderDirection = "asc" | "desc";
 export type OrderSpec = Readonly<Record<string, OrderDirection>>;
 
 export interface IncludeOptions {
@@ -43,18 +45,23 @@ export interface QuerySpec {
 
 export type Row = Record<string, unknown>;
 
-/**
- * Backend-neutral operations; field names are schema keys that an adapter must
- * resolve, never caller-provided SQL identifiers.
- */
+/** Combine predicates without making callers understand the wire shape. */
+export function andWhere(
+  existing: WhereClause | undefined,
+  next: WhereClause,
+): WhereClause {
+  return existing === undefined ? next : { and: [existing, next] };
+}
+
+/** Internal AppKit execution port; field names are schema-owned identifiers. */
 export interface DataPath {
   /** Read a bounded collection from one finalized table. */
   select(table: AppKitTable, spec: QuerySpec): Promise<Row[]>;
-  /** Read by the table's sole primary key with optional projection/include. */
+  /** Read by the sole primary key while preserving supported query state. */
   findOne(
     table: AppKitTable,
     id: IdValue,
-    spec?: Pick<QuerySpec, "select" | "include">,
+    spec?: Pick<QuerySpec, "where" | "select" | "include">,
   ): Promise<Row | null>;
   count(table: AppKitTable, where?: WhereClause): Promise<number>;
   /** Return exactly one inserted row; zero or many is an invariant failure. */
@@ -74,18 +81,10 @@ export interface DataPath {
   transaction<T>(callback: (tx: DataPath) => Promise<T>): Promise<T>;
 }
 
-/** Runtime failure that does not retain driver details. */
-export class DataPathError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DataPathError";
-  }
-}
-
 /** Validate an explicit root or relation row limit. */
 export function validateLimit(limit: number): number {
   if (!Number.isInteger(limit) || limit < 0 || limit > MAX_LIMIT) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `limit must be an integer between 0 and ${MAX_LIMIT}`,
     );
   }
@@ -99,8 +98,8 @@ export function limitOrDefault(limit?: number): number {
 
 /** Validate an explicit root or relation row offset. */
 export function validateOffset(offset: number): number {
-  if (!Number.isInteger(offset) || offset < 0 || offset > MAX_OFFSET) {
-    throw new DataPathError(
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_OFFSET) {
+    throw invalidDatabaseRequest(
       `offset must be an integer between 0 and ${MAX_OFFSET}`,
     );
   }
@@ -113,7 +112,7 @@ export function primaryKeyMeta(table: AppKitTable): ColumnMeta {
     (column) => column.primaryKey,
   );
   if (primaryKeys.length !== 1) {
-    throw new DataPathError(`Table "${table.$name}" has no primary key`);
+    throw invalidDatabaseRequest(`Table "${table.$name}" has no primary key`);
   }
   return primaryKeys[0];
 }
@@ -125,7 +124,7 @@ export function conflictTargetMeta(
 ): ColumnMeta {
   const column = table.$columns[columnName];
   if (!column || (!column.primaryKey && !column.unique)) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `Column "${table.$name}.${columnName}" is not a conflict target`,
     );
   }

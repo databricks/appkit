@@ -43,6 +43,9 @@ export interface SchemaBuilderContext {
 }
 
 const RESERVED_OBJECT_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const RESERVED_DATABASE_EXPORT_KEYS = new Set(["sql", "transaction"]);
+// A global symbol lets typegen recognize schemas loaded through another AppKit instance.
+const FINALIZED_SCHEMA = Symbol.for("@databricks/appkit.database.schema");
 const TABLE_METADATA_KEYS = [
   "$name",
   "$schemaName",
@@ -66,6 +69,13 @@ function assertRecord(value: unknown, label: string): asserts value is object {
 function assertName(value: string, label: string): void {
   if (!value || RESERVED_OBJECT_KEYS.has(value)) {
     throw new SchemaBuildError(`${label} "${value}" is reserved`);
+  }
+}
+
+function assertTableName(value: string): void {
+  assertName(value, "Table name");
+  if (RESERVED_DATABASE_EXPORT_KEYS.has(value)) {
+    throw new SchemaBuildError(`Table name "${value}" is reserved`);
   }
 }
 
@@ -100,7 +110,7 @@ function declareTable<C extends Record<string, ColumnBuilder>>(
   name: string,
   columns: C,
 ): TableHandle<C> {
-  assertName(name, "Table name");
+  assertTableName(name);
   if (state.raw.has(name)) {
     throw new SchemaBuildError(`Duplicate table "${name}"`);
   }
@@ -215,6 +225,7 @@ function validateHandles(raw: ReadonlyMap<string, RawTable>): void {
   }
 }
 
+/** Reject composite primary keys, which keyed operations cannot represent. */
 function validatePrimaryKeys(raw: ReadonlyMap<string, RawTable>): void {
   for (const table of raw.values()) {
     const primaryKeys = Object.values(table.metas).filter(
@@ -228,6 +239,7 @@ function validatePrimaryKeys(raw: ReadonlyMap<string, RawTable>): void {
   }
 }
 
+/** Reject table names that collide with generated Drizzle relation keys. */
 function validateRelationKeys(
   raw: ReadonlyMap<string, RawTable>,
   relations: ReadonlyMap<string, readonly ResolvedRelation[]>,
@@ -307,11 +319,24 @@ function publishSchema(
     engine[table.name] = candidate.engine;
   }
 
-  return Object.freeze({
+  const schema = {
     $schemaName: schemaName,
     $tables: Object.freeze(tables),
     $engine: Object.freeze(engine),
-  });
+  };
+  Object.defineProperty(schema, FINALIZED_SCHEMA, { value: true });
+  return Object.freeze(schema);
+}
+
+/** @internal Reject values that were not finalized by `defineSchema()`. */
+export function assertFinalizedSchema(value: unknown): asserts value is Schema {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    (value as Record<PropertyKey, unknown>)[FINALIZED_SCHEMA] !== true
+  ) {
+    throw new TypeError("Expected a finalized AppKit database schema");
+  }
 }
 
 export function defineSchema(

@@ -8,6 +8,13 @@
  * `packages/appkit/src/type-generator/index.ts`.
  */
 declare module "@databricks/appkit/type-generator" {
+  export const DATABASE_TYPES_FILE: "database.d.ts";
+
+  export function generateDatabaseTypes(options: {
+    schemaFile: string;
+    outFile: string;
+  }): Promise<void>;
+
   export function generateFromEntryPoint(options: {
     queryFolder?: string;
     metricViewsFolder?: string;
@@ -25,6 +32,8 @@ declare module "@databricks/appkit/type-generator" {
   export class TypegenFatalError extends Error {
     readonly queries: Array<{ name: string; message: string }>;
   }
+
+  export class DatabaseTypegenError extends Error {}
 
   export function generateServingTypes(options: {
     outFile: string;
