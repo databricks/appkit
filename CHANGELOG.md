@@ -126,6 +126,24 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+## [0.66.1](https://github.com/databricks/appkit/compare/v0.66.0...v0.66.1) (2026-08-26)
+
+### appkit
+
+* **appkit:** exclude lakebase postgres.project from the bundle ([#554](https://github.com/databricks/appkit/issues/554)) ([cc78e27](https://github.com/databricks/appkit/commit/cc78e275821b8a278863f976858e58e2d5aa2fa3))
+
+
+## [0.66.0](https://github.com/databricks/appkit/compare/v0.65.0...v0.66.0) (2026-08-26)
+
+### appkit
+
+* **appkit:** add the service-principal typed DatabasePlugin API ([#526](https://github.com/databricks/appkit/issues/526)) ([847de1f](https://github.com/databricks/appkit/commit/847de1fe3592d28269d9cff4be0eff43f6f2a258))
+
+
 ## [0.65.0](https://github.com/databricks/appkit/compare/v0.64.0...v0.65.0) (2026-08-24)
 
 ### appkit

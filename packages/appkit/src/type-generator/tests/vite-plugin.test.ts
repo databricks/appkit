@@ -7,11 +7,34 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { WarehouseState } from "../warehouse-status";
 
 const mocks = vi.hoisted(() => ({
+  existsSync: vi.fn((_file: unknown) => true),
+  generateDatabaseTypes: vi.fn(),
   generateFromEntryPoint: vi.fn(),
   getWarehouseState: vi.fn(),
   startWarehouse: vi.fn(),
   waitUntilRunning: vi.fn(),
+  loggerError: vi.fn(),
 }));
+
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
+  existsSync: mocks.existsSync,
+}));
+
+vi.mock("../../logging/logger", () => ({
+  createLogger: () => ({
+    debug: vi.fn(),
+    error: mocks.loggerError,
+  }),
+}));
+
+vi.mock("../database", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../database")>();
+  return {
+    ...actual,
+    generateDatabaseTypes: mocks.generateDatabaseTypes,
+  };
+});
 
 // Mock the module vite-plugin.ts pulls generateFromEntryPoint from. The error
 // classes are imported for `instanceof` checks in the catch block, so they must
@@ -47,6 +70,13 @@ const { appKitTypesPlugin } = await import("../vite-plugin");
 // Real constant values: the "../index" mock spreads the actual module, so these
 // are the genuine defaults the plugin resolves outFile from.
 const { ANALYTICS_TYPES_FILE, TYPES_DIR } = await import("../index");
+const { DatabaseTypegenError } = await import("../database");
+
+beforeEach(() => {
+  mocks.existsSync.mockReturnValue(true);
+  mocks.generateDatabaseTypes.mockReset();
+  mocks.generateDatabaseTypes.mockResolvedValue(undefined);
+});
 
 // The plugin hooks are loosely typed on Vite's Plugin; cast to the shapes we
 // actually drive so we can call them directly without a Vite build.
@@ -133,8 +163,7 @@ describe("appKitTypesPlugin — generation mode", () => {
     mocks.getWarehouseState.mockResolvedValue("DELETED" as WarehouseState);
     mocks.startWarehouse.mockResolvedValue(undefined);
     mocks.waitUntilRunning.mockResolvedValue("RUNNING" as WarehouseState);
-    // A non-empty warehouse ID is required or generate() short-circuits before
-    // ever calling generateFromEntryPoint.
+    // Default to the established warehouse-backed generation path.
     process.env.DATABRICKS_WAREHOUSE_ID = "wh-test";
   });
 
@@ -172,12 +201,90 @@ describe("appKitTypesPlugin — generation mode", () => {
     );
   });
 
-  test("skips generation when warehouse ID is absent", async () => {
+  test("runs warehouse-independent generation when warehouse ID is absent", async () => {
     delete process.env.DATABRICKS_WAREHOUSE_ID;
 
     await runPlugin();
+    await flush();
 
+    expect(mocks.generateDatabaseTypes).toHaveBeenCalledWith({
+      schemaFile: path.join(process.cwd(), "config", "database", "schema.ts"),
+      outFile: path.join(
+        process.cwd(),
+        "shared",
+        "appkit-types",
+        "database.d.ts",
+      ),
+    });
     expect(mocks.generateFromEntryPoint).not.toHaveBeenCalled();
+  });
+
+  test("activates a database-only project without a warehouse", () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    mocks.existsSync.mockImplementation((file) =>
+      String(file).endsWith(path.join("config", "database", "schema.ts")),
+    );
+    const apply = appKitTypesPlugin().apply;
+    expect(typeof apply).toBe("function");
+    expect((apply as (config: unknown, env: unknown) => boolean)({}, {})).toBe(
+      true,
+    );
+  });
+
+  test("does not run warehouse typegen for a database-only project", async () => {
+    mocks.existsSync.mockImplementation((file) =>
+      String(file).endsWith(path.join("config", "database", "schema.ts")),
+    );
+
+    await runPlugin();
+    await flush();
+
+    expect(mocks.generateDatabaseTypes).toHaveBeenCalledTimes(1);
+    expect(mocks.generateFromEntryPoint).not.toHaveBeenCalled();
+    expect(mocks.getWarehouseState).not.toHaveBeenCalled();
+  });
+
+  test("activates to neutralize an existing database declaration", () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    mocks.existsSync.mockImplementation((file) =>
+      String(file).endsWith(path.join("appkit-types", "database.d.ts")),
+    );
+    const apply = appKitTypesPlugin().apply;
+    expect(typeof apply).toBe("function");
+    expect((apply as (config: unknown, env: unknown) => boolean)({}, {})).toBe(
+      true,
+    );
+  });
+
+  test("logs DatabaseTypegenError message-only in development", async () => {
+    process.env.NODE_ENV = "development";
+    mocks.generateDatabaseTypes.mockRejectedValueOnce(
+      new DatabaseTypegenError("Database schema generation failed"),
+    );
+
+    await runPlugin();
+    await flush();
+
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      "%s",
+      "Database schema generation failed",
+    );
+    expect(mocks.loggerError).not.toHaveBeenCalledWith(
+      expect.stringContaining("%O"),
+      expect.anything(),
+    );
+  });
+
+  test("rejects DatabaseTypegenError message-only in production", async () => {
+    process.env.NODE_ENV = "production";
+    const error = new DatabaseTypegenError("Database schema generation failed");
+    mocks.generateDatabaseTypes.mockRejectedValueOnce(error);
+
+    const plugin = makeConfiguredPlugin();
+    await expect(getHook<BuildStartHook>(plugin, "buildStart")()).rejects.toBe(
+      error,
+    );
+    expect(error.stack).toBe(error.message);
   });
 });
 
@@ -310,6 +417,63 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     );
     await flush();
     expect(mocks.generateFromEntryPoint).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(["add", "change", "unlink"])(
+    "%s on the exact database schema regenerates without arming the warehouse",
+    async (event) => {
+      mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+      const plugin = makeConfiguredPlugin();
+      const { server, watcher } = makeFakeServer();
+      getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+
+      watcher.emit(
+        event,
+        path.join(process.cwd(), "config", "database", "schema.ts"),
+      );
+      await flush();
+
+      // Database sources ride the same single-flight generate as `.sql` edits,
+      // but a schema edit tells us nothing about the warehouse, so the one-shot
+      // blocking re-describe is not armed for it.
+      expect(mocks.generateDatabaseTypes).toHaveBeenCalledTimes(1);
+      expect(mocks.getWarehouseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test("regenerates when an imported database source changes", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+
+    watcher.emit(
+      "change",
+      path.join(process.cwd(), "config", "database", "tables", "notes.ts"),
+    );
+    await flush();
+
+    expect(mocks.generateDatabaseTypes).toHaveBeenCalledTimes(1);
+    expect(mocks.getWarehouseState).not.toHaveBeenCalled();
+  });
+
+  test("ignores database non-source files and prefix-collision siblings", async () => {
+    mocks.generateFromEntryPoint.mockResolvedValue(undefined);
+    const plugin = makeConfiguredPlugin();
+    const { server, watcher } = makeFakeServer();
+    getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+
+    for (const file of [
+      path.join(process.cwd(), "config", "database-copy", "schema.ts"),
+      path.join(process.cwd(), "config", "database", "README.md"),
+      path.join(process.cwd(), "other", "database", "schema.ts"),
+    ]) {
+      watcher.emit("change", file);
+    }
+    await flush();
+
+    expect(mocks.generateDatabaseTypes).not.toHaveBeenCalled();
+    expect(mocks.generateFromEntryPoint).not.toHaveBeenCalled();
   });
 
   test("a definitions.json OUTSIDE the metric-views folder does NOT regenerate; one inside does (directory match, not bare basename)", async () => {

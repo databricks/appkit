@@ -1,0 +1,83 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "database",
+  "displayName": "Database (Beta)",
+  "description": "Schema-driven typed access to Databricks Lakebase PostgreSQL",
+  "stability": "beta",
+  "hidden": false,
+  "resources": {
+    "required": [
+      {
+        "type": "postgres",
+        "alias": "Postgres",
+        "resourceKey": "postgres",
+        "description": "Lakebase Postgres database for persistent storage",
+        "permission": "CAN_CONNECT_AND_CREATE",
+        "fields": {
+          "project": {
+            "description": "Lakebase project resource name",
+            "examples": ["projects/{project-id}"],
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "postgres_project",
+              "select": "name"
+            }
+          },
+          "branch": {
+            "description": "Lakebase branch resource name",
+            "examples": ["projects/{project-id}/branches/{branch-id}"],
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "postgres_branch",
+              "select": "name",
+              "dependsOn": "project"
+            }
+          },
+          "database": {
+            "description": "Lakebase database resource name",
+            "examples": [
+              "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
+            ],
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "postgres_database",
+              "select": "name",
+              "dependsOn": "branch"
+            }
+          },
+          "host": {
+            "env": "PGHOST",
+            "localOnly": true,
+            "resolve": "postgres:host",
+            "description": "Postgres host"
+          },
+          "databaseName": {
+            "env": "PGDATABASE",
+            "localOnly": true,
+            "resolve": "postgres:databaseName",
+            "description": "Postgres database name"
+          },
+          "endpointPath": {
+            "env": "LAKEBASE_ENDPOINT",
+            "bundleIgnore": true,
+            "resolve": "postgres:endpointPath",
+            "description": "Lakebase endpoint resource name"
+          },
+          "port": {
+            "env": "PGPORT",
+            "localOnly": true,
+            "value": "5432",
+            "description": "Postgres port"
+          },
+          "sslmode": {
+            "env": "PGSSLMODE",
+            "localOnly": true,
+            "value": "require",
+            "description": "Postgres SSL mode"
+          }
+        }
+      }
+    ],
+    "optional": []
+  }
+}
