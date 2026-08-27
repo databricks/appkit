@@ -106,6 +106,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
+| [AppHandle](TypeAlias.AppHandle.md) | What `createApp()` returns: every plugin's exports keyed by manifest name, plus the app's own teardown handle. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |

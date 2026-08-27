@@ -162,10 +162,17 @@ export class TelemetryManager {
   /**
    * Flush and shut down the OpenTelemetry SDK.
    *
-   * Idempotent: the SDK reference is cleared synchronously and concurrent
-   * or repeated calls await the same in-flight flush. Awaited by the core
-   * lifecycle manager during graceful shutdown — that manager owns the
-   * process signal handlers, so telemetry no longer registers its own.
+   * Idempotent: the SDK reference is cleared synchronously and concurrent or
+   * repeated calls await the same in-flight flush. Awaited by the core lifecycle
+   * manager during graceful shutdown — that manager owns the process signal
+   * handlers, so telemetry no longer registers its own.
+   *
+   * Survives re-`initialize()`. `shutdownPromise` is deliberately *not* cleared
+   * when the flush settles, and that is safe: the memo is only ever returned
+   * after being reassigned for whatever SDK is currently live, so a stale
+   * resolved promise can only be returned when there is no SDK to flush. The
+   * covering test asserts every SDK across repeated
+   * initialize/shutdown cycles is flushed.
    */
   async shutdown(): Promise<void> {
     if (this.sdk) {
@@ -181,5 +188,17 @@ export class TelemetryManager {
     }
 
     return this.shutdownPromise;
+  }
+
+  /**
+   * Drop the singleton so the next {@link getInstance} builds a fresh manager.
+   *
+   * Does not flush: callers `shutdown()` first, then reset — the order
+   * `LifecycleManager.close()` uses.
+   *
+   * @internal
+   */
+  static reset(): void {
+    TelemetryManager.instance = undefined;
   }
 }

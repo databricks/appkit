@@ -1,4 +1,5 @@
 import type {
+  AppHandle,
   BasePlugin,
   CacheConfig,
   InputPluginMap,
@@ -11,6 +12,7 @@ import type {
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { ConfigurationError } from "../errors";
 import {
   isInternalTelemetryEnabled,
   TelemetryReporter,
@@ -27,10 +29,34 @@ import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
 
+/**
+ * Names a plugin manifest may not use: `createAndRegisterPlugin` installs
+ * exports as **own** properties, and an own property shadows a prototype
+ * method. Only *silently* broken names belong here — a plugin named `close`
+ * would no-op teardown, whereas shadowing an internal method throws
+ * `TypeError` on the next registration and needs no guard.
+ */
+/**
+ * The handle's own members, i.e. everything {@link AppHandle} adds on top of the
+ * plugin map. `Record` makes it exhaustive: add a named method to `AppHandle`
+ * and this stops compiling until it is reserved here too.
+ */
+const HANDLE_OWN_MEMBERS: Record<
+  Exclude<keyof AppHandle<[]>, keyof PluginMap<[]> | symbol>,
+  true
+> = { close: true };
+
+const RESERVED_PLUGIN_NAMES = new Set(Object.keys(HANDLE_OWN_MEMBERS));
+
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
+  /**
+   * Retained so {@link close} can reach the shutdown sequence. Assigned once
+   * every plugin has started; `close()` before that point is a no-op teardown.
+   */
+  #lifecycle: LifecycleManager | undefined;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
@@ -80,6 +106,15 @@ export class AppKit<TPlugins extends InputPluginMap> {
     pluginData: OptionalConfigPluginDef<T>,
     extraData?: Record<string, unknown>,
   ) {
+    if (RESERVED_PLUGIN_NAMES.has(name)) {
+      throw new ConfigurationError(
+        `Plugin name "${name}" is reserved by the app handle returned from ` +
+          "createApp(). Rename the plugin in its manifest — an own property " +
+          "would shadow the handle's method and silently break app teardown.",
+        { context: { pluginName: name } },
+      );
+    }
+
     const { plugin: Plugin, config: pluginConfig } = pluginData;
     const baseConfig = {
       ...config,
@@ -188,10 +223,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
       client?: WorkspaceClient;
+      /** Narrower than `AppHandle<T>` on purpose — see {@link createApp}. */
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
     } = {},
-  ): Promise<PluginMap<T>> {
+  ): Promise<AppHandle<T>> {
     // Initialize core services
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
@@ -225,7 +261,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     await Promise.all(instance.#setupPromises);
     await instance.#context.emitLifecycle("setup:complete");
 
-    const handle = instance as unknown as PluginMap<T>;
+    const handle = instance as unknown as AppHandle<T>;
 
     if (config.onPluginsReady) {
       logger.debug("Running onPluginsReady hook");
@@ -246,9 +282,34 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // plugin has started. Applies uniformly whether or not a server plugin
     // is present — server-less apps still get their telemetry flushed and
     // plugin shutdown() hooks run.
-    new LifecycleManager(instance.#context).installSignalHandlers();
+    instance.#lifecycle = new LifecycleManager(instance.#context);
+    instance.#lifecycle.installSignalHandlers();
 
     return handle;
+  }
+
+  /**
+   * Release everything this app acquired — sockets, timers, pools, cache,
+   * telemetry — without terminating the process. Runs the same phases as a
+   * SIGTERM shutdown (plugin `abortActiveOperations` and `shutdown()` hooks,
+   * the `"shutdown"` lifecycle event, cache close, telemetry flush) and
+   * detaches the signal handlers this app installed. Idempotent: repeated
+   * calls await the same teardown.
+   *
+   * @param options.timeoutMs - Overall budget. Defaults to the shorter
+   *   programmatic budget, not the production signal budget.
+   */
+  async close(options: { timeoutMs?: number } = {}): Promise<void> {
+    await this.#lifecycle?.close(options);
+  }
+
+  /**
+   * Enables `await using app = await createApp(...)`, releasing the app at
+   * scope exit. Unshadowable, unlike {@link close} — a manifest name can
+   * never be a symbol.
+   */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
   }
 
   private static bootstrapInternalTelemetry(): void {
@@ -382,9 +443,16 @@ export async function createApp<
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
     client?: WorkspaceClient;
+    /**
+     * Runs after plugin setup but **before** the server starts.
+     *
+     * Typed `PluginMap<T>`, not the `AppHandle<T>` this function returns: the
+     * runtime value is the same object, but teardown is not wired up yet, so
+     * `close()` here would silently no-op. The narrower type is deliberate.
+     */
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     disableInternalTelemetry?: boolean;
   } = {},
-): Promise<PluginMap<T>> {
+): Promise<AppHandle<T>> {
   return AppKit._createApp(config);
 }

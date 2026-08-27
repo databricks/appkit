@@ -1,5 +1,5 @@
-import { Plugin, type PluginManifest } from '@databricks/appkit';
-import { expectStream, createTestPluginContext } from '@databricks/appkit/testing';
+import { Plugin, type PluginManifest, toPlugin } from '@databricks/appkit';
+import { createTestApp, createTestPluginContext, expectStream } from '@databricks/appkit/testing';
 import { describe, expect, test } from 'vitest';
 
 /**
@@ -9,10 +9,13 @@ import { describe, expect, test } from 'vitest';
  * network — so these tests run anywhere, including CI. Delete this file, or use
  * it as a starting point for testing your own plugins.
  *
- * Two headline helpers are shown below:
+ * Three headline helpers are shown below:
+ *  - `createTestApp({ plugins })` — boot a real app (real Express, real routes,
+ *    real validation) on an ephemeral port and call it over HTTP. Start here for
+ *    a plugin's end-to-end behaviour. Every boot needs `close()`.
  *  - `createTestPluginContext()` — a real PluginContext with faked edges, attachable
  *    to a plugin so its real code paths (routes, tool dispatch, user scoping)
- *    run under test.
+ *    run under test. No boot, no socket — the fastest option for unit tests.
  *  - `expectStream(...).toEmit(...)` — assert the ordered event types a
  *    streaming handler emits.
  *
@@ -43,7 +46,24 @@ class GreeterPlugin extends Plugin {
     yield { type: 'greeting_start', name };
     yield { type: 'greeting_end', message: `Hello, ${name}!` };
   }
+
+  // A real HTTP route, so createTestApp has something to call.
+  injectRoutes(router: Parameters<Plugin['injectRoutes']>[0]) {
+    this.route(router, {
+      name: 'greet',
+      method: 'post',
+      path: '/greet',
+      handler: async (req, res) => {
+        const { name } = req.body as { name: string };
+        res.json({ message: `Hello, ${name}!` });
+      },
+    });
+  }
 }
+
+// The factory form `createApp` (and `createTestApp`) take. `toPlugin` reads the
+// plugin name from the static manifest.
+const greeter = toPlugin(GreeterPlugin);
 
 describe('testing kit example', () => {
   test('attaches a real PluginContext and records registered routes', async () => {
@@ -60,5 +80,21 @@ describe('testing kit example', () => {
     const plugin = new GreeterPlugin({});
 
     await expectStream(plugin.greet('world')).toEmit('greeting_start', 'greeting_end');
+  });
+
+  test('boots a real app and calls the plugin over HTTP', async () => {
+    // No workspace, no credentials, no network. The harness fakes the whole
+    // Databricks data plane and binds an ephemeral port.
+    const app = await createTestApp({ plugins: [greeter()] });
+
+    try {
+      const res = await app.post('/api/greeter/greet', { body: { name: 'world' } });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ message: 'Hello, world!' });
+    } finally {
+      // Required: releases the socket and restores process.env.
+      await app.close();
+    }
   });
 });

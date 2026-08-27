@@ -58,6 +58,8 @@ export class CacheManager {
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
+  /** Bumped by {@link reset} so an in-flight init cannot publish over it. */
+  private static generation = 0;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -126,9 +128,14 @@ export class CacheManager {
     }
 
     if (!CacheManager.initPromise) {
+      const generation = CacheManager.generation;
       CacheManager.initPromise = CacheManager.create(userConfig).then(
         (instance) => {
-          CacheManager.instance = instance;
+          // A reset() mid-flight discarded this manager before it existed:
+          // hand it to the awaiting caller, but do not publish it.
+          if (CacheManager.generation === generation) {
+            CacheManager.instance = instance;
+          }
           return instance;
         },
       );
@@ -555,6 +562,21 @@ export class CacheManager {
   /** Close the cache */
   async close(): Promise<void> {
     await this.storage.close();
+  }
+
+  /**
+   * Drop the singleton so the next {@link getInstance} builds a fresh manager.
+   *
+   * Both fields must clear — `getInstance()` falls back to `initPromise` when
+   * `instance` is null. A pointer drop, not teardown: call {@link close} first
+   * or the old storage leaks (a `pg.Pool` under `PersistentStorage`).
+   *
+   * @internal
+   */
+  static reset(): void {
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
+    CacheManager.generation += 1;
   }
 
   /**

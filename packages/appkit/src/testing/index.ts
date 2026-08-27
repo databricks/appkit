@@ -9,9 +9,11 @@
  * buffering, tool dispatch, timeout composition, user scoping — run under test
  * with no credentials.
  *
- * Two entry points:
+ * Three entry points:
+ * - {@link createTestApp} — boot a real app with a faked data plane and call it
+ *   over real HTTP. The recommended starting point.
  * - {@link createTestPluginContext} — build a real `PluginContext` with faked edges
- *   and attach it to a plugin.
+ *   and attach it to a plugin, with no boot and no socket.
  * - {@link expectStream} — assert the ordered event types a stream emits.
  *
  * Plus the fixture helpers (`createMockRequest`, `mockServiceContext`, …) for
@@ -42,6 +44,13 @@
 // path (../core/plugin-context) that is not part of the package's exports map.
 export type { PluginContext } from "../core/plugin-context";
 export {
+  createTestApp,
+  type CreateTestAppOptions,
+  getListeningPort,
+  type TestApp,
+  type TestRequestOptions,
+} from "./create-test-app";
+export {
   type CapturedSSEResponse,
   type ExpectStreamOptions,
   expectStream,
@@ -51,13 +60,11 @@ export {
   type StreamSource,
 } from "./expect-stream";
 export {
-  createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,
   createMockRouter,
   createMockTelemetry,
-  createMockWorkspaceClient,
   createSuccessfulSQLResponse,
   mockServiceContext,
   type OboOption,
@@ -68,6 +75,14 @@ export {
   type TestContextOptions,
   useServiceContextMock,
 } from "./fixtures";
+export {
+  createMockWorkspaceClient,
+  type CreateMockWorkspaceClientOptions,
+  getMock,
+  type MockWorkspaceClient,
+} from "./mock-workspace-client";
+export { createTestPlugin } from "./create-test-plugin";
+export { resetGlobalState } from "./reset";
 export {
   createTestPluginContext,
   type FakeProvider,

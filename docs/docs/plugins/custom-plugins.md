@@ -78,6 +78,14 @@ export const myPlugin = toPlugin(MyPlugin);
 
 JSON is the canonical authoring surface — it is what `appkit plugin sync` reads when aggregating manifests for templates. For the full v2.0 manifest contract (resources, discovery descriptors, scaffolding rules), see [Plugin manifest](./manifest.md).
 
+:::note Reserved plugin names
+`close` cannot be used as a plugin `name`. Plugin exports are installed as own
+properties on the object `createApp()` returns, and an own property shadows a
+prototype method — so a plugin named `close` would silently replace the app
+handle's own `close()` and break teardown. `createApp()` rejects it with a
+`ConfigurationError` naming the plugin instead of failing quietly at shutdown.
+:::
+
 ## Config-dependent resources
 
 The manifest defines resources as either `required` (always needed) or `optional` (may be needed).

@@ -7,7 +7,9 @@
       "@/*": ["src/*"],
       "@tools/*": ["../../tools/*"],
       "shared": ["../../packages/shared/src"],
-      "@databricks/lakebase": ["../../packages/lakebase/src"]
+      "@databricks/lakebase": ["../../packages/lakebase/src"],
+      "@databricks/appkit": ["src/index.ts"],
+      "@databricks/appkit/testing": ["src/testing/index.ts"]
     }
   },
   "include": ["src/**/*"],

@@ -1,13 +1,11 @@
-import type { Server } from "node:http";
-
 import {
-  createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
   createSuccessfulSQLResponse,
-  mockServiceContext,
+  createTestApp,
+  getMock,
   parseSSEResponse,
-  setupDatabricksEnv,
-} from "@tools/test-helpers";
+  type TestApp,
+} from "@databricks/appkit/testing";
 import { sql } from "shared";
 import {
   afterAll,
@@ -20,85 +18,37 @@ import {
 } from "vitest";
 
 import { AppManager } from "../../../app";
-import { ServiceContext } from "../../../context/service-context";
-import { createApp } from "../../../core";
-import { server as serverPlugin } from "../../server";
 import { analytics } from "../index";
 
 const getAppQuerySpy = vi.spyOn(AppManager.prototype, "getAppQuery");
 
-/**
- * Wait for the supplied server to finish binding, then return the OS-assigned
- * port. Required when the test passes `port: 0` to `serverPlugin` —
- * `app.server.start()` returns as soon as `listen()` is invoked but before the
- * bind completes, so `server.address()` returns `null` until the `listening`
- * event fires.
- */
-async function getListeningPort(server: Server): Promise<number> {
-  const addr = server.address();
-  if (addr && typeof addr === "object" && typeof addr.port === "number") {
-    return addr.port;
-  }
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", () => resolve());
-    server.once("error", (err) => reject(err));
-  });
-  const ready = server.address();
-  if (!ready || typeof ready !== "object") {
-    throw new Error("Server is listening but address() returned null");
-  }
-  return ready.port;
-}
-
 describe("Analytics Plugin Integration", () => {
-  let server: Server;
-  let baseUrl: string;
-  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  let mockClient: ReturnType<typeof createConfigurableMockWorkspaceClient>;
+  let app: TestApp<[ReturnType<typeof analytics>]>;
+  /** The SQL mock the analytics route drives, via the harness's client. */
+  let executeStatement: ReturnType<typeof getMock>;
+  let getStatement: ReturnType<typeof getMock>;
 
   beforeAll(async () => {
-    setupDatabricksEnv();
-    ServiceContext.reset();
-
-    mockClient = createConfigurableMockWorkspaceClient();
-    serviceContextMock = await mockServiceContext({
-      serviceDatabricksClient: mockClient.client,
-    });
-
-    const app = await createApp({
-      plugins: [
-        // port: 0 → OS assigns an ephemeral port. Avoids EADDRINUSE / cross-test
-        // route bleed when another integration test (e.g. server.integration)
-        // holds a fixed port concurrently in the shared vitest worker pool.
-        serverPlugin({
-          port: 0,
-          host: "127.0.0.1",
-        }),
-        analytics({}),
-      ],
-    });
-
-    server = app.server.getServer();
-    const port = await getListeningPort(server);
-    baseUrl = `http://127.0.0.1:${port}`;
+    // The harness owns the env setup, the singleton resets, the mock client, the
+    // server plugin on an ephemeral port, and the teardown.
+    app = await createTestApp({ plugins: [analytics({})] });
+    executeStatement = getMock(
+      app.client,
+      "statementExecution.executeStatement",
+    );
+    getStatement = getMock(app.client, "statementExecution.getStatement");
   });
 
   afterAll(async () => {
     getAppQuerySpy?.mockRestore();
-    serviceContextMock?.restore();
-    if (server) {
-      await new Promise<void>((resolve, reject) => {
-        server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    }
+    await app?.close();
   });
 
   beforeEach(() => {
-    mockClient.mocks.executeStatement.mockReset();
-    mockClient.mocks.getStatement.mockReset();
+    // Reset drops the built-in canned SUCCEEDED default too, matching the
+    // "script it yourself" semantics this suite relied on before.
+    executeStatement.mockReset();
+    getStatement.mockReset();
     getAppQuerySpy.mockReset();
   });
 
@@ -119,18 +69,13 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
-      mockClient.mocks.executeStatement.mockResolvedValueOnce(
+      executeStatement.mockResolvedValueOnce(
         createSuccessfulSQLResponse(mockData, mockColumns),
       );
 
-      const response = await fetch(
-        `${baseUrl}/api/analytics/query/test_query`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
-        },
-      );
+      const response = await app.post("/api/analytics/query/test_query", {
+        body: { parameters: {} },
+      });
 
       expect(response.status).toBe(200);
       expect(response.headers.get("Content-Type")).toBe(
@@ -144,8 +89,8 @@ describe("Analytics Plugin Integration", () => {
         { name: "Bob", age: "25" },
       ]);
 
-      expect(mockClient.mocks.executeStatement).toHaveBeenCalledTimes(1);
-      expect(mockClient.mocks.executeStatement).toHaveBeenCalledWith(
+      expect(executeStatement).toHaveBeenCalledTimes(1);
+      expect(executeStatement).toHaveBeenCalledWith(
         expect.objectContaining({
           statement: testQuery,
           warehouse_id: "test-warehouse-id",
@@ -162,26 +107,17 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
-      mockClient.mocks.executeStatement.mockResolvedValueOnce(
+      executeStatement.mockResolvedValueOnce(
         createSuccessfulSQLResponse([["Alice"]], [{ name: "name" }]),
       );
 
-      const response = await fetch(
-        `${baseUrl}/api/analytics/query/user_query`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            parameters: {
-              user_id: sql.string("123"),
-            },
-          }),
-        },
-      );
+      const response = await app.post("/api/analytics/query/user_query", {
+        body: { parameters: { user_id: sql.string("123") } },
+      });
 
       expect(response.status).toBe(200);
 
-      const callArgs = mockClient.mocks.executeStatement.mock.calls[0][0];
+      const callArgs = executeStatement.mock.calls[0][0];
       expect(callArgs.parameters).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -198,20 +134,15 @@ describe("Analytics Plugin Integration", () => {
     test("should return 404 when query does not exist", async () => {
       getAppQuerySpy.mockResolvedValueOnce(null);
 
-      const response = await fetch(
-        `${baseUrl}/api/analytics/query/nonexistent`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
-        },
-      );
+      const response = await app.post("/api/analytics/query/nonexistent", {
+        body: { parameters: {} },
+      });
 
       expect(response.status).toBe(404);
       const data = await response.json();
       expect(data).toEqual({ error: "Query not found" });
 
-      expect(mockClient.mocks.executeStatement).not.toHaveBeenCalled();
+      expect(executeStatement).not.toHaveBeenCalled();
     });
   });
 
@@ -222,14 +153,12 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
-      mockClient.mocks.executeStatement.mockResolvedValue(
+      executeStatement.mockResolvedValue(
         createFailedSQLResponse("Table not found"),
       );
 
-      const response = await fetch(`${baseUrl}/api/analytics/query/broken`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parameters: {} }),
+      const response = await app.post("/api/analytics/query/broken", {
+        body: { parameters: {} },
       });
 
       expect(response.status).toBe(200);
@@ -243,14 +172,10 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
-      mockClient.mocks.executeStatement.mockRejectedValue(
-        new Error("Network error"),
-      );
+      executeStatement.mockRejectedValue(new Error("Network error"));
 
-      const response = await fetch(`${baseUrl}/api/analytics/query/error`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parameters: {} }),
+      const response = await app.post("/api/analytics/query/error", {
+        body: { parameters: {} },
       });
 
       expect(response.status).toBe(200);
@@ -268,33 +193,23 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
-      mockClient.mocks.executeStatement.mockResolvedValue(
+      executeStatement.mockResolvedValue(
         createSuccessfulSQLResponse([["cached_value"]], [{ name: "value" }]),
       );
 
-      const response1 = await fetch(
-        `${baseUrl}/api/analytics/query/cache_test`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
-        },
-      );
+      const response1 = await app.post("/api/analytics/query/cache_test", {
+        body: { parameters: {} },
+      });
       const data1 = await parseSSEResponse(response1);
 
-      const response2 = await fetch(
-        `${baseUrl}/api/analytics/query/cache_test`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
-        },
-      );
+      const response2 = await app.post("/api/analytics/query/cache_test", {
+        body: { parameters: {} },
+      });
       const data2 = await parseSSEResponse(response2);
 
       expect(data1.data).toEqual([{ value: "cached_value" }]);
       expect(data2.data).toEqual([{ value: "cached_value" }]);
-      expect(mockClient.mocks.executeStatement).toHaveBeenCalledTimes(1);
+      expect(executeStatement).toHaveBeenCalledTimes(1);
     });
   });
 });
