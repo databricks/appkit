@@ -93,4 +93,5 @@ export {
   type RecordedRoute,
   type RecordedToolCall,
   type TestPluginContext,
+  type TestPluginContextOptions,
 } from "./test-plugin-context";

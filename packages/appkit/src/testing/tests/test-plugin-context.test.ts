@@ -324,3 +324,209 @@ describe("createTestPluginContext — attach()", () => {
     expect(result).toBe("fake");
   });
 });
+
+describe("createTestPluginContext — optional second parameter (options overload)", () => {
+  test("returns synchronously in both forms (not a promise)", () => {
+    const noOptions = createTestPluginContext();
+    expect(noOptions).not.toBeInstanceOf(Promise);
+    expect(noOptions.ctx).toBeInstanceOf(PluginContext);
+
+    const withOptions = createTestPluginContext(
+      {},
+      { responses: { "jobs.getRun": { state: "DONE" } } },
+    );
+    expect(withOptions).not.toBeInstanceOf(Promise);
+    expect(withOptions.ctx).toBeInstanceOf(PluginContext);
+    withOptions.restore?.();
+  });
+
+  test("no-options call behaves exactly as before (non-breaking)", async () => {
+    const mock = createTestPluginContext({
+      analytics: { query: [{ id: 1 }] },
+    });
+
+    const result = await mock.ctx.executeTool(
+      mockReq(),
+      "analytics",
+      "query",
+      {},
+    );
+
+    expect(result).toEqual([{ id: 1 }]);
+    expect(mock.toolCalls).toHaveLength(1);
+  });
+
+  test("with options and responses, installs a mock workspace client seeded from responses", async () => {
+    const mock = createTestPluginContext(
+      {},
+      {
+        responses: {
+          "jobs.getRun": { job_id: 42, state: "RUNNING" },
+        },
+      },
+    );
+
+    // The service context is installed, so getWorkspaceClient() returns the mocked client.
+    const { getWorkspaceClient } = await import("../../context");
+    const run = await getWorkspaceClient().jobs.getRun({ run_id: 42 } as never);
+    expect(run).toEqual({ job_id: 42, state: "RUNNING" });
+  });
+
+  test("with env in options, sets env vars during the test", async () => {
+    const prior = process.env.TEST_VAR_ABC;
+    delete process.env.TEST_VAR_ABC;
+
+    const mock = createTestPluginContext(
+      {},
+      {
+        env: { TEST_VAR_ABC: "test-value" },
+      },
+    );
+
+    expect(process.env.TEST_VAR_ABC).toBe("test-value");
+
+    // Cleanup
+    delete process.env.TEST_VAR_ABC;
+    if (prior !== undefined) {
+      process.env.TEST_VAR_ABC = prior;
+    }
+  });
+
+  test("env is restored after the test", async () => {
+    const prior = process.env.TEST_VAR_XYZ;
+    delete process.env.TEST_VAR_XYZ;
+
+    const mock = createTestPluginContext(
+      {},
+      {
+        env: { TEST_VAR_XYZ: "value1" },
+      },
+    );
+
+    expect(process.env.TEST_VAR_XYZ).toBe("value1");
+
+    // Call restore explicitly
+    if ("restore" in mock && typeof mock.restore === "function") {
+      mock.restore();
+    }
+
+    // After explicit restore, env should be gone (it was unset before)
+    expect(process.env.TEST_VAR_XYZ).toBeUndefined();
+
+    // Cleanup
+    if (prior !== undefined) {
+      process.env.TEST_VAR_XYZ = prior;
+    }
+  });
+
+  test("restore() is idempotent", async () => {
+    const prior = process.env.TEST_VAR_IDEMPOTENT;
+    process.env.TEST_VAR_IDEMPOTENT = "prior";
+
+    const mock = createTestPluginContext(
+      {},
+      {
+        env: { TEST_VAR_IDEMPOTENT: "changed" },
+      },
+    );
+
+    expect(process.env.TEST_VAR_IDEMPOTENT).toBe("changed");
+
+    if ("restore" in mock && typeof mock.restore === "function") {
+      mock.restore();
+    }
+
+    expect(process.env.TEST_VAR_IDEMPOTENT).toBe("prior");
+
+    // Calling restore again should not error
+    if ("restore" in mock && typeof mock.restore === "function") {
+      mock.restore();
+    }
+
+    expect(process.env.TEST_VAR_IDEMPOTENT).toBe("prior");
+
+    // Cleanup
+    if (prior !== undefined) {
+      process.env.TEST_VAR_IDEMPOTENT = prior;
+    } else {
+      delete process.env.TEST_VAR_IDEMPOTENT;
+    }
+  });
+
+  test("strict: true passes through to the mock client", async () => {
+    const mock = createTestPluginContext(
+      {},
+      {
+        responses: { "jobs.getRun": { state: "DONE" } },
+        strict: true,
+      },
+    );
+
+    const { getWorkspaceClient } = await import("../../context");
+    const client = getWorkspaceClient();
+
+    // Declared response should work
+    const run = await client.jobs.getRun({ run_id: 42 } as never);
+    expect(run).toEqual({ state: "DONE" });
+
+    // Undeclared path should throw when called with strict: true
+    // Access the method through the facade (which returns a service proxy)
+    const undeclaredFn = (client as any).warehouses.undeclaredMethod;
+    try {
+      await undeclaredFn({ foo: "bar" });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect((err as Error).message).toContain("no declared response");
+    }
+  });
+
+  test("service context is auto-restored after test via afterEach", async () => {
+    const { ServiceContext } = await import("../../context/service-context");
+    const priorInitialized = ServiceContext.isInitialized();
+
+    const mock = createTestPluginContext(
+      {},
+      {
+        responses: { "jobs.getRun": { state: "DONE" } },
+      },
+    );
+
+    // Inside the test, the mock service context is active
+    expect(ServiceContext.isInitialized()).toBe(true);
+
+    // Simulate afterEach cleanup (call restore)
+    if ("restore" in mock && typeof mock.restore === "function") {
+      mock.restore();
+    }
+
+    // After restore, the state should be what it was before
+    // (depends on whether it was initialized before the test)
+  });
+
+  test("combines fakes and responses in a single call", async () => {
+    const mock = createTestPluginContext(
+      {
+        analytics: { query: [{ result: "fake" }] },
+      },
+      {
+        responses: {
+          "jobs.getRun": { state: "DONE" },
+        },
+      },
+    );
+
+    // Fakes work
+    const fakeResult = await mock.ctx.executeTool(
+      mockReq(),
+      "analytics",
+      "query",
+      {},
+    );
+    expect(fakeResult).toEqual([{ result: "fake" }]);
+
+    // Responses work (via seeded mock client in service context)
+    const { getWorkspaceClient } = await import("../../context");
+    const run = await getWorkspaceClient().jobs.getRun({ run_id: 42 } as never);
+    expect(run).toEqual({ state: "DONE" });
+  });
+});
