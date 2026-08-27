@@ -83,6 +83,7 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       "runWithRequestContext",
       "setupDatabricksEnv",
       "useServiceContextMock",
+      "withEnv",
     ];
     const missing = expected.filter(
       (name) =>

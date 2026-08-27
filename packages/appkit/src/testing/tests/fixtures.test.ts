@@ -9,6 +9,7 @@ import {
   mockServiceContext,
   resetTestCache,
   useServiceContextMock,
+  withEnv,
 } from "../fixtures";
 
 describe("createMockRequest — obo option", () => {
@@ -182,5 +183,125 @@ describe("useServiceContextMock — restores after the block", () => {
   test("the singleton is un-spied outside the hooked block", () => {
     // afterEach in the inner block restored the original method.
     expect(vi.isMockFunction(ServiceContext.isInitialized)).toBe(false);
+  });
+});
+
+describe("withEnv — environment variable restoration", () => {
+  test("sets a var inside fn, restores it to its prior value afterward", () => {
+    const original = process.env.TEST_VAR;
+    process.env.TEST_VAR = "original";
+
+    const result = withEnv({ TEST_VAR: "modified" }, () => {
+      expect(process.env.TEST_VAR).toBe("modified");
+      return "done";
+    });
+
+    expect(result).toBe("done");
+    expect(process.env.TEST_VAR).toBe("original");
+
+    // Cleanup
+    if (original === undefined) {
+      delete process.env.TEST_VAR;
+    } else {
+      process.env.TEST_VAR = original;
+    }
+  });
+
+  test("a key that was UNSET before is deleted (not left set) after fn returns", () => {
+    if (process.env.NEVER_SET_VAR !== undefined) {
+      delete process.env.NEVER_SET_VAR;
+    }
+
+    withEnv({ NEVER_SET_VAR: "temp" }, () => {
+      expect(process.env.NEVER_SET_VAR).toBe("temp");
+    });
+
+    expect(process.env.NEVER_SET_VAR).toBeUndefined();
+  });
+
+  test("a key that PRE-EXISTED is restored to its original value, not deleted", () => {
+    process.env.PRE_EXISTING = "before";
+
+    withEnv({ PRE_EXISTING: "changed" }, () => {
+      expect(process.env.PRE_EXISTING).toBe("changed");
+    });
+
+    expect(process.env.PRE_EXISTING).toBe("before");
+
+    // Cleanup
+    delete process.env.PRE_EXISTING;
+  });
+
+  test("restores even when fn throws", () => {
+    process.env.THROW_TEST = "before";
+
+    expect(() => {
+      withEnv({ THROW_TEST: "during" }, () => {
+        expect(process.env.THROW_TEST).toBe("during");
+        throw new Error("test error");
+      });
+    }).toThrow("test error");
+
+    expect(process.env.THROW_TEST).toBe("before");
+
+    // Cleanup
+    delete process.env.THROW_TEST;
+  });
+
+  test("async form: await withEnv({...}, async () => …) restores after the promise settles", async () => {
+    process.env.ASYNC_TEST = "before";
+
+    await withEnv({ ASYNC_TEST: "during" }, async () => {
+      expect(process.env.ASYNC_TEST).toBe("during");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(process.env.ASYNC_TEST).toBe("before");
+
+    // Cleanup
+    delete process.env.ASYNC_TEST;
+  });
+
+  test("async form restores even when the promise rejects", async () => {
+    process.env.ASYNC_REJECT_TEST = "before";
+
+    await expect(
+      withEnv({ ASYNC_REJECT_TEST: "during" }, async () => {
+        expect(process.env.ASYNC_REJECT_TEST).toBe("during");
+        throw new Error("async error");
+      }),
+    ).rejects.toThrow("async error");
+
+    expect(process.env.ASYNC_REJECT_TEST).toBe("before");
+
+    // Cleanup
+    delete process.env.ASYNC_REJECT_TEST;
+  });
+
+  test("nested withEnv calls restore in reverse order (LIFO)", () => {
+    process.env.NESTED_VAR = "original";
+    const log: string[] = [];
+
+    withEnv({ NESTED_VAR: "level1" }, () => {
+      log.push(`L1-during: ${process.env.NESTED_VAR}`);
+
+      withEnv({ NESTED_VAR: "level2" }, () => {
+        log.push(`L2-during: ${process.env.NESTED_VAR}`);
+      });
+
+      log.push(`L1-after: ${process.env.NESTED_VAR}`);
+    });
+
+    log.push(`outside: ${process.env.NESTED_VAR}`);
+
+    expect(log).toEqual([
+      "L1-during: level1",
+      "L2-during: level2",
+      "L1-after: level1",
+      "outside: original",
+    ]);
+
+    // Cleanup
+    delete process.env.NESTED_VAR;
   });
 });

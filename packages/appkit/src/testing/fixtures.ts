@@ -341,6 +341,74 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
+ * Sets environment variables for the duration of `fn`, then restores them to
+ * their prior state. Each key's prior value (or "was absent") is captured on
+ * entry; on exit, the prior value is restored, or the key is deleted only if
+ * it was previously unset.
+ *
+ * Supports both sync and async `fn`. If `fn` returns a thenable, `withEnv`
+ * returns that promise and restores in `.finally()`. Otherwise, it restores
+ * in a synchronous `finally` and returns the callback's return value.
+ * Restoration runs even if `fn` throws. Nested calls restore in LIFO order.
+ *
+ * @example
+ * ```ts
+ * // Sync: restores synchronously after fn
+ * withEnv({ MY_VAR: "test" }, () => {
+ *   console.log(process.env.MY_VAR); // "test"
+ * });
+ * console.log(process.env.MY_VAR); // prior value (or undefined)
+ *
+ * // Async: restores after promise settles
+ * await withEnv({ MY_VAR: "test" }, async () => {
+ *   await fetch(...);
+ * });
+ * ```
+ */
+export function withEnv<T>(
+  vars: Record<string, string>,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
+  // Capture prior values (including undefined = "was absent")
+  const prior = new Map<string, string | undefined>();
+  for (const key of Object.keys(vars)) {
+    prior.set(key, process.env[key]);
+  }
+
+  // Restore a key to its prior state
+  const restore = () => {
+    for (const [key, value] of prior) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
+
+  // Set vars and call fn
+  Object.assign(process.env, vars);
+  try {
+    const result = fn();
+
+    // If result is thenable, attach restoration to .finally
+    if (result != null && typeof (result as Any).then === "function") {
+      return (result as Promise<T>).finally(() => {
+        restore();
+      });
+    }
+
+    // Otherwise restore synchronously
+    restore();
+    return result;
+  } catch (err) {
+    // Restore even on sync error
+    restore();
+    throw err;
+  }
+}
+
+/**
  * Clears AppKit's process-wide cache singleton so cached values don't leak
  * between tests in the same file.
  *

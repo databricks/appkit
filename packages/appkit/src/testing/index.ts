@@ -74,6 +74,7 @@ export {
   setupDatabricksEnv,
   type TestContextOptions,
   useServiceContextMock,
+  withEnv,
 } from "./fixtures";
 export {
   createMockWorkspaceClient,
