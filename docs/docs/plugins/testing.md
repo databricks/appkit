@@ -184,6 +184,31 @@ await mock.attach(plugin);
 
 Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
 
+### Seeding with workspace responses and environment
+
+`createTestPluginContext` accepts a second `options` parameter to control the faked workspace client and environment:
+
+```ts
+const mock = createTestPluginContext({}, {
+  responses: {
+    "jobs.getRun": { state: "TERMINATED" },
+    "servingEndpoints.query": (args, signal) => runFakeQuery(args),
+  },
+  env: { MY_VAR: "test-value" },
+  strict: true,
+});
+
+// The factory call is synchronous; attach is the async part.
+await mock.attach(plugin);
+```
+
+`options` is:
+- `responses` — seed the mock workspace client with responses keyed by dotted path (`"jobs.getRun"`, `"genie.getMessage"`). A value can be static or a function of call arguments and the abort signal.
+- `env` — set environment variables scoped to the test; they are restored on plugin detach.
+- `strict` — throw if a handler calls an undeclared workspace-client path (instead of silently resolving `undefined`). The built-in defaults still count as declared.
+
+The context installs a test-scoped service context via `beforeEach` and restores it on `afterEach`, so it survives across tests in the same suite. Call the returned `.restore()` explicitly if you need to clear it mid-test.
+
 The workspace client and the on-behalf-of stub are process-wide too, not per app: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. Because of that, **`createTestApp` allows one open app at a time** and throws if you boot a second before closing the first — with two open, the second one's `client` and `responses` would not reach the handlers, and closing either would remove the shared OBO fake from the other. Vitest isolates test *files* in separate workers, so this only constrains apps within a single file. One consequence worth knowing: a `describe` that holds an app open in `beforeAll` cannot contain a test that boots its own.
 
 The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
@@ -278,6 +303,7 @@ The kit now covers both. `createTestApp` fakes the data plane for you by injecti
 The kit re-exports the request/response/context fixtures AppKit uses internally:
 
 - `createMockRequest(overrides?)` / `createMockResponse()` — Express request/response doubles, including the streaming flags (`headersSent`, `writableEnded`). Pass `obo: true` (or `obo: { userId, token, email }`) to set the forwarded identity headers `asUser` requires, instead of hand-adding them. `createMockResponse()` also captures everything a handler writes; pass it to `expectStream` (or call `sseResponse()`) to assert a streaming route's SSE. (Plugins resolve the workspace client through `getWorkspaceClient()`, not the request — use `mockServiceContext` to control it.)
+- `createMockRouter()` — build a mock Express-style router for testing route-registration wiring.
 - `mockServiceContext(options?)` — spy the `ServiceContext` singleton so code that resolves the service principal or a user context gets test doubles. Call in `beforeEach`, and call the returned `restore()` in `afterEach`.
 - `useServiceContextMock(options?)` — the same, in one line: it registers the `beforeEach` install and `afterEach` restore for you. Call it at the top of a `describe` block (not inside a test), and read the live `.current` handle from within a test:
   ```ts
@@ -291,6 +317,17 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
   ```
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
+- `withEnv(vars, fn)` — set environment variables for the duration of a sync or async function, restoring each key's prior state (or deleting it if it was previously unset). Unlike a bare `process.env.X = ...` followed by `delete`, nested calls restore LIFO and don't accidentally leave prior values in place.
+  ```ts
+  // Before: process.env.X = "test"; try { /* code */ } finally { delete process.env.X }
+  // After:
+  await withEnv({ X: "test" }, async () => { /* code */ });
+  ```
+- `createApiError({ statusCode, message, errorCode })` — create a genuine `ApiError` instance for testing error paths. Returns an instance where `error instanceof ApiError` holds, so your error handling resolves the right type.
+  ```ts
+  const error = createApiError({ statusCode: 404, message: "Not found", errorCode: "NOT_FOUND" });
+  expect(error instanceof ApiError).toBe(true);
+  ```
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
 - `resetGlobalState()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
 The kit uses both words deliberately: a **mock** records calls so you can assert on them (`createMockWorkspaceClient`, `mockServiceContext`), while a **fake** stands in and simply works (`FakeProvider`, `FakeToolResponse`).
