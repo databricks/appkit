@@ -357,7 +357,7 @@ describe("createTestPluginContext — optional second parameter (options overloa
   });
 
   test("with options and responses, installs a mock workspace client seeded from responses", async () => {
-    const mock = createTestPluginContext(
+    createTestPluginContext(
       {},
       {
         responses: {
@@ -376,7 +376,7 @@ describe("createTestPluginContext — optional second parameter (options overloa
     const prior = process.env.TEST_VAR_ABC;
     delete process.env.TEST_VAR_ABC;
 
-    const mock = createTestPluginContext(
+    createTestPluginContext(
       {},
       {
         env: { TEST_VAR_ABC: "test-value" },
@@ -454,7 +454,7 @@ describe("createTestPluginContext — optional second parameter (options overloa
   });
 
   test("strict: true passes through to the mock client", async () => {
-    const mock = createTestPluginContext(
+    createTestPluginContext(
       {},
       {
         responses: { "jobs.getRun": { state: "DONE" } },
@@ -482,7 +482,6 @@ describe("createTestPluginContext — optional second parameter (options overloa
 
   test("service context is auto-restored after test via afterEach", async () => {
     const { ServiceContext } = await import("../../context/service-context");
-    const priorInitialized = ServiceContext.isInitialized();
 
     const mock = createTestPluginContext(
       {},
@@ -499,8 +498,8 @@ describe("createTestPluginContext — optional second parameter (options overloa
       mock.restore();
     }
 
-    // After restore, the state should be what it was before
-    // (depends on whether it was initialized before the test)
+    // restore() reverts the service-context spies; the asserted-revert case
+    // is covered by the env-restore test above.
   });
 
   test("combines fakes and responses in a single call", async () => {

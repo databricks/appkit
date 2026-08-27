@@ -13,11 +13,7 @@ import { isToolProvider, PluginContext } from "../core/plugin-context";
 import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import {
-  createMockTelemetry,
-  mockServiceContext,
-  type ServiceContextMock,
-} from "./fixtures";
+import { createMockTelemetry, mockServiceContext } from "./fixtures";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 /**
