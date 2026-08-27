@@ -13,6 +13,17 @@ resources:
       description: "{{.appDescription}}"
       source_code_path: ./
 
+      # Git-backed deployment (recommended): deploy from a Git repository/ref
+      # instead of uploading local files — reproducible, reviewable, and
+      # roll-back-able. Once the app is in a repo, replace `source_code_path`
+      # above with the block below (see the databricks-apps skill's git gate).
+      # git_repository:
+      #   url: https://github.com/my-org/my-repo
+      #   provider: gitHub            # gitHub, gitHubEnterprise, gitLab, bitbucketCloud, ...
+      # git_source:
+      #   branch: main                # or tag: / commit:
+      #   source_code_path: ./        # repo-relative path; omit for repo root
+
       # Start the app automatically on deploy.
       lifecycle:
         started: true
