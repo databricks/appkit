@@ -11,18 +11,23 @@ resources:
     app:
       name: "{{.projectName}}"
       description: "{{.appDescription}}"
+{{- if .git.url}}
+      # Git-backed deployment: the app is deployed from the Git repository below
+      # (auto-detected from this directory's Git remote) instead of uploading
+      # local files. Commit and push the branch before deploying so the ref
+      # exists on the remote.
+      git_repository:
+        url: {{.git.url}}
+        provider: {{.git.provider}}
+      git_source:
+        branch: {{.git.branch}}
+        source_code_path: {{.git.sourceCodePath}}
+{{- else}}
+      # Local source: files in this directory are uploaded on deploy. To deploy
+      # from Git instead, run `databricks apps init` inside a Git repository that
+      # has a remote — the git_repository/git_source block is filled in for you.
       source_code_path: ./
-
-      # Git-backed deployment (recommended): deploy from a Git repository/ref
-      # instead of uploading local files — reproducible, reviewable, and
-      # roll-back-able. Once the app is in a repo, replace `source_code_path`
-      # above with the block below (see the databricks-apps skill's git gate).
-      # git_repository:
-      #   url: https://github.com/my-org/my-repo
-      #   provider: gitHub            # gitHub, gitHubEnterprise, gitLab, bitbucketCloud, ...
-      # git_source:
-      #   branch: main                # or tag: / commit:
-      #   source_code_path: ./        # repo-relative path; omit for repo root
+{{- end}}
 
       # Start the app automatically on deploy.
       lifecycle:
