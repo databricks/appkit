@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { withEnv } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import { setupTestEnv, teardownTestEnv, VOLUMES_CONFIG } from "./_test-helpers";
 
@@ -94,14 +95,13 @@ describe("FilesPlugin volume config surface", () => {
     });
 
     test("discovered volumes get empty config objects", () => {
-      process.env.DATABRICKS_VOLUME_DATA = "/Volumes/catalog/schema/data";
-
-      try {
-        const volumes = FilesPlugin.discoverVolumes({});
-        expect(volumes.data).toEqual({});
-      } finally {
-        delete process.env.DATABRICKS_VOLUME_DATA;
-      }
+      withEnv(
+        { DATABRICKS_VOLUME_DATA: "/Volumes/catalog/schema/data" },
+        () => {
+          const volumes = FilesPlugin.discoverVolumes({});
+          expect(volumes.data).toEqual({});
+        },
+      );
     });
 
     test("explicit volumes without env vars still appear", () => {
@@ -119,20 +119,19 @@ describe("FilesPlugin volume config surface", () => {
     });
 
     test("env var volume is not added when explicit config has the same key", () => {
-      process.env.DATABRICKS_VOLUME_SPECIAL = "/Volumes/catalog/schema/special";
+      withEnv(
+        { DATABRICKS_VOLUME_SPECIAL: "/Volumes/catalog/schema/special" },
+        () => {
+          const volumes = FilesPlugin.discoverVolumes({
+            volumes: {
+              special: { maxUploadSize: 500 },
+            },
+          });
 
-      try {
-        const volumes = FilesPlugin.discoverVolumes({
-          volumes: {
-            special: { maxUploadSize: 500 },
-          },
-        });
-
-        // Explicit wins; should not be overwritten with {}
-        expect(volumes.special).toEqual({ maxUploadSize: 500 });
-      } finally {
-        delete process.env.DATABRICKS_VOLUME_SPECIAL;
-      }
+          // Explicit wins; should not be overwritten with {}
+          expect(volumes.special).toEqual({ maxUploadSize: 500 });
+        },
+      );
     });
   });
 

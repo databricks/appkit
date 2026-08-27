@@ -5,6 +5,7 @@ import {
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { withEnv } from "../../../testing";
 import { Context } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
@@ -206,31 +207,23 @@ describe("AiSearchPlugin", () => {
     });
 
     it("throws outside development when an index has no columns", async () => {
-      const originalNodeEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
-      try {
+      await withEnv({ NODE_ENV: "production" }, async () => {
         const plugin = new AiSearchPlugin({
           indexes: { docs: { indexName: "cat.sch.idx" } },
         });
         await expect(plugin.setup()).rejects.toThrow(
           'Index "docs" has no columns configured',
         );
-      } finally {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
+      });
     });
 
     it("does not throw outside development when columns are configured", async () => {
-      const originalNodeEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
-      try {
+      await withEnv({ NODE_ENV: "production" }, async () => {
         const plugin = new AiSearchPlugin({
           indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
         });
         await expect(plugin.setup()).resolves.not.toThrow();
-      } finally {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
+      });
     });
   });
 

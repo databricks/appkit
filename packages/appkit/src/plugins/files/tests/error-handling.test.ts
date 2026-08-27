@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthenticationError } from "../../../errors";
+import { withEnv } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -220,38 +221,37 @@ describe("FilesPlugin error handling", () => {
     });
 
     test("AuthenticationError via route returns generic 401 on OBO volume without token", async () => {
-      process.env.DATABRICKS_VOLUME_OBO = "/Volumes/catalog/schema/obo";
-      const plugin = new FilesPlugin({
-        volumes: {
-          obo: { auth: "on-behalf-of-user", policy: () => true },
+      await withEnv(
+        {
+          DATABRICKS_VOLUME_OBO: "/Volumes/catalog/schema/obo",
+          NODE_ENV: "production",
         },
-      });
-      const handler = getRouteHandler(plugin, "get", "/list");
-      const res = mockRes();
+        async () => {
+          const plugin = new FilesPlugin({
+            volumes: {
+              obo: { auth: "on-behalf-of-user", policy: () => true },
+            },
+          });
+          const handler = getRouteHandler(plugin, "get", "/list");
+          const res = mockRes();
 
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+          await handler(
+            {
+              params: { volumeKey: "obo" },
+              query: {},
+              headers: {},
+              header: () => undefined,
+            },
+            res,
+          );
 
-      try {
-        await handler(
-          {
-            params: { volumeKey: "obo" },
-            query: {},
-            headers: {},
-            header: () => undefined,
-          },
-          res,
-        );
-
-        expect(res.status).toHaveBeenCalledWith(401);
-        expect(res.json).toHaveBeenCalledWith({
-          error: "Unauthorized",
-          plugin: "files",
-        });
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-        delete process.env.DATABRICKS_VOLUME_OBO;
-      }
+          expect(res.status).toHaveBeenCalledWith(401);
+          expect(res.json).toHaveBeenCalledWith({
+            error: "Unauthorized",
+            plugin: "files",
+          });
+        },
+      );
     });
   });
 

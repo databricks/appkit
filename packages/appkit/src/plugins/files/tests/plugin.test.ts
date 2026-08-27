@@ -7,6 +7,7 @@ import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
+import { withEnv } from "../../../testing";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_READ_DEFAULTS,
@@ -137,33 +138,27 @@ describe("FilesPlugin", () => {
     });
 
     test("skips bare DATABRICKS_VOLUME_ prefix (no suffix)", () => {
-      process.env.DATABRICKS_VOLUME_ = "/Volumes/bare";
-      try {
+      withEnv({ DATABRICKS_VOLUME_: "/Volumes/bare" }, () => {
         const volumes = FilesPlugin.discoverVolumes({});
         expect(Object.keys(volumes)).not.toContain("");
-      } finally {
-        delete process.env.DATABRICKS_VOLUME_;
-      }
+      });
     });
 
     test("skips empty env var values", () => {
-      process.env.DATABRICKS_VOLUME_EMPTY = "";
-      try {
+      withEnv({ DATABRICKS_VOLUME_EMPTY: "" }, () => {
         const volumes = FilesPlugin.discoverVolumes({});
         expect(volumes).not.toHaveProperty("empty");
-      } finally {
-        delete process.env.DATABRICKS_VOLUME_EMPTY;
-      }
+      });
     });
 
     test("lowercases env var suffix", () => {
-      process.env.DATABRICKS_VOLUME_MY_DATA = "/Volumes/catalog/schema/data";
-      try {
-        const volumes = FilesPlugin.discoverVolumes({});
-        expect(volumes).toHaveProperty("my_data");
-      } finally {
-        delete process.env.DATABRICKS_VOLUME_MY_DATA;
-      }
+      withEnv(
+        { DATABRICKS_VOLUME_MY_DATA: "/Volumes/catalog/schema/data" },
+        () => {
+          const volumes = FilesPlugin.discoverVolumes({});
+          expect(volumes).toHaveProperty("my_data");
+        },
+      );
     });
 
     test("returns only explicit volumes when no env vars match", () => {

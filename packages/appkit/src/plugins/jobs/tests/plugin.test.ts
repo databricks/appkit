@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { ServiceContext } from "../../../context/service-context";
 import { ResourceType } from "../../../registry";
+import { withEnv } from "../../../testing";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,
@@ -163,33 +164,24 @@ describe("JobsPlugin", () => {
     });
 
     test("skips bare DATABRICKS_JOB_ prefix (no suffix)", () => {
-      process.env.DATABRICKS_JOB_ = "999";
-      try {
+      withEnv({ DATABRICKS_JOB_: "999" }, () => {
         const jobs = JobsPlugin.discoverJobs({});
         expect(Object.keys(jobs)).not.toContain("");
-      } finally {
-        delete process.env.DATABRICKS_JOB_;
-      }
+      });
     });
 
     test("skips empty env var values", () => {
-      process.env.DATABRICKS_JOB_EMPTY = "";
-      try {
+      withEnv({ DATABRICKS_JOB_EMPTY: "" }, () => {
         const jobs = JobsPlugin.discoverJobs({});
         expect(jobs).not.toHaveProperty("empty");
-      } finally {
-        delete process.env.DATABRICKS_JOB_EMPTY;
-      }
+      });
     });
 
     test("lowercases env var suffix", () => {
-      process.env.DATABRICKS_JOB_MY_PIPELINE = "111";
-      try {
+      withEnv({ DATABRICKS_JOB_MY_PIPELINE: "111" }, () => {
         const jobs = JobsPlugin.discoverJobs({});
         expect(jobs).toHaveProperty("my_pipeline");
-      } finally {
-        delete process.env.DATABRICKS_JOB_MY_PIPELINE;
-      }
+      });
     });
 
     test("returns only explicit jobs when no env vars match", () => {
