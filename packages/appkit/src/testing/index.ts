@@ -60,6 +60,7 @@ export {
   type StreamSource,
 } from "./expect-stream";
 export {
+  createApiError,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,

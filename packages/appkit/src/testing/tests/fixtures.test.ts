@@ -4,7 +4,9 @@ import { CacheManager } from "../../cache";
 import { InMemoryStorage } from "../../cache/storage";
 import { ServiceContext } from "../../context";
 import { AuthenticationError } from "../../errors";
+import { ApiError } from "../../workspace-client";
 import {
+  createApiError,
   createMockRequest,
   mockServiceContext,
   resetTestCache,
@@ -303,5 +305,66 @@ describe("withEnv — environment variable restoration", () => {
 
     // Cleanup
     delete process.env.NESTED_VAR;
+  });
+});
+
+describe("createApiError — genuine ApiError factory", () => {
+  test("returns a genuine ApiError instance", () => {
+    const error = createApiError({
+      statusCode: 404,
+      message: "Not found",
+      errorCode: "NOT_FOUND",
+    });
+    expect(error).toBeInstanceOf(ApiError);
+  });
+
+  test("preserves statusCode", () => {
+    const error = createApiError({
+      statusCode: 500,
+      message: "Server error",
+      errorCode: "INTERNAL_ERROR",
+    });
+    expect(error.statusCode).toBe(500);
+  });
+
+  test("preserves message", () => {
+    const error = createApiError({
+      statusCode: 400,
+      message: "Bad request input",
+      errorCode: "INVALID_ARGUMENT",
+    });
+    expect(error.message).toBe("Bad request input");
+  });
+
+  test("preserves errorCode", () => {
+    const error = createApiError({
+      statusCode: 403,
+      message: "Access denied",
+      errorCode: "PERMISSION_DENIED",
+    });
+    expect(error.errorCode).toBe("PERMISSION_DENIED");
+  });
+
+  test("works in production-shaped instanceof checks", () => {
+    const error = createApiError({
+      statusCode: 404,
+      message: "Not found",
+      errorCode: "NOT_FOUND",
+    });
+    // This is the production pattern from files/client.ts
+    const isNotFoundError =
+      error instanceof ApiError && error.statusCode === 404;
+    expect(isNotFoundError).toBe(true);
+  });
+
+  test("has sensible defaults for optional fields", () => {
+    const error = createApiError({
+      statusCode: 400,
+      message: "Bad request",
+      errorCode: "BAD_REQUEST",
+    });
+    // Should have response (undefined or null) and details (array)
+    expect(error).toHaveProperty("response");
+    expect(error).toHaveProperty("errorInfoType");
   });
 });

@@ -9,6 +9,7 @@ import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import { AuthenticationError } from "../errors";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
+import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
@@ -630,4 +631,37 @@ export function createFailedSQLResponse(errorMessage: string) {
     },
     statement_id: `stmt-${Date.now()}`,
   };
+}
+
+/**
+ * Creates a genuine `ApiError` instance for testing error paths. Returns a real
+ * instance (where `error instanceof ApiError` holds), suitable for testing
+ * `instanceof` checks and `.statusCode` / `.errorCode` / `.message` accessors.
+ *
+ * @param options Error details: `statusCode`, `message`, and `errorCode`. All required.
+ * @returns A genuine `ApiError` instance.
+ *
+ * @example
+ * ```ts
+ * const error = createApiError({
+ *   statusCode: 404,
+ *   message: "File not found",
+ *   errorCode: "NOT_FOUND",
+ * });
+ * expect(error).toBeInstanceOf(ApiError);
+ * expect(error.statusCode).toBe(404);
+ * ```
+ */
+export function createApiError(options: {
+  statusCode: number;
+  message: string;
+  errorCode: string;
+}): ApiError {
+  return new ApiError(
+    options.message,
+    options.errorCode,
+    options.statusCode,
+    undefined, // response: sensible default for testing
+    [], // details: empty array
+  );
 }

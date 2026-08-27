@@ -78,6 +78,7 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       "createMockTelemetry",
       "createSuccessfulSQLResponse",
       "createFailedSQLResponse",
+      "createApiError",
       "parseSSEResponse",
       "resetTestCache",
       "runWithRequestContext",
