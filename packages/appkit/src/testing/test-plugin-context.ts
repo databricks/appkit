@@ -13,7 +13,7 @@ import { isToolProvider, PluginContext } from "../core/plugin-context";
 import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import { createMockTelemetry, mockServiceContext } from "./fixtures";
+import { applyEnv, createMockTelemetry, mockServiceContext } from "./fixtures";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 /**
@@ -423,14 +423,8 @@ function createTestPluginContextWithOptions(
     serviceDatabricksClient: client,
   });
 
-  // Capture prior env values (including "was unset")
-  const priorEnv = new Map<string, string | undefined>();
-  for (const key of Object.keys(envVars)) {
-    priorEnv.set(key, process.env[key]);
-  }
-
-  // Set the env vars
-  Object.assign(process.env, envVars);
+  // Set env (captured for restore) via the shared helper.
+  const restoreEnv = applyEnv(envVars);
 
   // Create the base context (without options this time, since we're handling everything)
   const base = createTestPluginContextSync(fakes);
@@ -440,17 +434,7 @@ function createTestPluginContextWithOptions(
   const restore = () => {
     if (hasRestored) return;
     hasRestored = true;
-
-    // Restore env vars
-    for (const [key, value] of priorEnv) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-
-    // Restore service context
+    restoreEnv();
     serviceContextMock.restore();
   };
 

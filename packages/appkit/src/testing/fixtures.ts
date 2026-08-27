@@ -366,18 +366,19 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
  * });
  * ```
  */
-export function withEnv<T>(
-  vars: Record<string, string>,
-  fn: () => T | Promise<T>,
-): T | Promise<T> {
-  // Capture prior values (including undefined = "was absent")
+/**
+ * Set environment variables and return a function that restores each key to its
+ * prior state — the prior value, or a delete when the key was previously unset.
+ * Shared capture/restore behind {@link withEnv} and the
+ * {@link createTestPluginContext} options path; not part of the public surface.
+ */
+export function applyEnv(vars: Record<string, string>): () => void {
   const prior = new Map<string, string | undefined>();
   for (const key of Object.keys(vars)) {
     prior.set(key, process.env[key]);
   }
-
-  // Restore a key to its prior state
-  const restore = () => {
+  Object.assign(process.env, vars);
+  return () => {
     for (const [key, value] of prior) {
       if (value === undefined) {
         delete process.env[key];
@@ -386,27 +387,54 @@ export function withEnv<T>(
       }
     }
   };
+}
 
-  // Set vars and call fn
-  Object.assign(process.env, vars);
+/**
+ * Run a restore on an error path, suppressing any failure it throws so it
+ * cannot replace the caller's original error.
+ */
+function restoreQuietly(restore: () => void): void {
   try {
-    const result = fn();
-
-    // If result is thenable, attach restoration to .finally
-    if (result != null && typeof (result as Any).then === "function") {
-      return (result as Promise<T>).finally(() => {
-        restore();
-      });
-    }
-
-    // Otherwise restore synchronously
     restore();
-    return result;
+  } catch (restoreError) {
+    // A failed env restore must not mask the caller's original error.
+    void restoreError;
+  }
+}
+
+export function withEnv<T>(
+  vars: Record<string, string>,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
+  const restore = applyEnv(vars);
+
+  let result: T | Promise<T>;
+  try {
+    result = fn();
   } catch (err) {
-    // Restore even on sync error
-    restore();
+    // Sync throw: restore, but never let a restore failure mask `err`.
+    restoreQuietly(restore);
     throw err;
   }
+
+  // Async: restore after the promise settles. On rejection, guard the restore
+  // so it cannot replace the caller's error; on success, let a genuine restore
+  // failure surface.
+  if (result != null && typeof (result as Any).then === "function") {
+    return (result as Promise<T>).then(
+      (value) => {
+        restore();
+        return value;
+      },
+      (err: unknown) => {
+        restoreQuietly(restore);
+        throw err;
+      },
+    );
+  }
+
+  restore();
+  return result;
 }
 
 /**
