@@ -116,6 +116,33 @@ function sendJson(res: Response, body: JsonValue): void {
   writeJson(res, 200, payload);
 }
 
+/**
+ * Encode the list envelope one row at a time, charging each encoded row
+ * against the byte budget before the next row is shaped, so one response
+ * never costs more than the budget in memory.
+ */
+function encodeListPayload(
+  deps: ReadRouteDeps,
+  rows: Row[],
+  limit: number,
+  offset: number,
+): string {
+  const prefix = '{"items":[';
+  const suffix = `],"limit":${limit},"offset":${offset}}`;
+  let bytes =
+    Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8");
+  const items: string[] = [];
+  for (const row of rows) {
+    const encoded = JSON.stringify(serializeRow(deps, "list", row));
+    bytes += Buffer.byteLength(encoded, "utf8") + (items.length > 0 ? 1 : 0);
+    if (bytes > MAX_RESPONSE_BYTES) {
+      throw new DatabasePluginError("PAYLOAD_TOO_LARGE", "read");
+    }
+    items.push(encoded);
+  }
+  return prefix + items.join(",") + suffix;
+}
+
 /** Answer with the failure's safe category and the field it concerns. */
 function writeError(res: Response, error: unknown): void {
   if (res.headersSent) return;
@@ -146,11 +173,11 @@ export function createListHandler(deps: ReadRouteDeps): ReadHandler {
         if (decoded.include) query = query.include(decoded.include);
 
         const rows = await query.toArray();
-        sendJson(res, {
-          items: rows.map((row) => serializeRow(deps, "list", row)),
-          limit: decoded.limit,
-          offset: decoded.offset,
-        });
+        writeJson(
+          res,
+          200,
+          encodeListPayload(deps, rows, decoded.limit, decoded.offset),
+        );
       });
     } catch (error) {
       writeError(res, error);

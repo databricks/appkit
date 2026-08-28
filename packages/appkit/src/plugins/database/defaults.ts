@@ -11,6 +11,15 @@ export const databaseWriteDefaults: PluginExecuteConfig = {
   retry: { enabled: false },
 };
 
+// Connection posture: how long any one statement may hold a pooled connection.
+/**
+ * Server-side `statement_timeout` applied to every pooled connection (ms).
+ * PostgreSQL cancels the statement itself, so an expensive caller-supplied
+ * filter (for example a leading-wildcard `ilike`) cannot hold its pooled
+ * connection past the deadline.
+ */
+export const STATEMENT_TIMEOUT_MS = 30_000;
+
 // Generated-read limits. The wire caps a typed caller shares with HTTP live in
 // `database/contract`; these bound only what an untrusted request may ask for.
 

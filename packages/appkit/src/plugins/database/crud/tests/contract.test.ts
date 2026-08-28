@@ -57,6 +57,21 @@ describe("compileCrudTables", () => {
     expect(isolated.get("notes")?.relations.size).toBe(0);
   });
 
+  it("treats a private primary key as no key over HTTP", () => {
+    const hidden = defineSchema((builder) => ({
+      audits: builder.table("audits", {
+        id: id().private(),
+        action: text(),
+      }),
+    }));
+    const audits = compileCrudTables(hidden.$tables).get("audits");
+    // No key means no detail route and no existence oracle on the hidden id.
+    expect(audits?.primaryKey).toBeUndefined();
+    expect(audits?.columns.has("id")).toBe(true);
+    expect([...(audits?.selectable ?? [])]).toEqual(["action"]);
+    expect(() => audits?.decodeId("7")).toThrow(DatabasePluginError);
+  });
+
   it("decodes identifiers against the declared key type", () => {
     expect(users.decodeId("42")).toBe(42);
     expect(ledger.decodeId("9007199254740993")).toBe(9007199254740993n);

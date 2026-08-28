@@ -322,6 +322,22 @@ describe("serialization and response limits", () => {
     expect(MAX_RESPONSE_BYTES).toBeLessThan(6 * wide.length);
   });
 
+  it("stops shaping rows once the byte budget is exceeded", async () => {
+    const wide = "x".repeat(2 * 1024 * 1024);
+    const rows = Array.from({ length: 8 }, (_, index) => ({
+      id: index,
+      name: wide,
+    }));
+    const serialize = vi.fn<ReadSerializer>((row) => row);
+    await createListHandler(deps("users", fakeEntity(rows), serialize))(
+      request("/users"),
+      response.res,
+    );
+    expect(response.sent.status).toBe(413);
+    // Rows past the budget are never projected, serialized, or encoded.
+    expect(serialize.mock.calls.length).toBeLessThan(rows.length);
+  });
+
   it("maps an entity failure to its safe category", async () => {
     const entity = fakeEntity([]);
     entity.toArray = async () => {

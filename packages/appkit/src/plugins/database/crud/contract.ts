@@ -182,7 +182,10 @@ function compileTable(table: AppKitTable): MutableCrudTable {
   for (const meta of Object.values(table.$columns)) {
     const column = compileColumn(meta);
     columns.set(meta.columnName, column);
-    if (meta.primaryKey) primaryKey = column;
+    // A private key must not power `GET /:table/:id`: per-id probing would
+    // answer 200 or 404 on an identifier the schema hides, so over HTTP the
+    // table is keyless — no detail route, and lists must name their own order.
+    if (meta.primaryKey && !meta.isPrivate) primaryKey = column;
     if (meta.isPrivate) continue;
     selectable.add(meta.columnName);
     if (filterOperatorsForKind(meta.kind).length > 0) {

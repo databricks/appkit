@@ -14,9 +14,9 @@ export type SchemaTableName<TSchema extends Schema> = Extract<
  * makes it includable from its neighbours; a relation whose target stays off
  * cannot be included, which keeps one table's data behind one decision.
  *
- * Text filters accept caller-supplied `like`/`ilike` patterns, and this beta
- * adds no statement cancellation below the connector, so an expensive pattern
- * runs to completion while holding its pooled connection.
+ * Text filters accept caller-supplied `like`/`ilike` patterns; a server-side
+ * `statement_timeout` cancels a pattern that would otherwise hold its pooled
+ * connection to completion.
  */
 export type CrudRoutesConfig<TSchema extends Schema> =
   | boolean

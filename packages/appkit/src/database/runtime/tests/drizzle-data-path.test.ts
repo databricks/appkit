@@ -717,6 +717,7 @@ describe("database failures", () => {
     ["23000", "CONFLICT", false],
     ["40001", "TRANSIENT", true],
     ["40P01", "TRANSIENT", true],
+    ["57014", "TRANSIENT", true],
     ["42501", "FORBIDDEN", false],
     ["XX000", "INTERNAL", false],
     [42, "INTERNAL", false],
@@ -754,6 +755,7 @@ describe("database failures", () => {
     ["23503", "CONFLICT", false],
     ["40001", "TRANSIENT", true],
     ["40P01", "TRANSIENT", true],
+    ["57014", "TRANSIENT", true],
     ["42501", "FORBIDDEN", false],
     ["XX000", "INTERNAL", false],
   ] as const)(

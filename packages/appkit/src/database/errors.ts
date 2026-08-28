@@ -106,6 +106,21 @@ export function invalidDatabaseInput(
   ]);
 }
 
+/**
+ * Name an unknown failure without its payload. A driver error carries the SQL
+ * text and its bound row values (for example a `DrizzleQueryError` retains
+ * `query` and `params`), so only constructor names walk into the log.
+ */
+function describeUnclassifiedError(error: unknown): string {
+  const names: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    names.push(current.name);
+    current = current.cause;
+  }
+  return names.length > 0 ? names.join(" <- ") : typeof error;
+}
+
 /** Add operation context without retaining an unknown error's details. */
 export function classifyDatabaseError(
   error: unknown,
@@ -116,7 +131,11 @@ export function classifyDatabaseError(
       ? error
       : new DatabasePluginError(error.category, phase);
   }
-  logger.error("Unclassified database error during %s: %O", phase, error);
+  logger.error(
+    "Unclassified database error during %s (%s)",
+    phase,
+    describeUnclassifiedError(error),
+  );
   return new DatabasePluginError("INTERNAL", phase);
 }
 
