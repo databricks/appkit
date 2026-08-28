@@ -49,6 +49,9 @@ function buildSql(context: ExportContext): SqlTag {
   ) => {
     try {
       context.assertActive();
+      if (context.transactionBound) {
+        context.scope.consumeTransactionOperation();
+      }
       // DataPath accepts value interpolation only and keeps Drizzle private.
       return await context.getDataPath().raw<T>(strings, ...values);
     } catch (error) {

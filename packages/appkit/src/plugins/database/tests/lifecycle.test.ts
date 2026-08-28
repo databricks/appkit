@@ -20,6 +20,7 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
 
 import { STATEMENT_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS } from "../defaults";
 import { createDatabaseState } from "../lifecycle";
+import { MAX_TRANSACTION_OPERATIONS } from "../scope";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -284,6 +285,38 @@ describe("createDatabaseState", () => {
     expect(txPath.insert).toHaveBeenCalledTimes(2);
     // Reuse means the related write never opens a nested transaction.
     expect(txPath.transaction).not.toHaveBeenCalled();
+  });
+
+  test("bounds SQL fan-out issued by one hook", async () => {
+    let rolledBack = false;
+    const txPath = fakePath();
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => {
+        try {
+          return await callback(txPath);
+        } catch (error) {
+          rolledBack = true;
+          throw error;
+        }
+      }),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute, {
+      notes: {
+        beforeCreate: async (_values, context) => {
+          for (let index = 0; index < MAX_TRANSACTION_OPERATIONS; index++) {
+            await context.app.database.sql`select ${index}`;
+          }
+        },
+      },
+    });
+
+    await expect(
+      surface(state).notes.create({ body: "hooked" }),
+    ).rejects.toMatchObject({ category: "INTERNAL", phase: "write" });
+    expect(rolledBack).toBe(true);
+    expect(txPath.raw).toHaveBeenCalledTimes(MAX_TRANSACTION_OPERATIONS - 1);
+    expect(txPath.insert).not.toHaveBeenCalled();
   });
 
   test("rolls back and closes a transaction when its wall-clock deadline expires", async () => {

@@ -12,7 +12,7 @@ import { defineSchema, id, text } from "../../../database/schema-builder";
 import { DatabaseValidationError } from "../../../errors";
 import { EntityClient, type EntityClientContext } from "../entity-client";
 import type { TransactionClient } from "../entity-types";
-import { createMutationScope, MAX_MUTATIONS_PER_TRANSACTION } from "../scope";
+import { createMutationScope, MAX_TRANSACTION_OPERATIONS } from "../scope";
 import type { EntityHooks } from "../types";
 
 const schema = defineSchema(({ table }) => {
@@ -552,7 +552,7 @@ describe("EntityClient mutation hooks", () => {
   test("bounds sibling writes issued by one hook", async () => {
     const { client, calls } = harness({
       beforeUpdate: async (_id, _values, context) => {
-        for (let index = 0; index < MAX_MUTATIONS_PER_TRANSACTION; index++) {
+        for (let index = 0; index < MAX_TRANSACTION_OPERATIONS; index++) {
           await notesOf(context.app.database).create({ body: `${index}` });
         }
       },
@@ -564,7 +564,7 @@ describe("EntityClient mutation hooks", () => {
     });
     expect(
       names(calls).filter((name) => name === "insert").length,
-    ).toBeLessThan(MAX_MUTATIONS_PER_TRANSACTION);
+    ).toBeLessThan(MAX_TRANSACTION_OPERATIONS);
     expect(names(calls)).not.toContain("update");
   });
 

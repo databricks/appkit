@@ -6,8 +6,8 @@ import type { MutationOperation } from "./hooks";
 
 /** How deep hook-issued mutations may nest before the guard rejects. */
 const MAX_MUTATION_DEPTH = 8;
-/** Max entity mutations admitted by one transaction. */
-export const MAX_MUTATIONS_PER_TRANSACTION = 100;
+/** Max database operations admitted by one transaction. */
+export const MAX_TRANSACTION_OPERATIONS = 100;
 
 interface MutationFrame {
   readonly entity: string;
@@ -22,6 +22,19 @@ interface ScopeState {
   readonly transaction?: TransactionClient;
   readonly frames: readonly MutationFrame[];
   readonly budget: MutationBudget;
+}
+
+/** Charge one operation to a transaction-owned shared budget. */
+function consumeBudget(
+  state: ScopeState | undefined,
+  phase: "transaction" | "write",
+): MutationBudget {
+  const budget = state?.budget ?? { used: 0 };
+  if (budget.used >= MAX_TRANSACTION_OPERATIONS) {
+    throw new DatabasePluginError("INTERNAL", phase);
+  }
+  budget.used += 1;
+  return budget;
 }
 
 /** Instance-owned async context created by `createMutationScope()`. */
@@ -57,6 +70,12 @@ export function createMutationScope() {
       );
     },
 
+    /** Charge SQL and other direct work bound to the active transaction. */
+    consumeTransactionOperation(): void {
+      const state = storage.getStore();
+      if (state?.transaction) consumeBudget(state, "transaction");
+    },
+
     /** Open one frame, refusing a repeated entity/operation pair or deep nesting. */
     async runMutation<T>(
       entity: string,
@@ -65,18 +84,13 @@ export function createMutationScope() {
     ): Promise<T> {
       const state = storage.getStore();
       const frames = state?.frames ?? [];
-      const budget = state?.budget ?? { used: 0 };
       const repeated = frames.some(
         (frame) => frame.entity === entity && frame.operation === operation,
       );
-      if (
-        repeated ||
-        frames.length >= MAX_MUTATION_DEPTH ||
-        budget.used >= MAX_MUTATIONS_PER_TRANSACTION
-      ) {
+      if (repeated || frames.length >= MAX_MUTATION_DEPTH) {
         throw new DatabasePluginError("INTERNAL", "write");
       }
-      budget.used += 1;
+      const budget = consumeBudget(state, "write");
       return storage.run(
         {
           transaction: state?.transaction,

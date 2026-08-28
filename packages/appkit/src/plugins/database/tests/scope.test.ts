@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { TransactionClient } from "../entity-types";
-import { createMutationScope, MAX_MUTATIONS_PER_TRANSACTION } from "../scope";
+import { createMutationScope, MAX_TRANSACTION_OPERATIONS } from "../scope";
 
 const surface = (marker: string) =>
   ({ marker }) as unknown as TransactionClient;
@@ -55,7 +55,7 @@ describe("createMutationScope", () => {
     const tx = surface("bounded");
     await expect(
       scope.runWithTransaction(tx, async () => {
-        for (let index = 0; index < MAX_MUTATIONS_PER_TRANSACTION; index++) {
+        for (let index = 0; index < MAX_TRANSACTION_OPERATIONS; index++) {
           await scope.runMutation(`table${index}`, "create", async () => index);
         }
         return scope.runMutation("overflow", "create", async () => -1);
