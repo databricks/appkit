@@ -223,6 +223,32 @@ beforeEach(async () => {
 
 It also helps *within* a single test — clear the cache to force a miss, then assert the following call is a hit.
 
+### Asserting cache behaviour
+
+When a plugin caches its work (like `analytics` caching query results), test the caching *itself* — a second identical call is a hit, different users get different keys — with `useTestCache()`. It boots the real in-memory cache, clears it before each test, and hands back the real `CacheManager`, so you assert against production's own `getOrExecute` and `generateKey` rather than mocking the internal `cache` module:
+
+```ts
+import { useTestCache } from "@databricks/appkit/testing";
+
+describe("my plugin caches", () => {
+  const testCache = useTestCache();
+
+  test("a second identical request is served from cache", async () => {
+    const plugin = new MyPlugin(config);
+    // ...drive the same request twice against a mocked downstream call...
+    expect(downstreamMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("scopes the cache key per user", () => {
+    const a = testCache.current.generateKey(["query", sql], "user-1");
+    const b = testCache.current.generateKey(["query", sql], "user-2");
+    expect(a).not.toBe(b);
+  });
+});
+```
+
+Call it at the top of a `describe` (or module top-level), not inside a test — Vitest registers its `beforeEach`/`afterEach` at collection time. Because the cache is booted before the test body runs, a plugin you construct in the test binds `this.cache` to it automatically, so its real caching path runs. Reach for `resetTestCache()` (above) instead when you only need to clear the cache and don't need a handle to it.
+
 ### Inspecting what happened
 
 The returned object exposes live views you read after the action under test runs:
