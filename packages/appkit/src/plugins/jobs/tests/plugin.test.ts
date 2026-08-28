@@ -38,18 +38,8 @@ const { mockClient, jobsApi, mockCacheInstance } = await vi.hoisted(
       get: getMock(mockClient, "jobs.get"),
     };
 
-    const mockCacheInstance = {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (
-          _key: unknown[],
-          fn: (signal?: AbortSignal) => Promise<unknown>,
-        ) => fn(),
-      ),
-      generateKey: vi.fn(),
-    };
+    const { createCacheMock } = await import("../../../testing/cache-mock");
+    const mockCacheInstance = createCacheMock();
 
     return { mockClient, jobsApi, mockCacheInstance };
   },

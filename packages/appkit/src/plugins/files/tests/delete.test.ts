@@ -10,42 +10,38 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
+const { mockClient, MockApiError, mockCacheInstance } = await vi.hoisted(
+  async () => {
+    const mockFilesApi = {
+      listDirectoryContents: vi.fn(),
+      download: vi.fn(),
+      getMetadata: vi.fn(),
+      upload: vi.fn(),
+      createDirectory: vi.fn(),
+      delete: vi.fn(),
+    };
+    const mockClient = {
+      files: mockFilesApi,
+      config: {
+        host: "https://test.databricks.com",
+        authenticate: vi.fn(),
+      },
+    };
+    class MockApiError extends Error {
+      statusCode: number;
+      constructor(message: string, statusCode: number) {
+        super(message);
+        this.name = "ApiError";
+        this.statusCode = statusCode;
+      }
     }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
+
+    const { createCacheMock } = await import("../../../testing/cache-mock");
+    const mockCacheInstance = createCacheMock();
+
+    return { mockClient, MockApiError, mockCacheInstance };
+  },
+);
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =

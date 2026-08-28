@@ -15,25 +15,11 @@ import { GeniePlugin, genie } from "../genie";
 import type { IGenieConfig } from "../types";
 
 // Mock CacheManager singleton
-const { mockCacheInstance } = vi.hoisted(() => {
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi
-      .fn()
-      .mockImplementation(
-        async (
-          _key: unknown[],
-          fn: (signal?: AbortSignal) => Promise<unknown>,
-        ) => {
-          return await fn();
-        },
-      ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
+const { mockCacheInstance } = await vi.hoisted(async () => {
+  const { createCacheMock } = await import("../../../testing/cache-mock");
+  const mockCacheInstance = createCacheMock();
 
-  return { mockCacheInstance: instance };
+  return { mockCacheInstance };
 });
 
 vi.mock("../../../cache", () => ({
