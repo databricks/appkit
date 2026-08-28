@@ -17,7 +17,7 @@ The kit has three entry points plus a set of fixture helpers:
 - **`expectStream(...).toEmit(...)`** — assert the ordered event types a stream emits.
 - **Fixtures** — `createMockRequest`, `createMockResponse`, `createMockWorkspaceClient`, `mockServiceContext`, and SQL response builders.
 
-The kit uses [Vitest](https://vitest.dev)'s `vi` for its mocks, so `vitest` is an **optional peer dependency**: you already have it (you're writing Vitest tests), and the kit resolves to your copy rather than bundling a second one. Because it's optional, it is not installed into apps that never import `@databricks/appkit/testing` — production installs stay free of the test framework. Any Vitest v3 or v4 works.
+`vitest` is an **optional peer dependency**: the kit's mocks use its `vi` and resolve against your installed copy. Apps that never import `@databricks/appkit/testing` don't install it, so production stays free of the test framework. Any Vitest v3 or v4 works.
 
 ## Testing your plugin
 
@@ -71,7 +71,7 @@ const app = await createTestApp({
 });
 ```
 
-A function value receives the call arguments, so you can script per-argument behavior or reject to test an error path. `responses` configures the built-in mock, so passing it alongside your own `client` is rejected rather than silently ignored — configure the responses on that client instead. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services) for the trade-off it makes.
+A function value receives the call arguments, so you can script per-argument behavior or reject to test an error path. `responses` configures the built-in mock, so passing it alongside your own `client` is rejected rather than silently ignored — configure the responses on that client instead. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services).
 
 For the response *shapes*, follow the service types on the Databricks SDK. The kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
 
@@ -83,7 +83,7 @@ import { getMock } from "@databricks/appkit/testing";
 expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
 ```
 
-`getMock` exists because facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck.
+Facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck — `getMock` reaches the underlying spy.
 
 ### Requests
 
@@ -141,7 +141,7 @@ The harness validates that required resources' **environment variables are prese
 - `server: false` — no socket. Plugin setup, validation, and teardown still run; the request methods throw if called. Useful when you only care that a plugin boots.
 - `client` — supply your own workspace client instead of the built-in fake. You then own its `currentUser.me()`: AppKit reads `currentUser.id` during boot and can't start without it.
 - `nodeEnv` — defaults to `"test"`. `"development"` is **refused**: dev mode routes the harness's ephemeral port through `get-port`, which throws on port `0`, and it also boots a real Vite server and relaxes validation.
-- `cache` — defaults to in-memory. Overriding it is what would let the cache reach the network, so leave it alone unless that's the point of the test.
+- `cache` — defaults to in-memory. Override it only when reaching the network is the point of the test.
 - `closeTimeoutMs` — teardown budget.
 
 ## `createTestPluginContext()`
@@ -154,7 +154,7 @@ The harness validates that required resources' **environment variables are prese
 | Tool providers | Fakes registered through the real `registerToolProvider`, keyed by plugin then tool name. |
 | Routes | The real `addRoute`/`addMiddleware` are wrapped to record what a plugin registers. |
 
-Because the context is real, `executeTool` still resolves the user scope via `asUser(req)` and still composes the abort signal from your timeout — so those paths are genuinely under test.
+The context is real, so `executeTool` runs the actual user-scope (`asUser(req)`) and timeout-composition paths — not stubs of them.
 
 ### Registering fake tool responses
 
@@ -209,9 +209,9 @@ await mock.attach(plugin);
 
 The context installs a test-scoped service context via `beforeEach` and restores it on `afterEach`, so it survives across tests in the same suite. Call the returned `.restore()` explicitly if you need to clear it mid-test.
 
-The workspace client and the on-behalf-of stub are process-wide too, not per app: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. Because of that, **`createTestApp` allows one open app at a time** and throws if you boot a second before closing the first — with two open, the second one's `client` and `responses` would not reach the handlers, and closing either would remove the shared OBO fake from the other. Vitest isolates test *files* in separate workers, so this only constrains apps within a single file. One consequence worth knowing: a `describe` that holds an app open in `beforeAll` cannot contain a test that boots its own.
+The workspace client and on-behalf-of stub are process-wide too: `ServiceContext` holds one client, and the `createUserContext` fake is a single spy. So **`createTestApp` allows one open app at a time** and throws if you boot a second before closing the first. Vitest isolates test *files* in separate workers, so this constrains only apps within one file — and a `describe` holding an app open in `beforeAll` can't contain a test that boots its own.
 
-The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
+The cache is a process-wide singleton too — initialized once per test process and shared by tests **within one file** (it never leaks across files). If one test populates it and a later one must not see that, clear between tests with `resetTestCache()`:
 
 ```ts
 import { resetTestCache } from "@databricks/appkit/testing";
@@ -247,7 +247,7 @@ describe("my plugin caches", () => {
 });
 ```
 
-Call it at the top of a `describe` (or module top-level), not inside a test — Vitest registers its `beforeEach`/`afterEach` at collection time. Because the cache is booted before the test body runs, a plugin you construct in the test binds `this.cache` to it automatically, so its real caching path runs. Reach for `resetTestCache()` (above) instead when you only need to clear the cache and don't need a handle to it.
+Call it at the top of a `describe` (or module top-level), not inside a test — Vitest registers its `beforeEach`/`afterEach` at collection time. It boots the cache before each test, so a plugin you construct binds `this.cache` to the real cache and runs its actual caching path. Use `resetTestCache()` (above) instead when you only need to clear the cache, not a handle to it.
 
 ### Inspecting what happened
 
@@ -275,7 +275,7 @@ expect(mock.telemetry.getTracer().startActiveSpan).toHaveBeenCalled();
 
 `mock.telemetry` is injected into the `PluginContext`, so it captures the spans the *context* opens (notably `executeTool`). It is **not** the plugin's own telemetry: `attachContext` rebuilds `this.telemetry` from the real `TelemetryManager`, so spans a plugin opens internally do not land on `mock.telemetry`.
 
-`RecordedToolCall.asUser` is the field to assert for cross-plugin calls: because the fake `asUser` enforces the same token precondition as the real `Plugin.asUser`, a dispatch that records `asUser: true` (with `userId` set) genuinely resolved the caller's user scope, and a request missing `x-forwarded-access-token` **rejects** instead — the OBO distinction that silent `{ executeTool }` stubs cannot verify. Assert both directions: a well-formed request records the expected `userId`, and a token-less one throws.
+Assert cross-plugin on-behalf-of through `RecordedToolCall.asUser`. The fake `asUser` enforces the real `Plugin.asUser`'s token precondition: a request carrying a forwarded token records `asUser: true` with the resolved `userId`, and one missing `x-forwarded-access-token` **rejects**. Assert both directions — a well-formed request records the expected `userId`, a token-less one throws. A silent `{ executeTool }` stub verifies neither.
 
 The fake replicates `asUser`'s **token precondition**, not its internal dev-mode telemetry marker: in `NODE_ENV=development` the real `Plugin.asUser` skips impersonation and sets an OTel `isDevOboFallback()` flag, which the fake does not reproduce. Assert OBO through the recorded `asUser`/`userId` fields rather than `isDevOboFallback()`.
 
@@ -324,7 +324,7 @@ await expectStream(handler.stream(req), { timeout: 1000 }).toEmit("result");
 
 AppKit has two contexts, and they're faked by different tools. `PluginContext` is the mediator between plugins, handling routes, tool dispatch, and user scoping; `createTestPluginContext()` gives you the real thing with faked edges. `ServiceContext` is the **data plane**: it resolves the workspace client, the service principal, and the warehouse ID that plugins reach through `getWorkspaceClient()`.
 
-The kit now covers both. `createTestApp` fakes the data plane for you by injecting a mock workspace client at the real seam; below that, `mockServiceContext` spies the singleton directly, and `createMockWorkspaceClient` builds the client either of them installs.
+The kit covers both. `createTestApp` fakes the data plane by injecting a mock workspace client at the real seam; below that, `mockServiceContext` spies the singleton directly, and `createMockWorkspaceClient` builds the client either of them installs.
 
 The kit re-exports the request/response/context fixtures AppKit uses internally:
 
@@ -396,9 +396,9 @@ const app = await createTestApp({ plugins: [myPlugin()], strict: true });
 // a handler calling an undeclared path now fails the request
 ```
 
-TypeScript covers more of this than you might expect: because each accessor is typed against the SDK's own service class, both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
+TypeScript catches more than the obvious: each accessor is typed against the SDK's own service class, so both a misspelled **service** (`client.jbos`) and a misspelled **method** (`client.jobs.getRunz`) are compile errors. The gap is a *real* method with no declared response — and any call that bypasses the types with a cast.
 
-One more divergence: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than it does in production. This is deliberate: reporting those keys would make `util.inspect` probe each one, minting a mock per probe, which is the runaway recursion the default traps avoid.
+One more divergence: a service's methods are minted on access, so they are **callable but not enumerable**. `typeof client.jobs.getRun` is `"function"`, but `'getRun' in client.jobs` is `false` and `Object.keys(client.jobs)` is `[]`. Plugin code that feature-detects with `in` or reflects over a service will therefore take a different branch than in production. That's deliberate — reporting the keys would make `util.inspect` probe each one, minting a mock per probe.
 
 Separately, `createLakebasePool({ workspaceClient })` will build a pool whose password callback resolves to a mock: the pool exists but cannot connect. A Lakebase test needs a real database or a purpose-built fake pool, not this.
 :::
