@@ -6,6 +6,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withEnv } from "../../../testing";
+import { useTestCache } from "../../../testing/test-cache";
 import { Context } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
@@ -53,8 +54,16 @@ vi.mock("../../../telemetry", () => ({
         ) =>
           fn({
             setAttribute: vi.fn(),
+            setAttributes: vi.fn(),
             setStatus: vi.fn(),
             recordException: vi.fn(),
+            addEvent: vi.fn(),
+            addLink: vi.fn(),
+            addLinks: vi.fn(),
+            updateName: vi.fn(),
+            isRecording: vi.fn().mockReturnValue(false),
+            spanContext: vi.fn(),
+            end: vi.fn(),
           }),
       ),
     }),
@@ -64,37 +73,9 @@ vi.mock("../../../telemetry", () => ({
   normalizeTelemetryOptions: () => ({ traces: false, metrics: false }),
 }));
 
-// In-memory cache keyed like the real CacheManager.generateKey, so tests
-// exercise real key composition. Never stores rejections.
-const { mockCacheStore } = vi.hoisted(() => ({
-  mockCacheStore: new Map<string, unknown>(),
-}));
-
-vi.mock("../../../cache", () => {
-  const keyOf = (parts: unknown[], userKey: string) =>
-    JSON.stringify([userKey, ...parts]);
-  return {
-    CacheManager: {
-      getInstanceSync: () => ({
-        get: vi.fn(),
-        set: vi.fn(),
-        delete: vi.fn(),
-        generateKey: keyOf,
-        getOrExecute: async (
-          key: unknown[],
-          fn: (signal?: AbortSignal) => Promise<unknown>,
-          userKey: string,
-        ) => {
-          const k = keyOf(key, userKey);
-          if (mockCacheStore.has(k)) return mockCacheStore.get(k);
-          const result = await fn();
-          mockCacheStore.set(k, result);
-          return result;
-        },
-      }),
-    },
-  };
-});
+// Real in-memory cache so the plugin's caching path runs under test — no mock
+// of the internal cache module. Boots and clears the cache before each test.
+useTestCache();
 
 vi.mock("../../../app", () => ({
   AppManager: vi.fn().mockImplementation(() => ({})),
@@ -140,7 +121,6 @@ describe("AiSearchPlugin", () => {
   beforeEach(() => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValue(validVsResponse);
-    mockCacheStore.clear();
   });
 
   describe("setup()", () => {
