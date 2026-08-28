@@ -33,8 +33,11 @@ export function createCacheMock() {
     set: vi.fn(),
     delete: vi.fn(),
     getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
+      async (
+        _key: unknown[],
+        fn: (signal?: AbortSignal) => Promise<unknown>,
+        _userKey?: string,
+      ) => fn(),
     ),
     generateKey: vi.fn(),
   };
