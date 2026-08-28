@@ -85,6 +85,7 @@ export {
 } from "./mock-workspace-client";
 export { createTestPlugin } from "./create-test-plugin";
 export { resetGlobalState } from "./reset";
+export { type TestCacheHandle, useTestCache } from "./test-cache";
 export {
   createTestPluginContext,
   type FakeProvider,
