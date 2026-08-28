@@ -118,6 +118,23 @@ try {
 
 Miss the close and each boot leaks a listener; Node warns at about six.
 
+For a suite where **every** test needs its own app, `useTestApp()` wires both hooks for you — a fresh app before each test, closed after — so there is no `close()` to forget:
+
+```ts
+import { useTestApp } from "@databricks/appkit/testing";
+
+describe("my plugin over HTTP", () => {
+  const app = useTestApp({ plugins: [myPlugin()] });
+
+  test("answers a request", async () => {
+    const res = await app.current.post("/api/my-plugin/run", { body: { id: 1 } });
+    expect(res.status).toBe(200);
+  });
+});
+```
+
+Call it at the top of a `describe`, not inside a test — Vitest registers `beforeEach`/`afterEach` during collection. Read `.current` from within a test; outside one it throws rather than handing back a closed app. `await using` stays the shorter choice for a single test, but it cannot carry an app from a `beforeEach` into the test body.
+
 ### Satisfying declared resources
 
 The harness runs the real validator with a strict posture, so a plugin whose manifest requires a resource fails the boot unless its env var is set. Supply it with `env`:

@@ -84,6 +84,7 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       "runWithRequestContext",
       "setupDatabricksEnv",
       "useServiceContextMock",
+      "useTestApp",
       "useTestCache",
       "withEnv",
     ];
