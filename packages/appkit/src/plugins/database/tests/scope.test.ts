@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { TransactionClient } from "../entity-types";
-import { createMutationScope } from "../scope";
+import { createMutationScope, MAX_MUTATIONS_PER_TRANSACTION } from "../scope";
 
 const surface = (marker: string) =>
   ({ marker }) as unknown as TransactionClient;
@@ -46,6 +46,25 @@ describe("createMutationScope", () => {
     await expect(
       scope.runMutation("notes", "create", () =>
         scope.runMutation("notes", "update", async () => "reached"),
+      ),
+    ).resolves.toBe("reached");
+  });
+
+  test("bounds sibling mutations across one transaction", async () => {
+    const scope = createMutationScope();
+    const tx = surface("bounded");
+    await expect(
+      scope.runWithTransaction(tx, async () => {
+        for (let index = 0; index < MAX_MUTATIONS_PER_TRANSACTION; index++) {
+          await scope.runMutation(`table${index}`, "create", async () => index);
+        }
+        return scope.runMutation("overflow", "create", async () => -1);
+      }),
+    ).rejects.toMatchObject({ category: "INTERNAL", phase: "write" });
+
+    await expect(
+      scope.runWithTransaction(tx, () =>
+        scope.runMutation("fresh", "create", async () => "reached"),
       ),
     ).resolves.toBe("reached");
   });

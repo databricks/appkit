@@ -18,7 +18,7 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDataPath: mocks.createDrizzleDataPath,
 }));
 
-import { STATEMENT_TIMEOUT_MS } from "../defaults";
+import { STATEMENT_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS } from "../defaults";
 import { createDatabaseState } from "../lifecycle";
 
 function deferred<T>() {
@@ -284,6 +284,60 @@ describe("createDatabaseState", () => {
     expect(txPath.insert).toHaveBeenCalledTimes(2);
     // Reuse means the related write never opens a nested transaction.
     expect(txPath.transaction).not.toHaveBeenCalled();
+  });
+
+  test("rolls back and closes a transaction when its wall-clock deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const started = deferred<void>();
+      const resume = deferred<void>();
+      const finished = deferred<void>();
+      let rolledBack = false;
+      const txPath = fakePath();
+      const rootPath = fakePath({
+        transaction: vi.fn(async (callback) => {
+          try {
+            return await callback(txPath);
+          } catch (error) {
+            rolledBack = true;
+            throw error;
+          }
+        }),
+      });
+      const { execute } = arrange(rootPath);
+      const state = await createDatabaseState(schema, execute, {
+        notes: {
+          beforeCreate: async (_values, context) => {
+            started.resolve(undefined);
+            await resume.promise;
+            try {
+              await txSurface(context.app.database).tags.create({
+                label: "late",
+              });
+            } finally {
+              finished.resolve(undefined);
+            }
+          },
+        },
+      });
+
+      const failure = surface(state)
+        .notes.create({ body: "hooked" })
+        .catch((error) => error);
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(TRANSACTION_TIMEOUT_MS);
+
+      await expect(failure).resolves.toMatchObject({
+        category: "TRANSIENT",
+        phase: "write",
+      });
+      expect(rolledBack).toBe(true);
+      resume.resolve(undefined);
+      await finished.promise;
+      expect(txPath.insert).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("keeps an unhooked mutation off the transaction path", async () => {

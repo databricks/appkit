@@ -50,6 +50,13 @@ export interface EntityClientContext {
   ) => Promise<T>;
 }
 
+/** Internal rollback signal for a hooked keyed mutation that matched no row. */
+class MutationNoMatchError extends DatabasePluginError {
+  constructor() {
+    super("NOT_FOUND", "write");
+  }
+}
+
 /** Clone plain acyclic input so caller mutation cannot change a built query. */
 function snapshotPlain<T>(value: T, seen = new Set<object>()): T {
   if (
@@ -193,7 +200,9 @@ export class EntityClient {
         (dataPath, parsed) => dataPath.insert(this.ctx.table, parsed),
         byHook,
       );
-    if (this.isDirect("create")) return insert(values);
+    if (this.isDirect("create")) {
+      return this.directMutation("create", () => insert(values));
+    }
     return this.mutate(
       "create",
       (entity) => entity.create(values),
@@ -210,6 +219,14 @@ export class EntityClient {
   }
 
   update(id: IdValue, values: Row): Promise<Row | null> {
+    return this.updateWithNoMatch(id, values, new MutationNoMatchError());
+  }
+
+  private async updateWithNoMatch(
+    id: IdValue,
+    values: Row,
+    noMatch: MutationNoMatchError,
+  ): Promise<Row | null> {
     const hooks = this.ctx.hooks;
     const apply = (payload: Row, byHook = false) =>
       this.write(
@@ -219,21 +236,34 @@ export class EntityClient {
           dataPath.update(this.ctx.table, id, parsed, this.state.where),
         byHook,
       );
-    if (this.isDirect("update")) return apply(values);
-    return this.mutate(
-      "update",
-      (entity) => entity.update(id, values),
-      async (context) => {
-        const payload = await this.runBefore(
-          () => hooks?.beforeUpdate?.(id, values, context),
-          values,
-        );
-        const row = await apply(payload, payload !== values);
-        // Matching no row is an ordinary outcome, not something to react to.
-        if (row) await this.runHook(() => hooks?.afterUpdate?.(row, context));
-        return row;
-      },
-    );
+    if (this.isDirect("update")) {
+      return this.directMutation("update", () => apply(values));
+    }
+    try {
+      return await this.mutate(
+        "update",
+        (entity) => entity.updateWithNoMatch(id, values, noMatch),
+        async (context) => {
+          const payload = await this.runBefore(
+            () => hooks?.beforeUpdate?.(id, values, context),
+            values,
+          );
+          const row = await apply(payload, payload !== values);
+          if (row === null) throw noMatch;
+          await this.runHook(() => hooks?.afterUpdate?.(row, context));
+          return row;
+        },
+      );
+    } catch (error) {
+      if (
+        error === noMatch &&
+        !this.ctx.transactionBound &&
+        !this.ctx.scope.activeTransaction()
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async upsert(values: Row, options: { onConflict: string }): Promise<Row> {
@@ -248,7 +278,9 @@ export class EntityClient {
           dataPath.upsert(this.ctx.table, parsed, onConflict),
         byHook,
       );
-    if (this.isDirect("upsert")) return apply(values);
+    if (this.isDirect("upsert")) {
+      return this.directMutation("upsert", () => apply(values));
+    }
     return this.mutate(
       "upsert",
       (entity) => entity.upsert(values, { onConflict }),
@@ -266,6 +298,13 @@ export class EntityClient {
   }
 
   delete(id: IdValue): Promise<boolean> {
+    return this.deleteWithNoMatch(id, new MutationNoMatchError());
+  }
+
+  private async deleteWithNoMatch(
+    id: IdValue,
+    noMatch: MutationNoMatchError,
+  ): Promise<boolean> {
     const hooks = this.ctx.hooks;
     const remove = () =>
       this.run(
@@ -273,19 +312,40 @@ export class EntityClient {
         (dataPath) => dataPath.delete(this.ctx.table, id, this.state.where),
         databaseWriteDefaults,
       );
-    if (this.isDirect("delete")) return remove();
-    return this.mutate(
-      "delete",
-      (entity) => entity.delete(id),
-      async (context) => {
-        await this.runHook(() => hooks?.beforeDelete?.(id, context));
-        const deleted = await remove();
-        if (deleted) {
+    if (this.isDirect("delete")) {
+      return this.directMutation("delete", remove);
+    }
+    try {
+      return await this.mutate(
+        "delete",
+        (entity) => entity.deleteWithNoMatch(id, noMatch),
+        async (context) => {
+          await this.runHook(() => hooks?.beforeDelete?.(id, context));
+          const deleted = await remove();
+          if (!deleted) throw noMatch;
           await this.runHook(() => hooks?.afterDelete?.(id, context));
-        }
-        return deleted;
-      },
-    );
+          return true;
+        },
+      );
+    } catch (error) {
+      if (
+        error === noMatch &&
+        !this.ctx.transactionBound &&
+        !this.ctx.scope.activeTransaction()
+      ) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /** Count every write that runs on an already bound transaction. */
+  private directMutation<T>(
+    operation: MutationOperation,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.ctx.transactionBound) return run();
+    return this.ctx.scope.runMutation(this.ctx.table.$name, operation, run);
   }
 
   /** An insert matches no existing row, so a predicate could only be dropped. */
@@ -325,8 +385,9 @@ export class EntityClient {
   /**
    * Run one mutation atomically. A top-level call restarts itself on the
    * transaction-bound client, so hooks, validation, the mutation, and its after
-   * hook commit or roll back together. An unhooked mutation reaches this only to
-   * join an open transaction, and then runs without a frame or a hook context.
+   * hook commit or roll back together. An unhooked root mutation reaches this
+   * only to join an open transaction; its bound client counts the direct write
+   * without constructing a hook context.
    */
   private async mutate<T>(
     operation: MutationOperation,
@@ -341,7 +402,12 @@ export class EntityClient {
     try {
       return await this.ctx.runInTransaction(restart);
     } catch (error) {
-      if (error instanceof DatabaseValidationError) throw error;
+      if (
+        error instanceof DatabaseValidationError ||
+        error instanceof MutationNoMatchError
+      ) {
+        throw error;
+      }
       // BEGIN and COMMIT fail outside the inner classification boundary.
       throw classifyDatabaseError(error, "write");
     }

@@ -131,7 +131,11 @@ async function mount(hooks: Record<string, EntityHooks>) {
   mocks.createDrizzleDb.mockReturnValue({});
   mocks.createDrizzleDataPath.mockReturnValue(database.path);
 
-  const plugin = new DatabasePlugin({ schema, crudRoutes: true, hooks });
+  const plugin = new DatabasePlugin({
+    schema,
+    crudRoutes: { tables: ["notes", "audits"], writes: true },
+    hooks,
+  });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry = {
     startActiveSpan: <T>(
       _name: string,

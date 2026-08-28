@@ -7,6 +7,7 @@ import {
   jsonb,
   text,
   timestamp,
+  uuid,
 } from "../../../../database/schema-builder";
 import { MAX_SERIALIZED_DEPTH } from "../../defaults";
 import { compileCrudTables } from "../contract";
@@ -30,13 +31,20 @@ const schema = defineSchema((builder) => {
     label: text().default("guest"),
     createdAt: timestamp().defaultNow(),
   });
-  return { users, notes, invites };
+  const sessions = builder.table("sessions", {
+    id: uuid().primaryKey().defaultRandom(),
+    label: text(),
+  });
+  return { users, notes, invites, sessions };
 });
 
 const tables = compileCrudTables(schema.$tables);
 const users = tables.get("users") as NonNullable<ReturnType<typeof tables.get>>;
 const notes = tables.get("notes") as NonNullable<ReturnType<typeof tables.get>>;
 const invites = tables.get("invites") as NonNullable<
+  ReturnType<typeof tables.get>
+>;
+const sessions = tables.get("sessions") as NonNullable<
   ReturnType<typeof tables.get>
 >;
 
@@ -89,6 +97,8 @@ describe("write allowlists", () => {
     // A key rewrite would move the row out from under every reference to it,
     // and a caller who could rewrite `createdAt` could rewrite history.
     expect([...invites.updatable]).toEqual(["email", "label"]);
+    expect([...sessions.creatable]).toEqual(["label"]);
+    expect([...sessions.updatable]).toEqual(["label"]);
   });
 });
 

@@ -12,7 +12,7 @@ import { defineSchema, id, text } from "../../../database/schema-builder";
 import { DatabaseValidationError } from "../../../errors";
 import { EntityClient, type EntityClientContext } from "../entity-client";
 import type { TransactionClient } from "../entity-types";
-import { createMutationScope } from "../scope";
+import { createMutationScope, MAX_MUTATIONS_PER_TRANSACTION } from "../scope";
 import type { EntityHooks } from "../types";
 
 const schema = defineSchema(({ table }) => {
@@ -90,7 +90,13 @@ function harness(hooks?: EntityHooks) {
   });
 
   const context = contextFor(false);
-  return { client: new EntityClient(context), context, calls, overrides };
+  return {
+    client: new EntityClient(context),
+    boundClient: () => new EntityClient(contextFor(true)),
+    context,
+    calls,
+    overrides,
+  };
 }
 
 const names = (calls: Array<[string, unknown, unknown?]>) =>
@@ -399,6 +405,76 @@ describe("EntityClient mutation hooks", () => {
     expect(afterDelete).toHaveBeenCalledWith(1, expect.anything());
   });
 
+  test("rolls before-hook writes back when update or delete matches no row", async () => {
+    const update = harness({
+      beforeUpdate: async (_id, _values, context) => {
+        await notesOf(context.app.database).create({ body: "audit" });
+      },
+    });
+    update.overrides.update = async () => null;
+    let updateRolledBack = false;
+    update.overrides.transaction = async (callback) => {
+      try {
+        return await callback(update.context.getDataPath());
+      } catch (error) {
+        updateRolledBack = true;
+        throw error;
+      }
+    };
+    await expect(
+      update.client.update(999, { body: "missing" }),
+    ).resolves.toBeNull();
+    expect(updateRolledBack).toBe(true);
+    expect(names(update.calls)).toEqual(["begin", "insert", "update"]);
+
+    const remove = harness({
+      beforeDelete: async (_id, context) => {
+        await notesOf(context.app.database).create({ body: "audit" });
+      },
+    });
+    remove.overrides.delete = async () => false;
+    let deleteRolledBack = false;
+    remove.overrides.transaction = async (callback) => {
+      try {
+        return await callback(remove.context.getDataPath());
+      } catch (error) {
+        deleteRolledBack = true;
+        throw error;
+      }
+    };
+    await expect(remove.client.delete(999)).resolves.toBe(false);
+    expect(deleteRolledBack).toBe(true);
+    expect(names(remove.calls)).toEqual(["begin", "insert", "delete"]);
+  });
+
+  test("keeps no-match as a rollback signal inside an explicit transaction", async () => {
+    const joined = harness({ beforeUpdate: vi.fn() });
+    joined.overrides.update = async () => null;
+    const transaction = {
+      notes: joined.boundClient(),
+    } as unknown as TransactionClient;
+
+    await expect(
+      joined.context.scope.runWithTransaction(transaction, () =>
+        joined.client.update(999, { body: "missing" }),
+      ),
+    ).rejects.toMatchObject({ category: "NOT_FOUND", phase: "write" });
+  });
+
+  test("does not mistake a hook-issued no-match for the primary result", async () => {
+    const nested = harness({
+      afterUpdate: async (_row, context) => {
+        await notesOf(context.app.database).delete(999);
+      },
+      beforeDelete: vi.fn(),
+    });
+    nested.overrides.delete = async () => false;
+
+    await expect(
+      nested.client.update(1, { body: "changed" }),
+    ).rejects.toMatchObject({ category: "NOT_FOUND", phase: "write" });
+  });
+
   test("skips the after hook when the mutation itself is rejected", async () => {
     const afterCreate = vi.fn();
     const { client, overrides } = harness({
@@ -471,6 +547,25 @@ describe("EntityClient mutation hooks", () => {
     const failure = await client.create({ body: "a" }).catch((error) => error);
     expect(failure).toBeInstanceOf(DatabasePluginError);
     expect(failure.message).not.toContain("notes_pkey");
+  });
+
+  test("bounds sibling writes issued by one hook", async () => {
+    const { client, calls } = harness({
+      beforeUpdate: async (_id, _values, context) => {
+        for (let index = 0; index < MAX_MUTATIONS_PER_TRANSACTION; index++) {
+          await notesOf(context.app.database).create({ body: `${index}` });
+        }
+      },
+    });
+
+    await expect(client.update(1, { body: "changed" })).rejects.toMatchObject({
+      category: "INTERNAL",
+      phase: "write",
+    });
+    expect(
+      names(calls).filter((name) => name === "insert").length,
+    ).toBeLessThan(MAX_MUTATIONS_PER_TRANSACTION);
+    expect(names(calls)).not.toContain("update");
   });
 
   test("refuses a hook that re-enters the same mutation", async () => {

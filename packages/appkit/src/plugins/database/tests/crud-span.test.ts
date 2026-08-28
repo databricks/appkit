@@ -74,7 +74,10 @@ async function mount(exports: Record<string, unknown>) {
     exports,
     deactivate: vi.fn(),
   });
-  const plugin = new DatabasePlugin({ schema, crudRoutes: true });
+  const plugin = new DatabasePlugin({
+    schema,
+    crudRoutes: { tables: ["users"], writes: true },
+  });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry =
     fakeTelemetry(spans);
   await plugin.setup();

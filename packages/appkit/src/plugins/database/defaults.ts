@@ -20,6 +20,9 @@ export const databaseWriteDefaults: PluginExecuteConfig = {
  */
 export const STATEMENT_TIMEOUT_MS = 30_000;
 
+/** Max wall-clock time held by one database transaction (ms). */
+export const TRANSACTION_TIMEOUT_MS = 30_000;
+
 // Generated-read limits. The wire caps a typed caller shares with HTTP live in
 // `database/contract`; these bound only what an untrusted request may ask for.
 

@@ -12,7 +12,7 @@ import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { STATEMENT_TIMEOUT_MS } from "./defaults";
+import { STATEMENT_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS } from "./defaults";
 import { EntityClient, type EntityExecute } from "./entity-client";
 import type {
   DatabaseExports,
@@ -82,6 +82,21 @@ function entityOf(tx: TransactionClient, name: string): EntityClient {
   return (tx as unknown as Record<string, EntityClient>)[name];
 }
 
+/** Reject from inside the driver callback so the driver rolls back on expiry. */
+function runWithTransactionDeadline<T>(run: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new DatabasePluginError("TRANSIENT", "transaction")),
+      TRANSACTION_TIMEOUT_MS,
+    );
+    timer.unref?.();
+  });
+  return Promise.race([Promise.resolve().then(run), deadline]).finally(() =>
+    clearTimeout(timer),
+  );
+}
+
 /**
  * Run inside one transaction, joining the active one rather than nesting:
  * PostgreSQL has no nested transaction, and a savepoint would let part of a
@@ -113,7 +128,9 @@ function runTransaction<T>(
       transactionBound: true,
     });
     try {
-      return await context.scope.runWithTransaction(tx, () => callback(tx));
+      return await runWithTransactionDeadline(() =>
+        context.scope.runWithTransaction(tx, () => callback(tx)),
+      );
     } finally {
       // Captured clients must not outlive the transaction callback.
       open = false;

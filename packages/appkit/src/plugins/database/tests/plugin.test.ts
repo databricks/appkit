@@ -193,7 +193,13 @@ describe("DatabasePlugin", () => {
 
   test("registers reads for every table or an explicit subset", async () => {
     const assertNames = () => {
-      database({ schema: routedSchema, crudRoutes: { tables: ["notes"] } });
+      database({
+        schema: routedSchema,
+        crudRoutes: {
+          tables: ["notes"],
+          writes: { operations: ["create", "update"] },
+        },
+      });
       database({
         schema: routedSchema,
         hooks: { notes: { serialize: (row) => row } },
@@ -217,39 +223,56 @@ describe("DatabasePlugin", () => {
     });
     expect(all.routes).toEqual([
       "get /users",
-      "post /users",
       "get /users/:id",
-      "patch /users/:id",
-      "delete /users/:id",
       "get /notes",
-      "post /notes",
       "get /notes/:id",
-      "patch /notes/:id",
-      "delete /notes/:id",
       // A table without a primary key cannot address a single row.
       "get /events",
-      "post /events",
     ]);
-    // Upsert stays programmatic; no generated route ever performs one.
-    expect(all.routes.join()).not.toContain("upsert");
-    expect(all.plugin.getEndpoints()).toMatchObject({
-      "users.list": "/api/database/users",
-      "users.detail": "/api/database/users/:id",
-      "users.create": "/api/database/users",
-      "users.update": "/api/database/users/:id",
-      "users.delete": "/api/database/users/:id",
-    });
 
     const subset = await registerRoutes({
       schema: routedSchema,
       crudRoutes: { tables: ["notes"] },
     });
-    expect(subset.routes).toEqual([
+    expect(subset.routes).toEqual(["get /notes", "get /notes/:id"]);
+  });
+
+  test("registers only explicitly enabled writes", async () => {
+    const allWrites = await registerRoutes({
+      schema: routedSchema,
+      crudRoutes: { tables: ["users", "events"], writes: true },
+    });
+    expect(allWrites.routes).toEqual([
+      "get /users",
+      "post /users",
+      "get /users/:id",
+      "patch /users/:id",
+      "delete /users/:id",
+      "get /events",
+      "post /events",
+    ]);
+    // Upsert stays programmatic; no generated route ever performs one.
+    expect(allWrites.routes.join()).not.toContain("upsert");
+    expect(allWrites.plugin.getEndpoints()).toMatchObject({
+      "users.create": "/api/database/users",
+      "users.update": "/api/database/users/:id",
+      "users.delete": "/api/database/users/:id",
+    });
+
+    const constrained = await registerRoutes({
+      schema: routedSchema,
+      crudRoutes: {
+        tables: ["users", "notes"],
+        writes: { tables: ["notes"], operations: ["create", "update"] },
+      },
+    });
+    expect(constrained.routes).toEqual([
+      "get /users",
+      "get /users/:id",
       "get /notes",
       "post /notes",
       "get /notes/:id",
       "patch /notes/:id",
-      "delete /notes/:id",
     ]);
   });
 
@@ -259,6 +282,32 @@ describe("DatabasePlugin", () => {
       const plugin = new DatabasePlugin({
         schema: routedSchema,
         crudRoutes: { tables } as unknown as { tables: ["users"] },
+      });
+      await expect(plugin.setup()).rejects.toMatchObject({
+        category: "SETUP_FAILED",
+      });
+    }
+  });
+
+  test("fails setup on write exposure it cannot honor", async () => {
+    const invalid = [
+      {
+        tables: ["notes"],
+        writes: { tables: ["users"], operations: ["create"] },
+      },
+      {
+        tables: ["notes"],
+        writes: { operations: ["create", "create"] },
+      },
+      {
+        tables: ["notes"],
+        writes: { operations: ["upsert"] },
+      },
+    ];
+    for (const crudRoutes of invalid) {
+      const plugin = new DatabasePlugin({
+        schema: routedSchema,
+        crudRoutes: crudRoutes as never,
       });
       await expect(plugin.setup()).rejects.toMatchObject({
         category: "SETUP_FAILED",

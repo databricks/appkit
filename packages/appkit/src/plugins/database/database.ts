@@ -9,7 +9,7 @@ import type { Schema } from "../../database/schema-builder";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { compileCrudTables } from "./crud/contract";
-import { resolveExposedTables } from "./crud/exposure";
+import { type CrudExposure, resolveCrudExposure } from "./crud/exposure";
 import { routeOutcome } from "./crud/response";
 import {
   type CrudEntity,
@@ -37,7 +37,7 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
   private setupPromise: Promise<void> | null = null;
   private draining = false;
   private shutdownPromise: Promise<void> | null = null;
-  private exposedTables: string[] = [];
+  private exposure: CrudExposure = { tables: [], writes: new Map() };
 
   constructor(config: IDatabaseConfig<TSchema>) {
     super({ schema: config.schema });
@@ -53,7 +53,7 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     if (this.draining || this.state) throw databaseSetupFailed();
     if (!this.setupPromise) {
       const attempt = (async () => {
-        this.exposedTables = resolveExposedTables(
+        this.exposure = resolveCrudExposure(
           this.config.crudRoutes,
           Object.keys(this.config.schema.$tables),
         );
@@ -83,10 +83,10 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
 
   /** Register generated routes for explicitly exposed tables only. */
   injectRoutes(router: express.Router): void {
-    if (this.exposedTables.length === 0) return;
+    if (this.exposure.tables.length === 0) return;
     const tables = compileCrudTables(
       Object.fromEntries(
-        this.exposedTables.map((name) => [
+        this.exposure.tables.map((name) => [
           name,
           this.config.schema.$tables[name],
         ]),
@@ -111,13 +111,16 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
         path: `/${table.name}`,
         handler: createListHandler(deps),
       });
-      this.route(router, {
-        name: `${table.name}.create`,
-        method: "post",
-        path: `/${table.name}`,
-        handler: createCreateHandler(deps),
-      });
-      // Addressing one row needs a key, so a keyless table gets create only.
+      const writes = this.exposure.writes.get(table.name);
+      if (writes?.has("create")) {
+        this.route(router, {
+          name: `${table.name}.create`,
+          method: "post",
+          path: `/${table.name}`,
+          handler: createCreateHandler(deps),
+        });
+      }
+      // Addressing one row needs a public key.
       if (!table.primaryKey) continue;
       this.route(router, {
         name: `${table.name}.detail`,
@@ -125,18 +128,22 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
         path: `/${table.name}/:id`,
         handler: createDetailHandler(deps),
       });
-      this.route(router, {
-        name: `${table.name}.update`,
-        method: "patch",
-        path: `/${table.name}/:id`,
-        handler: createUpdateHandler(deps),
-      });
-      this.route(router, {
-        name: `${table.name}.delete`,
-        method: "delete",
-        path: `/${table.name}/:id`,
-        handler: createDeleteHandler(deps),
-      });
+      if (writes?.has("update")) {
+        this.route(router, {
+          name: `${table.name}.update`,
+          method: "patch",
+          path: `/${table.name}/:id`,
+          handler: createUpdateHandler(deps),
+        });
+      }
+      if (writes?.has("delete")) {
+        this.route(router, {
+          name: `${table.name}.delete`,
+          method: "delete",
+          path: `/${table.name}/:id`,
+          handler: createDeleteHandler(deps),
+        });
+      }
     }
   }
 

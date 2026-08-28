@@ -7,14 +7,25 @@ export type SchemaTableName<TSchema extends Schema> = Extract<
   string
 >;
 
+/** Generated write operations that require an explicit HTTP opt-in. */
+export type CrudWriteOperation = "create" | "update" | "delete";
+
+/** Write exposure for every readable table or a constrained subset. */
+type CrudWritesConfig<TSchema extends Schema> =
+  | true
+  | {
+      readonly tables?: readonly SchemaTableName<TSchema>[];
+      readonly operations: readonly CrudWriteOperation[];
+    };
+
 /**
- * Generated CRUD exposure: off by default, every table, or an explicit list.
+ * Generated route exposure: off by default, every readable table, or an
+ * explicit readable subset. Writes remain off unless `writes` names them.
  *
- * Routes run as the app's service principal and apply no per-user filter, so an
- * enabled table is readable and writable by anyone the app admits. Enabling a
+ * Routes run as the app's service principal and apply no per-user filter, so
+ * anyone the app admits receives every enabled operation. Enabling a readable
  * table also makes it includable from its neighbours; a relation whose target
- * stays off cannot be included, which keeps one table's data behind one
- * decision.
+ * stays off cannot be included.
  *
  * Text filters accept caller-supplied `like`/`ilike` patterns; a server-side
  * `statement_timeout` cancels a pattern that would otherwise hold its pooled
@@ -22,7 +33,10 @@ export type SchemaTableName<TSchema extends Schema> = Extract<
  */
 export type CrudRoutesConfig<TSchema extends Schema> =
   | boolean
-  | { readonly tables: readonly SchemaTableName<TSchema>[] };
+  | {
+      readonly tables: readonly SchemaTableName<TSchema>[];
+      readonly writes?: CrudWritesConfig<TSchema>;
+    };
 
 /** Which entity and generated operation produced the row being shaped. */
 export interface ReadSerializerContext {

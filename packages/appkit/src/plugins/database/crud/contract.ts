@@ -200,8 +200,9 @@ function compileTable(table: AppKitTable): MutableCrudTable {
     if (filterOperatorsForKind(meta.kind).length > 0) {
       queryable.add(meta.columnName);
     }
-    // A generated identity belongs to the server, never the caller.
-    if (meta.serverGenerated) continue;
+    // Database-generated identities belong to the server, never the caller.
+    if (meta.serverGenerated || (meta.primaryKey && meta.defaultRandom))
+      continue;
     creatable.add(meta.columnName);
     // Rewriting a key would move a row out from under every existing reference,
     // and rewriting a database-materialized stamp would rewrite history.
