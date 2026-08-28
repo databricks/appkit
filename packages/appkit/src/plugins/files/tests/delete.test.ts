@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  getMock,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -10,56 +15,9 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = await vi.hoisted(
-  async () => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
-    const mockClient = {
-      files: mockFilesApi,
-      config: {
-        host: "https://test.databricks.com",
-        authenticate: vi.fn(),
-      },
-    };
-    class MockApiError extends Error {
-      statusCode: number;
-      constructor(message: string, statusCode: number) {
-        super(message);
-        this.name = "ApiError";
-        this.statusCode = statusCode;
-      }
-    }
-
-    const { createCacheMock } = await import("../../../testing/cache-mock");
-    const mockCacheInstance = createCacheMock();
-
-    return { mockClient, MockApiError, mockCacheInstance };
-  },
-);
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
+const { mockCacheInstance } = await vi.hoisted(async () => {
+  const { createCacheMock } = await import("../../../testing/cache-mock");
+  return { mockCacheInstance: createCacheMock() };
 });
 
 vi.mock("../../../cache", () => ({
@@ -71,8 +29,21 @@ vi.mock("../../../cache", () => ({
 describe("FilesPlugin delete", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -84,7 +55,7 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
-    mockClient.files.delete.mockResolvedValue(undefined);
+    getMock(client, "files.delete").mockResolvedValue(undefined);
 
     await handler(
       mockReq("uploads", {
@@ -118,8 +89,12 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
-    mockClient.files.delete.mockRejectedValue(
-      new MockApiError("Not found", 404),
+    getMock(client, "files.delete").mockRejectedValue(
+      createApiError({
+        statusCode: 404,
+        message: "Not found",
+        errorCode: "ERROR",
+      }),
     );
 
     await handler(

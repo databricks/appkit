@@ -134,13 +134,19 @@ export function makeStreamResponse(content: string) {
   return { contents: stream };
 }
 
-export async function setupTestEnv() {
+export async function setupTestEnv(client?: unknown) {
   vi.clearAllMocks();
   setupDatabricksEnv();
   ServiceContext.reset();
   process.env.DATABRICKS_VOLUME_UPLOADS = "/Volumes/catalog/schema/uploads";
   process.env.DATABRICKS_VOLUME_EXPORTS = "/Volumes/catalog/schema/exports";
-  return mockServiceContext();
+  // Injecting a client makes `getWorkspaceClient()` resolve to it through the
+  // real ServiceContext, so a suite needs no vi.mock of `../../../context`.
+  return mockServiceContext(
+    client
+      ? { serviceDatabricksClient: client, userDatabricksClient: client }
+      : {},
+  );
 }
 
 export function teardownTestEnv(

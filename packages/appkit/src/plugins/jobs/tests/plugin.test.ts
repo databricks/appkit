@@ -45,30 +45,18 @@ const { mockClient, jobsApi, mockCacheInstance } = await vi.hoisted(
   },
 );
 
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: () => mockClient,
-    Context: vi.fn(),
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
 vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
   },
 }));
+
+vi.mock("../../../workspace-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../workspace-client")>();
+  // Only `Context` — the client itself is injected through ServiceContext.
+  return { ...actual, Context: vi.fn() };
+});
 
 describe("JobsPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -77,7 +65,10 @@ describe("JobsPlugin", () => {
     vi.clearAllMocks();
     setupDatabricksEnv();
     ServiceContext.reset();
-    serviceContextMock = await mockServiceContext();
+    serviceContextMock = await mockServiceContext({
+      serviceDatabricksClient: mockClient,
+      userDatabricksClient: mockClient,
+    });
   });
 
   afterEach(() => {
@@ -916,7 +907,10 @@ describe("injectRoutes", () => {
     vi.clearAllMocks();
     setupDatabricksEnv();
     ServiceContext.reset();
-    serviceContextMock = await mockServiceContext();
+    serviceContextMock = await mockServiceContext({
+      serviceDatabricksClient: mockClient,
+      userDatabricksClient: mockClient,
+    });
   });
 
   afterEach(() => {

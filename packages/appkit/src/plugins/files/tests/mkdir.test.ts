@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  getMock,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -10,56 +15,13 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = await vi.hoisted(
-  async () => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
-    const mockClient = {
-      files: mockFilesApi,
-      config: {
-        host: "https://test.databricks.com",
-        authenticate: vi.fn(),
-      },
-    };
-    class MockApiError extends Error {
-      statusCode: number;
-      constructor(message: string, statusCode: number) {
-        super(message);
-        this.name = "ApiError";
-        this.statusCode = statusCode;
-      }
-    }
-
-    const { createCacheMock } = await import("../../../testing/cache-mock");
-    const mockCacheInstance = createCacheMock();
-
-    return { mockClient, MockApiError, mockCacheInstance };
-  },
-);
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
+// EXPERIMENT: no vi.mock of `../../../workspace-client` or `../../../context`.
+// The client is the kit's, injected through the real ServiceContext, and the
+// SDK error is a genuine ApiError rather than a look-alike class that only
+// passes `instanceof` because the module was patched.
+const { mockCacheInstance } = await vi.hoisted(async () => {
+  const { createCacheMock } = await import("../../../testing/cache-mock");
+  return { mockCacheInstance: createCacheMock() };
 });
 
 vi.mock("../../../cache", () => ({
@@ -70,9 +32,16 @@ vi.mock("../../../cache", () => ({
 
 describe("FilesPlugin mkdir", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
+  let client: ReturnType<typeof createMockWorkspaceClient>;
 
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    // strict: true keeps the loudness the hand-rolled literal had by accident —
+    // an undeclared data-plane call throws instead of resolving undefined.
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: { "files.createDirectory": undefined },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -84,8 +53,6 @@ describe("FilesPlugin mkdir", () => {
     const handler = getRouteHandler(plugin, "post", "/mkdir");
     const res = mockRes();
 
-    mockClient.files.createDirectory.mockResolvedValue(undefined);
-
     await handler(
       mockReq("uploads", {
         body: { path: "/Volumes/catalog/schema/uploads/newdir" },
@@ -96,6 +63,7 @@ describe("FilesPlugin mkdir", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
+    expect(getMock(client, "files.createDirectory")).toHaveBeenCalled();
     expect(mockCacheInstance.generateKey).toHaveBeenCalled();
     expect(mockCacheInstance.delete).toHaveBeenCalled();
   });
@@ -118,8 +86,12 @@ describe("FilesPlugin mkdir", () => {
     const handler = getRouteHandler(plugin, "post", "/mkdir");
     const res = mockRes();
 
-    mockClient.files.createDirectory.mockRejectedValue(
-      new MockApiError("Conflict", 409),
+    getMock(client, "files.createDirectory").mockRejectedValue(
+      createApiError({
+        statusCode: 409,
+        message: "Conflict",
+        errorCode: "ALREADY_EXISTS",
+      }),
     );
 
     await handler(

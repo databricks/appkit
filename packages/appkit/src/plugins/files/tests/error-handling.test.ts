@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthenticationError } from "../../../errors";
+import { createApiError, createMockWorkspaceClient } from "../../../testing";
 import { withEnv } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
@@ -11,56 +12,9 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = await vi.hoisted(
-  async () => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
-    const mockClient = {
-      files: mockFilesApi,
-      config: {
-        host: "https://test.databricks.com",
-        authenticate: vi.fn(),
-      },
-    };
-    class MockApiError extends Error {
-      statusCode: number;
-      constructor(message: string, statusCode: number) {
-        super(message);
-        this.name = "ApiError";
-        this.statusCode = statusCode;
-      }
-    }
-
-    const { createCacheMock } = await import("../../../testing/cache-mock");
-    const mockCacheInstance = createCacheMock();
-
-    return { mockClient, MockApiError, mockCacheInstance };
-  },
-);
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
+const { mockCacheInstance } = await vi.hoisted(async () => {
+  const { createCacheMock } = await import("../../../testing/cache-mock");
+  return { mockCacheInstance: createCacheMock() };
 });
 
 vi.mock("../../../cache", () => ({
@@ -72,8 +26,21 @@ vi.mock("../../../cache", () => ({
 describe("FilesPlugin error handling", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -104,7 +71,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Forbidden", 403),
+        createApiError({
+          statusCode: 403,
+          message: "Forbidden",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -122,7 +93,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Not found", 404),
+        createApiError({
+          statusCode: 404,
+          message: "Not found",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -140,7 +115,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Conflict", 409),
+        createApiError({
+          statusCode: 409,
+          message: "Conflict",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -158,7 +137,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Bad Gateway", 502),
+        createApiError({
+          statusCode: 502,
+          message: "Bad Gateway",
+          errorCode: "ERROR",
+        }),
         "Operation failed",
       );
 
@@ -175,7 +158,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Internal error", 500),
+        createApiError({
+          statusCode: 500,
+          message: "Internal error",
+          errorCode: "ERROR",
+        }),
         "Fallback",
       );
 
