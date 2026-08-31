@@ -194,6 +194,15 @@ describe("loadAgentsFromDir", () => {
     expect(Object.keys(res.defs)).toEqual(["solo"]);
   });
 
+  test("parses the skills opt-in list from frontmatter", async () => {
+    writeAgent(
+      "picker",
+      "---\nendpoint: e\nskills:\n  - pdf\n  - pdf\n  - sql\n---\nPrompt.",
+    );
+    const res = await loadAgentsFromDir(workDir, {});
+    expect(res.defs.picker.skills).toEqual(["pdf", "sql"]);
+  });
+
   test("picks up default: true from frontmatter (deterministic sorted ids)", async () => {
     writeAgent("one", "---\nendpoint: a\n---\nOne.");
     writeAgent("two", "---\nendpoint: b\ndefault: true\n---\nTwo.");

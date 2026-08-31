@@ -8,6 +8,7 @@ import type {
 
 import type { GenerationParams } from "../../agents/databricks";
 import type { McpHostPolicyConfig } from "../../connectors/mcp";
+import type { ResolvedSkillCatalog } from "./skills/types";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
 
@@ -173,6 +174,13 @@ export interface AgentDefinition {
   tools?: AgentTools | AgentToolsFn;
   /** Sub-agents, exposed as `agent-<key>` tools on this agent. */
   agents?: Record<string, AgentDefinition>;
+  /**
+   * Names of global skills (shared `skills/` pool or catalog volume) to make
+   * visible to this agent. Per-agent skills under `<id>/skills/` are always
+   * visible and need not be listed. Ignored when the plugin's
+   * `autoInheritSkills` makes every global skill visible.
+   */
+  skills?: string[];
   /** Override the plugin's baseSystemPrompt for this agent only. */
   baseSystemPrompt?: BaseSystemPromptOption;
   maxSteps?: number;
@@ -233,6 +241,28 @@ export interface AgentsPluginConfig extends BasePluginConfig {
   tools?: Record<string, AgentTool>;
   /** Whether to auto-inherit every ToolProvider plugin's toolkit. Accepts a boolean shorthand. */
   autoInheritTools?: boolean | AutoInheritToolsConfig;
+  /**
+   * Whether every global skill (shared `skills/` pool or catalog volume) is
+   * visible to an agent without listing it in `skills:` frontmatter. Off by
+   * default so each agent's always-on skill catalog stays lean; accepts a
+   * boolean shorthand or a per-origin `{ file, code }` config, mirroring
+   * {@link autoInheritTools}.
+   */
+  autoInheritSkills?: boolean | AutoInheritToolsConfig;
+  /**
+   * Unity Catalog Volume path for catalog-sourced skills (e.g.
+   * `/Volumes/<catalog>/<schema>/<volume>`). Falls back to the
+   * `DATABRICKS_VOLUME_AGENT_SKILLS` env var. Skills at `<volume>/<name>/SKILL.md`
+   * are discovered at boot and on `reload()` and read as the service principal.
+   */
+  skillsVolume?: string;
+  /**
+   * Identity used to read catalog (volume) skills. v1 supports `"sp"` (default —
+   * a shared, service-principal-readable curated pool). `"obo"` is the reserved
+   * switch point for per-user skill volumes and is not wired yet (falls back to
+   * `"sp"` with a warning).
+   */
+  skillCredentialMode?: "sp" | "obo";
   /** Persistent thread store. Default: in-memory. */
   threadStore?: ThreadStore;
   /** Customize or disable the AppKit base system prompt. */
@@ -343,6 +373,18 @@ export type ResolvedToolEntry =
       source: "hosted-supervisor";
       spec: import("../../agents/supervisor-api").SupervisorTool;
       def: AgentToolDefinition;
+    }
+  | {
+      /**
+       * Built-in skill tools (`load_skill`, `read_skill_file`) injected into
+       * any agent that has a visible skill catalog. Executed in-process by the
+       * agents plugin against the agent's resolved catalog; read-only, so they
+       * bypass the approval gate.
+       */
+      source: "skill";
+      builtin: "load_skill" | "read_skill_file";
+      catalog: ResolvedSkillCatalog;
+      def: AgentToolDefinition;
     };
 
 export interface RegisteredAgent {
@@ -357,6 +399,12 @@ export interface RegisteredAgent {
   generationParams?: GenerationParams;
   /** Mirrors `AgentDefinition.ephemeral` — skip thread persistence. */
   ephemeral?: boolean;
+  /**
+   * Resolved per-agent skill catalog (visibility + collision rules applied).
+   * Present when any skill is visible to this agent; drives the always-on
+   * prompt catalog and `load_skill` dispatch.
+   */
+  skills?: ResolvedSkillCatalog;
 }
 
 /**

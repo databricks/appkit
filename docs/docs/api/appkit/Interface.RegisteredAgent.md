@@ -70,6 +70,18 @@ name: string;
 
 ***
 
+### skills?
+
+```ts
+optional skills: ResolvedSkillCatalog;
+```
+
+Resolved per-agent skill catalog (visibility + collision rules applied).
+Present when any skill is visible to this agent; drives the always-on
+prompt catalog and `load_skill` dispatch.
+
+***
+
 ### toolIndex
 
 ```ts

@@ -26,6 +26,8 @@ interface Message {
 interface AgentsClientConfig {
   agents: string[];
   defaultAgent: string | null;
+  /** Per-agent skill catalog (name + description) for the `/skill` picker. */
+  skills?: Record<string, { name: string; description: string }[]>;
 }
 
 /**
@@ -53,9 +55,11 @@ export function AgentChat() {
   // Agent registry comes from the agents plugin's `clientConfig()` payload
   // (boot-time, no fetch). `defaultAgent` is null only when no agents are
   // registered; both `planner` and `helper` are registered here.
-  const { agents, defaultAgent } =
+  const { agents, defaultAgent, skills } =
     usePluginClientConfig<AgentsClientConfig>('agents');
   const activeAgent = defaultAgent ?? agents[0] ?? null;
+  // Skills visible to the active agent, if any — drives the `/skill` picker.
+  const activeSkills = (activeAgent && skills?.[activeAgent]) || [];
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pendingAssistantId, setPendingAssistantId] = useState<string | null>(
@@ -87,6 +91,9 @@ export function AgentChat() {
   const { content, isStreaming, error, send } = useAgentChat({
     agent: activeAgent ?? '',
     onEvent: handleEvent,
+    // Gate `/skill` sugar on the real catalog so a stray `/word` isn't
+    // parsed as a skill (see useAgentChat's `skills` option).
+    skills: activeSkills.map((s) => s.name),
   });
 
   // Mirror the streaming `content` into the pending assistant message so
@@ -187,6 +194,28 @@ export function AgentChat() {
         </CardContent>
 
         <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
+          {activeSkills.length > 0 && (
+            <select
+              className="text-sm border rounded-md px-2 bg-background text-foreground shrink-0"
+              value=""
+              disabled={isStreaming}
+              aria-label="Load a skill"
+              onChange={(e) => {
+                const name = e.target.value;
+                if (!name) return;
+                // Prepend `/skill-name` sugar; useAgentChat parses it off.
+                setInput((v) => `/${name} ${v.replace(/^\/\S+\s*/, '')}`);
+                e.currentTarget.value = '';
+              }}
+            >
+              <option value="">+ skill</option>
+              {activeSkills.map((s) => (
+                <option key={s.name} value={s.name} title={s.description}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
