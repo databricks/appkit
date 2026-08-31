@@ -6,6 +6,8 @@ import {
   type FilterOperator,
   IN_CAP,
   isFilterOperator,
+  MAX_INCLUDE_DEPTH,
+  MAX_INCLUDE_NODES,
   MAX_INCLUDES,
   MAX_LIMIT,
   MAX_OFFSET,
@@ -24,6 +26,8 @@ describe("wire caps", () => {
     expect(MAX_WHERE_DEPTH).toBe(5);
     expect(MAX_WHERE_GROUP_ITEMS).toBe(20);
     expect(MAX_WHERE_CONDITIONS).toBe(50);
+    expect(MAX_INCLUDE_DEPTH).toBe(2);
+    expect(MAX_INCLUDE_NODES).toBe(25);
   });
 
   it("keeps DEFAULT_LIMIT within MAX_LIMIT", () => {

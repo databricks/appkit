@@ -14,6 +14,10 @@ export const MAX_WHERE_DEPTH = 5;
 export const MAX_WHERE_GROUP_ITEMS = 20;
 /** Max column conditions accepted across one runtime predicate tree. */
 export const MAX_WHERE_CONDITIONS = 50;
+/** Max number of relation edges one include path may traverse. */
+export const MAX_INCLUDE_DEPTH = 2;
+/** Max number of relation nodes across a complete include tree. */
+export const MAX_INCLUDE_NODES = 25;
 
 /** Scalar values accepted by primary-key operations. */
 export type IdValue = string | number | bigint;

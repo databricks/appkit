@@ -18,6 +18,7 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDataPath: mocks.createDrizzleDataPath,
 }));
 
+import { STATEMENT_TIMEOUT_MS } from "../defaults";
 import { createDatabaseState } from "../lifecycle";
 
 function deferred<T>() {
@@ -116,7 +117,9 @@ describe("createDatabaseState", () => {
     ready.resolve([]);
     const state = await pending;
     expect(mocks.createLakebasePool).toHaveBeenCalledTimes(1);
-    expect(mocks.createLakebasePool).toHaveBeenCalledWith();
+    expect(mocks.createLakebasePool).toHaveBeenCalledWith({
+      statement_timeout: STATEMENT_TIMEOUT_MS,
+    });
     expect(mocks.createDrizzleDb).toHaveBeenCalledWith(pool, schema);
     expect(mocks.createDrizzleDataPath).toHaveBeenCalledWith(db, schema, {
       columnAccess: "trusted",
