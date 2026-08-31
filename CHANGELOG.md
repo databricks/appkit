@@ -130,6 +130,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.68.0](https://github.com/databricks/appkit/compare/v0.67.0...v0.68.0) (2026-08-31)
+
+### appkit
+
+* **appkit:** add opt-in generated database reads ([#527](https://github.com/databricks/appkit/issues/527)) ([0b43f14](https://github.com/databricks/appkit/commit/0b43f14ab6c49aa0fdf7c4285edcf4297bf6461a))
+
+
 ## [0.66.1](https://github.com/databricks/appkit/compare/v0.66.0...v0.66.1) (2026-08-26)
 
 ### appkit
