@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { ServiceContext } from "../../../context/service-context";
 import { ResourceType } from "../../../registry";
-import { withEnv } from "../../../testing";
+import { createApiError, useTestCache, withEnv } from "../../../testing";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,
@@ -13,43 +13,32 @@ import {
 import { mapParams } from "../params";
 import { JobsPlugin, jobs } from "../plugin";
 
-const { mockClient, jobsApi, mockCacheInstance } = await vi.hoisted(
-  async () => {
-    // The testing kit's fake, not a hand-rolled literal: the seven jobs methods,
-    // `config.host` as a real string, and `config.authenticate` all come for free,
-    // and any *other* service this plugin grows into resolves instead of throwing.
-    // Imported inside the hoisted factory because the factory runs before the
-    // file's own imports are evaluated.
-    const { createMockWorkspaceClient, getMock } =
-      await import("../../../testing/mock-workspace-client");
+const { mockClient, jobsApi } = await vi.hoisted(async () => {
+  // The testing kit's fake, not a hand-rolled literal: the seven jobs methods,
+  // `config.host` as a real string, and `config.authenticate` all come for free,
+  // and any *other* service this plugin grows into resolves instead of throwing.
+  // Imported inside the hoisted factory because the factory runs before the
+  // file's own imports are evaluated.
+  const { createMockWorkspaceClient, getMock } =
+    await import("../../../testing/mock-workspace-client");
 
-    const mockClient = createMockWorkspaceClient();
+  const mockClient = createMockWorkspaceClient();
 
-    // Facade accessors are typed against the legacy SDK, so `.mockResolvedValue`
-    // on them would not typecheck. `getMock` is the typed handle; it mints
-    // idempotently, so these are the very functions the plugin will call.
-    const jobsApi = {
-      runNow: getMock(mockClient, "jobs.runNow"),
-      submit: getMock(mockClient, "jobs.submit"),
-      getRun: getMock(mockClient, "jobs.getRun"),
-      getRunOutput: getMock(mockClient, "jobs.getRunOutput"),
-      cancelRun: getMock(mockClient, "jobs.cancelRun"),
-      listRuns: getMock(mockClient, "jobs.listRuns"),
-      get: getMock(mockClient, "jobs.get"),
-    };
+  // Facade accessors are typed against the legacy SDK, so `.mockResolvedValue`
+  // on them would not typecheck. `getMock` is the typed handle; it mints
+  // idempotently, so these are the very functions the plugin will call.
+  const jobsApi = {
+    runNow: getMock(mockClient, "jobs.runNow"),
+    submit: getMock(mockClient, "jobs.submit"),
+    getRun: getMock(mockClient, "jobs.getRun"),
+    getRunOutput: getMock(mockClient, "jobs.getRunOutput"),
+    cancelRun: getMock(mockClient, "jobs.cancelRun"),
+    listRuns: getMock(mockClient, "jobs.listRuns"),
+    get: getMock(mockClient, "jobs.get"),
+  };
 
-    const { createCacheMock } = await import("../../../testing/cache-mock");
-    const mockCacheInstance = createCacheMock();
-
-    return { mockClient, jobsApi, mockCacheInstance };
-  },
-);
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+  return { mockClient, jobsApi };
+});
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =
@@ -57,6 +46,9 @@ vi.mock("../../../workspace-client", async (importOriginal) => {
   // Only `Context` — the client itself is injected through ServiceContext.
   return { ...actual, Context: vi.fn() };
 });
+
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 describe("JobsPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -570,9 +562,15 @@ describe("JobsPlugin", () => {
     test("error result preserves upstream HTTP status code", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const error = new Error("Detailed internal failure: db connection reset");
-      (error as any).statusCode = 403;
-      jobsApi.getRun.mockRejectedValue(error);
+      // A genuine ApiError (as the SDK throws): the real cache preserves an
+      // ApiError's status but wraps a plain Error into a 500.
+      jobsApi.getRun.mockRejectedValue(
+        createApiError({
+          statusCode: 403,
+          message: "Detailed internal failure: db connection reset",
+          errorCode: "PERMISSION_DENIED",
+        }),
+      );
 
       const plugin = new JobsPlugin({});
       const handle = plugin.exports()("etl");
@@ -1828,10 +1826,12 @@ describe("injectRoutes", () => {
     test("GET /:jobKey/runs returns upstream status on failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const error = new Error("Unauthorized");
-      (error as any).statusCode = 401;
       jobsApi.listRuns.mockImplementation(() => {
-        throw error;
+        throw createApiError({
+          statusCode: 401,
+          message: "Unauthorized",
+          errorCode: "UNAUTHENTICATED",
+        });
       });
 
       const plugin = new JobsPlugin({});

@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-
 /**
  * Tests the agent-tool surface of the Lakebase plugin.
  *
@@ -9,15 +8,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  * (SP or per-user via RoutingPool).
  */
 
-vi.mock("../../../cache", async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const instance = createCacheMock();
-  return {
-    CacheManager: {
-      getInstanceSync: vi.fn(() => instance),
-    },
-  };
-});
+import { useTestCache } from "../../../testing/test-cache";
+
+// Boot AppKit's real in-memory cache so the base Plugin constructor's
+// getInstanceSync() resolves instead of throwing.
+useTestCache();
 
 // Client calls recorded by the read-only-statement test. The `connect()`
 // mock returns a fresh client whose `query` pushes to this array so tests

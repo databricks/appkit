@@ -4,6 +4,7 @@ import {
   createApiError,
   createMockWorkspaceClient,
   getMock,
+  useTestCache,
 } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
@@ -19,16 +20,8 @@ import {
 // The client is the kit's, injected through the real ServiceContext, and the
 // SDK error is a genuine ApiError rather than a look-alike class that only
 // passes `instanceof` because the module was patched.
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  return { mockCacheInstance: createCacheMock() };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache; spy on `testCache.current` to assert invalidation.
+const testCache = useTestCache();
 
 describe("FilesPlugin mkdir", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
@@ -53,6 +46,9 @@ describe("FilesPlugin mkdir", () => {
     const handler = getRouteHandler(plugin, "post", "/mkdir");
     const res = mockRes();
 
+    const generateKey = vi.spyOn(testCache.current, "generateKey");
+    const del = vi.spyOn(testCache.current, "delete");
+
     await handler(
       mockReq("uploads", {
         body: { path: "/Volumes/catalog/schema/uploads/newdir" },
@@ -64,8 +60,8 @@ describe("FilesPlugin mkdir", () => {
       expect.objectContaining({ success: true }),
     );
     expect(getMock(client, "files.createDirectory")).toHaveBeenCalled();
-    expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-    expect(mockCacheInstance.delete).toHaveBeenCalled();
+    expect(generateKey).toHaveBeenCalled();
+    expect(del).toHaveBeenCalled();
   });
 
   test("mkdir without path returns 400", async () => {

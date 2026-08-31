@@ -3,16 +3,6 @@ import { describe, expect, test, vi } from "vitest";
 
 import { RoutingPool } from "../routing-pool";
 
-vi.mock("../../../cache", async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const instance = createCacheMock();
-  return {
-    CacheManager: {
-      getInstanceSync: vi.fn(() => instance),
-    },
-  };
-});
-
 function makeMockPool(label: string) {
   return {
     query: vi.fn(async () => ({ rows: [{ source: label }] })),

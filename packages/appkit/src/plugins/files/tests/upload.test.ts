@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { createMockWorkspaceClient } from "../../../testing";
+import { createMockWorkspaceClient, useTestCache } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import { policy } from "../policy";
 import {
@@ -12,16 +12,8 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  return { mockCacheInstance: createCacheMock() };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache; spy on `testCache.current` to assert invalidation.
+const testCache = useTestCache();
 
 describe("FilesPlugin upload", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
@@ -165,6 +157,9 @@ describe("FilesPlugin upload", () => {
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
+      const generateKey = vi.spyOn(testCache.current, "generateKey");
+      const del = vi.spyOn(testCache.current, "delete");
+
       const req = mockUploadReq("uploads", [Buffer.from("file content")], {
         query: { path: "/Volumes/catalog/schema/uploads/dir/file.txt" },
       });
@@ -186,8 +181,8 @@ describe("FilesPlugin upload", () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({ success: true }),
       );
-      expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-      expect(mockCacheInstance.delete).toHaveBeenCalled();
+      expect(generateKey).toHaveBeenCalled();
+      expect(del).toHaveBeenCalled();
     });
   });
 });
