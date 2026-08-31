@@ -69,6 +69,22 @@ Milliseconds to wait before auto-denying. Default: 60_000.
 
 ***
 
+### autoInheritSkills?
+
+```ts
+optional autoInheritSkills: 
+  | boolean
+  | AutoInheritToolsConfig;
+```
+
+Whether every global skill (shared `skills/` pool or catalog volume) is
+visible to an agent without listing it in `skills:` frontmatter. Off by
+default so each agent's always-on skill catalog stays lean; accepts a
+boolean shorthand or a per-origin `{ file, code }` config, mirroring
+[autoInheritTools](#autoinherittools).
+
+***
+
 ### autoInheritTools?
 
 ```ts
@@ -215,6 +231,32 @@ optional name: string;
 #### Inherited from
 
 [`BasePluginConfig`](Interface.BasePluginConfig.md).[`name`](Interface.BasePluginConfig.md#name)
+
+***
+
+### skillCredentialMode?
+
+```ts
+optional skillCredentialMode: "sp" | "obo";
+```
+
+Identity used to read catalog (volume) skills. v1 supports `"sp"` (default —
+a shared, service-principal-readable curated pool). `"obo"` is the reserved
+switch point for per-user skill volumes and is not wired yet (falls back to
+`"sp"` with a warning).
+
+***
+
+### skillsVolume?
+
+```ts
+optional skillsVolume: string;
+```
+
+Unity Catalog Volume path for catalog-sourced skills (e.g.
+`/Volumes/<catalog>/<schema>/<volume>`). Falls back to the
+`DATABRICKS_VOLUME_AGENT_SKILLS` env var. Skills at `<volume>/<name>/SKILL.md`
+are discovered at boot and on `reload()` and read as the service principal.
 
 ***
 

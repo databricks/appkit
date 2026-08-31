@@ -23,7 +23,9 @@ import {
   SUPERVISOR_EXTENSION_KEY,
   type SupervisorTool,
 } from "../../agents/supervisor-api";
+import { FilesConnector } from "../../connectors/files";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
+import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import {
@@ -33,6 +35,17 @@ import {
 } from "../../core/agent/load-code-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import { createPluginsProxy } from "../../core/agent/plugins-map";
+import {
+  loadSkillsFromDir,
+  parseSkill,
+  type ResolvedSkillCatalog,
+  readSkillResource,
+  renderLoadedSkill,
+  renderSkillCatalog,
+  resolveSkill,
+  resolveSkillCatalog,
+  type SkillDefinition,
+} from "../../core/agent/skills";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
@@ -59,6 +72,7 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
+import type { WorkspaceClient } from "../../workspace-client";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -206,6 +220,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * negative, or `NaN`) can't degrade into immediate auto-denial of every
    * mutating tool call.
    */
+  /**
+   * Shared global skill pool (bundle `skills/` + catalog volume), loaded once
+   * per registry build. Read by {@link buildRegisteredAgent} to resolve each
+   * agent's visible catalog and by the live `register` path.
+   */
+  private globalSkills: SkillDefinition[] = [];
+
   private cachedApprovalPolicy: {
     requireForDestructive: boolean;
     timeoutMs: number;
@@ -343,6 +364,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Two "code" sources: discovered files and the deprecated `agents({ agents })` map.
     const discovered = await this.loadCodeAgents();
     const deprecatedMapRaw = this.config.agents ?? {};
+
+    // Global skills (bundle + configured UC volume) load in parallel; per-agent
+    // skills resolve later during agent build.
+    const [bundleSkills, volumeSkills] = await Promise.all([
+      this.loadGlobalSkills(),
+      this.loadVolumeSkills(),
+    ]);
+    this.globalSkills = [...bundleSkills, ...volumeSkills];
 
     if (Object.keys(deprecatedMapRaw).length > 0) {
       this.warnAgentsMapDeprecated();
@@ -622,7 +651,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<RegisteredAgent> {
     const adapter = await this.resolveAdapter(def, name);
-    const toolIndex = await this.buildToolIndex(name, def, src);
+    const skills = await this.resolveAgentSkills(name, def, src);
+    const toolIndex = await this.buildToolIndex(name, def, src, skills);
 
     warnOnCapabilityMismatch(name, adapter, toolIndex);
 
@@ -636,7 +666,164 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       maxTokens: def.maxTokens,
       generationParams: def.generationParams,
       ephemeral: def.ephemeral,
+      skills,
     };
+  }
+
+  /** Loads the shared global skill pool from `<agentsDir>/skills/`. */
+  private async loadGlobalSkills(): Promise<SkillDefinition[]> {
+    const dir = this.resolvedAgentsDir();
+    if (!dir) return [];
+    return loadSkillsFromDir(path.join(dir, "skills"), "bundle-global");
+  }
+
+  /** Configured catalog-skills volume path, or null when none is set. */
+  private resolveSkillsVolume(): string | null {
+    const configured =
+      this.config.skillsVolume ?? process.env.DATABRICKS_VOLUME_AGENT_SKILLS;
+    return configured && configured.trim() !== "" ? configured.trim() : null;
+  }
+
+  /**
+   * Workspace client used to read catalog skills. v1 reads as the app service
+   * principal; `getWorkspaceClient()` resolves to SP outside a user scope
+   * (boot and skill-tool dispatch are both unscoped). This is the single
+   * switch point for a future OBO mode.
+   */
+  private skillWorkspaceClient(): WorkspaceClient {
+    return getWorkspaceClient();
+  }
+
+  /**
+   * Discovers catalog skills from the configured UC Volume, read as the
+   * service principal at boot (and on `reload()`). Each `<volume>/<name>/`
+   * folder with a `SKILL.md` becomes a `source: "volume"` skill. Best-effort:
+   * a missing volume, unavailable workspace client, or a malformed individual
+   * skill is logged and skipped rather than failing the whole registry build.
+   */
+  private async loadVolumeSkills(): Promise<SkillDefinition[]> {
+    const volume = this.resolveSkillsVolume();
+    if (!volume) return [];
+
+    if ((this.config.skillCredentialMode ?? "sp") === "obo") {
+      logger.warn(
+        "skillCredentialMode 'obo' is not wired yet; reading catalog skills as the service principal.",
+      );
+    }
+
+    let client: WorkspaceClient;
+    try {
+      client = this.skillWorkspaceClient();
+    } catch (err) {
+      logger.warn(
+        "Skipping catalog skills at '%s': no workspace client available (%s).",
+        volume,
+        err instanceof Error ? err.message : String(err),
+      );
+      return [];
+    }
+
+    const connector = new FilesConnector({ defaultVolume: volume });
+    let entries: Awaited<ReturnType<FilesConnector["list"]>>;
+    try {
+      entries = await connector.list(client, volume);
+    } catch (err) {
+      logger.warn(
+        "Failed to list catalog skills volume '%s': %s",
+        volume,
+        err instanceof Error ? err.message : String(err),
+      );
+      return [];
+    }
+
+    // Read every skill concurrently — each is a network round-trip to the
+    // volume, so serial reads would add up. A per-skill failure skips only
+    // that skill; Promise.all preserves the (sorted) entry order.
+    const loaded = await Promise.all(
+      entries.map(async (entry): Promise<SkillDefinition | null> => {
+        if (!entry.is_directory || !entry.name || !entry.path) return null;
+        const skillDir = entry.path;
+        const skillFile = `${skillDir}/SKILL.md`;
+        try {
+          const raw = await connector.read(client, skillFile);
+          const parsed = parseSkill(raw, skillFile);
+          const files = await this.listVolumeSkillFiles(
+            connector,
+            client,
+            skillDir,
+          );
+          return {
+            name: parsed.name,
+            description: parsed.description,
+            body: parsed.body,
+            source: "volume",
+            dir: skillDir,
+            files,
+            allowedTools: parsed.allowedTools,
+          };
+        } catch (err) {
+          logger.warn(
+            "Skipping catalog skill '%s': %s",
+            skillDir,
+            err instanceof Error ? err.message : String(err),
+          );
+          return null;
+        }
+      }),
+    );
+    return loaded.filter((s): s is SkillDefinition => s !== null);
+  }
+
+  /** Lists a volume skill's resource files (one level, excluding SKILL.md). */
+  private async listVolumeSkillFiles(
+    connector: FilesConnector,
+    client: WorkspaceClient,
+    skillDir: string,
+  ): Promise<string[]> {
+    try {
+      const entries = await connector.list(client, skillDir);
+      return entries
+        .filter((e) => !e.is_directory && e.name && e.name !== "SKILL.md")
+        .map((e) => e.name as string)
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Resolves the per-agent skill catalog: loads this agent's private skills
+   * (`<agentsDir>/<id>/skills/`, file-origin only), then applies visibility
+   * (opt-in via `def.skills` or `autoInheritSkills`) and collision rules
+   * against the shared global pool. Returns `undefined` when nothing is
+   * visible so the prompt catalog and dispatch can cheaply skip skills.
+   */
+  private async resolveAgentSkills(
+    name: string,
+    def: AgentDefinition,
+    src: AgentSource,
+  ): Promise<RegisteredAgent["skills"]> {
+    const dir = this.resolvedAgentsDir();
+    const perAgentSkills =
+      src.origin === "file" && dir
+        ? await loadSkillsFromDir(
+            path.join(dir, name, "skills"),
+            "bundle-agent",
+          )
+        : [];
+
+    const inherit = normalizeAutoInherit(this.config.autoInheritSkills);
+    const autoInherit = src.origin === "file" ? inherit.file : inherit.code;
+
+    const catalog = resolveSkillCatalog({
+      agentName: name,
+      agentSkillNames: def.skills,
+      perAgentSkills,
+      globalSkills: this.globalSkills,
+      autoInherit,
+    });
+
+    return catalog.byAddress.size > 0 ? catalog : undefined;
   }
 
   private async resolveAdapter(
@@ -687,6 +874,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     agentName: string,
     def: AgentDefinition,
     src: AgentSource,
+    skills?: ResolvedSkillCatalog,
   ): Promise<Map<string, ResolvedToolEntry>> {
     const index = new Map<string, ResolvedToolEntry>();
     const hasDeclaredTools = def.tools !== undefined;
@@ -779,6 +967,23 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     if (hostedToCollect.length > 0) {
       await this.connectHostedTools(hostedToCollect, index);
+    }
+
+    // 3. Built-in skill tools, present only when this agent has a visible
+    //    catalog. Injected last so they reliably shadow any same-named tool.
+    if (skills && skills.byAddress.size > 0) {
+      index.set("load_skill", {
+        source: "skill",
+        builtin: "load_skill",
+        catalog: skills,
+        def: LOAD_SKILL_TOOL_DEF,
+      });
+      index.set("read_skill_file", {
+        source: "skill",
+        builtin: "read_skill_file",
+        catalog: skills,
+        def: READ_SKILL_FILE_TOOL_DEF,
+      });
     }
 
     return index;
@@ -1041,9 +1246,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   clientConfig(): Record<string, unknown> {
+    // Per-agent skill catalog (name + description) so the client can offer a
+    // `/skill-name` autocomplete / picker. Only agents with a visible catalog
+    // appear here.
+    const skills: Record<string, { name: string; description: string }[]> = {};
+    for (const [name, agent] of this.agents) {
+      if (agent.skills) skills[name] = agent.skills.catalog;
+    }
     return {
       agents: Array.from(this.agents.keys()),
       defaultAgent: this.defaultAgentName,
+      skills,
     };
   }
 
@@ -1056,7 +1269,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
+    const {
+      message,
+      threadId,
+      agent: agentName,
+      mlflowRunId,
+      skill,
+    } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -1110,7 +1329,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId, mlflowRunId);
+    return this._streamAgent(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      mlflowRunId,
+      skill,
+    );
   }
 
   /**
@@ -1245,6 +1472,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     thread: Thread,
     userId: string,
     mlflowRunId?: string,
+    forcedSkill?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1316,7 +1544,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                   .getPluginNames()
                   .filter((n) => n !== this.name && n !== "server")
               : [];
-            const fullPrompt = composePromptForAgent(
+            let fullPrompt = composePromptForAgent(
               registered,
               this.config.baseSystemPrompt,
               {
@@ -1325,6 +1553,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 toolNames: tools.map((t) => t.name),
               },
             );
+
+            // Deterministic `/skill-name` invocation: eagerly inject the
+            // requested skill's instructions into this turn rather than waiting
+            // for the model to call load_skill. The tool stays available for
+            // the model to auto-select others.
+            if (forcedSkill) {
+              const addendum = this.renderForcedSkill(registered, forcedSkill);
+              if (addendum) fullPrompt = `${fullPrompt}\n\n${addendum}`;
+            }
 
             const messagesWithSystem: Message[] = [
               {
@@ -1736,12 +1973,89 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
             "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
         );
+      } else if (entry.source === "skill") {
+        result = await this.dispatchSkillTool(entry, args);
       }
 
       return result;
     });
 
     return normalizeToolResult(toolResult);
+  }
+
+  /**
+   * Executes the built-in `load_skill` / `read_skill_file` tools against the
+   * agent's resolved skill catalog. `load_skill` returns a skill's body plus a
+   * manifest of bundled files; `read_skill_file` returns the contents of one
+   * of those files (bundle skills only in v1 — catalog-volume resource reads
+   * arrive with the volume source).
+   */
+  private async dispatchSkillTool(
+    entry: Extract<ResolvedToolEntry, { source: "skill" }>,
+    args: unknown,
+  ): Promise<string> {
+    const obj =
+      typeof args === "object" && args !== null
+        ? (args as Record<string, unknown>)
+        : {};
+    const skillName = typeof obj.skill === "string" ? obj.skill.trim() : "";
+    if (!skillName) {
+      throw new Error(
+        `'${entry.builtin}' requires a 'skill' argument naming the skill to use.`,
+      );
+    }
+
+    const skill = resolveSkill(entry.catalog, skillName);
+
+    if (entry.builtin === "load_skill") {
+      return renderLoadedSkill(skill);
+    }
+
+    // read_skill_file
+    const filePath = typeof obj.path === "string" ? obj.path.trim() : "";
+    if (!filePath) {
+      throw new Error("'read_skill_file' requires a 'path' argument.");
+    }
+    if (!skill.files.includes(filePath)) {
+      throw new Error(
+        `Skill '${skill.name}' has no bundled file '${filePath}'. Available: ${
+          skill.files.join(", ") || "<none>"
+        }.`,
+      );
+    }
+
+    if (skill.source === "volume") {
+      const connector = new FilesConnector({ defaultVolume: skill.dir });
+      return connector.read(
+        this.skillWorkspaceClient(),
+        `${skill.dir}/${filePath}`,
+      );
+    }
+    return readSkillResource(skill.dir, filePath);
+  }
+
+  /**
+   * Renders the prompt addendum for a force-loaded skill (`/skill-name`).
+   * Returns null when the agent has no catalog or the name doesn't resolve —
+   * an unusable request shouldn't fail the whole turn, so it's logged and the
+   * model proceeds with the catalog + `load_skill` still available.
+   */
+  private renderForcedSkill(
+    registered: RegisteredAgent,
+    name: string,
+  ): string | null {
+    if (!registered.skills) return null;
+    try {
+      const skill = resolveSkill(registered.skills, name);
+      return `The user explicitly requested the "${skill.name}" skill for this turn. Its instructions:\n\n${renderLoadedSkill(skill)}`;
+    } catch (err) {
+      logger.warn(
+        "Ignoring forced skill '%s': %s",
+        name,
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    }
   }
 
   /**
@@ -2024,6 +2338,45 @@ function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   return { file: value.file ?? false, code: value.code ?? false };
 }
 
+/** Built-in tool the model calls to load a skill's full instructions on demand. */
+const LOAD_SKILL_TOOL_DEF: AgentToolDefinition = {
+  name: "load_skill",
+  description:
+    "Load the full instructions for one of the available skills by name. Call this before acting on a task that matches a skill's description. Returns the skill's instructions plus a list of any bundled files you can read with read_skill_file.",
+  parameters: {
+    type: "object",
+    properties: {
+      skill: {
+        type: "string",
+        description:
+          "The exact skill name to load, as shown in the available-skills list.",
+      },
+    },
+    required: ["skill"],
+  },
+  annotations: { effect: "read" },
+};
+
+/** Built-in tool for reading a resource file that a loaded skill references. */
+const READ_SKILL_FILE_TOOL_DEF: AgentToolDefinition = {
+  name: "read_skill_file",
+  description:
+    "Read a bundled resource file that a loaded skill references (e.g. a reference doc). Only files listed by load_skill for that skill are readable.",
+  parameters: {
+    type: "object",
+    properties: {
+      skill: { type: "string", description: "The skill that owns the file." },
+      path: {
+        type: "string",
+        description:
+          "Relative path of the file within the skill, as listed by load_skill.",
+      },
+    },
+    required: ["skill", "path"],
+  },
+  annotations: { effect: "read" },
+};
+
 function composePromptForAgent(
   registered: RegisteredAgent,
   pluginLevel: BaseSystemPromptOption | undefined,
@@ -2043,7 +2396,13 @@ function composePromptForAgent(
     base = buildBaseSystemPrompt(ctx);
   }
 
-  return composeSystemPrompt(base, registered.instructions);
+  const composed = composeSystemPrompt(base, registered.instructions);
+
+  // Append the always-on skill catalog (name + description only). Done here,
+  // after composeSystemPrompt, so it survives a custom/`false` base prompt.
+  const catalog = registered.skills?.catalog;
+  if (!catalog || catalog.length === 0) return composed;
+  return `${composed}\n\n${renderSkillCatalog(catalog)}`;
 }
 
 /**
