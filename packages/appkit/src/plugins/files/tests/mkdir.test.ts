@@ -16,10 +16,6 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-// EXPERIMENT: no vi.mock of `../../../workspace-client` or `../../../context`.
-// The client is the kit's, injected through the real ServiceContext, and the
-// SDK error is a genuine ApiError rather than a look-alike class that only
-// passes `instanceof` because the module was patched.
 // Real in-memory cache; spy on `testCache.current` to assert invalidation.
 const testCache = useTestCache();
 
