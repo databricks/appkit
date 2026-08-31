@@ -132,6 +132,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.69.0](https://github.com/databricks/appkit/compare/v0.68.0...v0.69.0) (2026-08-31)
+
+### appkit
+
+* **appkit:** split the agents plugin into focused modules ([#532](https://github.com/databricks/appkit/issues/532)) ([#547](https://github.com/databricks/appkit/issues/547)) ([2329476](https://github.com/databricks/appkit/commit/23294765213c9fc795f38074ecf36f3322dfe266))
+
+
 ## [0.68.0](https://github.com/databricks/appkit/compare/v0.67.0...v0.68.0) (2026-08-31)
 
 ### appkit
