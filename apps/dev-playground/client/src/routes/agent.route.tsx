@@ -247,10 +247,13 @@ function AgentRoute() {
 
     // `/skill-name …` forces a skill for this turn (the agents plugin injects
     // its instructions); the model can still auto-load others via load_skill.
+    // Only treat the leading token as a skill when it names one in the active
+    // catalog — otherwise a plain `/word` (e.g. "/tmp is full") would be
+    // mangled into a skill with its first word cut off.
     let messageBody = userMessage;
     let skill: string | undefined;
     const skillMatch = messageBody.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
-    if (skillMatch) {
+    if (skillMatch && activeSkills.some((s) => s.name === skillMatch[1])) {
       skill = skillMatch[1];
       messageBody = messageBody.slice(skillMatch[0].length);
       if (messageBody.trim() === "") messageBody = `Use the ${skill} skill.`;

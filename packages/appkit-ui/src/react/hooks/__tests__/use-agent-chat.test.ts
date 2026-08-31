@@ -92,8 +92,10 @@ describe("useAgentChat", () => {
     });
   });
 
-  test("parses a leading /skill-name token off the message", async () => {
-    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+  test("parses a leading /skill-name token when it matches a known skill", async () => {
+    const { result } = renderHook(() =>
+      useAgentChat({ agent: "helper", skills: ["pdf"] }),
+    );
 
     act(() => {
       void result.current.send("/pdf extract the tables");
@@ -108,7 +110,9 @@ describe("useAgentChat", () => {
   });
 
   test("/skill-name with no text falls back to a non-empty message", async () => {
-    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+    const { result } = renderHook(() =>
+      useAgentChat({ agent: "helper", skills: ["pdf"] }),
+    );
 
     act(() => {
       void result.current.send("/pdf");
@@ -117,6 +121,55 @@ describe("useAgentChat", () => {
     await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
     expect(capturedCallbacks.payload).toEqual({
       message: "Use the pdf skill.",
+      agent: "helper",
+      skill: "pdf",
+    });
+  });
+
+  test("a leading /token that is NOT a known skill is sent verbatim (no skill)", async () => {
+    const { result } = renderHook(() =>
+      useAgentChat({ agent: "helper", skills: ["pdf"] }),
+    );
+
+    // Classic false positive: "/tmp is full" must not become skill "tmp"
+    // with the first word cut off.
+    act(() => {
+      void result.current.send("/tmp is full");
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "/tmp is full",
+      agent: "helper",
+    });
+  });
+
+  test("a /path-like message is sent verbatim when no catalog is provided", async () => {
+    const { result } = renderHook(() => useAgentChat({ agent: "helper" }));
+
+    act(() => {
+      void result.current.send("/usr/bin/python needs upgrading");
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "/usr/bin/python needs upgrading",
+      agent: "helper",
+    });
+  });
+
+  test("explicit opts.skill wins even when the message starts with an unknown /token", async () => {
+    const { result } = renderHook(() =>
+      useAgentChat({ agent: "helper", skills: ["pdf"] }),
+    );
+
+    act(() => {
+      void result.current.send("/tmp is full", { skill: "pdf" });
+    });
+
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "/tmp is full",
       agent: "helper",
       skill: "pdf",
     });

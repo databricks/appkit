@@ -91,6 +91,9 @@ export function AgentChat() {
   const { content, isStreaming, error, send } = useAgentChat({
     agent: activeAgent ?? '',
     onEvent: handleEvent,
+    // Gate `/skill` sugar on the real catalog so a stray `/word` isn't
+    // parsed as a skill (see useAgentChat's `skills` option).
+    skills: activeSkills.map((s) => s.name),
   });
 
   // Mirror the streaming `content` into the pending assistant message so
