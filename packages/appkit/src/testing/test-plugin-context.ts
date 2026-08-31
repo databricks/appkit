@@ -5,7 +5,7 @@ import type {
   IAppRequest,
   ToolProvider,
 } from "shared";
-import { afterEach } from "vitest";
+import { afterEach, onTestFinished } from "vitest";
 
 import { CacheManager } from "../cache";
 import { InMemoryStorage } from "../cache/storage";
@@ -438,11 +438,21 @@ function createTestPluginContextWithOptions(
     serviceContextMock.restore();
   };
 
-  // Register an afterEach to auto-restore when used in a test
-  // This allows cleanup to happen automatically after the test
-  afterEach(() => {
-    restore();
-  });
+  // Auto-restore after the current test. This helper is documented and used
+  // from inside a test body, where a runtime-registered `afterEach` does NOT run
+  // for that test (Vitest only collects `afterEach` before the test runs) — the
+  // reason the old `afterEach` here silently leaked. `onTestFinished` is the hook
+  // built for runtime registration and fires after the creating test. If called
+  // at collection scope instead, it throws, so fall back to `afterEach` there.
+  try {
+    onTestFinished(() => {
+      restore();
+    });
+  } catch {
+    afterEach(() => {
+      restore();
+    });
+  }
 
   // Return the context with the restore method
   return {

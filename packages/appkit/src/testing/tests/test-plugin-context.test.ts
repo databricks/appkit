@@ -1,5 +1,5 @@
 import type express from "express";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { PluginContext } from "../../core/plugin-context";
 import { Plugin } from "../../plugin";
@@ -480,26 +480,31 @@ describe("createTestPluginContext — optional second parameter (options overloa
     }
   });
 
-  test("service context is auto-restored after test via afterEach", async () => {
-    const { ServiceContext } = await import("../../context/service-context");
+  // Proves the options overload auto-restores the service-context spies after
+  // the creating test WITHOUT a manual restore(). Split across two ordered tests
+  // because the cleanup fires between them: the second test would fail if the
+  // hook did not run for the first (the runtime-`afterEach` bug this replaced).
+  describe("service context auto-restore (no manual restore)", () => {
+    test("the mock is active inside the test that created it", async () => {
+      const { ServiceContext } = await import("../../context/service-context");
 
-    const mock = createTestPluginContext(
-      {},
-      {
-        responses: { "jobs.getRun": { state: "DONE" } },
-      },
-    );
+      // Intentionally NO manual restore() — auto-cleanup must handle it.
+      createTestPluginContext(
+        {},
+        { responses: { "jobs.getRun": { state: "DONE" } } },
+      );
 
-    // Inside the test, the mock service context is active
-    expect(ServiceContext.isInitialized()).toBe(true);
+      expect(ServiceContext.isInitialized()).toBe(true);
+      expect(vi.isMockFunction(ServiceContext.isInitialized)).toBe(true);
+    });
 
-    // Simulate afterEach cleanup (call restore)
-    if ("restore" in mock && typeof mock.restore === "function") {
-      mock.restore();
-    }
+    test("the previous test's service-context spies were auto-restored", async () => {
+      const { ServiceContext } = await import("../../context/service-context");
 
-    // restore() reverts the service-context spies; the asserted-revert case
-    // is covered by the env-restore test above.
+      // If auto-restore fired after the test above, the spy is gone and the real
+      // static method is back.
+      expect(vi.isMockFunction(ServiceContext.isInitialized)).toBe(false);
+    });
   });
 
   test("combines fakes and responses in a single call", async () => {
