@@ -3,7 +3,10 @@ import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import type { WorkspaceClient } from "../../workspace-client";
+import type {
+  StatementResponse,
+  WorkspaceClient,
+} from "../../workspace-client";
 import {
   type DescribeFormatMemo,
   describeAdaptive,
@@ -270,6 +273,31 @@ describe("describeAdaptive", () => {
     | DatabricksStatementExecutionResponse
     | Promise<DatabricksStatementExecutionResponse>;
 
+  // Adapt a local snake_case fixture to the modular SDK's camelCase
+  // StatementResponse — the shape executeStatement now returns; describeAdaptive
+  // maps it back to the local shape via toDescribeResponse.
+  function asSdkResponse(
+    r: DatabricksStatementExecutionResponse,
+  ): StatementResponse {
+    return {
+      statementId: r.statement_id,
+      status: r.status && {
+        state: r.status.state,
+        error: r.status.error && {
+          errorCode: r.status.error.error_code,
+          message: r.status.error.message,
+        },
+      },
+      manifest: r.manifest && { format: r.manifest.format },
+      result: r.result && {
+        dataArray: r.result.data_array,
+        attachment: r.result.attachment,
+        nextChunkIndex: r.result.next_chunk_index,
+        nextChunkInternalLink: r.result.next_chunk_internal_link,
+      },
+    } as unknown as StatementResponse;
+  }
+
   // Minimal WorkspaceClient stub: records the formats requested and delegates
   // each executeStatement to behavior(format), which may resolve or throw.
   function stubClient(behavior: StubBehavior) {
@@ -278,7 +306,7 @@ describe("describeAdaptive", () => {
       statementExecution: {
         executeStatement: async (req: { format: string }) => {
           formats.push(req.format);
-          return behavior(req.format);
+          return asSdkResponse(await behavior(req.format));
         },
       },
     } as unknown as WorkspaceClient;

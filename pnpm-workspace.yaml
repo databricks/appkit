@@ -18,3 +18,5 @@ allowBuilds:
   core-js-pure: false
   esbuild: true
   protobufjs: false
+patchedDependencies:
+  '@databricks/sdk-statementexecution@0.46.0': patches/@databricks__sdk-statementexecution@0.46.0.patch

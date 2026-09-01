@@ -1,5 +1,5 @@
 import { createLogger } from "../logging/logger";
-import type { WorkspaceClient } from "../workspace-client";
+import type { StatementResponse, WorkspaceClient } from "../workspace-client";
 import { getErrorMessage } from "./errors";
 import type { DatabricksStatementExecutionResponse } from "./types";
 
@@ -148,6 +148,42 @@ function isFormatRejection(
 }
 
 /**
+ * Adapt the modular SDK's camelCase {@link StatementResponse} onto the
+ * type-generator's own snake_case {@link DatabricksStatementExecutionResponse}
+ * — the shape every downstream DESCRIBE parser (and every mocked test) reads.
+ * Keeping the boundary here means only this mapper touches the SDK shape;
+ * {@link normalizeResultRows} and the parsers stay unchanged. `attachment`
+ * survives thanks to the pinned pnpm patch on `@databricks/sdk-statementexecution`.
+ */
+function toDescribeResponse(
+  r: StatementResponse,
+): DatabricksStatementExecutionResponse {
+  return {
+    statement_id: r.statementId ?? "",
+    status: {
+      state: r.status?.state ?? "",
+      error: r.status?.error
+        ? {
+            error_code: r.status.error.errorCode,
+            message: r.status.error.message,
+          }
+        : undefined,
+    },
+    manifest: r.manifest ? { format: r.manifest.format } : undefined,
+    result: r.result
+      ? {
+          // DESCRIBE rows are always string/null cells. Local key stays
+          // snake_case (`data_array`); value is the SDK's camelCase `dataArray`.
+          data_array: r.result.dataArray as (string | null)[][] | undefined,
+          attachment: r.result.attachment,
+          next_chunk_index: r.result.nextChunkIndex,
+          next_chunk_internal_link: r.result.nextChunkInternalLink,
+        }
+      : undefined,
+  };
+}
+
+/**
  * Run a DESCRIBE and return a response whose rows are readable via
  * `result.data_array`, adapting to the warehouse's result-format capability.
  *
@@ -175,15 +211,17 @@ export async function describeAdaptive(
   let lastError: unknown;
   for (const format of formats) {
     try {
-      const response = (await client.statementExecution.executeStatement({
-        statement,
-        warehouse_id: warehouseId,
-        // Synchronous wait: without it the call can return PENDING/RUNNING with
-        // no rows, which downstream misreads as a no-result degrade.
-        wait_timeout: "30s",
-        format,
-        disposition: "INLINE",
-      })) as DatabricksStatementExecutionResponse;
+      const response = toDescribeResponse(
+        await client.statementExecution.executeStatement({
+          statement,
+          warehouseId,
+          // Synchronous wait: without it the call can return PENDING/RUNNING with
+          // no rows, which downstream misreads as a no-result degrade.
+          waitTimeout: "30s",
+          format,
+          disposition: "INLINE",
+        }),
+      );
       const normalized = await normalizeResultRows(response);
       if (
         normalized.status?.state === "FAILED" &&

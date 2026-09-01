@@ -23,3 +23,5 @@ export {
   TimeUnits,
 } from "./legacy";
 export type { files, jobs, serving, sql, WorkspaceClient } from "./types";
+// Modular SDK client + model types (warehouses).
+export type * from "./modular";

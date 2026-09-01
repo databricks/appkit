@@ -21,7 +21,7 @@ vi.mock("../../workspace-client", async (importOriginal) => {
     ...actual,
     createWorkspaceClient: () => ({
       statementExecution: { executeStatement: mocks.executeStatement },
-      warehouses: { get: mocks.getWarehouse, start: vi.fn() },
+      warehouses: { getWarehouse: mocks.getWarehouse, startWarehouse: vi.fn() },
     }),
   };
 });
