@@ -1,0 +1,34 @@
+diff --git a/dist/v1/model.d.ts b/dist/v1/model.d.ts
+index e8d95659ea348b384a3d32b6a3d4f754287b38b6..705b9bed203981a2f3cde5417ed8019ff3a7065c 100644
+--- a/dist/v1/model.d.ts
++++ b/dist/v1/model.d.ts
+@@ -385,6 +385,8 @@ interface QueryTag {
+  * link is returned.)
+  */
+ interface ResultData {
++  /** PATCH(appkit): Reyden's non-standard INLINE ARROW_STREAM payload (base64 Arrow IPC). */
++  attachment?: string | undefined;
+   externalLinks?: ExternalLink[] | undefined;
+   /**
+    * The `JSON_ARRAY` format is an array of arrays of values, where each non-null value is
+diff --git a/dist/v1/model.js b/dist/v1/model.js
+index fc35e28bbad5e7e873c14f6492696f9086ec9280..3bd78f3ad2dea39cdc883fa0daddb940e99e83b9 100644
+--- a/dist/v1/model.js
++++ b/dist/v1/model.js
+@@ -177,10 +177,15 @@ const unmarshalResultDataSchema = z.object({
+ 		z.string()
+ 	]).transform((v) => BigInt(v)).optional(),
+ 	next_chunk_index: z.number().optional(),
+-	next_chunk_internal_link: z.string().optional()
++	next_chunk_internal_link: z.string().optional(),
++	// PATCH(appkit): preserve Reyden's non-standard INLINE ARROW_STREAM `attachment`
++	// (base64 Arrow IPC). The generated schema + rebuild-transform would otherwise
++	// strip it, breaking the inline-arrow delivery path. See patches/ for rationale.
++	attachment: z.string().optional()
+ }).transform((d) => ({
+ 	externalLinks: d.external_links,
+ 	dataArray: d.data_array,
++	attachment: d.attachment,
+ 	chunkIndex: d.chunk_index,
+ 	rowOffset: d.row_offset,
+ 	rowCount: d.row_count,

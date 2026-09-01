@@ -145,7 +145,7 @@ describe("Analytics Plugin", () => {
         expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM test",
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
       );
@@ -222,7 +222,7 @@ describe("Analytics Plugin", () => {
         expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM users WHERE id = :user_id",
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
       );
@@ -619,7 +619,7 @@ describe("Analytics Plugin", () => {
         expect.objectContaining({
           statement: "SELECT * FROM test",
           parameters: [],
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
       );
@@ -654,7 +654,7 @@ describe("Analytics Plugin", () => {
         expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM test",
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
           disposition: "INLINE",
           format: "ARROW_STREAM",
         }),
@@ -1667,7 +1667,7 @@ describe("Analytics Plugin", () => {
               result: { data: [] },
             }),
           },
-          warehouses: { get: warehouseGet, start: vi.fn() },
+          warehouses: { getWarehouse: warehouseGet, startWarehouse: vi.fn() },
         },
       });
       const mockReq = createMockRequest({
@@ -1724,7 +1724,7 @@ describe("Analytics Plugin", () => {
       serviceContextMock = await mockServiceContext({
         serviceDatabricksClient: {
           statementExecution: { executeStatement: vi.fn() },
-          warehouses: { get: warehouseGet, start: vi.fn() },
+          warehouses: { getWarehouse: warehouseGet, startWarehouse: vi.fn() },
         },
       });
       const mockReq = createMockRequest({
@@ -1769,7 +1769,7 @@ describe("Analytics Plugin", () => {
       serviceContextMock = await mockServiceContext({
         serviceDatabricksClient: {
           statementExecution: { executeStatement: vi.fn() },
-          warehouses: { get: warehouseGet, start: vi.fn() },
+          warehouses: { getWarehouse: warehouseGet, startWarehouse: vi.fn() },
         },
       });
       const mockReq = createMockRequest({
