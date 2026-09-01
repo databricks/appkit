@@ -45,19 +45,19 @@ describe("discoverEvalFiles", () => {
 
 describe("discoverEvalConfigs", () => {
   test("finds each agent's evals.config.ts, omits agents without one", () => {
-    write("config/agents/support/evals/basic.eval.ts");
-    write("config/agents/support/evals/evals.config.ts");
-    write("config/agents/analyst/evals/sql.eval.ts");
+    write("server/agents/support/evals/basic.eval.ts");
+    write("server/agents/support/evals/evals.config.ts");
+    write("server/agents/analyst/evals/sql.eval.ts");
 
     const found = discoverEvalConfigs(root);
 
     expect(found.map((c) => c.agent)).toEqual(["support"]);
     expect(found[0].file).toBe(
-      path.join(root, "config/agents/support/evals/evals.config.ts"),
+      path.join(root, "server/agents/support/evals/evals.config.ts"),
     );
   });
 
-  test("returns empty when there is no config/agents dir", () => {
+  test("returns empty when there is no server/agents dir", () => {
     expect(discoverEvalConfigs(root)).toEqual([]);
   });
 });

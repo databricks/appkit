@@ -498,7 +498,15 @@ export async function runEvalsInDir(
         ...options,
         timeoutMs: options.timeoutMs ?? configs.get(d.agent)?.timeoutMs,
       };
-      await runDiscovered(d, index, total, runId, fileOptions, emit, fileResults);
+      await runDiscovered(
+        d,
+        index,
+        total,
+        runId,
+        fileOptions,
+        emit,
+        fileResults,
+      );
       return fileResults;
     });
     const results = perFile.flat();
