@@ -26,7 +26,7 @@ describe("Analytics Plugin Integration", () => {
   let app: TestApp<[ReturnType<typeof analytics>]>;
   /** The SQL mock the analytics route drives, via the harness's client. */
   let executeStatement: ReturnType<typeof getMock>;
-  let getStatement: ReturnType<typeof getMock>;
+  let getStatementResult: ReturnType<typeof getMock>;
 
   beforeAll(async () => {
     // The harness owns the env setup, the singleton resets, the mock client, the
@@ -36,7 +36,10 @@ describe("Analytics Plugin Integration", () => {
       app.client,
       "statementExecution.executeStatement",
     );
-    getStatement = getMock(app.client, "statementExecution.getStatement");
+    getStatementResult = getMock(
+      app.client,
+      "statementExecution.getStatementResult",
+    );
   });
 
   afterAll(async () => {
@@ -48,7 +51,7 @@ describe("Analytics Plugin Integration", () => {
     // Reset drops the built-in canned SUCCEEDED default too, matching the
     // "script it yourself" semantics this suite relied on before.
     executeStatement.mockReset();
-    getStatement.mockReset();
+    getStatementResult.mockReset();
     getAppQuerySpy.mockReset();
   });
 
@@ -60,8 +63,8 @@ describe("Analytics Plugin Integration", () => {
         ["Bob", "25"],
       ];
       const mockColumns = [
-        { name: "name", type_name: "STRING" },
-        { name: "age", type_name: "STRING" },
+        { name: "name", typeName: "STRING" },
+        { name: "age", typeName: "STRING" },
       ];
 
       getAppQuerySpy.mockResolvedValueOnce({
@@ -93,7 +96,7 @@ describe("Analytics Plugin Integration", () => {
       expect(executeStatement).toHaveBeenCalledWith(
         expect.objectContaining({
           statement: testQuery,
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.anything(),
       );

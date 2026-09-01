@@ -629,19 +629,19 @@ export async function runWithRequestContext<T>(
  */
 export function createSuccessfulSQLResponse(
   data: Any[][],
-  columns: Array<{ name: string; type_name?: string }>,
+  columns: Array<{ name: string; typeName?: string }>,
 ) {
   return {
     status: { state: "SUCCEEDED" },
-    statement_id: `stmt-${Date.now()}`,
+    statementId: `stmt-${Date.now()}`,
     result: {
-      data_array: data,
+      dataArray: data,
     },
     manifest: {
       schema: {
         columns: columns.map((col) => ({
           name: col.name,
-          type_name: col.type_name ?? "STRING",
+          typeName: col.typeName ?? "STRING",
         })),
       },
     },
@@ -657,7 +657,7 @@ export function createFailedSQLResponse(errorMessage: string) {
         message: errorMessage,
       },
     },
-    statement_id: `stmt-${Date.now()}`,
+    statementId: `stmt-${Date.now()}`,
   };
 }
 

@@ -1,18 +1,18 @@
-import type { sql } from "../../workspace-client";
+import type { ExecuteStatementRequest } from "../../workspace-client";
 
 interface ExecuteStatementDefaults {
-  wait_timeout: string;
-  disposition: sql.ExecuteStatementRequest["disposition"];
-  format: sql.ExecuteStatementRequest["format"];
-  on_wait_timeout: sql.ExecuteStatementRequest["on_wait_timeout"];
+  waitTimeout: string;
+  disposition: ExecuteStatementRequest["disposition"];
+  format: ExecuteStatementRequest["format"];
+  onWaitTimeout: ExecuteStatementRequest["onWaitTimeout"];
   timeout: number;
 }
 
 // @TODO: Make these configurable globally and validate right values
 export const executeStatementDefaults: ExecuteStatementDefaults = {
-  wait_timeout: "30s",
+  waitTimeout: "30s",
   disposition: "INLINE",
   format: "JSON_ARRAY",
-  on_wait_timeout: "CONTINUE",
+  onWaitTimeout: "CONTINUE",
   timeout: 60000,
 };
