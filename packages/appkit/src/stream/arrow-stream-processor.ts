@@ -1,10 +1,8 @@
 import { ExecutionError, ValidationError } from "../errors";
 import { createLogger } from "../logging/logger";
-import type { sql } from "../workspace-client";
+import type { ExternalLink } from "../workspace-client";
 
 const logger = createLogger("stream:arrow");
-
-type ExternalLink = sql.ExternalLink;
 
 /**
  * Re-mint a chunk's pre-signed URL. DBSQL external links expire in <= 15 min,
@@ -83,11 +81,11 @@ export class ArrowStreamProcessor {
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    let externalLink = chunk.external_link;
+    let externalLink = chunk.externalLink;
     if (!externalLink) {
       // A missing link cannot be fixed by retrying — fail loudly.
       throw ExecutionError.statementFailed(
-        `External link missing for chunk ${chunk.chunk_index}`,
+        `External link missing for chunk ${chunk.chunkIndex}`,
       );
     }
 
@@ -114,7 +112,7 @@ export class ArrowStreamProcessor {
         clearTimeout(timer);
         if (!r.ok) {
           throw ExecutionError.statementFailed(
-            `Failed to download chunk ${chunk.chunk_index}: ${r.status} ${r.statusText}`,
+            `Failed to download chunk ${chunk.chunkIndex}: ${r.status} ${r.statusText}`,
           );
         }
         // Keep this attempt's controller alive to drive the body read + idle
@@ -134,16 +132,16 @@ export class ArrowStreamProcessor {
           // chunk's link — a stale URL would just 403 again on the same address.
           // Only meaningful before any bytes are yielded (below), which is why
           // this lives in the establish-response loop.
-          if (refresh && chunk.chunk_index != null) {
+          if (refresh && chunk.chunkIndex != null) {
             try {
-              const fresh = await refresh(chunk.chunk_index, signal);
-              if (fresh?.external_link) externalLink = fresh.external_link;
+              const fresh = await refresh(chunk.chunkIndex, signal);
+              if (fresh?.externalLink) externalLink = fresh.externalLink;
             } catch (refreshError) {
               // Keep retrying the current URL; surface the original error if
               // all attempts fail.
               logger.warn(
                 "Failed to re-resolve link for chunk %s: %O",
-                chunk.chunk_index,
+                chunk.chunkIndex,
                 refreshError,
               );
             }
@@ -154,7 +152,7 @@ export class ArrowStreamProcessor {
 
     if (!response || !controller) {
       throw ExecutionError.statementFailed(
-        `Failed to download chunk ${chunk.chunk_index} after ${this.options.retries} attempts: ${
+        `Failed to download chunk ${chunk.chunkIndex} after ${this.options.retries} attempts: ${
           lastError instanceof Error ? lastError.message : String(lastError)
         }`,
       );
@@ -194,13 +192,13 @@ export class ArrowStreamProcessor {
       if (signal?.aborted) throw ExecutionError.canceled();
       logger.error(
         "Failed streaming chunk %s body: %O",
-        chunk.chunk_index,
+        chunk.chunkIndex,
         error,
       );
       throw error instanceof ExecutionError
         ? error
         : ExecutionError.statementFailed(
-            `Failed streaming chunk ${chunk.chunk_index}: ${
+            `Failed streaming chunk ${chunk.chunkIndex}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );

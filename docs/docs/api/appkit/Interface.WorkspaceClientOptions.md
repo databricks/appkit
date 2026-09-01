@@ -38,6 +38,16 @@ Databricks host, e.g. https://my-workspace.cloud.databricks.com. Defaults to DAT
 
 ***
 
+### profile?
+
+```ts
+optional profile: string;
+```
+
+`~/.databrickscfg` profile name. Used when no host/token is provided.
+
+***
+
 ### token?
 
 ```ts

@@ -47,7 +47,12 @@
   "dependencies": {
     "@ast-grep/napi": "0.37.0",
     "@clack/prompts": "1.0.1",
+    "@databricks/sdk-auth": "0.46.0",
+    "@databricks/sdk-core": "0.46.0",
     "@databricks/sdk-experimental": "0.17.0",
+    "@databricks/sdk-options": "0.46.0",
+    "@databricks/sdk-statementexecution": "0.46.0",
+    "@databricks/sdk-warehouses": "0.46.0",
     "@standard-schema/spec": "1.1.0",
     "commander": "12.1.0",
     "dotenv": "16.6.1",

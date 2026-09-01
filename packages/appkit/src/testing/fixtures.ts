@@ -344,12 +344,12 @@ export function createMockWorkspaceClient() {
         result: { data: [] },
       }),
     },
-    // Analytics route now calls `warehouses.get` before issuing SQL to
+    // Analytics route now calls `warehouses.getWarehouse` before issuing SQL to
     // ensure the warehouse is RUNNING. Default to RUNNING so existing
     // tests that only care about SQL behaviour aren't affected.
     warehouses: {
-      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
-      start: vi.fn().mockResolvedValue(undefined),
+      getWarehouse: vi.fn().mockResolvedValue({ state: "RUNNING" }),
+      startWarehouse: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
@@ -503,19 +503,19 @@ export async function runWithRequestContext<T>(
  */
 export function createSuccessfulSQLResponse(
   data: Any[][],
-  columns: Array<{ name: string; type_name?: string }>,
+  columns: Array<{ name: string; typeName?: string }>,
 ) {
   return {
     status: { state: "SUCCEEDED" },
-    statement_id: `stmt-${Date.now()}`,
+    statementId: `stmt-${Date.now()}`,
     result: {
-      data_array: data,
+      dataArray: data,
     },
     manifest: {
       schema: {
         columns: columns.map((col) => ({
           name: col.name,
-          type_name: col.type_name ?? "STRING",
+          typeName: col.typeName ?? "STRING",
         })),
       },
     },
@@ -531,32 +531,32 @@ export function createFailedSQLResponse(errorMessage: string) {
         message: errorMessage,
       },
     },
-    statement_id: `stmt-${Date.now()}`,
+    statementId: `stmt-${Date.now()}`,
   };
 }
 
 /**
- * A WorkspaceClient whose `executeStatement`/`getStatement` are bare `vi.fn()`s
- * (no default resolution) so a test can script exactly what SQL returns.
- * `warehouses.get` defaults to RUNNING.
+ * A WorkspaceClient whose `executeStatement`/`getStatementResult` are bare
+ * `vi.fn()`s (no default resolution) so a test can script exactly what SQL
+ * returns. `warehouses.getWarehouse` defaults to RUNNING.
  */
 export function createConfigurableMockWorkspaceClient() {
   const executeStatement = vi.fn();
-  const getStatement = vi.fn();
-  // Analytics route now calls `warehouses.get` before issuing SQL; default to
-  // RUNNING so callers that don't care about warehouse readiness don't have
-  // to wire it up.
+  const getStatementResult = vi.fn();
+  // Analytics route now calls `warehouses.getWarehouse` before issuing SQL;
+  // default to RUNNING so callers that don't care about warehouse readiness
+  // don't have to wire it up.
   const warehousesGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
   const warehousesStart = vi.fn().mockResolvedValue(undefined);
 
   const client = {
     statementExecution: {
       executeStatement,
-      getStatement,
+      getStatementResult,
     },
     warehouses: {
-      get: warehousesGet,
-      start: warehousesStart,
+      getWarehouse: warehousesGet,
+      startWarehouse: warehousesStart,
     },
   };
 
@@ -564,7 +564,7 @@ export function createConfigurableMockWorkspaceClient() {
     client,
     mocks: {
       executeStatement,
-      getStatement,
+      getStatementResult,
       warehousesGet,
       warehousesStart,
     },

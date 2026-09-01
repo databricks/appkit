@@ -12,11 +12,19 @@ import {
   type LegacyWorkspaceClient,
   type WorkspaceClientOptions,
 } from "./legacy";
+import {
+  buildStatementExecutionClient,
+  buildWarehousesClient,
+  type StatementExecutionClient,
+  type WarehousesClient,
+} from "./modular";
 import type { WorkspaceClient } from "./types";
 
 export class AppKitWorkspaceClient implements WorkspaceClient {
   readonly #opts: WorkspaceClientOptions;
   #legacy?: LegacyWorkspaceClient;
+  #warehouses?: WarehousesClient;
+  #statementExecution?: StatementExecutionClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -26,8 +34,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getLegacy().files;
   }
 
-  get warehouses() {
-    return this.#getLegacy().warehouses;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get warehouses(): WarehousesClient {
+    if (!this.#warehouses) {
+      this.#warehouses = buildWarehousesClient(this.#opts);
+    }
+    return this.#warehouses;
   }
 
   get genie() {
@@ -38,8 +50,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getLegacy().jobs;
   }
 
-  get statementExecution() {
-    return this.#getLegacy().statementExecution;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get statementExecution(): StatementExecutionClient {
+    if (!this.#statementExecution) {
+      this.#statementExecution = buildStatementExecutionClient(this.#opts);
+    }
+    return this.#statementExecution;
   }
 
   get servingEndpoints() {
