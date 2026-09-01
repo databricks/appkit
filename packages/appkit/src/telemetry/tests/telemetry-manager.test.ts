@@ -270,15 +270,23 @@ describe("TelemetryManager", () => {
       expect(processor.startedSpans).toContain("contributed.span");
     });
 
-    test("start() is idempotent", () => {
+    test("start() is idempotent (no rebuild / double-attach)", async () => {
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
       const processor = recordingProcessor();
 
       TelemetryManager.initialize({ serviceName: "idempotent" });
       TelemetryManager.registerSpanProcessor(processor as any);
       TelemetryManager.start();
+      TelemetryManager.start(); // second call must not rebuild or re-attach
 
-      expect(() => TelemetryManager.start()).not.toThrow();
+      const tracer =
+        TelemetryManager.getProvider("idempotent-plugin").getTracer();
+      await tracer.startActiveSpan("once.span", {}, async (span) => {
+        span.end();
+      });
+
+      // A provider rebuilt on the second start() would double-record the span.
+      expect(processor.startedSpans).toEqual(["once.span"]);
     });
 
     test("registerSpanProcessor after start() is ignored (not attached)", async () => {
@@ -303,9 +311,13 @@ describe("TelemetryManager", () => {
     test("start() with no OTLP endpoint and no processors is a no-op", () => {
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
 
+      const before = trace.getTracerProvider();
       TelemetryManager.initialize({ serviceName: "no-telemetry" });
+      TelemetryManager.start();
 
-      expect(() => TelemetryManager.start()).not.toThrow();
+      // Nothing to export → the spanProcessors.length===0 early return means NO
+      // global tracer provider was registered (the API still returns the proxy).
+      expect(trace.getTracerProvider()).toBe(before);
     });
 
     test("metrics obtained after initialize() (before start()) still record", () => {
@@ -313,7 +325,13 @@ describe("TelemetryManager", () => {
       // initialize(), not start(), because OTel's metrics API has no lazy proxy.
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
+      const noop = metrics.getMeterProvider();
       TelemetryManager.initialize({ serviceName: "eager-metrics" });
+      // A REAL meter provider is registered by initialize(), before start() —
+      // not the NoOp. A `counter.add(...).not.toThrow()` assertion would pass
+      // against the NoOp meter too, so it can't detect a regression that moved
+      // registration into start(); this comparison can.
+      expect(metrics.getMeterProvider()).not.toBe(noop);
 
       // Instrument bound BEFORE start() — mirrors connector/cache constructors.
       const meter = TelemetryManager.getProvider("metrics-plugin").getMeter();

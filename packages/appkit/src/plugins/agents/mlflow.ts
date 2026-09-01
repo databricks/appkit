@@ -22,18 +22,35 @@ let initConfig: MlflowInitConfig | undefined;
 let gatedProcessor: GatedMlflowSpanProcessor | undefined;
 
 /**
- * Wraps mlflow's OTel `SpanProcessor` so it stays inert until mlflow's global
- * config is seeded. mlflow's `onStart` calls its own `getConfig()`, which THROWS
- * before `init()` runs — and that throw propagates out of `tracer.startSpan()`,
- * so it would break unrelated AppKit spans (HTTP, analytics) created between
- * `TelemetryManager.start()` and the first agent turn. We contribute this to
- * AppKit's single tracer provider during `setup()`, but only start forwarding
- * once `ready()` is called — right after the lazy `init()` in {@link ensureConfigured}.
+ * Wraps mlflow's OTel `SpanProcessor` and scopes it to agent traces. Two jobs:
  *
- * It also drops the exporters' own outbound spans (parentless CLIENT spans —
- * outgoing requests made outside any agent turn, e.g. mlflow/OTLP shipping a
- * trace). Forwarding those would loop: each upload is an HTTP call that
- * auto-instrumentation turns into a new span to trace and upload.
+ * 1. Stay inert until ready. mlflow's `onStart` calls its own `getConfig()`,
+ *    which THROWS before `init()` runs — and that throw propagates out of
+ *    `tracer.startSpan()`, so it would break unrelated AppKit spans (HTTP,
+ *    analytics) created between `TelemetryManager.start()` and the first agent
+ *    turn. We contribute this to AppKit's single tracer provider during
+ *    `setup()`, but only start forwarding once `ready()` is called — right after
+ *    the `init()` in {@link ensureConfigured}.
+ *
+ * 2. Let only agent turns become MLflow traces. mlflow roots a trace at EVERY
+ *    parentless span, and AppKit's single provider carries every HTTP/DB span —
+ *    so unscoped, every request would become an MLflow trace. mlflow tags only
+ *    its own spans (`mlflow.spanType`, set AFTER `onStart`), so the call is made
+ *    at the root's `onEnd`: forward it (mlflow exports the trace) only if some
+ *    span in the trace was an mlflow span; otherwise `popTrace` to discard the
+ *    trace mlflow built in memory. Children end before their root, so the flag
+ *    is set by the time the root decides.
+ *
+ * It also drops the exporters' own outbound spans at `onStart` (parentless
+ * CLIENT — outgoing requests made outside any agent turn, e.g. mlflow/OTLP
+ * shipping a trace). Forwarding those would loop: each upload is an HTTP call
+ * that auto-instrumentation turns into a new span to trace and upload.
+ *
+ * ponytail: non-agent requests still build (then discard) an in-memory trace
+ * tree — allocation-only, no network (export happens only when we forward the
+ * root's `onEnd`). Fine at normal QPS; if a very high-QPS app makes the churn
+ * matter, root MLflow at a detached agent span instead (costs the HTTP envelope
+ * on the trace and splits the OTLP trace).
  */
 export class GatedMlflowSpanProcessor implements SpanProcessor {
   #inner: SpanProcessor;
@@ -41,9 +58,26 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   // Spans we forwarded `onStart` for, so `onEnd` stays balanced — mlflow never
   // sees an end without a matching start.
   #forwarded = new WeakSet<object>();
+  // OTel trace ids that contained at least one mlflow (AGENT/TOOL) span, so the
+  // root's `onEnd` exports rather than discards. Cleared as each root ends.
+  #agentTraceIds = new Set<string>();
+  #popTrace: (otelTraceId: string) => void;
+  #spanTypeKey: string;
+  // Leak backstop for #agentTraceIds — far above real concurrency. See onEnd.
+  #maxTracked: number;
 
-  constructor(inner: SpanProcessor) {
+  constructor(
+    inner: SpanProcessor,
+    deps: {
+      popTrace: (otelTraceId: string) => void;
+      spanTypeKey: string;
+      maxTracked?: number;
+    },
+  ) {
     this.#inner = inner;
+    this.#popTrace = deps.popTrace;
+    this.#spanTypeKey = deps.spanTypeKey;
+    this.#maxTracked = deps.maxTracked ?? 1024;
   }
 
   ready(): void {
@@ -59,8 +93,7 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
     // an outgoing request made outside any agent turn — e.g. mlflow or OTLP
     // shipping a trace. Forwarding those would loop: each upload is itself an
     // HTTP call that auto-instrumentation turns into a new span to trace and
-    // upload. Spans inside a real request tree keep their parent (or are the
-    // incoming SERVER root), so they still flow through.
+    // upload.
     if (span.kind === SpanKind.CLIENT && !span.parentSpanContext?.spanId) {
       return;
     }
@@ -70,7 +103,40 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
 
   onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]): void {
     if (!this.#forwarded.has(span)) return;
-    this.#inner.onEnd(span);
+    const traceId = span.spanContext().traceId;
+    // An mlflow span (AGENT/TOOL) ended in this trace — mark it for export. The
+    // `mlflow.spanType` attribute is only present after `onStart`, so this is the
+    // earliest we can see it.
+    if (
+      span.attributes[this.#spanTypeKey] !== undefined &&
+      !this.#agentTraceIds.has(traceId)
+    ) {
+      // Normally an entry lives only until its root's onEnd deletes it. But a
+      // root that ends BEFORE its agent child (streaming client-disconnect) or
+      // never ends (crash) orphans the entry, and #agentTraceIds — unlike the
+      // GC-safe #forwarded WeakSet — is keyed by string, so it can't self-clean.
+      // FIFO-evict at the cap so an abandoned-trace pattern can't grow it
+      // unboundedly over process uptime.
+      // ponytail: evicting a still-live trace only mis-discards it, and that
+      // needs >#maxTracked concurrent agent turns — far above real load.
+      if (this.#agentTraceIds.size >= this.#maxTracked) {
+        const oldest = this.#agentTraceIds.values().next().value;
+        if (oldest !== undefined) this.#agentTraceIds.delete(oldest);
+      }
+      this.#agentTraceIds.add(traceId);
+    }
+    if (span.parentSpanContext?.spanId) {
+      // Non-root: mlflow's own `onEnd` early-returns, but forward for balance.
+      this.#inner.onEnd(span);
+      return;
+    }
+    // Root span: export only agent traces; discard everything else so plain HTTP
+    // requests never become MLflow traces. `delete` reports whether it was agent.
+    if (this.#agentTraceIds.delete(traceId)) {
+      this.#inner.onEnd(span);
+    } else {
+      this.#popTrace(traceId);
+    }
   }
 
   forceFlush(): Promise<void> {
@@ -88,17 +154,28 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
  * single global provider (OTLP + this processor), so agent spans reach both
  * MLflow and any OTLP endpoint without two SDKs racing for the global slot.
  *
+ * Also resolves the two hooks {@link GatedMlflowSpanProcessor} needs to scope
+ * forwarding to agent traces — `popTrace` (to discard non-agent traces) and the
+ * `mlflow.spanType` attribute key (to recognize an mlflow span) — so the gate's
+ * `onEnd` stays synchronous and all mlflow-internal coupling resolves here.
+ *
  * Deep-imports `mlflow-tracing` internals that aren't on its public entrypoint —
  * pinned to the exact version in package.json and guarded by a test that fails
  * loudly if a version bump renames them.
  */
-async function buildMlflowSpanProcessor(
-  config: MlflowInitConfig,
-): Promise<SpanProcessor> {
+async function buildMlflowSpanProcessor(config: MlflowInitConfig): Promise<{
+  processor: SpanProcessor;
+  popTrace: (otelTraceId: string) => void;
+  spanTypeKey: string;
+}> {
   const { createAuthProvider } = await import("mlflow-tracing/dist/auth");
   const { MlflowClient } = await import("mlflow-tracing");
   const { MlflowSpanExporter, MlflowSpanProcessor } =
     await import("mlflow-tracing/dist/exporters/mlflow");
+  const { InMemoryTraceManager } =
+    await import("mlflow-tracing/dist/core/trace_manager");
+  const { SpanAttributeKey } =
+    await import("mlflow-tracing/dist/core/constants");
 
   const authProvider = createAuthProvider({
     trackingUri: config.trackingUri,
@@ -111,9 +188,15 @@ async function buildMlflowSpanProcessor(
   // mlflow builds against a different @opentelemetry/sdk-trace-base major than
   // AppKit; the SpanProcessor contract (onStart/onEnd/forceFlush/shutdown) is
   // stable across them, so bridge the nominal type mismatch with one cast.
-  return new MlflowSpanProcessor(
+  const processor = new MlflowSpanProcessor(
     new MlflowSpanExporter(client),
   ) as unknown as SpanProcessor;
+  return {
+    processor,
+    popTrace: (otelTraceId) =>
+      InMemoryTraceManager.getInstance().popTrace(otelTraceId),
+    spanTypeKey: SpanAttributeKey.SPAN_TYPE,
+  };
 }
 
 /** The bound MLflow experiment id, from the optional `experiment` resource. */
@@ -144,7 +227,8 @@ function normalizedDatabricksHost(): string | undefined {
  * provider (which would race AppKit's and drop one exporter), we build mlflow's
  * span processor ourselves and contribute it to AppKit's single provider via
  * {@link TelemetryManager.registerSpanProcessor}. mlflow's global config is
- * seeded lazily in {@link ensureConfigured} on first trace, after `start()`.
+ * seeded by {@link startAgentTracing} on the `"setup:complete"` lifecycle event
+ * (after `start()`), with {@link ensureConfigured} as an idempotent lazy fallback.
  *
  * Auth is resolved by the `mlflow-tracing` SDK from the app's own Databricks
  * credentials — `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or a `~/.databrickscfg`
@@ -169,8 +253,12 @@ export async function initAgentTracing(): Promise<void> {
       experimentId: id,
       ...(host ? { host } : {}),
     };
-    const processor = await buildMlflowSpanProcessor(initConfig);
-    gatedProcessor = new GatedMlflowSpanProcessor(processor);
+    const { processor, popTrace, spanTypeKey } =
+      await buildMlflowSpanProcessor(initConfig);
+    gatedProcessor = new GatedMlflowSpanProcessor(processor, {
+      popTrace,
+      spanTypeKey,
+    });
     TelemetryManager.registerSpanProcessor(gatedProcessor);
     enabled = true;
     logger.info("MLflow agent tracing enabled (experiment %s)", id);
@@ -190,9 +278,11 @@ export interface SpanRecorder {
 const noopRecorder: SpanRecorder = { setOutputs() {} };
 
 /**
- * Seed mlflow's global config on first use — AFTER `TelemetryManager.start()`
- * has registered AppKit's provider. `init()` also stands up its own tracer
- * provider and tries to register it globally, but that loses to AppKit's
+ * Seed mlflow's global config once, AFTER `TelemetryManager.start()` has
+ * registered AppKit's provider — driven eagerly by {@link startAgentTracing} on
+ * `"setup:complete"`, or lazily by {@link trace} as a fallback. `init()` also
+ * stands up its own tracer provider and tries to register it globally, but that
+ * loses to AppKit's
  * already-registered provider (non-fatal); we call it only for the config
  * side-effect mlflow's span processor requires, then enable forwarding on the
  * gated processor. Returns whether tracing is usable.
@@ -200,7 +290,13 @@ const noopRecorder: SpanRecorder = { setOutputs() {} };
 function ensureConfigured(): boolean {
   if (configured) return enabled;
   configured = true;
-  if (!mlflow || !initConfig) return false;
+  // `gatedProcessor` guard is load-bearing: if buildMlflowSpanProcessor threw,
+  // `mlflow` and `initConfig` are still set but there is no gate. Calling
+  // `mlflow.init()` then would stand up mlflow's OWN ungated provider — and if
+  // AppKit registered none (no OTLP, no processor) it wins the global slot,
+  // routing every span into mlflow un-gated: the exact over-tracing + exporter
+  // loop this file exists to prevent.
+  if (!mlflow || !initConfig || !gatedProcessor) return false;
   try {
     mlflow.init(initConfig);
     gatedProcessor?.ready();
@@ -218,7 +314,10 @@ function ensureConfigured(): boolean {
  * server serves any request. Doing it here means the request's own root span is
  * already forwarded when the first turn runs, so that turn assembles into a
  * trace instead of being dropped (mlflow roots a trace only at the top-level
- * span). Idempotent, and `trace()` still seeds lazily as a fallback.
+ * span). Idempotent. `trace()` also seeds lazily, but that only fully rescues a
+ * turn whose agent span is itself the trace root; an HTTP-wrapped first turn
+ * seeded lazily loses its root span (already started — and dropped — before
+ * `ready()`), so this eager path is the reliable one.
  */
 export function startAgentTracing(): void {
   ensureConfigured();

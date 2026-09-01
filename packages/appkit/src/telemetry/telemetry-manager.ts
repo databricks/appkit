@@ -224,7 +224,8 @@ export class TelemetryManager {
    */
   registerInstrumentations(instrumentations: Instrumentation[]): void {
     otelRegisterInstrumentations({
-      //  global providers set by NodeSDK.start()
+      // Instrumentations bind to the global providers registered by start()
+      // (tracer) and _initialize() (meter/logger).
       instrumentations,
     });
   }
