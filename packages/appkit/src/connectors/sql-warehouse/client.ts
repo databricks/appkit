@@ -21,10 +21,14 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import {
-  Context,
-  type sql,
-  type WorkspaceClient,
+import type {
+  EndpointState,
+  ExecuteStatementRequest,
+  ExternalLink,
+  ResultData,
+  StatementResponse,
+  StatementStatus,
+  WorkspaceClient,
 } from "../../workspace-client";
 import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
@@ -40,14 +44,52 @@ const logger = createLogger("connectors:sql-warehouse");
  * Arrow result to match the JSON path. Returns `undefined` when the manifest
  * carries no columns.
  */
-function arrowColumnNames(
-  response: sql.StatementResponse,
-): string[] | undefined {
+function arrowColumnNames(response: StatementResponse): string[] | undefined {
   const cols = response.manifest?.schema?.columns;
   if (!cols || cols.length === 0) return undefined;
   return cols.map((c, i) =>
     c.name && c.name.length > 0 ? c.name : `column_${i}`,
   );
+}
+
+/**
+ * Coerce the modular SDK's `bigint` row/byte counts back to `number` (the type
+ * the legacy SDK used). AppKit never does arithmetic on these — they are purely
+ * informational — but a stray `bigint` makes `JSON.stringify` throw ("Do not
+ * know how to serialize a BigInt") the instant the result is cached or written
+ * to an SSE frame. Reyden's INLINE + ARROW_STREAM result — which the analytics
+ * arrow path caches — carries them on `result`/`manifest`, so normalize every
+ * statement response at the SDK boundary. Mutates in place (the response is a
+ * fresh unmarshalled object, owned by the caller).
+ */
+const BIGINT_COUNT_FIELDS = ["rowOffset", "rowCount", "byteCount"] as const;
+
+function normalizeResultCounts(result: unknown): void {
+  if (!result || typeof result !== "object") return;
+  const r = result as Record<string, unknown>;
+  for (const key of BIGINT_COUNT_FIELDS) {
+    if (typeof r[key] === "bigint") r[key] = Number(r[key]);
+  }
+  // EXTERNAL_LINKS entries carry the same count fields.
+  if (Array.isArray(r.externalLinks)) {
+    for (const link of r.externalLinks) normalizeResultCounts(link);
+  }
+}
+
+function normalizeStatementCounts<T extends StatementResponse>(response: T): T {
+  const manifest = response?.manifest as Record<string, unknown> | undefined;
+  if (manifest) {
+    for (const key of ["totalRowCount", "totalByteCount"] as const) {
+      if (typeof manifest[key] === "bigint")
+        manifest[key] = Number(manifest[key]);
+    }
+    // Per-chunk `BaseChunkInfo` entries carry the same bigint count fields.
+    if (Array.isArray(manifest.chunks)) {
+      for (const chunk of manifest.chunks) normalizeResultCounts(chunk);
+    }
+  }
+  normalizeResultCounts(response?.result);
+  return response;
 }
 
 /**
@@ -64,8 +106,8 @@ const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /**
  * Safety cap on how many additional EXTERNAL_LINKS chunks
  * {@link SQLWarehouseConnector._resolveAllExternalLinks} will follow when the
- * manifest omits `total_chunk_count`. High enough to cover any real result;
- * only bounds a misbehaving warehouse with a cyclic `next_chunk_index`.
+ * manifest omits `totalChunkCount`. High enough to cover any real result;
+ * only bounds a misbehaving warehouse with a cyclic `nextChunkIndex`.
  */
 const MAX_EXTERNAL_CHUNK_FOLLOWS = 10_000;
 
@@ -105,7 +147,7 @@ const WAREHOUSE_RUNNING_CACHE_TTL_MS = 30_000;
  */
 export interface WarehouseStatusUpdate {
   /** Current state from the SDK (RUNNING | STARTING | STOPPED | STOPPING | DELETED | DELETING). */
-  state: sql.State;
+  state: EndpointState;
   /** Milliseconds elapsed since `ensureWarehouseRunning` was called. */
   elapsedMs: number;
   /** 1-based attempt counter — useful for tests and telemetry. */
@@ -203,7 +245,7 @@ export class SQLWarehouseConnector {
 
   async executeStatement(
     workspaceClient: WorkspaceClient,
-    input: sql.ExecuteStatementRequest,
+    input: ExecuteStatementRequest,
     signal?: AbortSignal,
   ) {
     const startTime = Date.now();
@@ -220,7 +262,7 @@ export class SQLWarehouseConnector {
         kind: SpanKind.CLIENT,
         attributes: {
           "db.system": "databricks",
-          "db.warehouse_id": input.warehouse_id || "",
+          "db.warehouse_id": input.warehouseId || "",
           "db.catalog": input.catalog ?? "",
           "db.schema": input.schema ?? "",
           "db.statement": input.statement?.substring(0, 500) || "",
@@ -252,52 +294,52 @@ export class SQLWarehouseConnector {
             throw ValidationError.missingField("statement");
           }
 
-          if (!input.warehouse_id) {
+          if (!input.warehouseId) {
             throw ValidationError.missingField("warehouse_id");
           }
 
-          const body: sql.ExecuteStatementRequest = {
+          const body: ExecuteStatementRequest = {
             statement: input.statement,
             parameters: input.parameters,
-            warehouse_id: input.warehouse_id,
+            warehouseId: input.warehouseId,
             catalog: input.catalog,
             schema: input.schema,
-            wait_timeout:
-              input.wait_timeout || executeStatementDefaults.wait_timeout,
+            waitTimeout:
+              input.waitTimeout || executeStatementDefaults.waitTimeout,
             disposition:
               input.disposition || executeStatementDefaults.disposition,
             format: input.format || executeStatementDefaults.format,
-            byte_limit: input.byte_limit,
-            row_limit: input.row_limit,
-            on_wait_timeout:
-              input.on_wait_timeout || executeStatementDefaults.on_wait_timeout,
+            byteLimit: input.byteLimit,
+            rowLimit: input.rowLimit,
+            onWaitTimeout:
+              input.onWaitTimeout || executeStatementDefaults.onWaitTimeout,
           };
 
           span.addEvent("statement.submitting", {
-            "db.warehouse_id": input.warehouse_id,
+            "db.warehouse_id": input.warehouseId,
           });
 
           const response =
-            await workspaceClient.statementExecution.executeStatement(
-              body,
-              this._createContext(signal),
-            );
+            await workspaceClient.statementExecution.executeStatement(body, {
+              signal,
+            });
 
           if (!response) {
             throw ConnectionError.apiFailure("SQL Warehouse");
           }
+          normalizeStatementCounts(response);
           const status = response.status;
-          const statementId = response.statement_id as string;
+          const statementId = response.statementId as string;
 
           span.setAttribute("db.statement_id", statementId);
           span.addEvent("statement.submitted", {
-            "db.statement_id": response.statement_id,
+            "db.statement_id": response.statementId,
             "db.status": status?.state,
           });
 
           let result:
-            | sql.StatementResponse
-            | { result: { statement_id: string; status: sql.StatementStatus } };
+            | StatementResponse
+            | { result: { statement_id: string; status: StatementStatus } };
 
           switch (status?.state) {
             case "RUNNING":
@@ -322,7 +364,7 @@ export class SQLWarehouseConnector {
             case "FAILED":
               throw ExecutionError.statementFailed(
                 status.error?.message,
-                status.error?.error_code,
+                status.error?.errorCode,
               );
             case "CANCELED":
               throw ExecutionError.canceled();
@@ -336,7 +378,7 @@ export class SQLWarehouseConnector {
 
           const resultData = result.result as any;
           const rowCount =
-            resultData?.data?.length ?? resultData?.data_array?.length ?? 0;
+            resultData?.data?.length ?? resultData?.dataArray?.length ?? 0;
 
           if (rowCount > 0) {
             span.setAttribute("db.result.row_count", rowCount);
@@ -344,7 +386,7 @@ export class SQLWarehouseConnector {
 
           const duration = Date.now() - startTime;
           logger.event()?.setContext("sql-warehouse", {
-            warehouse_id: input.warehouse_id,
+            warehouse_id: input.warehouseId,
             rows_returned: rowCount,
             query_duration_ms: duration,
           });
@@ -385,7 +427,7 @@ export class SQLWarehouseConnector {
           }
 
           const attributes = {
-            "db.warehouse_id": input.warehouse_id,
+            "db.warehouse_id": input.warehouseId,
             "db.catalog": input.catalog ?? "",
             "db.schema": input.schema ?? "",
             "db.statement": input.statement?.substring(0, 500) || "",
@@ -622,9 +664,9 @@ export class SQLWarehouseConnector {
         );
       }
 
-      const info = await workspaceClient.warehouses.get(
+      const info = await workspaceClient.warehouses.getWarehouse(
         { id: warehouseId },
-        this._createContext(signal),
+        { signal },
       );
       const state = info?.state;
       const summary = info?.health?.summary;
@@ -650,9 +692,9 @@ export class SQLWarehouseConnector {
           if (!didStart) {
             emitter.emit("STARTING", summary);
             onWarehouseStartIssued?.();
-            await workspaceClient.warehouses.start(
+            await workspaceClient.warehouses.startWarehouse(
               { id: warehouseId },
-              this._createContext(signal),
+              { signal },
             );
             didStart = true;
           } else {
@@ -799,15 +841,14 @@ export class SQLWarehouseConnector {
             });
 
             const response =
-              await workspaceClient.statementExecution.getStatement(
-                {
-                  statement_id: statementId,
-                },
-                this._createContext(signal),
+              await workspaceClient.statementExecution.getStatementResult(
+                { statementId },
+                { signal },
               );
             if (!response) {
               throw ConnectionError.apiFailure("SQL Warehouse");
             }
+            normalizeStatementCounts(response);
 
             const status = response.status;
 
@@ -837,7 +878,7 @@ export class SQLWarehouseConnector {
               case "FAILED":
                 throw ExecutionError.statementFailed(
                   status.error?.message,
-                  status.error?.error_code,
+                  status.error?.errorCode,
                 );
               case "CANCELED":
                 throw ExecutionError.canceled();
@@ -871,13 +912,13 @@ export class SQLWarehouseConnector {
   }
 
   private async _transformDataArray(
-    response: sql.StatementResponse,
+    response: StatementResponse,
     workspaceClient: WorkspaceClient,
     signal?: AbortSignal,
   ) {
     if (response.manifest?.format === "ARROW_STREAM") {
       const result = response.result as
-        | (sql.ResultData & { attachment?: string })
+        | (ResultData & { attachment?: string })
         | undefined;
 
       // Inline Arrow: pass the base64 IPC attachment through unmodified so
@@ -893,20 +934,20 @@ export class SQLWarehouseConnector {
       // rather than omitting it) — it must NOT go down the streaming path
       // (`streamChunks([])` rejects), so fall through to synthesize an empty
       // Arrow table below.
-      if (result?.external_links && result.external_links.length > 0) {
+      if (result?.externalLinks && result.externalLinks.length > 0) {
         return this.updateWithArrowStatus(response, workspaceClient, signal);
       }
 
       // Empty result with a known schema: synthesize a zero-row Arrow IPC
       // attachment so the client always receives an Arrow Table for
       // ARROW_STREAM, regardless of whether the warehouse returned data.
-      // Note: an empty array (`data_array: []`) is truthy, so length-check
+      // Note: an empty array (`dataArray: []`) is truthy, so length-check
       // explicitly — otherwise zero-row responses fall through to the JSON
       // row transform below and return `[]` JSON rows instead of an Arrow
       // table.
       const hasNoRows =
-        !result?.data_array ||
-        (Array.isArray(result.data_array) && result.data_array.length === 0);
+        !result?.dataArray ||
+        (Array.isArray(result.dataArray) && result.dataArray.length === 0);
       if (hasNoRows && response.manifest?.schema?.columns) {
         const synthesized = buildEmptyArrowIPCBase64(
           response.manifest.schema.columns,
@@ -917,19 +958,19 @@ export class SQLWarehouseConnector {
         };
       }
 
-      // Inline data_array under ARROW_STREAM (rare): fall through to the
+      // Inline dataArray under ARROW_STREAM (rare): fall through to the
       // row transform below. The hook will receive `type: "result"` rows;
       // callers asking for ARROW_STREAM should not hit this path with
       // current Databricks warehouses.
     }
 
-    if (!response.result?.data_array || !response.manifest?.schema?.columns) {
+    if (!response.result?.dataArray || !response.manifest?.schema?.columns) {
       return response;
     }
 
     const columns = response.manifest.schema.columns;
 
-    const transformedData = response.result.data_array.map((row) => {
+    const transformedData = response.result.dataArray.map((row) => {
       const obj: Record<string, unknown> = {};
       row.forEach((value, index) => {
         const column = columns[index];
@@ -937,7 +978,7 @@ export class SQLWarehouseConnector {
 
         // attempt to parse JSON strings for string columns
         if (
-          column?.type_name === "STRING" &&
+          column?.typeName === "STRING" &&
           typeof value === "string" &&
           value &&
           (value[0] === "{" || value[0] === "[")
@@ -955,8 +996,8 @@ export class SQLWarehouseConnector {
       return obj;
     });
 
-    // remove data_array
-    const { data_array: _data_array, ...restResult } = response.result;
+    // remove dataArray
+    const { dataArray: _dataArray, ...restResult } = response.result;
     return {
       ...response,
       result: {
@@ -978,7 +1019,7 @@ export class SQLWarehouseConnector {
    * mechanism used for both INLINE and EXTERNAL_LINKS.
    */
   private _validateArrowAttachment(
-    response: sql.StatementResponse,
+    response: StatementResponse,
     attachment: string,
   ) {
     // Cap the size to protect against unbounded inline payloads from
@@ -1006,14 +1047,16 @@ export class SQLWarehouseConnector {
       return {
         ...response,
         result: {
-          ...(response.result as sql.ResultData & {
+          ...(response.result as ResultData & {
             attachment?: string;
             columnNames?: string[];
           }),
-          // `statement_id` is a top-level field, not on `ResultData` — carry it
+          // `statementId` is a top-level field, not on `ResultData` — carry it
           // onto the result (as the EXTERNAL_LINKS path does) so the route can
           // advertise it in `X-Appkit-Arrow-Columns-Ref` for wide inline schemas.
-          statement_id: response.statement_id,
+          // Kept as the synthetic `statement_id` key (the connector→route wire
+          // contract), sourced from the modular SDK's camelCase `statementId`.
+          statement_id: response.statementId,
           columnNames,
         },
       };
@@ -1023,26 +1066,26 @@ export class SQLWarehouseConnector {
   }
 
   private async updateWithArrowStatus(
-    response: sql.StatementResponse,
+    response: StatementResponse,
     workspaceClient: WorkspaceClient,
     signal?: AbortSignal,
   ): Promise<{
     result: {
       statement_id: string;
-      status: sql.StatementStatus;
+      status: StatementStatus;
       columnNames?: string[];
-      external_links?: sql.ExternalLink[];
+      external_links?: ExternalLink[];
       refreshChunkLink?: RefreshChunkLink;
     };
   }> {
-    const statementId = response.statement_id as string;
+    const statementId = response.statementId as string;
     return {
       result: {
         statement_id: statementId,
         status: {
           state: response.status?.state,
           error: response.status?.error,
-        } as sql.StatementStatus,
+        } as StatementStatus,
         columnNames: arrowColumnNames(response),
         // Resolve the pre-signed links for EVERY chunk in the caller's own
         // execution context. Streaming these directly (see
@@ -1069,9 +1112,9 @@ export class SQLWarehouseConnector {
   /**
    * Resolve pre-signed links for EVERY chunk of an EXTERNAL_LINKS result.
    *
-   * The execute/getStatement response carries only the first chunk's links
-   * (each link, except the last, exposes `next_chunk_index`); the remaining
-   * chunks are fetched with `getStatementResultChunkN`. Runs in the caller's
+   * The execute/getStatementResult response carries only the first chunk's links
+   * (each link, except the last, exposes `nextChunkIndex`); the remaining
+   * chunks are fetched with `getResultData`. Runs in the caller's
    * identity context (user creds for `.obo.sql`), so there is no cross-identity
    * fetch. Only the tiny link metadata is resolved eagerly — the bytes still
    * stream one chunk at a time downstream. Without this a multi-chunk result
@@ -1080,29 +1123,29 @@ export class SQLWarehouseConnector {
   private async _resolveAllExternalLinks(
     workspaceClient: WorkspaceClient,
     statementId: string,
-    response: sql.StatementResponse,
+    response: StatementResponse,
     signal?: AbortSignal,
-  ): Promise<sql.ExternalLink[] | undefined> {
-    const first = response.result?.external_links;
+  ): Promise<ExternalLink[] | undefined> {
+    const first = response.result?.externalLinks;
     if (!first || first.length === 0) return first;
 
-    const links: sql.ExternalLink[] = [...first];
+    const links: ExternalLink[] = [...first];
     // Bound the follow loop so a warehouse returning a cyclic/never-ending
     // `next_chunk_index` can't spin forever. The manifest's chunk count is the
     // natural bound; fall back to a generous safety cap if it's absent (real
     // results still terminate earlier when `next_chunk_index` becomes null) so
     // a missing count doesn't silently truncate a genuine multi-chunk result.
     const maxFetches =
-      response.manifest?.total_chunk_count ?? MAX_EXTERNAL_CHUNK_FOLLOWS;
+      response.manifest?.totalChunkCount ?? MAX_EXTERNAL_CHUNK_FOLLOWS;
     let next = this._nextChunkIndex(first);
     for (let fetches = 0; next != null && fetches < maxFetches; fetches++) {
       if (signal?.aborted) throw ExecutionError.canceled();
-      const chunk =
-        await workspaceClient.statementExecution.getStatementResultChunkN(
-          { statement_id: statementId, chunk_index: next },
-          this._createContext(signal),
-        );
-      const chunkLinks = chunk.external_links ?? [];
+      const chunk = await workspaceClient.statementExecution.getResultData(
+        { statementId, chunkIndex: next },
+        { signal },
+      );
+      normalizeResultCounts(chunk);
+      const chunkLinks = chunk.externalLinks ?? [];
       if (chunkLinks.length === 0) break;
       links.push(...chunkLinks);
       next = this._nextChunkIndex(chunkLinks);
@@ -1110,32 +1153,32 @@ export class SQLWarehouseConnector {
     return links;
   }
 
-  /** The `next_chunk_index` advertised by a chunk's links, if any. */
-  private _nextChunkIndex(links: sql.ExternalLink[]): number | undefined {
+  /** The `nextChunkIndex` advertised by a chunk's links, if any. */
+  private _nextChunkIndex(links: ExternalLink[]): number | undefined {
     for (const link of links) {
-      if (link.next_chunk_index != null) return link.next_chunk_index;
+      if (link.nextChunkIndex != null) return link.nextChunkIndex;
     }
     return undefined;
   }
 
   /**
    * A closure that re-mints a single chunk's pre-signed link via
-   * `getStatementResultChunkN`, bound to the caller's workspace client +
+   * `getResultData`, bound to the caller's workspace client +
    * statement id. Created here (in the caller's identity context) so the
    * streamer — which runs outside that context — can refresh an expired link
-   * for `.obo.sql` statements without a cross-identity `getStatement`.
+   * for `.obo.sql` statements without a cross-identity `getStatementResult`.
    */
   private _makeChunkLinkRefresher(
     workspaceClient: WorkspaceClient,
     statementId: string,
   ): RefreshChunkLink {
     return async (chunkIndex, signal) => {
-      const chunk =
-        await workspaceClient.statementExecution.getStatementResultChunkN(
-          { statement_id: statementId, chunk_index: chunkIndex },
-          this._createContext(signal),
-        );
-      return chunk.external_links?.find((l) => l.chunk_index === chunkIndex);
+      const chunk = await workspaceClient.statementExecution.getResultData(
+        { statementId, chunkIndex },
+        { signal },
+      );
+      normalizeResultCounts(chunk);
+      return chunk.externalLinks?.find((l) => l.chunkIndex === chunkIndex);
     };
   }
 
@@ -1147,7 +1190,7 @@ export class SQLWarehouseConnector {
    * the pre-signed URLs need no auth to download.
    */
   streamExternalLinks(
-    chunks: sql.ExternalLink[],
+    chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown> {
@@ -1165,10 +1208,12 @@ export class SQLWarehouseConnector {
     jobId: string,
     signal?: AbortSignal,
   ): Promise<string[] | undefined> {
-    const response = await workspaceClient.statementExecution.getStatement(
-      { statement_id: jobId },
-      this._createContext(signal),
-    );
+    const response =
+      await workspaceClient.statementExecution.getStatementResult(
+        { statementId: jobId },
+        { signal },
+      );
+    normalizeStatementCounts(response);
     return arrowColumnNames(response);
   }
 
@@ -1187,25 +1232,19 @@ export class SQLWarehouseConnector {
     if (error instanceof AppKitError) {
       throw error;
     }
+    // The legacy SDK exposed the Databricks error code as `errorCode`; the
+    // modular SDK's `ApiError` carries it as `code` (e.g. "INVALID_PARAMETER_VALUE").
+    // Read either, so callers can still branch on the stable code — notably the
+    // analytics arrow disposition/format fallback, which keys on
+    // INVALID_PARAMETER_VALUE / NOT_IMPLEMENTED to switch INLINE↔EXTERNAL_LINKS.
     const sdkErrorCode =
-      error && typeof error === "object" && "errorCode" in error
-        ? (error as { errorCode?: unknown }).errorCode
+      error && typeof error === "object"
+        ? ((error as { errorCode?: unknown }).errorCode ??
+          (error as { code?: unknown }).code)
         : undefined;
     throw ExecutionError.statementFailed(
       error instanceof Error ? error.message : String(error),
       typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
     );
-  }
-
-  // create context for cancellation token
-  private _createContext(signal?: AbortSignal) {
-    return new Context({
-      cancellationToken: {
-        isCancellationRequested: signal?.aborted ?? false,
-        onCancellationRequested: (cb: () => void) => {
-          signal?.addEventListener("abort", cb, { once: true });
-        },
-      },
-    });
   }
 }

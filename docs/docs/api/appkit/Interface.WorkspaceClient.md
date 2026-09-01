@@ -86,20 +86,20 @@ Serving Endpoints.
 ### statementExecution
 
 ```ts
-readonly statementExecution: StatementExecutionService;
+readonly statementExecution: StatementExecutionClient;
 ```
 
-Statement Execution.
+Statement Execution (modular SDK).
 
 ***
 
 ### warehouses
 
 ```ts
-readonly warehouses: WarehousesService;
+readonly warehouses: WarehousesClient;
 ```
 
-SQL Warehouses.
+SQL Warehouses (modular SDK).
 
 ## Methods
 
