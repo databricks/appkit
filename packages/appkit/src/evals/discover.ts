@@ -84,7 +84,7 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
  */
 export function findRootEvalConfig(rootDir: string): string | undefined {
   const file = path.join(rootDir, "evals.config.ts");
-  return isFile(file) ? file : undefined;
+  return existsSync(file) ? file : undefined;
 }
 
 /**

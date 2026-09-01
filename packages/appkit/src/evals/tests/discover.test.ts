@@ -73,7 +73,7 @@ describe("findRootEvalConfig", () => {
   });
 
   test("returns undefined when absent (and ignores per-agent configs)", () => {
-    write("config/agents/support/evals/evals.config.ts");
+    write("server/agents/support/evals/evals.config.ts");
     expect(findRootEvalConfig(root)).toBeUndefined();
   });
 });
