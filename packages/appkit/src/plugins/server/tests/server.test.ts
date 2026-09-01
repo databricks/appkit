@@ -839,7 +839,10 @@ describe("ServerPlugin", () => {
       }) as any);
 
       await server.start();
-      await new LifecycleManager(ctx).shutdown();
+      // The manager is injected now; only `close()` is exercised here.
+      await new LifecycleManager(ctx, {
+        close: vi.fn().mockResolvedValue(undefined),
+      } as unknown as import("../../../cache").CacheManager).shutdown();
 
       // closeIdle fires in the abort phase, the peer drains next, closeAll only
       // fires in the later lifecycle-emit phase, then the process exits 0.

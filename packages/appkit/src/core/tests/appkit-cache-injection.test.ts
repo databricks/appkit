@@ -82,6 +82,7 @@ describe("per-app CacheManager injection", () => {
     serviceContextMock = mockServiceContext();
     vi.spyOn(CacheManager, "create").mockImplementation(async (userConfig) => {
       const manager = await realCreate(userConfig);
+      vi.spyOn(manager, "close");
       built.push(manager);
       return manager;
     });
@@ -168,5 +169,120 @@ describe("per-app CacheManager injection", () => {
     // @ts-expect-error the constructor is private — `create` and `forStorage`
     // are the only entries, which is what makes one-manager-per-app checkable.
     void new CacheManager(new InMemoryStorage({} as never), {} as never);
+  });
+});
+
+describe("a failed boot closes the manager it built", () => {
+  let serviceContextMock: ReturnType<typeof mockServiceContext>;
+
+  beforeEach(() => {
+    built.length = 0;
+    constructed.length = 0;
+    setupDatabricksEnv();
+    serviceContextMock = mockServiceContext();
+    vi.spyOn(CacheManager, "create").mockImplementation(async (userConfig) => {
+      const manager = await realCreate(userConfig);
+      vi.spyOn(manager, "close");
+      built.push(manager);
+      return manager;
+    });
+  });
+
+  afterEach(() => {
+    serviceContextMock.restore();
+    vi.restoreAllMocks();
+  });
+
+  async function failedBoot(config: Record<string, unknown>) {
+    const { createApp } = await import("../appkit");
+    await expect(
+      createApp({
+        cache: { storage: new InMemoryStorage({} as never) },
+        ...config,
+      } as never),
+    ).rejects.toThrow();
+  }
+
+  /**
+   * Nothing else holds a reference once the boot unwinds, so an unclosed manager
+   * is unreachable — and one that resolved to Lakebase owns a `pg.Pool` that
+   * would never be ended. The singleton used to mask this: the next boot reused
+   * the published manager.
+   */
+  test("when onPluginsReady throws", async () => {
+    await failedBoot({
+      plugins: [probe({})],
+      onPluginsReady: () => {
+        throw new Error("boom");
+      },
+    });
+
+    expect(built).toHaveLength(1);
+    expect(built[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  test("when a plugin's setup() rejects", async () => {
+    class FailingSetupPlugin extends CacheProbe {
+      static manifest = {
+        name: "failingSetup",
+        displayName: "Failing Setup",
+        version: "0.0.0",
+        description: "Rejects during setup",
+        resources: { required: [], optional: [] },
+      } as unknown as PluginManifest<"failingSetup">;
+
+      override async setup() {
+        throw new Error("setup failed");
+      }
+    }
+
+    await failedBoot({ plugins: [toPlugin(FailingSetupPlugin)({})] });
+
+    expect(built[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  test("when attaching a plugin throws inside the AppKit constructor", async () => {
+    // The site `attachContext`'s own cache guard creates.
+    const attach = vi
+      .spyOn(Plugin.prototype, "attachContext")
+      .mockImplementation(() => {
+        throw new Error("attach failed");
+      });
+    try {
+      await failedBoot({ plugins: [probe({})] });
+      expect(built[0].close).toHaveBeenCalledTimes(1);
+    } finally {
+      attach.mockRestore();
+    }
+  });
+
+  test("a boot that fails before the manager exists attempts no close", async () => {
+    vi.spyOn(CacheManager, "create").mockRejectedValueOnce(
+      new Error("cache construction failed"),
+    );
+
+    await failedBoot({ plugins: [probe({})] });
+
+    expect(built).toHaveLength(0);
+  });
+
+  test("the boot error is not masked by a failing close", async () => {
+    vi.spyOn(CacheManager, "create").mockImplementationOnce(async (cfg) => {
+      const manager = await realCreate(cfg);
+      vi.spyOn(manager, "close").mockRejectedValue(new Error("close failed"));
+      built.push(manager);
+      return manager;
+    });
+
+    const { createApp } = await import("../appkit");
+    await expect(
+      createApp({
+        plugins: [probe({})],
+        cache: { storage: new InMemoryStorage({} as never) },
+        onPluginsReady: () => {
+          throw new Error("the real cause");
+        },
+      } as never),
+    ).rejects.toThrow("the real cause");
   });
 });

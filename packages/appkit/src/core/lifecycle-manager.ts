@@ -58,7 +58,16 @@ export class LifecycleManager {
    */
   private shutdownPhase = "not started";
 
-  constructor(private readonly context: PluginContext) {}
+  /**
+   * @param cache - This app's cache, by reference. Taken as a dependency rather
+   *   than looked up during shutdown: a lookup resolves whatever is in the
+   *   process-wide slot at that moment, which is not necessarily this app's
+   *   manager once more than one app can exist.
+   */
+  constructor(
+    private readonly context: PluginContext,
+    private readonly cache: CacheManager,
+  ) {}
 
   /**
    * Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}.
@@ -188,18 +197,11 @@ export class LifecycleManager {
     process.exit(exitCode);
   }
 
-  /** Close the cache storage, bounded and error-isolated. */
+  /** Close this app's cache storage, bounded and error-isolated. */
   private async closeCacheStorage(): Promise<void> {
-    let cache: CacheManager;
-    try {
-      cache = CacheManager.getInstanceSync();
-    } catch {
-      // Cache was never initialized — nothing to close.
-      return;
-    }
     try {
       await this.raceWithTimeout(
-        cache.close(),
+        this.cache.close(),
         LifecycleManager.PHASE_SHUTDOWN_TIMEOUT_MS,
         "cache storage close",
       );
