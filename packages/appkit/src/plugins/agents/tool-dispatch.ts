@@ -139,71 +139,9 @@ export async function dispatchToolCall(
   // wait above (which is human latency).
   let toolResult: unknown;
   try {
-    toolResult = await traceTool(name, args, async () => {
-      switch (entry.source) {
-        case "toolkit":
-          if (!deps.context) {
-            throw new Error(
-              "Plugin tool execution requires PluginContext; this should never happen through createApp",
-            );
-          }
-          return deps.context.executeTool(
-            runState.req,
-            entry.pluginName,
-            entry.localName,
-            args,
-            runState.signal,
-            runState.limits.toolCallTimeoutMs,
-          );
-        case "function": {
-          // Function tools declare their parameters as a JSON-object schema,
-          // so adapters always serialize `args` as an object. A non-object
-          // value here means the upstream model emitted malformed tool-call
-          // JSON; surface a clear error rather than silently passing through
-          // a wrong-shape value the tool will then choke on.
-          if (
-            typeof args !== "object" ||
-            args === null ||
-            Array.isArray(args)
-          ) {
-            throw new Error(
-              `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
-            );
-          }
-          return entry.functionTool.execute(args as Record<string, unknown>);
-        }
-        case "mcp": {
-          const mcpClient = deps.getMcpClient();
-          if (!mcpClient) throw new Error("MCP client not connected");
-          const oboToken = runState.req.headers["x-forwarded-access-token"];
-          const mcpAuth =
-            typeof oboToken === "string"
-              ? { Authorization: `Bearer ${oboToken}` }
-              : undefined;
-          return mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
-        }
-        case "subagent": {
-          const childAgent = deps.agents.get(entry.agentName);
-          if (!childAgent)
-            throw new Error(`Sub-agent not found: ${entry.agentName}`);
-          return runSubAgent(deps, runState, childAgent, args, depth + 1);
-        }
-        case "hosted-supervisor":
-          // Defense-in-depth: should never fire. Hosted-supervisor entries are
-          // routed via `AgentInput.extensions` and the SA endpoint executes
-          // them server-side; their `def` is filtered out of the adapter's
-          // `tools` array, so the model never sees a callable schema for them.
-          // If we reach here, the agent is paired with a non-SA adapter that
-          // somehow surfaced the placeholder def to the model — surface a
-          // clear error rather than crash later in `normalizeToolResult`.
-          throw new Error(
-            `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-              "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
-          );
-        case "skill":
-          return deps.dispatchSkillTool(entry, args);
-      }
-    });
+    toolResult = await traceTool(name, args, () =>
+      runToolEntry(deps, runState, entry, name, args, depth),
+    );
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error(
@@ -217,6 +155,76 @@ export async function dispatchToolCall(
   }
 
   return normalizeToolResult(toolResult);
+}
+
+/**
+ * Executes a resolved tool entry by source. Unknown sources fall through to
+ * `undefined` (the tool index only holds these six).
+ */
+async function runToolEntry(
+  deps: ToolDispatchDeps,
+  runState: RunState,
+  entry: ResolvedToolEntry,
+  name: string,
+  args: unknown,
+  depth: number,
+): Promise<unknown> {
+  switch (entry.source) {
+    case "toolkit":
+      if (!deps.context) {
+        throw new Error(
+          "Plugin tool execution requires PluginContext; this should never happen through createApp",
+        );
+      }
+      return deps.context.executeTool(
+        runState.req,
+        entry.pluginName,
+        entry.localName,
+        args,
+        runState.signal,
+        runState.limits.toolCallTimeoutMs,
+      );
+    case "function": {
+      // Function tools declare their parameters as a JSON-object schema, so
+      // adapters always serialize `args` as an object. A non-object value here
+      // means the model emitted malformed tool-call JSON; surface a clear error
+      // rather than passing a wrong-shape value the tool will choke on.
+      if (typeof args !== "object" || args === null || Array.isArray(args)) {
+        throw new Error(
+          `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+        );
+      }
+      return entry.functionTool.execute(args as Record<string, unknown>);
+    }
+    case "mcp": {
+      const mcpClient = deps.getMcpClient();
+      if (!mcpClient) throw new Error("MCP client not connected");
+      const oboToken = runState.req.headers["x-forwarded-access-token"];
+      const mcpAuth =
+        typeof oboToken === "string"
+          ? { Authorization: `Bearer ${oboToken}` }
+          : undefined;
+      return mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
+    }
+    case "subagent": {
+      const childAgent = deps.agents.get(entry.agentName);
+      if (!childAgent)
+        throw new Error(`Sub-agent not found: ${entry.agentName}`);
+      return runSubAgent(deps, runState, childAgent, args, depth + 1);
+    }
+    case "hosted-supervisor":
+      // Defense-in-depth: should never fire. Hosted-supervisor entries are
+      // routed via `AgentInput.extensions` and executed server-side; their
+      // `def` is filtered out of the adapter's `tools`, so the model never
+      // sees a callable schema. Reaching here means a non-SA adapter surfaced
+      // the placeholder def — fail clearly rather than crash in normalize.
+      throw new Error(
+        `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
+          "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
+      );
+    case "skill":
+      return deps.dispatchSkillTool(entry, args);
+  }
 }
 
 /**

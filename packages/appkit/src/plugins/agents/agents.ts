@@ -751,9 +751,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         };
       }
     }
-    // Plugins that are registered but expose no agent tools (e.g. aiSearch):
-    // a reference to one gets "registered but not a ToolProvider" rather than
-    // the misleading "not registered".
+    // Registered plugins that expose no agent tools (e.g. aiSearch) — so a
+    // reference reports "not a ToolProvider", not the misleading "not registered".
     const nonProviders = new Set(
       this.context.getPluginNames().filter((n) => !(n in out)),
     );
