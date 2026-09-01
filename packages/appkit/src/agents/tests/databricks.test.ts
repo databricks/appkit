@@ -330,6 +330,93 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
+  // Regression for #558: a custom tool's result must ground a gpt-oss answer
+  // that streams back as an array-shaped delta.content. The result reaching
+  // the model and the array answer being captured are the two failure points.
+  test("grounds a gpt-oss array-shaped answer in a tool result", async () => {
+    const toolResult = [
+      {
+        n: 1,
+        source: "test",
+        text: "The HTTPS ingest API default port is 8443.",
+      },
+    ];
+    const executeTool = vi.fn().mockResolvedValue(toolResult);
+    const searchTools: AgentToolDefinition[] = [
+      {
+        name: "search_docs",
+        description: "Search product docs.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    ];
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([
+            harmonyDelta([
+              {
+                type: "reasoning",
+                summary: [{ type: "summary_text", text: "Search the docs." }],
+              },
+            ]),
+            toolCallDelta(0, "call_1", "search_docs", ""),
+            toolCallDelta(0, undefined, undefined, '{"query":"gateway port"}'),
+            sseChunk("[DONE]"),
+          ]),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        body: createReadableStream([
+          harmonyDelta([
+            {
+              type: "reasoning",
+              summary: [{ type: "summary_text", text: "The tool says 8443." }],
+            },
+            { type: "text", text: "The default port is 8443." },
+          ]),
+          sseChunk("[DONE]"),
+        ]),
+      });
+    });
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      { messages: createTestMessages(), tools: searchTools, threadId: "t1" },
+      { executeTool },
+    )) {
+      events.push(event);
+    }
+
+    expect(executeTool).toHaveBeenCalledWith("search_docs", {
+      query: "gateway port",
+    });
+
+    // The tool result must be present in the follow-up request the model sees.
+    const [, secondInit] = (globalThis.fetch as any).mock.calls[1];
+    const secondBody = JSON.parse(secondInit.body);
+    const toolMessage = secondBody.messages.find(
+      (m: { role: string }) => m.role === "tool",
+    );
+    expect(toolMessage.content).toContain("8443");
+
+    // The array-shaped final answer is captured (not silently dropped).
+    expect(events).toContainEqual({
+      type: "message_delta",
+      content: "The default port is 8443.",
+    });
+  });
+
   describe("Vertex/Gemini thoughtSignature pass-through", () => {
     // Vertex AI's OpenAI-compatible surface attaches `thoughtSignature`
     // on every function call emitted by Gemini 2.x/3.x models. The next
