@@ -995,10 +995,10 @@ describe("syncMetrics", () => {
     expect(failures[0]).toMatchObject({
       key: "revenue",
       source: "demo.public.revenue",
-      // A throw with no recognizable connectivity signal is treated as
-      // deterministic (transient: false) — surfaced, not silently retried. The
-      // point of this test is that it is RECORDED, never an uncaught crash.
-      transient: false,
+      // A throw that carries no 404/400 is not on the deny-list, so it degrades
+      // (transient: true) and the has-types gate decides. The point of this test
+      // is that it is RECORDED, never an uncaught crash.
+      transient: true,
     });
     expect(failures[0].reason).toMatch(/warehouse unreachable/);
   });
@@ -1036,22 +1036,25 @@ describe("syncMetrics", () => {
     expect(failures[0]).toMatchObject({
       key: "revenue",
       source: "demo.public.revenue",
-      // Truncation is deterministic — re-describing the unchanged entry yields
-      // the same multi-chunk result — so it is non-transient (sticky/fatal),
-      // never a retryable blip. The point of the test: RECORDED, not a crash.
-      transient: false,
+      // The truncation guard throws inside the fetcher, so it lands on the
+      // "never ran" reject path and degrades by default (transient: true) — it
+      // carries no 404/400, so it is off the deny-list. Types stay stable via
+      // the has-types gate; nothing partial is ever emitted. The point of the
+      // test: RECORDED, not a crash.
+      transient: true,
     });
     expect(failures[0].reason).toMatch(/multi-chunk/i);
   });
 });
 
 // ── D′ transience classification: every failure says whether it should degrade
-// rather than fail the build. Recognized connectivity errors (self-converge,
-// retry next pass) AND auth/permission errors (a build-time identity gap the
-// committed-types gate handles) are transient; everything else — deterministic
-// warehouse answers (FAILED, zero rows, unparseable payload, zero columns), the
-// truncation guard, AND unrecognized throws — is non-transient and surfaces as
-// a build failure, matching the query path's split.
+// rather than fail the build. A DESCRIBE that never ran degrades by default
+// (connectivity, auth/permission, SDK/config, and unrecognized throws) — the
+// has-types gate reuses committed types. Only the deny-list of deterministic
+// client errors (bad warehouse id 404, malformed request 400) and ran-and-failed
+// responses (FAILED, zero rows, unparseable payload, zero columns, the
+// truncation guard) are non-transient and surface as a build failure — the same
+// split the query path and preflight make.
 describe("syncMetrics — failure transience (D′)", () => {
   const singleEntryResolution = () =>
     resolveMetricConfig({
@@ -1083,12 +1086,12 @@ describe("syncMetrics — failure transience (D′)", () => {
     expect(failures[0].transient).toBe(true);
   });
 
-  test("an auth failure is transient (build-time identity gap — degrade to committed types)", async () => {
-    // A 403 / permission error at build time is a build-time identity gap (the
-    // build runs as a different principal than the app's runtime OBO user), not
-    // a config error that fails a deploy: it degrades so the committed-types
-    // gate can reuse types. A fresh checkout with nothing committed still
-    // crashes via the caller's gate.
+  test("an auth failure (403) is transient — not on the deny-list, so it degrades", async () => {
+    // A 403 at build time is a build-time identity gap (the build runs as a
+    // different principal than the app's runtime OBO user), not a config error
+    // that fails a deploy. It isn't a deterministic 404/400, so it degrades and
+    // the committed-types gate reuses types. A fresh checkout with nothing
+    // committed still crashes via the caller's gate.
     const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
       const err = new Error(
         "PERMISSION_DENIED: cannot access metric view",
@@ -1103,8 +1106,9 @@ describe("syncMetrics — failure transience (D′)", () => {
 
   test("a PERMISSION_DENIED error_code with no HTTP status is transient", async () => {
     // The shape seen on deploy: `{ error_code: "PERMISSION_DENIED", message }`
-    // with NO numeric status. Status-only detection would miss it and surface a
-    // fatal; isAuthError reads the error_code so it degrades instead.
+    // with NO numeric status. It carries no 404/400, so it is not on the
+    // deny-list and degrades (the build no longer has to recognize the error
+    // class — only the deny-list stays fatal).
     const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
       throw Object.assign(new Error("2f1a9c…"), {
         error_code: "PERMISSION_DENIED",
@@ -1113,6 +1117,17 @@ describe("syncMetrics — failure transience (D′)", () => {
     const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
     expect(failures).toHaveLength(1);
     expect(failures[0].transient).toBe(true);
+  });
+
+  test("a deny-list error (404 bad warehouse id) is non-transient — surfaces", async () => {
+    // The deny-list: a bad/typo'd warehouse id (404) or malformed request (400)
+    // is a config error the build should surface, not mask with committed types.
+    const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
+      throw Object.assign(new Error("warehouse not found"), { status: 404 });
+    };
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(false);
   });
 
   test.each<[string, DatabricksStatementExecutionResponse]>([
@@ -1147,11 +1162,12 @@ describe("syncMetrics — failure transience (D′)", () => {
     expect(failures[0].transient).toBe(false);
   });
 
-  test("a defensive rejected settlement is non-transient (unknown cause — surface, don't loop)", async () => {
+  test("a defensive rejected settlement is transient (unknown cause — degrade, has-types gate decides)", async () => {
     // Same poisoned-response trick as the scheduling suite: blow up after
     // the fetch try/catch so the settlement itself rejects. An unknown internal
-    // failure carries no connectivity signal, so it is surfaced (deterministic)
-    // rather than retried forever — the pessimistic default matching the query path.
+    // failure carries no 404/400, so it is not on the deny-list: it degrades and
+    // the has-types gate arbitrates (reuse committed types, or crash a fresh
+    // checkout) rather than unconditionally failing the build.
     const poisoned = new Proxy({} as DatabricksStatementExecutionResponse, {
       get(_target, prop) {
         if (prop === "then") {
@@ -1163,7 +1179,7 @@ describe("syncMetrics — failure transience (D′)", () => {
     const fetcher = async () => poisoned;
     const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
     expect(failures).toHaveLength(1);
-    expect(failures[0].transient).toBe(false);
+    expect(failures[0].transient).toBe(true);
   });
 });
 

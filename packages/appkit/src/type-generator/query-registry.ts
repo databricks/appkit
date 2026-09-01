@@ -11,7 +11,6 @@ import {
   classifyBlockingFailure,
   classifyEnvironmentalCause,
   getErrorDiagnostic,
-  isAuthError,
   isConnectivityError,
 } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
@@ -955,9 +954,12 @@ export async function generateQueriesFromDescribe(
             }
           } else {
             // executeStatement rejected without a normal StatementExecution result.
-            // Only structured transport/connectivity failures are treated as
-            // offline; auth, bad warehouse IDs, malformed requests, and SDK/config
-            // failures stay fatal so users fix the underlying setup issue.
+            // executeStatement rejected — the statement never ran. Degrade by
+            // default (connectivity, auth/permission, SDK/config); the has-types
+            // gate reuses committed types, or crashes a fresh checkout with
+            // nothing to fall back to. Only the deny-list below — deterministic
+            // client errors — stays fatal. (Bad SQL is a *ran-and-failed*
+            // statement, handled by the syntax-error branch above, not here.)
             completed++;
             spinner.update(
               `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
@@ -975,12 +977,9 @@ export async function generateQueriesFromDescribe(
               schema: { name: queryName, ...degraded },
             });
 
-            if (
-              !isConnectivityError(entry.reason) &&
-              !isAuthError(entry.reason)
-            ) {
-              // Bad SQL, a bad/missing warehouse id (404), and malformed
-              // requests (400) stay fatal so users fix the underlying setup.
+            if (classifyBlockingFailure(entry.reason) === "deterministic") {
+              // Deny-list: a bad/typo'd warehouse id (404) or a malformed
+              // request (400) is a config error — surface it so users fix it.
               fatalErrors.push({ name: queryName, message: error.message });
               logEntries.push({
                 queryName,
@@ -991,11 +990,12 @@ export async function generateQueriesFromDescribe(
               continue;
             }
 
-            // Environmental for the same reason as the preflight branch above,
-            // so the has-types gate still sees it: a connectivity blip
-            // self-converges, and a build-time auth/permission gap (the build
-            // runs as a different principal than the app's runtime on-behalf-of
-            // user) must not fail a deploy when committed types exist.
+            // Not on the deny-list: degrade so the has-types gate can reuse
+            // committed types, exactly as the preflight branch above does. This
+            // covers connectivity blips and build-time auth/permission gaps (the
+            // build runs as a different principal than the app's runtime
+            // on-behalf-of user), which must not fail a deploy when committed
+            // types exist.
             if (mode === "blocking") {
               hadEnvironmentalFailure = true;
               environmentalCause =

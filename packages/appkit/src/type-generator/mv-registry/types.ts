@@ -128,10 +128,11 @@ export interface MetricSyncFailure {
   /** Single human-readable reason (DESCRIBE failed, parse failed, zero columns). */
   reason: string;
   /**
-   * Whether the failure should degrade rather than fail the build: a
-   * connectivity blip that self-converges on a later pass, or a build-time
-   * auth/permission gap that the committed-types gate handles. Deterministic
-   * failures (bad id, malformed request, zero columns) are not transient.
+   * Whether the failure should degrade rather than fail the build. True for any
+   * DESCRIBE that never ran (connectivity, auth/permission, SDK/config) — the
+   * has-types gate reuses committed types. False for the deny-list of
+   * deterministic client errors (bad warehouse id 404, malformed request 400)
+   * and ran-and-failed responses (unparseable payload, zero columns).
    */
   transient: boolean;
 }
