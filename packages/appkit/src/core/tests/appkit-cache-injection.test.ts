@@ -132,15 +132,18 @@ describe("per-app CacheManager injection", () => {
     expect(privateField(manager, "storage")).toBe(storage);
   });
 
-  test("every plugin in one app resolves the same manager as its peers", async () => {
-    await bootApp([probe({}), probeTwo({})]);
+  test("every plugin in one app resolves that app's own manager", async () => {
+    // Booted second on purpose: the ambient slot is first-wins, so if plugins
+    // read it rather than their context they would get the *first* app's cache
+    // and this assertion would fail.
+    await bootApp([probe({})]);
+    const { manager } = await bootApp([probe({}), probeTwo({})]);
 
-    expect(constructed).toHaveLength(2);
-    const [first, second] = constructed;
-    expect(first.boundCache()).toBe(second.boundCache());
-    // Asserting they also resolve *this app's* manager belongs with the unit
-    // that rebinds `Plugin` from the context. Until then they read the ambient
-    // slot, which is first-wins and so holds the first app booted in this file.
+    const second = constructed.slice(-2);
+    expect(second).toHaveLength(2);
+    for (const plugin of second) {
+      expect(plugin.boundCache()).toBe(manager);
+    }
   });
 
   test("the manager never reaches plugin config", async () => {
