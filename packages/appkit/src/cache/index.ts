@@ -138,7 +138,39 @@ export class CacheManager {
   }
 
   /**
-   * Create a new cache manager instance
+   * Publish a manager into the deprecated process-wide slot, first-wins.
+   *
+   * Exists only so the still-exported {@link getInstanceSync} keeps answering
+   * for callers that used it before the cache became per-app. `_createApp`
+   * is the only caller; it publishes its own manager after building it. Deleted
+   * together with the statics it serves.
+   *
+   * @internal
+   */
+  static _publishAmbient(manager: CacheManager): void {
+    CacheManager.instance ??= manager;
+  }
+
+  /**
+   * Build a manager over caller-supplied storage, synchronously.
+   *
+   * The async {@link create} is the app's path; this one exists for the testing
+   * kit, whose entry points are synchronous and which always supplies in-memory
+   * storage — so there is no health check to await. The constructor stays
+   * private: these two statics are the only ways to build a manager, which is
+   * what keeps "one manager per app" a compiler-checked property.
+   *
+   * @internal
+   */
+  static forStorage(
+    storage: CacheStorage,
+    userConfig?: Partial<CacheConfig>,
+  ): CacheManager {
+    return new CacheManager(storage, deepMerge(cacheDefaults, userConfig));
+  }
+
+  /**
+   * Create a new cache manager instance.
    *
    * Storage selection logic:
    * 1. If `storage` provided and healthy → use provided storage
@@ -148,8 +180,9 @@ export class CacheManager {
    *
    * @param userConfig - User configuration for the cache manager
    * @returns CacheManager instance
+   * @internal
    */
-  private static async create(
+  static async create(
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);

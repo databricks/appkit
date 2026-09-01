@@ -32,10 +32,20 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
 
-  private constructor(config: { plugins: TPlugins }) {
+  /**
+   * @param context - The app's plugin context, already carrying this app's
+   *   per-app services. A separate parameter, never a key on `config`: the
+   *   `config` bag's leftovers are spread into every plugin's `baseConfig`
+   *   (see {@link createAndRegisterPlugin}), and `_buildExecutionConfig`
+   *   deep-merges a plugin's config into its execute options — so a
+   *   `CacheManager` reaching plugin config would be merged into what
+   *   `PluginExecuteConfig.cache` declares as a `CacheConfig` and silently
+   *   break the cache interceptor's gate.
+   */
+  private constructor(config: { plugins: TPlugins }, context: PluginContext) {
     const { plugins, ...globalConfig } = config;
 
-    this.#context = new PluginContext();
+    this.#context = context;
 
     const pluginEntries = Object.entries(plugins);
 
@@ -192,9 +202,15 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
+    // Initialize core services. Telemetry first: the CacheManager constructor
+    // pulls a telemetry provider. The cache stays an await here — `create()`
+    // builds its own workspace client before ServiceContext.initialize() runs,
+    // so it cannot move into the synchronous AppKit constructor.
     TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
+    const cache = await CacheManager.create(config?.cache);
+    // Keeps the still-exported getInstanceSync() answering as it does today,
+    // first-wins. Removed with the statics it serves.
+    CacheManager._publishAmbient(cache);
 
     const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
     const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
@@ -215,12 +231,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // Validate env vars
     registry.enforceValidation();
 
-    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
-    const mergedConfig = {
-      plugins: preparedPlugins,
-    };
-
-    const instance = new AppKit(mergedConfig);
+    const instance = new AppKit(
+      { plugins: AppKit.preparePlugins(rawPlugins) },
+      new PluginContext({ cache }),
+    );
 
     await Promise.all(instance.#setupPromises);
     await instance.#context.emitLifecycle("setup:complete");

@@ -79,6 +79,10 @@ vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
     getInstance: vi.fn(async () => mockCacheInstance),
+    // `createApp` builds this app's own manager and publishes it to the
+    // deprecated ambient slot; both are part of the module's shape now.
+    create: vi.fn(async () => mockCacheInstance),
+    _publishAmbient: vi.fn(),
   },
 }));
 

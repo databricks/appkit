@@ -1,6 +1,7 @@
 import type express from "express";
 import type { BasePlugin, IAppRequest, ToolProvider } from "shared";
 
+import type { CacheManager } from "../cache";
 import { createLogger } from "../logging/logger";
 import {
   type ITelemetry,
@@ -70,16 +71,27 @@ export class PluginContext {
   private telemetry: ITelemetry;
 
   /**
+   * This app's cache. `readonly` so nothing can swap an app's cache after the
+   * context is built — one of the two halves that make "exactly one manager per
+   * app" hold. Optional only until every construction site supplies one; a
+   * plugin that finds it absent falls back to the deprecated process-wide slot.
+   */
+  readonly cache: CacheManager | undefined;
+
+  /**
    * @param deps.telemetry - Telemetry provider used for `executeTool` spans.
    *   Defaults to the shared `"plugin-context"` provider — the production
    *   path. Injectable so the testing kit can pass a mock provider and run
    *   `executeTool` without a live OpenTelemetry pipeline. This is the only
    *   seam the mock context needs; route buffering and the tool registry are
    *   exercised through the existing public API.
+   * @param deps.cache - The manager `_createApp` built for this app. Every
+   *   plugin in the app binds `this.cache` to this object.
    */
-  constructor(deps: { telemetry?: ITelemetry } = {}) {
+  constructor(deps: { telemetry?: ITelemetry; cache?: CacheManager } = {}) {
     this.telemetry =
       deps.telemetry ?? TelemetryManager.getProvider("plugin-context");
+    this.cache = deps.cache;
   }
 
   /**
