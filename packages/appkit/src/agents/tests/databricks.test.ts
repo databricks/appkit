@@ -52,6 +52,14 @@ function toolCallDelta(
   );
 }
 
+function harmonyDelta(parts: unknown[]): string {
+  return sseChunk(
+    JSON.stringify({
+      choices: [{ delta: { content: parts } }],
+    }),
+  );
+}
+
 function createReadableStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let i = 0;
@@ -139,6 +147,70 @@ describe("DatabricksAdapter", () => {
     expect(events[0]).toEqual({ type: "status", status: "running" });
     expect(events[1]).toEqual({ type: "message_delta", content: "Hello" });
     expect(events[2]).toEqual({ type: "message_delta", content: " world" });
+  });
+
+  test("extracts answer text from harmony array-shaped delta.content", async () => {
+    globalThis.fetch = mockFetch([
+      harmonyDelta([
+        {
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: "...answer the user." }],
+        },
+        { type: "text", text: "The default port is 8443." },
+      ]),
+      sseChunk("[DONE]"),
+    ]);
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      type: "message_delta",
+      content: "The default port is 8443.",
+    });
+    expect(events).toContainEqual({
+      type: "thinking",
+      content: "...answer the user.",
+    });
+    // Reasoning must not leak into the answer: exactly one message_delta.
+    expect(events.filter((e) => e.type === "message_delta")).toHaveLength(1);
+  });
+
+  test("reasoning-only harmony delta yields thinking but no answer text", async () => {
+    globalThis.fetch = mockFetch([
+      harmonyDelta([
+        {
+          type: "reasoning",
+          summary: [
+            { type: "summary_text", text: "We have the search result..." },
+          ],
+        },
+      ]),
+      sseChunk("[DONE]"),
+    ]);
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+
+    for await (const event of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((e) => e.type === "message_delta")).toHaveLength(0);
+    expect(events).toContainEqual({
+      type: "thinking",
+      content: "We have the search result...",
+    });
   });
 
   test("calls authenticate() per request for fresh headers", async () => {
