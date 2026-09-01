@@ -4,7 +4,7 @@ import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 
 import { getWorkspaceId } from "../../context";
 import { ValidationError } from "../../errors";
-import type { sql } from "../../workspace-client";
+import type { StatementParameter } from "../../workspace-client";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;
 
@@ -37,8 +37,8 @@ export class QueryProcessor {
   convertToSQLParameters(
     query: string,
     parameters?: Record<string, SQLParameterValue>,
-  ): { statement: string; parameters: sql.StatementParameterListItem[] } {
-    const sqlParameters: sql.StatementParameterListItem[] = [];
+  ): { statement: string; parameters: StatementParameter[] } {
+    const sqlParameters: StatementParameter[] = [];
 
     if (parameters) {
       // extract all params from the query
@@ -72,7 +72,7 @@ export class QueryProcessor {
   private _createParameter(
     key: string,
     value: SQLParameterValue,
-  ): sql.StatementParameterListItem | null {
+  ): StatementParameter | null {
     if (value === null || value === undefined) {
       return null;
     }

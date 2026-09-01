@@ -38,9 +38,9 @@ describe.runIf(!!warehouseId)("arrow delivery (live warehouse)", () => {
           client,
           {
             statement,
-            warehouse_id: warehouseId as string,
-            wait_timeout: "50s",
-            on_wait_timeout: "CONTINUE",
+            warehouseId: warehouseId as string,
+            waitTimeout: "50s",
+            onWaitTimeout: "CONTINUE",
             disposition: fp.disposition as never,
             format: fp.format as never,
           },

@@ -13,15 +13,8 @@ export {
   Time,
   TimeUnits,
 } from "shared";
-export type {
-  CancellationToken,
-  ClientOptions,
-  files,
-  GenieMessage,
-  jobs,
-  serving,
-  sql,
-  Waiter,
-  WorkspaceClient,
-  WorkspaceClientOptions,
-} from "shared/workspace-client";
+// Forwards every wrapper type — legacy service namespaces (files/jobs/serving),
+// the client option/waiter types, and the modular SDK client + model types
+// (warehouses, statementExecution). `sql` is gone: its statement + warehouse
+// types now come from the modular SDK.
+export type * from "shared/workspace-client";

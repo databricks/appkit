@@ -83,7 +83,7 @@ export async function readEvalDataset(
       : "";
   const connector = new SQLWarehouseConnector({});
   const response = await connector.executeStatement(client, {
-    warehouse_id: options.warehouseId,
+    warehouseId: options.warehouseId,
     statement: `SELECT inputs, expectations FROM ${options.table}${limit}`,
   });
 
