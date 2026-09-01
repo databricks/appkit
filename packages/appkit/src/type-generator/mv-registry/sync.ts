@@ -1,4 +1,8 @@
-import { getErrorDiagnostic, isConnectivityError } from "../errors";
+import {
+  getErrorDiagnostic,
+  isAuthError,
+  isConnectivityError,
+} from "../errors";
 import type { DatabricksStatementExecutionResponse } from "../types";
 import {
   extractMetricColumns,
@@ -73,10 +77,18 @@ export async function syncMetrics(
       response = await fetcher(entry.source);
     } catch (err) {
       const reason = `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(err)}`;
-      // Connectivity blips self-converge (retry next pass); auth, a bad
-      // warehouse id, a truncated / multi-chunk result, or a malformed request
-      // are deterministic and must surface — the same split the query path makes.
-      return failedOutcome(index, entry, reason, isConnectivityError(err));
+      // Connectivity blips self-converge (retry next pass), and a build-time
+      // auth/permission gap (the build runs as a different principal than the
+      // app's runtime on-behalf-of user) must not fail a deploy when committed
+      // types exist — both degrade. A bad warehouse id, a truncated /
+      // multi-chunk result, or a malformed request are deterministic and must
+      // surface — the same split the query path makes.
+      return failedOutcome(
+        index,
+        entry,
+        reason,
+        isConnectivityError(err) || isAuthError(err),
+      );
     }
 
     const state = response.status?.state;
@@ -139,7 +151,7 @@ export async function syncMetrics(
           index,
           entry,
           `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(result.reason)}`,
-          isConnectivityError(result.reason),
+          isConnectivityError(result.reason) || isAuthError(result.reason),
         );
         schemas[index] = schema;
         failureSlots[index] = failure;

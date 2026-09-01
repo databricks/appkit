@@ -1045,12 +1045,13 @@ describe("syncMetrics", () => {
   });
 });
 
-// ── D′ transience classification: every failure says whether retrying the
-// unchanged entry can succeed. ONLY recognized connectivity errors are
-// transient (self-converge, retry next pass); everything else — deterministic
+// ── D′ transience classification: every failure says whether it should degrade
+// rather than fail the build. Recognized connectivity errors (self-converge,
+// retry next pass) AND auth/permission errors (a build-time identity gap the
+// committed-types gate handles) are transient; everything else — deterministic
 // warehouse answers (FAILED, zero rows, unparseable payload, zero columns), the
 // truncation guard, AND unrecognized throws — is non-transient and surfaces as
-// a build failure, matching the query path's pessimistic default.
+// a build failure, matching the query path's split.
 describe("syncMetrics — failure transience (D′)", () => {
   const singleEntryResolution = () =>
     resolveMetricConfig({
@@ -1082,9 +1083,12 @@ describe("syncMetrics — failure transience (D′)", () => {
     expect(failures[0].transient).toBe(true);
   });
 
-  test("an auth failure is non-transient (deterministic — must surface)", async () => {
-    // A 403 / permission error is a real misconfiguration, not a blip: it must
-    // surface (and fail the build via the caller), never retry forever.
+  test("an auth failure is transient (build-time identity gap — degrade to committed types)", async () => {
+    // A 403 / permission error at build time is a build-time identity gap (the
+    // build runs as a different principal than the app's runtime OBO user), not
+    // a config error that fails a deploy: it degrades so the committed-types
+    // gate can reuse types. A fresh checkout with nothing committed still
+    // crashes via the caller's gate.
     const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
       const err = new Error(
         "PERMISSION_DENIED: cannot access metric view",
@@ -1094,7 +1098,21 @@ describe("syncMetrics — failure transience (D′)", () => {
     };
     const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
     expect(failures).toHaveLength(1);
-    expect(failures[0].transient).toBe(false);
+    expect(failures[0].transient).toBe(true);
+  });
+
+  test("a PERMISSION_DENIED error_code with no HTTP status is transient", async () => {
+    // The shape seen on deploy: `{ error_code: "PERMISSION_DENIED", message }`
+    // with NO numeric status. Status-only detection would miss it and surface a
+    // fatal; isAuthError reads the error_code so it degrades instead.
+    const fetcher = async (): Promise<DatabricksStatementExecutionResponse> => {
+      throw Object.assign(new Error("2f1a9c…"), {
+        error_code: "PERMISSION_DENIED",
+      });
+    };
+    const { failures } = await syncMetrics(singleEntryResolution(), fetcher);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].transient).toBe(true);
   });
 
   test.each<[string, DatabricksStatementExecutionResponse]>([

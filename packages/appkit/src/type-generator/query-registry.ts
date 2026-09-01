@@ -11,6 +11,7 @@ import {
   classifyBlockingFailure,
   classifyEnvironmentalCause,
   getErrorDiagnostic,
+  isAuthError,
   isConnectivityError,
 } from "./errors";
 import { decidePreflight, type PreflightMode } from "./preflight";
@@ -974,7 +975,12 @@ export async function generateQueriesFromDescribe(
               schema: { name: queryName, ...degraded },
             });
 
-            if (!isConnectivityError(entry.reason)) {
+            if (
+              !isConnectivityError(entry.reason) &&
+              !isAuthError(entry.reason)
+            ) {
+              // Bad SQL, a bad/missing warehouse id (404), and malformed
+              // requests (400) stay fatal so users fix the underlying setup.
               fatalErrors.push({ name: queryName, message: error.message });
               logEntries.push({
                 queryName,
@@ -985,16 +991,21 @@ export async function generateQueriesFromDescribe(
               continue;
             }
 
-            // Environmental for the same reason as the preflight connectivity
-            // branch above, so the has-types gate still sees it.
+            // Environmental for the same reason as the preflight branch above,
+            // so the has-types gate still sees it: a connectivity blip
+            // self-converges, and a build-time auth/permission gap (the build
+            // runs as a different principal than the app's runtime on-behalf-of
+            // user) must not fail a deploy when committed types exist.
             if (mode === "blocking") {
               hadEnvironmentalFailure = true;
-              environmentalCause = environmentalCause ?? "unreachable";
+              environmentalCause =
+                environmentalCause ?? classifyEnvironmentalCause(entry.reason);
             }
 
             logger.warn(
-              "DESCRIBE unreachable for %s: %s — %s",
+              "DESCRIBE degraded for %s (%s): %s — %s",
               queryName,
+              classifyEnvironmentalCause(entry.reason),
               reason,
               canReusePrior
                 ? "reusing last cached type"
