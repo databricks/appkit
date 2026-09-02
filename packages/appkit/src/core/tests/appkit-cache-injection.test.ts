@@ -7,15 +7,10 @@ import { Plugin, toPlugin } from "../../plugin";
 import { mockServiceContext, setupDatabricksEnv } from "../../testing";
 import { PluginContext } from "../plugin-context";
 
-/**
- * Each app owns exactly one `CacheManager`, reached through its own
- * `PluginContext`.
- *
- * The cache module is deliberately NOT mocked here — the claim under test is
- * which real manager an app builds and hands out, so a fake would assert
- * nothing. Every boot passes `cache: { storage }`, without which `create()`
- * probes Lakebase.
- */
+// Each app owns one real `CacheManager`, reached through its own
+// `PluginContext` — the cache module is not mocked (a fake would assert
+// nothing here). Every boot passes `cache: { storage }`, without which
+// `create()` probes Lakebase.
 
 /** Instances registered by `setup()`, so tests can read a real plugin's cache. */
 const constructed: CacheProbe[] = [];
@@ -116,7 +111,7 @@ describe("per-app CacheManager injection", () => {
     const first = await bootApp([probe({})], { ttl: 60 });
     const second = await bootApp([probe({})], { ttl: 3600 });
 
-    // Before per-app managers this was first-wins: B silently inherited A's.
+    // A shared manager would make B silently inherit A's ttl; each keeps its own.
     expect(privateField<{ ttl?: number }>(first.manager, "config").ttl).toBe(
       60,
     );
@@ -205,8 +200,7 @@ describe("a failed boot closes the manager it built", () => {
   /**
    * Nothing else holds a reference once the boot unwinds, so an unclosed manager
    * is unreachable — and one that resolved to Lakebase owns a `pg.Pool` that
-   * would never be ended. The singleton used to mask this: the next boot reused
-   * the published manager.
+   * would never be ended.
    */
   test("when onPluginsReady throws", async () => {
     await failedBoot({

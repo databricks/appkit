@@ -75,12 +75,9 @@ export class CacheManager {
   };
 
   /**
-   * @param ownsStorage - Whether this manager built its own storage. Only owned
-   *   storage is closed on {@link close}: a caller who passed `cache: { storage }`
-   *   keeps ownership, and closing theirs is destructive —
-   *   `PersistentStorage.close()` is `pool.end()` and permanent, while
-   *   `InMemoryStorage.close()` merely clears a Map, which is why the hazard has
-   *   been invisible.
+   * @param ownsStorage - Whether this manager built its own storage. {@link close}
+   *   closes only owned storage: closing a caller's `cache: { storage }` is
+   *   destructive — `PersistentStorage.close()` is a permanent `pool.end()`.
    */
   private constructor(
     storage: CacheStorage,
@@ -110,13 +107,9 @@ export class CacheManager {
   }
 
   /**
-   * Build a manager over caller-supplied storage, synchronously.
-   *
-   * The async {@link create} is the app's path; this one exists for the testing
-   * kit, whose entry points are synchronous and which always supplies in-memory
-   * storage — so there is no health check to await. The constructor stays
-   * private: these two statics are the only ways to build a manager, which is
-   * what keeps "one manager per app" a compiler-checked property.
+   * Build a manager over caller-supplied storage, synchronously — the testing
+   * kit's path, where storage is always in-memory so there is no health check
+   * to await. The async {@link create} is the app's path.
    *
    * @internal
    */

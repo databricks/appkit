@@ -10,12 +10,12 @@ import type { CacheManager } from "../cache";
  */
 const kitCaches = new Set<CacheManager>();
 
-/** Record a cache the kit created, so `resetTestCache()` can find it. @internal */
+/** @internal */
 export function registerKitCache(cache: CacheManager): void {
   kitCaches.add(cache);
 }
 
-/** Every cache the kit created in this file. @internal */
+/** @internal */
 export function trackedKitCaches(): readonly CacheManager[] {
   return [...kitCaches];
 }

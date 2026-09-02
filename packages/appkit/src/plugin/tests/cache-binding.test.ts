@@ -8,12 +8,8 @@ import { InitializationError } from "../../errors";
 import { mockServiceContext } from "../../testing";
 import { Plugin } from "../plugin";
 
-/**
- * How a plugin gets its cache, and how it fails when it has none.
- *
- * This file never boots an app, so an unattached plugin here is genuinely
- * cache-less — there is no process-wide cache to fall back to.
- */
+// This file never boots an app, so an unattached plugin here is genuinely
+// cache-less — there is nothing to fall back to.
 
 class ProbePlugin extends Plugin {
   static manifest = {
@@ -60,9 +56,6 @@ describe("Plugin cache binding", () => {
   test("an app-less plugin constructs and still has telemetry", () => {
     const plugin = new ProbePlugin({});
 
-    // Telemetry used to be bound only after the cache lookup succeeded, so a
-    // plugin built before any app had neither — and failed inside the telemetry
-    // interceptor, far from the cause.
     expect(plugin.telemetryProvider()).toBeDefined();
   });
 
@@ -98,10 +91,8 @@ describe("Plugin cache binding", () => {
   test("a context-less attachContext is the app-less path, not an error", () => {
     const plugin = new ProbePlugin({});
 
-    // `runAgent` runs the lifecycle this way for standalone plugins
-    // (core/agent/run-agent.ts). It must bind telemetry and leave the cache
-    // unbound rather than refuse: only a cached execution then fails, at the
-    // chokepoint the test below covers.
+    // The standalone `runAgent` path (core/agent/run-agent.ts). It must bind
+    // telemetry and leave the cache unbound rather than refuse.
     expect(() => plugin.attachContext({})).not.toThrow();
     expect(() => plugin.attachContext({ context: undefined })).not.toThrow();
   });
@@ -119,10 +110,6 @@ describe("Plugin cache binding", () => {
     try {
       const plugin = new ProbePlugin({});
 
-      // Every cached execution passes through `_buildInterceptors`; `cache`'s
-      // declared type is non-optional, so the compiler cannot catch this. The
-      // old symptom was a TypeError on `undefined.getOrExecute`, inside a
-      // request handler.
       const result = await plugin.runCached();
 
       expect(result).toMatchObject({ ok: false });
@@ -136,9 +123,7 @@ describe("Plugin cache binding", () => {
     const plugin = new ProbePlugin({});
 
     // `analytics.ts` and `files/plugin.ts` read `this.cache` directly, outside
-    // `execute()`, so the chokepoint above never sees them. The accessor is
-    // their guard: a named error at the read, not `undefined` that becomes a
-    // `TypeError` two calls later.
+    // `execute()`, so the accessor — not the interceptor chain — is their guard.
     expect(() => plugin.boundCache()).toThrow(InitializationError);
   });
 
@@ -165,9 +150,9 @@ describe("Plugin cache binding", () => {
       }
     }
 
-    // Enforced twice over: the `@ts-expect-error` above proves the compiler
-    // rejects it, and an accessor with no setter also throws at runtime — so
-    // even a JavaScript consumer cannot swap an app's cache.
+    // The `@ts-expect-error` proves the compiler rejects it; this proves the
+    // getter-only accessor also throws at runtime, so a JS consumer cannot
+    // swap an app's cache either.
     expect(() => new OwnCachePlugin()).toThrow(TypeError);
   });
 });
