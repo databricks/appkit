@@ -4,8 +4,33 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { vi } from "vitest";
 
 import { ServiceContext } from "../../../context/service-context";
-import type { FilesPlugin } from "../plugin";
+import { createTestPluginContext } from "../../../testing";
+import { FilesPlugin } from "../plugin";
 import { policy } from "../policy";
+
+/**
+ * One kit context per test file — Vitest isolates files, so this module is
+ * re-evaluated for each — supplying the real `CacheManager` a plugin resolves.
+ */
+const kit = createTestPluginContext();
+
+/**
+ * The cache every plugin from {@link filesPlugin} resolves as `this.cache`.
+ * Spy it to assert invalidation (`vi.spyOn(testCache, "delete")`), so the keys
+ * asserted are production's own rather than a re-implemented fake's.
+ */
+export const testCache = kit.cache;
+
+/**
+ * Build a `FilesPlugin` bound to this file's cache, the way an app binds one.
+ * `attachContext` is the production path and is synchronous, so callers stay
+ * unchanged.
+ */
+export function filesPlugin(config: unknown = VOLUMES_CONFIG): FilesPlugin {
+  const plugin = new FilesPlugin(config as never);
+  plugin.attachContext({ context: kit.ctx });
+  return plugin;
+}
 
 export const VOLUMES_CONFIG = {
   volumes: {
