@@ -12,7 +12,9 @@ export class InMemoryStorage implements CacheStorage {
   private accessCounter: number;
   private maxSize: number;
 
-  constructor(config: CacheConfig) {
+  // Only `maxSize` is read; the parameter is narrowed to say so, which also
+  // lets callers write `new InMemoryStorage()` instead of casting a full config.
+  constructor(config: Pick<CacheConfig, "maxSize"> = {}) {
     this.cache = new Map();
     this.accessOrder = new Map();
     this.maxSize = config.maxSize ?? inMemoryStorageDefaults.maxSize;

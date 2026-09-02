@@ -52,7 +52,7 @@ class ProbePlugin extends Plugin {
 }
 
 function contextWithCache() {
-  const cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+  const cache = CacheManager.forStorage(new InMemoryStorage());
   return { cache, context: new PluginContext({ cache }) };
 }
 
@@ -161,7 +161,7 @@ describe("Plugin cache binding", () => {
         // @ts-expect-error `cache` is a read-only accessor: every plugin in an
         // app shares the one manager the app built. Use a per-plugin
         // `cache: { enabled, ttl }` config instead.
-        this.cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+        this.cache = CacheManager.forStorage(new InMemoryStorage());
       }
     }
 

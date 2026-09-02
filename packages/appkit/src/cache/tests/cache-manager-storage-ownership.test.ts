@@ -15,7 +15,7 @@ import { InMemoryStorage } from "../storage/memory";
  */
 
 function inMemory(): InMemoryStorage {
-  return new InMemoryStorage({ enabled: true, maxSize: 100 } as never);
+  return new InMemoryStorage({ maxSize: 100 });
 }
 
 /** Models a storage whose close is permanent, the way `pool.end()` is. */

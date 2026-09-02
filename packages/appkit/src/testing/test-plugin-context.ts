@@ -192,7 +192,7 @@ export function createTestPluginContext(
   // Synchronous on purpose: `createTestPluginContext` is called at describe-body
   // time, so it cannot await. `forStorage` skips the health check that the app's
   // async `create()` performs, which in-memory storage does not need.
-  const cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+  const cache = CacheManager.forStorage(new InMemoryStorage());
   // So `resetTestCache()` with no argument can find it.
   registerKitCache(cache);
   const ctx = new PluginContext({ telemetry, cache });

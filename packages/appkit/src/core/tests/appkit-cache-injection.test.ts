@@ -101,7 +101,7 @@ describe("per-app CacheManager injection", () => {
     const { createApp } = await import("../appkit");
     const handle = await createApp({
       plugins,
-      cache: { storage: new InMemoryStorage({} as never), ...cache },
+      cache: { storage: new InMemoryStorage(), ...cache },
     } as never);
     return { handle, manager: built[built.length - 1] };
   }
@@ -127,7 +127,7 @@ describe("per-app CacheManager injection", () => {
   });
 
   test("the app's manager uses the storage the caller supplied", async () => {
-    const storage = new InMemoryStorage({} as never);
+    const storage = new InMemoryStorage();
     const { manager } = await bootApp([probe({})], { storage });
 
     expect(privateField(manager, "storage")).toBe(storage);
@@ -157,18 +157,18 @@ describe("per-app CacheManager injection", () => {
   });
 
   test("PluginContext exposes the cache it was given, and it cannot be swapped", () => {
-    const cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+    const cache = CacheManager.forStorage(new InMemoryStorage());
     const context = new PluginContext({ cache });
 
     expect(context.cache).toBe(cache);
     // @ts-expect-error `cache` is readonly: an app's cache cannot be replaced.
-    context.cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+    context.cache = CacheManager.forStorage(new InMemoryStorage());
   });
 
   test("a consumer has no way to construct a manager", () => {
     // @ts-expect-error the constructor is private — `create` and `forStorage`
     // are the only entries, which is what makes one-manager-per-app checkable.
-    void new CacheManager(new InMemoryStorage({} as never), {} as never);
+    void new CacheManager(new InMemoryStorage(), {} as never);
   });
 });
 
@@ -197,7 +197,7 @@ describe("a failed boot closes the manager it built", () => {
     const { createApp } = await import("../appkit");
     await expect(
       createApp({
-        cache: { storage: new InMemoryStorage({} as never) },
+        cache: { storage: new InMemoryStorage() },
         ...config,
       } as never),
     ).rejects.toThrow();
@@ -278,7 +278,7 @@ describe("a failed boot closes the manager it built", () => {
     await expect(
       createApp({
         plugins: [probe({})],
-        cache: { storage: new InMemoryStorage({} as never) },
+        cache: { storage: new InMemoryStorage() },
         onPluginsReady: () => {
           throw new Error("the real cause");
         },

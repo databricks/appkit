@@ -131,10 +131,10 @@ let mockCache: CacheManager;
 class TestPlugin extends Plugin<BasePluginConfig> {
   constructor(config: BasePluginConfig) {
     super(config);
-    // A registered plugin gets its cache from the app through `attachContext`.
-    // Doing the same here lets the direct constructions below behave like
-    // plugins an app owns, instead of leaning on a process-wide slot.
-    this.attachContext({ context: { cache: mockCache } as never });
+    // A registered plugin gets its cache from the app through `attachContext`;
+    // doing the same here lets the direct constructions below behave like
+    // plugins an app owns.
+    this.attachContext({ context: { cache: mockCache } });
   }
 
   async customMethod(value: string): Promise<string> {
