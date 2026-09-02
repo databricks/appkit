@@ -177,7 +177,15 @@ export class CacheManager {
 
       const isHealthy = await persistentStorage.healthCheck();
       if (isHealthy) {
-        await persistentStorage.initialize();
+        try {
+          await persistentStorage.initialize();
+        } catch (err) {
+          // Health check passed but `initialize()` failed. End the pool we
+          // opened before falling through to in-memory — otherwise it is
+          // orphaned for the life of the process and boot still "succeeds".
+          await pool.end().catch(() => {});
+          throw err;
+        }
         return new CacheManager(persistentStorage, config, true);
       }
 

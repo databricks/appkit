@@ -6,6 +6,9 @@ import { CacheManager } from "../../index";
 // Mock createLakebasePool
 const mockPoolQuery = vi.fn();
 const mockPoolEnd = vi.fn();
+// Controls whether PersistentStorage.initialize() resolves; a test can make it
+// reject to exercise the "healthy but init failed" pool-leak path.
+const mockInitialize = vi.fn();
 vi.mock("@/connectors/lakebase", () => ({
   createLakebasePool: vi.fn().mockImplementation(() => ({
     query: mockPoolQuery,
@@ -18,7 +21,7 @@ vi.mock("../storage/persistent", () => ({
   PersistentStorage: vi.fn().mockImplementation((_config: any, pool: any) => {
     const cache = new Map<string, { value: unknown; expiry: number }>();
     return {
-      initialize: vi.fn().mockResolvedValue(undefined),
+      initialize: mockInitialize,
       get: vi
         .fn()
         .mockImplementation(async (key: string) => cache.get(key) || null),
@@ -98,14 +101,10 @@ function createUnhealthyMockStorage(): CacheStorage {
 }
 
 describe("CacheManager", () => {
-  // The singleton-pattern tests below still exercise the statics; the rest
-  // build managers directly. This reset goes when those statics do.
   beforeEach(() => {
-    // Access private static fields to reset singleton
-    (CacheManager as any).instance = null;
-    (CacheManager as any).initPromise = null;
     // Default: Lakebase unavailable (most tests pass explicit storage)
     mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
+    mockInitialize.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -993,10 +992,6 @@ describe("CacheManager", () => {
 
   describe("strictPersistence mode", () => {
     test("should disable cache when strictPersistence is true and storage unhealthy", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Pass an unhealthy storage with strictPersistence: true
       const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
@@ -1015,10 +1010,6 @@ describe("CacheManager", () => {
 
   describe("storage fallback", () => {
     test("should fallback to in-memory when provided storage is unhealthy", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Pass an unhealthy storage, should fallback to in-memory
       const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
@@ -1032,10 +1023,6 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when provided storage health check fails", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
         strictPersistence: false,
@@ -1049,10 +1036,6 @@ describe("CacheManager", () => {
 
   describe("lakebase default storage", () => {
     test("should use Lakebase when no storage provided and Lakebase is available", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Make pool.query succeed for healthCheck ('SELECT 1')
       mockPoolQuery.mockResolvedValue({
         rows: [{ "?column?": 1 }],
@@ -1067,10 +1050,6 @@ describe("CacheManager", () => {
     });
 
     test("should fallback to in-memory when Lakebase is unavailable", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy (pool.query fails, default in beforeEach)
       mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
@@ -1087,10 +1066,6 @@ describe("CacheManager", () => {
     });
 
     test("should disable cache when Lakebase unavailable and strictPersistence is true", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy (pool.query fails)
       mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
@@ -1108,10 +1083,6 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when Lakebase health check fails", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy - pool.query('SELECT 1') fails
       mockPoolQuery.mockRejectedValue(new Error("Health check failed"));
 
@@ -1123,10 +1094,6 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when Lakebase throws an error", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase throws
       mockPoolQuery.mockRejectedValue(new Error("Connection refused"));
 
@@ -1135,6 +1102,20 @@ describe("CacheManager", () => {
       // Should be using in-memory storage
       const storage = (cache as any).storage;
       expect(storage.isPersistent()).toBe(false);
+    });
+
+    test("ends the pool and falls back when a healthy Lakebase fails to initialize", async () => {
+      // Health check passes, so the pool is opened...
+      mockPoolQuery.mockResolvedValue({ rows: [{ "?column?": 1 }] });
+      // ...but initialize() throws after that. The pool must be ended, not
+      // orphaned, and boot must fall back to in-memory rather than "succeed"
+      // holding a leaked connection.
+      mockInitialize.mockRejectedValue(new Error("schema migration failed"));
+
+      const cache = await CacheManager.create({});
+
+      expect(mockPoolEnd).toHaveBeenCalledTimes(1);
+      expect((cache as any).storage.isPersistent()).toBe(false);
     });
   });
 });
