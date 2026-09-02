@@ -7,7 +7,7 @@ import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
-import { createTestPluginContext, resetTestCache } from "../../../testing";
+import { resetTestCache } from "../../../testing";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_READ_DEFAULTS,
@@ -15,6 +15,7 @@ import {
 } from "../defaults";
 import { FilesPlugin, files } from "../plugin";
 import { PolicyDeniedError, policy } from "../policy";
+import { filesPlugin, testCache, VOLUMES_CONFIG } from "./_test-helpers";
 
 const { mockClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
@@ -64,29 +65,6 @@ vi.mock("../../../context", async (importOriginal) => {
     getCurrentUserId: vi.fn(() => "test-service-principal"),
   };
 });
-
-const VOLUMES_CONFIG = {
-  volumes: {
-    uploads: { maxUploadSize: 100_000_000, policy: policy.allowAll() },
-    exports: { policy: policy.allowAll() },
-  },
-};
-
-/**
- * One kit context for this file, supplying the real `CacheManager` a plugin
- * resolves — the same seam the sibling files suites use. The double this file
- * used to carry passed `getOrExecute` straight through, so no test here ever
- * saw a cache hit.
- */
-const kit = createTestPluginContext();
-const testCache = kit.cache;
-
-/** Build a plugin bound to this file's cache, the way an app binds one. */
-function filesPlugin(config: unknown): FilesPlugin {
-  const plugin = new FilesPlugin(config as never);
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
-}
 
 describe("FilesPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;

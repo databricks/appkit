@@ -151,11 +151,11 @@ export interface TestPluginContext {
   /**
    * Attach this context to a plugin the production way: calls
    * `plugin.attachContext`, which binds {@link cache}, rebuilds the plugin's
-   * telemetry, and flips `isReady` to `true`. Await it before exercising
-   * handlers that read `this.context`, `this.cache`, or gate on `isReady`.
-   * Returns the same plugin for chaining.
+   * telemetry, and flips `isReady` to `true`. Synchronous — call it before
+   * exercising handlers that read `this.context`, `this.cache`, or gate on
+   * `isReady`. Returns the same plugin for chaining.
    */
-  attach<P extends Plugin>(plugin: P): Promise<P>;
+  attach<P extends Plugin>(plugin: P): P;
 }
 
 /**
@@ -333,7 +333,7 @@ export function createTestPluginContext(
     registerProvider(name, tools);
   }
 
-  async function attach<P extends Plugin>(plugin: P): Promise<P> {
+  function attach<P extends Plugin>(plugin: P): P {
     // The context already carries this test's cache, so `attachContext` binds
     // it the same way `createApp` binds an app's. A plugin attached here
     // reaches only this context's cache, and a sibling context cannot

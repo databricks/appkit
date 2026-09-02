@@ -23,21 +23,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../../context/service-context";
 import { resetTestCache } from "../../../testing";
-import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
+import { analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
-
-/**
- * One kit context for this file — Vitest isolates files — supplying the real
- * `CacheManager`. The suite previously hand-rolled a store-backed double whose
- * `generateKey` was a copy of production's and free to drift from it.
- */
-const kit = createTestPluginContext();
-
-function analyticsPlugin(config: IAnalyticsConfig): AnalyticsPlugin {
-  const plugin = new AnalyticsPlugin(config);
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
-}
+import { analyticsPlugin } from "./_test-helpers";
 
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;

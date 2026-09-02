@@ -62,9 +62,7 @@ vi.mock("../../../context", async (importOriginal) => {
  */
 const kit = createTestPluginContext();
 function jobsPlugin(...args: ConstructorParameters<typeof JobsPlugin>) {
-  const plugin = new JobsPlugin(...args);
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
+  return kit.attach(new JobsPlugin(...args));
 }
 
 describe("JobsPlugin", () => {

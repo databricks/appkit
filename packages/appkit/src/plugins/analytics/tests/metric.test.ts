@@ -15,8 +15,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
-import { createTestPluginContext, resetTestCache } from "../../../testing";
-import { AnalyticsPlugin } from "../analytics";
+import { resetTestCache } from "../../../testing";
+import type { AnalyticsPlugin } from "../analytics";
 import {
   buildMetricSql,
   composeMetricCacheKey,
@@ -31,9 +31,8 @@ import type {
   MetricFilter,
   MetricRegistration,
 } from "../types";
+import { analyticsPlugin, testCache } from "./_test-helpers";
 
-// Mirror the analytics.test.ts CacheManager mock so the inner `execute`'s
-// cache interceptor is a no-op pass-through (each request re-executes).
 // Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
 // test. Using real files (pointing the plugin's `AppManager` at the dir, see
 // `pluginForDir`) exercises the actual read → parse path in
@@ -56,20 +55,6 @@ const tempRegistryDirs: string[] = [];
 function pluginForDir(config: IAnalyticsConfig, dir: string): AnalyticsPlugin {
   const plugin = analyticsPlugin(config);
   (plugin as any).app = new AppManager(path.join(dir, "queries"), dir);
-  return plugin;
-}
-
-/**
- * One kit context for this file — Vitest isolates files — supplying the real
- * `CacheManager`. Its `generateKey` is production's, so the key invariants below
- * are asserted against the real thing rather than a copy that can drift.
- */
-const kit = createTestPluginContext();
-const testCache = kit.cache;
-
-function analyticsPlugin(config: IAnalyticsConfig): AnalyticsPlugin {
-  const plugin = new AnalyticsPlugin(config);
-  plugin.attachContext({ context: kit.ctx });
   return plugin;
 }
 

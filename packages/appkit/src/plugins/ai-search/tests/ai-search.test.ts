@@ -131,9 +131,7 @@ const kit = createTestPluginContext();
 function aiSearchPlugin(
   config: ConstructorParameters<typeof AiSearchPlugin>[0],
 ): AiSearchPlugin {
-  const plugin = new AiSearchPlugin(config);
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
+  return kit.attach(new AiSearchPlugin(config));
 }
 
 describe("AiSearchPlugin", () => {

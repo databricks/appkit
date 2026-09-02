@@ -28,9 +28,7 @@ function stubAdapter(): AgentAdapter {
 const kit = createTestPluginContext();
 
 function instantiate(config: AgentsPluginConfig) {
-  const plugin = new AgentsPlugin({ ...config, name: "agent" });
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
+  return kit.attach(new AgentsPlugin({ ...config, name: "agent" }));
 }
 
 type ExportsApi = {

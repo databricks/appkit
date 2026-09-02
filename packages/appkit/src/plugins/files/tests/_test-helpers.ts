@@ -23,13 +23,13 @@ export const testCache = kit.cache;
 
 /**
  * Build a `FilesPlugin` bound to this file's cache, the way an app binds one.
- * `attachContext` is the production path and is synchronous, so callers stay
- * unchanged.
+ * `attach` runs the production path — attachContext plus the registry parity a
+ * booted app gives — and is synchronous.
  */
-export function filesPlugin(config: unknown = VOLUMES_CONFIG): FilesPlugin {
-  const plugin = new FilesPlugin(config as never);
-  plugin.attachContext({ context: kit.ctx });
-  return plugin;
+export function filesPlugin(
+  config: ConstructorParameters<typeof FilesPlugin>[0] = VOLUMES_CONFIG,
+): FilesPlugin {
+  return kit.attach(new FilesPlugin(config));
 }
 
 export const VOLUMES_CONFIG = {
