@@ -23,7 +23,7 @@ import {
 } from "vitest";
 
 import { AppManager } from "../../app";
-import { CacheManager } from "../../cache";
+import type { CacheManager } from "../../cache";
 import { ServiceContext } from "../../context/service-context";
 import {
   AuthenticationError,
@@ -61,11 +61,6 @@ vi.mock("../../workspace-client", async (importOriginal) => {
 
 // Mock all dependencies
 vi.mock("../../app");
-vi.mock("../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(),
-  },
-}));
 vi.mock("../../stream");
 vi.mock("../../utils", () => ({
   deepMerge: vi.fn((a, b) => {
