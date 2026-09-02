@@ -10,7 +10,10 @@ import { GatedMlflowSpanProcessor } from "../mlflow";
  * registry and re-mocks the SDK so init runs fresh.
  */
 
-function stubSdk(overrides: Record<string, unknown> = {}) {
+function stubSdk(
+  overrides: Record<string, unknown> = {},
+  ucFromTags: Record<string, string> | null = null,
+) {
   const setInputs = vi.fn();
   const setOutputs = vi.fn();
   const span = { setInputs, setOutputs };
@@ -21,8 +24,13 @@ function stubSdk(overrides: Record<string, unknown> = {}) {
     // imports under mlflow-tracing 0.1.3), so they live on the main mock.
     createAuthProvider: vi.fn(() => ({})),
     MlflowClient: class {
-      // Auto-detect probes this; default: not a UC-backed experiment.
-      getExperiment = vi.fn(async () => null);
+      // Auto-detect probes this; default: experiment exists, UC-ness is then
+      // decided by the ucLocationFromExperimentTags mock below.
+      getExperiment = vi.fn(async () => ({
+        experimentId: "e",
+        name: "n",
+        tags: {},
+      }));
     },
     InMemoryTraceManager: { getInstance: () => ({ popTrace: vi.fn() }) },
     SpanAttributeKey: { SPAN_TYPE: "mlflow.spanType" },
@@ -37,9 +45,8 @@ function stubSdk(overrides: Record<string, unknown> = {}) {
   };
   vi.doMock("@mlflow/core", () => sdk);
   // Deep imports used by buildMlflowSpanProcessor — the exporter/processor
-  // classes are the only symbols not on @mlflow/core's public entrypoint. Both
-  // modules stub the same SpanProcessor shape, so one class covers both; kept as
-  // light stubs so setup() wires a processor without touching Databricks.
+  // classes are the only symbols not on @mlflow/core's public entrypoint. Kept
+  // as light stubs so setup() wires a processor without touching Databricks.
   class StubProcessor {
     onStart() {}
     onEnd() {}
@@ -54,11 +61,32 @@ function stubSdk(overrides: Record<string, unknown> = {}) {
     MlflowSpanExporter: class {},
     MlflowSpanProcessor: StubProcessor,
   }));
+  // Distinct from the classic stub so a test can tell which processor was built
+  // and assert the resolved UC location actually reaches its constructor.
+  const uc: { built: boolean; location?: unknown } = { built: false };
   vi.doMock("@mlflow/core/dist/exporters/uc_table", () => ({
     DatabricksUCTableSpanExporter: class {},
-    DatabricksUCTableSpanProcessor: StubProcessor,
+    DatabricksUCTableSpanProcessor: class {
+      constructor(_exporter: unknown, location: unknown) {
+        uc.built = true;
+        uc.location = location;
+      }
+      onStart() {}
+      onEnd() {}
+      forceFlush() {
+        return Promise.resolve();
+      }
+      shutdown() {
+        return Promise.resolve();
+      }
+    },
   }));
-  return { sdk, span, setInputs, setOutputs };
+  // mlflow's experiment-tag → UC-location parser (deep import), used by the
+  // numeric-id auto-detect path. Default: not a UC experiment (null → classic).
+  vi.doMock("@mlflow/core/dist/core/destination", () => ({
+    ucLocationFromExperimentTags: vi.fn(() => ucFromTags),
+  }));
+  return { sdk, span, setInputs, setOutputs, uc };
 }
 
 describe("agent tracing (mlflow)", () => {
@@ -74,6 +102,7 @@ describe("agent tracing (mlflow)", () => {
     vi.doUnmock("@mlflow/core");
     vi.doUnmock("@mlflow/core/dist/exporters/mlflow");
     vi.doUnmock("@mlflow/core/dist/exporters/uc_table");
+    vi.doUnmock("@mlflow/core/dist/core/destination");
     vi.doUnmock("../../../telemetry");
     vi.restoreAllMocks();
     delete process.env.MLFLOW_EXPERIMENT_ID;
@@ -152,38 +181,79 @@ describe("agent tracing (mlflow)", () => {
     vi.doUnmock("../../../telemetry");
   });
 
-  test("UC via env vars: contributes a processor and never calls init()", async () => {
+  test("UC via env vars: builds the UC processor with that location, never calls init()", async () => {
     process.env.MLFLOW_EXPERIMENT_ID = "exp-123";
     process.env.MLFLOW_UC_CATALOG = "main";
     process.env.MLFLOW_UC_SCHEMA = "mario";
     process.env.MLFLOW_UC_TABLE_PREFIX = "exp-123";
-    const { sdk } = stubSdk();
+    const { sdk, uc } = stubSdk();
     vi.doMock("../../../telemetry", () => ({
       TelemetryManager: { registerSpanProcessor: vi.fn() },
     }));
     const mod = await import("../mlflow");
 
     await mod.initAgentTracing();
-    // The UC processor carries its location and reads no global config, so
-    // init() — which would stand up @mlflow/core's competing NodeSDK — is
-    // never called, not even eagerly on "setup:complete".
     mod.startAgentTracing();
+
+    // The env location reaches the UC processor verbatim...
+    expect(uc.built).toBe(true);
+    expect(uc.location).toEqual({
+      catalogName: "main",
+      schemaName: "mario",
+      tablePrefix: "exp-123",
+    });
+    // ...and the UC processor reads no global config, so init() — which would
+    // stand up @mlflow/core's competing NodeSDK — is never called, not even
+    // eagerly on "setup:complete".
     expect(sdk.init).not.toHaveBeenCalled();
     vi.doUnmock("../../../telemetry");
   });
 
-  test("UC via experiment tag: auto-detects location and never calls init()", async () => {
-    process.env.MLFLOW_EXPERIMENT_ID = "123";
-    const getExperiment = vi.fn(async () => ({
-      experimentId: "123",
-      name: "n",
-      tags: {
-        "mlflow.experiment.databricksTraceDestinationPath": "main.mario.123",
-      },
+  test("UC via experiment tag: auto-detects the location, builds the UC processor, no init()", async () => {
+    process.env.MLFLOW_EXPERIMENT_ID = "123"; // numeric → auto-detect runs
+    const location = {
+      catalogName: "main",
+      schemaName: "mario",
+      tablePrefix: "123",
+    };
+    const { sdk, uc } = stubSdk({}, location);
+    vi.doMock("../../../telemetry", () => ({
+      TelemetryManager: { registerSpanProcessor: vi.fn() },
     }));
-    const { sdk } = stubSdk({
+    const mod = await import("../mlflow");
+
+    await mod.initAgentTracing();
+    mod.startAgentTracing();
+
+    expect(uc.built).toBe(true);
+    expect(uc.location).toEqual(location);
+    expect(sdk.init).not.toHaveBeenCalled(); // UC path skips init()
+    vi.doUnmock("../../../telemetry");
+  });
+
+  test("numeric experiment with no UC tag: falls back to classic (init seeds config)", async () => {
+    process.env.MLFLOW_EXPERIMENT_ID = "123";
+    const { sdk, uc } = stubSdk(); // ucFromTags defaults to null → classic
+    vi.doMock("../../../telemetry", () => ({
+      TelemetryManager: { registerSpanProcessor: vi.fn() },
+    }));
+    const mod = await import("../mlflow");
+
+    await mod.initAgentTracing();
+    mod.startAgentTracing();
+
+    expect(uc.built).toBe(false); // classic processor, not UC
+    expect(sdk.init).toHaveBeenCalledOnce(); // classic needs the config seed
+    vi.doUnmock("../../../telemetry");
+  });
+
+  test("getExperiment failure during auto-detect: classic fallback, tracing stays enabled", async () => {
+    process.env.MLFLOW_EXPERIMENT_ID = "123";
+    const { sdk, uc } = stubSdk({
       MlflowClient: class {
-        getExperiment = getExperiment;
+        getExperiment = vi.fn(async () => {
+          throw new Error("permission denied");
+        });
       },
     });
     vi.doMock("../../../telemetry", () => ({
@@ -194,8 +264,41 @@ describe("agent tracing (mlflow)", () => {
     await mod.initAgentTracing();
     mod.startAgentTracing();
 
-    expect(getExperiment).toHaveBeenCalledWith("123");
-    expect(sdk.init).not.toHaveBeenCalled(); // UC path skips init()
+    // A UC-detect failure must never break the agent: classic fallback, enabled.
+    expect(uc.built).toBe(false);
+    expect(sdk.init).toHaveBeenCalledOnce();
+    await mod.traceAgent("agent", { messages: [] }, async () => {});
+    expect(sdk.withSpan).toHaveBeenCalled(); // still traces (classic)
+    vi.doUnmock("../../../telemetry");
+  });
+
+  test("non-numeric experiment id: skips getExperiment (numeric-only) and uses classic", async () => {
+    process.env.MLFLOW_EXPERIMENT_ID = "exp-123"; // non-numeric
+    const getExperiment = vi.fn(async () => ({
+      experimentId: "x",
+      name: "n",
+      tags: {},
+    }));
+    // ucFromTags would return a UC location if the parser were reached...
+    const { sdk } = stubSdk(
+      {
+        MlflowClient: class {
+          getExperiment = getExperiment;
+        },
+      },
+      { catalogName: "main", schemaName: "mario", tablePrefix: "x" },
+    );
+    vi.doMock("../../../telemetry", () => ({
+      TelemetryManager: { registerSpanProcessor: vi.fn() },
+    }));
+    const mod = await import("../mlflow");
+
+    await mod.initAgentTracing();
+    mod.startAgentTracing();
+
+    // ...but the numeric gate skips the lookup entirely, so it stays classic.
+    expect(getExperiment).not.toHaveBeenCalled();
+    expect(sdk.init).toHaveBeenCalledOnce();
     vi.doUnmock("../../../telemetry");
   });
 
@@ -269,17 +372,20 @@ describe("agent tracing (mlflow)", () => {
   // or moves the public symbols we now import from the entrypoint. Runs against
   // the REAL package (no mocks); an OSS trackingUri needs no Databricks creds.
   test("@mlflow/core exposes the public + deep-imported symbols we construct", async () => {
+    const mlflow = await import("@mlflow/core");
     const {
       createAuthProvider,
       MlflowClient,
       InMemoryTraceManager,
       SpanAttributeKey,
       SpanType,
-    } = await import("@mlflow/core");
+    } = mlflow;
     const { MlflowSpanExporter, MlflowSpanProcessor } =
       await import("@mlflow/core/dist/exporters/mlflow");
     const { DatabricksUCTableSpanExporter, DatabricksUCTableSpanProcessor } =
       await import("@mlflow/core/dist/exporters/uc_table");
+    const { ucLocationFromExperimentTags } =
+      await import("@mlflow/core/dist/core/destination");
 
     // Public entrypoint symbols (deep imports under mlflow-tracing 0.1.3).
     expect(typeof createAuthProvider).toBe("function");
@@ -288,6 +394,16 @@ describe("agent tracing (mlflow)", () => {
     expect(SpanAttributeKey.SPAN_TYPE).toBe("mlflow.spanType");
     expect(SpanType.AGENT).toBe("AGENT");
     expect(SpanType.TOOL).toBe("TOOL");
+
+    // The tracing entrypoints trace()/currentTraceId()/linkTraceToRun() call.
+    for (const fn of [
+      "init",
+      "withSpan",
+      "getCurrentActiveSpan",
+      "updateCurrentTrace",
+    ]) {
+      expect(typeof (mlflow as any)[fn]).toBe("function");
+    }
 
     const authProvider = createAuthProvider({
       trackingUri: "http://localhost:5000",
@@ -310,13 +426,27 @@ describe("agent tracing (mlflow)", () => {
       }
     }
 
-    // getExperiment backs UC trace-location auto-detect.
+    // getExperiment + the tag parser back UC trace-location auto-detect.
     expect(typeof client.getExperiment).toBe("function");
+    expect(
+      ucLocationFromExperimentTags({
+        "mlflow.experiment.databricksTraceDestinationPath": "cat.schema.prefix",
+      }),
+    ).toMatchObject({
+      catalogName: "cat",
+      schemaName: "schema",
+      tablePrefix: "prefix",
+    });
+    expect(ucLocationFromExperimentTags({})).toBeNull();
   });
 });
 
 describe("GatedMlflowSpanProcessor", () => {
   const SPAN_TYPE_KEY = "mlflow.spanType";
+  // The JSON-stringified AGENT/TOOL values that mark a trace as an agent turn,
+  // exactly as buildMlflowSpanProcessor computes them. mlflow stamps UNKNOWN on
+  // every non-agent span, so this set must NOT match `'"UNKNOWN"'`.
+  const AGENT_SPAN_TYPES = new Set(['"AGENT"', '"TOOL"']);
 
   function mkGated(maxTracked?: number) {
     const inner = {
@@ -329,6 +459,7 @@ describe("GatedMlflowSpanProcessor", () => {
     const gated = new GatedMlflowSpanProcessor(inner as any, {
       popTrace,
       spanTypeKey: SPAN_TYPE_KEY,
+      agentSpanTypes: AGENT_SPAN_TYPES,
       maxTracked,
     });
     return { inner, popTrace, gated };
@@ -363,6 +494,8 @@ describe("GatedMlflowSpanProcessor", () => {
     const requestRoot = mkSpan({
       kind: SpanKind.SERVER,
       parentSpanContext: undefined,
+      // mlflow stamps the SERVER root UNKNOWN; the AGENT child is what counts.
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' },
       traceId: "tr-agent",
     }); // incoming request — mlflow roots the trace here
     const agentChild = mkSpan({
@@ -381,23 +514,31 @@ describe("GatedMlflowSpanProcessor", () => {
     expect(popTrace).not.toHaveBeenCalled();
   });
 
-  test("discards the trace when no agent span appears — a plain HTTP request never becomes an MLflow trace", () => {
+  // Regression: mlflow's real processor stamps `mlflow.spanType = "UNKNOWN"` on
+  // EVERY span it processes, so a presence check (`!== undefined`) would export
+  // every plain request. The gate must key on the AGENT/TOOL value instead.
+  test("discards a plain request even though mlflow stamps every span UNKNOWN", () => {
     const { inner, popTrace, gated } = mkGated();
     gated.ready();
 
     const requestRoot = mkSpan({
       kind: SpanKind.SERVER,
       parentSpanContext: undefined,
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' }, // mlflow stamps the root
       traceId: "tr-plain",
     }); // e.g. /api/analytics/query
-    const dbChild = mkSpan({ kind: SpanKind.CLIENT, traceId: "tr-plain" }); // SQL warehouse call — no mlflow.spanType
+    const dbChild = mkSpan({
+      kind: SpanKind.CLIENT,
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' }, // ...and the child
+      traceId: "tr-plain",
+    }); // SQL warehouse call
 
     gated.onStart(requestRoot as any, {} as any);
     gated.onStart(dbChild as any, {} as any);
     gated.onEnd(dbChild as any);
     gated.onEnd(requestRoot as any);
 
-    // Root discarded from mlflow, not exported.
+    // UNKNOWN is not AGENT/TOOL → discarded from mlflow, not exported.
     expect(popTrace).toHaveBeenCalledExactlyOnceWith("tr-plain");
     expect(inner.onEnd).not.toHaveBeenCalledWith(requestRoot);
   });
@@ -559,6 +700,7 @@ describe("GatedMlflowSpanProcessor", () => {
     const gated = new GatedMlflowSpanProcessor(inner as any, {
       popTrace: vi.fn(),
       spanTypeKey: SPAN_TYPE_KEY,
+      agentSpanTypes: AGENT_SPAN_TYPES,
       flushTimeoutMs: 5,
     });
 

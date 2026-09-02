@@ -39,12 +39,15 @@ let gatedProcessor: GatedMlflowSpanProcessor | undefined;
  *
  * 2. Let only agent turns become MLflow traces. mlflow roots a trace at EVERY
  *    parentless span, and AppKit's single provider carries every HTTP/DB span —
- *    so unscoped, every request would become an MLflow trace. mlflow tags only
- *    its own spans (`mlflow.spanType`, set AFTER `onStart`), so the call is made
- *    at the root's `onEnd`: forward it (mlflow exports the trace) only if some
- *    span in the trace was an mlflow span; otherwise `popTrace` to discard the
- *    trace mlflow built in memory. Children end before their root, so the flag
- *    is set by the time the root decides.
+ *    so unscoped, every request would become an MLflow trace. mlflow stamps
+ *    `mlflow.spanType` on EVERY span it processes (defaulting to `UNKNOWN`), so
+ *    presence alone can't tell an agent turn from a plain request — we key on
+ *    the value (AGENT/TOOL) instead. At the root's `onEnd` we forward it (mlflow
+ *    exports the trace) only if some span in the trace carried an AGENT/TOOL
+ *    type; otherwise `popTrace` to discard the trace mlflow built in memory. The
+ *    real span type is set after `onStart` (the constructor stamps UNKNOWN
+ *    first), and children end before their root, so the flag is set by the time
+ *    the root decides.
  *
  * It also drops the exporters' own outbound spans at `onStart` (parentless
  * CLIENT — outgoing requests made outside any agent turn, e.g. mlflow/OTLP
@@ -68,6 +71,10 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   #agentTraceIds = new Set<string>();
   #popTrace: (otelTraceId: string) => void;
   #spanTypeKey: string;
+  // The `mlflow.spanType` attribute values (JSON-stringified) that mark a trace
+  // as an agent turn — AGENT/TOOL. Every other value (notably UNKNOWN, which
+  // mlflow stamps on all non-agent spans) is treated as non-agent.
+  #agentSpanTypes: ReadonlySet<string>;
   // Leak backstop for #agentTraceIds — far above real concurrency. See onEnd.
   #maxTracked: number;
   // Cap on how long forceFlush/shutdown wait for a stuck export.
@@ -78,6 +85,7 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
     deps: {
       popTrace: (otelTraceId: string) => void;
       spanTypeKey: string;
+      agentSpanTypes: ReadonlySet<string>;
       maxTracked?: number;
       flushTimeoutMs?: number;
     },
@@ -85,6 +93,7 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
     this.#inner = inner;
     this.#popTrace = deps.popTrace;
     this.#spanTypeKey = deps.spanTypeKey;
+    this.#agentSpanTypes = deps.agentSpanTypes;
     this.#maxTracked = deps.maxTracked ?? 1024;
     this.#flushTimeoutMs = deps.flushTimeoutMs ?? 5000;
   }
@@ -113,11 +122,12 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]): void {
     if (!this.#forwarded.has(span)) return;
     const traceId = span.spanContext().traceId;
-    // An mlflow span (AGENT/TOOL) ended in this trace — mark it for export. The
-    // `mlflow.spanType` attribute is only present after `onStart`, so this is the
-    // earliest we can see it.
+    // An AGENT/TOOL span ended in this trace — mark it for export. mlflow stamps
+    // `mlflow.spanType` on every span (UNKNOWN by default), so match the value,
+    // not mere presence; the real type is set after `onStart`, so `onEnd` is the
+    // earliest we can read it.
     if (
-      span.attributes[this.#spanTypeKey] !== undefined &&
+      this.#agentSpanTypes.has(span.attributes[this.#spanTypeKey] as string) &&
       !this.#agentTraceIds.has(traceId)
     ) {
       // Normally an entry lives only until its root's onEnd deletes it. But a
@@ -183,10 +193,6 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   }
 }
 
-/** The Databricks experiment tag that links an experiment to a UC trace store. */
-const UC_DESTINATION_PATH_TAG =
-  "mlflow.experiment.databricksTraceDestinationPath";
-
 /**
  * Resolve the Unity Catalog trace location for the bound experiment, or
  * `undefined` for classic experiment-backed storage. Any failure falls back to
@@ -195,14 +201,13 @@ const UC_DESTINATION_PATH_TAG =
  * 1. Explicit env override — `MLFLOW_UC_CATALOG` + `MLFLOW_UC_SCHEMA` +
  *    `MLFLOW_UC_TABLE_PREFIX`, all three required.
  * 2. Auto-detect from the linked Databricks experiment (numeric ids only, since
- *    `GetExperiment` only accepts them): read the
- *    `mlflow.experiment.databricksTraceDestinationPath` tag, whose value is
- *    `<catalog>.<schema>.<prefix>`.
+ *    `GetExperiment` only accepts them): parse its `databricksTrace*` tags with
+ *    mlflow's own {@link ucLocationFromExperimentTags}, which also carries the
+ *    backend-populated spans/logs table names for custom-provisioned locations.
  * 3. Otherwise classic.
  *
- * @mlflow/core ships its own tag parser (`core/destination`) but doesn't export
- * it publicly, and its published `.d.ts` redacts the tag constant, so we read
- * the tag directly here rather than deep-import a scrubbed internal.
+ * `ucLocationFromExperimentTags` isn't on `@mlflow/core`'s public entrypoint, so
+ * it's deep-imported like the exporter classes and covered by the tripwire test.
  */
 async function resolveUcLocation(
   experimentId: string,
@@ -219,12 +224,10 @@ async function resolveUcLocation(
 
   try {
     const experiment = await client.getExperiment(experimentId);
-    const path = experiment?.tags?.[UC_DESTINATION_PATH_TAG];
-    if (!path) return undefined;
-    // Must be exactly catalog.schema.prefix, all non-empty; else not a UC store.
-    const [cat, schema, prefix, ...rest] = path.split(".");
-    if (!cat || !schema || !prefix || rest.length > 0) return undefined;
-    return { catalogName: cat, schemaName: schema, tablePrefix: prefix };
+    if (!experiment) return undefined;
+    const { ucLocationFromExperimentTags } =
+      await import("@mlflow/core/dist/core/destination");
+    return ucLocationFromExperimentTags(experiment.tags) ?? undefined;
   } catch (err) {
     logger.warn(
       "MLflow UC trace-location auto-detect failed; using classic experiment storage: %O",
@@ -249,10 +252,11 @@ async function resolveUcLocation(
  * pinned to the exact version in package.json and guarded by a test that fails
  * loudly if a version bump renames them.
  *
- * Also resolves the two hooks {@link GatedMlflowSpanProcessor} needs to scope
- * forwarding to agent traces — `popTrace` (to discard non-agent traces) and the
- * `mlflow.spanType` attribute key (to recognize an mlflow span) — so the gate's
- * `onEnd` stays synchronous.
+ * Also resolves the hooks {@link GatedMlflowSpanProcessor} needs to scope
+ * forwarding to agent traces: `popTrace` (to discard non-agent traces), the
+ * `mlflow.spanType` attribute key, and the JSON-stringified AGENT/TOOL values
+ * that mark a trace as an agent turn (mlflow stamps every span, defaulting to
+ * UNKNOWN, so the gate must match the value, not presence).
  */
 async function buildMlflowSpanProcessor(
   m: MlflowModule,
@@ -262,6 +266,7 @@ async function buildMlflowSpanProcessor(
   processor: SpanProcessor;
   popTrace: (otelTraceId: string) => void;
   spanTypeKey: string;
+  agentSpanTypes: ReadonlySet<string>;
 }> {
   let processor: SpanProcessor;
   if (ucLoc) {
@@ -281,6 +286,12 @@ async function buildMlflowSpanProcessor(
     popTrace: (otelTraceId) =>
       m.InMemoryTraceManager.getInstance().popTrace(otelTraceId),
     spanTypeKey: m.SpanAttributeKey.SPAN_TYPE,
+    // mlflow JSON-stringifies attribute values, so the stored values are
+    // `"AGENT"`/`"TOOL"` (quoted). Match that exact form.
+    agentSpanTypes: new Set([
+      JSON.stringify(m.SpanType.AGENT),
+      JSON.stringify(m.SpanType.TOOL),
+    ]),
   };
 }
 
@@ -352,14 +363,12 @@ export async function initAgentTracing(): Promise<void> {
       authProvider,
     });
     ucLocation = await resolveUcLocation(id, client);
-    const { processor, popTrace, spanTypeKey } = await buildMlflowSpanProcessor(
-      mlflow,
-      client,
-      ucLocation,
-    );
+    const { processor, popTrace, spanTypeKey, agentSpanTypes } =
+      await buildMlflowSpanProcessor(mlflow, client, ucLocation);
     gatedProcessor = new GatedMlflowSpanProcessor(processor, {
       popTrace,
       spanTypeKey,
+      agentSpanTypes,
     });
     TelemetryManager.registerSpanProcessor(gatedProcessor);
     enabled = true;
