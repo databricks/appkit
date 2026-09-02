@@ -4,7 +4,7 @@ import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
 import { createLakebasePool } from "../connectors/lakebase";
 import { getClientOptions } from "../context/client-options";
-import { AppKitError, ExecutionError, InitializationError } from "../errors";
+import { AppKitError, ExecutionError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
@@ -42,22 +42,25 @@ function createAbortError(signal: AbortSignal): unknown {
  * Cache manager class to handle cache operations.
  * Can be used with in-memory storage or persistent storage (Lakebase).
  *
- * The cache is automatically initialized by AppKit. Use `getInstanceSync()` to access
- * the singleton instance after initialization.
+ * One manager belongs to one app: `createApp` builds it and hands it to every
+ * plugin through the plugin context, so a plugin reads it as `this.cache`.
+ * There is no process-wide instance and no public construction path.
  *
  * @internal
  * @example
  * ```typescript
- * const cache = CacheManager.getInstanceSync();
- * const result = await cache.getOrExecute(["users", userId], () => fetchUser(userId), userKey);
+ * // Inside a plugin — the app bound this cache when it registered the plugin.
+ * const result = await this.cache.getOrExecute(
+ *   ["users", userId],
+ *   () => fetchUser(userId),
+ *   userKey,
+ * );
  * ```
  */
 export class CacheManager {
   private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
   private static readonly ABORT_GRACE_PERIOD_MS = 100;
   private readonly name: string = "cache-manager";
-  private static instance: CacheManager | null = null;
-  private static initPromise: Promise<CacheManager> | null = null;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -104,63 +107,6 @@ export class CacheManager {
         unit: "1",
       }),
     };
-  }
-
-  /**
-   * Get the singleton instance of the cache manager (sync version).
-   *
-   * Throws if not initialized - ensure AppKit.create() has completed first.
-   * @returns CacheManager instance
-   */
-  static getInstanceSync(): CacheManager {
-    if (!CacheManager.instance) {
-      throw InitializationError.notInitialized(
-        "CacheManager",
-        "Ensure AppKit.create() has completed before accessing the cache",
-      );
-    }
-
-    return CacheManager.instance;
-  }
-
-  /**
-   * Initialize and get the singleton instance of the cache manager.
-   * Called internally by AppKit - prefer `getInstanceSync()` for plugin access.
-   * @param userConfig - User configuration for the cache manager
-   * @returns CacheManager instance
-   * @internal
-   */
-  static async getInstance(
-    userConfig?: Partial<CacheConfig>,
-  ): Promise<CacheManager> {
-    if (CacheManager.instance) {
-      return CacheManager.instance;
-    }
-
-    if (!CacheManager.initPromise) {
-      CacheManager.initPromise = CacheManager.create(userConfig).then(
-        (instance) => {
-          CacheManager.instance = instance;
-          return instance;
-        },
-      );
-    }
-
-    return CacheManager.initPromise;
-  }
-
-  /**
-   * Publish a manager into the deprecated process-wide slot, first-wins.
-   *
-   * Exists only so the still-exported {@link getInstanceSync} keeps answering
-   * for callers that used it before the cache became per-app. `_createApp`
-   * is the only caller; it publishes its own manager after building it. Deleted
-   * together with the statics it serves.
-   *
-   * @internal
-   */
-  static _publishAmbient(manager: CacheManager): void {
-    CacheManager.instance ??= manager;
   }
 
   /**

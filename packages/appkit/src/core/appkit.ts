@@ -208,9 +208,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // so it cannot move into the synchronous AppKit constructor.
     TelemetryManager.initialize(config?.telemetry);
     const cache = await CacheManager.create(config?.cache);
-    // Keeps the still-exported getInstanceSync() answering as it does today,
-    // first-wins. Removed with the statics it serves.
-    CacheManager._publishAmbient(cache);
 
     // Everything past the manager's construction runs guarded: the app owns the
     // manager now, so a failed boot has to close it. Nothing else holds a

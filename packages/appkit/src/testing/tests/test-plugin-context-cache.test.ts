@@ -98,16 +98,6 @@ describe("createTestPluginContext's cache", () => {
     }
   });
 
-  test("attaching touches no process-wide slot", async () => {
-    const publish = vi.spyOn(CacheManager, "_publishAmbient");
-    const mock = createTestPluginContext();
-
-    await mock.attach(new CachingPlugin({}));
-
-    expect(publish).not.toHaveBeenCalled();
-    publish.mockRestore();
-  });
-
   test("the handle's key function is production's", () => {
     const mock = createTestPluginContext();
 

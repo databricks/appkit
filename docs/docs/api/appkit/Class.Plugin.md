@@ -298,8 +298,12 @@ evaluated at module top level, before any app exists.
 
 #### Throws
 
-InitializationError when no cache is reachable — a plugin whose
-  cached paths would otherwise fail later, inside a request handler.
+InitializationError when a context is supplied but carries no
+  cache. A context-less `attachContext({})` is the app-less path instead
+  (see `runAgent`): it binds telemetry and leaves the cache unbound, so
+  only a cached execution fails, at the chokepoint in
+  \_buildInterceptors. There is no process-wide cache to fall back
+  to either way.
 
 #### Implementation of
 

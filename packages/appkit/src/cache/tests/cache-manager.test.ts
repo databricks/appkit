@@ -112,31 +112,6 @@ describe("CacheManager", () => {
     vi.clearAllMocks();
   });
 
-  describe("singleton pattern", () => {
-    test("getInstanceSync should throw when not initialized", () => {
-      expect(() => CacheManager.getInstanceSync()).toThrow(
-        "CacheManager not initialized",
-      );
-    });
-
-    test("getInstance should create singleton", async () => {
-      const instance1 = await CacheManager.getInstance({
-        storage: createMockStorage(),
-      });
-      const instance2 = await CacheManager.getInstance();
-
-      expect(instance1).toBe(instance2);
-    });
-
-    test("getInstanceSync should return instance after initialization", async () => {
-      await CacheManager.getInstance({ storage: createMockStorage() });
-
-      const instance = CacheManager.getInstanceSync();
-
-      expect(instance).toBeInstanceOf(CacheManager);
-    });
-  });
-
   describe("generateKey", () => {
     test("should generate consistent hash for same inputs", async () => {
       const cache = await CacheManager.create({

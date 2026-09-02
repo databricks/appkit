@@ -15,7 +15,7 @@ import type {
 import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
-import { CacheManager } from "../cache";
+import type { CacheManager } from "../cache";
 import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
 import type { PluginContext } from "../core/plugin-context";
 import {
@@ -288,25 +288,6 @@ export abstract class Plugin<
       this.name,
       this.config.telemetry,
     );
-    this.bindAmbientCache();
-  }
-
-  /**
-   * Opportunistically bind the process-wide cache, if one exists.
-   *
-   * A plugin's real cache comes from its app via {@link attachContext}; this
-   * covers the app-less case, where the deprecated ambient slot is the only
-   * cache there is. Retained only while that slot exists — it goes away with
-   * the statics, at which point an app-less plugin has no cache until it is
-   * attached.
-   */
-  private bindAmbientCache(): void {
-    try {
-      this._cache = CacheManager.getInstanceSync();
-      this.isReady = true;
-    } catch {
-      // No app has booted. `attachContext` will supply the cache.
-    }
   }
 
   /**
@@ -315,8 +296,12 @@ export abstract class Plugin<
    * `setup()`. Kept separate from the constructor so plugin factories can be
    * evaluated at module top level, before any app exists.
    *
-   * @throws InitializationError when no cache is reachable — a plugin whose
-   *   cached paths would otherwise fail later, inside a request handler.
+   * @throws InitializationError when a context is supplied but carries no
+   *   cache. A context-less `attachContext({})` is the app-less path instead
+   *   (see `runAgent`): it binds telemetry and leaves the cache unbound, so
+   *   only a cached execution fails, at the chokepoint in
+   *   {@link _buildInterceptors}. There is no process-wide cache to fall back
+   *   to either way.
    */
   attachContext(
     deps: {
@@ -327,10 +312,16 @@ export abstract class Plugin<
     if (deps.context !== undefined) {
       this.context = deps.context as PluginContext;
     }
-    // The app's own cache, and every plugin in the app gets the same one. The
-    // ambient fallback covers callers that build a context without one; it goes
-    // away with the process-wide slot itself.
-    this._cache = this.context?.cache ?? CacheManager.getInstanceSync();
+    // The app's own cache, and every plugin in the app gets the same one. A
+    // context that carries none is a misconfigured context rather than an
+    // app-less plugin, so it fails here where the cause is legible.
+    if (this.context !== undefined && !this.context.cache) {
+      throw InitializationError.notInitialized(
+        "CacheManager",
+        `Plugin "${this.name}" was attached to a context that carries no cache. Build the context with createApp(), or createTestPluginContext() in tests.`,
+      );
+    }
+    this._cache = this.context?.cache;
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       deps.telemetryConfig ?? this.config.telemetry,

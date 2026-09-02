@@ -49,7 +49,7 @@ const mock = createTestPluginContext({
 
 ### Attaching to a plugin
 
-`attach()` wires the context to a plugin the production way: it seeds an in-memory cache (if AppKit hasn't already initialized one), then calls the plugin's `attachContext`, which rebuilds telemetry and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
+`attach()` wires the context to a plugin the production way: it calls the plugin's `attachContext`, which binds this context's cache, rebuilds telemetry, and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
 
 ```ts
 const plugin = new MyAgentPlugin({});

@@ -97,14 +97,15 @@ describe("Plugin cache binding", () => {
     expect(second.boundCache()).toBe(first.boundCache());
   });
 
-  test("attachContext with no reachable cache throws InitializationError", () => {
+  test("a context-less attachContext is the app-less path, not an error", () => {
     const plugin = new ProbePlugin({});
 
-    // Not a TypeError later inside a handler: the failure lands at attach time,
-    // where the cause is legible.
-    expect(() => plugin.attachContext({ context: undefined })).toThrow(
-      InitializationError,
-    );
+    // `runAgent` runs the lifecycle this way for standalone plugins
+    // (core/agent/run-agent.ts). It must bind telemetry and leave the cache
+    // unbound rather than refuse: only a cached execution then fails, at the
+    // chokepoint the test below covers.
+    expect(() => plugin.attachContext({})).not.toThrow();
+    expect(() => plugin.attachContext({ context: undefined })).not.toThrow();
   });
 
   test("a context carrying no cache is not a silent pass", () => {
