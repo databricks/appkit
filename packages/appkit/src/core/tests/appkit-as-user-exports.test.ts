@@ -13,45 +13,6 @@ import type { UserContext } from "../../context/user-context";
 
 // ── Mock heavy dependencies ─────────────────────────────────────────
 
-vi.mock("../../cache", () => ({
-  CacheManager: {
-    getInstance: vi.fn(async () => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-    getInstanceSync: vi.fn(() => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-    // `createApp` builds this app's own manager and publishes it to the
-    // deprecated ambient slot; both are part of the module's shape now.
-    create: vi.fn(async () => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-      close: vi.fn(async () => {}),
-    })),
-    _publishAmbient: vi.fn(),
-  },
-}));
-
 vi.mock("../../telemetry", async () => {
   const actual =
     await vi.importActual<typeof import("../../telemetry")>("../../telemetry");
