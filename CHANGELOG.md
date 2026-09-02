@@ -136,6 +136,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.69.2](https://github.com/databricks/appkit/compare/v0.69.1...v0.69.2) (2026-09-02)
+
+### stream
+
+* **stream:** raise SSE event limit to 5 MiB and honour per-call maxEventSize ([#567](https://github.com/databricks/appkit/issues/567)) ([e7474c8](https://github.com/databricks/appkit/commit/e7474c8a57b54e1870bf86e13eb59ca0f6501ecc))
+
+
 ## [0.69.1](https://github.com/databricks/appkit/compare/v0.69.0...v0.69.1) (2026-09-01)
 
 ### appkit

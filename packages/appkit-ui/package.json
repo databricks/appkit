@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit-ui",
   "type": "module",
-  "version": "0.69.1",
+  "version": "0.69.2",
   "license": "Apache-2.0",
   "sideEffects": [
     "**/*.css"
