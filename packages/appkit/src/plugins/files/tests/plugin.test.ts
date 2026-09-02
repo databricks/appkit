@@ -7,6 +7,7 @@ import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
+import { createTestPluginContext, resetTestCache } from "../../../testing";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_READ_DEFAULTS,
@@ -15,7 +16,7 @@ import {
 import { FilesPlugin, files } from "../plugin";
 import { PolicyDeniedError, policy } from "../policy";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
+const { mockClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
@@ -42,18 +43,7 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
     }
   }
 
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(),
-  };
-
-  return { mockFilesApi, mockClient, MockApiError, mockCacheInstance };
+  return { mockFilesApi, mockClient, MockApiError };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -75,17 +65,6 @@ vi.mock("../../../context", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-    getInstance: vi.fn(async () => mockCacheInstance),
-    // `createApp` builds this app's own manager and publishes it to the
-    // deprecated ambient slot; both are part of the module's shape now.
-    create: vi.fn(async () => mockCacheInstance),
-    _publishAmbient: vi.fn(),
-  },
-}));
-
 const VOLUMES_CONFIG = {
   volumes: {
     uploads: { maxUploadSize: 100_000_000, policy: policy.allowAll() },
@@ -93,11 +72,30 @@ const VOLUMES_CONFIG = {
   },
 };
 
+/**
+ * One kit context for this file, supplying the real `CacheManager` a plugin
+ * resolves — the same seam the sibling files suites use. The double this file
+ * used to carry passed `getOrExecute` straight through, so no test here ever
+ * saw a cache hit.
+ */
+const kit = createTestPluginContext();
+const testCache = kit.cache;
+
+/** Build a plugin bound to this file's cache, the way an app binds one. */
+function filesPlugin(config: unknown): FilesPlugin {
+  const plugin = new FilesPlugin(config as never);
+  plugin.attachContext({ context: kit.ctx });
+  return plugin;
+}
+
 describe("FilesPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // The cache is real and shared across this file's tests now, so entries
+    // must not outlive a test.
+    await resetTestCache();
     setupDatabricksEnv();
     ServiceContext.reset();
     process.env.DATABRICKS_VOLUME_UPLOADS = "/Volumes/catalog/schema/uploads";
@@ -106,6 +104,12 @@ describe("FilesPlugin", () => {
   });
 
   afterEach(() => {
+    // Unpatch only the shared cache: a stubbed `generateKey`/`delete` would
+    // otherwise leak into later tests. `vi.restoreAllMocks()` is too broad —
+    // it also strips the module-scope SDK doubles' implementations.
+    for (const method of ["getOrExecute", "generateKey", "delete"] as const) {
+      (testCache[method] as { mockRestore?: () => void }).mockRestore?.();
+    }
     serviceContextMock?.restore();
     delete process.env.DATABRICKS_VOLUME_UPLOADS;
     delete process.env.DATABRICKS_VOLUME_EXPORTS;
@@ -117,7 +121,7 @@ describe("FilesPlugin", () => {
   });
 
   test("plugin instance has correct name", () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin(VOLUMES_CONFIG);
     expect(plugin.name).toBe("files");
   });
 
@@ -222,7 +226,7 @@ describe("FilesPlugin", () => {
 
   describe("getAgentTools / executeAgentTool", () => {
     test("produces independent tool entries per volume", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const tools = plugin.getAgentTools();
       const names = tools.map((t) => t.name);
 
@@ -241,7 +245,7 @@ describe("FilesPlugin", () => {
     });
 
     test("dispatches to the correct volume API based on the tool name", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const asyncIterable = (items: { path: string }[]) => ({
         [Symbol.asyncIterator]: async function* () {
           for (const item of items) yield item;
@@ -268,7 +272,7 @@ describe("FilesPlugin", () => {
     });
 
     test("returns LLM-friendly error string for invalid tool args", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const result = await plugin.executeAgentTool("uploads.read", {});
       expect(typeof result).toBe("string");
       expect(result).toContain("Invalid arguments for uploads.read");
@@ -278,7 +282,7 @@ describe("FilesPlugin", () => {
 
   describe("exports()", () => {
     test("returns a callable function with a .volume alias", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
       expect(typeof exported).toBe("function");
@@ -286,7 +290,7 @@ describe("FilesPlugin", () => {
     });
 
     test("returns volume handle with asUser and direct VolumeAPI methods", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
       for (const key of ["uploads", "exports"]) {
@@ -299,7 +303,7 @@ describe("FilesPlugin", () => {
     });
 
     test(".volume() returns the same shape as the callable", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
       const direct = exported("uploads");
@@ -309,7 +313,7 @@ describe("FilesPlugin", () => {
     });
 
     test("throws for unknown volume key", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
       expect(() => exported("unknown")).toThrow(/Unknown volume "unknown"/);
@@ -333,7 +337,7 @@ describe("FilesPlugin", () => {
     ];
 
     test("volume handle exposes asUser and all VolumeAPI methods", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
 
       expect(typeof handle.asUser).toBe("function");
@@ -346,7 +350,7 @@ describe("FilesPlugin", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
       try {
-        const plugin = new FilesPlugin(VOLUMES_CONFIG);
+        const plugin = filesPlugin(VOLUMES_CONFIG);
         const handle = plugin.exports()("uploads");
         const mockReq = { header: () => undefined } as any;
 
@@ -360,7 +364,7 @@ describe("FilesPlugin", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "development";
       try {
-        const plugin = new FilesPlugin(VOLUMES_CONFIG);
+        const plugin = filesPlugin(VOLUMES_CONFIG);
         const handle = plugin.exports()("uploads");
         const mockReq = { header: () => undefined } as any;
 
@@ -374,7 +378,7 @@ describe("FilesPlugin", () => {
     });
 
     test("direct methods on handle work as service principal", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
 
       // Direct call executes as service principal (returns a promise, does not throw)
@@ -383,7 +387,7 @@ describe("FilesPlugin", () => {
   });
 
   test("injectRoutes registers volume-scoped routes", () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin(VOLUMES_CONFIG);
     const mockRouter = {
       use: vi.fn(),
       get: vi.fn(),
@@ -407,7 +411,7 @@ describe("FilesPlugin", () => {
   });
 
   test("shutdown() calls streamManager.abortAll()", async () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin(VOLUMES_CONFIG);
     const abortAllSpy = vi.spyOn((plugin as any).streamManager, "abortAll");
 
     await plugin.shutdown();
@@ -447,7 +451,7 @@ describe("FilesPlugin", () => {
     }
 
     test("returns 404 for unknown volume key", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -462,7 +466,7 @@ describe("FilesPlugin", () => {
     });
 
     test("/volumes returns configured volume keys", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/volumes");
       const res = mockRes();
 
@@ -506,7 +510,7 @@ describe("FilesPlugin", () => {
     }
 
     test("rejects upload with content-length over per-volume limit (413)", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
@@ -535,7 +539,7 @@ describe("FilesPlugin", () => {
     });
 
     test("rejects upload with content-length over default limit (413)", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
@@ -564,7 +568,7 @@ describe("FilesPlugin", () => {
     });
 
     test("allows upload with content-length at exactly the limit", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
@@ -591,7 +595,7 @@ describe("FilesPlugin", () => {
     });
 
     test("allows upload when content-length header is missing", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
@@ -619,7 +623,7 @@ describe("FilesPlugin", () => {
 
   describe("auto-discovery integration", () => {
     test("files() with no volumes config discovers from env vars", () => {
-      const plugin = new FilesPlugin({});
+      const plugin = filesPlugin({});
       const exported = plugin.exports();
       // Discovered volumes are accessible via the callable
       expect(() => exported("uploads")).not.toThrow();
@@ -629,7 +633,7 @@ describe("FilesPlugin", () => {
     test("files() with no config and no env vars creates no volumes", () => {
       delete process.env.DATABRICKS_VOLUME_UPLOADS;
       delete process.env.DATABRICKS_VOLUME_EXPORTS;
-      const plugin = new FilesPlugin({});
+      const plugin = filesPlugin({});
       const exported = plugin.exports();
       expect(() => exported("uploads")).toThrow(/Unknown volume/);
     });
@@ -716,7 +720,7 @@ describe("FilesPlugin", () => {
     });
 
     test("read-tier: list succeeds when operation completes within timeout", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
@@ -740,7 +744,7 @@ describe("FilesPlugin", () => {
     });
 
     test("read-tier: list returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
@@ -767,7 +771,7 @@ describe("FilesPlugin", () => {
     });
 
     test("read-tier: read returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/read");
       const res = mockRes();
 
@@ -789,7 +793,7 @@ describe("FilesPlugin", () => {
     });
 
     test("read-tier: exists returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/exists");
       const res = mockRes();
 
@@ -813,7 +817,7 @@ describe("FilesPlugin", () => {
     });
 
     test("read-tier: metadata returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/metadata");
       const res = mockRes();
 
@@ -837,7 +841,7 @@ describe("FilesPlugin", () => {
     });
 
     test("download-tier: download returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/download");
       const res = mockRes();
 
@@ -859,7 +863,7 @@ describe("FilesPlugin", () => {
     });
 
     test("write-tier: mkdir returns 500 when SDK call rejects", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "post", "/mkdir");
       const res = mockRes();
 
@@ -882,7 +886,7 @@ describe("FilesPlugin", () => {
     });
 
     test("write-tier: inflightWrites decrements after error", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "post", "/mkdir");
       const res = mockRes();
 
@@ -904,7 +908,7 @@ describe("FilesPlugin", () => {
     });
 
     test("error response does not leak internal details", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
@@ -931,7 +935,7 @@ describe("FilesPlugin", () => {
       // context.signal, but the files plugin callbacks don't consume it.
       // The timeout only works if the underlying SDK call respects the signal
       // or rejects on its own.
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
@@ -1066,7 +1070,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
 
       try {
-        const plugin = new FilesPlugin(spyConfig);
+        const plugin = filesPlugin(spyConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1106,7 +1110,7 @@ describe("FilesPlugin", () => {
     });
 
     test("header-less HTTP + default publicRead() + write action → 403 with SP user", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
@@ -1143,7 +1147,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_DENIED = "/Volumes/c/s/denied";
 
       try {
-        const plugin = new FilesPlugin(spyConfig);
+        const plugin = filesPlugin(spyConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1181,7 +1185,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_GATED = "/Volumes/c/s/gated";
 
       try {
-        const plugin = new FilesPlugin(allowConfig);
+        const plugin = filesPlugin(allowConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1229,7 +1233,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_GATED = "/Volumes/c/s/gated";
 
       try {
-        const plugin = new FilesPlugin(denyConfig);
+        const plugin = filesPlugin(denyConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1254,7 +1258,7 @@ describe("FilesPlugin", () => {
     });
 
     test("policy volume + policy returns false → 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -1269,7 +1273,7 @@ describe("FilesPlugin", () => {
     });
 
     test("policy volume + policy returns true → 200, runs as SP", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -1305,7 +1309,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_ASYNC_VOL = "/Volumes/c/s/async";
 
       try {
-        const plugin = new FilesPlugin(asyncConfig);
+        const plugin = filesPlugin(asyncConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1326,7 +1330,7 @@ describe("FilesPlugin", () => {
     });
 
     test("default publicRead() volume → reads succeed", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -1345,7 +1349,7 @@ describe("FilesPlugin", () => {
     });
 
     test("default publicRead() volume → writes denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/mkdir");
       const res = mockRes();
 
@@ -1376,7 +1380,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_SIZED = "/Volumes/c/s/sized";
 
       try {
-        const plugin = new FilesPlugin(sizeConfig);
+        const plugin = filesPlugin(sizeConfig);
         const handler = getRouteHandler(plugin, "post", "/upload");
         const res = mockRes();
 
@@ -1403,7 +1407,7 @@ describe("FilesPlugin", () => {
     });
 
     test("upload with malformed content-length → rejected with 400", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
@@ -1428,7 +1432,7 @@ describe("FilesPlugin", () => {
     });
 
     test("upload with negative content-length → rejected with 400", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
@@ -1448,7 +1452,7 @@ describe("FilesPlugin", () => {
     });
 
     test("upload with partially numeric content-length → rejected with 400", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
@@ -1468,7 +1472,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SDK asUser(req) on policy volume → policy-wrapped API works", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const exported = plugin.exports();
       const handle = exported("public");
 
@@ -1494,7 +1498,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SDK asUser(req) on policy volume + deny → throws PolicyDeniedError", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const exported = plugin.exports();
       const handle = exported("locked");
 
@@ -1511,7 +1515,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SDK asUser(req) + denyAll() → delete throws PolicyDeniedError", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handle = plugin.exports()("locked");
 
       const mockReqObj = {
@@ -1528,7 +1532,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SDK asUser(req) + publicRead() → upload throws PolicyDeniedError", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handle = plugin.exports()("public");
 
       const mockReqObj = {
@@ -1545,7 +1549,7 @@ describe("FilesPlugin", () => {
     });
 
     test("direct call on policy volume → enforces policy as SP", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handle = plugin.exports()("open");
 
       // Direct call on allowAll() volume succeeds (policy is checked but allows)
@@ -1556,7 +1560,7 @@ describe("FilesPlugin", () => {
     });
 
     test("direct SP call on denyAll() volume → throws PolicyDeniedError", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handle = plugin.exports()("locked");
 
       await expect(handle.list()).rejects.toThrow(PolicyDeniedError);
@@ -1574,7 +1578,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
 
       try {
-        const plugin = new FilesPlugin(spyConfig);
+        const plugin = filesPlugin(spyConfig);
         const handle = plugin.exports()("spied");
         await handle.list();
 
@@ -1600,7 +1604,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
 
       try {
-        const plugin = new FilesPlugin(spyConfig);
+        const plugin = filesPlugin(spyConfig);
         const handle = plugin.exports()("spied");
         const mockReqObj = {
           header: (name: string) => {
@@ -1630,7 +1634,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → read denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/read");
       const res = mockRes();
 
@@ -1645,7 +1649,7 @@ describe("FilesPlugin", () => {
     });
 
     test("publicRead() volume → read allowed", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/read");
       const res = mockRes();
 
@@ -1668,7 +1672,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → download denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/download");
       const res = mockRes();
 
@@ -1683,7 +1687,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → raw denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/raw");
       const res = mockRes();
 
@@ -1698,7 +1702,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → exists denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/exists");
       const res = mockRes();
 
@@ -1713,7 +1717,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → metadata denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/metadata");
       const res = mockRes();
 
@@ -1728,7 +1732,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → preview denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/preview");
       const res = mockRes();
 
@@ -1743,7 +1747,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → delete denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "delete", "/:volumeKey");
       const res = mockRes();
 
@@ -1758,7 +1762,7 @@ describe("FilesPlugin", () => {
     });
 
     test("denyAll() volume → upload denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
 
@@ -1783,7 +1787,7 @@ describe("FilesPlugin", () => {
     });
 
     test("not(publicRead()) volume → read denied with 403", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -1798,7 +1802,7 @@ describe("FilesPlugin", () => {
     });
 
     test("not(publicRead()) volume → write allowed", async () => {
-      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const plugin = filesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/mkdir");
       const res = mockRes();
 
@@ -1828,7 +1832,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
 
       try {
-        const plugin = new FilesPlugin(brokenConfig);
+        const plugin = filesPlugin(brokenConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1866,7 +1870,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
 
       try {
-        const plugin = new FilesPlugin(brokenConfig);
+        const plugin = filesPlugin(brokenConfig);
         const handle = plugin.exports()("broken");
 
         await expect(handle.list()).rejects.toThrow("policy crashed");
@@ -1893,7 +1897,7 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
 
       try {
-        const plugin = new FilesPlugin(brokenConfig);
+        const plugin = filesPlugin(brokenConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
@@ -1918,7 +1922,7 @@ describe("FilesPlugin", () => {
 
   describe("_resolveAuth config inheritance", () => {
     test("volume-level auth overrides plugin default", () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         auth: "service-principal",
         volumes: {
           uploads: { auth: "on-behalf-of-user" },
@@ -1929,7 +1933,7 @@ describe("FilesPlugin", () => {
     });
 
     test("volume without auth inherits plugin default", () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         auth: "on-behalf-of-user",
         volumes: {
           uploads: {},
@@ -1940,7 +1944,7 @@ describe("FilesPlugin", () => {
     });
 
     test("neither volume nor plugin sets auth → defaults to service-principal", () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           uploads: {},
           exports: {},
@@ -2071,7 +2075,7 @@ describe("FilesPlugin", () => {
 
     test("OBO volume + valid token → policy receives { isServicePrincipal: false, id: <x-forwarded-user> }", async () => {
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2112,7 +2116,7 @@ describe("FilesPlugin", () => {
     test("OBO volume + missing token + NODE_ENV != 'development' → 401, no SDK call", async () => {
       process.env.NODE_ENV = "production";
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2148,7 +2152,7 @@ describe("FilesPlugin", () => {
     test("OBO volume + missing token + NODE_ENV === 'development' → exactly one warn, SP fallback proceeds", async () => {
       process.env.NODE_ENV = "development";
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2205,7 +2209,7 @@ describe("FilesPlugin", () => {
 
     test("OBO volume + valid token + policy denies → 403 PolicyDeniedError", async () => {
       const policySpy = vi.fn().mockReturnValue(false);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2328,7 +2332,7 @@ describe("FilesPlugin", () => {
     test("OBO list + valid token wraps SDK call in user context (alice's userId resolves inside the wrapped fn)", async () => {
       await useRealGetCurrentUserId();
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2371,7 +2375,7 @@ describe("FilesPlugin", () => {
 
     test("OBO read happy path: valid token + policy allows + UC allows → 200", async () => {
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2437,7 +2441,7 @@ describe("FilesPlugin", () => {
       // would re-enable cache here.
       await useRealGetCurrentUserId();
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2445,6 +2449,7 @@ describe("FilesPlugin", () => {
         },
       });
       const handler = getRouteHandler(plugin, "get", "/list");
+      const getOrExecute = vi.spyOn(testCache, "getOrExecute");
 
       mockClient.files.listDirectoryContents.mockImplementation(
         async function* () {
@@ -2472,13 +2477,13 @@ describe("FilesPlugin", () => {
 
       // Cache is disabled on OBO: `getOrExecute` is bypassed. The SDK
       // must execute on every request — no cross-user staleness possible.
-      expect(mockCacheInstance.getOrExecute).not.toHaveBeenCalled();
+      expect(getOrExecute).not.toHaveBeenCalled();
       expect(mockClient.files.listDirectoryContents).toHaveBeenCalledTimes(2);
     });
 
     test("SP volume reads still use the cache (cache is only disabled for OBO)", async () => {
       await useRealGetCurrentUserId();
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: {
             auth: "on-behalf-of-user",
@@ -2491,6 +2496,7 @@ describe("FilesPlugin", () => {
       });
 
       const listHandler = getRouteHandler(plugin, "get", "/list");
+      const getOrExecute = vi.spyOn(testCache, "getOrExecute");
 
       mockClient.files.listDirectoryContents.mockImplementation(
         async function* () {
@@ -2516,7 +2522,7 @@ describe("FilesPlugin", () => {
         mockRes(),
       );
 
-      const calls = mockCacheInstance.getOrExecute.mock.calls;
+      const calls = getOrExecute.mock.calls;
       // Exactly one cache consultation — the SP volume's. The OBO request
       // bypassed the cache entirely.
       expect(calls).toHaveLength(1);
@@ -2542,7 +2548,7 @@ describe("FilesPlugin", () => {
      */
     test("OBO HTTP request builds the UserContext exactly once (no duplicate WorkspaceClient allocation)", async () => {
       const policySpy = vi.fn().mockReturnValue(true);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2770,7 +2776,7 @@ describe("FilesPlugin", () => {
         .mockResolvedValue({ ok: true, status: 200, text: async () => "" });
       vi.stubGlobal("fetch", fetchSpy);
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: {
             auth: "on-behalf-of-user",
@@ -2821,7 +2827,7 @@ describe("FilesPlugin", () => {
       const fetchSpy = vi.fn();
       vi.stubGlobal("fetch", fetchSpy);
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: {
             auth: "on-behalf-of-user",
@@ -2863,7 +2869,7 @@ describe("FilesPlugin", () => {
 
     test("OBO mkdir + policy denies → 403 PolicyDeniedError; SDK not invoked", async () => {
       const policySpy = vi.fn().mockReturnValue(false);
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
           uploads: {},
@@ -2940,7 +2946,7 @@ describe("FilesPlugin", () => {
         }),
       );
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: {
             auth: "on-behalf-of-user",
@@ -2987,7 +2993,7 @@ describe("FilesPlugin", () => {
       // SP volume — uses the cache.
       process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
       try {
-        const plugin = new FilesPlugin({
+        const plugin = filesPlugin({
           volumes: {
             sp_vol: { policy: policy.allowAll() },
             uploads: {},
@@ -3000,16 +3006,8 @@ describe("FilesPlugin", () => {
 
         // Track which (parts, userKey) pairs go through generateKey so we
         // can match the invalidation segment exactly.
-        const generateKeyCalls: Array<{
-          parts: (string | number | object)[];
-          userKey: string;
-        }> = [];
-        mockCacheInstance.generateKey.mockImplementation(
-          (parts: (string | number | object)[], userKey: string) => {
-            generateKeyCalls.push({ parts, userKey });
-            return "stub-key";
-          },
-        );
+        // Records against production's own generateKey — the spy calls through.
+        const generateKey = vi.spyOn(testCache, "generateKey");
 
         await mkdirHandler(
           mockReq("sp_vol", {}, { body: { path: "/Volumes/c/s/sp/foo/bar" } }),
@@ -3017,8 +3015,8 @@ describe("FilesPlugin", () => {
         );
 
         // Exactly one list-cache invalidation key was constructed.
-        const listInvalidations = generateKeyCalls.filter(
-          (c) => Array.isArray(c.parts) && c.parts[0] === "files:sp_vol:list",
+        const listInvalidations = generateKey.mock.calls.filter(
+          (c) => Array.isArray(c[0]) && c[0][0] === "files:sp_vol:list",
         );
         expect(listInvalidations).toHaveLength(1);
 
@@ -3026,12 +3024,10 @@ describe("FilesPlugin", () => {
         // written path. `parentDirectory("/Volumes/c/s/sp/foo/bar")`
         // returns `"/Volumes/c/s/sp/foo"`, which the connector resolves
         // unchanged because it's already absolute and starts with /Volumes/.
-        expect(listInvalidations[0].parts[1]).toBe("/Volumes/c/s/sp/foo");
+        expect(listInvalidations[0][0][1]).toBe("/Volumes/c/s/sp/foo");
         // Defense-in-depth: the file path itself must NOT appear as the
         // segment.
-        expect(listInvalidations[0].parts[1]).not.toBe(
-          "/Volumes/c/s/sp/foo/bar",
-        );
+        expect(listInvalidations[0][0][1]).not.toBe("/Volumes/c/s/sp/foo/bar");
       } finally {
         delete process.env.DATABRICKS_VOLUME_SP_VOL;
       }
@@ -3061,7 +3057,7 @@ describe("FilesPlugin", () => {
     ];
     for (const { label, writePath } of rootInvalidationCases) {
       test(`SP write at ${label} invalidates __root__ + volumeRoot variants (matches _handleList's possible cache keys)`, async () => {
-        const plugin = new FilesPlugin({
+        const plugin = filesPlugin({
           volumes: {
             uploads: { policy: policy.allowAll() },
             exports: {},
@@ -3071,26 +3067,18 @@ describe("FilesPlugin", () => {
 
         mockClient.files.createDirectory.mockResolvedValue(undefined);
 
-        const generateKeyCalls: Array<{
-          parts: (string | number | object)[];
-          userKey: string;
-        }> = [];
-        mockCacheInstance.generateKey.mockImplementation(
-          (parts: (string | number | object)[], userKey: string) => {
-            generateKeyCalls.push({ parts, userKey });
-            return "stub-key";
-          },
-        );
+        // Records against production's own generateKey — the spy calls through.
+        const generateKey = vi.spyOn(testCache, "generateKey");
 
         await mkdirHandler(
           mockReq("uploads", {}, { body: { path: writePath } }),
           mockRes(),
         );
 
-        const listInvalidations = generateKeyCalls.filter(
-          (c) => Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
+        const listInvalidations = generateKey.mock.calls.filter(
+          (c) => Array.isArray(c[0]) && c[0][0] === "files:uploads:list",
         );
-        const segments = listInvalidations.map((c) => c.parts[1]);
+        const segments = listInvalidations.map((c) => c[0][1]);
         expect(segments).toEqual(
           expect.arrayContaining([
             "__root__",
@@ -3138,7 +3126,7 @@ describe("FilesPlugin", () => {
 
       process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
       try {
-        const plugin = new FilesPlugin({
+        const plugin = filesPlugin({
           volumes: {
             sp_vol: { policy: policy.allowAll() },
             uploads: {},
@@ -3148,7 +3136,7 @@ describe("FilesPlugin", () => {
         const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
 
         mockClient.files.createDirectory.mockResolvedValue(undefined);
-        mockCacheInstance.generateKey.mockReturnValue("stub-key");
+        vi.spyOn(testCache, "generateKey").mockReturnValue("stub-key");
 
         // Deferred promise that gates the cache delete. The handler must
         // await this before writing the success response.
@@ -3156,9 +3144,9 @@ describe("FilesPlugin", () => {
         const deletePending = new Promise<void>((resolve) => {
           releaseDelete = resolve;
         });
-        mockCacheInstance.delete.mockImplementation(
-          async () => await deletePending,
-        );
+        const cacheDelete = vi
+          .spyOn(testCache, "delete")
+          .mockImplementation(async () => await deletePending);
 
         const res = mockRes();
 
@@ -3176,15 +3164,12 @@ describe("FilesPlugin", () => {
         // Use setImmediate to also drain macrotask queue items (telemetry/
         // timeout interceptors may use setTimeout under the hood).
         const deadline = Date.now() + 1000;
-        while (
-          mockCacheInstance.delete.mock.calls.length === 0 &&
-          Date.now() < deadline
-        ) {
+        while (cacheDelete.mock.calls.length === 0 && Date.now() < deadline) {
           await new Promise((resolve) => setImmediate(resolve));
         }
 
         expect(mockClient.files.createDirectory).toHaveBeenCalledTimes(1);
-        expect(mockCacheInstance.delete).toHaveBeenCalledTimes(1);
+        expect(cacheDelete).toHaveBeenCalledTimes(1);
 
         // Critical assertion: drain plenty of microtasks AND macrotasks
         // while `cache.delete` is still parked on the deferred. If the
@@ -3227,7 +3212,7 @@ describe("FilesPlugin", () => {
         () => "test-service-principal",
       );
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: {
             auth: "on-behalf-of-user",
@@ -3395,7 +3380,7 @@ describe("FilesPlugin", () => {
       // connector picks it up.
       process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
       try {
-        const plugin = new FilesPlugin({
+        const plugin = filesPlugin({
           volumes: {
             // SP-configured volume (the auth: "service-principal" default).
             sp_vol: { auth: "service-principal", policy: policy.allowAll() },
@@ -3451,7 +3436,7 @@ describe("FilesPlugin", () => {
 
       process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
       try {
-        const plugin = new FilesPlugin({
+        const plugin = filesPlugin({
           volumes: {
             obo_vol: {
               auth: "on-behalf-of-user",
@@ -3485,7 +3470,7 @@ describe("FilesPlugin", () => {
 
       serviceContextMock.createUserContextSpy.mockClear();
 
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
       await handle.list("subdir"); // no asUser; pure SP path
 
@@ -3508,7 +3493,7 @@ describe("FilesPlugin", () => {
      */
     test("asUser in production with x-forwarded-user but no x-forwarded-access-token throws AuthenticationError.missingToken (privilege-confusion guard)", () => {
       process.env.NODE_ENV = "production";
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
       const reqWithUserOnly = {
         header: (name: string) =>
@@ -3545,7 +3530,7 @@ describe("FilesPlugin", () => {
 
       serviceContextMock.createUserContextSpy.mockClear();
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           uploads: { policy: policySpy },
           exports: {},
@@ -3684,7 +3669,7 @@ describe("FilesPlugin", () => {
     });
 
     test("OBO volume + HTTP route + valid token → span attribute is 'on-behalf-of-user'", async () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policy.allowAll() },
           uploads: {},
@@ -3716,7 +3701,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SP volume + HTTP route → span attribute is 'service-principal'", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
       mockClient.files.listDirectoryContents.mockImplementation(
@@ -3742,7 +3727,7 @@ describe("FilesPlugin", () => {
     });
 
     test("appKit.files('sp-vol').asUser(req).list() programmatic → span attribute is 'on-behalf-of-user' (asUser forces it on SP volumes)", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
       mockClient.files.listDirectoryContents.mockImplementation(
@@ -3779,7 +3764,7 @@ describe("FilesPlugin", () => {
      * AsyncLocalStorage. This test pins span count == 1.
      */
     test("programmatic asUser().list() produces exactly ONE files.list span (no duplicate parent span)", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
       mockClient.files.listDirectoryContents.mockImplementation(
@@ -3808,7 +3793,7 @@ describe("FilesPlugin", () => {
     });
 
     test("programmatic SP-volume .list() produces exactly ONE files.list span tagged service-principal", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
       mockClient.files.listDirectoryContents.mockImplementation(
@@ -3835,7 +3820,7 @@ describe("FilesPlugin", () => {
       // for (OBO).
       process.env.NODE_ENV = "development";
 
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           obo_vol: { auth: "on-behalf-of-user", policy: policy.allowAll() },
           uploads: {},
