@@ -86,6 +86,7 @@ function makeRunState(plugin: AgentsPlugin) {
       push: (event: unknown) => pushed.push(event),
     },
     toolCallsUsed: { count: 0 },
+    toolErrors: [] as Array<{ tool: string; error: string }>,
   };
   return { runState, pushed, plugin };
 }
@@ -231,6 +232,37 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
       "Tool execution denied by user approval gate (tool: delete_user).",
     );
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchToolCall — tool failures are captured", () => {
+  test("rethrows the tool error and records it in runState.toolErrors", async () => {
+    const plugin = new AgentsPlugin({});
+    const { runState } = makeRunState(plugin);
+
+    const toolIndex = new Map<string, unknown>([
+      [
+        "boom",
+        {
+          source: "function",
+          def: {
+            name: "boom",
+            description: "throws",
+            parameters: { type: "object" },
+          },
+          functionTool: {
+            execute: vi.fn().mockRejectedValue(new Error("kaboom")),
+          },
+        },
+      ],
+    ]);
+
+    await expect(
+      callDispatch(plugin, { runState, toolIndex, name: "boom", args: {} }),
+    ).rejects.toThrow(/kaboom/);
+
+    // The caught error is recorded so the non-streaming response can surface it.
+    expect(runState.toolErrors).toEqual([{ tool: "boom", error: "kaboom" }]);
   });
 });
 

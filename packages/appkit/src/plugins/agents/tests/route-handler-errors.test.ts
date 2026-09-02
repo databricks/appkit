@@ -376,6 +376,71 @@ describe("POST /invocations & /responses — successful invoke", () => {
   });
 });
 
+describe("POST /invocations — tool failures surfaced", () => {
+  test("returns tool_errors alongside a completed response", async () => {
+    const plugin = new AgentsPlugin({});
+    (plugin as any).agents.set("default", {
+      name: "default",
+      instructions: "hi",
+      // Mimics a real adapter: invokes the tool, swallows its failure, and
+      // finishes the turn (the model recovers with an ungrounded answer).
+      adapter: {
+        async *run(
+          _input: unknown,
+          ctx: { executeTool: (n: string, a: unknown) => Promise<unknown> },
+        ) {
+          try {
+            await ctx.executeTool("boom", {});
+          } catch {
+            // adapter continues after a tool failure
+          }
+          yield { type: "message_delta", content: "done" };
+        },
+      },
+      toolIndex: new Map([
+        [
+          "boom",
+          {
+            source: "function",
+            def: {
+              name: "boom",
+              description: "throws",
+              parameters: { type: "object" },
+            },
+            functionTool: {
+              execute: vi.fn().mockRejectedValue(new Error("kaboom")),
+            },
+          },
+        ],
+      ]),
+    });
+    (plugin as any).defaultAgentName = "default";
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq({ input: "hi" }), res);
+
+    expect(res.status).not.toHaveBeenCalledWith(500);
+    const payload = json.mock.calls[0]?.[0] as {
+      status: string;
+      tool_errors?: Array<{ tool: string; error: string }>;
+    };
+    expect(payload.status).toBe("completed");
+    expect(payload.tool_errors).toEqual([{ tool: "boom", error: "kaboom" }]);
+  });
+});
+
 describe("/invocations and /responses are aliases", () => {
   test("both routes are registered and bound to the same handler", () => {
     const plugin = new AgentsPlugin({});

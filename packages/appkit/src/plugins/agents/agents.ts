@@ -737,8 +737,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   private buildPluginsMap(): Plugins {
     const out: Record<string, PluginToolkitProvider> = {};
+    const label = `Agent '${this.name}': tools(plugins)`;
     if (!this.context) {
-      return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
+      return createPluginsProxy(out, label);
     }
     for (const { name, provider } of this.context.getToolProviders()) {
       const direct = (provider as { toolkit?: unknown }).toolkit;
@@ -750,7 +751,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         };
       }
     }
-    return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
+    // Registered plugins that expose no agent tools (e.g. aiSearch) — so a
+    // reference reports "not a ToolProvider", not the misleading "not registered".
+    const nonProviders = new Set(
+      this.context.getPluginNames().filter((n) => !(n in out)),
+    );
+    return createPluginsProxy(out, label, nonProviders);
   }
 
   private async applyAutoInherit(
@@ -1214,6 +1220,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
+      toolErrors: [],
     };
 
     const deps = this.toolDispatchDeps();
@@ -1436,6 +1443,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
+      toolErrors: [],
     };
 
     const deps = this.toolDispatchDeps();
@@ -1558,6 +1566,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       // Lets an eval runner attach assessments to this turn's trace; absent
       // when tracing is disabled.
       ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
+      // Tool failures the model recovered from — the non-streaming equivalent
+      // of the streaming path's `tool_result` error events.
+      ...(runState.toolErrors.length > 0
+        ? { tool_errors: runState.toolErrors }
+        : {}),
       output: [message],
     });
   }
