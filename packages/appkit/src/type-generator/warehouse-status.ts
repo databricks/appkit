@@ -71,14 +71,14 @@ export async function getWarehouseState(
   client: WorkspaceClient,
   warehouseId: string,
 ): Promise<WarehouseState> {
-  const response = await client.warehouses.get({ id: warehouseId });
+  const response = await client.warehouses.getWarehouse({ id: warehouseId });
   return response.state as WarehouseState;
 }
 
 /**
  * Initiate a start of a stopped/stopping SQL warehouse.
  *
- * Only KICKS OFF the start: the SDK's `start()` returns a Waiter, but we
+ * Only KICKS OFF the start: the SDK's `startWarehouse()` returns a Waiter, but we
  * deliberately do not `.wait()` on it. Blocking on the full cold-start isn't our
  * job here — {@link waitUntilRunning} is the poller that watches the warehouse
  * the rest of the way to RUNNING. We just nudge it out of the stopped state.
@@ -90,7 +90,7 @@ export async function startWarehouse(
   client: WorkspaceClient,
   warehouseId: string,
 ): Promise<void> {
-  await client.warehouses.start({ id: warehouseId });
+  await client.warehouses.startWarehouse({ id: warehouseId });
 }
 
 /**

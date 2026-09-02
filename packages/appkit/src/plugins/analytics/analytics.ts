@@ -1069,7 +1069,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       workspaceClient,
       {
         statement,
-        warehouse_id: warehouseId,
+        warehouseId,
         parameters: sqlParameters,
         ...formatParameters,
       },

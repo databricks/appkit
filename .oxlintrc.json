@@ -26,11 +26,8 @@
       {
         "patterns": [
           {
-            "group": [
-              "@databricks/sdk-experimental",
-              "@databricks/sdk-experimental/**"
-            ],
-            "message": "Import the Databricks SDK only through the wrapper in packages/shared/src/workspace-client. Add a re-export there if you need a new symbol."
+            "group": ["@databricks/sdk-*", "@databricks/sdk-*/**"],
+            "message": "Import the Databricks SDK only through the wrapper in packages/shared/src/workspace-client (legacy.ts for @databricks/sdk-experimental, modular.ts for the modular @databricks/sdk-* packages). Add a re-export there if you need a new symbol."
           }
         ]
       }

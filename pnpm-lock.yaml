@@ -11,6 +11,11 @@ overrides:
   qs@<6.15.2: 6.15.2
   size-sensor: 1.0.3
 
+patchedDependencies:
+  '@databricks/sdk-statementexecution@0.46.0':
+    hash: a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d
+    path: patches/@databricks__sdk-statementexecution@0.46.0.patch
+
 importers:
 
   .:
@@ -567,9 +572,24 @@ importers:
       '@clack/prompts':
         specifier: 1.0.1
         version: 1.0.1
+      '@databricks/sdk-auth':
+        specifier: 0.46.0
+        version: 0.46.0
+      '@databricks/sdk-core':
+        specifier: 0.46.0
+        version: 0.46.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-options':
+        specifier: 0.46.0
+        version: 0.46.0
+      '@databricks/sdk-statementexecution':
+        specifier: 0.46.0
+        version: 0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)
+      '@databricks/sdk-warehouses':
+        specifier: 0.46.0
+        version: 0.46.0
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0
@@ -1929,6 +1949,14 @@ packages:
     engines: {node: ^20 || ^22 || ^24 || ^25, pnpm: '>=10'}
     hasBin: true
 
+  '@databricks/sdk-auth@0.46.0':
+    resolution: {integrity: sha512-cMrwxsFtpiEKFxta5dKHchKdrgmHkQ6upJ2C4OacmlHrOHJ+ChzQBVTpAiVtjX62xj+YjNgp/29IpSdKKYUVDA==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-core@0.46.0':
+    resolution: {integrity: sha512-Q2LAGWYIi+jyeKR9OIqvkgyde2GdzqfSG8lewxA9Xu/C9RJBBFbSfg5Nh8ZC66TKElGIosVOecoEJdbxnNMuxw==}
+    engines: {node: '>=22.0.0'}
+
   '@databricks/sdk-experimental@0.15.0':
     resolution: {integrity: sha512-HkoMiF7dNDt6WRW0xhi7oPlBJQfxJ9suJhEZRFt08VwLMaWcw2PiF8monfHlkD4lkufEYV6CTxi5njQkciqiHA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
@@ -1936,6 +1964,18 @@ packages:
   '@databricks/sdk-experimental@0.17.0':
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
+
+  '@databricks/sdk-options@0.46.0':
+    resolution: {integrity: sha512-UtADlR+41rYEoOCycZvJh1g96uDN6GVWgqQk+72cHBzcxi+koxKSJXHcYRI997Sc4Fcc1d2oyAC2I2ddVhurjA==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-statementexecution@0.46.0':
+    resolution: {integrity: sha512-VJA3e7UHmxRxN42/mV5VtKeINME0vCz3Na3hrwmta3tZqJWZbBU7XTfUdD1yOQ5Z1JU5UIM65OlWq8gc4IzHFg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-warehouses@0.46.0':
+    resolution: {integrity: sha512-9r/gbdTb6ASiWCiibCwAOF8QizqNacidIw78uwzJYKK9dbdqmWIfNK0pF/jt3BG1sUiXz2b1I6URPdX7Qi0oLg==}
+    engines: {node: '>=22.0.0'}
 
   '@date-fns/tz@1.4.1':
     resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
@@ -2602,6 +2642,10 @@ packages:
 
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
+
+  '@js-temporal/polyfill@0.5.1':
+    resolution: {integrity: sha512-hloP58zRVCRSpgDxmqCWJNlizAlUgJFqG2ypq79DCvyv9tHjRYMDOcPFjzfl/A1/YxDvRCZz8wvZvmapQnKwFQ==}
+    engines: {node: '>=12'}
 
   '@jsonjoy.com/base64@1.1.2':
     resolution: {integrity: sha512-q6XAnWQDIMA3+FTiOYajoYqySkO+JSat0ytXGSuRdq9uXE7o92gzuQwQM14xaCRlBLGq3v5miDGC4vkVTn54xA==}
@@ -8519,6 +8563,9 @@ packages:
     resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
 
+  jsbi@4.3.2:
+    resolution: {integrity: sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==}
+
   jsdom@27.0.0:
     resolution: {integrity: sha512-lIHeR1qlIRrIN5VMccd8tI2Sgw6ieYXSVktcSHaNe3Z5nE/tcPQYQWOq00wxMvYOsz+73eAkNenVvmPC6bba9A==}
     engines: {node: '>=20'}
@@ -13959,6 +14006,16 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@databricks/sdk-auth@0.46.0':
+    dependencies:
+      '@databricks/sdk-core': 0.46.0
+      zod: 4.3.6
+
+  '@databricks/sdk-core@0.46.0':
+    dependencies:
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
   '@databricks/sdk-experimental@0.15.0':
     dependencies:
       google-auth-library: 10.5.0
@@ -13976,6 +14033,29 @@ snapshots:
       semver: 7.7.3
     transitivePeerDependencies:
       - supports-color
+
+  '@databricks/sdk-options@0.46.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.46.0
+      '@databricks/sdk-core': 0.46.0
+
+  '@databricks/sdk-statementexecution@0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)':
+    dependencies:
+      '@databricks/sdk-auth': 0.46.0
+      '@databricks/sdk-core': 0.46.0
+      '@databricks/sdk-options': 0.46.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-warehouses@0.46.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.46.0
+      '@databricks/sdk-core': 0.46.0
+      '@databricks/sdk-options': 0.46.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@date-fns/tz@1.4.1': {}
 
@@ -15174,6 +15254,10 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@js-sdsl/ordered-map@4.4.2': {}
+
+  '@js-temporal/polyfill@0.5.1':
+    dependencies:
+      jsbi: 4.3.2
 
   '@jsonjoy.com/base64@1.1.2(tslib@2.8.1)':
     dependencies:
@@ -21581,6 +21665,8 @@ snapshots:
   js-yaml@4.3.1:
     dependencies:
       argparse: 2.0.1
+
+  jsbi@4.3.2: {}
 
   jsdom@27.0.0(bufferutil@4.0.9)(postcss@8.5.6):
     dependencies:

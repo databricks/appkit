@@ -1,5 +1,5 @@
 import type { Span } from "../../telemetry";
-import type { sql } from "../../workspace-client";
+import type { EndpointState } from "../../workspace-client";
 import type { WarehouseStatusUpdate } from "./client";
 
 /**
@@ -10,7 +10,7 @@ import type { WarehouseStatusUpdate } from "./client";
  */
 export class WarehouseStatusEmitter {
   attempt = 0;
-  private lastEmittedState: sql.State | null = null;
+  private lastEmittedState: EndpointState | null = null;
 
   constructor(
     private readonly span: Span,
@@ -18,7 +18,7 @@ export class WarehouseStatusEmitter {
     private readonly onStatus: (update: WarehouseStatusUpdate) => void,
   ) {}
 
-  emit(state: sql.State, summary: string | undefined): void {
+  emit(state: EndpointState, summary: string | undefined): void {
     this.attempt += 1;
     this.span.addEvent("warehouse.status", {
       "db.warehouse.state": state,

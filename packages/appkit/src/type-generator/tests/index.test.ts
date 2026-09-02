@@ -11,7 +11,36 @@ import {
   vi,
 } from "vitest";
 
+import type { StatementResponse } from "../../workspace-client";
 import type { DatabricksStatementExecutionResponse } from "../types";
+
+/**
+ * Adapt a local snake_case describe fixture to the modular SDK's camelCase
+ * `StatementResponse` — the shape the mocked `executeStatement` now returns.
+ * `describeAdaptive` maps it back to the local shape via `toDescribeResponse`,
+ * so fixtures stay authored in the type-generator's own domain shape.
+ */
+function asSdkResponse(
+  r: DatabricksStatementExecutionResponse,
+): StatementResponse {
+  return {
+    statementId: r.statement_id,
+    status: r.status && {
+      state: r.status.state,
+      error: r.status.error && {
+        errorCode: r.status.error.error_code,
+        message: r.status.error.message,
+      },
+    },
+    manifest: r.manifest && { format: r.manifest.format },
+    result: r.result && {
+      dataArray: r.result.data_array,
+      attachment: r.result.attachment,
+      nextChunkIndex: r.result.next_chunk_index,
+      nextChunkInternalLink: r.result.next_chunk_internal_link,
+    },
+  } as unknown as StatementResponse;
+}
 
 const mocks = vi.hoisted(() => ({
   generateQueriesFromDescribe: vi.fn(),
@@ -553,7 +582,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   test("non-blocking + RUNNING warehouse: DESCRIBEs run and land full schemas", async () => {
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
-    mocks.executeStatement.mockResolvedValue(describeResponse);
+    mocks.executeStatement.mockResolvedValue(asSdkResponse(describeResponse));
 
     await expect(
       generateFromEntryPoint({
@@ -568,7 +597,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.executeStatement).toHaveBeenCalledWith(
       expect.objectContaining({
         statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
-        warehouse_id: "wh-1",
+        warehouseId: "wh-1",
       }),
     );
     const declarations = fs.readFileSync(metricFile, "utf-8");
@@ -582,7 +611,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   test("blocking + RUNNING: one preflight probe, no start/wait, DESCRIBEs run", async () => {
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
-    mocks.executeStatement.mockResolvedValue(describeResponse);
+    mocks.executeStatement.mockResolvedValue(asSdkResponse(describeResponse));
 
     await expect(
       generateFromEntryPoint({
@@ -754,7 +783,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     mocks.getWarehouseState.mockResolvedValue("STOPPED");
     mocks.startWarehouse.mockResolvedValue(undefined);
     mocks.waitUntilRunning.mockResolvedValue("RUNNING");
-    mocks.executeStatement.mockResolvedValue(describeResponse);
+    mocks.executeStatement.mockResolvedValue(asSdkResponse(describeResponse));
 
     await expect(
       generateFromEntryPoint({
@@ -1013,7 +1042,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   test("non-blocking + RUNNING with the default fetcher: probe and DESCRIBEs share exactly one client", async () => {
     writeMetricConfig();
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
-    mocks.executeStatement.mockResolvedValue(describeResponse);
+    mocks.executeStatement.mockResolvedValue(asSdkResponse(describeResponse));
 
     await expect(
       generateFromEntryPoint({
@@ -1152,24 +1181,23 @@ describe("generateFromEntryPoint — metric cache section", () => {
   const outFile = path.join(cacheTestDir, "generated", "analytics.d.ts");
   const metricFile = path.join(cacheTestDir, "generated", "metric-views.d.ts");
 
-  const describeResponseFor = (
-    measure: string,
-  ): DatabricksStatementExecutionResponse => ({
-    statement_id: "stmt-mock",
-    status: { state: "SUCCEEDED" },
-    result: {
-      data_array: [
-        [
-          JSON.stringify({
-            columns: [
-              { name: measure, type: "DECIMAL(38,2)", is_measure: true },
-              { name: "region", type: "STRING", is_measure: false },
-            ],
-          }),
+  const describeResponseFor = (measure: string): StatementResponse =>
+    asSdkResponse({
+      statement_id: "stmt-mock",
+      status: { state: "SUCCEEDED" },
+      result: {
+        data_array: [
+          [
+            JSON.stringify({
+              columns: [
+                { name: measure, type: "DECIMAL(38,2)", is_measure: true },
+                { name: "region", type: "STRING", is_measure: false },
+              ],
+            }),
+          ],
         ],
-      ],
-    },
-  });
+      },
+    });
 
   const writeConfig = (
     metricViews: Record<
@@ -2079,7 +2107,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     };
 
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
-    mocks.executeStatement.mockResolvedValue(describeResponse);
+    mocks.executeStatement.mockResolvedValue(asSdkResponse(describeResponse));
 
     await expect(
       generateFromEntryPoint({

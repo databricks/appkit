@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 // imports it from there.
 import { quoteFqnForSql } from "../../../../shared/src/schemas/metric-fqn";
 import { metricSourceSchema } from "../../../../shared/src/schemas/metric-source";
+import type { StatementResponse } from "../../workspace-client";
 import { readMetricConfig, resolveMetricConfig } from "../mv-registry/config";
 import {
   createWorkspaceDescribeFetcher,
@@ -51,6 +52,35 @@ function mockDescribeResponse(
       data_array: [[JSON.stringify(payload)]],
     },
   };
+}
+
+/**
+ * Adapt a local snake_case describe fixture to the modular SDK's camelCase
+ * `StatementResponse` — the shape a mocked `executeStatement` (consumed by the
+ * real `createWorkspaceDescribeFetcher` → `describeAdaptive`) now returns.
+ * Direct `syncMetrics(resolution, fetcher)` fixtures stay in the local snake
+ * shape (they bypass the SDK), so only the executeStatement mocks wrap with this.
+ */
+function asSdkResponse(
+  r: DatabricksStatementExecutionResponse,
+): StatementResponse {
+  return {
+    statementId: r.statement_id,
+    status: r.status && {
+      state: r.status.state,
+      error: r.status.error && {
+        errorCode: r.status.error.error_code,
+        message: r.status.error.message,
+      },
+    },
+    manifest: r.manifest && { format: r.manifest.format },
+    result: r.result && {
+      dataArray: r.result.data_array,
+      attachment: r.result.attachment,
+      nextChunkIndex: r.result.next_chunk_index,
+      nextChunkInternalLink: r.result.next_chunk_internal_link,
+    },
+  } as unknown as StatementResponse;
 }
 
 /**
@@ -326,9 +356,11 @@ describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
       statementExecution: {
         executeStatement: async (req: Record<string, unknown>) => {
           statements.push(req);
-          return mockDescribeResponse({
-            columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
-          });
+          return asSdkResponse(
+            mockDescribeResponse({
+              columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
+            }),
+          );
         },
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
@@ -664,7 +696,7 @@ describe("createWorkspaceDescribeFetcher", () => {
       statementExecution: {
         executeStatement: async (req: Record<string, unknown>) => {
           statements.push(req);
-          return mockDescribeResponse(payload);
+          return asSdkResponse(mockDescribeResponse(payload));
         },
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
@@ -680,8 +712,8 @@ describe("createWorkspaceDescribeFetcher", () => {
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatchObject({
       statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
-      warehouse_id: "wh-1",
-      wait_timeout: "30s",
+      warehouseId: "wh-1",
+      waitTimeout: "30s",
       // describeAdaptive tries JSON_ARRAY first (standard DBSQL); it falls back
       // to ARROW_STREAM only if the warehouse rejects that format.
       format: "JSON_ARRAY",
@@ -700,13 +732,13 @@ describe("createWorkspaceDescribeFetcher", () => {
       statementExecution: {
         executeStatement: async (req: Record<string, unknown>) => {
           statements.push(req);
-          return {
+          return asSdkResponse({
             statement_id: "stmt-arrow",
             status: { state: "SUCCEEDED" },
             manifest: { format: "ARROW_STREAM" },
             // Only an attachment — no data_array (the bug's trigger condition).
             result: { attachment: ARROW_ATTACHMENT_B64 },
-          } as DatabricksStatementExecutionResponse;
+          });
         },
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
@@ -1016,7 +1048,7 @@ describe("syncMetrics", () => {
     const client = {
       statementExecution: {
         executeStatement: async () =>
-          ({
+          asSdkResponse({
             statement_id: "stmt-chunked",
             status: { state: "SUCCEEDED" },
             manifest: { format: "ARROW_STREAM" },
@@ -1024,7 +1056,7 @@ describe("syncMetrics", () => {
               attachment: ARROW_ATTACHMENT_B64,
               next_chunk_index: 1,
             },
-          }) as DatabricksStatementExecutionResponse,
+          }),
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
     const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
