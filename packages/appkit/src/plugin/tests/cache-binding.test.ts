@@ -11,10 +11,8 @@ import { Plugin } from "../plugin";
 /**
  * How a plugin gets its cache, and how it fails when it has none.
  *
- * This file deliberately never boots an app, so the deprecated process-wide
- * slot stays empty and an unattached plugin is genuinely cache-less. Booting
- * here would publish into that slot and quietly satisfy the very lookups these
- * tests are checking.
+ * This file never boots an app, so an unattached plugin here is genuinely
+ * cache-less — there is no process-wide cache to fall back to.
  */
 
 class ProbePlugin extends Plugin {
@@ -132,6 +130,16 @@ describe("Plugin cache binding", () => {
     } finally {
       serviceContext.restore();
     }
+  });
+
+  test("an unattached plugin's direct this.cache read throws, not returns undefined", () => {
+    const plugin = new ProbePlugin({});
+
+    // `analytics.ts` and `files/plugin.ts` read `this.cache` directly, outside
+    // `execute()`, so the chokepoint above never sees them. The accessor is
+    // their guard: a named error at the read, not `undefined` that becomes a
+    // `TypeError` two calls later.
+    expect(() => plugin.boundCache()).toThrow(InitializationError);
   });
 
   test("an unattached plugin still runs an uncached execution", async () => {

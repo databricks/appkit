@@ -256,15 +256,24 @@ export abstract class Plugin<
   name: string;
 
   /**
-   * This app's cache, bound by {@link attachContext}.
+   * This app's cache, bound by {@link attachContext}. Every plugin in an app
+   * shares the one manager the app built; a plugin cannot substitute its own,
+   * so set a per-plugin `cache: { enabled, ttl }` config instead of assigning.
    *
-   * Read-only: every plugin in an app shares the one manager the app built, and
-   * a plugin cannot substitute its own. Reads are unchanged
-   * (`this.cache.getOrExecute(...)`); an assignment no longer compiles. Set a
-   * per-plugin `cache: { enabled, ttl }` config instead.
+   * Throws `InitializationError` when read on an unattached plugin (the app-less
+   * `runAgent` path, or a plugin built by hand in a test). This is the guard for
+   * the direct readers — `analytics.ts`, `files/plugin.ts` — that reach the
+   * cache without going through {@link execute}: they now fail with a named
+   * error at the read rather than a bare `TypeError` deeper in a handler.
    */
   protected get cache(): CacheManager {
-    return this._cache as CacheManager;
+    if (!this._cache) {
+      throw InitializationError.notInitialized(
+        "CacheManager",
+        `Plugin "${this.name}" read this.cache before it was attached to an app. Register the plugin through createApp(), or attach it to a test context first.`,
+      );
+    }
+    return this._cache;
   }
 
   constructor(protected config: TConfig) {
@@ -748,10 +757,10 @@ export abstract class Plugin<
     }
 
     if (options.cache?.enabled && options.cache.cacheKey?.length) {
-      // Every cached execution passes through here, and `cache`'s declared type
-      // is non-optional, so the compiler cannot catch a plugin that never got
-      // `attachContext`. Without this the first symptom is a `TypeError` on
-      // `undefined.getOrExecute` inside a request handler.
+      // Every cached execution routed through execute()/executeStream() passes
+      // here (direct `this.cache` readers are guarded by the accessor instead).
+      // The compiler cannot catch a plugin that never got `attachContext`, so
+      // without this the first symptom is a `TypeError` inside a request handler.
       if (!this._cache) {
         throw InitializationError.notInitialized(
           "CacheManager",
