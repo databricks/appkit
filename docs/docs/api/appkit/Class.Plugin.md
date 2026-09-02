@@ -120,14 +120,6 @@ protected app: AppManager;
 
 ***
 
-### cache
-
-```ts
-protected cache: CacheManager;
-```
-
-***
-
 ### config
 
 ```ts
@@ -203,6 +195,27 @@ Plugin initialization phase.
 - 'normal': Initialized second (most plugins)
 - 'deferred': Initialized last (e.g., server plugin)
 
+## Accessors
+
+### cache
+
+#### Get Signature
+
+```ts
+get protected cache(): CacheManager;
+```
+
+This app's cache, bound by [attachContext](#attachcontext).
+
+Read-only: every plugin in an app shares the one manager the app built, and
+a plugin cannot substitute its own. Reads are unchanged
+(`this.cache.getOrExecute(...)`); an assignment no longer compiles. Set a
+per-plugin `cache: { enabled, ttl }` config instead.
+
+##### Returns
+
+`CacheManager`
+
 ## Methods
 
 ### abortActiveOperations()
@@ -268,10 +281,8 @@ attachContext(deps: {
 
 Binds runtime dependencies (telemetry provider, cache, plugin context) to
 this plugin. Called by `AppKit._createApp` after construction and before
-`setup()`. Idempotent: safe to call if the constructor already bound them
-eagerly. Kept separate so factories can eagerly construct plugin instances
-without running this before `TelemetryManager.initialize()` /
-`CacheManager.getInstance()` have run.
+`setup()`. Kept separate from the constructor so plugin factories can be
+evaluated at module top level, before any app exists.
 
 #### Parameters
 
@@ -284,6 +295,11 @@ without running this before `TelemetryManager.initialize()` /
 #### Returns
 
 `void`
+
+#### Throws
+
+InitializationError when no cache is reachable — a plugin whose
+  cached paths would otherwise fail later, inside a request handler.
 
 #### Implementation of
 
