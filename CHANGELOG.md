@@ -140,6 +140,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.70.0](https://github.com/databricks/appkit/compare/v0.69.3...v0.70.0) (2026-09-02)
+
+### stream
+
+* **stream:** expose per-plugin streamConfig on BasePluginConfig ([#568](https://github.com/databricks/appkit/issues/568)) ([2d7d17c](https://github.com/databricks/appkit/commit/2d7d17c5111b45b89865be06f0f1409443c4d16f))
+
+
 ## [0.69.3](https://github.com/databricks/appkit/compare/v0.69.2...v0.69.3) (2026-09-02)
 
 ### appkit
