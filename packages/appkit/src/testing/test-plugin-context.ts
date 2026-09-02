@@ -339,17 +339,20 @@ export function createTestPluginContext(
     // observe it.
     plugin.attachContext({ context: ctx });
 
-    // Mirror what AppKit core does after attachContext (core/appkit.ts): put
-    // the plugin in the registry so `getPlugins()`/`getPluginNames()`/
-    // `hasPlugin()` and any sibling-plugin lookup behave as in production. Only
-    // register it as a tool provider when it actually is one AND its name does
-    // not collide with an injected fake — the fakes are the authored test
-    // doubles and must not be overwritten by the plugin under test.
+    // Put the plugin in the registry (as AppKit core does after attachContext)
+    // so `getPlugins()`/`getPluginNames()`/`hasPlugin()` resolve it. A tool
+    // provider is also registered as one, unless its name collides with an
+    // injected fake — the fakes are the authored doubles and must win.
     //
-    // Register a given name once: a test file that builds many instances of one
-    // plugin (the shared-kit factory pattern) re-attaches the same name, and
-    // that must not churn the registry or trip the production
-    // "registered more than once" warning — the kit is a fixture, not an app.
+    // First attach of a name wins: a test file that builds many instances of
+    // one plugin (the shared-kit factory pattern) re-attaches the same name,
+    // and re-registering would churn the registry and trip the production
+    // "registered more than once" warning. So later instances are bound (their
+    // `attachContext` runs) but not re-registered. The limit that follows: a
+    // sibling-plugin lookup through this context resolves the FIRST instance
+    // attached under a name, not the most recent — fine because the direct
+    // `mock.attach(...)` sites use a fresh context per test, and no factory
+    // suite does a sibling lookup that depends on which instance answers.
     if (!ctx.hasPlugin(plugin.name)) {
       ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
       if (isToolProvider(plugin) && !providers.has(plugin.name)) {
