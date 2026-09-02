@@ -42,24 +42,6 @@ vi.mock("../utils", () => ({
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
 
-// Mock CacheManager
-vi.mock("@databricks-apps/cache", () => ({
-  CacheManager: {
-    getInstance: vi.fn().mockResolvedValue({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(),
-    }),
-    getInstanceSync: vi.fn().mockReturnValue({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(),
-    }),
-  },
-}));
-
 // Test plugin classes for different phases
 class CoreTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { coreDefault: "core-value" };
