@@ -275,6 +275,19 @@ describe("Plugin", () => {
       // @ts-expect-error - cache is protected
       expect(plugin.cache).toBe(mockCache);
     });
+
+    test("should forward streamConfig to the StreamManager", () => {
+      const streamConfig = { maxEventSize: 20 * 1024 * 1024 };
+      new TestPlugin({ ...config, streamConfig });
+
+      expect(StreamManager).toHaveBeenCalledWith(streamConfig);
+    });
+
+    test("should construct the StreamManager with defaults when no streamConfig", () => {
+      new TestPlugin(config);
+
+      expect(StreamManager).toHaveBeenCalledWith(undefined);
+    });
   });
 
   describe("setup", () => {

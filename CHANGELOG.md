@@ -136,6 +136,33 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.70.0](https://github.com/databricks/appkit/compare/v0.69.3...v0.70.0) (2026-09-02)
+
+### stream
+
+* **stream:** expose per-plugin streamConfig on BasePluginConfig ([#568](https://github.com/databricks/appkit/issues/568)) ([2d7d17c](https://github.com/databricks/appkit/commit/2d7d17c5111b45b89865be06f0f1409443c4d16f))
+
+
+## [0.69.3](https://github.com/databricks/appkit/compare/v0.69.2...v0.69.3) (2026-09-02)
+
+### appkit
+
+* **appkit:** surface swallowed tool-execution errors in agents plugin ([#560](https://github.com/databricks/appkit/issues/560)) ([2c13806](https://github.com/databricks/appkit/commit/2c13806058390b32e00db1be9586924b87f2642f))
+
+
+## [0.69.2](https://github.com/databricks/appkit/compare/v0.69.1...v0.69.2) (2026-09-02)
+
+### stream
+
+* **stream:** raise SSE event limit to 5 MiB and honour per-call maxEventSize ([#567](https://github.com/databricks/appkit/issues/567)) ([e7474c8](https://github.com/databricks/appkit/commit/e7474c8a57b54e1870bf86e13eb59ca0f6501ecc))
+
+
 ## [0.69.1](https://github.com/databricks/appkit/compare/v0.69.0...v0.69.1) (2026-09-01)
 
 ### appkit

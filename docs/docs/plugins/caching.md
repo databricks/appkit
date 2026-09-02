@@ -55,9 +55,9 @@ not bind one, so `this.cache` is not available in a plugin's constructor —
 read it from `setup()` or from a request handler, both of which run after
 registration.
 
-## Upgrading to 0.70.0
+## Upgrading to 0.71.0
 
-The cache became per-app in 0.70.0. Most apps need no changes: if your plugins
+The cache became per-app in 0.71.0. Most apps need no changes: if your plugins
 reach the cache through `this.cache` and you build apps with `createApp`, this
 release is a no-op for you.
 

@@ -281,7 +281,7 @@ export abstract class Plugin<
       config.name ??
       (this.constructor as { manifest?: { name: string } }).manifest?.name ??
       "plugin";
-    this.streamManager = new StreamManager();
+    this.streamManager = new StreamManager(config.streamConfig);
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
     this.context = (config as Record<string, unknown>).context as

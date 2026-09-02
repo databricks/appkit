@@ -287,6 +287,12 @@ this plugin. Called by `AppKit._createApp` after construction and before
 `setup()`. Kept separate from the constructor so plugin factories can be
 evaluated at module top level, before any app exists.
 
+A context-less `attachContext({})` is the app-less path (see `runAgent`):
+it binds telemetry and leaves the cache unbound, so only a cached execution
+fails, at the chokepoint in \_buildInterceptors. A supplied context
+always carries a cache — `PluginContext.cache` is required, so a cache-less
+one cannot be constructed.
+
 #### Parameters
 
 | Parameter | Type |
@@ -298,15 +304,6 @@ evaluated at module top level, before any app exists.
 #### Returns
 
 `void`
-
-#### Throws
-
-InitializationError when a context is supplied but carries no
-  cache. A context-less `attachContext({})` is the app-less path instead
-  (see `runAgent`): it binds telemetry and leaves the cache unbound, so
-  only a cached execution fails, at the chokepoint in
-  \_buildInterceptors. There is no process-wide cache to fall back
-  to either way.
 
 #### Implementation of
 
