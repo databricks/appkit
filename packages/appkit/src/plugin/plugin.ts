@@ -303,12 +303,11 @@ export abstract class Plugin<
    * `setup()`. Kept separate from the constructor so plugin factories can be
    * evaluated at module top level, before any app exists.
    *
-   * @throws InitializationError when a context is supplied but carries no
-   *   cache. A context-less `attachContext({})` is the app-less path instead
-   *   (see `runAgent`): it binds telemetry and leaves the cache unbound, so
-   *   only a cached execution fails, at the chokepoint in
-   *   {@link _buildInterceptors}. There is no process-wide cache to fall back
-   *   to either way.
+   * A context-less `attachContext({})` is the app-less path (see `runAgent`):
+   * it binds telemetry and leaves the cache unbound, so only a cached execution
+   * fails, at the chokepoint in {@link _buildInterceptors}. A supplied context
+   * always carries a cache — `PluginContext.cache` is required, so a cache-less
+   * one cannot be constructed.
    */
   attachContext(
     deps: {
@@ -319,15 +318,8 @@ export abstract class Plugin<
     if (deps.context !== undefined) {
       this.context = deps.context as PluginContext;
     }
-    // The app's own cache, and every plugin in the app gets the same one. A
-    // context that carries none is a misconfigured context rather than an
-    // app-less plugin, so it fails here where the cause is legible.
-    if (this.context !== undefined && !this.context.cache) {
-      throw InitializationError.notInitialized(
-        "CacheManager",
-        `Plugin "${this.name}" was attached to a context that carries no cache. Build the context with createApp(), or createTestPluginContext() in tests.`,
-      );
-    }
+    // The app's own cache, and every plugin in the app gets the same one; only
+    // the context-less app-less path leaves it undefined.
     this._cache = this.context?.cache;
     this.telemetry = TelemetryManager.getProvider(
       this.name,

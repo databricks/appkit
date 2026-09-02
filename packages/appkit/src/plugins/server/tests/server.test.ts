@@ -1,7 +1,11 @@
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import type { CacheManager } from "../../../cache";
 import { PluginContext } from "../../../core/plugin-context";
+
+/** A CacheManager these server tests carry but never exercise. */
+const cacheStub = {} as unknown as CacheManager;
 
 // Use vi.hoisted for mocks that need to be available before module loading
 const {
@@ -192,7 +196,7 @@ import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
 
 function createContextWithPlugins(plugins: Record<string, any>): PluginContext {
-  const ctx = new PluginContext();
+  const ctx = new PluginContext({ cache: cacheStub });
   for (const [name, instance] of Object.entries(plugins)) {
     ctx.registerPlugin(name, instance as BasePlugin);
   }
@@ -810,7 +814,7 @@ describe("ServerPlugin", () => {
         order.push("closeAll");
       });
 
-      const ctx = new PluginContext();
+      const ctx = new PluginContext({ cache: cacheStub });
       const server = new ServerPlugin({ context: ctx } as any);
       ctx.registerPlugin("server", server as unknown as BasePlugin);
       ctx.registerPlugin("peer", {

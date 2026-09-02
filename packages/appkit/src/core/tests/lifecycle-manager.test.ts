@@ -53,7 +53,7 @@ import { LifecycleManager } from "../lifecycle-manager";
 import { PluginContext } from "../plugin-context";
 
 function contextWithPlugins(plugins: Record<string, Partial<BasePlugin>>) {
-  const ctx = new PluginContext();
+  const ctx = new PluginContext({ cache: cacheDouble() });
   for (const [name, instance] of Object.entries(plugins)) {
     ctx.registerPlugin(name, instance as BasePlugin);
   }

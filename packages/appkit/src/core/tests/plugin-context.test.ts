@@ -1,7 +1,11 @@
 import type { AgentToolDefinition } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import type { CacheManager } from "../../cache";
 import { isToolProvider, PluginContext } from "../plugin-context";
+
+/** A CacheManager these context tests carry but never exercise. */
+const cacheStub = {} as unknown as CacheManager;
 
 /**
  * Holds the most recent mock span instance so tests can assert against
@@ -65,7 +69,7 @@ describe("PluginContext", () => {
   let ctx: PluginContext;
 
   beforeEach(() => {
-    ctx = new PluginContext();
+    ctx = new PluginContext({ cache: cacheStub });
   });
 
   describe("route buffering", () => {

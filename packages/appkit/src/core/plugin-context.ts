@@ -72,13 +72,12 @@ export class PluginContext {
 
   /**
    * This app's cache. `readonly` so nothing can swap an app's cache after the
-   * context is built — one of the two halves that make "exactly one manager per
-   * app" hold. Optional so a context-less `attachContext({})` — the standalone
-   * `runAgent` path — still binds telemetry and leaves the cache unbound; a
-   * *supplied* context that carries no cache makes `attachContext` throw rather
-   * than falling back to anything (there is no process-wide cache).
+   * context is built, and required so a context cannot exist without one — the
+   * two halves that make "exactly one manager per app" a compiler-checked
+   * invariant. The app-less case is context-less (`attachContext({})`, the
+   * standalone `runAgent` path), not a cache-less context.
    */
-  readonly cache: CacheManager | undefined;
+  readonly cache: CacheManager;
 
   /**
    * @param deps.telemetry - Telemetry provider used for `executeTool` spans.
@@ -90,7 +89,7 @@ export class PluginContext {
    * @param deps.cache - The manager `_createApp` built for this app. Every
    *   plugin in the app binds `this.cache` to this object.
    */
-  constructor(deps: { telemetry?: ITelemetry; cache?: CacheManager } = {}) {
+  constructor(deps: { telemetry?: ITelemetry; cache: CacheManager }) {
     this.telemetry =
       deps.telemetry ?? TelemetryManager.getProvider("plugin-context");
     this.cache = deps.cache;

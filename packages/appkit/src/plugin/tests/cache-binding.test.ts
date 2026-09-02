@@ -97,12 +97,12 @@ describe("Plugin cache binding", () => {
     expect(() => plugin.attachContext({ context: undefined })).not.toThrow();
   });
 
-  test("a context carrying no cache is not a silent pass", () => {
-    const plugin = new ProbePlugin({});
-
-    expect(() =>
-      plugin.attachContext({ context: new PluginContext() }),
-    ).toThrow(InitializationError);
+  test("a cache-less context cannot be constructed", () => {
+    // The previous runtime guard is now a compile-time one: `PluginContext.cache`
+    // is required, so a context without a cache does not typecheck. This pins
+    // that the invariant is enforced by the compiler, not a runtime throw.
+    // @ts-expect-error cache is required on PluginContext
+    new PluginContext({});
   });
 
   test("an unattached plugin's cached execution fails at the chokepoint", async () => {
