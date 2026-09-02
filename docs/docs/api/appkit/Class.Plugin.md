@@ -205,12 +205,15 @@ Plugin initialization phase.
 get protected cache(): CacheManager;
 ```
 
-This app's cache, bound by [attachContext](#attachcontext).
+This app's cache, bound by [attachContext](#attachcontext). Every plugin in an app
+shares the one manager the app built; a plugin cannot substitute its own,
+so set a per-plugin `cache: { enabled, ttl }` config instead of assigning.
 
-Read-only: every plugin in an app shares the one manager the app built, and
-a plugin cannot substitute its own. Reads are unchanged
-(`this.cache.getOrExecute(...)`); an assignment no longer compiles. Set a
-per-plugin `cache: { enabled, ttl }` config instead.
+Throws `InitializationError` when read on an unattached plugin (the app-less
+`runAgent` path, or a plugin built by hand in a test). This is the guard for
+the direct readers — `analytics.ts`, `files/plugin.ts` — that reach the
+cache without going through [execute](#execute): they now fail with a named
+error at the read rather than a bare `TypeError` deeper in a handler.
 
 ##### Returns
 
