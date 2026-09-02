@@ -74,8 +74,8 @@ await cache.getOrExecute(["k"], work, userKey);
 await this.cache.getOrExecute(["k"], work, userKey);
 ```
 
-Code outside a plugin cannot reach an app's cache directly, by design — the
-manager has no public constructor. Move the cached work into a plugin.
+An app's cache is handed only to the plugins it registers — there is no
+process-wide accessor to fetch it from. Move the cached work into a plugin.
 
 **A plugin constructed without an app has no cache.** Previously such a plugin
 picked up whichever manager happened to exist in the process. Now a cached
@@ -92,8 +92,10 @@ await mock.attach(new MyPlugin({}));
 ```
 
 The most common way to hit this is reading `this.cache` in a plugin's
-constructor or `setup()` before it was attached. `setup()` runs after
-registration under `createApp`, so only hand-rolled construction is affected.
+constructor — which always runs before any attach — or on a plugin you built
+by hand and never registered. Under `createApp`, `setup()` and request
+handlers run after the cache is bound, so a registered plugin is safe (this is
+why [above](#one-cache-per-app) says to read the cache from `setup()`).
 
 **`this.cache` is read-only.** A plugin that assigned its own manager
 (`this.cache = new CacheManager(...)`) no longer compiles. Use a plugin-level
