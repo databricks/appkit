@@ -335,9 +335,9 @@ export function createTestPluginContext(
 
   async function attach<P extends Plugin>(plugin: P): Promise<P> {
     // The context already carries this test's cache, so `attachContext` binds
-    // it the same way `createApp` binds an app's. Nothing is seeded into the
-    // process-wide slot: a plugin attached here reaches only this context's
-    // cache, and a sibling context cannot observe it.
+    // it the same way `createApp` binds an app's. A plugin attached here
+    // reaches only this context's cache, and a sibling context cannot
+    // observe it.
     plugin.attachContext({ context: ctx });
 
     // Mirror what AppKit core does after attachContext (core/appkit.ts): put

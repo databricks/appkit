@@ -286,16 +286,18 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
- * Clears AppKit's process-wide cache singleton so cached values don't leak
- * between tests in the same file.
+ * Clears the caches this file's test contexts built, so cached values don't
+ * leak between tests in the same file.
  *
- * The cache `attach()` seeds is shared by every test in a file (Vitest isolates
- * files, not tests within a file). Call this in `beforeEach` when one test's
- * cached value must not be seen by the next, or mid-test to force a cache miss
- * before asserting a subsequent hit.
+ * A `createTestPluginContext()` carries its own cache, and Vitest isolates test
+ * files rather than the tests within one — so that cache is shared by every
+ * test in the file. Call this in `beforeEach` when one test's cached value must
+ * not be seen by the next, or mid-test to force a cache miss before asserting a
+ * subsequent hit.
  *
- * No-ops when the cache has not been initialized yet, so it is safe to call
- * before any `attach()`.
+ * Pass a context or a manager to clear only that one. With no argument it
+ * clears every cache this kit built for the file, and no-ops when there are
+ * none — so it is safe to call before creating any context.
  *
  * @example
  * ```ts
