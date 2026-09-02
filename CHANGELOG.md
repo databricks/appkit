@@ -138,6 +138,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.69.3](https://github.com/databricks/appkit/compare/v0.69.2...v0.69.3) (2026-09-02)
+
+### appkit
+
+* **appkit:** surface swallowed tool-execution errors in agents plugin ([#560](https://github.com/databricks/appkit/issues/560)) ([2c13806](https://github.com/databricks/appkit/commit/2c13806058390b32e00db1be9586924b87f2642f))
+
+
 ## [0.69.2](https://github.com/databricks/appkit/compare/v0.69.1...v0.69.2) (2026-09-02)
 
 ### stream

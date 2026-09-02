@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1064931,
-        "unpacked": 3712194
+        "packed": 1066224,
+        "unpacked": 3715822
       },
       "dist": {
         "total": {
-          "raw": 3697794,
-          "gzip": 1249225
+          "raw": 3701422,
+          "gzip": 1250535
         },
         "js": {
-          "raw": 1098511,
-          "gzip": 385075
+          "raw": 1099771,
+          "gzip": 385528
         },
         "types": {
           "raw": 394008,
-          "gzip": 139112
+          "gzip": 139117
         },
         "maps": {
-          "raw": 2194480,
-          "gzip": 721220
+          "raw": 2196848,
+          "gzip": 722072
         },
         "css": {
           "raw": 0,
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 77029,
+          "gzip": 77216,
           "composition": {
-            "initialGzip": 76572,
-            "lazyGzip": 457,
-            "totalGzip": 77029,
-            "own": 230704,
+            "initialGzip": 76758,
+            "lazyGzip": 458,
+            "totalGzip": 77216,
+            "own": 231186,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 60024,
+                "gzip": 60206,
                 "kind": "initial"
               },
               {
@@ -89,7 +89,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 3229,
+                "gzip": 3232,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1346,
+                "gzip": 1347,
                 "kind": "initial"
               },
               {
@@ -124,7 +124,7 @@
               },
               {
                 "label": "index.js",
-                "gzip": 122,
+                "gzip": 123,
                 "kind": "lazy"
               }
             ]
