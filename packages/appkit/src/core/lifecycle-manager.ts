@@ -59,10 +59,8 @@ export class LifecycleManager {
   private shutdownPhase = "not started";
 
   /**
-   * @param cache - This app's cache, by reference. Taken as a dependency rather
-   *   than looked up during shutdown: a lookup resolves whatever is in the
-   *   process-wide slot at that moment, which is not necessarily this app's
-   *   manager once more than one app can exist.
+   * @param cache - This app's cache, by reference. Each `createApp` builds its
+   *   own, so shutdown must close this app's manager specifically.
    */
   constructor(
     private readonly context: PluginContext,

@@ -8,10 +8,9 @@ import { InMemoryStorage } from "../storage/memory";
  * Who owns the storage a manager closes.
  *
  * A caller who passes `cache: { storage }` keeps ownership, so `close()` must
- * leave it alone. The hazard has been invisible because `InMemoryStorage.close()`
+ * leave it alone. The hazard stays invisible because `InMemoryStorage.close()`
  * merely clears a `Map` and stays usable, while `PersistentStorage.close()` is
- * `pool.end()` and permanent — and because `getInstance` was first-wins and
- * discarded a second caller's storage, so nothing exercised the borrowed path.
+ * `pool.end()` and permanent.
  */
 
 function inMemory(): InMemoryStorage {

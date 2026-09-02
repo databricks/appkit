@@ -73,8 +73,10 @@ export class PluginContext {
   /**
    * This app's cache. `readonly` so nothing can swap an app's cache after the
    * context is built — one of the two halves that make "exactly one manager per
-   * app" hold. Optional only until every construction site supplies one; a
-   * plugin that finds it absent falls back to the deprecated process-wide slot.
+   * app" hold. Optional so a context-less `attachContext({})` — the standalone
+   * `runAgent` path — still binds telemetry and leaves the cache unbound; a
+   * *supplied* context that carries no cache makes `attachContext` throw rather
+   * than falling back to anything (there is no process-wide cache).
    */
   readonly cache: CacheManager | undefined;
 

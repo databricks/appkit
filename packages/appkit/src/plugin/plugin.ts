@@ -288,11 +288,9 @@ export abstract class Plugin<
       | PluginContext
       | undefined;
 
-    // Telemetry is no longer gated behind the cache. `getProvider` routes
-    // through a lazily-constructed manager and never throws, so a plugin
-    // factory evaluated at module top level — before `createApp` has run — gets
-    // a usable `this.telemetry` either way. Previously a missing cache returned
-    // early and left telemetry unbound, which surfaced far from its cause.
+    // `getProvider` routes through a lazily-constructed manager and never
+    // throws, so a plugin factory evaluated at module top level — before
+    // `createApp` has run — still gets a usable `this.telemetry`.
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       this.config.telemetry,

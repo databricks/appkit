@@ -33,14 +33,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #context: PluginContext;
 
   /**
-   * @param context - The app's plugin context, already carrying this app's
-   *   per-app services. A separate parameter, never a key on `config`: the
-   *   `config` bag's leftovers are spread into every plugin's `baseConfig`
-   *   (see {@link createAndRegisterPlugin}), and `_buildExecutionConfig`
-   *   deep-merges a plugin's config into its execute options — so a
-   *   `CacheManager` reaching plugin config would be merged into what
-   *   `PluginExecuteConfig.cache` declares as a `CacheConfig` and silently
-   *   break the cache interceptor's gate.
+   * @param context - The app's plugin context, carrying this app's per-app
+   *   services. A separate parameter, never a `config` key: a `CacheManager`
+   *   reaching plugin config would be deep-merged into what
+   *   `PluginExecuteConfig.cache` declares as a `CacheConfig` and break the
+   *   cache interceptor's gate. `appkit-cache-injection.test.ts` pins this.
    */
   private constructor(config: { plugins: TPlugins }, context: PluginContext) {
     const { plugins, ...globalConfig } = config;

@@ -61,9 +61,8 @@ class ProbeTwoPlugin extends CacheProbe {
 const probe = toPlugin(ProbePlugin);
 const probeTwo = toPlugin(ProbeTwoPlugin);
 
-/** Managers `create()` built, in boot order — the only way to see a second
- * app's, since the ambient slot is first-wins and keeps answering with the
- * first app's. */
+/** Managers `create()` built, in boot order — captured by spying on `create`
+ * so a test can assert each app resolved its own. */
 const built: CacheManager[] = [];
 const realCreate = CacheManager.create.bind(CacheManager);
 
@@ -134,9 +133,9 @@ describe("per-app CacheManager injection", () => {
   });
 
   test("every plugin in one app resolves that app's own manager", async () => {
-    // Booted second on purpose: the ambient slot is first-wins, so if plugins
-    // read it rather than their context they would get the *first* app's cache
-    // and this assertion would fail.
+    // Booted second on purpose: a plugin that resolved its cache from anywhere
+    // but its own context would get the *first* app's cache, and this assertion
+    // would fail.
     await bootApp([probe({})]);
     const { manager } = await bootApp([probe({}), probeTwo({})]);
 
