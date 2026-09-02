@@ -27,7 +27,7 @@ class EndableStorage extends InMemoryStorage {
 }
 
 function endable(): EndableStorage {
-  return new EndableStorage({ enabled: true, maxSize: 100 } as never);
+  return new EndableStorage({ maxSize: 100 });
 }
 
 /** A storage that reports unhealthy, forcing `create()` to build its own. */

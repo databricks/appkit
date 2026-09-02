@@ -346,12 +346,19 @@ export function createTestPluginContext(
     // register it as a tool provider when it actually is one AND its name does
     // not collide with an injected fake — the fakes are the authored test
     // doubles and must not be overwritten by the plugin under test.
-    ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
-    if (isToolProvider(plugin) && !providers.has(plugin.name)) {
-      ctx.registerToolProvider(
-        plugin.name,
-        plugin as unknown as Parameters<typeof ctx.registerToolProvider>[1],
-      );
+    //
+    // Register a given name once: a test file that builds many instances of one
+    // plugin (the shared-kit factory pattern) re-attaches the same name, and
+    // that must not churn the registry or trip the production
+    // "registered more than once" warning — the kit is a fixture, not an app.
+    if (!ctx.hasPlugin(plugin.name)) {
+      ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
+      if (isToolProvider(plugin) && !providers.has(plugin.name)) {
+        ctx.registerToolProvider(
+          plugin.name,
+          plugin as unknown as Parameters<typeof ctx.registerToolProvider>[1],
+        );
+      }
     }
     return plugin;
   }
