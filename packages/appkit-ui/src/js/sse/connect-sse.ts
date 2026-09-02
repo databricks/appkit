@@ -18,11 +18,9 @@ export async function connectSSE<Payload = unknown>(
     lastEventId: initialLastEventId = null,
     retryDelay = 2000,
     maxRetries = 3,
-    // 1 MiB — matches the server's `streamDefaults.maxEventSize`. SSE
-    // carries only short JSON control messages; bulk Arrow payloads stream
-    // back as the raw HTTP response body of the query request, so this
-    // buffer never needs to hold multi-MiB attachments.
-    maxBufferSize = 1 * 1024 * 1024,
+    // Matches the server's `streamDefaults.maxEventSize`: a smaller buffer here
+    // turns a legal server event into "Buffer size exceeded" plus retries.
+    maxBufferSize = 5 * 1024 * 1024,
     timeout = 300000, // 5 minutes
     onError,
   } = options;
