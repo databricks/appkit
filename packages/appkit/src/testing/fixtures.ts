@@ -6,7 +6,6 @@ import type { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
-import { trackedKitCaches } from "./kit-cache";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
 // repo-wide (see biome.json), so a local alias keeps the intent readable.
@@ -286,6 +285,26 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
+ * The caches `createTestPluginContext` built for the current test file. Module-
+ * level on purpose: Vitest isolates test files in separate workers, so this set
+ * is per-file and never leaks across them. Lives here, next to
+ * {@link resetTestCache} — its only reader — rather than on `CacheManager`,
+ * which belongs to an app, not to test bookkeeping.
+ *
+ * @internal
+ */
+const kitCaches = new Set<CacheManager>();
+
+/**
+ * Record a cache `createTestPluginContext` built, so a no-argument
+ * {@link resetTestCache} can find it. The kit's one cross-file seam.
+ * @internal
+ */
+export function registerKitCache(cache: CacheManager): void {
+  kitCaches.add(cache);
+}
+
+/**
  * Clears the caches this file's test contexts built, so cached values don't
  * leak between tests in the same file.
  *
@@ -309,12 +328,7 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 export async function resetTestCache(
   target?: { cache: CacheManager } | CacheManager,
 ): Promise<void> {
-  const caches = target
-    ? [resolveCache(target)]
-    : // Every cache this kit built for the current file. Vitest isolates files,
-      // so that is per-file by construction; a file holding two test contexts
-      // gets both cleared, which is what makes a mid-test call unambiguous.
-      trackedKitCaches();
+  const caches = target ? [resolveCache(target)] : [...kitCaches];
 
   // No cache to clear is not an error: a suite may call this before it has
   // created one.

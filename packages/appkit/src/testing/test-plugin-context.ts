@@ -12,8 +12,7 @@ import { isToolProvider, PluginContext } from "../core/plugin-context";
 import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import { createMockTelemetry } from "./fixtures";
-import { registerKitCache } from "./kit-cache";
+import { createMockTelemetry, registerKitCache } from "./fixtures";
 
 /**
  * A concrete (non-function) fake tool response — returned as-is. Covers the
