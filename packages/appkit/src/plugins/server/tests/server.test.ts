@@ -107,17 +107,6 @@ vi.mock("../../../telemetry", () => ({
   },
 }));
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn().mockReturnValue({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
-}));
-
 vi.mock("../../../utils", () => ({
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));

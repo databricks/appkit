@@ -9,21 +9,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  * (SP or per-user via RoutingPool).
  */
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-  },
-}));
-
 // Client calls recorded by the read-only-statement test. The `connect()`
 // mock returns a fresh client whose `query` pushes to this array so tests
 // can assert the exact sequence of statements emitted on the dedicated
