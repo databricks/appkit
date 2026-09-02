@@ -180,9 +180,16 @@ export class CacheManager {
         try {
           await persistentStorage.initialize();
         } catch (err) {
-          // Health check passed but `initialize()` failed. End the pool we
-          // opened before falling through to in-memory — otherwise it is
-          // orphaned for the life of the process and boot still "succeeds".
+          // Health check passed but `initialize()` failed. Unlike an
+          // unreachable Lakebase (the expected, silent fallback), a healthy
+          // connection that fails to initialize is surprising and worth a
+          // signal — the outer catch is silent. End the pool we opened before
+          // falling through to in-memory, or it is orphaned for the life of the
+          // process while boot still "succeeds".
+          logger.warn(
+            "Lakebase cache is healthy but failed to initialize; falling back to in-memory: %O",
+            err,
+          );
           await pool.end().catch(() => {});
           throw err;
         }
