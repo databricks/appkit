@@ -125,8 +125,23 @@ vi.mock("../interceptors/telemetry", () => ({
   })),
 }));
 
+/**
+ * The cache the plugins below are attached to. Module-scoped because
+ * `TestPlugin`'s constructor closes over it; `beforeEach` reassigns it so each
+ * test gets a fresh double.
+ */
+let mockCache: CacheManager;
+
 // Test plugin implementations
 class TestPlugin extends Plugin<BasePluginConfig> {
+  constructor(config: BasePluginConfig) {
+    super(config);
+    // A registered plugin gets its cache from the app through `attachContext`.
+    // Doing the same here lets the direct constructions below behave like
+    // plugins an app owns, instead of leaning on a process-wide slot.
+    this.attachContext({ context: { cache: mockCache } as never });
+  }
+
   async customMethod(value: string): Promise<string> {
     return `processed-${value}`;
   }
@@ -185,7 +200,6 @@ class OboTestPlugin extends Plugin<BasePluginConfig> {
 
 describe("Plugin", () => {
   let mockTelemetry: ITelemetry;
-  let mockCache: CacheManager;
   let mockApp: AppManager;
   let mockStreamManager: StreamManager;
   let config: BasePluginConfig;
@@ -222,7 +236,6 @@ describe("Plugin", () => {
     };
 
     // Setup constructor mocks
-    vi.mocked(CacheManager.getInstanceSync).mockReturnValue(mockCache);
     vi.mocked(AppManager).mockImplementation(() => mockApp);
     vi.mocked(StreamManager).mockImplementation(() => mockStreamManager);
     vi.mocked(TelemetryManager.getProvider).mockReturnValue(
@@ -257,9 +270,15 @@ describe("Plugin", () => {
     test("should initialize managers", () => {
       new TestPlugin(config);
 
-      expect(CacheManager.getInstanceSync).toHaveBeenCalledTimes(1);
       expect(AppManager).toHaveBeenCalledTimes(1);
       expect(StreamManager).toHaveBeenCalledTimes(1);
+    });
+
+    test("binds the cache its context carries", () => {
+      const plugin = new TestPlugin(config);
+
+      // @ts-expect-error - cache is protected
+      expect(plugin.cache).toBe(mockCache);
     });
   });
 
