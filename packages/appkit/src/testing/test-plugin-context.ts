@@ -120,6 +120,17 @@ export interface TestPluginContext {
    */
   telemetry: ITelemetry;
   /**
+   * The real in-memory {@link CacheManager} this context carries — the very
+   * object a plugin attached through {@link attach} resolves as `this.cache`.
+   * Spy or read it (`vi.spyOn(mock.cache, "getOrExecute")`, `generateKey`,
+   * `get`, `has`) to assert a plugin's real caching behaviour against
+   * production's own keying rather than a re-implemented fake.
+   *
+   * Each `createTestPluginContext()` gets its own, so two contexts in one file
+   * cannot see each other's entries.
+   */
+  cache: CacheManager;
+  /**
    * Tool dispatches observed across all fake providers, in call order. Live —
    * read it after the action under test runs.
    */
@@ -137,11 +148,11 @@ export interface TestPluginContext {
    */
   registerProvider(name: string, tools: Record<string, FakeToolResponse>): void;
   /**
-   * Attach this context to a plugin the production way: seed an in-memory
-   * cache (if AppKit hasn't already), then call `plugin.attachContext`, which
-   * also rebuilds the plugin's telemetry and flips `isReady` to `true`. Await
-   * it before exercising handlers that read `this.context`, `this.cache`, or
-   * gate on `isReady`. Returns the same plugin for chaining.
+   * Attach this context to a plugin the production way: calls
+   * `plugin.attachContext`, which binds {@link cache}, rebuilds the plugin's
+   * telemetry, and flips `isReady` to `true`. Await it before exercising
+   * handlers that read `this.context`, `this.cache`, or gate on `isReady`.
+   * Returns the same plugin for chaining.
    */
   attach<P extends Plugin>(plugin: P): Promise<P>;
 }
@@ -177,7 +188,11 @@ export function createTestPluginContext(
   fakes: FakeProviders = {},
 ): TestPluginContext {
   const telemetry = createMockTelemetry();
-  const ctx = new PluginContext({ telemetry });
+  // Synchronous on purpose: `createTestPluginContext` is called at describe-body
+  // time, so it cannot await. `forStorage` skips the health check that the app's
+  // async `create()` performs, which in-memory storage does not need.
+  const cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+  const ctx = new PluginContext({ telemetry, cache });
 
   const toolCalls: RecordedToolCall[] = [];
   const routes: RecordedRoute[] = [];
@@ -316,12 +331,10 @@ export function createTestPluginContext(
   }
 
   async function attach<P extends Plugin>(plugin: P): Promise<P> {
-    // Seed a real in-memory cache if AppKit hasn't initialized one. Idempotent:
-    // getInstance returns any existing singleton (e.g. one a suite already set
-    // up) and ignores the storage argument in that case.
-    if (!cacheReady()) {
-      await CacheManager.getInstance({ storage: new InMemoryStorage({}) });
-    }
+    // The context already carries this test's cache, so `attachContext` binds
+    // it the same way `createApp` binds an app's. Nothing is seeded into the
+    // process-wide slot: a plugin attached here reaches only this context's
+    // cache, and a sibling context cannot observe it.
     plugin.attachContext({ context: ctx });
 
     // Mirror what AppKit core does after attachContext (core/appkit.ts): put
@@ -343,19 +356,11 @@ export function createTestPluginContext(
   return {
     ctx,
     telemetry,
+    cache,
     toolCalls,
     routes,
     providers,
     registerProvider,
     attach,
   };
-}
-
-function cacheReady(): boolean {
-  try {
-    CacheManager.getInstanceSync();
-    return true;
-  } catch {
-    return false;
-  }
 }

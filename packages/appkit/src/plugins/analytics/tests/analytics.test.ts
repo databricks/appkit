@@ -62,6 +62,10 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
 vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
+    // `createTestPluginContext` builds its own manager over in-memory storage;
+    // this fake stands in for it so the suite's store-backed double stays the
+    // one under test. Part of the module's shape now.
+    forStorage: vi.fn(() => mockCacheInstance),
   },
 }));
 
