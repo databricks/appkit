@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import type { AgentAdapter, AgentInput, AgentRunContext } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { CacheManager } from "../../../cache";
 import type { AgentsPluginConfig } from "../../../core/agent/types";
+import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
 /** Absolute path to a committed agent fixture directory. */
@@ -22,14 +22,14 @@ function stubAdapter(): AgentAdapter {
   };
 }
 
-beforeEach(async () => {
-  // Agent setup reads the cache singleton; initialize it with defaults.
-  await CacheManager.getInstance();
-});
+// One real context for the file: it carries the cache `setup()` reads, and its
+// provider registry is empty, so tool collection finds nothing — as it did when
+// these tests attached no context at all.
+const kit = createTestPluginContext();
 
 function instantiate(config: AgentsPluginConfig) {
   const plugin = new AgentsPlugin({ ...config, name: "agent" });
-  plugin.attachContext({ context: undefined as unknown as object });
+  plugin.attachContext({ context: kit.ctx });
   return plugin;
 }
 
