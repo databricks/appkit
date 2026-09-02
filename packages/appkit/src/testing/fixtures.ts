@@ -2,10 +2,11 @@ import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
 
-import { CacheManager } from "../cache";
+import type { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
+import { trackedKitCaches } from "./kit-cache";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
 // repo-wide (see biome.json), so a local alias keeps the intent readable.
@@ -303,15 +304,23 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
  * });
  * ```
  */
-export async function resetTestCache(): Promise<void> {
-  let cache: ReturnType<typeof CacheManager.getInstanceSync>;
-  try {
-    cache = CacheManager.getInstanceSync();
-  } catch {
-    // Not initialized yet — nothing to clear.
-    return;
-  }
-  await cache.clear();
+export async function resetTestCache(
+  target?: { cache: CacheManager } | CacheManager,
+): Promise<void> {
+  const caches = target
+    ? [resolveCache(target)]
+    : // Every cache this kit built for the current file. Vitest isolates files,
+      // so that is per-file by construction; a file holding two test contexts
+      // gets both cleared, which is what makes a mid-test call unambiguous.
+      trackedKitCaches();
+
+  // No cache to clear is not an error: a suite may call this before it has
+  // created one.
+  await Promise.all(caches.map((cache) => cache.clear()));
+}
+
+function resolveCache(target: { cache: CacheManager } | CacheManager) {
+  return "cache" in target ? target.cache : target;
 }
 
 /**

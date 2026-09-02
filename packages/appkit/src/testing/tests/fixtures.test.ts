@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { CacheManager } from "../../cache";
-import { InMemoryStorage } from "../../cache/storage";
 import { ServiceContext } from "../../context";
 import {
   createMockRequest,
   resetTestCache,
   useServiceContextMock,
 } from "../fixtures";
+import { createTestPluginContext } from "../test-plugin-context";
 
 describe("createMockRequest — obo option", () => {
   test("no obo leaves the forwarded identity headers unset", () => {
@@ -79,26 +78,59 @@ describe("resetTestCache", () => {
     vi.restoreAllMocks();
   });
 
-  test("no-ops when the cache is not initialized", async () => {
-    // Force the uninitialized branch deterministically (there is no public
-    // un-initialize), so the try/catch is exercised regardless of test order.
-    vi.spyOn(CacheManager, "getInstanceSync").mockImplementation(() => {
-      throw new Error("not initialized");
-    });
+  test("no-ops when this file has no kit cache to clear", async () => {
     await expect(resetTestCache()).resolves.toBeUndefined();
   });
 
-  test("clears a populated cache", async () => {
-    // Seed the real singleton the way attach() does, then prove reset empties it.
-    const cache = await CacheManager.getInstance({
-      storage: new InMemoryStorage({}),
-    });
-    await cache.set("k", { hello: "world" });
-    expect(await cache.get("k")).toEqual({ hello: "world" });
+  test("clears the cache a test context carries", async () => {
+    const mock = createTestPluginContext();
+    const key = mock.cache.generateKey(["k"], "user");
+    await mock.cache.set(key, { hello: "world" });
+    expect(await mock.cache.get(key)).toEqual({ hello: "world" });
 
     await resetTestCache();
 
-    expect(await cache.get("k")).toBeNull();
+    expect(await mock.cache.get(key)).toBeNull();
+  });
+
+  test("clears every kit cache in the file, not just the newest", async () => {
+    // A file can hold several contexts, so "the most recent one" would clear
+    // the wrong cache when called mid-test.
+    const first = createTestPluginContext();
+    const second = createTestPluginContext();
+    const firstKey = first.cache.generateKey(["a"], "user");
+    const secondKey = second.cache.generateKey(["b"], "user");
+    await first.cache.set(firstKey, { n: 1 });
+    await second.cache.set(secondKey, { n: 2 });
+
+    await resetTestCache();
+
+    expect(await first.cache.get(firstKey)).toBeNull();
+    expect(await second.cache.get(secondKey)).toBeNull();
+  });
+
+  test("clears only the target it is given", async () => {
+    const kept = createTestPluginContext();
+    const cleared = createTestPluginContext();
+    const keptKey = kept.cache.generateKey(["keep"], "user");
+    const clearedKey = cleared.cache.generateKey(["drop"], "user");
+    await kept.cache.set(keptKey, { n: 1 });
+    await cleared.cache.set(clearedKey, { n: 2 });
+
+    await resetTestCache(cleared);
+
+    expect(await cleared.cache.get(clearedKey)).toBeNull();
+    expect(await kept.cache.get(keptKey)).toEqual({ n: 1 });
+  });
+
+  test("accepts a manager directly as well as a handle", async () => {
+    const mock = createTestPluginContext();
+    const key = mock.cache.generateKey(["direct"], "user");
+    await mock.cache.set(key, { n: 1 });
+
+    await resetTestCache(mock.cache);
+
+    expect(await mock.cache.get(key)).toBeNull();
   });
 });
 

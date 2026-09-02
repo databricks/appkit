@@ -13,6 +13,7 @@ import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
 import { createMockTelemetry } from "./fixtures";
+import { registerKitCache } from "./kit-cache";
 
 /**
  * A concrete (non-function) fake tool response — returned as-is. Covers the
@@ -192,6 +193,8 @@ export function createTestPluginContext(
   // time, so it cannot await. `forStorage` skips the health check that the app's
   // async `create()` performs, which in-memory storage does not need.
   const cache = CacheManager.forStorage(new InMemoryStorage({} as never));
+  // So `resetTestCache()` with no argument can find it.
+  registerKitCache(cache);
   const ctx = new PluginContext({ telemetry, cache });
 
   const toolCalls: RecordedToolCall[] = [];
