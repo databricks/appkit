@@ -15398,7 +15398,7 @@ snapshots:
       form-data: 4.0.6
       hpagent: 1.2.0
       isomorphic-ws: 5.0.0(ws@8.21.0(bufferutil@4.0.9))
-      js-yaml: 4.2.0
+      js-yaml: 4.3.1
       jsonpath-plus: 10.4.0
       node-fetch: 2.7.0
       openid-client: 6.8.7
