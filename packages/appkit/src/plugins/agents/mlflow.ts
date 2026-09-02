@@ -1,3 +1,4 @@
+import type { UnityCatalogLocation } from "@mlflow/core";
 import { SpanKind } from "@opentelemetry/api";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 
@@ -6,7 +7,8 @@ import { TelemetryManager } from "../../telemetry";
 
 const logger = createLogger("agents");
 
-type MlflowModule = typeof import("mlflow-tracing");
+type MlflowModule = typeof import("@mlflow/core");
+type MlflowClientInstance = InstanceType<MlflowModule["MlflowClient"]>;
 
 interface MlflowInitConfig {
   trackingUri: string;
@@ -19,18 +21,21 @@ let enabled = false;
 let initStarted = false;
 let configured = false;
 let initConfig: MlflowInitConfig | undefined;
+// The resolved UC trace location, or undefined for classic experiment storage.
+let ucLocation: UnityCatalogLocation | undefined;
 let gatedProcessor: GatedMlflowSpanProcessor | undefined;
 
 /**
  * Wraps mlflow's OTel `SpanProcessor` and scopes it to agent traces. Two jobs:
  *
- * 1. Stay inert until ready. mlflow's `onStart` calls its own `getConfig()`,
- *    which THROWS before `init()` runs — and that throw propagates out of
- *    `tracer.startSpan()`, so it would break unrelated AppKit spans (HTTP,
- *    analytics) created between `TelemetryManager.start()` and the first agent
- *    turn. We contribute this to AppKit's single tracer provider during
- *    `setup()`, but only start forwarding once `ready()` is called — right after
- *    the `init()` in {@link ensureConfigured}.
+ * 1. Stay inert until ready. The classic processor's `onStart` calls its own
+ *    `getConfig()`, which THROWS before `init()` runs — and that throw
+ *    propagates out of `tracer.startSpan()`, so it would break unrelated AppKit
+ *    spans (HTTP, analytics) created between `TelemetryManager.start()` and the
+ *    first agent turn. We contribute this to AppKit's single tracer provider
+ *    during `setup()`, but only start forwarding once `ready()` is called by
+ *    {@link ensureConfigured}. (The UC processor reads no global config and
+ *    can't throw here, but forwarding is gated uniformly either way.)
  *
  * 2. Let only agent turns become MLflow traces. mlflow roots a trace at EVERY
  *    parentless span, and AppKit's single provider carries every HTTP/DB span —
@@ -65,6 +70,8 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   #spanTypeKey: string;
   // Leak backstop for #agentTraceIds — far above real concurrency. See onEnd.
   #maxTracked: number;
+  // Cap on how long forceFlush/shutdown wait for a stuck export.
+  #flushTimeoutMs: number;
 
   constructor(
     inner: SpanProcessor,
@@ -72,12 +79,14 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
       popTrace: (otelTraceId: string) => void;
       spanTypeKey: string;
       maxTracked?: number;
+      flushTimeoutMs?: number;
     },
   ) {
     this.#inner = inner;
     this.#popTrace = deps.popTrace;
     this.#spanTypeKey = deps.spanTypeKey;
     this.#maxTracked = deps.maxTracked ?? 1024;
+    this.#flushTimeoutMs = deps.flushTimeoutMs ?? 5000;
   }
 
   ready(): void {
@@ -140,62 +149,138 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   }
 
   forceFlush(): Promise<void> {
-    return this.#inner.forceFlush();
+    return this.#boundedFlush(() => this.#inner.forceFlush());
   }
 
   shutdown(): Promise<void> {
-    return this.#inner.shutdown();
+    return this.#boundedFlush(() => this.#inner.shutdown());
+  }
+
+  // Bound the inner flush/shutdown wait: both exporters export fire-and-forget,
+  // so a stuck export only wedges here (graceful shutdown), never a turn.
+  // Resolves — not rejects — on timeout: the caller is tearing down.
+  async #boundedFlush(op: () => Promise<void>): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        op().catch((err) => {
+          logger.warn("MLflow trace flush error: %O", err);
+        }),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            logger.warn(
+              "MLflow trace flush exceeded %dms; continuing (export may still be in flight)",
+              this.#flushTimeoutMs,
+            );
+            resolve();
+          }, this.#flushTimeoutMs);
+          timer.unref(); // don't keep the event loop alive on the timeout alone
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+}
+
+/** The Databricks experiment tag that links an experiment to a UC trace store. */
+const UC_DESTINATION_PATH_TAG =
+  "mlflow.experiment.databricksTraceDestinationPath";
+
+/**
+ * Resolve the Unity Catalog trace location for the bound experiment, or
+ * `undefined` for classic experiment-backed storage. Any failure falls back to
+ * classic — a tracing misconfiguration must never break the agent.
+ *
+ * 1. Explicit env override — `MLFLOW_UC_CATALOG` + `MLFLOW_UC_SCHEMA` +
+ *    `MLFLOW_UC_TABLE_PREFIX`, all three required.
+ * 2. Auto-detect from the linked Databricks experiment (numeric ids only, since
+ *    `GetExperiment` only accepts them): read the
+ *    `mlflow.experiment.databricksTraceDestinationPath` tag, whose value is
+ *    `<catalog>.<schema>.<prefix>`.
+ * 3. Otherwise classic.
+ *
+ * @mlflow/core ships its own tag parser (`core/destination`) but doesn't export
+ * it publicly, and its published `.d.ts` redacts the tag constant, so we read
+ * the tag directly here rather than deep-import a scrubbed internal.
+ */
+async function resolveUcLocation(
+  experimentId: string,
+  client: MlflowClientInstance,
+): Promise<UnityCatalogLocation | undefined> {
+  const catalogName = process.env.MLFLOW_UC_CATALOG?.trim();
+  const schemaName = process.env.MLFLOW_UC_SCHEMA?.trim();
+  const tablePrefix = process.env.MLFLOW_UC_TABLE_PREFIX?.trim();
+  if (catalogName && schemaName && tablePrefix) {
+    return { catalogName, schemaName, tablePrefix };
+  }
+
+  if (!/^\d+$/.test(experimentId)) return undefined;
+
+  try {
+    const experiment = await client.getExperiment(experimentId);
+    const path = experiment?.tags?.[UC_DESTINATION_PATH_TAG];
+    if (!path) return undefined;
+    // Must be exactly catalog.schema.prefix, all non-empty; else not a UC store.
+    const [cat, schema, prefix, ...rest] = path.split(".");
+    if (!cat || !schema || !prefix || rest.length > 0) return undefined;
+    return { catalogName: cat, schemaName: schema, tablePrefix: prefix };
+  } catch (err) {
+    logger.warn(
+      "MLflow UC trace-location auto-detect failed; using classic experiment storage: %O",
+      err,
+    );
+    return undefined;
   }
 }
 
 /**
  * Build mlflow's OTel `SpanProcessor` ourselves rather than letting `init()`
- * build and globally register its own tracer provider. This lets AppKit own the
- * single global provider (OTLP + this processor), so agent spans reach both
- * MLflow and any OTLP endpoint without two SDKs racing for the global slot.
+ * build and globally register its own tracer provider (its own `NodeSDK`). This
+ * lets AppKit own the single global provider (OTLP + this processor), so agent
+ * spans reach both MLflow and any OTLP endpoint without two SDKs racing for the
+ * global slot.
+ *
+ * When a UC trace location is bound, builds the Unity Catalog processor +
+ * exporter (V4 trace ids, spans uploaded to the experiment's UC table);
+ * otherwise the classic experiment-backed processor. `createAuthProvider`,
+ * `MlflowClient`, `InMemoryTraceManager` and `SpanAttributeKey` are all public
+ * in `@mlflow/core`, so only the exporter/processor classes are deep-imported —
+ * pinned to the exact version in package.json and guarded by a test that fails
+ * loudly if a version bump renames them.
  *
  * Also resolves the two hooks {@link GatedMlflowSpanProcessor} needs to scope
  * forwarding to agent traces — `popTrace` (to discard non-agent traces) and the
  * `mlflow.spanType` attribute key (to recognize an mlflow span) — so the gate's
- * `onEnd` stays synchronous and all mlflow-internal coupling resolves here.
- *
- * Deep-imports `mlflow-tracing` internals that aren't on its public entrypoint —
- * pinned to the exact version in package.json and guarded by a test that fails
- * loudly if a version bump renames them.
+ * `onEnd` stays synchronous.
  */
-async function buildMlflowSpanProcessor(config: MlflowInitConfig): Promise<{
+async function buildMlflowSpanProcessor(
+  m: MlflowModule,
+  client: MlflowClientInstance,
+  ucLoc: UnityCatalogLocation | undefined,
+): Promise<{
   processor: SpanProcessor;
   popTrace: (otelTraceId: string) => void;
   spanTypeKey: string;
 }> {
-  const { createAuthProvider } = await import("mlflow-tracing/dist/auth");
-  const { MlflowClient } = await import("mlflow-tracing");
-  const { MlflowSpanExporter, MlflowSpanProcessor } =
-    await import("mlflow-tracing/dist/exporters/mlflow");
-  const { InMemoryTraceManager } =
-    await import("mlflow-tracing/dist/core/trace_manager");
-  const { SpanAttributeKey } =
-    await import("mlflow-tracing/dist/core/constants");
-
-  const authProvider = createAuthProvider({
-    trackingUri: config.trackingUri,
-    ...(config.host ? { host: config.host } : {}),
-  });
-  const client = new MlflowClient({
-    trackingUri: config.trackingUri,
-    authProvider,
-  });
-  // mlflow builds against a different @opentelemetry/sdk-trace-base major than
-  // AppKit; the SpanProcessor contract (onStart/onEnd/forceFlush/shutdown) is
-  // stable across them, so bridge the nominal type mismatch with one cast.
-  const processor = new MlflowSpanProcessor(
-    new MlflowSpanExporter(client),
-  ) as unknown as SpanProcessor;
+  let processor: SpanProcessor;
+  if (ucLoc) {
+    const { DatabricksUCTableSpanExporter, DatabricksUCTableSpanProcessor } =
+      await import("@mlflow/core/dist/exporters/uc_table");
+    processor = new DatabricksUCTableSpanProcessor(
+      new DatabricksUCTableSpanExporter(client),
+      ucLoc,
+    );
+  } else {
+    const { MlflowSpanExporter, MlflowSpanProcessor } =
+      await import("@mlflow/core/dist/exporters/mlflow");
+    processor = new MlflowSpanProcessor(new MlflowSpanExporter(client));
+  }
   return {
     processor,
     popTrace: (otelTraceId) =>
-      InMemoryTraceManager.getInstance().popTrace(otelTraceId),
-    spanTypeKey: SpanAttributeKey.SPAN_TYPE,
+      m.InMemoryTraceManager.getInstance().popTrace(otelTraceId),
+    spanTypeKey: m.SpanAttributeKey.SPAN_TYPE,
   };
 }
 
@@ -206,7 +291,7 @@ function experimentId(): string | undefined {
 }
 
 /**
- * Databricks host with a scheme. The mlflow-tracing SDK uses `DATABRICKS_HOST`
+ * Databricks host with a scheme. `@mlflow/core` uses `DATABRICKS_HOST`
  * verbatim to build request URLs and doesn't add `https://`, so a bare host
  * (`workspace.cloud.databricks.com`) makes `new URL()` throw. Pass an explicit
  * normalized host when the env var is set; when it isn't (profile-based auth),
@@ -223,14 +308,18 @@ function normalizedDatabricksHost(): string | undefined {
  * agents plugin's optional `experiment` resource is set (`MLFLOW_EXPERIMENT_ID`).
  * Called from the agents plugin's `setup()`, before `TelemetryManager.start()`.
  *
- * Rather than let `mlflow.init()` stand up and globally register its own tracer
- * provider (which would race AppKit's and drop one exporter), we build mlflow's
+ * Rather than let `@mlflow/core`'s `init()` stand up and globally register its
+ * own tracer provider (its `NodeSDK`, which would race AppKit's), we build the
  * span processor ourselves and contribute it to AppKit's single provider via
- * {@link TelemetryManager.registerSpanProcessor}. mlflow's global config is
- * seeded by {@link startAgentTracing} on the `"setup:complete"` lifecycle event
- * (after `start()`), with {@link ensureConfigured} as an idempotent lazy fallback.
+ * {@link TelemetryManager.registerSpanProcessor}. For the classic
+ * experiment-backed processor, mlflow's global config is seeded by
+ * {@link startAgentTracing} on the `"setup:complete"` lifecycle event (after
+ * `start()`), with {@link ensureConfigured} as an idempotent lazy fallback; the
+ * UC processor needs no seeded config, so that path never calls `init()`.
  *
- * Auth is resolved by the `mlflow-tracing` SDK from the app's own Databricks
+ * The trace store is resolved here: a UC table prefix (env-configured or
+ * auto-detected from the experiment's Databricks tags) vs. the classic
+ * experiment. Auth is resolved by `@mlflow/core` from the app's own Databricks
  * credentials — `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or a `~/.databrickscfg`
  * profile (`MLFLOW_TRACKING_URI=databricks://profile`) — so no tokens or OTLP
  * headers are wired by hand. A failure (missing creds, bad experiment) logs and
@@ -246,22 +335,45 @@ export async function initAgentTracing(): Promise<void> {
   if (!id) return;
 
   try {
-    mlflow = await import("mlflow-tracing");
+    mlflow = await import("@mlflow/core");
     const host = normalizedDatabricksHost();
     initConfig = {
       trackingUri: process.env.MLFLOW_TRACKING_URI?.trim() || "databricks",
       experimentId: id,
       ...(host ? { host } : {}),
     };
-    const { processor, popTrace, spanTypeKey } =
-      await buildMlflowSpanProcessor(initConfig);
+    // One auth resolution + client, reused for UC auto-detect and the exporter.
+    const authProvider = mlflow.createAuthProvider({
+      trackingUri: initConfig.trackingUri,
+      ...(host ? { host } : {}),
+    });
+    const client = new mlflow.MlflowClient({
+      trackingUri: initConfig.trackingUri,
+      authProvider,
+    });
+    ucLocation = await resolveUcLocation(id, client);
+    const { processor, popTrace, spanTypeKey } = await buildMlflowSpanProcessor(
+      mlflow,
+      client,
+      ucLocation,
+    );
     gatedProcessor = new GatedMlflowSpanProcessor(processor, {
       popTrace,
       spanTypeKey,
     });
     TelemetryManager.registerSpanProcessor(gatedProcessor);
     enabled = true;
-    logger.info("MLflow agent tracing enabled (experiment %s)", id);
+    if (ucLocation) {
+      logger.info(
+        "MLflow agent tracing enabled (experiment %s, UC %s.%s.%s)",
+        id,
+        ucLocation.catalogName,
+        ucLocation.schemaName,
+        ucLocation.tablePrefix,
+      );
+    } else {
+      logger.info("MLflow agent tracing enabled (experiment %s)", id);
+    }
   } catch (err) {
     logger.warn("MLflow agent tracing disabled: %O", err);
   }
@@ -278,14 +390,19 @@ export interface SpanRecorder {
 const noopRecorder: SpanRecorder = { setOutputs() {} };
 
 /**
- * Seed mlflow's global config once, AFTER `TelemetryManager.start()` has
- * registered AppKit's provider — driven eagerly by {@link startAgentTracing} on
- * `"setup:complete"`, or lazily by {@link trace} as a fallback. `init()` also
- * stands up its own tracer provider and tries to register it globally, but that
- * loses to AppKit's
- * already-registered provider (non-fatal); we call it only for the config
- * side-effect mlflow's span processor requires, then enable forwarding on the
- * gated processor. Returns whether tracing is usable.
+ * Seed the classic processor's global config once, AFTER
+ * `TelemetryManager.start()` has registered AppKit's provider — driven eagerly
+ * by {@link startAgentTracing} on `"setup:complete"`, or lazily by {@link trace}
+ * as a fallback — then enable forwarding on the gated processor. Returns whether
+ * tracing is usable.
+ *
+ * The classic experiment-backed `MlflowSpanProcessor` reads
+ * `getConfig().experimentId` in `onStart`, so it needs `init()` to seed mlflow's
+ * global config. `init()` also stands up its own `NodeSDK` whose provider loses
+ * the global slot to AppKit's already-registered one (non-fatal); we call it
+ * only for that config side-effect. The UC processor carries its location and
+ * reads no global config, so the UC path skips `init()` entirely — no second
+ * `NodeSDK`, no competing global registration by `@mlflow/core`.
  */
 function ensureConfigured(): boolean {
   if (configured) return enabled;
@@ -298,8 +415,8 @@ function ensureConfigured(): boolean {
   // loop this file exists to prevent.
   if (!mlflow || !initConfig || !gatedProcessor) return false;
   try {
-    mlflow.init(initConfig);
-    gatedProcessor?.ready();
+    if (!ucLocation) mlflow.init(initConfig);
+    gatedProcessor.ready();
     return true;
   } catch (err) {
     enabled = false;
