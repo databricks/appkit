@@ -71,7 +71,19 @@ export class CacheManager {
     cacheMissCount: Counter;
   };
 
-  private constructor(storage: CacheStorage, config: CacheConfig) {
+  /**
+   * @param ownsStorage - Whether this manager built its own storage. Only owned
+   *   storage is closed on {@link close}: a caller who passed `cache: { storage }`
+   *   keeps ownership, and closing theirs is destructive —
+   *   `PersistentStorage.close()` is `pool.end()` and permanent, while
+   *   `InMemoryStorage.close()` merely clears a Map, which is why the hazard has
+   *   been invisible.
+   */
+  private constructor(
+    storage: CacheStorage,
+    config: CacheConfig,
+    private readonly ownsStorage: boolean,
+  ) {
     this.storage = storage;
     this.config = config;
     this.inFlightRequests = new Map();
@@ -166,7 +178,11 @@ export class CacheManager {
     storage: CacheStorage,
     userConfig?: Partial<CacheConfig>,
   ): CacheManager {
-    return new CacheManager(storage, deepMerge(cacheDefaults, userConfig));
+    return new CacheManager(
+      storage,
+      deepMerge(cacheDefaults, userConfig),
+      false,
+    );
   }
 
   /**
@@ -190,7 +206,7 @@ export class CacheManager {
     if (config.storage) {
       const isHealthy = await config.storage.healthCheck();
       if (isHealthy) {
-        return new CacheManager(config.storage, config);
+        return new CacheManager(config.storage, config, false);
       }
 
       if (config.strictPersistence) {
@@ -198,10 +214,11 @@ export class CacheManager {
         return new CacheManager(
           new InMemoryStorage(disabledConfig),
           disabledConfig,
+          true,
         );
       }
 
-      return new CacheManager(new InMemoryStorage(config), config);
+      return new CacheManager(new InMemoryStorage(config), config, true);
     }
 
     // try to use lakebase storage
@@ -215,7 +232,7 @@ export class CacheManager {
       const isHealthy = await persistentStorage.healthCheck();
       if (isHealthy) {
         await persistentStorage.initialize();
-        return new CacheManager(persistentStorage, config);
+        return new CacheManager(persistentStorage, config, true);
       }
 
       // Health check failed, close the pool and fallback
@@ -229,10 +246,11 @@ export class CacheManager {
       return new CacheManager(
         new InMemoryStorage(disabledConfig),
         disabledConfig,
+        true,
       );
     }
 
-    return new CacheManager(new InMemoryStorage(config), config);
+    return new CacheManager(new InMemoryStorage(config), config, true);
   }
 
   /**
@@ -587,6 +605,8 @@ export class CacheManager {
 
   /** Close the cache */
   async close(): Promise<void> {
+    // Borrowed storage outlives the manager: whoever supplied it owns closing it.
+    if (!this.ownsStorage) return;
     await this.storage.close();
   }
 
