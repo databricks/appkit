@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { FilesPlugin } from "../plugin";
 import {
+  filesPlugin,
   getRouteHandler,
   mockReq,
   mockRes,
   setupTestEnv,
   teardownTestEnv,
-  VOLUMES_CONFIG,
+  testCache,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
+const { mockClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
@@ -34,17 +34,7 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
       this.statusCode = statusCode;
     }
   }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
+  return { mockClient, MockApiError };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -66,12 +56,6 @@ vi.mock("../../../context", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
-
 describe("FilesPlugin delete", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
@@ -84,9 +68,12 @@ describe("FilesPlugin delete", () => {
   });
 
   test("successful delete invalidates list cache", async () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin();
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
+    // Production's own keying and invalidation, not a fake's.
+    const generateKey = vi.spyOn(testCache, "generateKey");
+    const invalidate = vi.spyOn(testCache, "delete");
 
     mockClient.files.delete.mockResolvedValue(undefined);
 
@@ -100,12 +87,12 @@ describe("FilesPlugin delete", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
-    expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-    expect(mockCacheInstance.delete).toHaveBeenCalled();
+    expect(generateKey).toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalled();
   });
 
   test("delete without path returns 400", async () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin();
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
@@ -118,7 +105,7 @@ describe("FilesPlugin delete", () => {
   });
 
   test("delete that throws ApiError returns proper status", async () => {
-    const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    const plugin = filesPlugin();
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 

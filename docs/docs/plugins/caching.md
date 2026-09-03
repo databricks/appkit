@@ -35,3 +35,69 @@ const value = await this.cache.getOrExecute(
   { ttl: 300 },
 );
 ```
+
+### One cache per app
+
+Each app owns exactly one cache. `createApp` builds it from your `cache` config
+and hands the same manager to every plugin it registers, so `this.cache` is the
+app's cache — not a process-wide one. Two apps in the same process hold two
+independent managers, and each honours its own `cache` config.
+
+`this.cache` is read-only: a plugin cannot substitute its own manager. To vary
+caching per plugin, set a plugin-level `cache` config instead:
+
+```ts
+analytics({ cache: { enabled: true, ttl: 600 } });
+```
+
+A plugin receives its cache when the app registers it. Construction alone does
+not bind one, so `this.cache` is not available in a plugin's constructor —
+read it from `setup()` or from a request handler, both of which run after
+registration.
+
+## Upgrading to 0.71.0
+
+The cache became per-app in 0.71.0. Most apps need no changes: if your plugins
+reach the cache through `this.cache` and you build apps with `createApp`, this
+release is a no-op for you.
+
+**`CacheManager.getInstance()` and `CacheManager.getInstanceSync()` are
+removed.** There is no process-wide cache to fetch. Inside a plugin, use
+`this.cache`, which the app binds for you:
+
+```ts
+// Before
+const cache = CacheManager.getInstanceSync();
+await cache.getOrExecute(["k"], work, userKey);
+
+// After
+await this.cache.getOrExecute(["k"], work, userKey);
+```
+
+An app's cache is handed only to the plugins it registers — there is no
+process-wide accessor to fetch it from. Move the cached work into a plugin.
+
+**A plugin constructed without an app has no cache.** Previously such a plugin
+picked up whichever manager happened to exist in the process. Now a cached
+execution on an unregistered plugin throws `InitializationError`
+(`CacheManager not initialized`) naming the plugin. Register it through
+`createApp`, or in tests attach it to a test context:
+
+```ts
+import { createTestPluginContext } from "@databricks/appkit/testing";
+
+const mock = createTestPluginContext();
+await mock.attach(new MyPlugin({}));
+// mock.cache is the very cache the plugin now resolves — spy or read it.
+```
+
+The most common way to hit this is reading `this.cache` in a plugin's
+constructor — which always runs before any attach — or on a plugin you built
+by hand and never registered. Under `createApp`, `setup()` and request
+handlers run after the cache is bound, so a registered plugin is safe (this is
+why [above](#one-cache-per-app) says to read the cache from `setup()`).
+
+**`this.cache` is read-only.** A plugin that assigned its own manager
+(`this.cache = new CacheManager(...)`) no longer compiles. Use a plugin-level
+`cache: { enabled, ttl }` config instead — see [One cache per
+app](#one-cache-per-app).

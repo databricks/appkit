@@ -212,6 +212,37 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
     // Only the INLINE attempt — no EXTERNAL_LINKS fallback.
     expect(calls).toEqual([{ disposition: "INLINE", format: "ARROW_STREAM" }]);
   });
+
+  test("an aborted signal propagates the rejection without a fallback", async () => {
+    // The rejection is the one that normally *does* trigger EXTERNAL_LINKS, so
+    // the abort is the only thing that can stop the second statement. Covers
+    // the client disconnecting mid-query: retrying is pure waste once nobody
+    // is listening.
+    const inlineErr = reject(
+      "INVALID_PARAMETER_VALUE",
+      "The format field must be JSON_ARRAY when the disposition field is INLINE.",
+    );
+    const { executor, calls } = executorFrom(async () => {
+      throw inlineErr;
+    });
+    const streamer: ArrowChunkStreamer = {
+      streamExternalLinks: vi.fn(async function* () {}),
+    };
+
+    await expect(
+      collect(
+        deliverArrowBytes(
+          executor,
+          streamer,
+          "SELECT 1",
+          undefined,
+          {},
+          AbortSignal.abort(),
+        ),
+      ),
+    ).rejects.toBe(inlineErr);
+    expect(calls).toEqual([{ disposition: "INLINE", format: "ARROW_STREAM" }]);
+  });
 });
 
 describe("deliverJsonResult", () => {

@@ -1,7 +1,6 @@
 import type express from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
-import { CacheManager } from "../../../cache";
 import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 
@@ -19,18 +18,6 @@ import { AgentsPlugin } from "../agents";
  * so an agent whose tool surface contains approval-gated tools must be
  * rejected up-front with HTTP 400.
  */
-
-beforeEach(() => {
-  (CacheManager as any).instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(() => "test-key"),
-  };
-});
 
 function mockReq(body: unknown, userId = "alice"): express.Request {
   const headers: Record<string, string> = {

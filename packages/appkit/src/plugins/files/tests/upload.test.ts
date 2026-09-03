@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { FilesPlugin } from "../plugin";
 import { policy } from "../policy";
 import {
+  filesPlugin,
   getRouteHandler,
   mockRes,
   mockUploadReq,
   setupTestEnv,
   teardownTestEnv,
+  testCache,
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
+const { mockClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
@@ -35,17 +36,7 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
       this.statusCode = statusCode;
     }
   }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
+  return { mockClient, MockApiError };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -67,12 +58,6 @@ vi.mock("../../../context", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
-
 describe("FilesPlugin upload", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
@@ -86,7 +71,7 @@ describe("FilesPlugin upload", () => {
 
   describe("Upload stream mid-transfer size enforcement", () => {
     test("upload exceeding size mid-stream is caught by execute and returns error", async () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           uploads: { maxUploadSize: 50, policy: policy.allowAll() },
         },
@@ -131,7 +116,7 @@ describe("FilesPlugin upload", () => {
       // The outer catch in _handleUpload has a specific check for the
       // "exceeds maximum allowed size" message. This tests that path by
       // making execute() re-throw instead of catching.
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           uploads: { maxUploadSize: 50, policy: policy.allowAll() },
         },
@@ -160,7 +145,7 @@ describe("FilesPlugin upload", () => {
     });
 
     test("upload within size limit succeeds", async () => {
-      const plugin = new FilesPlugin({
+      const plugin = filesPlugin({
         volumes: {
           uploads: { maxUploadSize: 100, policy: policy.allowAll() },
         },
@@ -198,9 +183,12 @@ describe("FilesPlugin upload", () => {
 
   describe("Upload cache invalidation", () => {
     test("successful upload calls cache.delete for parent directory", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const plugin = filesPlugin(VOLUMES_CONFIG);
       const handler = getRouteHandler(plugin, "post", "/upload");
       const res = mockRes();
+      // Production's own keying and invalidation, not a fake's.
+      const generateKey = vi.spyOn(testCache, "generateKey");
+      const invalidate = vi.spyOn(testCache, "delete");
 
       const req = mockUploadReq("uploads", [Buffer.from("file content")], {
         query: { path: "/Volumes/catalog/schema/uploads/dir/file.txt" },
@@ -223,8 +211,8 @@ describe("FilesPlugin upload", () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({ success: true }),
       );
-      expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-      expect(mockCacheInstance.delete).toHaveBeenCalled();
+      expect(generateKey).toHaveBeenCalled();
+      expect(invalidate).toHaveBeenCalled();
     });
   });
 });

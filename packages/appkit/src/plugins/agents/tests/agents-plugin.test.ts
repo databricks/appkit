@@ -12,7 +12,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 
-import { CacheManager } from "../../../cache";
+import type { CacheManager } from "../../../cache";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -24,6 +24,7 @@ import type {
   ToolkitEntry,
 } from "../../../core/agent/types";
 import { isToolkitEntry } from "../../../core/agent/types";
+import { createTestPluginContext } from "../../../testing";
 // Import the class directly so we can construct it without a createApp
 import { AgentsPlugin } from "../agents";
 
@@ -38,7 +39,12 @@ interface FakeContext {
     localName: string,
     args: unknown,
   ) => Promise<unknown>;
+  /** What `attachContext` binds as the plugin's `this.cache`. */
+  cache: CacheManager;
 }
+
+/** Supplies the cache the fake contexts below hand to the plugin. */
+const kit = createTestPluginContext();
 
 function fakeContext(
   providers: Array<{ name: string; provider: ToolProvider }>,
@@ -53,6 +59,7 @@ function fakeContext(
       tool: n,
       args,
     })),
+    cache: kit.cache,
   };
 }
 
@@ -88,20 +95,11 @@ function makeToolProvider(
 let tmpDir: string;
 let priorCwd: string;
 
-beforeEach(async () => {
+beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agents-plugin-"));
   // Discovery scans <cwd>/server/agents, so run in tmpDir and write agents there.
   priorCwd = process.cwd();
   process.chdir(tmpDir);
-  const storage = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    keys: vi.fn(),
-    healthCheck: vi.fn(async () => true),
-    close: vi.fn(async () => {}),
-  };
-  await CacheManager.getInstance({ storage: storage as any });
 });
 
 afterEach(() => {
@@ -109,7 +107,7 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function instantiate(config: AgentsPluginConfig, ctx?: FakeContext) {
+function instantiate(config: AgentsPluginConfig, ctx = fakeContext([])) {
   const plugin = new AgentsPlugin({ ...config, name: "agent" });
   plugin.attachContext({ context: ctx as unknown as object });
   return plugin;

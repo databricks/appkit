@@ -9,15 +9,9 @@ import {
   vi,
 } from "vitest";
 
-// Mock core singletons before importing the subject under test.
-vi.mock("../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn().mockReturnValue({
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
-}));
-
+// Mock core singletons before importing the subject under test. The cache is
+// not among them: `LifecycleManager` takes this app's manager as a dependency,
+// so each test passes a double directly.
 vi.mock("../../telemetry", () => ({
   TelemetryManager: {
     getInstance: vi.fn().mockReturnValue({
@@ -35,6 +29,11 @@ vi.mock("../../internal-telemetry", () => ({
   },
 }));
 
+/** A stand-in for this app's manager; only `close()` is exercised here. */
+function cacheDouble(close = vi.fn().mockResolvedValue(undefined)) {
+  return { close } as unknown as import("../../cache").CacheManager;
+}
+
 const { mockLoggerError } = vi.hoisted(() => ({
   mockLoggerError: vi.fn(),
 }));
@@ -48,14 +47,13 @@ vi.mock("../../logging/logger", () => ({
   }),
 }));
 
-import { CacheManager } from "../../cache";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { TelemetryManager } from "../../telemetry";
 import { LifecycleManager } from "../lifecycle-manager";
 import { PluginContext } from "../plugin-context";
 
 function contextWithPlugins(plugins: Record<string, Partial<BasePlugin>>) {
-  const ctx = new PluginContext();
+  const ctx = new PluginContext({ cache: cacheDouble() });
   for (const [name, instance] of Object.entries(plugins)) {
     ctx.registerPlugin(name, instance as BasePlugin);
   }
@@ -99,7 +97,7 @@ describe("LifecycleManager", () => {
         "no-hooks": { name: "no-hooks" },
       });
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(ctx, cacheDouble()).shutdown();
 
       expect(shutdownA).toHaveBeenCalledTimes(1);
       expect(shutdownB).toHaveBeenCalledTimes(1);
@@ -122,7 +120,7 @@ describe("LifecycleManager", () => {
         },
       });
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(ctx, cacheDouble()).shutdown();
 
       expect(stop).toHaveBeenCalledTimes(1);
       expect(order).toEqual(["reporter-stop", "abort"]);
@@ -139,7 +137,7 @@ describe("LifecycleManager", () => {
         bad: { name: "bad", abortActiveOperations: badAbort },
       });
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(ctx, cacheDouble()).shutdown();
 
       expect(okAbort).toHaveBeenCalledTimes(1);
       expect(badAbort).toHaveBeenCalledTimes(1);
@@ -159,7 +157,7 @@ describe("LifecycleManager", () => {
         healthy: { name: "healthy", shutdown: healthy },
       });
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(ctx, cacheDouble()).shutdown();
 
       expect(failing).toHaveBeenCalledTimes(1);
       expect(healthy).toHaveBeenCalledTimes(1);
@@ -180,7 +178,7 @@ describe("LifecycleManager", () => {
         fast: { name: "fast", shutdown: fast },
       });
 
-      const done = new LifecycleManager(ctx).shutdown();
+      const done = new LifecycleManager(ctx, cacheDouble()).shutdown();
       await vi.advanceTimersByTimeAsync(10_000);
       await done;
 
@@ -202,7 +200,7 @@ describe("LifecycleManager", () => {
       const hook = vi.fn();
       ctx.onLifecycle("shutdown", hook);
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(ctx, cacheDouble()).shutdown();
 
       expect(hook).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(0);
@@ -213,7 +211,7 @@ describe("LifecycleManager", () => {
       const ctx = contextWithPlugins({
         a: { name: "a", shutdown: shutdownHook },
       });
-      const manager = new LifecycleManager(ctx);
+      const manager = new LifecycleManager(ctx, cacheDouble());
 
       await Promise.all([manager.shutdown(), manager.shutdown()]);
       await manager.shutdown();
@@ -224,14 +222,14 @@ describe("LifecycleManager", () => {
     test("closes the cache storage and flushes telemetry", async () => {
       const close = vi.fn().mockResolvedValue(undefined);
       const flush = vi.fn().mockResolvedValue(undefined);
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
-        close,
-      } as any);
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: flush,
       } as any);
 
-      await new LifecycleManager(contextWithPlugins({})).shutdown();
+      await new LifecycleManager(
+        contextWithPlugins({}),
+        cacheDouble(close),
+      ).shutdown();
 
       expect(close).toHaveBeenCalledTimes(1);
       expect(flush).toHaveBeenCalledTimes(1);
@@ -245,7 +243,10 @@ describe("LifecycleManager", () => {
         shutdown: hangingFlush,
       } as any);
 
-      const done = new LifecycleManager(contextWithPlugins({})).shutdown();
+      const done = new LifecycleManager(
+        contextWithPlugins({}),
+        cacheDouble(),
+      ).shutdown();
       await vi.advanceTimersByTimeAsync(2_000);
       await done;
 
@@ -263,11 +264,11 @@ describe("LifecycleManager", () => {
     test("a hanging cache close cannot hang shutdown — the close timeout still exits 0", async () => {
       vi.useFakeTimers();
       const hangingClose = vi.fn(() => new Promise<never>(() => {}));
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
-        close: hangingClose,
-      } as any);
 
-      const done = new LifecycleManager(contextWithPlugins({})).shutdown();
+      const done = new LifecycleManager(
+        contextWithPlugins({}),
+        cacheDouble(hangingClose),
+      ).shutdown();
       await vi.advanceTimersByTimeAsync(2_000);
       await done;
 
@@ -279,21 +280,6 @@ describe("LifecycleManager", () => {
             String(c[1]).includes("timed out"),
         ),
       ).toBe(true);
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
-
-    test("a never-initialized cache is skipped without error", async () => {
-      vi.mocked(CacheManager.getInstanceSync).mockImplementationOnce(() => {
-        throw new Error("cache not initialized");
-      });
-
-      await new LifecycleManager(contextWithPlugins({})).shutdown();
-
-      expect(
-        mockLoggerError.mock.calls.some((c) =>
-          String(c[0]).includes("Error closing cache storage"),
-        ),
-      ).toBe(false);
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -313,11 +299,6 @@ describe("LifecycleManager", () => {
       ctx.onLifecycle("shutdown", () => {
         order.push("lifecycle");
       });
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValueOnce({
-        close: vi.fn(async () => {
-          order.push("cache-close");
-        }),
-      } as any);
       vi.mocked(TelemetryManager.getInstance).mockReturnValueOnce({
         shutdown: vi.fn(async () => {
           order.push("flush");
@@ -327,7 +308,14 @@ describe("LifecycleManager", () => {
         order.push("exit");
       }) as any);
 
-      await new LifecycleManager(ctx).shutdown();
+      await new LifecycleManager(
+        ctx,
+        cacheDouble(
+          vi.fn(async () => {
+            order.push("cache-close");
+          }),
+        ),
+      ).shutdown();
 
       expect(order.slice(0, 3)).toEqual([
         "abort",
@@ -354,7 +342,7 @@ describe("LifecycleManager", () => {
         late: { name: "late", shutdown: lateRejecting },
       });
 
-      const done = new LifecycleManager(ctx).shutdown();
+      const done = new LifecycleManager(ctx, cacheDouble()).shutdown();
       await vi.advanceTimersByTimeAsync(10_000);
       await done;
 
@@ -371,7 +359,7 @@ describe("LifecycleManager", () => {
     test("registers SIGTERM/SIGINT once and triggers shutdown", async () => {
       const onceSpy = vi.spyOn(process, "once");
       const ctx = contextWithPlugins({});
-      const manager = new LifecycleManager(ctx);
+      const manager = new LifecycleManager(ctx, cacheDouble());
 
       manager.installSignalHandlers();
 

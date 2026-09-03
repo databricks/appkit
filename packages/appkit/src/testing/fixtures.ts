@@ -2,7 +2,7 @@ import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
 
-import { CacheManager } from "../cache";
+import type { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
@@ -285,16 +285,38 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
- * Clears AppKit's process-wide cache singleton so cached values don't leak
- * between tests in the same file.
+ * The caches `createTestPluginContext` built for the current test file. Module-
+ * level on purpose: Vitest isolates test files in separate workers, so this set
+ * is per-file and never leaks across them. Lives here, next to
+ * {@link resetTestCache} — its only reader — rather than on `CacheManager`,
+ * which belongs to an app, not to test bookkeeping.
  *
- * The cache `attach()` seeds is shared by every test in a file (Vitest isolates
- * files, not tests within a file). Call this in `beforeEach` when one test's
- * cached value must not be seen by the next, or mid-test to force a cache miss
- * before asserting a subsequent hit.
+ * @internal
+ */
+const kitCaches = new Set<CacheManager>();
+
+/**
+ * Record a cache `createTestPluginContext` built, so a no-argument
+ * {@link resetTestCache} can find it. The kit's one cross-file seam.
+ * @internal
+ */
+export function registerKitCache(cache: CacheManager): void {
+  kitCaches.add(cache);
+}
+
+/**
+ * Clears the caches this file's test contexts built, so cached values don't
+ * leak between tests in the same file.
  *
- * No-ops when the cache has not been initialized yet, so it is safe to call
- * before any `attach()`.
+ * A `createTestPluginContext()` carries its own cache, and Vitest isolates test
+ * files rather than the tests within one — so that cache is shared by every
+ * test in the file. Call this in `beforeEach` when one test's cached value must
+ * not be seen by the next, or mid-test to force a cache miss before asserting a
+ * subsequent hit.
+ *
+ * Pass a context or a manager to clear only that one. With no argument it
+ * clears every cache this kit built for the file, and no-ops when there are
+ * none — so it is safe to call before creating any context.
  *
  * @example
  * ```ts
@@ -303,15 +325,18 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
  * });
  * ```
  */
-export async function resetTestCache(): Promise<void> {
-  let cache: ReturnType<typeof CacheManager.getInstanceSync>;
-  try {
-    cache = CacheManager.getInstanceSync();
-  } catch {
-    // Not initialized yet — nothing to clear.
-    return;
-  }
-  await cache.clear();
+export async function resetTestCache(
+  target?: { cache: CacheManager } | CacheManager,
+): Promise<void> {
+  const caches = target ? [resolveCache(target)] : [...kitCaches];
+
+  // No cache to clear is not an error: a suite may call this before it has
+  // created one.
+  await Promise.all(caches.map((cache) => cache.clear()));
+}
+
+function resolveCache(target: { cache: CacheManager } | CacheManager) {
+  return "cache" in target ? target.cache : target;
 }
 
 /**

@@ -1,20 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-  },
-}));
-
 import { AnalyticsPlugin } from "../analytics";
 
 /**

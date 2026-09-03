@@ -13,6 +13,7 @@
     "install": "cd client && npm install && cd ..",
     "preview": "vite preview",
     "check": "tsc",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf build && cd client && rm -rf dist",
     "clean:full": "rm -rf build node_modules && cd client && rm -rf dist node_modules",
     "test:integration": "playwright test",

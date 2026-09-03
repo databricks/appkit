@@ -1,7 +1,6 @@
 import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 import { chatRequestSchema, invocationsRequestSchema } from "../schemas";
 import {
@@ -54,16 +53,6 @@ function mockRes() {
 }
 
 beforeEach(() => {
-  CacheManager.getInstanceSync = vi.fn(() => ({
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(() => "test-key"),
-  })) as any;
   process.env.NODE_ENV = "development";
 });
 

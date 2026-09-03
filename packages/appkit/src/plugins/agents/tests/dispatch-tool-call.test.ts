@@ -3,9 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import type express from "express";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { CacheManager } from "../../../cache";
 import { resolveSkillCatalog } from "../../../core/agent/skills/resolve-catalog";
 import type { SkillDefinition } from "../../../core/agent/skills/types";
 import type { ResolvedToolEntry } from "../../../core/agent/types";
@@ -34,20 +33,6 @@ import {
  * that both the top-level adapter and `runSubAgent` share via a
  * common `RunState` object. Tests below pin those guarantees.
  */
-
-beforeEach(() => {
-  // dispatchToolCall is exercised without going through setup(), so we
-  // need the cache singleton to be initialised before the plugin reads it.
-  (CacheManager as any).instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(() => "test-key"),
-  };
-});
 
 function mockReq(): express.Request {
   // Carry OBO headers so PluginContext.executeTool's asUser(req) resolves a

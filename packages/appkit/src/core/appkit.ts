@@ -32,10 +32,17 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
 
-  private constructor(config: { plugins: TPlugins }) {
+  /**
+   * @param context - The app's plugin context, carrying this app's per-app
+   *   services. A separate parameter, never a `config` key: a `CacheManager`
+   *   reaching plugin config would be deep-merged into what
+   *   `PluginExecuteConfig.cache` declares as a `CacheConfig` and break the
+   *   cache interceptor's gate. `appkit-cache-injection.test.ts` pins this.
+   */
+  private constructor(config: { plugins: TPlugins }, context: PluginContext) {
     const { plugins, ...globalConfig } = config;
 
-    this.#context = new PluginContext();
+    this.#context = context;
 
     const pluginEntries = Object.entries(plugins);
 
@@ -192,63 +199,80 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
+    // Initialize core services. Telemetry first: the CacheManager constructor
+    // pulls a telemetry provider. The cache stays an await here — `create()`
+    // builds its own workspace client before ServiceContext.initialize() runs,
+    // so it cannot move into the synchronous AppKit constructor.
     TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
+    const cache = await CacheManager.create(config?.cache);
 
-    const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
-    const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
+    // Everything past the manager's construction runs guarded: the app owns the
+    // manager now, so a failed boot has to close it. Nothing else holds a
+    // reference, and a manager that resolved to Lakebase owns a `pg.Pool` that
+    // would otherwise never be ended — one leaked pool per failed boot, holding
+    // the event loop open.
+    try {
+      const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
+      const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
 
-    // Collect manifest resources via registry
-    const registry = new ResourceRegistry();
-    registry.collectResources(rawPlugins);
+      // Collect manifest resources via registry
+      const registry = new ResourceRegistry();
+      registry.collectResources(rawPlugins);
 
-    // Derive ServiceContext needs from what manifests declared
-    const needsWarehouse = registry
-      .getRequired()
-      .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
-    await ServiceContext.initialize(
-      { warehouseId: needsWarehouse },
-      config?.client,
-    );
+      // Derive ServiceContext needs from what manifests declared
+      const needsWarehouse = registry
+        .getRequired()
+        .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
+      await ServiceContext.initialize(
+        { warehouseId: needsWarehouse },
+        config?.client,
+      );
 
-    // Validate env vars
-    registry.enforceValidation();
+      // Validate env vars
+      registry.enforceValidation();
 
-    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
-    const mergedConfig = {
-      plugins: preparedPlugins,
-    };
+      const instance = new AppKit(
+        { plugins: AppKit.preparePlugins(rawPlugins) },
+        new PluginContext({ cache }),
+      );
 
-    const instance = new AppKit(mergedConfig);
+      await Promise.all(instance.#setupPromises);
+      await instance.#context.emitLifecycle("setup:complete");
 
-    await Promise.all(instance.#setupPromises);
-    await instance.#context.emitLifecycle("setup:complete");
+      const handle = instance as unknown as PluginMap<T>;
 
-    const handle = instance as unknown as PluginMap<T>;
+      if (config.onPluginsReady) {
+        logger.debug("Running onPluginsReady hook");
+        await config.onPluginsReady(handle);
+        logger.debug("onPluginsReady hook completed");
+      }
 
-    if (config.onPluginsReady) {
-      logger.debug("Running onPluginsReady hook");
-      await config.onPluginsReady(handle);
-      logger.debug("onPluginsReady hook completed");
+      if (isInternalTelemetryEnabled(config)) {
+        AppKit.bootstrapInternalTelemetry();
+      }
+
+      const serverPlugin = instance.#pluginInstances.server;
+      if (serverPlugin && typeof (serverPlugin as any).start === "function") {
+        await (serverPlugin as any).start();
+      }
+
+      // Core owns graceful shutdown: install the signal handlers once every
+      // plugin has started. Applies uniformly whether or not a server plugin
+      // is present — server-less apps still get their telemetry flushed and
+      // plugin shutdown() hooks run.
+      new LifecycleManager(instance.#context, cache).installSignalHandlers();
+
+      return handle;
+    } catch (err) {
+      // Never mask the boot error with a teardown failure.
+      await cache.close().catch((closeErr) => {
+        logger.error(
+          "Error closing the cache after a failed boot: %O",
+          closeErr,
+        );
+      });
+      throw err;
     }
-
-    if (isInternalTelemetryEnabled(config)) {
-      AppKit.bootstrapInternalTelemetry();
-    }
-
-    const serverPlugin = instance.#pluginInstances.server;
-    if (serverPlugin && typeof (serverPlugin as any).start === "function") {
-      await (serverPlugin as any).start();
-    }
-
-    // Core owns graceful shutdown: install the signal handlers once every
-    // plugin has started. Applies uniformly whether or not a server plugin
-    // is present — server-less apps still get their telemetry flushed and
-    // plugin shutdown() hooks run.
-    new LifecycleManager(instance.#context).installSignalHandlers();
-
-    return handle;
   }
 
   private static bootstrapInternalTelemetry(): void {

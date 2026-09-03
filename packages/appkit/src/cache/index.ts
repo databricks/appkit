@@ -4,7 +4,7 @@ import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
 import { createLakebasePool } from "../connectors/lakebase";
 import { getClientOptions } from "../context/client-options";
-import { AppKitError, ExecutionError, InitializationError } from "../errors";
+import { AppKitError, ExecutionError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
@@ -42,22 +42,25 @@ function createAbortError(signal: AbortSignal): unknown {
  * Cache manager class to handle cache operations.
  * Can be used with in-memory storage or persistent storage (Lakebase).
  *
- * The cache is automatically initialized by AppKit. Use `getInstanceSync()` to access
- * the singleton instance after initialization.
+ * One manager belongs to one app: `createApp` builds it and hands it to every
+ * plugin through the plugin context, so a plugin reads it as `this.cache`.
+ * There is no process-wide instance and no public construction path.
  *
  * @internal
  * @example
  * ```typescript
- * const cache = CacheManager.getInstanceSync();
- * const result = await cache.getOrExecute(["users", userId], () => fetchUser(userId), userKey);
+ * // Inside a plugin — the app bound this cache when it registered the plugin.
+ * const result = await this.cache.getOrExecute(
+ *   ["users", userId],
+ *   () => fetchUser(userId),
+ *   userKey,
+ * );
  * ```
  */
 export class CacheManager {
   private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
   private static readonly ABORT_GRACE_PERIOD_MS = 100;
   private readonly name: string = "cache-manager";
-  private static instance: CacheManager | null = null;
-  private static initPromise: Promise<CacheManager> | null = null;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -71,7 +74,16 @@ export class CacheManager {
     cacheMissCount: Counter;
   };
 
-  private constructor(storage: CacheStorage, config: CacheConfig) {
+  /**
+   * @param ownsStorage - Whether this manager built its own storage. {@link close}
+   *   closes only owned storage: closing a caller's `cache: { storage }` is
+   *   destructive — `PersistentStorage.close()` is a permanent `pool.end()`.
+   */
+  private constructor(
+    storage: CacheStorage,
+    config: CacheConfig,
+    private readonly ownsStorage: boolean,
+  ) {
     this.storage = storage;
     this.config = config;
     this.inFlightRequests = new Map();
@@ -95,50 +107,25 @@ export class CacheManager {
   }
 
   /**
-   * Get the singleton instance of the cache manager (sync version).
+   * Build a manager over caller-supplied storage, synchronously — the testing
+   * kit's path, where storage is always in-memory so there is no health check
+   * to await. The async {@link create} is the app's path.
    *
-   * Throws if not initialized - ensure AppKit.create() has completed first.
-   * @returns CacheManager instance
-   */
-  static getInstanceSync(): CacheManager {
-    if (!CacheManager.instance) {
-      throw InitializationError.notInitialized(
-        "CacheManager",
-        "Ensure AppKit.create() has completed before accessing the cache",
-      );
-    }
-
-    return CacheManager.instance;
-  }
-
-  /**
-   * Initialize and get the singleton instance of the cache manager.
-   * Called internally by AppKit - prefer `getInstanceSync()` for plugin access.
-   * @param userConfig - User configuration for the cache manager
-   * @returns CacheManager instance
    * @internal
    */
-  static async getInstance(
+  static forStorage(
+    storage: CacheStorage,
     userConfig?: Partial<CacheConfig>,
-  ): Promise<CacheManager> {
-    if (CacheManager.instance) {
-      return CacheManager.instance;
-    }
-
-    if (!CacheManager.initPromise) {
-      CacheManager.initPromise = CacheManager.create(userConfig).then(
-        (instance) => {
-          CacheManager.instance = instance;
-          return instance;
-        },
-      );
-    }
-
-    return CacheManager.initPromise;
+  ): CacheManager {
+    return new CacheManager(
+      storage,
+      deepMerge(cacheDefaults, userConfig),
+      false,
+    );
   }
 
   /**
-   * Create a new cache manager instance
+   * Create a new cache manager instance.
    *
    * Storage selection logic:
    * 1. If `storage` provided and healthy → use provided storage
@@ -148,8 +135,9 @@ export class CacheManager {
    *
    * @param userConfig - User configuration for the cache manager
    * @returns CacheManager instance
+   * @internal
    */
-  private static async create(
+  static async create(
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);
@@ -157,7 +145,7 @@ export class CacheManager {
     if (config.storage) {
       const isHealthy = await config.storage.healthCheck();
       if (isHealthy) {
-        return new CacheManager(config.storage, config);
+        return new CacheManager(config.storage, config, false);
       }
 
       if (config.strictPersistence) {
@@ -165,10 +153,11 @@ export class CacheManager {
         return new CacheManager(
           new InMemoryStorage(disabledConfig),
           disabledConfig,
+          true,
         );
       }
 
-      return new CacheManager(new InMemoryStorage(config), config);
+      return new CacheManager(new InMemoryStorage(config), config, true);
     }
 
     // try to use lakebase storage
@@ -181,8 +170,23 @@ export class CacheManager {
 
       const isHealthy = await persistentStorage.healthCheck();
       if (isHealthy) {
-        await persistentStorage.initialize();
-        return new CacheManager(persistentStorage, config);
+        try {
+          await persistentStorage.initialize();
+        } catch (err) {
+          // Health check passed but `initialize()` failed. Unlike an
+          // unreachable Lakebase (the expected, silent fallback), a healthy
+          // connection that fails to initialize is surprising and worth a
+          // signal — the outer catch is silent. End the pool we opened before
+          // falling through to in-memory, or it is orphaned for the life of the
+          // process while boot still "succeeds".
+          logger.warn(
+            "Lakebase cache is healthy but failed to initialize; falling back to in-memory: %O",
+            err,
+          );
+          await pool.end().catch(() => {});
+          throw err;
+        }
+        return new CacheManager(persistentStorage, config, true);
       }
 
       // Health check failed, close the pool and fallback
@@ -196,10 +200,11 @@ export class CacheManager {
       return new CacheManager(
         new InMemoryStorage(disabledConfig),
         disabledConfig,
+        true,
       );
     }
 
-    return new CacheManager(new InMemoryStorage(config), config);
+    return new CacheManager(new InMemoryStorage(config), config, true);
   }
 
   /**
@@ -554,6 +559,8 @@ export class CacheManager {
 
   /** Close the cache */
   async close(): Promise<void> {
+    // Borrowed storage outlives the manager: whoever supplied it owns closing it.
+    if (!this.ownsStorage) return;
     await this.storage.close();
   }
 

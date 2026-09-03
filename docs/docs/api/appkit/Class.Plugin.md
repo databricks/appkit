@@ -120,14 +120,6 @@ protected app: AppManager;
 
 ***
 
-### cache
-
-```ts
-protected cache: CacheManager;
-```
-
-***
-
 ### config
 
 ```ts
@@ -203,6 +195,30 @@ Plugin initialization phase.
 - 'normal': Initialized second (most plugins)
 - 'deferred': Initialized last (e.g., server plugin)
 
+## Accessors
+
+### cache
+
+#### Get Signature
+
+```ts
+get protected cache(): CacheManager;
+```
+
+This app's cache, bound by [attachContext](#attachcontext). Every plugin in an app
+shares the one manager the app built; a plugin cannot substitute its own,
+so set a per-plugin `cache: { enabled, ttl }` config instead of assigning.
+
+Throws `InitializationError` when read on an unattached plugin (the app-less
+`runAgent` path, or a plugin built by hand in a test). This is the guard for
+the direct readers — `analytics.ts`, `files/plugin.ts` — that reach the
+cache without going through [execute](#execute): they now fail with a named
+error at the read rather than a bare `TypeError` deeper in a handler.
+
+##### Returns
+
+`CacheManager`
+
 ## Methods
 
 ### abortActiveOperations()
@@ -268,10 +284,14 @@ attachContext(deps: {
 
 Binds runtime dependencies (telemetry provider, cache, plugin context) to
 this plugin. Called by `AppKit._createApp` after construction and before
-`setup()`. Idempotent: safe to call if the constructor already bound them
-eagerly. Kept separate so factories can eagerly construct plugin instances
-without running this before `TelemetryManager.initialize()` /
-`CacheManager.getInstance()` have run.
+`setup()`. Kept separate from the constructor so plugin factories can be
+evaluated at module top level, before any app exists.
+
+A context-less `attachContext({})` is the app-less path (see `runAgent`):
+it binds telemetry and leaves the cache unbound, so only a cached execution
+fails, at the chokepoint in \_buildInterceptors. A supplied context
+always carries a cache — `PluginContext.cache` is required, so a cache-less
+one cannot be constructed.
 
 #### Parameters
 

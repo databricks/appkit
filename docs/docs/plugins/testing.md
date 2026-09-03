@@ -49,7 +49,7 @@ const mock = createTestPluginContext({
 
 ### Attaching to a plugin
 
-`attach()` wires the context to a plugin the production way: it seeds an in-memory cache (if AppKit hasn't already initialized one), then calls the plugin's `attachContext`, which rebuilds telemetry and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
+`attach()` wires the context to a plugin the production way: it calls the plugin's `attachContext`, which binds this context's cache, rebuilds telemetry, and flips `isReady` to `true`. Await it before exercising any handler that reads `this.context`, `this.cache`, or gates on `isReady`:
 
 ```ts
 const plugin = new MyAgentPlugin({});
@@ -58,17 +58,30 @@ await mock.attach(plugin);
 
 Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analytics()` / `agents()` factories you pass to `createApp` return a descriptor for the app to construct — for a unit test you want the instance.
 
-The cache `attach()` seeds is a process-wide singleton: `CacheManager` is initialized once per test process and reused. Vitest isolates test *files* in separate workers, so caches never leak across files, but tests **within one file** share it. If a test populates the cache and a later test in the same file must not see it, clear it between tests with `resetTestCache()`:
+Each `createTestPluginContext()` carries its **own** real in-memory cache, exposed as `mock.cache` — the very object the attached plugin resolves as `this.cache`. Two contexts in one file cannot see each other's entries, and nothing is shared with other test files.
+
+That makes it the seam for asserting real caching behaviour, against production's own `getOrExecute` and `generateKey` rather than a re-implemented fake:
+
+```ts
+const mock = createTestPluginContext();
+const plugin = await mock.attach(new MyPlugin({}));
+
+const getOrExecute = vi.spyOn(mock.cache, "getOrExecute");
+await plugin.handleRequest(req, res);
+expect(getOrExecute).toHaveBeenCalledOnce();
+```
+
+Entries persist across tests in a file, since the context is built where you build it. Clear between tests — or mid-test, to force a miss before asserting the next call is a hit — with `resetTestCache()`:
 
 ```ts
 import { resetTestCache } from "@databricks/appkit/testing";
 
 beforeEach(async () => {
-  await resetTestCache(); // no-op if the cache isn't initialized yet
+  await resetTestCache(); // every cache this file's contexts built
 });
 ```
 
-It also helps *within* a single test — clear the cache to force a miss, then assert the following call is a hit.
+Pass a specific context (`resetTestCache(mock)`) or manager (`resetTestCache(mock.cache)`) to clear just that one.
 
 ### Inspecting what happened
 
@@ -159,7 +172,7 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
   ```
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
-- `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
+- `resetTestCache(target?)` — clear the caches this file's test contexts built, between or within tests. Pass a context or a manager to clear only that one; no-ops when there is nothing to clear.
 
 ## Full example
 
