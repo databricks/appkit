@@ -1,3 +1,5 @@
+import { context, metrics, trace } from "@opentelemetry/api";
+import { logs } from "@opentelemetry/api-logs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { TelemetryManager } from "../telemetry-manager";
@@ -55,12 +57,21 @@ describe("TelemetryManager", () => {
     vi.clearAllMocks();
     // @ts-expect-error - accessing private static property for testing
     TelemetryManager.instance = undefined;
-    // @ts-expect-error - accessing private static property for testing
-    TelemetryManager.shutdownRegistered = false;
+    // OTel's registerGlobal is allowOverride=false: a global registered by one
+    // test would make the next test's registration a silent no-op. Reset all
+    // global providers so each test starts clean.
+    trace.disable();
+    metrics.disable();
+    logs.disable();
+    context.disable();
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    trace.disable();
+    metrics.disable();
+    logs.disable();
+    context.disable();
   });
 
   test("getInstance() should return singleton instance", () => {
@@ -90,6 +101,7 @@ describe("TelemetryManager", () => {
       serviceName: "integration-test",
       serviceVersion: "1.0.0",
     });
+    TelemetryManager.start();
 
     const telemetryProvider = TelemetryManager.getProvider("test-plugin");
     const tracer = telemetryProvider.getTracer();
@@ -186,6 +198,7 @@ describe("TelemetryManager", () => {
         serviceName: "span-test",
         serviceVersion: "1.0.0",
       });
+      TelemetryManager.start();
 
       const telemetryProvider =
         TelemetryManager.getProvider("span-test-plugin");
@@ -211,6 +224,7 @@ describe("TelemetryManager", () => {
         serviceName: "error-test",
         serviceVersion: "1.0.0",
       });
+      TelemetryManager.start();
 
       const telemetryProvider =
         TelemetryManager.getProvider("error-test-plugin");
@@ -222,6 +236,110 @@ describe("TelemetryManager", () => {
           throw testError;
         }),
       ).rejects.toThrow("Test error in span");
+    });
+  });
+
+  describe("two-phase init (registerSpanProcessor + start)", () => {
+    /** Minimal SpanProcessor that records the names of spans it sees start. */
+    function recordingProcessor() {
+      const startedSpans: string[] = [];
+      return {
+        startedSpans,
+        onStart: (span: { name: string }) => {
+          startedSpans.push(span.name);
+        },
+        onEnd: () => {},
+        forceFlush: () => Promise.resolve(),
+        shutdown: () => Promise.resolve(),
+      };
+    }
+
+    test("routes spans to a contributed processor with no OTLP endpoint", async () => {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
+      const processor = recordingProcessor();
+
+      TelemetryManager.initialize({ serviceName: "contrib-only" });
+      TelemetryManager.registerSpanProcessor(processor as any);
+      TelemetryManager.start();
+
+      const tracer = TelemetryManager.getProvider("contrib-plugin").getTracer();
+      await tracer.startActiveSpan("contributed.span", {}, async (span) => {
+        span.end();
+      });
+
+      expect(processor.startedSpans).toContain("contributed.span");
+    });
+
+    test("start() is idempotent (no rebuild / double-attach)", async () => {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
+      const processor = recordingProcessor();
+
+      TelemetryManager.initialize({ serviceName: "idempotent" });
+      TelemetryManager.registerSpanProcessor(processor as any);
+      TelemetryManager.start();
+      TelemetryManager.start(); // second call must not rebuild or re-attach
+
+      const tracer =
+        TelemetryManager.getProvider("idempotent-plugin").getTracer();
+      await tracer.startActiveSpan("once.span", {}, async (span) => {
+        span.end();
+      });
+
+      // A provider rebuilt on the second start() would double-record the span.
+      expect(processor.startedSpans).toEqual(["once.span"]);
+    });
+
+    test("registerSpanProcessor after start() is ignored (not attached)", async () => {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
+      const early = recordingProcessor();
+      const late = recordingProcessor();
+
+      TelemetryManager.initialize({ serviceName: "late-register" });
+      TelemetryManager.registerSpanProcessor(early as any);
+      TelemetryManager.start();
+      TelemetryManager.registerSpanProcessor(late as any);
+
+      const tracer = TelemetryManager.getProvider("late-plugin").getTracer();
+      await tracer.startActiveSpan("post.start.span", {}, async (span) => {
+        span.end();
+      });
+
+      expect(early.startedSpans).toContain("post.start.span");
+      expect(late.startedSpans).toHaveLength(0);
+    });
+
+    test("start() with no OTLP endpoint and no processors is a no-op", () => {
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
+
+      const before = trace.getTracerProvider();
+      TelemetryManager.initialize({ serviceName: "no-telemetry" });
+      TelemetryManager.start();
+
+      // Nothing to export → the spanProcessors.length===0 early return means NO
+      // global tracer provider was registered (the API still returns the proxy).
+      expect(trace.getTracerProvider()).toBe(before);
+    });
+
+    test("metrics obtained after initialize() (before start()) still record", () => {
+      // Guards the eager-metrics invariant: the meter provider is registered in
+      // initialize(), not start(), because OTel's metrics API has no lazy proxy.
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
+
+      const noop = metrics.getMeterProvider();
+      TelemetryManager.initialize({ serviceName: "eager-metrics" });
+      // A REAL meter provider is registered by initialize(), before start() —
+      // not the NoOp. A `counter.add(...).not.toThrow()` assertion would pass
+      // against the NoOp meter too, so it can't detect a regression that moved
+      // registration into start(); this comparison can.
+      expect(metrics.getMeterProvider()).not.toBe(noop);
+
+      // Instrument bound BEFORE start() — mirrors connector/cache constructors.
+      const meter = TelemetryManager.getProvider("metrics-plugin").getMeter();
+      const counter = meter.createCounter("eager.counter");
+
+      TelemetryManager.start();
+
+      expect(() => counter.add(1, { label: "value" })).not.toThrow();
     });
   });
 });
