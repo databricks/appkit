@@ -8,8 +8,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../../cache";
 import { resolveSkillCatalog } from "../../../core/agent/skills/resolve-catalog";
 import type { SkillDefinition } from "../../../core/agent/skills/types";
+import type { ResolvedToolEntry } from "../../../core/agent/types";
 import { createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
+import {
+  dispatchToolCall,
+  type RunState,
+  runSubAgent,
+  type ToolDispatchDeps,
+} from "../tool-dispatch";
 
 /**
  * Verifies that `dispatchToolCall` is the single source of truth for the
@@ -79,8 +86,16 @@ function makeRunState(plugin: AgentsPlugin) {
       push: (event: unknown) => pushed.push(event),
     },
     toolCallsUsed: { count: 0 },
+    toolErrors: [] as Array<{ tool: string; error: string }>,
   };
   return { runState, pushed, plugin };
+}
+
+/** The plugin's own dispatch-deps builder, reused so tests dispatch exactly as the plugin does. */
+function depsOf(plugin: AgentsPlugin): ToolDispatchDeps {
+  return (
+    plugin as unknown as { toolDispatchDeps: () => ToolDispatchDeps }
+  ).toolDispatchDeps();
 }
 
 function callDispatch(
@@ -93,19 +108,10 @@ function callDispatch(
     depth?: number;
   },
 ): Promise<unknown> {
-  return (
-    plugin as unknown as {
-      dispatchToolCall: (
-        runState: unknown,
-        toolIndex: Map<string, unknown>,
-        name: string,
-        args: unknown,
-        depth: number,
-      ) => Promise<unknown>;
-    }
-  ).dispatchToolCall(
-    args.runState,
-    args.toolIndex,
+  return dispatchToolCall(
+    depsOf(plugin),
+    args.runState as RunState,
+    args.toolIndex as unknown as Map<string, ResolvedToolEntry>,
     args.name,
     args.args,
     args.depth ?? 0,
@@ -226,6 +232,37 @@ describe("dispatchToolCall — approval gate honours `effect`", () => {
       "Tool execution denied by user approval gate (tool: delete_user).",
     );
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchToolCall — tool failures are captured", () => {
+  test("rethrows the tool error and records it in runState.toolErrors", async () => {
+    const plugin = new AgentsPlugin({});
+    const { runState } = makeRunState(plugin);
+
+    const toolIndex = new Map<string, unknown>([
+      [
+        "boom",
+        {
+          source: "function",
+          def: {
+            name: "boom",
+            description: "throws",
+            parameters: { type: "object" },
+          },
+          functionTool: {
+            execute: vi.fn().mockRejectedValue(new Error("kaboom")),
+          },
+        },
+      ],
+    ]);
+
+    await expect(
+      callDispatch(plugin, { runState, toolIndex, name: "boom", args: {} }),
+    ).rejects.toThrow(/kaboom/);
+
+    // The caught error is recorded so the non-streaming response can surface it.
+    expect(runState.toolErrors).toEqual([{ tool: "boom", error: "kaboom" }]);
   });
 });
 
@@ -427,7 +464,13 @@ describe("runSubAgent — sub-agent event forwarding", () => {
     } as any;
 
     await expect(
-      (plugin as any).runSubAgent(runState, child, { input: "go" }, 3),
+      runSubAgent(
+        depsOf(plugin),
+        runState as unknown as RunState,
+        child,
+        { input: "go" },
+        3,
+      ),
     ).rejects.toThrow(/Sub-agent depth exceeded \(limit 2\)/);
     expect(childRun).not.toHaveBeenCalled();
   });
@@ -455,7 +498,13 @@ describe("runSubAgent — sub-agent event forwarding", () => {
       toolIndex: new Map(),
     } as any;
 
-    await (plugin as any).runSubAgent(runState, child, { input: "go" }, 1);
+    await runSubAgent(
+      depsOf(plugin),
+      runState as unknown as RunState,
+      child,
+      { input: "go" },
+      1,
+    );
 
     const types = pushed.map((e) => (e as { type: string }).type);
     expect(types).not.toContain("metadata");

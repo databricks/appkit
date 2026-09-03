@@ -19,7 +19,12 @@ export interface SkillDefinition {
   source: SkillSource;
   /** Absolute directory containing `SKILL.md` and any bundled resources. */
   dir: string;
-  /** Relative posix paths of bundled resource files (excludes `SKILL.md`). */
+  /**
+   * Relative posix paths of bundled resource files (excludes `SKILL.md`).
+   * Bundle skills recurse into subdirectories; volume skills list one level
+   * only, so nested files under a volume skill are not exposed to
+   * `read_skill_file`.
+   */
   files: string[];
   /**
    * Optional advisory tool allowlist from frontmatter `allowed-tools`. Surfaced
