@@ -13,31 +13,6 @@ import type { UserContext } from "../../context/user-context";
 
 // ── Mock heavy dependencies ─────────────────────────────────────────
 
-vi.mock("../../cache", () => ({
-  CacheManager: {
-    getInstance: vi.fn(async () => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-    getInstanceSync: vi.fn(() => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-  },
-}));
-
 vi.mock("../../telemetry", async () => {
   const actual =
     await vi.importActual<typeof import("../../telemetry")>("../../telemetry");

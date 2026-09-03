@@ -11,7 +11,7 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
+const { mockClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
@@ -35,17 +35,7 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
       this.statusCode = statusCode;
     }
   }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
+  return { mockClient, MockApiError };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -66,12 +56,6 @@ vi.mock("../../../context", async (importOriginal) => {
     isInUserContext: vi.fn(() => true),
   };
 });
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
 
 describe("FilesPlugin path validation", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;

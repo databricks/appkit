@@ -33,10 +33,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #context: PluginContext;
 
   /**
-   * @param context - The app's plugin context, carrying this app's cache. Built
-   *   in `_createApp` after the cache so it can be injected here, rather than
-   *   constructed inside AppKit — this is what lets a later change give each
-   *   app its own manager.
+   * @param context - The app's plugin context, carrying this app's per-app
+   *   services. A separate parameter, never a `config` key: a `CacheManager`
+   *   reaching plugin config would be deep-merged into what
+   *   `PluginExecuteConfig.cache` declares as a `CacheConfig` and break the
+   *   cache interceptor's gate. `appkit-cache-injection.test.ts` pins this.
    */
   private constructor(config: { plugins: TPlugins }, context: PluginContext) {
     const { plugins, ...globalConfig } = config;
@@ -198,9 +199,12 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
+    // Initialize core services. Telemetry first: the CacheManager constructor
+    // pulls a telemetry provider. The cache stays an await here — `create()`
+    // builds its own workspace client before ServiceContext.initialize() runs,
+    // so it cannot move into the synchronous AppKit constructor.
     TelemetryManager.initialize(config?.telemetry);
-    const cache = await CacheManager.getInstance(config?.cache);
+    const cache = await CacheManager.create(config?.cache);
 
     const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
     const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
@@ -221,13 +225,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // Validate env vars
     registry.enforceValidation();
 
-    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
-    const mergedConfig = {
-      plugins: preparedPlugins,
-    };
-
-    const context = new PluginContext({ cache });
-    const instance = new AppKit(mergedConfig, context);
+    const instance = new AppKit(
+      { plugins: AppKit.preparePlugins(rawPlugins) },
+      new PluginContext({ cache }),
+    );
 
     await Promise.all(instance.#setupPromises);
     await instance.#context.emitLifecycle("setup:complete");
@@ -253,7 +254,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // plugin has started. Applies uniformly whether or not a server plugin
     // is present — server-less apps still get their telemetry flushed and
     // plugin shutdown() hooks run.
-    new LifecycleManager(instance.#context).installSignalHandlers();
+    new LifecycleManager(instance.#context, cache).installSignalHandlers();
 
     return handle;
   }

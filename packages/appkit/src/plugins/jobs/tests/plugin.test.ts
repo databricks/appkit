@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import { ServiceContext } from "../../../context/service-context";
 import { ResourceType } from "../../../registry";
+import { createTestPluginContext, resetTestCache } from "../../../testing";
+import { ApiError } from "../../../workspace-client";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,
@@ -12,7 +14,7 @@ import {
 import { mapParams } from "../params";
 import { JobsPlugin, jobs } from "../plugin";
 
-const { mockClient, mockCacheInstance } = vi.hoisted(() => {
+const { mockClient } = vi.hoisted(() => {
   const mockJobsApi = {
     runNow: vi.fn(),
     submit: vi.fn(),
@@ -31,18 +33,7 @@ const { mockClient, mockCacheInstance } = vi.hoisted(() => {
     },
   };
 
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(),
-  };
-
-  return { mockJobsApi, mockClient, mockCacheInstance };
+  return { mockJobsApi, mockClient };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -64,11 +55,15 @@ vi.mock("../../../context", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+/**
+ * One kit context for this file — Vitest isolates files — supplying the real
+ * `CacheManager` the read paths need. `attachContext` is the production binding
+ * and is synchronous, so tests stay unchanged.
+ */
+const kit = createTestPluginContext();
+function jobsPlugin(...args: ConstructorParameters<typeof JobsPlugin>) {
+  return kit.attach(new JobsPlugin(...args));
+}
 
 describe("JobsPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -78,6 +73,9 @@ describe("JobsPlugin", () => {
     setupDatabricksEnv();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
+    // The cache is real now, so entries outlive a test unless cleared — one
+    // test's cached run would otherwise answer the next one's read.
+    await resetTestCache();
   });
 
   afterEach(() => {
@@ -97,7 +95,7 @@ describe("JobsPlugin", () => {
 
   test("plugin instance has correct name", () => {
     process.env.DATABRICKS_JOB_ETL = "123";
-    const plugin = new JobsPlugin({});
+    const plugin = jobsPlugin({});
     expect(plugin.name).toBe("jobs");
   });
 
@@ -242,7 +240,7 @@ describe("JobsPlugin", () => {
     test("returns a callable function", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       expect(typeof exported).toBe("function");
@@ -251,7 +249,7 @@ describe("JobsPlugin", () => {
     test("returns job handle with direct JobAPI methods", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       const handle = exported("etl");
@@ -268,7 +266,7 @@ describe("JobsPlugin", () => {
     test("throws for unknown job key", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       expect(() => exported("unknown")).toThrow(/Unknown job "unknown"/);
@@ -277,7 +275,7 @@ describe("JobsPlugin", () => {
     test("single-job default key is accessible", () => {
       process.env.DATABRICKS_JOB_ID = "789";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       expect(() => exported("default")).not.toThrow();
@@ -292,7 +290,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
       const handle = exported("etl");
 
@@ -309,7 +307,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
       const handle = exported("etl");
 
@@ -331,7 +329,7 @@ describe("JobsPlugin", () => {
     test("runNow validates params against job config schema", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: {
           etl: {
             taskType: "notebook",
@@ -351,7 +349,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: {
           etl: {
             taskType: "notebook",
@@ -377,7 +375,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       await expect(handle.runNow({ anything: "goes" })).resolves.not.toThrow();
@@ -393,7 +391,7 @@ describe("JobsPlugin", () => {
         state: { life_cycle_state: "TERMINATED" },
       });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const executeSpy = vi.spyOn(plugin as any, "execute");
       const handle = plugin.exports()("etl");
 
@@ -417,7 +415,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.get.mockResolvedValue({ job_id: 123 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const executeSpy = vi.spyOn(plugin as any, "execute");
       const handle = plugin.exports()("etl");
 
@@ -441,7 +439,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       await handle.listRuns({ limit: 10000 });
@@ -460,7 +458,7 @@ describe("JobsPlugin", () => {
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 1, job_id: 123 });
       mockClient.jobs.cancelRun.mockResolvedValue(undefined);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const executeSpy = vi.spyOn(plugin as any, "execute");
       const handle = plugin.exports()("etl");
 
@@ -489,7 +487,7 @@ describe("JobsPlugin", () => {
           state: { life_cycle_state: "TERMINATED" },
         });
 
-      const plugin = new JobsPlugin({ pollIntervalMs: 10 });
+      const plugin = jobsPlugin({ pollIntervalMs: 10 });
       const handle = plugin.exports()("etl");
 
       const statuses: any[] = [];
@@ -507,7 +505,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({});
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const gen = handle.runAndWait();
@@ -523,7 +521,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockRejectedValue(new Error("API timeout"));
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.runNow();
@@ -542,7 +540,7 @@ describe("JobsPlugin", () => {
         new Error("Permission denied"),
       );
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.cancelRun(42);
@@ -560,7 +558,7 @@ describe("JobsPlugin", () => {
         new Error("Internal server error"),
       );
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.getRun(42);
@@ -578,7 +576,7 @@ describe("JobsPlugin", () => {
         throw new Error("Auth failure");
       });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.listRuns();
@@ -592,11 +590,16 @@ describe("JobsPlugin", () => {
     test("error result preserves upstream HTTP status code", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const error = new Error("Detailed internal failure: db connection reset");
-      (error as any).statusCode = 403;
+      const error = new ApiError(
+        "Detailed internal failure: db connection reset",
+        "PERMISSION_DENIED",
+        403,
+        undefined,
+        [],
+      );
       mockClient.jobs.getRun.mockRejectedValue(error);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.getRun(42);
@@ -613,7 +616,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.runNow();
@@ -630,7 +633,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.getRun(99);
@@ -644,7 +647,7 @@ describe("JobsPlugin", () => {
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
       mockClient.jobs.getRunOutput.mockResolvedValue({ logs: "nope" });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.getRunOutput(99);
@@ -660,7 +663,7 @@ describe("JobsPlugin", () => {
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
       mockClient.jobs.cancelRun.mockResolvedValue(undefined);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.cancelRun(99);
@@ -678,7 +681,7 @@ describe("JobsPlugin", () => {
         state: { life_cycle_state: "TERMINATED" },
       });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const handle = plugin.exports()("etl");
 
       const result = await handle.getRun(42);
@@ -724,7 +727,7 @@ describe("JobsPlugin", () => {
         state: { life_cycle_state: "RUNNING" },
       });
 
-      const plugin = new JobsPlugin({ pollIntervalMs: 10 });
+      const plugin = jobsPlugin({ pollIntervalMs: 10 });
       const handle = plugin.exports()("etl");
 
       const controller = new AbortController();
@@ -745,7 +748,7 @@ describe("JobsPlugin", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
       process.env.DATABRICKS_JOB_ML = "456";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const config = plugin.clientConfig();
 
       expect(config).toEqual({
@@ -759,7 +762,7 @@ describe("JobsPlugin", () => {
     test("returns single default key for DATABRICKS_JOB_ID", () => {
       process.env.DATABRICKS_JOB_ID = "789";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const config = plugin.clientConfig();
 
       expect(config).toEqual({
@@ -770,7 +773,7 @@ describe("JobsPlugin", () => {
     });
 
     test("returns empty jobs when no jobs configured", () => {
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const config = plugin.clientConfig();
 
       expect(config).toEqual({ jobs: {} });
@@ -779,7 +782,7 @@ describe("JobsPlugin", () => {
     test("includes JSON schema when params schema is configured", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: {
           etl: {
             params: z.object({ key: z.string() }),
@@ -800,13 +803,13 @@ describe("JobsPlugin", () => {
     test("jobs() with no config discovers from env vars", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
       expect(() => exported("etl")).not.toThrow();
     });
 
     test("jobs() with no config and no env vars creates no jobs", () => {
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
       expect(() => exported("etl")).toThrow(/Unknown job/);
     });
@@ -817,7 +820,7 @@ describe("JobsPlugin", () => {
       process.env.DATABRICKS_JOB_ETL = "100";
       process.env.DATABRICKS_JOB_ML = "200";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       expect(() => exported("etl")).not.toThrow();
@@ -831,7 +834,7 @@ describe("JobsPlugin", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 1 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const exported = plugin.exports();
 
       await exported("etl").runNow();
@@ -930,6 +933,9 @@ describe("injectRoutes", () => {
     setupDatabricksEnv();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
+    // The cache is real now, so entries outlive a test unless cleared — one
+    // test's cached run would otherwise answer the next one's read.
+    await resetTestCache();
   });
 
   afterEach(() => {
@@ -941,7 +947,7 @@ describe("injectRoutes", () => {
   test("registers all 5 routes via this.route()", () => {
     process.env.DATABRICKS_JOB_ETL = "123";
 
-    const plugin = new JobsPlugin({});
+    const plugin = jobsPlugin({});
     const routeSpy = vi.spyOn(plugin as any, "route");
 
     const mockRouter = {
@@ -965,7 +971,7 @@ describe("injectRoutes", () => {
   test("registers correct HTTP methods and paths", () => {
     process.env.DATABRICKS_JOB_ETL = "123";
 
-    const plugin = new JobsPlugin({});
+    const plugin = jobsPlugin({});
     const routeSpy = vi.spyOn(plugin as any, "route");
 
     const mockRouter = {
@@ -1013,7 +1019,7 @@ describe("injectRoutes", () => {
     test("returns 404 for unknown job key", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const resolveJob = (plugin as any)._resolveJob.bind(plugin);
 
       const mockReq = { params: { jobKey: "unknown" } } as any;
@@ -1037,7 +1043,7 @@ describe("injectRoutes", () => {
     test("sanitizes special characters in unknown job key error", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const resolveJob = (plugin as any)._resolveJob.bind(plugin);
 
       const mockReq = {
@@ -1060,7 +1066,7 @@ describe("injectRoutes", () => {
     test("returns jobKey and jobId for known job", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const resolveJob = (plugin as any)._resolveJob.bind(plugin);
 
       const mockReq = { params: { jobKey: "etl" } } as any;
@@ -1083,7 +1089,7 @@ describe("injectRoutes", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1118,7 +1124,7 @@ describe("injectRoutes", () => {
     test("returns 400 when params sent to job without taskType or schema", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1154,7 +1160,7 @@ describe("injectRoutes", () => {
     test("returns 400 on parameter validation failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: {
           etl: {
             taskType: "notebook",
@@ -1209,7 +1215,7 @@ describe("injectRoutes", () => {
         })(),
       );
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1243,7 +1249,7 @@ describe("injectRoutes", () => {
 
       mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1286,7 +1292,7 @@ describe("injectRoutes", () => {
       };
       mockClient.jobs.getRun.mockResolvedValue(mockRun);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1316,7 +1322,7 @@ describe("injectRoutes", () => {
     test("returns 400 for invalid runId", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1353,7 +1359,7 @@ describe("injectRoutes", () => {
       // Run exists upstream but is owned by job 456, not the configured 123.
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1399,7 +1405,7 @@ describe("injectRoutes", () => {
         })(),
       );
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1434,7 +1440,7 @@ describe("injectRoutes", () => {
 
       mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1472,7 +1478,7 @@ describe("injectRoutes", () => {
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 42, job_id: 123 });
       mockClient.jobs.cancelRun.mockResolvedValue(undefined);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1504,7 +1510,7 @@ describe("injectRoutes", () => {
     test("returns 400 for invalid runId", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1543,7 +1549,7 @@ describe("injectRoutes", () => {
       mockClient.jobs.getRun.mockResolvedValue({ run_id: 99, job_id: 456 });
       mockClient.jobs.cancelRun.mockResolvedValue(undefined);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1577,7 +1583,7 @@ describe("injectRoutes", () => {
     test("returns 404 for unknown job key", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1610,7 +1616,7 @@ describe("injectRoutes", () => {
     test("returns 400 when params is an array", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1645,7 +1651,7 @@ describe("injectRoutes", () => {
     test("returns 400 when params is a string", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1681,7 +1687,7 @@ describe("injectRoutes", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       // Job has a taskType but no Zod schema — the cap should kick in.
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: { etl: { taskType: "notebook" } },
       });
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1724,7 +1730,7 @@ describe("injectRoutes", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({
+      const plugin = jobsPlugin({
         jobs: { etl: { taskType: "notebook" } },
       });
       const routeSpy = vi.spyOn(plugin as any, "route");
@@ -1768,7 +1774,7 @@ describe("injectRoutes", () => {
 
       mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1809,7 +1815,7 @@ describe("injectRoutes", () => {
       (error as any).statusCode = 403;
       mockClient.jobs.runNow.mockRejectedValue(error);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1847,13 +1853,18 @@ describe("injectRoutes", () => {
     test("GET /:jobKey/runs returns upstream status on failure", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      const error = new Error("Unauthorized");
-      (error as any).statusCode = 401;
+      const error = new ApiError(
+        "Unauthorized",
+        "UNAUTHENTICATED",
+        401,
+        undefined,
+        [],
+      );
       mockClient.jobs.listRuns.mockImplementation(() => {
         throw error;
       });
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
@@ -1889,7 +1900,7 @@ describe("injectRoutes", () => {
       (error as any).statusCode = 403;
       mockClient.jobs.cancelRun.mockRejectedValue(error);
 
-      const plugin = new JobsPlugin({});
+      const plugin = jobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
       const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };

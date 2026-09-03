@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
-import { CacheManager } from "../../../cache";
 import { AgentsPlugin } from "../agents";
 
 /**
@@ -22,19 +21,6 @@ function policyOf(plugin: AgentsPlugin) {
     timeoutMs: number;
   };
 }
-
-beforeEach(() => {
-  CacheManager.getInstanceSync = vi.fn(() => ({
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn(() => "test-key"),
-  })) as unknown as typeof CacheManager.getInstanceSync;
-});
 
 describe("AgentsPlugin.resolvedApprovalPolicy.timeoutMs", () => {
   test("uses the default (60_000) when approval is omitted", () => {

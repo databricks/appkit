@@ -15,10 +15,14 @@ import type {
 import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
-import { CacheManager } from "../cache";
+import type { CacheManager } from "../cache";
 import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
 import type { PluginContext } from "../core/plugin-context";
-import { AppKitError, AuthenticationError } from "../errors";
+import {
+  AppKitError,
+  AuthenticationError,
+  InitializationError,
+} from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
 import {
@@ -220,7 +224,12 @@ export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin {
   protected isReady = false;
-  protected cache!: CacheManager;
+  /**
+   * Backing field for {@link cache}. A plain private property rather than a
+   * `#private` one: `asUser` hands callers a `Proxy` over the plugin, and a
+   * `#private` read through a proxy receiver throws.
+   */
+  private _cache?: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
@@ -246,6 +255,27 @@ export abstract class Plugin<
    */
   name: string;
 
+  /**
+   * This app's cache, bound by {@link attachContext}. Every plugin in an app
+   * shares the one manager the app built; a plugin cannot substitute its own,
+   * so set a per-plugin `cache: { enabled, ttl }` config instead of assigning.
+   *
+   * Throws `InitializationError` when read on an unattached plugin (the app-less
+   * `runAgent` path, or a plugin built by hand in a test). This is the guard for
+   * the direct readers — `analytics.ts`, `files/plugin.ts` — that reach the
+   * cache without going through {@link execute}: they now fail with a named
+   * error at the read rather than a bare `TypeError` deeper in a handler.
+   */
+  protected get cache(): CacheManager {
+    if (!this._cache) {
+      throw InitializationError.notInitialized(
+        "CacheManager",
+        `Plugin "${this.name}" read this.cache before it was attached to an app. Register the plugin through createApp(), or attach it to a test context first.`,
+      );
+    }
+    return this._cache;
+  }
+
   constructor(protected config: TConfig) {
     this.name =
       config.name ??
@@ -258,34 +288,26 @@ export abstract class Plugin<
       | PluginContext
       | undefined;
 
-    // Eagerly bind telemetry + cache if the core services have already been
-    // initialized (normal createApp path, or tests that mock CacheManager).
-    // If they haven't, we leave these undefined and rely on `attachContext`
-    // being called later — this lets factories eagerly construct plugin
-    // instances at module top-level before `createApp` has run.
-    this.tryAttachContext();
-  }
-
-  private tryAttachContext(): void {
-    try {
-      this.cache = this.context?.cache ?? CacheManager.getInstanceSync();
-    } catch {
-      return;
-    }
+    // `getProvider` routes through a lazily-constructed manager and never
+    // throws, so a plugin factory evaluated at module top level — before
+    // `createApp` has run — still gets a usable `this.telemetry`.
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       this.config.telemetry,
     );
-    this.isReady = true;
   }
 
   /**
    * Binds runtime dependencies (telemetry provider, cache, plugin context) to
    * this plugin. Called by `AppKit._createApp` after construction and before
-   * `setup()`. Idempotent: safe to call if the constructor already bound them
-   * eagerly. Kept separate so factories can eagerly construct plugin instances
-   * without running this before `TelemetryManager.initialize()` /
-   * `CacheManager.getInstance()` have run.
+   * `setup()`. Kept separate from the constructor so plugin factories can be
+   * evaluated at module top level, before any app exists.
+   *
+   * A context-less `attachContext({})` is the app-less path (see `runAgent`):
+   * it binds telemetry and leaves the cache unbound, so only a cached execution
+   * fails, at the chokepoint in {@link _buildInterceptors}. A supplied context
+   * always carries a cache — `PluginContext.cache` is required, so a cache-less
+   * one cannot be constructed.
    */
   attachContext(
     deps: {
@@ -296,9 +318,9 @@ export abstract class Plugin<
     if (deps.context !== undefined) {
       this.context = deps.context as PluginContext;
     }
-    if (!this.cache) {
-      this.cache = this.context?.cache ?? CacheManager.getInstanceSync();
-    }
+    // The app's own cache, and every plugin in the app gets the same one; only
+    // the context-less app-less path leaves it undefined.
+    this._cache = this.context?.cache;
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       deps.telemetryConfig ?? this.config.telemetry,
@@ -610,8 +632,6 @@ export abstract class Plugin<
   ): Promise<ExecutionResult<T>> {
     const executeConfig = this._buildExecutionConfig(options);
 
-    const interceptors = this._buildInterceptors(executeConfig);
-
     // get user key from context if not provided
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
@@ -621,6 +641,11 @@ export abstract class Plugin<
     };
 
     try {
+      // Inside the try: building the chain can fail — an unattached plugin has
+      // no cache to give the cache interceptor — and this method's contract is
+      // to report failures as a result, never to throw.
+      const interceptors = this._buildInterceptors(executeConfig);
+
       const data = await this._executeWithInterceptors(
         fn,
         interceptors,
@@ -722,7 +747,17 @@ export abstract class Plugin<
     }
 
     if (options.cache?.enabled && options.cache.cacheKey?.length) {
-      interceptors.push(new CacheInterceptor(this.cache, options.cache));
+      // Every cached execution routed through execute()/executeStream() passes
+      // here (direct `this.cache` readers are guarded by the accessor instead).
+      // The compiler cannot catch a plugin that never got `attachContext`, so
+      // without this the first symptom is a `TypeError` inside a request handler.
+      if (!this._cache) {
+        throw InitializationError.notInitialized(
+          "CacheManager",
+          `Plugin "${this.name}" requested a cached execution before attachContext() ran, so it has no cache. Register the plugin through createApp(), or attach it to a test context first.`,
+        );
+      }
+      interceptors.push(new CacheInterceptor(this._cache, options.cache));
     }
 
     return interceptors;

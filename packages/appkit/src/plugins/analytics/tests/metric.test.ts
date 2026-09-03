@@ -15,7 +15,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
-import { AnalyticsPlugin } from "../analytics";
+import { resetTestCache } from "../../../testing";
+import type { AnalyticsPlugin } from "../analytics";
 import {
   buildMetricSql,
   composeMetricCacheKey,
@@ -30,41 +31,7 @@ import type {
   MetricFilter,
   MetricRegistration,
 } from "../types";
-
-// Mirror the analytics.test.ts CacheManager mock so the inner `execute`'s
-// cache interceptor is a no-op pass-through (each request re-executes).
-const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
-  const store = new Map<string, unknown>();
-  const generateKey = (parts: unknown[], userKey: string): string => {
-    const { createHash } = require("node:crypto");
-    const serialized = JSON.stringify([userKey, ...parts]);
-    return createHash("sha256").update(serialized).digest("hex");
-  };
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
-        const cacheKey = generateKey(key, userKey);
-        if (store.has(cacheKey)) return store.get(cacheKey);
-        const result = await fn();
-        store.set(cacheKey, result);
-        return result;
-      },
-    ),
-    generateKey: vi.fn((parts: unknown[], userKey: string) =>
-      generateKey(parts, userKey),
-    ),
-  };
-  return { mockCacheStore: store, mockCacheInstance: instance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+import { analyticsPlugin, testCache } from "./_test-helpers";
 
 // Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
 // test. Using real files (pointing the plugin's `AppManager` at the dir, see
@@ -86,7 +53,7 @@ const tempRegistryDirs: string[] = [];
  * every route-handler test threads through.
  */
 function pluginForDir(config: IAnalyticsConfig, dir: string): AnalyticsPlugin {
-  const plugin = new AnalyticsPlugin(config);
+  const plugin = analyticsPlugin(config);
   (plugin as any).app = new AppManager(path.join(dir, "queries"), dir);
   return plugin;
 }
@@ -146,7 +113,7 @@ describe("analytics metric route", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
+    await resetTestCache();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });
@@ -161,7 +128,7 @@ describe("analytics metric route", () => {
 
   describe("injectRoutes", () => {
     test("registers POST /metric/:key alongside /query", () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -1064,8 +1031,9 @@ describe("analytics metric route", () => {
 
       // Capture the composed cache key the inner `execute` hands to the shared
       // CacheManager mock — the same key whether or not metadata is injected.
+      const getOrExecuteSpy = vi.spyOn(testCache, "getOrExecute");
       const cacheKeyFor = async (mvMeta?: MetricViewsMetadata) => {
-        mockCacheInstance.getOrExecute.mockClear();
+        getOrExecuteSpy.mockClear();
         const plugin = pluginForDir(
           { ...config, metricViewsMetadata: mvMeta },
           registryDir(registry),
@@ -1079,7 +1047,7 @@ describe("analytics metric route", () => {
           createMockResponse(),
         );
         // First getOrExecute call is the SQL execution's cache interceptor.
-        const call = mockCacheInstance.getOrExecute.mock.calls[0];
+        const call = getOrExecuteSpy.mock.calls[0];
         return { cacheKey: call[0], userKey: call[2] };
       };
 
@@ -1359,7 +1327,7 @@ describe("analytics metric route", () => {
     });
 
     test("no definitions.json present → registry empty, unknown key 404, nothing executes", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn();
@@ -2489,7 +2457,7 @@ describe("metric — filter translator", () => {
     beforeEach(async () => {
       config = { timeout: 5000 };
       setupDatabricksEnv();
-      mockCacheStore.clear();
+      await resetTestCache();
       ServiceContext.reset();
       serviceContextMock = await mockServiceContext();
     });
@@ -2960,7 +2928,7 @@ describe("metric route — lane dispatch", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
+    await resetTestCache();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });

@@ -22,48 +22,10 @@ import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../../context/service-context";
-import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
+import { resetTestCache } from "../../../testing";
+import { analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
-
-// Mock CacheManager singleton with actual caching behavior
-const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
-  const store = new Map<string, unknown>();
-
-  const generateKey = (parts: unknown[], userKey: string): string => {
-    const { createHash } = require("node:crypto");
-    const allParts = [userKey, ...parts];
-    const serialized = JSON.stringify(allParts);
-    return createHash("sha256").update(serialized).digest("hex");
-  };
-
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
-        const cacheKey = generateKey(key, userKey);
-        if (store.has(cacheKey)) {
-          return store.get(cacheKey);
-        }
-        const result = await fn();
-        store.set(cacheKey, result);
-        return result;
-      },
-    ),
-    generateKey: vi.fn((parts: unknown[], userKey: string) =>
-      generateKey(parts, userKey),
-    ),
-  };
-
-  return { mockCacheStore: store, mockCacheInstance: instance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+import { analyticsPlugin } from "./_test-helpers";
 
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;
@@ -72,7 +34,7 @@ describe("Analytics Plugin", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
+    await resetTestCache();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });
@@ -87,14 +49,14 @@ describe("Analytics Plugin", () => {
   });
 
   test("Plugin instance should be created with correct configuration", () => {
-    const plugin = new AnalyticsPlugin(config);
+    const plugin = analyticsPlugin(config);
 
     expect(plugin.name).toBe("analytics");
   });
 
   describe("injectRoutes", () => {
     test("should register the query and metric POST routes", () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -113,7 +75,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should return 400 when query_key is missing", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -134,7 +96,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as service principal for .sql files (isAsUser: false)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // Mock getAppQuery to return a regular .sql file (isAsUser: false)
@@ -197,7 +159,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as user for .obo.sql files (isAsUser: true)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // Mock getAppQuery to return an .obo.sql file (isAsUser: true)
@@ -260,7 +222,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should use different cache keys for .sql vs .obo.sql queries", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       const getAppQueryMock = vi.fn();
@@ -309,7 +271,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should return cached result on second request for .sql files", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -343,7 +305,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should share cache across users for .sql files (global cache)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // Mock returns .sql file (isAsUser: false) - should use global cache
@@ -413,7 +375,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should cache user-scoped .obo.sql queries separately per user", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // Mock returns .obo.sql file (isAsUser: true)
@@ -487,7 +449,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("OBO cache key must use the end user's ID, not the service principal's", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -546,7 +508,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("OBO requests differing only by whitespace in x-forwarded-user share one cache key", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -603,7 +565,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should handle AbortSignal cancellation", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -645,7 +607,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should pass INLINE + ARROW_STREAM format parameters when format is ARROW_STREAM", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -682,7 +644,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should use INLINE + JSON_ARRAY by default when no format specified", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -717,7 +679,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should pass INLINE + JSON_ARRAY when format is explicitly JSON_ARRAY", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -748,7 +710,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key falls back ARROW_STREAM INLINE→EXTERNAL_LINKS and streams the preserved links in-context", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -827,7 +789,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("OBO: .obo.sql ARROW_STREAM external-links streams under the user context", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // `.obo.sql` → isAsUser true → the route must run through asUser(req).
@@ -896,7 +858,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("ARROW_STREAM: a stuck warehouse fails fast with a 503 WAREHOUSE_UNAVAILABLE", async () => {
-      const plugin = new AnalyticsPlugin({
+      const plugin = analyticsPlugin({
         ...config,
         arrowFirstByteTimeoutMs: 20,
       });
@@ -938,7 +900,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("ARROW_STREAM: a schema too wide for the header advertises a columns-ref instead", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -977,7 +939,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("GET /columns/:statementId returns the manifest column names", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
       (plugin as any).SQLClient.getColumnNames = vi
         .fn()
@@ -996,7 +958,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("GET /columns/:statementId falls back to the service principal when the user identity can't read it (OBO)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // User identity 404s (e.g. the statement was executed by the SP, which
@@ -1025,7 +987,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key falls back on a structured ExecutionError.errorCode without scanning the message", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1069,7 +1031,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key falls back when error message carries a structured INVALID_PARAMETER_VALUE error_code", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1110,7 +1072,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key does NOT fall back on a non-capability error (auth/SQL)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1153,7 +1115,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key falls back on a capability-coded rejection regardless of exact wording", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1196,7 +1158,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should not fall back for non-format errors", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1230,7 +1192,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key streams ARROW_STREAM INLINE bytes directly on the response body (no SSE, no stash)", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1301,7 +1263,7 @@ describe("Analytics Plugin", () => {
       // back into plain row objects: the caller's contract is preserved and
       // the SSE channel still carries a `result` message, not an `arrow`
       // message.
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1418,7 +1380,7 @@ describe("Analytics Plugin", () => {
         "base64",
       );
 
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
         query: "SELECT * FROM test",
@@ -1471,7 +1433,7 @@ describe("Analytics Plugin", () => {
       // If the JSON_ARRAY retry path (ARROW_STREAM + INLINE) also fails — e.g.
       // a downstream warehouse outage that affects both shapes — the route
       // must surface the failure rather than silently dropping it.
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1544,7 +1506,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key rejects unknown format values with 400", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       const executeMock = vi.fn();
@@ -1569,7 +1531,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key does not retry the fallback when the request was aborted", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1577,13 +1539,14 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
-      const executeMock = vi.fn().mockImplementation((_wc, _opts, signal) => {
-        // Simulate a signal that becomes aborted before the failure surfaces —
-        // e.g. the client cancelled the SSE stream mid-query. Use vitest's
-        // getter spy rather than Object.defineProperty so we don't try to
-        // override the native non-configurable AbortSignal.aborted getter.
-        if (signal) {
-          vi.spyOn(signal, "aborted", "get").mockReturnValue(true);
+      const executeMock = vi.fn().mockImplementation(() => {
+        // Simulate the client cancelling the SSE stream mid-query by firing the
+        // `close` listener the route registered. That aborts the route's own
+        // controller — the signal its fallback check actually reads — so this
+        // does not depend on which signal object the cache hands the callback
+        // (the caching executor passes a composed `sharedSignal`, not this one).
+        for (const [event, handler] of mockRes.on.mock.calls) {
+          if (event === "close") handler();
         }
         return Promise.reject(
           new Error(
@@ -1614,7 +1577,7 @@ describe("Analytics Plugin", () => {
       // disposition could be any unrelated SQL/permission error. The classifier
       // must NOT interpret it as "warehouse wants ARROW_STREAM" — falling back
       // would mask the real failure.
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1651,7 +1614,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("emits warehouse_status events before the result", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
@@ -1717,7 +1680,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should return 404 when query file is not found", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const plugin = analyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       // Mock getAppQuery to return null (query not found)
@@ -1743,7 +1706,7 @@ describe("Analytics Plugin", () => {
 
   describe("toolkit()", () => {
     test("produces ToolkitEntry records keyed by the plugin name", () => {
-      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const plugin = analyticsPlugin({ name: "analytics" });
       const entries = plugin.toolkit();
       expect(Object.keys(entries)).toContain("analytics.query");
       const entry = entries["analytics.query"];
@@ -1753,7 +1716,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("respects prefix and only options", () => {
-      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const plugin = analyticsPlugin({ name: "analytics" });
       const entries = plugin.toolkit({ prefix: "", only: ["query"] });
       expect(Object.keys(entries)).toEqual(["query"]);
     });

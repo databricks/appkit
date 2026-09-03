@@ -13,33 +13,6 @@ import { ServiceContext } from "../../../context/service-context";
 import { ServingPlugin, serving } from "../serving";
 import type { IServingConfig } from "../types";
 
-// Mock CacheManager singleton
-const { mockCacheInstance } = vi.hoisted(() => {
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi
-      .fn()
-      .mockImplementation(
-        async (
-          _key: unknown[],
-          fn: (signal?: AbortSignal) => Promise<unknown>,
-        ) => {
-          return await fn();
-        },
-      ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockCacheInstance: instance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
-
 // Mock the serving connector
 const mockInvoke = vi.fn();
 const mockStream = vi.fn();

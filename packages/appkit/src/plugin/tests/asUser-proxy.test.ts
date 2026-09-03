@@ -33,7 +33,6 @@ import {
 } from "vitest";
 
 import { AppManager } from "../../app";
-import { CacheManager } from "../../cache";
 import { getUserContext } from "../../context/execution-context";
 import { ServiceContext } from "../../context/service-context";
 import { AuthenticationError } from "../../errors/authentication";
@@ -54,9 +53,6 @@ vi.mock("../../workspace-client", async (importOriginal) => {
 });
 
 vi.mock("../../app");
-vi.mock("../../cache", () => ({
-  CacheManager: { getInstanceSync: vi.fn() },
-}));
 vi.mock("../../stream");
 vi.mock("../../telemetry", () => ({
   TelemetryManager: { getProvider: vi.fn() },
@@ -207,7 +203,6 @@ function createReqWithToken(forwardedToken: string): express.Request {
 
 describe("Plugin.asUser proxy", () => {
   let mockTelemetry: ITelemetry;
-  let mockCache: CacheManager;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   let config: BasePluginConfig;
   let contextManager: ContextManager;
@@ -227,13 +222,6 @@ describe("Plugin.asUser proxy", () => {
     serviceContextMock = await mockServiceContext();
 
     mockTelemetry = createMockTelemetry();
-    mockCache = {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-    } as unknown as CacheManager;
-
-    vi.mocked(CacheManager.getInstanceSync).mockReturnValue(mockCache);
     vi.mocked(AppManager).mockImplementation(
       () => ({ getAppQuery: vi.fn() }) as unknown as AppManager,
     );

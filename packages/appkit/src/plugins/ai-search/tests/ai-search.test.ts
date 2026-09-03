@@ -5,6 +5,7 @@ import {
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestPluginContext, resetTestCache } from "../../../testing";
 import { Context } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
@@ -50,10 +51,25 @@ vi.mock("../../../telemetry", () => ({
           fn: (...args: unknown[]) => unknown,
           _telemetryOpts?: unknown,
         ) =>
+          // A whole span, not just the members this plugin happens to touch:
+          // the real CacheManager instruments getOrExecute on the same
+          // provider, and the faked cache this suite used to carry did not.
           fn({
             setAttribute: vi.fn(),
+            setAttributes: vi.fn(),
             setStatus: vi.fn(),
             recordException: vi.fn(),
+            addEvent: vi.fn(),
+            addLink: vi.fn(),
+            addLinks: vi.fn(),
+            updateName: vi.fn(),
+            isRecording: vi.fn(() => false),
+            spanContext: vi.fn(() => ({
+              traceId: "0".repeat(32),
+              spanId: "0".repeat(16),
+              traceFlags: 0,
+            })),
+            end: vi.fn(),
           }),
       ),
     }),
@@ -62,38 +78,6 @@ vi.mock("../../../telemetry", () => ({
   SpanStatusCode: { OK: 1, ERROR: 2 },
   normalizeTelemetryOptions: () => ({ traces: false, metrics: false }),
 }));
-
-// In-memory cache keyed like the real CacheManager.generateKey, so tests
-// exercise real key composition. Never stores rejections.
-const { mockCacheStore } = vi.hoisted(() => ({
-  mockCacheStore: new Map<string, unknown>(),
-}));
-
-vi.mock("../../../cache", () => {
-  const keyOf = (parts: unknown[], userKey: string) =>
-    JSON.stringify([userKey, ...parts]);
-  return {
-    CacheManager: {
-      getInstanceSync: () => ({
-        get: vi.fn(),
-        set: vi.fn(),
-        delete: vi.fn(),
-        generateKey: keyOf,
-        getOrExecute: async (
-          key: unknown[],
-          fn: (signal?: AbortSignal) => Promise<unknown>,
-          userKey: string,
-        ) => {
-          const k = keyOf(key, userKey);
-          if (mockCacheStore.has(k)) return mockCacheStore.get(k);
-          const result = await fn();
-          mockCacheStore.set(k, result);
-          return result;
-        },
-      }),
-    },
-  };
-});
 
 vi.mock("../../../app", () => ({
   AppManager: vi.fn().mockImplementation(() => ({})),
@@ -135,11 +119,26 @@ const mockWorkspaceClient = {
 
 import { AiSearchPlugin } from "../ai-search";
 
+/**
+ * One kit context for this file, supplying the real `CacheManager`. The suite
+ * previously faked one that claimed to key "like the real
+ * CacheManager.generateKey" but keyed on `JSON.stringify([userKey, ...parts])`
+ * where production hashes — so the caching tests below could not actually
+ * exercise production's key composition.
+ */
+const kit = createTestPluginContext();
+
+function aiSearchPlugin(
+  config: ConstructorParameters<typeof AiSearchPlugin>[0],
+): AiSearchPlugin {
+  return kit.attach(new AiSearchPlugin(config));
+}
+
 describe("AiSearchPlugin", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValue(validVsResponse);
-    mockCacheStore.clear();
+    await resetTestCache();
   });
 
   describe("setup()", () => {
@@ -154,7 +153,7 @@ describe("AiSearchPlugin", () => {
 
     it("defaults indexName from DATABRICKS_VS_INDEX_NAME when omitted", async () => {
       process.env.DATABRICKS_VS_INDEX_NAME = "cat.sch.from_env";
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: { columns: ["id"] },
         },
@@ -170,7 +169,7 @@ describe("AiSearchPlugin", () => {
     it("seeds a 'default' index from the env var when no indexes are configured", async () => {
       process.env.DATABRICKS_VS_INDEX_NAME = "cat.sch.from_env";
       // Bare aiSearch() — no indexes config.
-      const plugin = new AiSearchPlugin({});
+      const plugin = aiSearchPlugin({});
 
       await plugin.query("default", { queryText: "q", columns: ["id"] });
       expect(mockRequest.mock.calls[0][0].path).toBe(
@@ -179,7 +178,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("throws if pagination enabled but no endpointName", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -192,7 +191,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("succeeds with valid config", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           products: {
             indexName: "cat.sch.products_idx",
@@ -209,7 +208,7 @@ describe("AiSearchPlugin", () => {
       const originalNodeEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
       try {
-        const plugin = new AiSearchPlugin({
+        const plugin = aiSearchPlugin({
           indexes: { docs: { indexName: "cat.sch.idx" } },
         });
         await expect(plugin.setup()).rejects.toThrow(
@@ -224,7 +223,7 @@ describe("AiSearchPlugin", () => {
       const originalNodeEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
       try {
-        const plugin = new AiSearchPlugin({
+        const plugin = aiSearchPlugin({
           indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
         });
         await expect(plugin.setup()).resolves.not.toThrow();
@@ -264,7 +263,7 @@ describe("AiSearchPlugin", () => {
     it("fills columns from the source table in development and warns", async () => {
       process.env.NODE_ENV = "development";
       mockRequest.mockImplementation(routeByPath);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { docs: { indexName: "cat.sch.idx" } },
       });
 
@@ -283,7 +282,7 @@ describe("AiSearchPlugin", () => {
       mockRequest.mockImplementation(routeByPath);
       // Columns set so the prod no-columns guard doesn't fire; this test only
       // asserts discovery doesn't run outside development.
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
 
@@ -299,7 +298,7 @@ describe("AiSearchPlugin", () => {
     it("skips (does not throw) when an index already has columns", async () => {
       process.env.NODE_ENV = "development";
       mockRequest.mockImplementation(routeByPath);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
 
@@ -320,7 +319,7 @@ describe("AiSearchPlugin", () => {
 
   describe("exports()", () => {
     it("returns object with query function", () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },
@@ -333,7 +332,7 @@ describe("AiSearchPlugin", () => {
 
   describe("query()", () => {
     it("calls VS API via connector and parses response", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           products: {
             indexName: "cat.sch.products",
@@ -361,7 +360,7 @@ describe("AiSearchPlugin", () => {
         id: number;
         title: string;
       }
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           products: { indexName: "cat.sch.products", columns: ["id", "title"] },
         },
@@ -379,7 +378,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("constructs correct API request", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -409,7 +408,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("throws Error for unknown alias", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },
@@ -422,7 +421,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("includes filters when provided", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -446,7 +445,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("includes reranker config when enabled on index", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -468,7 +467,7 @@ describe("AiSearchPlugin", () => {
 
     it("calls embeddingFn and drops query_text for ann (vector-only)", async () => {
       const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -489,7 +488,7 @@ describe("AiSearchPlugin", () => {
 
     it("keeps query_text alongside the embedded vector for hybrid", async () => {
       const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -510,7 +509,7 @@ describe("AiSearchPlugin", () => {
 
     it("skips embeddingFn for full_text and sends query_text only", async () => {
       const mockEmbeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -533,7 +532,7 @@ describe("AiSearchPlugin", () => {
       const mockEmbeddingFn = vi
         .fn()
         .mockRejectedValue(new Error("embedding service unavailable"));
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -552,7 +551,7 @@ describe("AiSearchPlugin", () => {
 
   describe("shutdown()", () => {
     it("does not throw", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
         },
@@ -568,7 +567,7 @@ describe("AiSearchPlugin", () => {
         result: { row_count: 1, data_array: [[1, "hi"]] },
         next_page_token: null,
       });
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { test: { indexName: "cat.sch.idx", columns: ["id", "t"] } },
       });
       await plugin.setup();
@@ -583,7 +582,7 @@ describe("AiSearchPlugin", () => {
         ...validVsResponse,
         next_page_token: "tok-123",
       });
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { test: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
       await plugin.setup();
@@ -599,7 +598,7 @@ describe("AiSearchPlugin", () => {
         next_page_token: null,
         debug_info: { latency_ms: 42 },
       });
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { test: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
       await plugin.setup();
@@ -613,7 +612,7 @@ describe("AiSearchPlugin", () => {
 
   describe("query() overrides and reranker", () => {
     it("lets the request override index queryType, numResults, and columns", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -638,7 +637,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("passes an object reranker through untouched", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -655,7 +654,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("lets request.reranker=false suppress an index-enabled reranker", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           test: {
             indexName: "cat.sch.idx",
@@ -674,7 +673,7 @@ describe("AiSearchPlugin", () => {
     it("skips the reranker when enabled but no columns are resolved", async () => {
       // Query-time behavior only; skip setup() (its prod guard rejects the
       // deliberately column-less config used to exercise this path).
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { test: { indexName: "cat.sch.idx", reranker: true } },
       });
       await plugin.query("test", { queryText: "q" });
@@ -688,7 +687,7 @@ describe("AiSearchPlugin", () => {
       // Persistent reject so the retry interceptor exhausts its attempts and
       // execute() surfaces a failed result, driving the !result.ok branch.
       mockRequest.mockRejectedValue(new Error("VS 503"));
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: { products: { indexName: "cat.sch.p", columns: ["id"] } },
       });
       await plugin.setup();
@@ -701,7 +700,7 @@ describe("AiSearchPlugin", () => {
 
   describe("caching", () => {
     const makePlugin = () =>
-      new AiSearchPlugin({
+      aiSearchPlugin({
         indexes: {
           products: {
             indexName: "cat.sch.products",
@@ -798,7 +797,7 @@ describe("AiSearchPlugin", () => {
     it("keys managed-embedding queries by queryText, skipping embedding on a route cache hit", async () => {
       // Keyed by queryText, not the derived vector; the hit skips embeddingFn.
       const embeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           docs: {
             indexName: "cat.sch.docs",
@@ -831,7 +830,7 @@ describe("AiSearchPlugin", () => {
 
     it("skips embedding on a programmatic query() cache hit too", async () => {
       const embeddingFn = vi.fn().mockResolvedValue([0.1, 0.2, 0.3]);
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           docs: {
             indexName: "cat.sch.docs",
@@ -851,7 +850,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("does not share cache across OBO users (per-user cache key)", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           docs: {
             indexName: "cat.sch.docs",
@@ -894,7 +893,7 @@ describe("AiSearchPlugin", () => {
     });
 
     it("re-serves the same OBO user from cache (connector called once)", async () => {
-      const plugin = new AiSearchPlugin({
+      const plugin = aiSearchPlugin({
         indexes: {
           docs: {
             indexName: "cat.sch.docs",
@@ -931,7 +930,7 @@ describe("AiSearchPlugin", () => {
 
   describe("injectRoutes", () => {
     const makePlugin = () =>
-      new AiSearchPlugin({
+      aiSearchPlugin({
         indexes: {
           demo: {
             indexName: "cat.sch.idx",
@@ -1037,7 +1036,7 @@ describe("AiSearchPlugin", () => {
       it("500s when query preparation throws", async () => {
         // Query prep (embeddingFn) runs inside execute() so it shares the OBO
         // context; a failure surfaces as a non-ok result → 500.
-        const plugin = new AiSearchPlugin({
+        const plugin = aiSearchPlugin({
           indexes: {
             demo: {
               indexName: "cat.sch.idx",

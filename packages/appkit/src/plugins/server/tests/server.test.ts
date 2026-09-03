@@ -1,7 +1,11 @@
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import type { CacheManager } from "../../../cache";
 import { PluginContext } from "../../../core/plugin-context";
+
+/** A CacheManager these server tests carry but never exercise. */
+const cacheStub = {} as unknown as CacheManager;
 
 // Use vi.hoisted for mocks that need to be available before module loading
 const {
@@ -107,17 +111,6 @@ vi.mock("../../../telemetry", () => ({
   },
 }));
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn().mockReturnValue({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
-}));
-
 vi.mock("../../../utils", () => ({
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
@@ -203,7 +196,7 @@ import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
 
 function createContextWithPlugins(plugins: Record<string, any>): PluginContext {
-  const ctx = new PluginContext();
+  const ctx = new PluginContext({ cache: cacheStub });
   for (const [name, instance] of Object.entries(plugins)) {
     ctx.registerPlugin(name, instance as BasePlugin);
   }
@@ -821,7 +814,7 @@ describe("ServerPlugin", () => {
         order.push("closeAll");
       });
 
-      const ctx = new PluginContext();
+      const ctx = new PluginContext({ cache: cacheStub });
       const server = new ServerPlugin({ context: ctx } as any);
       ctx.registerPlugin("server", server as unknown as BasePlugin);
       ctx.registerPlugin("peer", {
@@ -839,7 +832,10 @@ describe("ServerPlugin", () => {
       }) as any);
 
       await server.start();
-      await new LifecycleManager(ctx).shutdown();
+      // The manager is injected now; only `close()` is exercised here.
+      await new LifecycleManager(ctx, {
+        close: vi.fn().mockResolvedValue(undefined),
+      } as unknown as import("../../../cache").CacheManager).shutdown();
 
       // closeIdle fires in the abort phase, the peer drains next, closeAll only
       // fires in the later lifecycle-emit phase, then the process exits 0.

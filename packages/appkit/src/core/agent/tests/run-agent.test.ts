@@ -6,11 +6,14 @@ import type {
   AgentToolDefinition,
   PluginConstructor,
   PluginData,
+  PluginManifest,
   ToolProvider,
 } from "shared";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 
+import { InitializationError } from "../../../errors";
+import { Plugin } from "../../../plugin";
 import { createAgent } from "../create-agent";
 import { runAgent } from "../run-agent";
 import { mcpServer } from "../tools/hosted-tools";
@@ -350,6 +353,65 @@ describe("runAgent", () => {
     await expect(
       runAgent(def, { messages: "hi", plugins: [pluginData] }),
     ).rejects.toThrow(/createApp/);
+  });
+
+  test("standalone init runs the app-less lifecycle on a real Plugin subclass", async () => {
+    // run-agent.ts calls `attachContext({})` on every standalone plugin. Every
+    // other double in this file is duck-typed and never reaches
+    // `Plugin.attachContext`, so this is the only coverage that the two-case
+    // contract holds for a REAL plugin: a context-less attach binds telemetry,
+    // flips isReady, and leaves the cache unbound — without throwing (a
+    // *supplied* cache-less context is the case that throws). If the call site
+    // ever changed to trip that throw, only this test would fail.
+    const attached: RealPlugin[] = [];
+
+    class RealPlugin extends Plugin implements ToolProvider {
+      static manifest = {
+        name: "real",
+        displayName: "Real",
+        version: "0.0.0",
+        description: "A real Plugin subclass for the standalone path",
+        resources: { required: [], optional: [] },
+      } as unknown as PluginManifest<"real">;
+
+      async setup(): Promise<void> {
+        attached.push(this);
+      }
+      getAgentTools(): AgentToolDefinition[] {
+        return [];
+      }
+      async executeAgentTool(): Promise<unknown> {
+        return null;
+      }
+      /** `cache` is protected; read it in-class so the test can assert it. */
+      readCache(): unknown {
+        return this.cache;
+      }
+      ready(): boolean {
+        return this.isReady;
+      }
+    }
+
+    const def = createAgent({
+      instructions: "x",
+      model: scriptedAdapter([{ type: "message_delta", content: "ok" }]),
+    });
+    const pluginData: PluginData<PluginConstructor, unknown, string> = {
+      plugin: RealPlugin as unknown as PluginConstructor,
+      config: {},
+      name: "real",
+    };
+
+    await expect(
+      runAgent(def, { messages: "hi", plugins: [pluginData] }),
+    ).resolves.toBeDefined();
+
+    // attachContext({}) + setup() both ran, without throwing.
+    expect(attached).toHaveLength(1);
+    expect(attached[0].ready()).toBe(true);
+    // App-less: the cache is unbound, so a direct read fails closed rather than
+    // handing back undefined.
+    expect(() => attached[0].readCache()).toThrow(InitializationError);
   });
 
   test("sub-agent recursion shares the same plugin instance with the parent", async () => {

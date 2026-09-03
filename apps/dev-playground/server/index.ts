@@ -375,10 +375,13 @@ createApp({
           const pngs = new Map<string, (typeof entries)[number]>();
           const metas = new Map<string, (typeof entries)[number]>();
           for (const e of entries) {
-            if (e.path.endsWith(".png")) {
-              pngs.set(e.path.replace(/\.png$/, ""), e);
-            } else if (e.path.endsWith(".json")) {
-              metas.set(e.path.replace(/\.json$/, ""), e);
+            // `path` is optional on the SDK's entry type.
+            const path = e.path;
+            if (!path) continue;
+            if (path.endsWith(".png")) {
+              pngs.set(path.replace(/\.png$/, ""), e);
+            } else if (path.endsWith(".json")) {
+              metas.set(path.replace(/\.json$/, ""), e);
             }
           }
           const views = await Promise.all(

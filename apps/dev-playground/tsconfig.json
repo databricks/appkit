@@ -6,7 +6,9 @@
     "declaration": false,
     "declarationMap": false,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "customConditions": ["development"]
   },
-  "exclude": ["node_modules", "build"]
+  "exclude": ["node_modules", "build", "client"],
+  "include": ["server/**/*.ts", "*.ts"]
 }

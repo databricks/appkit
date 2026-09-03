@@ -12,7 +12,7 @@ import { isToolProvider, PluginContext } from "../core/plugin-context";
 import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import { createMockTelemetry } from "./fixtures";
+import { createMockTelemetry, registerKitCache } from "./fixtures";
 
 /**
  * A concrete (non-function) fake tool response — returned as-is. Covers the
@@ -120,6 +120,17 @@ export interface TestPluginContext {
    */
   telemetry: ITelemetry;
   /**
+   * The real in-memory {@link CacheManager} this context carries — the very
+   * object a plugin attached through {@link attach} resolves as `this.cache`.
+   * Spy or read it (`vi.spyOn(mock.cache, "getOrExecute")`, `generateKey`,
+   * `get`, `has`) to assert a plugin's real caching behaviour against
+   * production's own keying rather than a re-implemented fake.
+   *
+   * Each `createTestPluginContext()` gets its own, so two contexts in one file
+   * cannot see each other's entries.
+   */
+  cache: CacheManager;
+  /**
    * Tool dispatches observed across all fake providers, in call order. Live —
    * read it after the action under test runs.
    */
@@ -137,13 +148,13 @@ export interface TestPluginContext {
    */
   registerProvider(name: string, tools: Record<string, FakeToolResponse>): void;
   /**
-   * Attach this context to a plugin the production way: seed an in-memory
-   * cache (if AppKit hasn't already), then call `plugin.attachContext`, which
-   * also rebuilds the plugin's telemetry and flips `isReady` to `true`. Await
-   * it before exercising handlers that read `this.context`, `this.cache`, or
-   * gate on `isReady`. Returns the same plugin for chaining.
+   * Attach this context to a plugin the production way: calls
+   * `plugin.attachContext`, which binds {@link cache}, rebuilds the plugin's
+   * telemetry, and flips `isReady` to `true`. Synchronous — call it before
+   * exercising handlers that read `this.context`, `this.cache`, or gate on
+   * `isReady`. Returns the same plugin for chaining.
    */
-  attach<P extends Plugin>(plugin: P): Promise<P>;
+  attach<P extends Plugin>(plugin: P): P;
 }
 
 /**
@@ -177,7 +188,13 @@ export function createTestPluginContext(
   fakes: FakeProviders = {},
 ): TestPluginContext {
   const telemetry = createMockTelemetry();
-  const ctx = new PluginContext({ telemetry });
+  // Synchronous on purpose: `createTestPluginContext` is called at describe-body
+  // time, so it cannot await. `forStorage` skips the health check that the app's
+  // async `create()` performs, which in-memory storage does not need.
+  const cache = CacheManager.forStorage(new InMemoryStorage());
+  // So `resetTestCache()` with no argument can find it.
+  registerKitCache(cache);
+  const ctx = new PluginContext({ telemetry, cache });
 
   const toolCalls: RecordedToolCall[] = [];
   const routes: RecordedRoute[] = [];
@@ -315,27 +332,35 @@ export function createTestPluginContext(
     registerProvider(name, tools);
   }
 
-  async function attach<P extends Plugin>(plugin: P): Promise<P> {
-    // Seed a real in-memory cache if AppKit hasn't initialized one. Idempotent:
-    // getInstance returns any existing singleton (e.g. one a suite already set
-    // up) and ignores the storage argument in that case.
-    if (!cacheReady()) {
-      await CacheManager.getInstance({ storage: new InMemoryStorage({}) });
-    }
+  function attach<P extends Plugin>(plugin: P): P {
+    // The context already carries this test's cache, so `attachContext` binds
+    // it the same way `createApp` binds an app's. A plugin attached here
+    // reaches only this context's cache, and a sibling context cannot
+    // observe it.
     plugin.attachContext({ context: ctx });
 
-    // Mirror what AppKit core does after attachContext (core/appkit.ts): put
-    // the plugin in the registry so `getPlugins()`/`getPluginNames()`/
-    // `hasPlugin()` and any sibling-plugin lookup behave as in production. Only
-    // register it as a tool provider when it actually is one AND its name does
-    // not collide with an injected fake — the fakes are the authored test
-    // doubles and must not be overwritten by the plugin under test.
-    ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
-    if (isToolProvider(plugin) && !providers.has(plugin.name)) {
-      ctx.registerToolProvider(
-        plugin.name,
-        plugin as unknown as Parameters<typeof ctx.registerToolProvider>[1],
-      );
+    // Put the plugin in the registry (as AppKit core does after attachContext)
+    // so `getPlugins()`/`getPluginNames()`/`hasPlugin()` resolve it. A tool
+    // provider is also registered as one, unless its name collides with an
+    // injected fake — the fakes are the authored doubles and must win.
+    //
+    // First attach of a name wins: a test file that builds many instances of
+    // one plugin (the shared-kit factory pattern) re-attaches the same name,
+    // and re-registering would churn the registry and trip the production
+    // "registered more than once" warning. So later instances are bound (their
+    // `attachContext` runs) but not re-registered. The limit that follows: a
+    // sibling-plugin lookup through this context resolves the FIRST instance
+    // attached under a name, not the most recent — fine because the direct
+    // `mock.attach(...)` sites use a fresh context per test, and no factory
+    // suite does a sibling lookup that depends on which instance answers.
+    if (!ctx.hasPlugin(plugin.name)) {
+      ctx.registerPlugin(plugin.name, plugin as unknown as BasePlugin);
+      if (isToolProvider(plugin) && !providers.has(plugin.name)) {
+        ctx.registerToolProvider(
+          plugin.name,
+          plugin as unknown as Parameters<typeof ctx.registerToolProvider>[1],
+        );
+      }
     }
     return plugin;
   }
@@ -343,19 +368,11 @@ export function createTestPluginContext(
   return {
     ctx,
     telemetry,
+    cache,
     toolCalls,
     routes,
     providers,
     registerProvider,
     attach,
   };
-}
-
-function cacheReady(): boolean {
-  try {
-    CacheManager.getInstanceSync();
-    return true;
-  } catch {
-    return false;
-  }
 }

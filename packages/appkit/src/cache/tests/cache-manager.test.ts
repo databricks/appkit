@@ -98,11 +98,7 @@ function createUnhealthyMockStorage(): CacheStorage {
 }
 
 describe("CacheManager", () => {
-  // Reset singleton between tests
   beforeEach(() => {
-    // Access private static fields to reset singleton
-    (CacheManager as any).instance = null;
-    (CacheManager as any).initPromise = null;
     // Default: Lakebase unavailable (most tests pass explicit storage)
     mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
   });
@@ -111,34 +107,9 @@ describe("CacheManager", () => {
     vi.clearAllMocks();
   });
 
-  describe("singleton pattern", () => {
-    test("getInstanceSync should throw when not initialized", () => {
-      expect(() => CacheManager.getInstanceSync()).toThrow(
-        "CacheManager not initialized",
-      );
-    });
-
-    test("getInstance should create singleton", async () => {
-      const instance1 = await CacheManager.getInstance({
-        storage: createMockStorage(),
-      });
-      const instance2 = await CacheManager.getInstance();
-
-      expect(instance1).toBe(instance2);
-    });
-
-    test("getInstanceSync should return instance after initialization", async () => {
-      await CacheManager.getInstance({ storage: createMockStorage() });
-
-      const instance = CacheManager.getInstanceSync();
-
-      expect(instance).toBeInstanceOf(CacheManager);
-    });
-  });
-
   describe("generateKey", () => {
     test("should generate consistent hash for same inputs", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -149,7 +120,7 @@ describe("CacheManager", () => {
     });
 
     test("should generate different hash for different inputs", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -163,7 +134,7 @@ describe("CacheManager", () => {
     });
 
     test("should handle objects in key parts", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -178,7 +149,7 @@ describe("CacheManager", () => {
 
   describe("get/set operations", () => {
     test("should return null for non-existent key", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -188,7 +159,7 @@ describe("CacheManager", () => {
     });
 
     test("should set and get value", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -199,7 +170,7 @@ describe("CacheManager", () => {
     });
 
     test("should respect TTL expiry", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -217,7 +188,7 @@ describe("CacheManager", () => {
 
   describe("delete operation", () => {
     test("should delete existing key", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -231,7 +202,7 @@ describe("CacheManager", () => {
 
   describe("has operation", () => {
     test("should return true for existing key", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -242,7 +213,7 @@ describe("CacheManager", () => {
     });
 
     test("should return false for non-existent key", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -251,7 +222,7 @@ describe("CacheManager", () => {
     });
 
     test("should return false for expired key", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -265,7 +236,7 @@ describe("CacheManager", () => {
 
   describe("clear operation", () => {
     test("should clear all entries", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -281,7 +252,7 @@ describe("CacheManager", () => {
 
   describe("getOrExecute", () => {
     test("should execute function on cache miss", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const fn = vi.fn().mockResolvedValue("result");
@@ -293,7 +264,7 @@ describe("CacheManager", () => {
     });
 
     test("should return cached value on cache hit", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const fn = vi.fn().mockResolvedValue("new-result");
@@ -309,7 +280,7 @@ describe("CacheManager", () => {
     });
 
     test("should deduplicate concurrent requests", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       let callCount = 0;
@@ -336,7 +307,7 @@ describe("CacheManager", () => {
     });
 
     test("should use different cache keys for different users", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -359,7 +330,7 @@ describe("CacheManager", () => {
     });
 
     test("should re-execute function when cached entry has expired", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       let calls = 0;
@@ -383,7 +354,7 @@ describe("CacheManager", () => {
     });
 
     test("should work when fn ignores signal parameter (non-signal caller regression)", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       // Simulates direct callers like telemetry-example-plugin that pass
@@ -403,7 +374,7 @@ describe("CacheManager", () => {
 
   describe("abort / ref-counting", () => {
     test("one caller aborts while another still waits — waiting caller resolves normally", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -443,7 +414,7 @@ describe("CacheManager", () => {
     });
 
     test("all callers abort — shared controller signal is aborted", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -492,7 +463,7 @@ describe("CacheManager", () => {
     });
 
     test("pre-aborted callerSignal throws immediately without executing fn", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -512,7 +483,7 @@ describe("CacheManager", () => {
     });
 
     test("single caller abort mid-flight rejects with abort error and aborts shared controller", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -545,7 +516,7 @@ describe("CacheManager", () => {
     });
 
     test("deduped caller abort does not poison the first caller's result", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -580,7 +551,7 @@ describe("CacheManager", () => {
     });
 
     test("fn rejects while multiple callers wait — all receive the error", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -616,7 +587,7 @@ describe("CacheManager", () => {
     });
 
     test("caller aborts after promise already resolved — gets the resolved value", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -648,7 +619,7 @@ describe("CacheManager", () => {
     });
 
     test("new caller after previous entry fully aborted gets fresh execution", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -696,7 +667,7 @@ describe("CacheManager", () => {
     });
 
     test("grace period: new caller joins before timer fires — no abort, single execution", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -742,7 +713,7 @@ describe("CacheManager", () => {
     });
 
     test("grace period: no new caller arrives — timer fires and aborts shared controller", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -781,7 +752,7 @@ describe("CacheManager", () => {
 
   describe("disabled cache", () => {
     test("should bypass cache when disabled", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         enabled: false,
         storage: createMockStorage(),
       });
@@ -796,7 +767,7 @@ describe("CacheManager", () => {
     });
 
     test("should return null for get when disabled", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         enabled: false,
         storage: createMockStorage(),
       });
@@ -808,7 +779,7 @@ describe("CacheManager", () => {
     });
 
     test("should return false for has when disabled", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         enabled: false,
         storage: createMockStorage(),
       });
@@ -822,7 +793,7 @@ describe("CacheManager", () => {
 
   describe("storage health", () => {
     test("should check storage health", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -834,7 +805,7 @@ describe("CacheManager", () => {
 
   describe("close", () => {
     test("should close storage", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
 
@@ -844,7 +815,7 @@ describe("CacheManager", () => {
 
   describe("maybeCleanup", () => {
     test("should not trigger cleanup for non-persistent storage", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(false),
         cleanupProbability: 1, // 100% probability
       });
@@ -860,7 +831,7 @@ describe("CacheManager", () => {
     });
 
     test("should respect MIN_CLEANUP_INTERVAL_MS", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
         cleanupProbability: 1,
       });
@@ -881,7 +852,7 @@ describe("CacheManager", () => {
     });
 
     test("should trigger cleanup when probability allows and interval passed", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
         cleanupProbability: 1, // 100% probability
       });
@@ -902,7 +873,7 @@ describe("CacheManager", () => {
     });
 
     test("should not trigger cleanup when already in progress", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
         cleanupProbability: 1,
       });
@@ -922,7 +893,7 @@ describe("CacheManager", () => {
     });
 
     test("should handle cleanup errors gracefully", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
         cleanupProbability: 1,
       });
@@ -949,7 +920,7 @@ describe("CacheManager", () => {
 
   describe("getOrExecute error handling", () => {
     test("should propagate errors from executed function", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const error = new Error("Execution failed");
@@ -961,7 +932,7 @@ describe("CacheManager", () => {
     });
 
     test("should remove in-flight request on error", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const error = new Error("Execution failed");
@@ -980,7 +951,7 @@ describe("CacheManager", () => {
 
     test("should re-throw ApiError without wrapping", async () => {
       const { ApiError } = await import("../../workspace-client");
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const apiError = new ApiError(
@@ -998,7 +969,7 @@ describe("CacheManager", () => {
     });
 
     test("should allow retry after error", async () => {
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createMockStorage(),
       });
       const fn = vi
@@ -1017,12 +988,8 @@ describe("CacheManager", () => {
 
   describe("strictPersistence mode", () => {
     test("should disable cache when strictPersistence is true and storage unhealthy", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Pass an unhealthy storage with strictPersistence: true
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
         strictPersistence: true,
       });
@@ -1039,12 +1006,8 @@ describe("CacheManager", () => {
 
   describe("storage fallback", () => {
     test("should fallback to in-memory when provided storage is unhealthy", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Pass an unhealthy storage, should fallback to in-memory
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
         strictPersistence: false,
       });
@@ -1056,11 +1019,7 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when provided storage health check fails", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         storage: createUnhealthyMockStorage(),
         strictPersistence: false,
       });
@@ -1073,17 +1032,13 @@ describe("CacheManager", () => {
 
   describe("lakebase default storage", () => {
     test("should use Lakebase when no storage provided and Lakebase is available", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Make pool.query succeed for healthCheck ('SELECT 1')
       mockPoolQuery.mockResolvedValue({
         rows: [{ "?column?": 1 }],
         rowCount: 1,
       });
 
-      const cache = await CacheManager.getInstance({});
+      const cache = await CacheManager.create({});
 
       // Storage should be persistent (Lakebase)
       const storage = (cache as any).storage;
@@ -1091,14 +1046,10 @@ describe("CacheManager", () => {
     });
 
     test("should fallback to in-memory when Lakebase is unavailable", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy (pool.query fails, default in beforeEach)
       mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
-      const cache = await CacheManager.getInstance({});
+      const cache = await CacheManager.create({});
 
       // Cache should work (in-memory fallback)
       await cache.set("test-key", "value");
@@ -1111,14 +1062,10 @@ describe("CacheManager", () => {
     });
 
     test("should disable cache when Lakebase unavailable and strictPersistence is true", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy (pool.query fails)
       mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
-      const cache = await CacheManager.getInstance({
+      const cache = await CacheManager.create({
         strictPersistence: true,
       });
 
@@ -1132,14 +1079,10 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when Lakebase health check fails", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase unhealthy - pool.query('SELECT 1') fails
       mockPoolQuery.mockRejectedValue(new Error("Health check failed"));
 
-      const cache = await CacheManager.getInstance({});
+      const cache = await CacheManager.create({});
 
       // Should be using in-memory storage
       const storage = (cache as any).storage;
@@ -1147,14 +1090,10 @@ describe("CacheManager", () => {
     });
 
     test("should use in-memory storage when Lakebase throws an error", async () => {
-      // Reset singleton
-      (CacheManager as any).instance = null;
-      (CacheManager as any).initPromise = null;
-
       // Lakebase throws
       mockPoolQuery.mockRejectedValue(new Error("Connection refused"));
 
-      const cache = await CacheManager.getInstance({});
+      const cache = await CacheManager.create({});
 
       // Should be using in-memory storage
       const storage = (cache as any).storage;

@@ -71,21 +71,25 @@ export class PluginContext {
   private telemetry: ITelemetry;
 
   /**
-   * This app's cache. `createApp` injects the manager it builds here so every
-   * plugin reads it as `this.cache`. Optional: a context can be built without
-   * one (a bare test context, or the app-less `runAgent` path), in which case
-   * plugins fall back to the process-wide `CacheManager`.
+   * This app's cache. `readonly` so nothing can swap an app's cache after the
+   * context is built, and required so a context cannot exist without one — the
+   * two halves that make "exactly one manager per app" a compiler-checked
+   * invariant. The app-less case is context-less (`attachContext({})`, the
+   * standalone `runAgent` path), not a cache-less context.
    */
-  readonly cache?: CacheManager;
+  readonly cache: CacheManager;
 
   /**
    * @param deps.telemetry - Telemetry provider used for `executeTool` spans.
    *   Defaults to the shared `"plugin-context"` provider — the production
    *   path. Injectable so the testing kit can pass a mock provider and run
-   *   `executeTool` without a live OpenTelemetry pipeline.
-   * @param deps.cache - The manager `createApp` built for this app.
+   *   `executeTool` without a live OpenTelemetry pipeline. This is the only
+   *   seam the mock context needs; route buffering and the tool registry are
+   *   exercised through the existing public API.
+   * @param deps.cache - The manager `_createApp` built for this app. Every
+   *   plugin in the app binds `this.cache` to this object.
    */
-  constructor(deps: { telemetry?: ITelemetry; cache?: CacheManager } = {}) {
+  constructor(deps: { telemetry?: ITelemetry; cache: CacheManager }) {
     this.telemetry =
       deps.telemetry ?? TelemetryManager.getProvider("plugin-context");
     this.cache = deps.cache;
