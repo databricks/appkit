@@ -5,7 +5,7 @@ import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { TelemetryManager } from "../telemetry";
 import type { PluginContext } from "./plugin-context";
-import { releaseCoreSingletons } from "./reset-singletons";
+import { dropCoreSingletons } from "./reset-singletons";
 
 const logger = createLogger("lifecycle");
 
@@ -59,7 +59,7 @@ export class LifecycleManager {
   private shutdownPhase = "not started";
   /** Retained so {@link close} removes its own listeners and nothing else. */
   private signalHandlers: [NodeJS.Signals, () => void][] = [];
-  /** Memoizes {@link close}, so the singleton release happens once. */
+  /** Memoizes {@link close}, so the singleton drop happens once. */
   private closed: Promise<void> | undefined;
 
   constructor(private readonly context: PluginContext) {}
@@ -162,18 +162,17 @@ export class LifecycleManager {
         this.shutdownPhase,
         err,
       );
-      // Release now, not when the orphaned phases settle. Holding the count
-      // makes the next boot skip its reset, so it inherits this app's cache —
-      // which the orphan then closes in phase 5, mid-test. Safe because
-      // runPhases captured its own cache and telemetry before its first await
-      // and never re-reads the shared slots.
-      releaseCoreSingletons();
+      // Drop now, not when the orphaned phases settle: a next boot into these
+      // slots must start from a clean reset. Safe because runPhases captured
+      // its own cache and telemetry before its first await and never re-reads
+      // the shared slots.
+      dropCoreSingletons();
       return;
     }
 
     // Here rather than in runPhases so the signal path skips it — the process is
     // dying there, and dropping pointers is pure cost.
-    releaseCoreSingletons();
+    dropCoreSingletons();
   }
 
   /** No `await` between read and assign — that gap is the re-entrancy window. */

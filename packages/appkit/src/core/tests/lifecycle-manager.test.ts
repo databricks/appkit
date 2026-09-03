@@ -30,7 +30,7 @@ vi.mock("../../telemetry", () => ({
 }));
 
 vi.mock("../reset-singletons", () => ({
-  releaseCoreSingletons: vi.fn(),
+  dropCoreSingletons: vi.fn(),
 }));
 
 vi.mock("../../internal-telemetry", () => ({
@@ -57,7 +57,7 @@ import { TelemetryReporter } from "../../internal-telemetry";
 import { TelemetryManager } from "../../telemetry";
 import { LifecycleManager } from "../lifecycle-manager";
 import { PluginContext } from "../plugin-context";
-import { releaseCoreSingletons } from "../reset-singletons";
+import { dropCoreSingletons } from "../reset-singletons";
 
 function contextWithPlugins(plugins: Record<string, Partial<BasePlugin>>) {
   const ctx = new PluginContext();
@@ -421,7 +421,7 @@ describe("LifecycleManager", () => {
 
       // The whole point of the split.
       expect(exitSpy).not.toHaveBeenCalled();
-      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
+      expect(dropCoreSingletons).toHaveBeenCalledTimes(1);
     });
 
     test("is idempotent: teardown runs once and the second call awaits it", async () => {
@@ -577,15 +577,15 @@ describe("LifecycleManager", () => {
       // A hung teardown must not kill the process on the programmatic path.
       expect(exitSpy).not.toHaveBeenCalled();
 
-      // Released immediately, not deferred to the orphaned teardown. Holding the
-      // count would make the next boot skip its reset and inherit this app's
-      // cache, which the orphan then closes in phase 5.
-      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
+      // Dropped immediately, not deferred to the orphaned teardown. A next boot
+      // into these slots would otherwise inherit this app's cache, which the
+      // orphan then closes in phase 5.
+      expect(dropCoreSingletons).toHaveBeenCalledTimes(1);
 
       // And exactly once, even after the abandoned phases finish.
       releaseHook?.();
       await vi.advanceTimersByTimeAsync(10);
-      expect(releaseCoreSingletons).toHaveBeenCalledTimes(1);
+      expect(dropCoreSingletons).toHaveBeenCalledTimes(1);
     });
   });
 

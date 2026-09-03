@@ -16,12 +16,12 @@ import { vi } from "vitest";
 import { InMemoryStorage } from "../cache/storage/memory";
 import { ServiceContext } from "../context/service-context";
 import { createApp } from "../core/appkit";
+import { dropCoreSingletons } from "../core/reset-singletons";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { fakeUserContext, oboHeaders, setupDatabricksEnv } from "./fixtures";
 import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
-import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
 
 // Loose shapes are intentional here; `noExplicitAny` is off repo-wide (see
 // .oxlintrc.json), so a local alias keeps the intent readable.
@@ -30,23 +30,21 @@ type Any = any;
 /**
  * The env snapshot to restore on close, and whether an app currently holds it.
  *
- * One live app at a time (see the guard in `createTestApp`), so the counter is
- * really a flag. Kept as a count so a stray double release cannot drive it
- * negative and strand the baseline.
+ * One live app at a time (see the guard in `createTestApp`), so a flag suffices.
  */
 let envBaseline: NodeJS.ProcessEnv | undefined;
-let liveHarnessApps = 0;
+let harnessAppLive = false;
 
-/** Take the baseline on the first live app. */
+/** Take the baseline on boot. */
 function acquireEnvBaseline(): void {
-  if (liveHarnessApps === 0) envBaseline = { ...process.env };
-  liveHarnessApps += 1;
+  envBaseline = { ...process.env };
+  harnessAppLive = true;
 }
 
-/** Restore the baseline once no apps are left. */
+/** Restore the baseline on close. */
 function releaseEnvBaseline(): void {
-  liveHarnessApps = Math.max(0, liveHarnessApps - 1);
-  if (liveHarnessApps > 0 || !envBaseline) return;
+  harnessAppLive = false;
+  if (!envBaseline) return;
 
   const baseline = envBaseline;
   envBaseline = undefined;
@@ -235,7 +233,7 @@ export async function createTestApp<T extends Plugins>(
   // on-behalf-of fake are process-wide, so a second live app cannot own its
   // own. Checked before any mutation, so a refused boot leaves the live app
   // untouched.
-  if (liveHarnessApps > 0) {
+  if (harnessAppLive) {
     throw new Error(
       "createTestApp: a harness app is already open. AppKit's workspace " +
         "client, cache, and on-behalf-of fake are process-wide, so a second " +
@@ -266,7 +264,7 @@ export async function createTestApp<T extends Plugins>(
       ...env,
     });
 
-    claimAppKitSingletons();
+    dropCoreSingletons();
 
     // `responses` only seeds the built-in mock, so alongside a caller-supplied
     // client it would silently do nothing. Refuse instead, matching the
@@ -337,9 +335,8 @@ export async function createTestApp<T extends Plugins>(
             closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
           );
         } finally {
-          // No release here: app.close() -> LifecycleManager.close() already
-          // drops this app's claim. A second release would drop a claim this
-          // app never took.
+          // No drop here: app.close() -> LifecycleManager.close() already drops
+          // the singletons for us.
           restoreUserContext?.();
           releaseEnvBaseline();
         }
@@ -422,8 +419,7 @@ export async function createTestApp<T extends Plugins>(
     // Teardown must run from the failure path too, or the boot leaks env
     // mutations and singletons into every later test in the file.
     if (app) {
-      // No release alongside this: close() drops the claim itself, and a second
-      // release would drop a claim this app never took.
+      // No drop alongside this: close() drops the singletons itself.
       try {
         await app.close(
           closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
@@ -432,8 +428,8 @@ export async function createTestApp<T extends Plugins>(
         // The boot error is the interesting one; don't let teardown mask it.
       }
     } else {
-      // Nothing was booted, so nothing else will drop the claim taken above.
-      releaseAppKitSingletons();
+      // Nothing booted, so no close() will run — drop any partial init here.
+      dropCoreSingletons();
     }
     restoreUserContext?.();
     releaseEnvBaseline();

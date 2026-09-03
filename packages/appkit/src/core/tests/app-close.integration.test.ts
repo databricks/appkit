@@ -250,8 +250,9 @@ describe("app handle close()", () => {
     const port = await getListeningPort(second.server.getServer());
 
     try {
-      // The phases are memoized, but the singleton release was not — so this
-      // second call used to drop the singletons the *second* app was using.
+      // close() is memoized as a whole (phases and the singleton drop) — without
+      // that, this stale second call would drop the singletons the *second* app
+      // is using.
       await first.close();
 
       await expect(
