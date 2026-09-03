@@ -189,24 +189,36 @@ For full props API, see: `npx @databricks/appkit docs ./docs/plugins.md`.
 
 ### Execution Interceptor Pattern
 
-Plugins use `execute()` or `executeStream()` which apply interceptors in this order:
-1. **TelemetryInterceptor** (outermost) - Traces execution span
-2. **TimeoutInterceptor** - AbortSignal timeout
-3. **RetryInterceptor** - Exponential backoff retry
-4. **CacheInterceptor** (innermost) - TTL-based caching
+Plugins use `execute()` or `executeStream()`, which wrap the operation in a chain of interceptors. The runtime nesting, from **outermost to innermost**, is:
 
-Example:
+1. **CacheInterceptor** (outermost) - TTL-based caching; a cache hit short-circuits everything below it
+2. **RetryInterceptor** - Exponential backoff retry (full jitter)
+3. **TimeoutInterceptor** - AbortSignal timeout
+4. **TelemetryInterceptor** (innermost) - Traces the execution span, then `fn()` runs
+
+`_buildInterceptors` pushes them in the array order `[telemetry, timeout, retry, cache]`, then `_executeWithInterceptors` folds that array so each *later* entry becomes the *inner* wrapper — netting the cache-outermost order above.
+
+**Observability is layered — it's not just the one `plugin.execute` span:**
+- The innermost `TelemetryInterceptor` opens `plugin.execute`, but because it sits *below* cache/retry/timeout: a cache hit never reaches it, retry attempts do not share a single parent span, and a timeout surfaces only as a generic "Operation cancelled by client" (indistinguishable from a user cancel).
+- The **cache layer** (`src/cache/index.ts`) opens its own `cache.getOrExecute` span with a `cache.hit` attribute plus hit/miss metrics and structured logs — so cache hits *are* observable, via that layer.
+- **Connectors** (SQL warehouse, files, ai-search, jobs) create their own detailed spans/events — that's where most tracing detail lives.
+- `TimeoutInterceptor` and `RetryInterceptor` create no spans; they only emit `logger.event()` (`timeout_ms`, `retry_attempts` live in logs, not the trace).
+
+Example — the second argument is `{ default: PluginExecuteConfig, user?: PluginExecuteConfig }`, where `user` overrides `default` for on-behalf-of requests:
 ```typescript
 await this.execute(
   () => expensiveOperation(),
   {
-    cache: { ttl: 60000 },        // Cache for 60 seconds
-    retry: { maxRetries: 3 },      // Retry up to 3 times
-    timeout: 5000,                 // 5 second timeout
-    telemetry: { traces: true }    // Enable tracing
-  }
+    default: {
+      cache: { enabled: true, cacheKey: ["my-op", id], ttl: 60 }, // TTL is in SECONDS
+      retry: { enabled: true, attempts: 3 },                      // 3 total attempts (1 initial + 2 retries)
+      timeout: 5000,                                              // 5s timeout (milliseconds)
+      telemetryInterceptor: { enabled: true },                   // span on/off (traces also gated by plugin `telemetry` config)
+    },
+  },
 );
 ```
+Cache activates only with both `enabled: true` and a non-empty `cacheKey`; retry only with `enabled: true` and `attempts > 1`.
 
 ### Server-Sent Events (SSE) Streaming
 
