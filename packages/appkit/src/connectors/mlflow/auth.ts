@@ -1,4 +1,7 @@
-import { createWorkspaceClient, type WorkspaceClient } from "../../workspace-client";
+import {
+  createWorkspaceClient,
+  type WorkspaceClient,
+} from "../../workspace-client";
 
 /** Resolved Databricks host + bearer token for the eval runner's REST calls. */
 export interface DatabricksAuth {
