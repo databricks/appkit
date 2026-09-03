@@ -121,10 +121,15 @@ export async function runAgent<TOutput = string>(
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
-  const { text, events, adapter, hadTools, baseMessages } =
-    await runAgentInternal(def, input, providerCache);
 
   const schema = options?.output ?? def.output;
+  // Pass the schema into the main run so a tool-free agent gets
+  // `response_format` inline (no wasted round-trip); the adapter ignores it
+  // when tools are present. Sub-agent recursions never receive it.
+  const mainOutputSchema = schema ? toToolJSONSchema(schema) : undefined;
+  const { text, events, adapter, hadTools, baseMessages } =
+    await runAgentInternal(def, input, providerCache, mainOutputSchema);
+
   if (!schema) return { text, events };
 
   const output = await resolveStructuredOutput<TOutput>({
@@ -181,6 +186,7 @@ async function runAgentInternal(
   def: AgentDefinition<unknown>,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
+  mainOutputSchema?: Record<string, unknown>,
 ): Promise<RawRunResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
@@ -256,6 +262,7 @@ async function runAgentInternal(
       threadId: randomUUID(),
       signal,
       extensions: buildStandaloneExtensions(toolIndex),
+      outputSchema: mainOutputSchema,
     },
     { executeTool, signal },
   );

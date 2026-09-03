@@ -1299,6 +1299,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 threadId: thread.id,
                 signal,
                 extensions: buildAdapterExtensions(registered.toolIndex),
+                // Tool-free structured agents get `response_format` inline; the
+                // adapter ignores it when tools are present.
+                outputSchema: registered.output
+                  ? toToolJSONSchema(registered.output)
+                  : undefined,
               },
               { executeTool, signal },
             );
@@ -1526,6 +1531,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
               tools,
               threadId: thread.id,
               signal,
+              // Tool-free structured agents get `response_format` inline; the
+              // adapter ignores it when tools are present.
+              outputSchema: registered.output
+                ? toToolJSONSchema(registered.output)
+                : undefined,
             },
             { executeTool, signal },
           );
