@@ -1283,3 +1283,168 @@ describe("parseTextToolCalls", () => {
     expect(parseTextToolCalls(`${filler}${suffix}`)).toEqual([]);
   });
 });
+
+describe("DatabricksAdapter structured output", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    mockAuthenticate.mockClear();
+  });
+
+  interface FakeResponse {
+    ok: boolean;
+    status?: number;
+    chunks?: string[];
+    text?: string;
+  }
+
+  /** Records each request body and replays queued responses in order. */
+  function capturingFetch(
+    bodies: Array<Record<string, unknown>>,
+    responses: FakeResponse[],
+  ): typeof globalThis.fetch {
+    let call = 0;
+    return vi.fn().mockImplementation((_url, init) => {
+      if (init?.body) bodies.push(JSON.parse(init.body));
+      const r = responses[Math.min(call, responses.length - 1)];
+      call++;
+      return Promise.resolve({
+        ok: r.ok,
+        status: r.status ?? (r.ok ? 200 : 400),
+        body: r.ok ? createReadableStream(r.chunks ?? []) : null,
+        text: () => Promise.resolve(r.text ?? ""),
+      });
+    });
+  }
+
+  async function drain(gen: AsyncGenerator<AgentEvent>): Promise<void> {
+    for await (const _ of gen) {
+      // consume
+    }
+  }
+
+  const outputSchema = {
+    type: "object",
+    properties: { answer: { type: "string" } },
+    required: ["answer"],
+  };
+
+  test("tool-free run sends response_format json_schema", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: true, chunks: [textDelta('{"answer":"hi"}'), sseChunk("[DONE]")] },
+    ]);
+
+    const adapter = createAdapter();
+    await drain(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: [],
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "structured_output",
+        schema: outputSchema,
+        strict: true,
+      },
+    });
+    expect(bodies[0].tools).toBeUndefined();
+  });
+
+  test("does NOT send response_format when tools are present", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: true, chunks: [textDelta("done"), sseChunk("[DONE]")] },
+    ]);
+
+    const adapter = createAdapter();
+    await drain(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: createTestTools(),
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    expect(bodies[0].response_format).toBeUndefined();
+    expect(bodies[0].tools).toBeDefined();
+  });
+
+  test("400 naming response_format strips it and retries once", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      {
+        ok: false,
+        status: 400,
+        text: "Bad request: response_format is not supported",
+      },
+      { ok: true, chunks: [textDelta('{"answer":"ok"}'), sseChunk("[DONE]")] },
+    ]);
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+    for await (const ev of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: [],
+        threadId: "t1",
+        outputSchema,
+      },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(ev);
+    }
+
+    // First body carried response_format; the retry stripped it.
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].response_format).toBeDefined();
+    expect(bodies[1].response_format).toBeUndefined();
+    // The stream succeeded on retry — the model's JSON came through.
+    expect(events).toContainEqual({
+      type: "message_delta",
+      content: '{"answer":"ok"}',
+    });
+    // No error status leaked (the 400 was recovered).
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: "status", status: "error" }),
+    );
+  });
+
+  test("a 400 NOT naming response_format propagates (no strip-retry)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: false, status: 400, text: "Bad request: token limit exceeded" },
+    ]);
+
+    const adapter = createAdapter();
+    await expect(
+      drain(
+        adapter.run(
+          {
+            messages: createTestMessages(),
+            tools: [],
+            threadId: "t1",
+            outputSchema,
+          },
+          { executeTool: vi.fn() },
+        ),
+      ),
+    ).rejects.toThrow(/token limit exceeded/);
+    // Only the original request — no retry for an unrelated 400.
+    expect(bodies).toHaveLength(1);
+  });
+});
