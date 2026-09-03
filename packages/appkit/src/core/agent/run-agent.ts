@@ -51,11 +51,17 @@ export interface RunAgentInput {
   plugins?: PluginData<PluginConstructor, unknown, string>[];
 }
 
-export interface RunAgentResult {
+export interface RunAgentResult<TOutput = string> {
   /** Aggregated text output from all `message_delta` events. */
   text: string;
   /** Every event the adapter yielded, in order. Useful for inspection/tests. */
   events: AgentEvent[];
+  /**
+   * Parsed, schema-validated object — present only when the agent (or the
+   * per-call override) declared an `output` schema. Statically typed via
+   * `z.infer` when the agent was built with `createAgent({ output })`.
+   */
+  output?: TOutput;
 }
 
 /**
@@ -86,10 +92,10 @@ export interface RunAgentResult {
  *   `PluginContext`) throw at standalone-init time with a clear "use
  *   createApp instead" message — not mid-stream.
  */
-export async function runAgent(
-  def: AgentDefinition,
+export async function runAgent<TOutput = string>(
+  def: AgentDefinition<TOutput>,
   input: RunAgentInput,
-): Promise<RunAgentResult> {
+): Promise<RunAgentResult<TOutput>> {
   // Single shared cache for the whole call graph: parent + every nested
   // sub-agent dispatch share constructed plugin instances. Without this,
   // each nested `runAgent` would build its own cache, re-instantiate every
@@ -97,14 +103,22 @@ export async function runAgent(
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
-  return runAgentInternal(def, input, providerCache);
+  const { text, events } = await runAgentInternal(def, input, providerCache);
+  // Structured-output resolution is wired in a later commit; for now the
+  // typed `output` field is left undefined.
+  return { text, events };
+}
+
+interface RawRunResult {
+  text: string;
+  events: AgentEvent[];
 }
 
 async function runAgentInternal(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
-): Promise<RunAgentResult> {
+): Promise<RawRunResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
@@ -263,7 +277,9 @@ async function initStandalonePlugins(
   }
 }
 
-async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
+async function resolveAdapter(
+  def: AgentDefinition<unknown>,
+): Promise<AgentAdapter> {
   const { model } = def;
   if (!model) {
     const { DatabricksAdapter } = await import("../../agents/databricks");
@@ -344,7 +360,7 @@ type StandaloneEntry =
  * references throw a named "not registered" error via the proxy.
  */
 function buildStandaloneToolIndex(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   plugins: PluginData<PluginConstructor, unknown, string>[],
   providerCache: Map<string, ToolProvider>,
 ): Map<string, StandaloneEntry> {
@@ -389,7 +405,7 @@ function buildStandaloneToolIndex(
  * directly (no construction at toolkit-call time).
  */
 function resolveDefTools(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   plugins: PluginData<PluginConstructor, unknown, string>[],
   providerCache: Map<string, ToolProvider>,
 ): AgentTools {
