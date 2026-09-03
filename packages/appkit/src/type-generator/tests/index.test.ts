@@ -602,19 +602,21 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     );
   });
 
-  test("blocking + a per-key DESCRIBE failure: escalates to a build failure (TypegenFatalError)", async () => {
+  test("blocking + a per-key deny-list DESCRIBE failure: escalates to a build failure (TypegenFatalError)", async () => {
     writeMetricConfig();
 
-    // An injected fetcher always runs and bypasses preflight; throwing makes the
-    // key a deterministic DESCRIBE failure. Non-blocking only warns (covered
-    // above) — but `--wait` promised correct types, so it must fail the build.
+    // An injected fetcher always runs and bypasses preflight; throwing a
+    // deny-list error (400 malformed request) makes the key a deterministic
+    // DESCRIBE failure. Non-blocking only warns (covered above) — but `--wait`
+    // promised correct types, so a deny-list failure must fail the build.
+    // (A non-deny-list throw would instead degrade — see the transient case.)
     const error = await generateFromEntryPoint({
       outFile,
       queryFolder,
       warehouseId: "wh-1",
       mode: "blocking",
       metricFetcher: async () => {
-        throw new Error("DESCRIBE exploded");
+        throw Object.assign(new Error("DESCRIBE exploded"), { status: 400 });
       },
     }).then(
       () => {
