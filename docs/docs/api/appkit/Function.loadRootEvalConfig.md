@@ -17,4 +17,4 @@ app-under-test lifecycle before calling [runEvalsInDir](Function.runEvalsInDir.m
 
 ## Returns
 
-`Promise`\<[`EvalConfig`](Interface.EvalConfig.md) \| `undefined`\>
+`Promise`\<`EvalConfig` \| `undefined`\>

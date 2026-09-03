@@ -26,7 +26,7 @@ optional dataset: {
 Run this eval once per row of a Databricks managed evaluation dataset (a
 Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns).
 Each row is bound to `t.input`/`t.expected`. Requires the runner to have a
-workspace client + warehouse (`--warehouse`). Omit for a single-run eval.
+workspace client + warehouse (`--warehouse-id`). Omit for a single-run eval.
 
 #### limit?
 
@@ -49,6 +49,27 @@ optional description: string;
 ```
 
 Short human description, shown in reports.
+
+***
+
+### tags?
+
+```ts
+optional tags: string[];
+```
+
+Free-form tags for filtering (see the runner's `tags` / `--tag` option).
+
+***
+
+### timeoutMs?
+
+```ts
+optional timeoutMs: number;
+```
+
+Per-eval timeout (ms): `runEval` races the test against it and records a
+non-passing result instead of hanging. Overrides the runner/CLI default.
 
 ## Methods
 

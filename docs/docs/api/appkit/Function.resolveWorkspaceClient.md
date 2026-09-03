@@ -18,4 +18,4 @@ used and the SDK resolves credentials, minting OAuth as needed. Returns
 
 ## Returns
 
-`WorkspaceClient` \| `undefined`
+[`WorkspaceClient`](Interface.WorkspaceClient.md) \| `undefined`

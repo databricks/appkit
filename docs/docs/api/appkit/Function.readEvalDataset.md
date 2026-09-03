@@ -18,7 +18,7 @@ equivalent), so we read the backing table directly.
 
 | Parameter | Type |
 | ------ | ------ |
-| `client` | `WorkspaceClient` |
+| `client` | [`WorkspaceClient`](Interface.WorkspaceClient.md) |
 | `options` | [`ReadEvalDatasetOptions`](Interface.ReadEvalDatasetOptions.md) |
 
 ## Returns

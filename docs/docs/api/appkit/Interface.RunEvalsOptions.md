@@ -12,6 +12,19 @@ Base URL of the running app to drive, e.g. `http://localhost:3000`.
 
 ***
 
+### concurrency?
+
+```ts
+optional concurrency: number;
+```
+
+Max evals to drive concurrently. Each eval opens one stream to the app as
+the same user, so keep this at or below the app's
+`maxConcurrentStreamsPerUser` (default 5) or the surplus streams hit the
+429 guard. Defaults to 4; clamped to `[1, total]`.
+
+***
+
 ### filter?
 
 ```ts
@@ -62,18 +75,6 @@ model: string;
 ```ts
 token: string;
 ```
-
-***
-
-### maxConcurrency?
-
-```ts
-optional maxConcurrency: number;
-```
-
-Max evals/dataset rows to drive concurrently. Defaults to `1` (serial).
-Values below 1 are clamped to 1. Output order is preserved regardless.
-Wins over an agent's `evals.config.ts` `maxConcurrency`.
 
 ***
 
@@ -169,7 +170,7 @@ retried (a wrong reply is real signal, not flake). Defaults to `0`.
 optional rootDir: string;
 ```
 
-Project root containing `config/agents/`. Defaults to `process.cwd()`.
+Project root containing `server/agents/`. Defaults to `process.cwd()`.
 
 ***
 
@@ -200,8 +201,9 @@ Tags live on the eval def, so filtering happens after each file is loaded.
 optional timeoutMs: number;
 ```
 
-Default per-eval timeout (ms). A per-eval `def.timeoutMs` overrides it.
-Wins over an agent's `evals.config.ts` `timeoutMs`.
+Default per-eval timeout (ms): `runEval` races the whole test against it and
+it also caps each driver turn. A per-eval `def.timeoutMs` overrides it, and
+it wins over an agent's `evals.config.ts` `timeoutMs`. Unbounded when unset.
 
 ***
 

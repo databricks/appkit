@@ -1,6 +1,6 @@
 # Interface: DiscoveredEvalConfig
 
-A per-agent `evals.config.ts` found under `config/agents/<agent>/evals/`.
+A per-agent `evals.config.ts` found under `server/agents/<agent>/evals/`.
 
 ## Properties
 
