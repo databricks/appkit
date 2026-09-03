@@ -268,7 +268,7 @@ export abstract class Plugin<
 
   private tryAttachContext(): void {
     try {
-      this.cache = CacheManager.getInstanceSync();
+      this.cache = this.context?.cache ?? CacheManager.getInstanceSync();
     } catch {
       return;
     }
@@ -293,16 +293,16 @@ export abstract class Plugin<
       telemetryConfig?: BasePluginConfig["telemetry"];
     } = {},
   ): void {
+    if (deps.context !== undefined) {
+      this.context = deps.context as PluginContext;
+    }
     if (!this.cache) {
-      this.cache = CacheManager.getInstanceSync();
+      this.cache = this.context?.cache ?? CacheManager.getInstanceSync();
     }
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       deps.telemetryConfig ?? this.config.telemetry,
     );
-    if (deps.context !== undefined) {
-      this.context = deps.context as PluginContext;
-    }
     this.isReady = true;
   }
 

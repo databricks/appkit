@@ -32,10 +32,16 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
 
-  private constructor(config: { plugins: TPlugins }) {
+  /**
+   * @param context - The app's plugin context, carrying this app's cache. Built
+   *   in `_createApp` after the cache so it can be injected here, rather than
+   *   constructed inside AppKit — this is what lets a later change give each
+   *   app its own manager.
+   */
+  private constructor(config: { plugins: TPlugins }, context: PluginContext) {
     const { plugins, ...globalConfig } = config;
 
-    this.#context = new PluginContext();
+    this.#context = context;
 
     const pluginEntries = Object.entries(plugins);
 
@@ -194,7 +200,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
   ): Promise<PluginMap<T>> {
     // Initialize core services
     TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
+    const cache = await CacheManager.getInstance(config?.cache);
 
     const withDefaults = AppKit.withDefaultPlugins(config.plugins as T);
     const rawPlugins = AppKit.filterDevOnlyPlugins(withDefaults);
@@ -220,7 +226,8 @@ export class AppKit<TPlugins extends InputPluginMap> {
       plugins: preparedPlugins,
     };
 
-    const instance = new AppKit(mergedConfig);
+    const context = new PluginContext({ cache });
+    const instance = new AppKit(mergedConfig, context);
 
     await Promise.all(instance.#setupPromises);
     await instance.#context.emitLifecycle("setup:complete");
