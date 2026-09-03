@@ -27,6 +27,7 @@ import type {
   ResolvedSkillCatalog,
   SkillDefinition,
 } from "../../core/agent/skills";
+import { resolveStructuredOutput } from "../../core/agent/structured-output";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
@@ -34,6 +35,7 @@ import {
   isHostedTool,
   resolveHostedTools,
 } from "../../core/agent/tools";
+import { toToolJSONSchema } from "../../core/agent/tools/json-schema";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -65,6 +67,7 @@ import {
   initAgentTracing,
   linkTraceToRun,
   traceAgent,
+  traceTool,
 } from "./mlflow";
 import { composePromptForAgent } from "./prompt";
 import {
@@ -493,6 +496,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       maxTokens: def.maxTokens,
       generationParams: def.generationParams,
       ephemeral: def.ephemeral,
+      output: def.output,
       skills,
     };
   }
@@ -1332,6 +1336,27 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 outboundEvents.push(evt);
               }
             }
+
+            // Structured output: after the visible text, coerce + validate the
+            // answer against the agent's schema and emit one final
+            // `structured_output` event. Retries (if any) happen here, invisible
+            // to the streamed text. On exhaustion the throw propagates to the
+            // driver's catch and surfaces as an error event.
+            if (registered.output) {
+              const data = await this.runStructuredOutput(
+                registered,
+                messagesWithSystem,
+                fullContent,
+                tools.length > 0,
+                signal,
+              );
+              for (const evt of translator.translate({
+                type: "structured_output",
+                data,
+              })) {
+                outboundEvents.push(evt);
+              }
+            }
           },
         );
 
@@ -1428,6 +1453,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Assigned inside the span below (the only place the active trace id
     // resolves), read into the response envelope after.
     let mlflowTraceId: string | undefined;
+    // Parsed structured output, when the agent declared an `output` schema.
+    let outputParsed: unknown;
 
     const runState: RunState = {
       req,
@@ -1515,6 +1542,19 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             });
           }
 
+          // Structured output: coerce + validate against the agent's schema
+          // and attach as the envelope's `output_parsed`. Throws on exhaustion
+          // (caught below as a 500) — never returns partial data.
+          if (registered.output) {
+            outputParsed = await this.runStructuredOutput(
+              registered,
+              messagesWithSystem,
+              fullContent,
+              tools.length > 0,
+              signal,
+            );
+          }
+
           mlflowTraceId = currentTraceId();
         },
       );
@@ -1571,8 +1611,63 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       ...(runState.toolErrors.length > 0
         ? { tool_errors: runState.toolErrors }
         : {}),
+      // Parsed, schema-validated object when the agent declared an `output`
+      // schema — the non-streaming equivalent of the `structured_output` SSE
+      // event. Conditionally spread, like `mlflow_trace_id` / `tool_errors`.
+      ...(outputParsed !== undefined ? { output_parsed: outputParsed } : {}),
       output: [message],
     });
+  }
+
+  /**
+   * Resolves an agent's structured output from the run's final text. The
+   * structuring pass(es) run as a fresh tool-free `adapter.run()` constrained
+   * by the schema, wrapped in a TOOL span so they nest under the turn's AGENT
+   * span. Assumes `registered.output` is set. Throws `StructuredOutputError`
+   * if no schema-valid object can be produced within the retry budget.
+   */
+  private runStructuredOutput(
+    registered: RegisteredAgent,
+    baseMessages: Message[],
+    finalText: string,
+    hadTools: boolean,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const schema = registered.output;
+    if (!schema) {
+      throw new Error("runStructuredOutput called without an output schema");
+    }
+    const outputSchema = toToolJSONSchema(schema);
+    return traceTool("structured_output", { schema: outputSchema }, () =>
+      resolveStructuredOutput({
+        schema,
+        baseMessages,
+        finalText,
+        hadTools,
+        signal,
+        runStructuringPass: (messages, sig) =>
+          consumeAdapterStream(
+            registered.adapter.run(
+              {
+                messages,
+                tools: [],
+                threadId: randomUUID(),
+                signal: sig,
+                outputSchema,
+              },
+              {
+                executeTool: () => {
+                  throw new Error(
+                    "structured-output structuring pass is tool-free and must not call a tool",
+                  );
+                },
+                signal: sig,
+              },
+            ),
+            { signal: sig },
+          ),
+      }),
+    );
   }
 
   private dispatchSkillTool(
