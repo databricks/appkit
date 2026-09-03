@@ -96,7 +96,6 @@ interface EvalOptions {
   judgeModel?: string;
   concurrency?: number;
   warehouseId?: string;
-  warehouse?: string;
 }
 
 /** Resolved Databricks host + bearer (either field may be absent). */
@@ -210,7 +209,7 @@ async function runAgentEval(
 
   // Managed-dataset reads: a workspace client (same profile/host/token) + a SQL
   // warehouse. Only needed by evals that declare `dataset`.
-  const warehouseId = opts.warehouse ?? process.env.DATABRICKS_WAREHOUSE_ID;
+  const warehouseId = opts.warehouseId ?? process.env.DATABRICKS_WAREHOUSE_ID;
   const workspaceClient = runner.resolveWorkspaceClient({
     profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
     host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
@@ -299,11 +298,7 @@ export const agentEvalCommand = new Command("eval")
   )
   .option(
     "--warehouse-id <id>",
-    "SQL warehouse id for writing assessments to UC-backed experiments (default: MLFLOW_TRACING_SQL_WAREHOUSE_ID or DATABRICKS_WAREHOUSE_ID)",
-  )
-  .option(
-    "--warehouse <id>",
-    "SQL warehouse id for reading managed evaluation datasets (default: DATABRICKS_WAREHOUSE_ID)",
+    "SQL warehouse id for reading managed eval datasets and writing assessments to UC-backed experiments (default: DATABRICKS_WAREHOUSE_ID, or MLFLOW_TRACING_SQL_WAREHOUSE_ID for assessments)",
   )
   .option(
     "--judge-model <endpoint>",
