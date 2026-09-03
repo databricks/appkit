@@ -50,6 +50,27 @@ optional description: string;
 
 Short human description, shown in reports.
 
+***
+
+### tags?
+
+```ts
+optional tags: string[];
+```
+
+Free-form tags for filtering (see the runner's `tags` / `--tag` option).
+
+***
+
+### timeoutMs?
+
+```ts
+optional timeoutMs: number;
+```
+
+Per-eval timeout (ms): `runEval` races the test against it and records a
+non-passing result instead of hanging. Overrides the runner/CLI default.
+
 ## Methods
 
 ### test()
