@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1066409,
-        "unpacked": 3716413
+        "packed": 1081706,
+        "unpacked": 3764742
       },
       "dist": {
         "total": {
-          "raw": 3702013,
-          "gzip": 1250725
+          "raw": 3750294,
+          "gzip": 1266463
         },
         "js": {
-          "raw": 1099790,
-          "gzip": 385531
+          "raw": 1117130,
+          "gzip": 391295
         },
         "types": {
-          "raw": 394541,
-          "gzip": 139298
+          "raw": 394864,
+          "gzip": 139444
         },
         "maps": {
-          "raw": 2196887,
-          "gzip": 722078
+          "raw": 2227505,
+          "gzip": 731906
         },
         "css": {
           "raw": 0,
@@ -36,17 +36,17 @@
       "entries": [
         {
           "id": ".",
-          "gzip": 99691,
+          "gzip": 100152,
           "composition": {
-            "initialGzip": 97117,
+            "initialGzip": 97578,
             "lazyGzip": 2574,
-            "totalGzip": 99691,
-            "own": 318263,
+            "totalGzip": 100152,
+            "own": 320035,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 93019,
+                "gzip": 93480,
                 "kind": "initial"
               },
               {
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 77218,
+          "gzip": 78635,
           "composition": {
-            "initialGzip": 76761,
-            "lazyGzip": 457,
-            "totalGzip": 77218,
-            "own": 231202,
+            "initialGzip": 78179,
+            "lazyGzip": 456,
+            "totalGzip": 78635,
+            "own": 235380,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 60213,
+                "gzip": 61629,
                 "kind": "initial"
               },
               {
@@ -89,7 +89,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 3230,
+                "gzip": 3231,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1346,
+                "gzip": 1347,
                 "kind": "initial"
               },
               {
@@ -119,7 +119,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 142,
+                "gzip": 141,
                 "kind": "lazy"
               },
               {
@@ -132,17 +132,17 @@
         },
         {
           "id": "./testing",
-          "gzip": 16912,
+          "gzip": 17239,
           "composition": {
-            "initialGzip": 16912,
+            "initialGzip": 17239,
             "lazyGzip": 0,
-            "totalGzip": 16912,
-            "own": 51392,
+            "totalGzip": 17239,
+            "own": 52710,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 16912,
+                "gzip": 17239,
                 "kind": "initial"
               }
             ]
@@ -168,17 +168,17 @@
         },
         {
           "id": "./type-generator",
-          "gzip": 23010,
+          "gzip": 23134,
           "composition": {
-            "initialGzip": 23010,
+            "initialGzip": 23134,
             "lazyGzip": 0,
-            "totalGzip": 23010,
-            "own": 66420,
+            "totalGzip": 23134,
+            "own": 66859,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 23010,
+                "gzip": 23134,
                 "kind": "initial"
               }
             ]
@@ -189,7 +189,7 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 358131,
+        "packed": 358130,
         "unpacked": 1443865
       },
       "dist": {

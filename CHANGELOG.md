@@ -142,6 +142,16 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.71.0](https://github.com/databricks/appkit/compare/v0.70.0...v0.71.0) (2026-09-03)
+
+### appkit
+
+* **appkit:** degrade typegen on build-time auth errors instead of failing the build ([#561](https://github.com/databricks/appkit/issues/561)) ([5949ec5](https://github.com/databricks/appkit/commit/5949ec5c5c3838f2d4616a5f16b06f90f84c62a1))
+* **appkit:** migrate agent mlflow tracing to @mlflow/core with Unity Catalog support ([#545](https://github.com/databricks/appkit/issues/545)) ([4c767f8](https://github.com/databricks/appkit/commit/4c767f8d2a7502db8678a8432dc52bc0ae43f7df)), closes [#agentTraceIds](https://github.com/databricks/appkit/issues/agentTraceIds)
+
+
 ## [0.70.0](https://github.com/databricks/appkit/compare/v0.69.3...v0.70.0) (2026-09-02)
 
 ### stream

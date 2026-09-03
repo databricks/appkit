@@ -8,6 +8,7 @@ This Software contains code from the following open source projects:
 | :--------------- | :---------------- | :----------- | :--------------------------------------------------- |
 | [@ast-grep/napi](https://www.npmjs.com/package/@ast-grep/napi) | 0.37.0 | MIT | https://ast-grep.github.io |
 | [@clack/prompts](https://www.npmjs.com/package/@clack/prompts) | 1.0.1 | MIT | https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme |
+| [@mlflow/core](https://www.npmjs.com/package/@mlflow/core) | 0.4.0 | Apache-2.0 | https://mlflow.org/ |
 | [@opentelemetry/api](https://www.npmjs.com/package/@opentelemetry/api) | 1.9.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/api |
 | [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |
 | [@opentelemetry/auto-instrumentations-node](https://www.npmjs.com/package/@opentelemetry/auto-instrumentations-node) | 0.77.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/auto-instrumentations-node#readme |
@@ -20,8 +21,8 @@ This Software contains code from the following open source projects:
 | [@opentelemetry/resources](https://www.npmjs.com/package/@opentelemetry/resources) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-resources |
 | [@opentelemetry/sdk-logs](https://www.npmjs.com/package/@opentelemetry/sdk-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/sdk-logs |
 | [@opentelemetry/sdk-metrics](https://www.npmjs.com/package/@opentelemetry/sdk-metrics) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/sdk-metrics |
-| [@opentelemetry/sdk-node](https://www.npmjs.com/package/@opentelemetry/sdk-node) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-sdk-node |
 | [@opentelemetry/sdk-trace-base](https://www.npmjs.com/package/@opentelemetry/sdk-trace-base) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-base |
+| [@opentelemetry/sdk-trace-node](https://www.npmjs.com/package/@opentelemetry/sdk-trace-node) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-node |
 | [@opentelemetry/semantic-conventions](https://www.npmjs.com/package/@opentelemetry/semantic-conventions) | 1.38.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions |
 | [@radix-ui/react-accordion](https://www.npmjs.com/package/@radix-ui/react-accordion) | 1.2.12 | MIT | https://radix-ui.com/primitives |
 | [@radix-ui/react-alert-dialog](https://www.npmjs.com/package/@radix-ui/react-alert-dialog) | 1.1.15 | MIT | https://radix-ui.com/primitives |
@@ -71,7 +72,6 @@ This Software contains code from the following open source projects:
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [magic-string](https://www.npmjs.com/package/magic-string) | 0.30.21 | MIT | https://github.com/Rich-Harris/magic-string#readme |
 | [marked](https://www.npmjs.com/package/marked) | 16.4.2, 17.0.3 | MIT | https://marked.js.org |
-| [mlflow-tracing](https://www.npmjs.com/package/mlflow-tracing) | 0.1.3 | Apache-2.0 | https://mlflow.org/ |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
 | [obug](https://www.npmjs.com/package/obug) | 2.1.1 | MIT | https://github.com/sxzz/obug#readme |
 | [pg](https://www.npmjs.com/package/pg) | 8.18.0 | MIT | https://github.com/brianc/node-postgres |
