@@ -109,11 +109,22 @@ export interface RunAgentResult<TOutput = string> {
  *   `PluginContext`) throw at standalone-init time with a clear "use
  *   createApp instead" message — not mid-stream.
  */
-export async function runAgent<TOutput = string>(
+// Per-call schema override drives the result type via z.infer.
+export function runAgent<S extends z.ZodType>(
+  def: AgentDefinition<unknown>,
+  input: RunAgentInput,
+  options: RunAgentOptions<z.infer<S>> & { output: S },
+): Promise<RunAgentResult<z.infer<S>>>;
+// No override — the result type comes from the agent's own `output` schema.
+export function runAgent<TOutput = string>(
   def: AgentDefinition<TOutput>,
   input: RunAgentInput,
-  options?: RunAgentOptions<TOutput>,
-): Promise<RunAgentResult<TOutput>> {
+): Promise<RunAgentResult<TOutput>>;
+export async function runAgent(
+  def: AgentDefinition<unknown>,
+  input: RunAgentInput,
+  options?: RunAgentOptions,
+): Promise<RunAgentResult<unknown>> {
   // Single shared cache for the whole call graph: parent + every nested
   // sub-agent dispatch share constructed plugin instances. Without this,
   // each nested `runAgent` would build its own cache, re-instantiate every
@@ -132,7 +143,7 @@ export async function runAgent<TOutput = string>(
 
   if (!schema) return { text, events };
 
-  const output = await resolveStructuredOutput<TOutput>({
+  const output = await resolveStructuredOutput({
     schema,
     baseMessages,
     finalText: text,
