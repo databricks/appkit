@@ -1299,11 +1299,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 threadId: thread.id,
                 signal,
                 extensions: buildAdapterExtensions(registered.toolIndex),
-                // Tool-free structured agents get `response_format` inline; the
-                // adapter ignores it when tools are present.
-                outputSchema: registered.output
-                  ? toToolJSONSchema(registered.output)
-                  : undefined,
               },
               { executeTool, signal },
             );
@@ -1352,7 +1347,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 registered,
                 messagesWithSystem,
                 fullContent,
-                tools.length > 0,
                 signal,
               );
               for (const evt of translator.translate({
@@ -1531,11 +1525,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
               tools,
               threadId: thread.id,
               signal,
-              // Tool-free structured agents get `response_format` inline; the
-              // adapter ignores it when tools are present.
-              outputSchema: registered.output
-                ? toToolJSONSchema(registered.output)
-                : undefined,
             },
             { executeTool, signal },
           );
@@ -1560,7 +1549,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
               registered,
               messagesWithSystem,
               fullContent,
-              tools.length > 0,
               signal,
             );
           }
@@ -1640,7 +1628,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     baseMessages: Message[],
     finalText: string,
-    hadTools: boolean,
     signal: AbortSignal,
   ): Promise<unknown> {
     const schema = registered.output;
@@ -1653,7 +1640,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         schema,
         baseMessages,
         finalText,
-        hadTools,
         signal,
         runStructuringPass: (messages, sig) =>
           consumeAdapterStream(

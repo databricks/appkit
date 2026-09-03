@@ -133,21 +133,22 @@ export async function runAgent(
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
 
-  const schema = options?.output ?? def.output;
-  // Pass the schema into the main run so a tool-free agent gets
-  // `response_format` inline (no wasted round-trip); the adapter ignores it
-  // when tools are present. Sub-agent recursions never receive it.
-  const mainOutputSchema = schema ? toToolJSONSchema(schema) : undefined;
-  const { text, events, adapter, hadTools, baseMessages } =
-    await runAgentInternal(def, input, providerCache, mainOutputSchema);
+  const { text, events, adapter, baseMessages } = await runAgentInternal(
+    def,
+    input,
+    providerCache,
+  );
 
+  const schema = options?.output ?? def.output;
   if (!schema) return { text, events };
 
+  // Structured output is produced by a separate tool-free, non-streaming
+  // structuring pass (Databricks rejects response_format under streaming),
+  // so the main run above always streams the visible answer normally.
   const output = await resolveStructuredOutput({
     schema,
     baseMessages,
     finalText: text,
-    hadTools,
     runStructuringPass: buildStructuringPass(adapter, schema),
     signal: input.signal,
   });
@@ -187,8 +188,6 @@ interface RawRunResult {
   events: AgentEvent[];
   /** Adapter used for the run — reused for the structuring pass. */
   adapter: AgentAdapter;
-  /** Whether the run exposed tools (tool-having answers need a structuring pass). */
-  hadTools: boolean;
   /** Normalized system + input messages the run saw (structuring-pass seed). */
   baseMessages: Message[];
 }
@@ -197,7 +196,6 @@ async function runAgentInternal(
   def: AgentDefinition<unknown>,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
-  mainOutputSchema?: Record<string, unknown>,
 ): Promise<RawRunResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
@@ -273,7 +271,6 @@ async function runAgentInternal(
       threadId: randomUUID(),
       signal,
       extensions: buildStandaloneExtensions(toolIndex),
-      outputSchema: mainOutputSchema,
     },
     { executeTool, signal },
   );
@@ -292,7 +289,6 @@ async function runAgentInternal(
     text,
     events,
     adapter,
-    hadTools: tools.length > 0,
     baseMessages: messages,
   };
 }

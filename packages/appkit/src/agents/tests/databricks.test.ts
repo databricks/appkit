@@ -1295,7 +1295,10 @@ describe("DatabricksAdapter structured output", () => {
   interface FakeResponse {
     ok: boolean;
     status?: number;
+    /** SSE chunks for the streaming path. */
     chunks?: string[];
+    /** Parsed body for the non-streaming (structured) path. */
+    json?: unknown;
     text?: string;
   }
 
@@ -1313,15 +1316,23 @@ describe("DatabricksAdapter structured output", () => {
         ok: r.ok,
         status: r.status ?? (r.ok ? 200 : 400),
         body: r.ok ? createReadableStream(r.chunks ?? []) : null,
+        json: () => Promise.resolve(r.json),
         text: () => Promise.resolve(r.text ?? ""),
       });
     });
   }
 
-  async function drain(gen: AsyncGenerator<AgentEvent>): Promise<void> {
-    for await (const _ of gen) {
-      // consume
-    }
+  /** A non-streaming chat-completion body with a single JSON message. */
+  function completion(content: string): unknown {
+    return { choices: [{ message: { role: "assistant", content } }] };
+  }
+
+  async function collect(
+    gen: AsyncGenerator<AgentEvent>,
+  ): Promise<AgentEvent[]> {
+    const events: AgentEvent[] = [];
+    for await (const ev of gen) events.push(ev);
+    return events;
   }
 
   const outputSchema = {
@@ -1330,14 +1341,14 @@ describe("DatabricksAdapter structured output", () => {
     required: ["answer"],
   };
 
-  test("tool-free run sends response_format json_schema", async () => {
+  test("tool-free structured run is NON-streaming with response_format", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = capturingFetch(bodies, [
-      { ok: true, chunks: [textDelta('{"answer":"hi"}'), sseChunk("[DONE]")] },
+      { ok: true, json: completion('{"answer":"hi"}') },
     ]);
 
     const adapter = createAdapter();
-    await drain(
+    const events = await collect(
       adapter.run(
         {
           messages: createTestMessages(),
@@ -1350,6 +1361,7 @@ describe("DatabricksAdapter structured output", () => {
     );
 
     expect(bodies).toHaveLength(1);
+    expect(bodies[0].stream).toBe(false);
     expect(bodies[0].response_format).toEqual({
       type: "json_schema",
       json_schema: {
@@ -1359,16 +1371,21 @@ describe("DatabricksAdapter structured output", () => {
       },
     });
     expect(bodies[0].tools).toBeUndefined();
+    // The JSON arrives as a single `message` event (not streamed deltas).
+    expect(events).toContainEqual({
+      type: "message",
+      content: '{"answer":"hi"}',
+    });
   });
 
-  test("does NOT send response_format when tools are present", async () => {
+  test("does NOT send response_format when tools are present (stays streaming)", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = capturingFetch(bodies, [
       { ok: true, chunks: [textDelta("done"), sseChunk("[DONE]")] },
     ]);
 
     const adapter = createAdapter();
-    await drain(
+    await collect(
       adapter.run(
         {
           messages: createTestMessages(),
@@ -1382,49 +1399,47 @@ describe("DatabricksAdapter structured output", () => {
 
     expect(bodies[0].response_format).toBeUndefined();
     expect(bodies[0].tools).toBeDefined();
+    expect(bodies[0].stream).toBe(true);
   });
 
-  test("400 naming response_format strips it and retries once", async () => {
+  test("400 naming structured output strips response_format and retries once", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = capturingFetch(bodies, [
       {
         ok: false,
         status: 400,
-        text: "Bad request: response_format is not supported",
+        text: "INVALID_PARAMETER_VALUE: Structured output is not currently supported with streaming.",
       },
-      { ok: true, chunks: [textDelta('{"answer":"ok"}'), sseChunk("[DONE]")] },
+      { ok: true, json: completion('{"answer":"ok"}') },
     ]);
 
     const adapter = createAdapter();
-    const events: AgentEvent[] = [];
-    for await (const ev of adapter.run(
-      {
-        messages: createTestMessages(),
-        tools: [],
-        threadId: "t1",
-        outputSchema,
-      },
-      { executeTool: vi.fn() },
-    )) {
-      events.push(ev);
-    }
+    const events = await collect(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: [],
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
 
-    // First body carried response_format; the retry stripped it.
+    // First body carried response_format; the retry stripped it. Both non-streaming.
     expect(bodies).toHaveLength(2);
     expect(bodies[0].response_format).toBeDefined();
     expect(bodies[1].response_format).toBeUndefined();
-    // The stream succeeded on retry — the model's JSON came through.
     expect(events).toContainEqual({
-      type: "message_delta",
+      type: "message",
       content: '{"answer":"ok"}',
     });
-    // No error status leaked (the 400 was recovered).
     expect(events).not.toContainEqual(
       expect.objectContaining({ type: "status", status: "error" }),
     );
   });
 
-  test("a 400 NOT naming response_format propagates (no strip-retry)", async () => {
+  test("a 400 NOT naming the param propagates (no strip-retry)", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = capturingFetch(bodies, [
       { ok: false, status: 400, text: "Bad request: token limit exceeded" },
@@ -1432,7 +1447,7 @@ describe("DatabricksAdapter structured output", () => {
 
     const adapter = createAdapter();
     await expect(
-      drain(
+      collect(
         adapter.run(
           {
             messages: createTestMessages(),

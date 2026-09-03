@@ -28,7 +28,7 @@ function recordingAdapter(
 }
 
 describe("runAgent structured output", () => {
-  test("tool-free agent: output is parsed; main run carries outputSchema, no tools", async () => {
+  test("answer already valid JSON: direct pre-check, no structuring pass", async () => {
     const adapter = recordingAdapter(['{"answer":"hi","score":1}']);
     const agent = createAgent({
       instructions: "classify",
@@ -39,19 +39,40 @@ describe("runAgent structured output", () => {
     const result = await runAgent(agent, { messages: "hello" });
 
     expect(result.output).toEqual({ answer: "hi", score: 1 });
-    // Statically typed via z.infer — this line only compiles if the type is right.
+    // Statically typed via z.infer — compiles only if the type is right.
     const typed: { answer: string; score: number } | undefined = result.output;
     expect(typed?.answer).toBe("hi");
 
+    // One run only; the main run never carries outputSchema.
     expect(adapter.calls).toHaveLength(1);
-    expect(adapter.calls[0].outputSchema).toBeDefined();
-    expect(adapter.calls[0].tools).toEqual([]);
+    expect(adapter.calls[0].outputSchema).toBeUndefined();
   });
 
-  test("tool-having agent: runs a tool-free structuring pass over the prose answer", async () => {
+  test("prose answer: a tool-free structuring pass produces the object", async () => {
     const adapter = recordingAdapter([
       "The answer is hi with a score of 1.", // main run: prose
       '{"answer":"hi","score":1}', // structuring pass: JSON
+    ]);
+    const agent = createAgent({
+      instructions: "classify",
+      model: adapter,
+      output: schema,
+    });
+
+    const result = await runAgent(agent, { messages: "hello" });
+
+    expect(result.output).toEqual({ answer: "hi", score: 1 });
+    expect(adapter.calls).toHaveLength(2);
+    // Main run: no outputSchema. Structuring pass: tool-free + schema-constrained.
+    expect(adapter.calls[0].outputSchema).toBeUndefined();
+    expect(adapter.calls[1].tools).toEqual([]);
+    expect(adapter.calls[1].outputSchema).toBeDefined();
+  });
+
+  test("tool-having agent structures identically (tool only on the main run)", async () => {
+    const adapter = recordingAdapter([
+      "Looks like a billing issue, not urgent.",
+      '{"answer":"billing","score":0}',
     ]);
     const agent = createAgent({
       instructions: "classify",
@@ -69,11 +90,10 @@ describe("runAgent structured output", () => {
 
     const result = await runAgent(agent, { messages: "hello" });
 
-    expect(result.output).toEqual({ answer: "hi", score: 1 });
+    expect(result.output).toEqual({ answer: "billing", score: 0 });
     expect(adapter.calls).toHaveLength(2);
-    // Main run exposed the tool; the structuring pass is tool-free + constrained.
-    expect(adapter.calls[0].tools).toHaveLength(1);
-    expect(adapter.calls[1].tools).toEqual([]);
+    expect(adapter.calls[0].tools).toHaveLength(1); // main run has the tool
+    expect(adapter.calls[1].tools).toEqual([]); // structuring pass is tool-free
     expect(adapter.calls[1].outputSchema).toBeDefined();
   });
 
@@ -101,8 +121,8 @@ describe("runAgent structured output", () => {
     await expect(runAgent(agent, { messages: "hi" })).rejects.toBeInstanceOf(
       StructuredOutputError,
     );
-    // 1 main run + 2 structuring retries.
-    expect(adapter.calls).toHaveLength(3);
+    // main run + convert pass + 2 retry passes.
+    expect(adapter.calls).toHaveLength(4);
   });
 
   test("no output schema: result.output is undefined, no extra runs", async () => {

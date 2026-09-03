@@ -46,14 +46,8 @@ interface ResolveStructuredOutputParams<T> {
    * instruction to this.
    */
   baseMessages: Message[];
-  /** The main run's final assistant text (already JSON when `hadTools` is false). */
+  /** The main run's final assistant text (the answer to reformat into JSON). */
   finalText: string;
-  /**
-   * Whether the main run used tools. Tool-having runs produce prose, so the
-   * first attempt is a structuring pass; tool-free runs already emitted JSON
-   * inline (via `response_format`), so `finalText` is validated directly.
-   */
-  hadTools: boolean;
   /** Runs one tool-free, schema-constrained completion (see {@link StructuringPass}). */
   runStructuringPass: StructuringPass;
   signal?: AbortSignal;
@@ -62,33 +56,28 @@ interface ResolveStructuredOutputParams<T> {
 /**
  * Validate-and-retry loop that turns an agent's answer into a typed object.
  *
- * - Tool-free agent: `finalText` is already `response_format` JSON, validated
- *   directly; on failure a re-prompted structuring pass runs.
- * - Tool-having agent: the answer is prose, so a structuring pass reformats it
- *   into JSON first.
- *
- * On every failure it re-prompts with the flattened Zod issues (up to
- * {@link MAX_VALIDATION_RETRIES} times), then throws {@link StructuredOutputError}
- * carrying the last raw output. Never returns partial/unvalidated data.
+ * The agent's visible answer (`finalText`) is validated as-is first — a model
+ * may already emit valid JSON — as a cheap pre-check. Otherwise a tool-free,
+ * schema-constrained structuring pass reformats it into JSON, re-prompting with
+ * the flattened Zod issues on each failure (up to {@link MAX_VALIDATION_RETRIES}
+ * times). On exhaustion it throws {@link StructuredOutputError} carrying the
+ * last raw output; it never returns partial/unvalidated data.
  */
 export async function resolveStructuredOutput<T>(
   params: ResolveStructuredOutputParams<T>,
 ): Promise<T> {
-  const {
-    schema,
-    baseMessages,
-    finalText,
-    hadTools,
-    runStructuringPass,
-    signal,
-  } = params;
+  const { schema, baseMessages, finalText, runStructuringPass, signal } =
+    params;
 
-  let lastRaw = hadTools
-    ? await runStructuringPass(
-        structuringMessages(baseMessages, finalText, CONVERT_INSTRUCTION),
-        signal,
-      )
-    : finalText;
+  // Cheap pre-check: the answer may already be valid JSON (no round-trip).
+  const direct = parseAndValidate(schema, finalText);
+  if (direct.ok) return direct.value;
+
+  // Reformat the answer into JSON via a tool-free structuring pass.
+  let lastRaw = await runStructuringPass(
+    structuringMessages(baseMessages, finalText, CONVERT_INSTRUCTION),
+    signal,
+  );
 
   for (let retries = 0; ; retries++) {
     const parsed = parseAndValidate(schema, lastRaw);

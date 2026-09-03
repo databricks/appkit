@@ -18,13 +18,12 @@ function baseMessages(): Message[] {
 }
 
 describe("resolveStructuredOutput", () => {
-  test("tool-free: validates finalText directly, no structuring pass", async () => {
+  test("validates the answer as-is when it is already valid JSON (no pass)", async () => {
     const pass = vi.fn<StructuringPass>();
     const output = await resolveStructuredOutput({
       schema,
       baseMessages: baseMessages(),
       finalText: JSON.stringify({ category: "billing", urgent: true }),
-      hadTools: false,
       runStructuringPass: pass,
     });
 
@@ -32,7 +31,7 @@ describe("resolveStructuredOutput", () => {
     expect(pass).not.toHaveBeenCalled();
   });
 
-  test("tool-having: runs one structuring pass over the answer", async () => {
+  test("reformats a prose answer via one structuring pass", async () => {
     const pass = vi
       .fn<StructuringPass>()
       .mockResolvedValue(JSON.stringify({ category: "sales", urgent: false }));
@@ -41,7 +40,6 @@ describe("resolveStructuredOutput", () => {
       schema,
       baseMessages: baseMessages(),
       finalText: "This looks like a sales question, not urgent.",
-      hadTools: true,
       runStructuringPass: pass,
     });
 
@@ -59,7 +57,6 @@ describe("resolveStructuredOutput", () => {
       schema,
       baseMessages: baseMessages(),
       finalText: '```json\n{"category":"support","urgent":false}\n```',
-      hadTools: false,
       runStructuringPass: vi.fn<StructuringPass>(),
     });
     expect(output).toEqual({ category: "support", urgent: false });
@@ -76,20 +73,20 @@ describe("resolveStructuredOutput", () => {
     const output = await resolveStructuredOutput({
       schema,
       baseMessages: baseMessages(),
-      finalText: JSON.stringify({ category: "billing" }), // invalid attempt 0
-      hadTools: false,
+      finalText: JSON.stringify({ category: "billing" }), // invalid — triggers a pass
       runStructuringPass: pass,
     });
 
     expect(output).toEqual({ category: "billing", urgent: true });
-    // attempt 0 = finalText (invalid) -> retry 1 (invalid) -> retry 2 (valid)
+    // pass #1 (convert) invalid -> pass #2 (retry w/ errors) valid.
     expect(pass).toHaveBeenCalledTimes(2);
-    // The retry carries the flattened zod error text.
-    const [retryMsgs] = pass.mock.calls[0];
-    expect(retryMsgs.at(-1)?.content).toMatch(
-      /did not match the required schema/i,
+    // The FIRST pass is the convert instruction; the retry carries the zod error.
+    expect(pass.mock.calls[0][0].at(-1)?.content).toMatch(
+      /JSON matching the provided schema/i,
     );
-    expect(retryMsgs.at(-1)?.content).toMatch(/urgent/);
+    const retryMsg = pass.mock.calls[1][0].at(-1)?.content ?? "";
+    expect(retryMsg).toMatch(/did not match the required schema/i);
+    expect(retryMsg).toMatch(/urgent/);
   });
 
   test("throws StructuredOutputError with lastRaw after retries exhausted", async () => {
@@ -100,7 +97,6 @@ describe("resolveStructuredOutput", () => {
         schema,
         baseMessages: baseMessages(),
         finalText: "not json either",
-        hadTools: false,
         runStructuringPass: pass,
       }),
     ).rejects.toMatchObject({
@@ -108,8 +104,8 @@ describe("resolveStructuredOutput", () => {
       lastRaw: "still not json",
     });
 
-    // attempt 0 (finalText) + 2 retries = 2 structuring passes.
-    expect(pass).toHaveBeenCalledTimes(2);
+    // convert pass + 2 retry passes = 3 structuring attempts.
+    expect(pass).toHaveBeenCalledTimes(3);
   });
 
   test("StructuredOutputError does not leak lastRaw via clientMessage", () => {

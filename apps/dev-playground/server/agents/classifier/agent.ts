@@ -17,8 +17,9 @@ import { z } from "zod";
 //       const { output } = await runAgent(classifier, { messages: ticket });
 //       output?.category; // "billing" | "bug" | ... | undefined
 //
-// Because it declares no tools, AppKit sends the schema inline as the
-// endpoint's `response_format`, so the answer comes back as JSON directly.
+// The agent answers normally, then AppKit runs a dedicated non-streaming
+// completion constrained by the schema (Databricks rejects `response_format`
+// under streaming) and validates it with Zod before surfacing the object.
 export default createAgent({
   instructions:
     "You are a support-ticket triage classifier. Read the user's message and " +

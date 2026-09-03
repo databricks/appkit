@@ -7,6 +7,7 @@ import type {
 } from "shared";
 
 import {
+  query as servingQuery,
   type StreamBody,
   stream as servingStream,
 } from "../connectors/serving/client";
@@ -71,25 +72,59 @@ function applyGenerationParams(
 }
 
 /**
- * True when `err` looks like an HTTP 400 that names `response_format` /
- * `json_schema`. Used to strip-and-retry when a serving endpoint (or the
- * gateway in front of it) doesn't support structured output — some
- * Llama/DBRX/Mistral endpoints reject the param outright. The Zod boundary
- * in the structured-output resolver is the real guarantee; `response_format`
- * is only the retry-rate optimization, so silently dropping it on a 400 is
- * safe. Deliberately narrow: a 400 that does NOT name the param is a real
- * request error and must propagate.
+ * True when `err` looks like a client-side (400 / INVALID_PARAMETER_VALUE)
+ * rejection of structured output. Used to strip `response_format` and retry —
+ * some endpoints don't support it at all, and Databricks Claude specifically
+ * rejects it (the phrasing is "Structured output is not currently supported
+ * with streaming", though this path is already non-streaming). The Zod
+ * boundary in the resolver is the real guarantee, so dropping the param on
+ * such an error is safe. Deliberately narrow: a client error that does NOT
+ * name the feature is a genuine request error and must propagate.
  */
 function isResponseFormatRejection(err: unknown): boolean {
+  const rec = isRecord(err) ? err : {};
   const status =
-    isRecord(err) && typeof err.status === "number"
-      ? err.status
-      : isRecord(err) && typeof err.statusCode === "number"
-        ? err.statusCode
+    typeof rec.status === "number"
+      ? rec.status
+      : typeof rec.statusCode === "number"
+        ? rec.statusCode
         : undefined;
+  const code = typeof rec.errorCode === "string" ? rec.errorCode : "";
   const msg = err instanceof Error ? err.message : String(err);
-  const is400 = status === 400 || /\b400\b/.test(msg);
-  return is400 && /response_format|json[_ ]schema/i.test(msg);
+  const looksClientError =
+    status === 400 || /\b400\b/.test(msg) || code === "INVALID_PARAMETER_VALUE";
+  const namesFeature = /response_format|json[_ ]schema|structured output/i.test(
+    msg,
+  );
+  return looksClientError && namesFeature;
+}
+
+/** Pull the assistant message text out of a NON-streaming chat completion. */
+function extractMessageContent(parsed: unknown): string {
+  if (!isRecord(parsed)) return "";
+  const choices = parsed.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return "";
+  const first = choices[0];
+  if (!isRecord(first)) return "";
+  const message = first.message;
+  if (!isRecord(message)) return "";
+  const content = message.content;
+  if (typeof content === "string") return content;
+  // Harmony/array content: concatenate the text parts.
+  if (Array.isArray(content)) {
+    let text = "";
+    for (const part of content) {
+      if (
+        isRecord(part) &&
+        part.type === "text" &&
+        typeof part.text === "string"
+      ) {
+        text += part.text;
+      }
+    }
+    return text;
+  }
+  return "";
 }
 
 function extractLlamaToolJsonSlice(text: string): string | undefined {
@@ -145,6 +180,16 @@ function reasoningPartText(part: Record<string, unknown>): string {
  * adapter uses a bare `fetch()` to call it. Useful for tests and for pointing
  * the adapter at non-workspace endpoints (reverse proxies, mocks).
  */
+/**
+ * Non-streaming transport, mirroring {@link StreamBody}. Returns the parsed
+ * JSON response body. Used only for structured-output completions (Databricks
+ * rejects `response_format` under `stream: true`).
+ */
+type QueryBody = (
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+
 interface RawFetchAdapterOptions {
   endpointUrl: string;
   authenticate: () => Promise<Record<string, string>>;
@@ -168,6 +213,8 @@ interface RawFetchAdapterOptions {
  */
 interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
+  /** Non-streaming transport for structured-output completions. */
+  queryBody?: QueryBody;
   maxSteps?: number;
   maxTokens?: number;
   generationParams?: GenerationParams;
@@ -306,6 +353,8 @@ interface DeltaToolCall {
  */
 export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
+  /** Non-streaming transport; present only when structured output is usable. */
+  private queryBody?: QueryBody;
   private maxSteps: number;
   private maxTokens: number;
   private generationParams: GenerationParams;
@@ -326,6 +375,7 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (isStreamBodyOptions(options)) {
       this.streamBody = options.streamBody;
+      this.queryBody = options.queryBody;
     } else {
       const { endpointUrl, authenticate } = options;
       this.streamBody = async (body, signal) => {
@@ -350,6 +400,29 @@ export class DatabricksAdapter implements AgentAdapter {
         }
         if (!response.body) throw new Error("No response body");
         return response.body;
+      };
+      // Non-streaming sibling of streamBody for structured-output completions.
+      this.queryBody = async (body, signal) => {
+        const fetchSignal =
+          signal ?? AbortSignal.timeout(RAW_FETCH_DEFAULT_TIMEOUT_MS);
+        const authHeaders = await authenticate();
+        const response = await fetch(endpointUrl, {
+          method: "POST",
+          headers: {
+            "User-Agent": APPKIT_USER_AGENT,
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({ ...body, stream: false }),
+          signal: fetchSignal,
+        });
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "Unknown error");
+          throw new Error(
+            `Databricks API error (${response.status}): ${errorText}`,
+          );
+        }
+        return response.json();
       };
     }
   }
@@ -382,6 +455,13 @@ export class DatabricksAdapter implements AgentAdapter {
         // only need `apiClient.request`.
         servingStream(
           workspaceClient as unknown as Parameters<typeof servingStream>[0],
+          endpointName,
+          body,
+          signal,
+        ),
+      queryBody: (body, signal) =>
+        servingQuery(
+          workspaceClient as unknown as Parameters<typeof servingQuery>[0],
           endpointName,
           body,
           signal,
@@ -500,16 +580,30 @@ export class DatabricksAdapter implements AgentAdapter {
     const tools = this.buildTools(input.tools, nameToWire);
     const messages = this.buildMessages(input.messages, nameToWire);
 
-    // Structured output is only sent inline for tool-free completions —
-    // Databricks Claude endpoints reject `response_format` alongside `tools`.
-    // Tool-having agents produce prose here and are re-formatted by a
-    // separate tool-free structuring pass (a second `run()` with no tools).
-    const structuredSchema =
-      input.outputSchema && input.tools.length === 0
-        ? input.outputSchema
-        : undefined;
-
     yield { type: "status", status: "running" };
+
+    // Structured output is a tool-free, NON-streaming completion — Databricks
+    // rejects `response_format` under `stream: true`. The structured-output
+    // resolver drives this via `run({ tools: [], outputSchema })`; the visible
+    // agent answer streams normally on the tool-having / non-structured path
+    // below and is re-formatted into JSON by this pass afterwards.
+    if (input.outputSchema && input.tools.length === 0) {
+      let text: string;
+      try {
+        text = await this.structuredCompletion(
+          messages,
+          input.outputSchema,
+          context,
+        );
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Structured request failed";
+        yield { type: "status", status: "error", error: msg };
+        throw err;
+      }
+      yield { type: "message", content: text };
+      return;
+    }
 
     for (let step = 0; step < this.maxSteps; step++) {
       if (context.signal?.aborted) break;
@@ -518,19 +612,13 @@ export class DatabricksAdapter implements AgentAdapter {
         messages,
         tools,
         context,
-        structuredSchema,
       );
 
       if (toolCalls.length === 0) {
-        // In structured mode the model returns raw JSON (an array-typed schema
-        // emits `[{...}]`, which the Llama/Python text-tool-call fallback would
-        // otherwise misread as a tool invocation). Skip the fallback entirely.
-        if (!structuredSchema) {
-          const parsed = parseTextToolCalls(text);
-          if (parsed.length > 0) {
-            yield* this.executeToolCalls(parsed, messages, context, nameToWire);
-            continue;
-          }
+        const parsed = parseTextToolCalls(text);
+        if (parsed.length > 0) {
+          yield* this.executeToolCalls(parsed, messages, context, nameToWire);
+          continue;
         }
         break;
       }
@@ -596,11 +684,54 @@ export class DatabricksAdapter implements AgentAdapter {
     }
   }
 
+  /**
+   * One tool-free, NON-streaming completion constrained by `schema` via
+   * `response_format`. Databricks rejects `response_format` under
+   * `stream: true`, so structured output must be non-streaming. Returns the
+   * raw message content (the JSON text) for the caller to validate. On a 400
+   * that names the param, strips `response_format` and retries once — the
+   * structuring prompt already asks for schema-only JSON and the caller's Zod
+   * validation is the real guarantee.
+   */
+  private async structuredCompletion(
+    messages: OpenAIMessage[],
+    schema: Record<string, unknown>,
+    context: AgentRunContext,
+  ): Promise<string> {
+    if (!this.queryBody) {
+      throw new Error(
+        "DatabricksAdapter: structured output requires a non-streaming transport. " +
+          "Build the adapter via DatabricksAdapter.fromServingEndpoint / fromModelServing.",
+      );
+    }
+    const body: Record<string, unknown> = {
+      messages,
+      max_tokens: this.maxTokens,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "structured_output", schema, strict: true },
+      },
+    };
+    applyGenerationParams(body, this.generationParams);
+
+    let parsed: unknown;
+    try {
+      parsed = await this.queryBody(body, context.signal);
+    } catch (err) {
+      if (isResponseFormatRejection(err)) {
+        delete body.response_format;
+        parsed = await this.queryBody(body, context.signal);
+      } else {
+        throw err;
+      }
+    }
+    return extractMessageContent(parsed);
+  }
+
   private async *streamCompletion(
     messages: OpenAIMessage[],
     tools: OpenAITool[],
     context: AgentRunContext,
-    structuredSchema?: Record<string, unknown>,
   ): AsyncGenerator<
     AgentEvent,
     { text: string; toolCalls: OpenAIToolCall[] },
@@ -616,48 +747,15 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (tools.length > 0) {
       body.tools = tools;
-    } else if (structuredSchema) {
-      // OpenAI-compatible structured output. `strict: true` asks the endpoint
-      // to constrain generation to the schema; the caller still validates
-      // with Zod, so a silently-ignored `response_format` is handled upstream.
-      body.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "structured_output",
-          schema: structuredSchema,
-          strict: true,
-        },
-      };
     }
 
     let responseBody: ReadableStream<Uint8Array>;
     try {
       responseBody = await this.streamBody(body, context.signal);
     } catch (err) {
-      // Some endpoints/gateways 400 on `response_format`. Strip it and retry
-      // once — the structured-output resolver's Zod validation is the real
-      // guarantee. A 400 that doesn't name the param is a genuine error.
-      if (
-        body.response_format !== undefined &&
-        isResponseFormatRejection(err)
-      ) {
-        delete body.response_format;
-        try {
-          responseBody = await this.streamBody(body, context.signal);
-        } catch (retryErr) {
-          const msg =
-            retryErr instanceof Error
-              ? retryErr.message
-              : "Stream request failed";
-          yield { type: "status", status: "error", error: msg };
-          throw retryErr;
-        }
-      } else {
-        const msg =
-          err instanceof Error ? err.message : "Stream request failed";
-        yield { type: "status", status: "error", error: msg };
-        throw err;
-      }
+      const msg = err instanceof Error ? err.message : "Stream request failed";
+      yield { type: "status", status: "error", error: msg };
+      throw err;
     }
 
     const reader = responseBody.getReader();
