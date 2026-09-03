@@ -276,6 +276,17 @@ export interface AgentInput {
   threadId: string;
   signal?: AbortSignal;
   /**
+   * JSON Schema the adapter should constrain a tool-free completion to, when
+   * it supports server-side structured output (e.g. an OpenAI-compatible
+   * `response_format: { type: "json_schema" }`). Set by the structured-output
+   * path; ignored when `tools` is non-empty (Databricks Claude endpoints
+   * reject `response_format` combined with `tools`). Adapters that can't
+   * constrain output ignore it — the structured-output resolver then relies
+   * on prompt + Zod validation. Already stripped of the top-level `$schema`
+   * key by {@link toToolJSONSchema}.
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
    * Adapter-specific opaque payloads, keyed by adapter namespace. The
    * shared contract intentionally does not enumerate keys — see each
    * adapter's docs for which keys it reads and the shape of each value.

@@ -70,6 +70,28 @@ function applyGenerationParams(
   }
 }
 
+/**
+ * True when `err` looks like an HTTP 400 that names `response_format` /
+ * `json_schema`. Used to strip-and-retry when a serving endpoint (or the
+ * gateway in front of it) doesn't support structured output — some
+ * Llama/DBRX/Mistral endpoints reject the param outright. The Zod boundary
+ * in the structured-output resolver is the real guarantee; `response_format`
+ * is only the retry-rate optimization, so silently dropping it on a 400 is
+ * safe. Deliberately narrow: a 400 that does NOT name the param is a real
+ * request error and must propagate.
+ */
+function isResponseFormatRejection(err: unknown): boolean {
+  const status =
+    isRecord(err) && typeof err.status === "number"
+      ? err.status
+      : isRecord(err) && typeof err.statusCode === "number"
+        ? err.statusCode
+        : undefined;
+  const msg = err instanceof Error ? err.message : String(err);
+  const is400 = status === 400 || /\b400\b/.test(msg);
+  return is400 && /response_format|json[_ ]schema/i.test(msg);
+}
+
 function extractLlamaToolJsonSlice(text: string): string | undefined {
   const start = text.indexOf("[{");
   if (start < 0) return undefined;
@@ -478,6 +500,15 @@ export class DatabricksAdapter implements AgentAdapter {
     const tools = this.buildTools(input.tools, nameToWire);
     const messages = this.buildMessages(input.messages, nameToWire);
 
+    // Structured output is only sent inline for tool-free completions —
+    // Databricks Claude endpoints reject `response_format` alongside `tools`.
+    // Tool-having agents produce prose here and are re-formatted by a
+    // separate tool-free structuring pass (a second `run()` with no tools).
+    const structuredSchema =
+      input.outputSchema && input.tools.length === 0
+        ? input.outputSchema
+        : undefined;
+
     yield { type: "status", status: "running" };
 
     for (let step = 0; step < this.maxSteps; step++) {
@@ -487,13 +518,19 @@ export class DatabricksAdapter implements AgentAdapter {
         messages,
         tools,
         context,
+        structuredSchema,
       );
 
       if (toolCalls.length === 0) {
-        const parsed = parseTextToolCalls(text);
-        if (parsed.length > 0) {
-          yield* this.executeToolCalls(parsed, messages, context, nameToWire);
-          continue;
+        // In structured mode the model returns raw JSON (an array-typed schema
+        // emits `[{...}]`, which the Llama/Python text-tool-call fallback would
+        // otherwise misread as a tool invocation). Skip the fallback entirely.
+        if (!structuredSchema) {
+          const parsed = parseTextToolCalls(text);
+          if (parsed.length > 0) {
+            yield* this.executeToolCalls(parsed, messages, context, nameToWire);
+            continue;
+          }
         }
         break;
       }
@@ -563,6 +600,7 @@ export class DatabricksAdapter implements AgentAdapter {
     messages: OpenAIMessage[],
     tools: OpenAITool[],
     context: AgentRunContext,
+    structuredSchema?: Record<string, unknown>,
   ): AsyncGenerator<
     AgentEvent,
     { text: string; toolCalls: OpenAIToolCall[] },
@@ -578,15 +616,48 @@ export class DatabricksAdapter implements AgentAdapter {
 
     if (tools.length > 0) {
       body.tools = tools;
+    } else if (structuredSchema) {
+      // OpenAI-compatible structured output. `strict: true` asks the endpoint
+      // to constrain generation to the schema; the caller still validates
+      // with Zod, so a silently-ignored `response_format` is handled upstream.
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "structured_output",
+          schema: structuredSchema,
+          strict: true,
+        },
+      };
     }
 
     let responseBody: ReadableStream<Uint8Array>;
     try {
       responseBody = await this.streamBody(body, context.signal);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Stream request failed";
-      yield { type: "status", status: "error", error: msg };
-      throw err;
+      // Some endpoints/gateways 400 on `response_format`. Strip it and retry
+      // once — the structured-output resolver's Zod validation is the real
+      // guarantee. A 400 that doesn't name the param is a genuine error.
+      if (
+        body.response_format !== undefined &&
+        isResponseFormatRejection(err)
+      ) {
+        delete body.response_format;
+        try {
+          responseBody = await this.streamBody(body, context.signal);
+        } catch (retryErr) {
+          const msg =
+            retryErr instanceof Error
+              ? retryErr.message
+              : "Stream request failed";
+          yield { type: "status", status: "error", error: msg };
+          throw retryErr;
+        }
+      } else {
+        const msg =
+          err instanceof Error ? err.message : "Stream request failed";
+        yield { type: "status", status: "error", error: msg };
+        throw err;
+      }
     }
 
     const reader = responseBody.getReader();
