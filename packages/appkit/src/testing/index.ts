@@ -60,6 +60,7 @@ export {
   type StreamSource,
 } from "./expect-stream";
 export {
+  createApiError,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,
@@ -74,6 +75,7 @@ export {
   setupDatabricksEnv,
   type TestContextOptions,
   useServiceContextMock,
+  withEnv,
 } from "./fixtures";
 export {
   createMockWorkspaceClient,
@@ -83,6 +85,8 @@ export {
 } from "./mock-workspace-client";
 export { createTestPlugin } from "./create-test-plugin";
 export { resetGlobalState } from "./reset";
+export { type TestAppHandle, useTestApp } from "./test-app";
+export { type TestCacheHandle, useTestCache } from "./test-cache";
 export {
   createTestPluginContext,
   type FakeProvider,
@@ -91,4 +95,5 @@ export {
   type RecordedRoute,
   type RecordedToolCall,
   type TestPluginContext,
+  type TestPluginContextOptions,
 } from "./test-plugin-context";

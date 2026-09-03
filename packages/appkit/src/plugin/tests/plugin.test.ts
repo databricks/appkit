@@ -35,29 +35,9 @@ import {
 import { StreamManager } from "../../stream";
 import type { ITelemetry, TelemetryProvider } from "../../telemetry";
 import { TelemetryManager } from "../../telemetry";
+import { createApiError } from "../../testing";
 import type { InterceptorContext } from "../interceptors/types";
 import { isDevOboFallback, Plugin } from "../plugin";
-
-const { MockApiError } = vi.hoisted(() => {
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  return { MockApiError };
-});
-
-vi.mock("../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../workspace-client")>();
-  return {
-    ...actual,
-    ApiError: MockApiError,
-  };
-});
 
 // Mock all dependencies
 vi.mock("../../app");
@@ -428,7 +408,11 @@ describe("Plugin", () => {
 
     test("should preserve 404 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
-      const apiError = new MockApiError("Not found", 404);
+      const apiError = createApiError({
+        statusCode: 404,
+        message: "Not found",
+        errorCode: "ERROR",
+      });
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const result = await (plugin as any).execute(
@@ -445,7 +429,11 @@ describe("Plugin", () => {
 
     test("should preserve 401 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
-      const apiError = new MockApiError("Unauthorized", 401);
+      const apiError = createApiError({
+        statusCode: 401,
+        message: "Unauthorized",
+        errorCode: "ERROR",
+      });
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const result = await (plugin as any).execute(
@@ -462,7 +450,11 @@ describe("Plugin", () => {
 
     test("should preserve 403 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
-      const apiError = new MockApiError("Forbidden", 403);
+      const apiError = createApiError({
+        statusCode: 403,
+        message: "Forbidden",
+        errorCode: "ERROR",
+      });
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const result = await (plugin as any).execute(
@@ -479,7 +471,11 @@ describe("Plugin", () => {
 
     test("should preserve 502 statusCode from non-AppKitError", async () => {
       const plugin = new TestPlugin(config);
-      const apiError = new MockApiError("Bad gateway", 502);
+      const apiError = createApiError({
+        statusCode: 502,
+        message: "Bad gateway",
+        errorCode: "ERROR",
+      });
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const result = await (plugin as any).execute(
@@ -499,7 +495,11 @@ describe("Plugin", () => {
       process.env.NODE_ENV = "production";
       try {
         const plugin = new TestPlugin(config);
-        const apiError = new MockApiError("Internal upstream detail", 502);
+        const apiError = createApiError({
+          statusCode: 502,
+          message: "Internal upstream detail",
+          errorCode: "ERROR",
+        });
         const mockFn = vi.fn().mockRejectedValue(apiError);
 
         const result = await (plugin as any).execute(
@@ -522,7 +522,11 @@ describe("Plugin", () => {
       process.env.NODE_ENV = "production";
       try {
         const plugin = new TestPlugin(config);
-        const apiError = new MockApiError("Forbidden", 403);
+        const apiError = createApiError({
+          statusCode: 403,
+          message: "Forbidden",
+          errorCode: "ERROR",
+        });
         const mockFn = vi.fn().mockRejectedValue(apiError);
 
         const result = await (plugin as any).execute(

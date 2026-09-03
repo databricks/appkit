@@ -78,11 +78,15 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       "createMockTelemetry",
       "createSuccessfulSQLResponse",
       "createFailedSQLResponse",
+      "createApiError",
       "parseSSEResponse",
       "resetTestCache",
       "runWithRequestContext",
       "setupDatabricksEnv",
       "useServiceContextMock",
+      "useTestApp",
+      "useTestCache",
+      "withEnv",
     ];
     const missing = expected.filter(
       (name) =>

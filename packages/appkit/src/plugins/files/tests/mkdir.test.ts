@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  getMock,
+  useTestCache,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -10,73 +16,21 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache; spy on `testCache.current` to assert invalidation.
+const testCache = useTestCache();
 
 describe("FilesPlugin mkdir", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
+  let client: ReturnType<typeof createMockWorkspaceClient>;
 
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    // strict: true keeps the loudness the hand-rolled literal had by accident —
+    // an undeclared data-plane call throws instead of resolving undefined.
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: { "files.createDirectory": undefined },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -88,7 +42,8 @@ describe("FilesPlugin mkdir", () => {
     const handler = getRouteHandler(plugin, "post", "/mkdir");
     const res = mockRes();
 
-    mockClient.files.createDirectory.mockResolvedValue(undefined);
+    const generateKey = vi.spyOn(testCache.current, "generateKey");
+    const del = vi.spyOn(testCache.current, "delete");
 
     await handler(
       mockReq("uploads", {
@@ -100,8 +55,9 @@ describe("FilesPlugin mkdir", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
-    expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-    expect(mockCacheInstance.delete).toHaveBeenCalled();
+    expect(getMock(client, "files.createDirectory")).toHaveBeenCalled();
+    expect(generateKey).toHaveBeenCalled();
+    expect(del).toHaveBeenCalled();
   });
 
   test("mkdir without path returns 400", async () => {
@@ -122,8 +78,12 @@ describe("FilesPlugin mkdir", () => {
     const handler = getRouteHandler(plugin, "post", "/mkdir");
     const res = mockRes();
 
-    mockClient.files.createDirectory.mockRejectedValue(
-      new MockApiError("Conflict", 409),
+    getMock(client, "files.createDirectory").mockRejectedValue(
+      createApiError({
+        statusCode: 409,
+        message: "Conflict",
+        errorCode: "ALREADY_EXISTS",
+      }),
     );
 
     await handler(

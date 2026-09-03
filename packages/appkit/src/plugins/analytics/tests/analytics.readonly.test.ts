@@ -1,21 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => ({
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(
-        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-          fn(),
-      ),
-      generateKey: vi.fn(() => "test-key"),
-    })),
-  },
-}));
-
+import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin } from "../analytics";
+
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 /**
  * Tests the read-only SQL enforcement on the analytics agent tool.

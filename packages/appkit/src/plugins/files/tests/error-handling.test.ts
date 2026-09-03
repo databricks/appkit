@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { AuthenticationError } from "../../../errors";
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  useTestCache,
+} from "../../../testing";
+import { withEnv } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -10,73 +16,27 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 describe("FilesPlugin error handling", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -107,7 +67,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Forbidden", 403),
+        createApiError({
+          statusCode: 403,
+          message: "Forbidden",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -125,7 +89,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Not found", 404),
+        createApiError({
+          statusCode: 404,
+          message: "Not found",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -143,7 +111,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Conflict", 409),
+        createApiError({
+          statusCode: 409,
+          message: "Conflict",
+          errorCode: "ERROR",
+        }),
         "fallback msg",
       );
 
@@ -161,7 +133,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Bad Gateway", 502),
+        createApiError({
+          statusCode: 502,
+          message: "Bad Gateway",
+          errorCode: "ERROR",
+        }),
         "Operation failed",
       );
 
@@ -178,7 +154,11 @@ describe("FilesPlugin error handling", () => {
 
       (plugin as any)._handleApiError(
         res,
-        new MockApiError("Internal error", 500),
+        createApiError({
+          statusCode: 500,
+          message: "Internal error",
+          errorCode: "ERROR",
+        }),
         "Fallback",
       );
 
@@ -220,38 +200,37 @@ describe("FilesPlugin error handling", () => {
     });
 
     test("AuthenticationError via route returns generic 401 on OBO volume without token", async () => {
-      process.env.DATABRICKS_VOLUME_OBO = "/Volumes/catalog/schema/obo";
-      const plugin = new FilesPlugin({
-        volumes: {
-          obo: { auth: "on-behalf-of-user", policy: () => true },
+      await withEnv(
+        {
+          DATABRICKS_VOLUME_OBO: "/Volumes/catalog/schema/obo",
+          NODE_ENV: "production",
         },
-      });
-      const handler = getRouteHandler(plugin, "get", "/list");
-      const res = mockRes();
+        async () => {
+          const plugin = new FilesPlugin({
+            volumes: {
+              obo: { auth: "on-behalf-of-user", policy: () => true },
+            },
+          });
+          const handler = getRouteHandler(plugin, "get", "/list");
+          const res = mockRes();
 
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+          await handler(
+            {
+              params: { volumeKey: "obo" },
+              query: {},
+              headers: {},
+              header: () => undefined,
+            },
+            res,
+          );
 
-      try {
-        await handler(
-          {
-            params: { volumeKey: "obo" },
-            query: {},
-            headers: {},
-            header: () => undefined,
-          },
-          res,
-        );
-
-        expect(res.status).toHaveBeenCalledWith(401);
-        expect(res.json).toHaveBeenCalledWith({
-          error: "Unauthorized",
-          plugin: "files",
-        });
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-        delete process.env.DATABRICKS_VOLUME_OBO;
-      }
+          expect(res.status).toHaveBeenCalledWith(401);
+          expect(res.json).toHaveBeenCalledWith({
+            error: "Unauthorized",
+            plugin: "files",
+          });
+        },
+      );
     });
   });
 
