@@ -9,6 +9,7 @@ import type {
   PluginData,
   ToolProvider,
 } from "shared";
+import type { z } from "zod";
 
 import {
   isSupervisorTool,
@@ -18,6 +19,10 @@ import {
 import { createLogger } from "../../logging/logger";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
+import {
+  resolveStructuredOutput,
+  type StructuringPass,
+} from "./structured-output";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
   type FunctionTool,
@@ -25,6 +30,7 @@ import {
   isFunctionTool,
 } from "./tools/function-tool";
 import { isHostedTool } from "./tools/hosted-tools";
+import { toToolJSONSchema } from "./tools/json-schema";
 import type {
   AgentDefinition,
   AgentTool,
@@ -49,6 +55,17 @@ export interface RunAgentInput {
    * there is no HTTP request in standalone mode).
    */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
+}
+
+/** Per-call options for {@link runAgent}. */
+export interface RunAgentOptions<TOutput = unknown> {
+  /**
+   * Structured-output schema override for this call. Takes precedence over the
+   * agent's own `output` schema. When either is set, `runAgent` validates the
+   * final answer and populates {@link RunAgentResult.output}, throwing a
+   * `StructuredOutputError` if it can't produce a valid object.
+   */
+  output?: z.ZodType<TOutput>;
 }
 
 export interface RunAgentResult<TOutput = string> {
@@ -95,6 +112,7 @@ export interface RunAgentResult<TOutput = string> {
 export async function runAgent<TOutput = string>(
   def: AgentDefinition<TOutput>,
   input: RunAgentInput,
+  options?: RunAgentOptions<TOutput>,
 ): Promise<RunAgentResult<TOutput>> {
   // Single shared cache for the whole call graph: parent + every nested
   // sub-agent dispatch share constructed plugin instances. Without this,
@@ -103,15 +121,60 @@ export async function runAgent<TOutput = string>(
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
-  const { text, events } = await runAgentInternal(def, input, providerCache);
-  // Structured-output resolution is wired in a later commit; for now the
-  // typed `output` field is left undefined.
-  return { text, events };
+  const { text, events, adapter, hadTools, baseMessages } =
+    await runAgentInternal(def, input, providerCache);
+
+  const schema = options?.output ?? def.output;
+  if (!schema) return { text, events };
+
+  const output = await resolveStructuredOutput<TOutput>({
+    schema,
+    baseMessages,
+    finalText: text,
+    hadTools,
+    runStructuringPass: buildStructuringPass(adapter, schema),
+    signal: input.signal,
+  });
+  return { text, events, output };
+}
+
+/**
+ * Builds a {@link StructuringPass}: one tool-free, schema-constrained
+ * `adapter.run()`, consumed to its final text. `executeTool` throws — a
+ * tool-free run never dispatches one; if it somehow does, that's a bug we
+ * want surfaced, not swallowed.
+ */
+function buildStructuringPass(
+  adapter: AgentAdapter,
+  schema: z.ZodType,
+): StructuringPass {
+  const outputSchema = toToolJSONSchema(schema);
+  return (messages, signal) =>
+    consumeAdapterStream(
+      adapter.run(
+        { messages, tools: [], threadId: randomUUID(), signal, outputSchema },
+        {
+          executeTool: () => {
+            throw new Error(
+              "runAgent: structuring pass is tool-free and must not call a tool",
+            );
+          },
+          signal,
+        },
+      ),
+      { signal },
+    );
 }
 
 interface RawRunResult {
   text: string;
   events: AgentEvent[];
+  /** Adapter used for the run — reused for the structuring pass. */
+  adapter: AgentAdapter;
+  /** Whether the run exposed tools (tool-having answers need a structuring pass). */
+  hadTools: boolean;
+  /** Normalized system + input messages the run saw (structuring-pass seed). */
+  baseMessages: Message[];
 }
 
 async function runAgentInternal(
@@ -207,7 +270,13 @@ async function runAgentInternal(
     },
   });
 
-  return { text, events };
+  return {
+    text,
+    events,
+    adapter,
+    hadTools: tools.length > 0,
+    baseMessages: messages,
+  };
 }
 
 /**
