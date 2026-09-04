@@ -105,6 +105,8 @@ export type {
 export {
   agentIdFromMarkdownPath,
   isToolkitEntry,
+  LakebaseThreadStore,
+  type LakebaseThreadStoreOptions,
   loadAgentFromFile,
   loadAgentsFromDir,
 } from "./plugins/agents";
