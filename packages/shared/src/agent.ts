@@ -106,6 +106,17 @@ export interface ThreadStore {
   list(userId: string): Promise<Thread[]>;
   addMessage(threadId: string, userId: string, message: Message): Promise<void>;
   delete(threadId: string, userId: string): Promise<boolean>;
+  /**
+   * Optional one-time initialization — e.g. verify connectivity and bootstrap
+   * a backing schema. Called once during agents-plugin setup, so a failure
+   * here fails boot fast. In-memory stores omit it.
+   */
+  init?(): Promise<void>;
+  /**
+   * Optional teardown — e.g. close an owned connection pool. Called during
+   * agents-plugin shutdown. In-memory stores omit it.
+   */
+  close?(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

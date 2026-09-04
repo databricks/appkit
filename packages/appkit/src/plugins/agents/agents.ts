@@ -13,6 +13,7 @@ import type {
   ResponseOutputMessage,
   ResponseStreamEvent,
   Thread,
+  ThreadStore,
   ToolProvider,
 } from "shared";
 
@@ -114,7 +115,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   private streams = new ActiveStreamTracker();
   private mcpClient: AppKitMcpClient | null = null;
-  private threadStore;
+  private threadStore: ThreadStore;
   private approvalGate = new ToolApprovalGate();
   /** Guards the `agents({ agents })` deprecation warning to once per instance. */
   private agentsMapDeprecationWarned = false;
@@ -201,6 +202,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   async setup() {
+    // Fail boot fast if the thread store can't initialize (e.g. Lakebase
+    // unreachable or schema bootstrap denied). No-op for in-memory stores.
+    await this.threadStore.init?.();
     await initAgentTracing();
     // Seed mlflow's config right after TelemetryManager.start() (before the
     // server serves), so the first turn's request-root span is forwarded and
@@ -1744,6 +1748,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       await this.mcpClient.close();
       this.mcpClient = null;
     }
+    // Release any pool the thread store owns. No-op for in-memory stores.
+    await this.threadStore.close?.();
   }
 
   exports() {
