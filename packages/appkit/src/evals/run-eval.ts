@@ -1,3 +1,4 @@
+import type { DatasetRow } from "./dataset";
 import { judgeClosedQA, judgeCustom, judgeFactuality } from "./judge";
 import type {
   AssertionHandle,
@@ -27,6 +28,8 @@ export interface RunEvalOptions {
   driver: EvalDriver;
   /** When true, soft assertion failures also fail the eval. */
   strict?: boolean;
+  /** Dataset row bound to `t.input`/`t.expected` for dataset-driven evals. */
+  row?: DatasetRow;
 }
 
 /**
@@ -70,7 +73,8 @@ export async function runEval(
         return handle;
       },
       atLeast(threshold: number) {
-        result.severity = "soft";
+        // Re-threshold the score; keep the current severity (gate unless the
+        // caller also chained `.soft()`).
         result.pass = (result.score ?? (result.pass ? 1 : 0)) >= threshold;
         return handle;
       },
@@ -78,14 +82,15 @@ export async function runEval(
     return handle;
   };
 
-  // LLM-judge assertions are scored and soft by default; the caller chains
-  // `.atLeast(n)` to set the pass threshold or `.gate()` to promote.
+  // LLM-judge assertions are scored and gate by default (a miss fails the eval,
+  // like other assertions). The caller chains `.atLeast(n)` to change the pass
+  // threshold, or `.soft()` to demote to a tracked-only metric.
   const recordJudge = (
     label: string,
     score: number,
     rationale?: string,
   ): AssertionHandle =>
-    record(label, score >= DEFAULT_JUDGE_THRESHOLD, score, rationale).soft();
+    record(label, score >= DEFAULT_JUDGE_THRESHOLD, score, rationale);
 
   const t: TestContext = {
     async send(message) {
@@ -97,6 +102,9 @@ export async function runEval(
       lastSucceeded = r.succeeded;
       if (r.traceId) lastTraceId = r.traceId;
     },
+    reset() {
+      options.driver.reset?.();
+    },
     get reply() {
       return reply;
     },
@@ -105,6 +113,12 @@ export async function runEval(
     },
     get sessionId() {
       return sessionId;
+    },
+    get input() {
+      return options.row?.inputs ?? {};
+    },
+    get expected() {
+      return options.row?.expectations;
     },
     succeeded() {
       return record(

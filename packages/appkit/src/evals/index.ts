@@ -5,7 +5,13 @@ export {
   type PostResult,
   type ResolveDatabricksAuthOptions,
   resolveDatabricksAuth,
+  resolveWorkspaceClient,
 } from "../connectors/mlflow";
+export {
+  type DatasetRow,
+  type ReadEvalDatasetOptions,
+  readEvalDataset,
+} from "./dataset";
 export { defineEval } from "./define-eval";
 export { type DiscoveredEval, discoverEvalFiles } from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";

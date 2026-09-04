@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { defineEval } from "../define-eval";
 import { includes } from "../matchers";
@@ -114,5 +114,77 @@ describe("runEval", () => {
     const result = await runEval(def, { id: "boom", driver: fakeDriver({}) });
     expect(result.passed).toBe(false);
     expect(result.error).toBe("boom");
+  });
+
+  test("atLeast() gates by default — a below-threshold score fails the eval", async () => {
+    // A scored matcher standing in for a judge (which shares the same handle).
+    const scored = (score: number) => (): { pass: boolean; score: number } => ({
+      pass: score >= 0.5,
+      score,
+    });
+    const def = defineEval({
+      async test(t) {
+        await t.send("q");
+        t.check(t.reply, scored(0.2)).atLeast(0.5); // gate, below threshold
+      },
+    });
+    const result = await runEval(def, {
+      id: "gate",
+      driver: fakeDriver({ reply: "x" }),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.assertions[0].severity).toBe("gate");
+  });
+
+  test("atLeast().soft() demotes so a below-threshold score only tracks", async () => {
+    const scored = (score: number) => (): { pass: boolean; score: number } => ({
+      pass: score >= 0.5,
+      score,
+    });
+    const def = defineEval({
+      async test(t) {
+        await t.send("q");
+        t.check(t.reply, scored(0.2)).atLeast(0.5).soft();
+      },
+    });
+    const result = await runEval(def, {
+      id: "soft-judge",
+      driver: fakeDriver({ reply: "x" }),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.assertions[0].severity).toBe("soft");
+    expect(result.assertions[0].pass).toBe(false);
+  });
+
+  test("t.reset() forwards to the driver to start a fresh conversation", async () => {
+    const reset = vi.fn();
+    const driver: EvalDriver = {
+      send: async () => ({ reply: "", toolCalls: [], succeeded: true }),
+      reset,
+    };
+    const def = defineEval({
+      async test(t) {
+        await t.send("first");
+        t.reset();
+        await t.send("second");
+      },
+    });
+    await runEval(def, { id: "reset", driver });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  test("t.reset() is a no-op when the driver has no reset", async () => {
+    const def = defineEval({
+      async test(t) {
+        t.reset();
+        await t.send("hi");
+      },
+    });
+    // fakeDriver has no reset(); this must not throw.
+    const result = await runEval(def, {
+      id: "no-reset",
+      driver: fakeDriver({}),
+    });
+    expect(result.passed).toBe(true);
   });
 });

@@ -126,6 +126,9 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
   let threadId: string | undefined;
 
   return {
+    reset(): void {
+      threadId = undefined;
+    },
     async send(message: string): Promise<DriveResult> {
       // Bounds connect + the entire read below. Passed to both the fetch and
       // the SSE reader: on expiry the reader is cancelled and the turn fails.
