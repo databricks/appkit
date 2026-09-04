@@ -170,7 +170,39 @@ export interface EvalDefinition {
   test(t: TestContext): Promise<void> | void;
 }
 
-/** Per-directory config from `evals.config.ts` (see {@link defineEvalConfig}). */
+/**
+ * Auto-start config for the app under test, à la Playwright's `webServer`. When
+ * set in a root `evals.config.ts`, the CLI boots the app before running evals
+ * and tears it down after — so you don't have to start the server by hand.
+ */
+export interface EvalWebServer {
+  /** Shell command that starts the app, e.g. `"npm run dev"`. */
+  command: string;
+  /**
+   * URL polled until it answers before evals start. Defaults to the run's
+   * `baseUrl` (`--url`). Readiness = any HTTP response (a 404 still proves the
+   * server is up).
+   */
+  url?: string;
+  /** How long to wait for `url` to answer before giving up. Defaults to 60s. */
+  timeoutMs?: number;
+  /**
+   * When `true` (default), reuse a server already answering at `url` instead of
+   * spawning one — so a running `dev` server is used as-is. Set `false` to
+   * always spawn a fresh server.
+   */
+  reuseExisting?: boolean;
+}
+
+/**
+ * Eval config from `evals.config.ts` (via {@link defineEvalConfig}).
+ *
+ * Two scopes share this shape: a **root** `evals.config.ts` (project root) may
+ * set run-wide settings — `baseUrl` and `webServer` — plus defaults for
+ * `maxConcurrency`/`timeoutMs`; a **per-agent** `server/agents/<id>/evals/evals.config.ts`
+ * sets only that agent's `maxConcurrency`/`timeoutMs` overrides (`baseUrl`/
+ * `webServer` there are ignored — server lifecycle is run-wide).
+ */
 export interface EvalConfig {
   /** LLM judge config. Defaults to the agent's own serving endpoint. */
   judge?: { model?: string };
@@ -178,6 +210,10 @@ export interface EvalConfig {
   maxConcurrency?: number;
   /** Default per-eval timeout. */
   timeoutMs?: number;
+  /** Base URL of the app to drive (root config only). Overridden by `--url`. */
+  baseUrl?: string;
+  /** Auto-start the app under test (root config only). */
+  webServer?: EvalWebServer;
 }
 
 /** The outcome of running one eval. */

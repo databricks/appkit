@@ -12,7 +12,9 @@ metric; `.atLeast(n)` is a soft, score-thresholded assertion.
 atLeast(threshold: number): AssertionHandle;
 ```
 
-Soft assertion that passes only when the score is at least `threshold`.
+Set the pass threshold for a scored assertion: it passes only when the
+score is at least `threshold`. Keeps the current severity (gate unless also
+chained with `.soft()`).
 
 #### Parameters
 
