@@ -1,25 +1,10 @@
 import { createAgent } from "@databricks/appkit/beta";
 import { z } from "zod";
 
-// Structured-output demo: a tool-free agent whose final answer is validated
-// against a Zod schema instead of being returned as freeform text. Discovered
-// automatically from server/agents/classifier/ (its id is the folder name,
-// "classifier").
-//
-// How the schema surfaces on each path:
-//   • POST /api/agents/chat with { message, agent: "classifier" } streams the
-//     text, then emits one final `appkit.structured_output` SSE event whose
-//     `data` is the parsed object.
-//   • POST /api/agents/invocations (when this is the default agent) returns a
-//     top-level `output_parsed` field alongside the usual `output` text.
-//   • In-process, the result is statically typed via z.infer:
-//       import { runAgent } from "@databricks/appkit/beta";
-//       const { output } = await runAgent(classifier, { messages: ticket });
-//       output?.category; // "billing" | "bug" | ... | undefined
-//
-// The agent answers normally, then AppKit runs a dedicated non-streaming
-// completion constrained by the schema (Databricks rejects `response_format`
-// under streaming) and validates it with Zod before surfacing the object.
+// Structured-output demo: a tool-free agent whose answer is validated against
+// its `output` Zod schema instead of returned as text. Discovered from the
+// folder name (`classifier`). See docs/plugins/agents.md "Structured output"
+// for how the object surfaces on /chat, /invocations, and in-process runAgent.
 export default createAgent({
   instructions:
     "You are a support-ticket triage classifier. Read the user's message and " +

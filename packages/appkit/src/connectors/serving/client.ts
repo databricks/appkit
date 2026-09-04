@@ -102,11 +102,9 @@ export async function streamPath(
 }
 
 /**
- * POSTs `body` to a serving endpoint as a NON-streaming request and returns the
- * parsed JSON response (OpenAI-compatible `{ choices: [{ message }] }` shape).
- * Forces `stream: false`. Used by the structured-output path — Databricks
- * rejects `response_format` under `stream: true`, so structured completions
- * must be non-streaming.
+ * POSTs `body` to a serving endpoint as a non-streaming request (forces
+ * `stream: false`) and returns the parsed JSON (`{ choices: [{ message }] }`).
+ * Used by the structured-output path.
  *
  * @internal Not part of the public AppKit surface. Like {@link streamPath},
  * the endpoint name is caller-controlled and hard-coded by internal callers;

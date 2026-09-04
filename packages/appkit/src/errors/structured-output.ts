@@ -1,14 +1,11 @@
 import { AppKitError } from "./base";
 
 /**
- * Thrown when an agent with an `output` schema could not produce a value that
- * validates against it, even after the structuring retries are exhausted.
- * Carries the last raw model output (server-side only) for debugging — it is
- * never returned to the client, which sees the generic {@link clientMessage}.
- *
- * The structured-output path throws this rather than returning partial or
- * unvalidated data: a caller that asked for a typed object gets either a valid
- * one or an error, never a half-parsed shape.
+ * Thrown when an agent with an `output` schema could not produce a
+ * schema-valid value within the structuring retry budget — the caller gets a
+ * valid object or this error, never partial data. Carries the last raw model
+ * output (`lastRaw`) for debugging, server-side only: it is never returned to
+ * the client, which sees the generic {@link clientMessage}.
  *
  * @example
  * ```typescript

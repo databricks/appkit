@@ -1,17 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { Message } from "shared";
+import type { AgentAdapter, Message } from "shared";
 import type { z } from "zod";
 
 import { StructuredOutputError } from "../../errors";
+import { consumeAdapterStream } from "./consume-adapter-stream";
+import { formatZodIssues } from "./tools/tool";
 
-/**
- * Max number of re-prompted structuring passes after the first validation
- * fails. So ≤3 total validation attempts, and ≤3 structuring passes for a
- * tool-having agent (1 initial + 2 retries) / ≤2 for a tool-free one (the
- * first attempt is the inline `response_format` output, retries add passes).
- * Tracked here, separate from the tool-call / maxSteps budget.
- */
+/** Re-prompted structuring passes after the first convert pass (so ≤3 total). Separate from the tool-call / maxSteps budget. */
 const MAX_VALIDATION_RETRIES = 2;
 
 const CONVERT_INSTRUCTION =
@@ -27,10 +23,9 @@ function retryInstruction(errors: string): string {
 }
 
 /**
- * Runs ONE tool-free, schema-constrained completion over `messages` and
- * returns the raw model text. Injected by the caller so the resolver stays
- * free of any adapter / MLflow dependency: the agents plugin and standalone
- * `runAgent` each build this from `adapter.run({ tools: [], outputSchema })`.
+ * Runs one tool-free, schema-constrained completion and returns the raw text.
+ * Injected so the resolver stays free of any adapter / MLflow dependency; see
+ * {@link buildStructuringPass}.
  */
 export type StructuringPass = (
   messages: Message[],
@@ -40,13 +35,9 @@ export type StructuringPass = (
 interface ResolveStructuredOutputParams<T> {
   /** Schema the final object is validated against. */
   schema: z.ZodType<T>;
-  /**
-   * The conversation the main run saw (system + thread messages), WITHOUT the
-   * final answer. Each structuring pass appends the latest answer + an
-   * instruction to this.
-   */
+  /** The conversation the main run saw (system + thread), without the final answer. */
   baseMessages: Message[];
-  /** The main run's final assistant text (the answer to reformat into JSON). */
+  /** The main run's final assistant text — the answer to reformat into JSON. */
   finalText: string;
   /** Runs one tool-free, schema-constrained completion (see {@link StructuringPass}). */
   runStructuringPass: StructuringPass;
@@ -54,14 +45,11 @@ interface ResolveStructuredOutputParams<T> {
 }
 
 /**
- * Validate-and-retry loop that turns an agent's answer into a typed object.
- *
- * The agent's visible answer (`finalText`) is validated as-is first — a model
- * may already emit valid JSON — as a cheap pre-check. Otherwise a tool-free,
- * schema-constrained structuring pass reformats it into JSON, re-prompting with
- * the flattened Zod issues on each failure (up to {@link MAX_VALIDATION_RETRIES}
- * times). On exhaustion it throws {@link StructuredOutputError} carrying the
- * last raw output; it never returns partial/unvalidated data.
+ * Turns an agent's answer into a schema-validated object. Validates `finalText`
+ * as-is first (skipping a structuring round-trip when the model already emitted
+ * valid JSON); otherwise re-prompts a tool-free structuring pass with the
+ * flattened Zod issues, up to {@link MAX_VALIDATION_RETRIES} times. Throws
+ * {@link StructuredOutputError} on exhaustion — never returns partial data.
  */
 export async function resolveStructuredOutput<T>(
   params: ResolveStructuredOutputParams<T>,
@@ -69,11 +57,9 @@ export async function resolveStructuredOutput<T>(
   const { schema, baseMessages, finalText, runStructuringPass, signal } =
     params;
 
-  // Cheap pre-check: the answer may already be valid JSON (no round-trip).
   const direct = parseAndValidate(schema, finalText);
   if (direct.ok) return direct.value;
 
-  // Reformat the answer into JSON via a tool-free structuring pass.
   let lastRaw = await runStructuringPass(
     structuringMessages(baseMessages, finalText, CONVERT_INSTRUCTION),
     signal,
@@ -139,15 +125,10 @@ function parseAndValidate<T>(
   }
   const result = schema.safeParse(json);
   if (result.success) return { ok: true, value: result.data };
-  return { ok: false, error: flattenZodError(result.error) };
+  return { ok: false, error: formatZodIssues(result.error) };
 }
 
-/**
- * Strip a single leading/trailing Markdown code fence. `response_format`
- * output is bare JSON, but on the 400-strip fallback (or a model that ignores
- * the param) the answer often arrives fenced (` ```json … ``` `). Cheap to
- * undo and materially raises the parse rate on that path.
- */
+/** Strip a leading/trailing Markdown code fence — models often wrap JSON in ` ```json … ``` `. */
 function stripCodeFences(text: string): string {
   const trimmed = text.trim();
   if (!trimmed.startsWith("```")) return trimmed;
@@ -157,12 +138,28 @@ function stripCodeFences(text: string): string {
     .trim();
 }
 
-/** Compact one-line rendering of a ZodError's issues, safe across zod v4. */
-function flattenZodError(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.join(".") || "(root)";
-      return `${path}: ${issue.message}`;
-    })
-    .join("; ");
+/**
+ * Builds a {@link StructuringPass}: one tool-free, schema-constrained
+ * `adapter.run()` consumed to its text. `executeTool` throws — a tool-free
+ * pass must never dispatch one.
+ */
+export function buildStructuringPass(
+  adapter: AgentAdapter,
+  outputSchema: Record<string, unknown>,
+): StructuringPass {
+  return (messages, signal) =>
+    consumeAdapterStream(
+      adapter.run(
+        { messages, tools: [], threadId: randomUUID(), signal, outputSchema },
+        {
+          executeTool: () => {
+            throw new Error(
+              "structured-output structuring pass is tool-free and must not call a tool",
+            );
+          },
+          signal,
+        },
+      ),
+      { signal },
+    );
 }

@@ -20,8 +20,8 @@ import { createLogger } from "../../logging/logger";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
 import {
+  buildStructuringPass,
   resolveStructuredOutput,
-  type StructuringPass,
 } from "./structured-output";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
@@ -58,14 +58,14 @@ export interface RunAgentInput {
 }
 
 /** Per-call options for {@link runAgent}. */
-export interface RunAgentOptions<TOutput = unknown> {
+export interface RunAgentOptions {
   /**
    * Structured-output schema override for this call. Takes precedence over the
    * agent's own `output` schema. When either is set, `runAgent` validates the
    * final answer and populates {@link RunAgentResult.output}, throwing a
    * `StructuredOutputError` if it can't produce a valid object.
    */
-  output?: z.ZodType<TOutput>;
+  output?: z.ZodType;
 }
 
 export interface RunAgentResult<TOutput = string> {
@@ -113,7 +113,7 @@ export interface RunAgentResult<TOutput = string> {
 export function runAgent<S extends z.ZodType>(
   def: AgentDefinition<unknown>,
   input: RunAgentInput,
-  options: RunAgentOptions<z.infer<S>> & { output: S },
+  options: RunAgentOptions & { output: S },
 ): Promise<RunAgentResult<z.infer<S>>>;
 // No override — the result type comes from the agent's own `output` schema.
 export function runAgent<TOutput = string>(
@@ -149,38 +149,10 @@ export async function runAgent(
     schema,
     baseMessages,
     finalText: text,
-    runStructuringPass: buildStructuringPass(adapter, schema),
+    runStructuringPass: buildStructuringPass(adapter, toToolJSONSchema(schema)),
     signal: input.signal,
   });
   return { text, events, output };
-}
-
-/**
- * Builds a {@link StructuringPass}: one tool-free, schema-constrained
- * `adapter.run()`, consumed to its final text. `executeTool` throws — a
- * tool-free run never dispatches one; if it somehow does, that's a bug we
- * want surfaced, not swallowed.
- */
-function buildStructuringPass(
-  adapter: AgentAdapter,
-  schema: z.ZodType,
-): StructuringPass {
-  const outputSchema = toToolJSONSchema(schema);
-  return (messages, signal) =>
-    consumeAdapterStream(
-      adapter.run(
-        { messages, tools: [], threadId: randomUUID(), signal, outputSchema },
-        {
-          executeTool: () => {
-            throw new Error(
-              "runAgent: structuring pass is tool-free and must not call a tool",
-            );
-          },
-          signal,
-        },
-      ),
-      { signal },
-    );
 }
 
 interface RawRunResult {

@@ -156,14 +156,12 @@ export interface AgentDefinition<TOutput = string> {
   /** System prompt body. For markdown-loaded agents this is the file body. */
   instructions: string;
   /**
-   * Optional Zod schema the agent's final answer is validated against. When
-   * set, the agent returns a typed object instead of freeform text: the
-   * `/invocations` envelope gains a top-level `output_parsed` field, `/chat`
-   * emits a final `structured_output` SSE event, and in-process `runAgent`
-   * populates `RunAgentResult.output`. Prefer {@link createAgent} with an
-   * `output` schema so the in-process result is statically typed via
-   * `z.infer`. Code-config agents only — markdown `agent.md` agents cannot
-   * carry a schema.
+   * Optional Zod schema the agent's final answer is validated against; when
+   * set, the agent returns a typed object instead of text — surfaced as
+   * `output_parsed` on `/invocations`, a final `structured_output` SSE event
+   * on `/chat`, and `RunAgentResult.output` in-process. Prefer {@link
+   * createAgent} so the in-process result is typed via `z.infer`. Code-config
+   * agents only — markdown agents can't carry a schema.
    */
   output?: z.ZodType<TOutput>;
   /**
@@ -418,6 +416,8 @@ export interface RegisteredAgent {
    * typing lives on `createAgent`/`runAgent`.
    */
   output?: z.ZodType;
+  /** The {@link output} schema converted to JSON Schema, memoized at registration. Present iff `output` is. */
+  outputSchema?: Record<string, unknown>;
   /**
    * Resolved per-agent skill catalog (visibility + collision rules applied).
    * Present when any skill is visible to this agent; drives the always-on

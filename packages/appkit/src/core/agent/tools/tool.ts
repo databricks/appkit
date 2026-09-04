@@ -85,14 +85,24 @@ export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
 }
 
 /**
+ * Compact one-line rendering of a ZodError's issues: `path: message` per issue,
+ * joined by `; ` (root-level issues render as `(root)`). Stable across zod v4.
+ * Shared by {@link formatZodError} and the structured-output re-prompt.
+ */
+export function formatZodIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => {
+      const field = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+      return `${field}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
+/**
  * Formats a Zod validation error into an LLM-friendly string.
  *
  * Example: `Invalid arguments for get_weather: city: Invalid input: expected string, received undefined`
  */
 export function formatZodError(error: z.ZodError, toolName: string): string {
-  const parts = error.issues.map((issue) => {
-    const field = issue.path.length > 0 ? issue.path.join(".") : "(root)";
-    return `${field}: ${issue.message}`;
-  });
-  return `Invalid arguments for ${toolName}: ${parts.join("; ")}`;
+  return `Invalid arguments for ${toolName}: ${formatZodIssues(error)}`;
 }

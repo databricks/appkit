@@ -131,11 +131,9 @@ export type AgentEvent =
   | { type: "metadata"; data: Record<string, unknown> }
   | {
       /**
-       * Emitted by the agents plugin (not adapters) once, after the streamed
-       * text, when the agent declared an `output` schema: the parsed,
-       * schema-validated object. Delivered on the wire as
-       * `appkit.structured_output`. Non-streaming surfaces (`/invocations`)
-       * return the same object as the envelope's `output_parsed` field.
+       * Emitted by the agents plugin (not adapters) after the streamed text:
+       * the parsed, schema-validated object. Wire event:
+       * {@link AppKitStructuredOutputEvent}.
        */
       type: "structured_output";
       data: unknown;
@@ -301,14 +299,11 @@ export interface AgentInput {
   threadId: string;
   signal?: AbortSignal;
   /**
-   * JSON Schema the adapter should constrain a tool-free completion to, when
-   * it supports server-side structured output (e.g. an OpenAI-compatible
-   * `response_format: { type: "json_schema" }`). Set by the structured-output
-   * path; ignored when `tools` is non-empty (Databricks Claude endpoints
-   * reject `response_format` combined with `tools`). Adapters that can't
-   * constrain output ignore it — the structured-output resolver then relies
-   * on prompt + Zod validation. Already stripped of the top-level `$schema`
-   * key by {@link toToolJSONSchema}.
+   * JSON Schema to constrain a tool-free completion to, for adapters that
+   * support server-side structured output (OpenAI-compatible `response_format`).
+   * Adapters that can't ignore it — the structured-output resolver then falls
+   * back to prompt + Zod validation. Already stripped of the top-level
+   * `$schema` key by {@link toToolJSONSchema}.
    */
   outputSchema?: Record<string, unknown>;
   /**
