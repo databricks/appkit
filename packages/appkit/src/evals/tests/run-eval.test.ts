@@ -11,6 +11,7 @@ function fakeDriver(result: Partial<DriveResult>): EvalDriver {
     send: async () => ({
       reply: "",
       toolCalls: [],
+      toolCallDetails: [],
       succeeded: true,
       ...result,
     }),
@@ -53,6 +54,82 @@ describe("runEval", () => {
     });
     expect(result.passed).toBe(false);
     expect(result.assertions[0].pass).toBe(false);
+  });
+
+  test("calledToolWith passes when a call's args deep-contain the expected", async () => {
+    const def = defineEval({
+      async test(t) {
+        await t.send("weather in Paris?");
+        t.calledToolWith("get_weather", { city: "Paris" });
+      },
+    });
+    const result = await runEval(def, {
+      id: "args-match",
+      driver: fakeDriver({
+        toolCalls: ["get_weather"],
+        toolCallDetails: [
+          { name: "get_weather", args: { city: "Paris", units: "metric" } },
+        ],
+      }),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.assertions[0].pass).toBe(true);
+  });
+
+  test("calledToolWith fails when the tool was called with different args", async () => {
+    const def = defineEval({
+      async test(t) {
+        await t.send("weather in Paris?");
+        t.calledToolWith("get_weather", { city: "Paris" });
+      },
+    });
+    const result = await runEval(def, {
+      id: "args-mismatch",
+      driver: fakeDriver({
+        toolCalls: ["get_weather"],
+        toolCallDetails: [{ name: "get_weather", args: { city: "London" } }],
+      }),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.assertions[0].pass).toBe(false);
+  });
+
+  test("calledToolWith fails when the tool was not called", async () => {
+    const def = defineEval({
+      async test(t) {
+        await t.send("hi");
+        t.calledToolWith("get_weather", { city: "Paris" });
+      },
+    });
+    const result = await runEval(def, {
+      id: "args-not-called",
+      driver: fakeDriver({ toolCalls: [], toolCallDetails: [] }),
+    });
+    expect(result.passed).toBe(false);
+    expect(result.assertions[0].pass).toBe(false);
+    expect(result.assertions[0].detail).toContain("not called");
+  });
+
+  test("calledToolWith matches nested args and ignores extra keys", async () => {
+    const def = defineEval({
+      async test(t) {
+        await t.send("book it");
+        t.calledToolWith("book", { where: { city: "Paris" } });
+      },
+    });
+    const result = await runEval(def, {
+      id: "args-nested",
+      driver: fakeDriver({
+        toolCalls: ["book"],
+        toolCallDetails: [
+          {
+            name: "book",
+            args: { where: { city: "Paris", zip: "75001" }, when: "today" },
+          },
+        ],
+      }),
+    });
+    expect(result.passed).toBe(true);
   });
 
   test("soft failures don't fail the eval unless strict", async () => {
@@ -159,7 +236,12 @@ describe("runEval", () => {
   test("t.reset() forwards to the driver to start a fresh conversation", async () => {
     const reset = vi.fn();
     const driver: EvalDriver = {
-      send: async () => ({ reply: "", toolCalls: [], succeeded: true }),
+      send: async () => ({
+        reply: "",
+        toolCalls: [],
+        toolCallDetails: [],
+        succeeded: true,
+      }),
       reset,
     };
     const def = defineEval({
@@ -186,5 +268,64 @@ describe("runEval", () => {
       driver: fakeDriver({}),
     });
     expect(result.passed).toBe(true);
+  });
+
+  test("def.timeoutMs turns a hanging test into a non-passing timeout result", async () => {
+    const def = defineEval({
+      timeoutMs: 20,
+      async test() {
+        // Never resolves; only the timeout can settle the eval.
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, { id: "hang", driver: fakeDriver({}) });
+    expect(result.passed).toBe(false);
+    expect(result.error).toBe("eval timed out after 20ms");
+  });
+
+  test("a fast eval passes well under the same timeout", async () => {
+    const def = defineEval({
+      timeoutMs: 20,
+      async test(t) {
+        await t.send("hi");
+        t.succeeded();
+      },
+    });
+    const result = await runEval(def, {
+      id: "fast",
+      driver: fakeDriver({ succeeded: true }),
+    });
+    expect(result.passed).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("RunEvalOptions.timeoutMs applies when the def has none", async () => {
+    const def = defineEval({
+      async test() {
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, {
+      id: "runner-timeout",
+      driver: fakeDriver({}),
+      timeoutMs: 20,
+    });
+    expect(result.passed).toBe(false);
+    expect(result.error).toBe("eval timed out after 20ms");
+  });
+
+  test("def.timeoutMs overrides the runner-level default", async () => {
+    const def = defineEval({
+      timeoutMs: 15,
+      async test() {
+        await new Promise<void>(() => {});
+      },
+    });
+    const result = await runEval(def, {
+      id: "per-eval-wins",
+      driver: fakeDriver({}),
+      timeoutMs: 5000,
+    });
+    expect(result.error).toBe("eval timed out after 15ms");
   });
 });

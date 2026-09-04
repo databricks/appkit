@@ -56,6 +56,8 @@ export interface DriveResult {
   reply: string;
   /** Names of tools the agent called during the turn. */
   toolCalls: string[];
+  /** Tool calls with their parsed arguments, in call order. */
+  toolCallDetails: Array<{ name: string; args: Record<string, unknown> }>;
   /** Whether the turn completed without an agent/stream error. */
   succeeded: boolean;
   /** Thread/session id, when the driver exposes one. */
@@ -107,6 +109,15 @@ export interface TestContext {
   succeeded(): AssertionHandle;
   /** Assert a tool was called during the run (gate by default). */
   calledTool(name: string): AssertionHandle;
+  /**
+   * Assert a tool was called with arguments that deep-contain `expected`: every
+   * key in `expected` must equal the actual argument (recursively for nested
+   * objects), so extra arguments are ignored. Gate by default.
+   */
+  calledToolWith(
+    name: string,
+    expected: Record<string, unknown>,
+  ): AssertionHandle;
   /** Assert a value against a matcher, e.g. `t.check(t.reply, includes("Sunny"))`. */
   check(value: string, matcher: Matcher): AssertionHandle;
   /**
@@ -141,6 +152,13 @@ export interface EvalDefinition {
   description?: string;
   /** Target agent id. Defaults to the eval's parent `server/agents/<id>` dir. */
   agent?: string;
+  /** Free-form tags for filtering (see the runner's `tags` / `--tag` option). */
+  tags?: string[];
+  /**
+   * Per-eval timeout (ms): `runEval` races the test against it and records a
+   * non-passing result instead of hanging. Overrides the runner/CLI default.
+   */
+  timeoutMs?: number;
   /**
    * Run this eval once per row of a Databricks managed evaluation dataset (a
    * Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns).
@@ -150,6 +168,16 @@ export interface EvalDefinition {
   dataset?: { table: string; limit?: number };
   /** The eval body: drive the agent and assert on its behavior. */
   test(t: TestContext): Promise<void> | void;
+}
+
+/** Per-directory config from `evals.config.ts` (see {@link defineEvalConfig}). */
+export interface EvalConfig {
+  /** LLM judge config. Defaults to the agent's own serving endpoint. */
+  judge?: { model?: string };
+  /** Max evals to run concurrently. */
+  maxConcurrency?: number;
+  /** Default per-eval timeout. */
+  timeoutMs?: number;
 }
 
 /** The outcome of running one eval. */

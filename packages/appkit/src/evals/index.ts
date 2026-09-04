@@ -11,9 +11,15 @@ export {
   type DatasetRow,
   type ReadEvalDatasetOptions,
   readEvalDataset,
+  userTurns,
 } from "./dataset";
-export { defineEval } from "./define-eval";
-export { type DiscoveredEval, discoverEvalFiles } from "./discover";
+export { defineEval, defineEvalConfig } from "./define-eval";
+export {
+  type DiscoveredEval,
+  type DiscoveredEvalConfig,
+  discoverEvalConfigs,
+  discoverEvalFiles,
+} from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";
 export {
   configureJudge,
@@ -34,6 +40,8 @@ export {
   formatEvalDetail,
   formatEvalHeadline,
   formatEvalResults,
+  formatResultsJson,
+  formatResultsJUnit,
   formatSummaryLine,
   summarize,
 } from "./report";
@@ -43,6 +51,7 @@ export {
   type EvalRunSummary,
   type RunEvalsOptions,
   runEvalsInDir,
+  runWithRetries,
 } from "./run-evals";
 export type {
   AssertionHandle,

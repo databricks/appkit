@@ -1,4 +1,6 @@
-import { Command } from "commander";
+import fs from "node:fs";
+
+import { Command, Option } from "commander";
 
 interface EvalRunSummary {
   results: unknown[];
@@ -25,6 +27,7 @@ interface EvalRunner {
     rootDir?: string;
     baseUrl: string;
     filter?: string;
+    tags?: string[];
     strict?: boolean;
     headers?: Record<string, string>;
     concurrency?: number;
@@ -37,6 +40,8 @@ interface EvalRunner {
     judge?: { host: string; token: string; model: string };
     workspaceClient?: unknown;
     warehouseId?: string;
+    timeoutMs?: number;
+    retries?: number;
     onEvent?: (event: EvalProgress) => void;
   }): Promise<EvalRunSummary>;
   resolveDatabricksAuth(opts: {
@@ -53,7 +58,9 @@ interface EvalRunner {
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
-  summarize(results: unknown[]): { allPassed: boolean };
+  formatResultsJson(results: unknown[]): string;
+  formatResultsJUnit(results: unknown[]): string;
+  summarize(results: unknown[]): { allPassed: boolean; passRate: number };
 }
 
 /**
@@ -89,6 +96,7 @@ interface EvalOptions {
   strict?: boolean;
   root?: string;
   header?: string[];
+  tag?: string[];
   profile?: string;
   databricksHost?: string;
   databricksToken?: string;
@@ -96,6 +104,11 @@ interface EvalOptions {
   judgeModel?: string;
   concurrency?: number;
   warehouseId?: string;
+  timeout?: string;
+  retries?: string;
+  minPassRate?: string;
+  reporter?: "text" | "json" | "junit";
+  output?: string;
 }
 
 /** Resolved Databricks host + bearer (either field may be absent). */
@@ -130,22 +143,29 @@ function resolveJudge(opts: EvalOptions, auth: Auth) {
     : undefined;
 }
 
-/** Progress reporter: stream each eval as it runs instead of going silent. */
+/**
+ * Progress reporter: stream each eval as it runs instead of going silent. In a
+ * machine reporter (json/junit) the live per-eval streaming is suppressed and
+ * banners go to stderr (via `info`), keeping stdout clean for the report.
+ */
 function makeProgressReporter(
   runner: EvalRunner,
   url: string,
+  machine: boolean,
+  info: (msg: string) => void,
 ): (event: EvalProgress) => void {
   return (event) => {
     switch (event.type) {
       case "discovered":
-        console.log(
+        info(
           `Running ${event.total} eval${event.total === 1 ? "" : "s"} against ${url}\n`,
         );
         break;
       case "run-created":
-        console.log(`MLflow evaluation run: ${event.runId}\n`);
+        info(`MLflow evaluation run: ${event.runId}\n`);
         break;
       case "result": {
+        if (machine) break;
         // One full line per completion — evals run concurrently, so a split
         // "start … glyph" prefix would interleave into garbage.
         console.log(
@@ -168,12 +188,17 @@ function formatFailureLine(f: {
   return `  ✗ trace ${f.traceId}: ${f.status ?? ""} ${f.error ?? ""}`.trim();
 }
 
-/** Print the MLflow assessment/finish outcome after a run that created one. */
+/**
+ * Print the MLflow assessment/finish outcome after a run that created one. The
+ * summary line goes through `info` (stderr under a machine reporter); per-trace
+ * failures and finish errors always go to stderr.
+ */
 function printMlflowOutcome(
   mlflow: NonNullable<EvalRunSummary["mlflow"]>,
+  info: (msg: string) => void,
 ): void {
   const { report, finish } = mlflow;
-  console.log(
+  info(
     `MLflow: ${report.written} assessment(s) written` +
       (report.skipped ? `, ${report.skipped} skipped` : "") +
       (report.failures.length ? `, ${report.failures.length} failed` : ""),
@@ -197,24 +222,49 @@ async function runAgentEval(
 ): Promise<void> {
   const runner = await loadRunner();
 
+  // Databricks credentials shared by auth resolution and the workspace client:
+  // an explicit flag/DATABRICKS_* env wins, else the SDK resolves from the CLI
+  // profile.
+  const credentials = {
+    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
+    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
+    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
+  };
+
   // Resolve Databricks host + bearer the AppKit-native way: an explicit
-  // host/token (or DATABRICKS_* env) wins; otherwise the SDK mints an OAuth
-  // token from the CLI profile — so no hand-set PAT is required.
-  const auth: Auth =
-    (await runner.resolveDatabricksAuth({
-      profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
-      host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
-      token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
-    })) ?? {};
+  // host/token wins; otherwise the SDK mints an OAuth token from the CLI
+  // profile — so no hand-set PAT is required.
+  const auth: Auth = (await runner.resolveDatabricksAuth(credentials)) ?? {};
 
   // Managed-dataset reads: a workspace client (same profile/host/token) + a SQL
   // warehouse. Only needed by evals that declare `dataset`.
   const warehouseId = opts.warehouseId ?? process.env.DATABRICKS_WAREHOUSE_ID;
-  const workspaceClient = runner.resolveWorkspaceClient({
-    profile: opts.profile ?? process.env.DATABRICKS_CONFIG_PROFILE,
-    host: opts.databricksHost ?? process.env.DATABRICKS_HOST,
-    token: opts.databricksToken ?? process.env.DATABRICKS_TOKEN,
-  });
+  const workspaceClient = runner.resolveWorkspaceClient(credentials);
+
+  // Runner-level default per-eval timeout (ms). A per-eval `timeoutMs` wins.
+  const parsedTimeout = opts.timeout
+    ? Number.parseInt(opts.timeout, 10)
+    : undefined;
+  const timeoutMs =
+    parsedTimeout && parsedTimeout > 0 ? parsedTimeout : undefined;
+
+  // Extra attempts for evals that fail on an infra error (turn/timeout). Junk
+  // or negative input falls back to no retries.
+  const parsedRetries = opts.retries
+    ? Number.parseInt(opts.retries, 10)
+    : undefined;
+  const retries =
+    parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
+
+  // In a machine reporter (json/junit), stdout is reserved for the report (it
+  // may be piped), so human-facing lines go to stderr and the per-eval live
+  // streaming is suppressed. Text mode keeps its current stdout behavior.
+  const reporter = opts.reporter ?? "text";
+  const machine = reporter !== "text";
+  const info = (msg: string): void => {
+    if (machine) console.error(msg);
+    else console.log(msg);
+  };
 
   let summary: EvalRunSummary;
   try {
@@ -222,6 +272,7 @@ async function runAgentEval(
       rootDir: opts.root,
       baseUrl: opts.url,
       filter,
+      tags: opts.tag,
       strict: opts.strict,
       headers: opts.header ? parseHeaders(opts.header) : undefined,
       concurrency: opts.concurrency,
@@ -229,7 +280,9 @@ async function runAgentEval(
       judge: resolveJudge(opts, auth),
       workspaceClient,
       warehouseId,
-      onEvent: makeProgressReporter(runner, opts.url),
+      timeoutMs,
+      retries,
+      onEvent: makeProgressReporter(runner, opts.url, machine, info),
     });
   } catch (err) {
     // Setup failures (e.g. a bad --experiment for the MLflow run) reject before
@@ -241,18 +294,50 @@ async function runAgentEval(
     process.exitCode = 1;
     return;
   }
-  console.log(`\n${runner.formatSummaryLine(summary.results)}`);
+
+  // The final human summary always shows (stderr for machine reporters so it
+  // never pollutes the report on stdout/file).
+  info(`\n${runner.formatSummaryLine(summary.results)}`);
 
   if (summary.mlflow) {
-    printMlflowOutcome(summary.mlflow);
+    printMlflowOutcome(summary.mlflow, info);
   } else {
-    console.log(
+    info(
       "\nMLflow evaluation run skipped — pass --experiment (or set" +
         " MLFLOW_EXPERIMENT_ID) plus --profile/--databricks-host to create one.",
     );
   }
 
-  if (!runner.summarize(summary.results).allPassed) {
+  // Machine-readable report: build the string with a pure formatter, then emit
+  // it to --output <file> or stdout (kept clean of the human noise above).
+  if (machine) {
+    const report =
+      reporter === "json"
+        ? runner.formatResultsJson(summary.results)
+        : runner.formatResultsJUnit(summary.results);
+    if (opts.output) {
+      fs.writeFileSync(opts.output, `${report}\n`);
+      info(`Wrote ${reporter} report to ${opts.output}`);
+    } else {
+      process.stdout.write(`${report}\n`);
+    }
+  }
+
+  const stats = runner.summarize(summary.results);
+  const minPassRate = opts.minPassRate
+    ? Number.parseFloat(opts.minPassRate)
+    : undefined;
+  if (minPassRate !== undefined && !Number.isNaN(minPassRate)) {
+    // Threshold mode: gate on the aggregate pass rate rather than requiring
+    // every eval to pass.
+    const ok = stats.passRate >= minPassRate;
+    info(
+      `Pass rate ${(stats.passRate * 100).toFixed(0)}% (threshold ${(
+        minPassRate * 100
+      ).toFixed(0)}%) — ${ok ? "OK" : "below threshold"}`,
+    );
+    if (!ok) process.exitCode = 1;
+  } else if (!stats.allPassed) {
     process.exitCode = 1;
   }
 }
@@ -281,6 +366,10 @@ export const agentEvalCommand = new Command("eval")
     "Extra request header as 'Key: value' (repeatable)",
   )
   .option(
+    "--tag <tag...>",
+    "Only run evals tagged with one of these tags (repeatable)",
+  )
+  .option(
     "--profile <name>",
     "Databricks CLI profile to authenticate with via OAuth (default: DATABRICKS_CONFIG_PROFILE)",
   )
@@ -303,5 +392,29 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--judge-model <endpoint>",
     "Databricks serving endpoint to use as the LLM judge for t.judge.* (default: APPKIT_JUDGE_MODEL)",
+  )
+  .option(
+    "--timeout <ms>",
+    "Default per-eval timeout in ms (a per-eval timeoutMs overrides it)",
+  )
+  .option(
+    "--retries <n>",
+    "Re-run an eval up to N times when it fails on an infra error (turn/timeout); assertion failures are not retried",
+  )
+  .option(
+    "--min-pass-rate <rate>",
+    "Gate on aggregate pass rate (0..1) instead of requiring every eval to pass; exit 1 when below",
+  )
+  .addOption(
+    new Option(
+      "--reporter <format>",
+      "Report format: text (live console), json (dashboards), or junit (CI test reporters)",
+    )
+      .choices(["text", "json", "junit"])
+      .default("text"),
+  )
+  .option(
+    "--output <file>",
+    "Write the json/junit report to this file instead of stdout (ignored for text)",
   )
   .action(runAgentEval);
