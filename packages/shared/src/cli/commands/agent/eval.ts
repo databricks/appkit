@@ -91,6 +91,12 @@ function parseHeaders(values: string[]): Record<string, string> {
   return headers;
 }
 
+/** Parse a positive-integer CLI option; junk, zero, or negative → undefined. */
+function positiveInt(raw: string | undefined): number | undefined {
+  const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return n > 0 ? n : undefined;
+}
+
 interface EvalOptions {
   url: string;
   strict?: boolean;
@@ -242,19 +248,11 @@ async function runAgentEval(
   const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
   // Runner-level default per-eval timeout (ms). A per-eval `timeoutMs` wins.
-  const parsedTimeout = opts.timeout
-    ? Number.parseInt(opts.timeout, 10)
-    : undefined;
-  const timeoutMs =
-    parsedTimeout && parsedTimeout > 0 ? parsedTimeout : undefined;
+  const timeoutMs = positiveInt(opts.timeout);
 
   // Extra attempts for evals that fail on an infra error (turn/timeout). Junk
   // or negative input falls back to no retries.
-  const parsedRetries = opts.retries
-    ? Number.parseInt(opts.retries, 10)
-    : undefined;
-  const retries =
-    parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
+  const retries = positiveInt(opts.retries);
 
   // In a machine reporter (json/junit), stdout is reserved for the report (it
   // may be piped), so human-facing lines go to stderr and the per-eval live

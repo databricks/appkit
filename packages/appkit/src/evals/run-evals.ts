@@ -448,13 +448,12 @@ export async function runEvalsInDir(
   // it can't be applied per-agent without splitting the pool. The `--concurrency`
   // flag wins; else the highest value any agent's config requests (the pool
   // ceiling); else the built-in default.
-  const configMaxConcurrency = [...configs.values()]
+  const configConcurrencies = [...configs.values()]
     .map((c) => c.maxConcurrency)
-    .filter((n): n is number => typeof n === "number")
-    .reduce<number | undefined>(
-      (max, n) => (max === undefined ? n : Math.max(max, n)),
-      undefined,
-    );
+    .filter((n): n is number => typeof n === "number");
+  const configMaxConcurrency = configConcurrencies.length
+    ? Math.max(...configConcurrencies)
+    : undefined;
   const concurrency =
     options.concurrency ?? configMaxConcurrency ?? DEFAULT_CONCURRENCY;
 

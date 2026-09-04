@@ -1,4 +1,4 @@
-import { type Dirent, existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { agentDirNames } from "../core/agent/agent-dirs";
@@ -34,23 +34,32 @@ function evalFilesIn(dir: string): string[] {
 }
 
 /**
+ * List the agent directory names under `<rootDir>/server/agents/` (empty if the
+ * dir is absent). Shared by the eval-file and eval-config discovery below.
+ */
+function listAgents(rootDir: string): { agentsDir: string; agents: string[] } {
+  const agentsDir = path.join(rootDir, CODE_AGENTS_SOURCE_DIR);
+  try {
+    return {
+      agentsDir,
+      agents: agentDirNames(readdirSync(agentsDir, { withFileTypes: true })),
+    };
+  } catch {
+    return { agentsDir, agents: [] };
+  }
+}
+
+/**
  * Discover evals under `<rootDir>/server/agents/<agent>/evals/` — co-located
  * with each agent's `agent.{md,ts}` (same folder-per-agent layout the agents
  * plugin discovers). The agent id is the folder name; the eval id is the file
  * path relative to that evals dir with `.eval.ts` stripped. Sorted + stable.
  */
 export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
-  const agentsDir = path.join(rootDir, CODE_AGENTS_SOURCE_DIR);
+  const { agentsDir, agents } = listAgents(rootDir);
   const out: DiscoveredEval[] = [];
 
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(agentsDir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-
-  for (const agent of agentDirNames(entries)) {
+  for (const agent of agents) {
     const evalsDir = path.join(agentsDir, agent, "evals");
     for (const file of evalFilesIn(evalsDir)) {
       const id = path
@@ -74,17 +83,10 @@ export function discoverEvalFiles(rootDir: string): DiscoveredEval[] {
  * config file are omitted. Returns a stable, sorted list.
  */
 export function discoverEvalConfigs(rootDir: string): DiscoveredEvalConfig[] {
-  const agentsDir = path.join(rootDir, CODE_AGENTS_SOURCE_DIR);
+  const { agentsDir, agents } = listAgents(rootDir);
   const out: DiscoveredEvalConfig[] = [];
 
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(agentsDir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-
-  for (const agent of agentDirNames(entries)) {
+  for (const agent of agents) {
     const file = path.join(agentsDir, agent, "evals", "evals.config.ts");
     if (existsSync(file)) out.push({ file, agent });
   }
