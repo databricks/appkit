@@ -144,6 +144,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.72.0](https://github.com/databricks/appkit/compare/v0.71.0...v0.72.0) (2026-09-04)
+
+### appkit
+
+* **appkit:** agent eval framework, judge, mlflow connector ([#478](https://github.com/databricks/appkit/issues/478)) ([2e2c26e](https://github.com/databricks/appkit/commit/2e2c26e90c2bacb9e7e038d1aa842039c708bc97)), closes [#545](https://github.com/databricks/appkit/issues/545) [#545](https://github.com/databricks/appkit/issues/545)
+
+
 ## [0.71.0](https://github.com/databricks/appkit/compare/v0.70.0...v0.71.0) (2026-09-03)
 
 ### appkit
