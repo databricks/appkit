@@ -90,6 +90,7 @@
     "@opentelemetry/semantic-conventions": "1.38.0",
     "@types/semver": "7.7.1",
     "apache-arrow": "21.1.0",
+    "autoevals": "0.3.0",
     "dotenv": "16.6.1",
     "drizzle-orm": "0.45.2",
     "express": "4.22.2",
