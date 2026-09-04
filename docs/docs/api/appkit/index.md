@@ -22,6 +22,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
+| [LakebaseThreadStore](Class.LakebaseThreadStore.md) | Persistent [ThreadStore](Interface.ThreadStore.md) backed by Databricks Lakebase (Postgres). |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
@@ -62,6 +63,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [LakebasePool](Interface.LakebasePool.md) | Subset of `pg.Pool` exposed by the Lakebase plugin. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
 | [LakebasePoolManager](Interface.LakebasePoolManager.md) | Manages multiple Lakebase connection pools keyed by an identifier (e.g. userId). |
+| [LakebaseThreadStoreOptions](Interface.LakebaseThreadStoreOptions.md) | - |
 | [McpConnectAllResult](Interface.McpConnectAllResult.md) | Per-endpoint outcome of [AppKitMcpClient.connectAll](Class.AppKitMcpClient.md#connectall). Callers (the agents plugin in particular) use the split to warn at startup when some MCP servers are unreachable without aborting boot for the rest. |
 | [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |

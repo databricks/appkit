@@ -63,6 +63,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.LakebaseThreadStore",
+          label: "LakebaseThreadStore"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.Plugin",
           label: "Plugin"
         },
@@ -241,6 +246,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.LakebasePoolManager",
           label: "LakebasePoolManager"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.LakebaseThreadStoreOptions",
+          label: "LakebaseThreadStoreOptions"
         },
         {
           type: "doc",

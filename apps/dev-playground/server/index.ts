@@ -12,7 +12,7 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch } from "@databricks/appkit/beta";
+import { agents, aiSearch, LakebaseThreadStore } from "@databricks/appkit/beta";
 
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -115,6 +115,13 @@ createApp({
       // conversational default for the bare `/agent` route (the markdown agents
       // are dispatchers or ephemeral and don't make sense as the landing agent).
       defaultAgent: "helper",
+      // Persist threads across restarts when a Lakebase is bound (same
+      // LAKEBASE_ENDPOINT signal the lakebase plugin uses above). The store
+      // self-bootstraps its tables on setup; without Lakebase we fall back to
+      // the in-memory store, so local dev needs no database.
+      ...(process.env.LAKEBASE_ENDPOINT
+        ? { threadStore: new LakebaseThreadStore() }
+        : {}),
     }),
     aiSearch({
       indexes: {

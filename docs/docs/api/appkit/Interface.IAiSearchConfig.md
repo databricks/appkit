@@ -46,6 +46,23 @@ optional name: string;
 
 ***
 
+### streamConfig?
+
+```ts
+optional streamConfig: StreamConfig;
+```
+
+SSE stream configuration for this plugin's `executeStream()` calls (buffer
+sizes, `maxEventSize`, TTL, heartbeat). Sets the plugin's StreamManager
+defaults; a per-call `stream` config still overrides these. Use it to raise
+`maxEventSize` above the 5 MiB default when a stream emits larger events.
+
+#### Inherited from
+
+[`BasePluginConfig`](Interface.BasePluginConfig.md).[`streamConfig`](Interface.BasePluginConfig.md#streamconfig)
+
+***
+
 ### telemetry?
 
 ```ts

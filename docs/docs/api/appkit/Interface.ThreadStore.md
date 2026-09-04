@@ -25,6 +25,21 @@ message: Message): Promise<void>;
 
 ***
 
+### close()?
+
+```ts
+optional close(): Promise<void>;
+```
+
+Optional teardown — e.g. close an owned connection pool. Called during
+agents-plugin shutdown. In-memory stores omit it.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### create()
 
 ```ts
@@ -78,6 +93,22 @@ get(threadId: string, userId: string): Promise<Thread | null>;
 #### Returns
 
 `Promise`\<[`Thread`](Interface.Thread.md) \| `null`\>
+
+***
+
+### init()?
+
+```ts
+optional init(): Promise<void>;
+```
+
+Optional one-time initialization — e.g. verify connectivity and bootstrap
+a backing schema. Called once during agents-plugin setup, so a failure
+here fails boot fast. In-memory stores omit it.
+
+#### Returns
+
+`Promise`\<`void`\>
 
 ***
 
