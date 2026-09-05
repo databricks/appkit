@@ -11,7 +11,7 @@ export interface CrudRelation {
   readonly target: CrudTable;
 }
 
-/** Private HTTP contract compiled once for one explicitly exposed table. */
+/** Private HTTP contract compiled once for one exposed table. */
 export interface CrudTable {
   readonly name: string;
   readonly primaryKey?: CompiledColumn;

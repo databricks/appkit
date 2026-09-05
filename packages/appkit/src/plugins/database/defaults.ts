@@ -20,7 +20,10 @@ export const databaseWriteDefaults: PluginExecuteConfig = {
  */
 export const STATEMENT_TIMEOUT_MS = 30_000;
 
-/** Max wall-clock time held by one database transaction (ms). */
+/** Server-side limit for an idle open transaction, independent of JS timers (ms). */
+export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
+
+/** Deadline for the transaction callback, not cancellation of arbitrary hook work (ms). */
 export const TRANSACTION_TIMEOUT_MS = 30_000;
 
 // Generated-read limits. The wire caps a typed caller shares with HTTP live in

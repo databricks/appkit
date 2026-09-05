@@ -77,14 +77,15 @@ export class DatabasePluginError extends AppKitError {
   constructor(
     readonly category: DatabaseErrorCategory,
     readonly phase: DatabaseErrorPhase,
-    runtimeMessage?: string,
+    diagnosticMessage?: string,
     readonly details?: readonly DatabaseErrorDetail[],
   ) {
     const definition = definitions[category];
-    // Plugin boundaries replace runtime diagnostics with the stable message.
+    // Setup and runtime diagnostics stay server-side. Request boundaries and
+    // clientMessage always use the stable message.
     super(
-      phase === "runtime" && runtimeMessage
-        ? runtimeMessage
+      (phase === "runtime" || phase === "setup") && diagnosticMessage
+        ? diagnosticMessage
         : definition.message,
       {
         clientMessage: definition.message,
@@ -104,8 +105,12 @@ export function invalidDatabaseRequest(
 }
 
 /** Refuse to publish a plugin whose configuration cannot be honored. */
-export function databaseSetupFailed(): DatabasePluginError {
-  return new DatabasePluginError("SETUP_FAILED", "setup");
+export function databaseSetupFailed(reason?: string): DatabasePluginError {
+  return new DatabasePluginError(
+    "SETUP_FAILED",
+    "setup",
+    reason ? `Database setup failed: ${reason}` : undefined,
+  );
 }
 
 /** Reject untrusted request input, naming the field but never its value. */

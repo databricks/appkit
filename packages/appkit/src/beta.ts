@@ -119,6 +119,9 @@ export type {
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
 export type {
+  DatabaseApiConfig,
+  DatabaseApiWriteOperation,
+  DatabaseApiWritesConfig,
   DatabaseExports,
   EntityHooks,
   EntityMutationHooks,

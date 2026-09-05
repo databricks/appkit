@@ -400,7 +400,11 @@ export class EntityClient {
       );
     }
     try {
-      return await this.ctx.runInTransaction(restart);
+      return await this.ctx.runInTransaction((entity) =>
+        // Change the execution context without losing the caller's query state
+        // or mutating the shared transaction client.
+        restart(entity.clone(this.state)),
+      );
     } catch (error) {
       if (
         error instanceof DatabaseValidationError ||

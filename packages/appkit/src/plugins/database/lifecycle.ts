@@ -12,7 +12,11 @@ import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { STATEMENT_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS } from "./defaults";
+import {
+  IDLE_IN_TRANSACTION_TIMEOUT_MS,
+  STATEMENT_TIMEOUT_MS,
+  TRANSACTION_TIMEOUT_MS,
+} from "./defaults";
 import { EntityClient, type EntityExecute } from "./entity-client";
 import type {
   DatabaseExports,
@@ -176,7 +180,10 @@ export async function createDatabaseState<TSchema extends Schema>(
     if (!active) throw new DatabasePluginError("INTERNAL", "runtime");
   };
   try {
-    pool = createLakebasePool({ statement_timeout: STATEMENT_TIMEOUT_MS });
+    pool = createLakebasePool({
+      statement_timeout: STATEMENT_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
+    });
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",

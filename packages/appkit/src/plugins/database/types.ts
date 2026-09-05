@@ -7,35 +7,43 @@ export type SchemaTableName<TSchema extends Schema> = Extract<
   string
 >;
 
-/** Generated write operations that require an explicit HTTP opt-in. */
-export type CrudWriteOperation = "create" | "update" | "delete";
+/** Generated HTTP write operations. */
+export type DatabaseApiWriteOperation = "create" | "update" | "delete";
 
-/** Write exposure for every readable table or a constrained subset. */
-type CrudWritesConfig<TSchema extends Schema> =
-  | true
+/** All writes by default; false keeps reads only, and an object narrows writes. */
+export type DatabaseApiWritesConfig<TSchema extends Schema> =
+  | boolean
   | {
+      /** Tables that remain writable. Defaults to every exposed table. */
       readonly tables?: readonly SchemaTableName<TSchema>[];
-      readonly operations: readonly CrudWriteOperation[];
+      /** Operations that remain enabled. Defaults to create, update, and delete. */
+      readonly operations?: readonly DatabaseApiWriteOperation[];
     };
 
 /**
- * Generated route exposure: off by default, every readable table, or an
- * explicit readable subset. Writes remain off unless `writes` names them.
+ * Full generated CRUD for every declared table by default. Set false to disable
+ * all generated routes, or use an object to restrict tables and writes.
+ * Keyed routes require a public primary key; upsert stays programmatic.
+ * Route names must start with a letter, contain only letters, digits, `_`, or
+ * `-`, be at most 64 characters, and be unique ignoring case. Invalid names
+ * fail setup; exclude internal tables with `api.tables` or use `api: false`.
  *
  * Routes run as the app's service principal and apply no per-user filter, so
- * anyone the app admits receives every enabled operation. Enabling a readable
- * table also makes it includable from its neighbours; a relation whose target
+ * anyone the app admits receives every enabled operation. An exposed table
+ * also becomes includable from its neighbours; a relation whose target
  * stays off cannot be included.
  *
  * Text filters accept caller-supplied `like`/`ilike` patterns; a server-side
  * `statement_timeout` cancels a pattern that would otherwise hold its pooled
  * connection to completion.
  */
-export type CrudRoutesConfig<TSchema extends Schema> =
+export type DatabaseApiConfig<TSchema extends Schema> =
   | boolean
   | {
-      readonly tables: readonly SchemaTableName<TSchema>[];
-      readonly writes?: CrudWritesConfig<TSchema>;
+      /** Tables that remain exposed. Defaults to every declared table. */
+      readonly tables?: readonly SchemaTableName<TSchema>[];
+      /** All writes by default. Set false for read-only routes. */
+      readonly writes?: DatabaseApiWritesConfig<TSchema>;
     };
 
 /** Which entity and generated operation produced the row being shaped. */
@@ -66,7 +74,19 @@ export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema> = {
   readonly schema: TSchema;
-  readonly crudRoutes?: CrudRoutesConfig<TSchema>;
+  /**
+   * Generated HTTP CRUD is enabled for all tables by default, using the app's
+   * service principal. Every admitted caller receives the enabled operations;
+   * no per-user or per-row authorization is applied. This plugin does not
+   * support OBO. Use custom routes for application-specific authorization.
+   *
+   * Set `false` to disable routes, `{ writes: false }` for reads only, or
+   * `{ tables: ["notes"] }` to expose only selected tables. To disable delete,
+   * use `{ writes: { operations: ["create", "update"] } }`.
+   *
+   * @defaultValue true
+   */
+  readonly api?: DatabaseApiConfig<TSchema>;
   readonly hooks?: {
     readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
   };

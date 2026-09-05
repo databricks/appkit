@@ -133,7 +133,6 @@ async function mount(hooks: Record<string, EntityHooks>) {
 
   const plugin = new DatabasePlugin({
     schema,
-    crudRoutes: { tables: ["notes", "audits"], writes: true },
     hooks,
   });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry = {

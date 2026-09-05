@@ -114,6 +114,9 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
+| [DatabaseApiConfig](TypeAlias.DatabaseApiConfig.md) | Full generated CRUD for every declared table by default. Set false to disable all generated routes, or use an object to restrict tables and writes. Keyed routes require a public primary key; upsert stays programmatic. Route names must start with a letter, contain only letters, digits, `_`, or `-`, be at most 64 characters, and be unique ignoring case. Invalid names fail setup; exclude internal tables with `api.tables` or use `api: false`. |
+| [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
+| [DatabaseApiWritesConfig](TypeAlias.DatabaseApiWritesConfig.md) | All writes by default; false keeps reads only, and an object narrows writes. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
 | [EntityHooks](TypeAlias.EntityHooks.md) | Response shaping and mutation lifecycle declared for one table. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
@@ -165,7 +168,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
 | [database](Function.database.md) | Create a typed database plugin registration for a finalized schema. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
-| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `crudRoutes` and `hooks` can name only real tables. |
+| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` and `hooks` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [enumColumn](Function.enumColumn.md) | - |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |

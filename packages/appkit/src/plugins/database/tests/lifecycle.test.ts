@@ -18,7 +18,12 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDataPath: mocks.createDrizzleDataPath,
 }));
 
-import { STATEMENT_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS } from "../defaults";
+import {
+  IDLE_IN_TRANSACTION_TIMEOUT_MS,
+  STATEMENT_TIMEOUT_MS,
+  TRANSACTION_TIMEOUT_MS,
+} from "../defaults";
+import type { EntityClient } from "../entity-client";
 import { createDatabaseState } from "../lifecycle";
 import { MAX_TRANSACTION_OPERATIONS } from "../scope";
 
@@ -54,10 +59,10 @@ function fakePath(overrides: Partial<DataPath> = {}): DataPath {
   return path;
 }
 
-type TestEntity = {
-  create(values: Row): Promise<Row>;
-  toArray(): Promise<Row[]>;
-};
+type TestEntity = Pick<
+  EntityClient,
+  "create" | "toArray" | "where" | "update" | "delete"
+>;
 type TestTransaction = {
   notes: TestEntity;
   tags: TestEntity;
@@ -126,6 +131,7 @@ describe("createDatabaseState", () => {
     expect(mocks.createLakebasePool).toHaveBeenCalledTimes(1);
     expect(mocks.createLakebasePool).toHaveBeenCalledWith({
       statement_timeout: STATEMENT_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
     expect(mocks.createDrizzleDb).toHaveBeenCalledWith(pool, schema);
     expect(mocks.createDrizzleDataPath).toHaveBeenCalledWith(db, schema, {
@@ -403,6 +409,80 @@ describe("createDatabaseState", () => {
     expect(txPath.insert).toHaveBeenCalledTimes(1);
     expect(txPath.transaction).not.toHaveBeenCalled();
   });
+
+  test.each([
+    ["hooked root", "automatic", true],
+    ["root joining a transaction", "root", false],
+    ["hooked root joining a transaction", "root", true],
+    ["transaction client", "bound", false],
+    ["hooked transaction client", "bound", true],
+  ] as const)(
+    "preserves keyed mutation predicates for a %s",
+    async (_name, mode, hooked) => {
+      const txPath = fakePath();
+      const rootPath = fakePath({
+        transaction: vi.fn(async (callback) => callback(txPath)),
+      });
+      const { execute } = arrange(rootPath);
+      const beforeUpdate = vi.fn();
+      const beforeDelete = vi.fn();
+      const state = await createDatabaseState(
+        schema,
+        execute,
+        hooked ? { notes: { beforeUpdate, beforeDelete } } : undefined,
+      );
+      const exports = surface(state);
+      const predicate = {
+        and: [{ body: { eq: "original" } }, { id: { gt: 0 } }],
+      };
+      const mutate = async (entity: TestEntity) => {
+        const scoped = entity
+          .where({ body: { eq: "original" } })
+          .where({ id: { gt: 0 } });
+        await scoped.update(1, { body: "updated" });
+        await scoped.delete(1);
+      };
+
+      if (mode === "automatic") {
+        await mutate(exports.notes);
+      } else {
+        await exports.transaction(async (tx) => {
+          await mutate(mode === "root" ? exports.notes : tx.notes);
+          // A scoped operation must not change the shared transaction client.
+          await tx.notes.update(2, { body: "unfiltered" });
+          expect(txPath.update).toHaveBeenLastCalledWith(
+            schema.$tables.notes,
+            2,
+            { body: "unfiltered" },
+            undefined,
+          );
+        });
+      }
+
+      expect(txPath.update).toHaveBeenNthCalledWith(
+        1,
+        schema.$tables.notes,
+        1,
+        { body: "updated" },
+        predicate,
+      );
+      expect(txPath.delete).toHaveBeenCalledExactlyOnceWith(
+        schema.$tables.notes,
+        1,
+        predicate,
+      );
+      expect(rootPath.update).not.toHaveBeenCalled();
+      expect(rootPath.delete).not.toHaveBeenCalled();
+      expect(rootPath.transaction).toHaveBeenCalledTimes(
+        mode === "automatic" ? 2 : 1,
+      );
+      expect(txPath.transaction).not.toHaveBeenCalled();
+      expect(beforeUpdate).toHaveBeenCalledTimes(
+        hooked ? (mode === "automatic" ? 1 : 2) : 0,
+      );
+      expect(beforeDelete).toHaveBeenCalledTimes(hooked ? 1 : 0);
+    },
+  );
 
   test("rolls the hook's related write back with the primary mutation", async () => {
     let rolledBack = false;

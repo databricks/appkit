@@ -41,9 +41,15 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
 
   constructor(config: IDatabaseConfig<TSchema>) {
     super({ schema: config.schema });
+    // Do not silently turn a previous opt-out into the default full API.
+    if ("crudRoutes" in config) {
+      throw databaseSetupFailed(
+        '"crudRoutes" was renamed to "api". Use api: false to disable generated routes or api: { writes: false } for reads only.',
+      );
+    }
     this.config = {
       schema: config.schema,
-      crudRoutes: config.crudRoutes,
+      api: config.api,
       hooks: config.hooks,
     };
   }
@@ -54,13 +60,15 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     if (!this.setupPromise) {
       const attempt = (async () => {
         this.exposure = resolveCrudExposure(
-          this.config.crudRoutes,
+          this.config.api,
           Object.keys(this.config.schema.$tables),
         );
         // A hook key naming no declared table would silently never run.
         for (const name of Object.keys(this.hooks() ?? {})) {
           if (!Object.hasOwn(this.config.schema.$tables, name)) {
-            throw databaseSetupFailed();
+            throw databaseSetupFailed(
+              `hooks names undeclared table ${JSON.stringify(name)}. Use a table declared in schema.`,
+            );
           }
         }
         const candidate = await createDatabaseState(
@@ -81,7 +89,7 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     return this.setupPromise;
   }
 
-  /** Register generated routes for explicitly exposed tables only. */
+  /** Register generated CRUD, subject to the configured table and write restrictions. */
   injectRoutes(router: express.Router): void {
     if (this.exposure.tables.length === 0) return;
     const tables = compileCrudTables(
