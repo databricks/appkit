@@ -180,23 +180,46 @@ export function classifyBlockingFailure(
   return "environmental";
 }
 
-/**
- * Coarse cause label for an environmental failure, used by the `--wait`
- * committed-types warning so the log says *why* generation fell back.
- *
- * Returns:
- * - "unreachable": transport/connectivity failure (see {@link isConnectivityError}).
- * - "auth": HTTP 401/403, including a status carried on `response.status` or
- *   wrapped in a `cause`/`AggregateError` chain.
- * - "unavailable": everything else (DELETED/DELETING, wait timeouts, degraded
- *   DESCRIBEs).
- */
-export function classifyEnvironmentalCause(
-  error: unknown,
-): "auth" | "unreachable" | "unavailable" {
-  if (isConnectivityError(error)) return "unreachable";
+// Databricks REST/SDK auth error codes. These arrive as an `error_code` string
+// (a top-level field, or a JSON body embedded in the message) rather than a
+// numeric HTTP status, so status-only detection misses them.
+const AUTH_ERROR_CODES = new Set(["PERMISSION_DENIED", "UNAUTHENTICATED"]);
 
-  // Walk the error chain so a wrapped 401/403 is still labeled as auth.
+/**
+ * Extract a Databricks `error_code` (e.g. "PERMISSION_DENIED") from a thrown
+ * error. The SDK surfaces it either as a top-level `error_code` field or as a
+ * JSON body embedded in the message string, e.g.
+ * `Response from server (Forbidden) {"error_code":"PERMISSION_DENIED",...}`.
+ */
+function getDatabricksErrorCode(error: unknown): string | undefined {
+  if (!isObject(error)) return undefined;
+  if (typeof error.error_code === "string") return error.error_code;
+
+  const message = typeof error.message === "string" ? error.message : undefined;
+  const jsonMatch = message?.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as { error_code?: unknown };
+      if (typeof parsed.error_code === "string") return parsed.error_code;
+    } catch {
+      // not valid JSON — fall through
+    }
+  }
+  return undefined;
+}
+
+/**
+ * True when a thrown failure is an authentication/authorization problem: an
+ * HTTP 401/403, or a Databricks `error_code` of PERMISSION_DENIED /
+ * UNAUTHENTICATED (which can arrive with no numeric status). Walks
+ * `cause`/`AggregateError` chains so a wrapped auth error is still recognized.
+ *
+ * Callers degrade rather than fail the build on `true`: a build-time identity
+ * gap — the build runs as a different principal than the app's runtime
+ * on-behalf-of user — must not block a deploy when committed types exist. The
+ * has-types gate still crashes a fresh checkout with nothing to fall back to.
+ */
+export function isAuthError(error: unknown): boolean {
   const seen = new Set<unknown>();
   const stack = [error];
 
@@ -206,10 +229,33 @@ export function classifyEnvironmentalCause(
     seen.add(current);
 
     const status = getErrorStatus(current);
-    if (status !== undefined && AUTH_ERROR_STATUSES.has(status)) return "auth";
+    if (status !== undefined && AUTH_ERROR_STATUSES.has(status)) return true;
+
+    const code = getDatabricksErrorCode(current);
+    if (code && AUTH_ERROR_CODES.has(code)) return true;
 
     stack.push(...getErrorChildren(current));
   }
 
+  return false;
+}
+
+/**
+ * Coarse cause label for an environmental failure, used by the `--wait`
+ * committed-types warning so the log says *why* generation fell back.
+ *
+ * Returns:
+ * - "unreachable": transport/connectivity failure (see {@link isConnectivityError}).
+ * - "auth": HTTP 401/403 or a PERMISSION_DENIED / UNAUTHENTICATED `error_code`,
+ *   including one carried on `response.status` or wrapped in a
+ *   `cause`/`AggregateError` chain (see {@link isAuthError}).
+ * - "unavailable": everything else (DELETED/DELETING, wait timeouts, degraded
+ *   DESCRIBEs).
+ */
+export function classifyEnvironmentalCause(
+  error: unknown,
+): "auth" | "unreachable" | "unavailable" {
+  if (isConnectivityError(error)) return "unreachable";
+  if (isAuthError(error)) return "auth";
   return "unavailable";
 }

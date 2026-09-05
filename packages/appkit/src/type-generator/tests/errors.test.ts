@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyBlockingFailure, classifyEnvironmentalCause } from "../errors";
+import {
+  classifyBlockingFailure,
+  classifyEnvironmentalCause,
+  isAuthError,
+} from "../errors";
 
 describe("classifyBlockingFailure", () => {
   describe("deterministic failures", () => {
@@ -290,5 +294,66 @@ describe("classifyEnvironmentalCause", () => {
     ["a non-object", "just a string"],
   ])("labels %s as unavailable", (_name, error) => {
     expect(classifyEnvironmentalCause(error)).toBe("unavailable");
+  });
+
+  it("labels a PERMISSION_DENIED error_code (no status) as auth", () => {
+    const error = Object.assign(new Error("2f1a9c…"), {
+      error_code: "PERMISSION_DENIED",
+    });
+    expect(classifyEnvironmentalCause(error)).toBe("auth");
+  });
+});
+
+describe("isAuthError", () => {
+  it.each([401, 403])("detects HTTP %i", (status) => {
+    expect(isAuthError(Object.assign(new Error("Denied"), { status }))).toBe(
+      true,
+    );
+  });
+
+  it("detects a PERMISSION_DENIED error_code carried with no numeric status", () => {
+    // The shape observed on deploy: an error_code string, no HTTP status.
+    const error = Object.assign(new Error("2f1a9c…"), {
+      error_code: "PERMISSION_DENIED",
+    });
+    expect(isAuthError(error)).toBe(true);
+  });
+
+  it("detects UNAUTHENTICATED via error_code", () => {
+    const error = Object.assign(new Error("no token"), {
+      error_code: "UNAUTHENTICATED",
+    });
+    expect(isAuthError(error)).toBe(true);
+  });
+
+  it("detects error_code embedded as a JSON body in the message", () => {
+    const error = new Error(
+      'Response from server (Forbidden) {"error_code":"PERMISSION_DENIED","message":"nope"}',
+    );
+    expect(isAuthError(error)).toBe(true);
+  });
+
+  it("detects an auth status wrapped in a cause chain", () => {
+    const error = new Error("Request failed", {
+      cause: Object.assign(new Error("Denied"), { status: 403 }),
+    });
+    expect(isAuthError(error)).toBe(true);
+  });
+
+  it.each([
+    ["a bad-id 404", Object.assign(new Error("Not found"), { status: 404 })],
+    ["a 400", Object.assign(new Error("Bad request"), { status: 400 })],
+    [
+      "a connectivity code",
+      Object.assign(new Error("x"), { code: "ECONNREFUSED" }),
+    ],
+    [
+      "a non-auth error_code",
+      Object.assign(new Error("x"), { error_code: "TABLE_OR_VIEW_NOT_FOUND" }),
+    ],
+    ["a plain error", new Error("boom")],
+    ["a non-object", "just a string"],
+  ])("returns false for %s", (_name, error) => {
+    expect(isAuthError(error)).toBe(false);
   });
 });

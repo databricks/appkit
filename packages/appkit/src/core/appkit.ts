@@ -223,6 +223,12 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const instance = new AppKit(mergedConfig);
 
     await Promise.all(instance.#setupPromises);
+
+    // Build the global tracer provider now that every plugin's setup() has run
+    // and contributed any span processors. Deferred to here so a single provider
+    // carries all processors (OTLP + plugin-contributed); see TelemetryManager.
+    TelemetryManager.start();
+
     await instance.#context.emitLifecycle("setup:complete");
 
     const handle = instance as unknown as PluginMap<T>;
