@@ -181,19 +181,60 @@ describe("DatabasePlugin", () => {
     await expect(plugin.shutdown()).rejects.toBe(error);
   });
 
-  test("registers no generated routes unless they are turned on", async () => {
-    for (const crudRoutes of [undefined, false] as const) {
-      const { routes } = await registerRoutes({
+  test.each([undefined, true, {}, { writes: true }, { writes: {} }] as const)(
+    "registers full CRUD by default with api=%j",
+    async (api) => {
+      const { routes, plugin } = await registerRoutes({
         schema: routedSchema,
-        crudRoutes,
+        api,
+      });
+      expect(routes).toEqual([
+        "get /users",
+        "post /users",
+        "get /users/:id",
+        "patch /users/:id",
+        "delete /users/:id",
+        "get /notes",
+        "post /notes",
+        "get /notes/:id",
+        "patch /notes/:id",
+        "delete /notes/:id",
+        // A keyless table supports list/create, but no keyed operations.
+        "get /events",
+        "post /events",
+      ]);
+      expect(plugin.getEndpoints()).toMatchObject({
+        "users.create": "/api/database/users",
+        "users.update": "/api/database/users/:id",
+        "users.delete": "/api/database/users/:id",
+      });
+      // Upsert stays programmatic, and no PUT route is generated.
+      expect(routes.some((route) => route.startsWith("put "))).toBe(false);
+      expect(plugin.getEndpoints()).not.toHaveProperty("users.upsert");
+    },
+  );
+
+  test.each([false, { tables: [] }] as const)(
+    "disables generated routes with api=%j without disabling the typed API",
+    async (api) => {
+      const { routes, plugin } = await registerRoutes({
+        schema: routedSchema,
+        api,
       });
       expect(routes).toEqual([]);
-    }
-  });
+      expect(plugin.exports()).toHaveProperty("operation");
+    },
+  );
 
-  test("registers reads for every table or an explicit subset", async () => {
+  test("restricts CRUD to a selected table without a separate write opt-in", async () => {
     const assertNames = () => {
-      database({ schema: routedSchema, crudRoutes: { tables: ["notes"] } });
+      database({
+        schema: routedSchema,
+        api: {
+          tables: ["notes"],
+          writes: { operations: ["create", "update"] },
+        },
+      });
       database({
         schema: routedSchema,
         hooks: { notes: { serialize: (row) => row } },
@@ -201,7 +242,7 @@ describe("DatabasePlugin", () => {
       database({
         schema: routedSchema,
         // @ts-expect-error only a declared table can be exposed
-        crudRoutes: { tables: ["missing"] },
+        api: { tables: ["missing"] },
       });
       database({
         schema: routedSchema,
@@ -209,30 +250,108 @@ describe("DatabasePlugin", () => {
         hooks: { missing: { serialize: (row) => row } },
       });
     };
+    const assertApiTypes = () => {
+      database({
+        schema: routedSchema,
+        // @ts-expect-error generated writes do not expose upsert
+        api: { writes: { operations: ["upsert"] } },
+      });
+      database({
+        schema: routedSchema,
+        // @ts-expect-error write restrictions must name declared tables
+        api: { writes: { tables: ["missing"] } },
+      });
+      database({
+        schema: routedSchema,
+        // @ts-expect-error the generated API option is named api
+        crudRoutes: false,
+      });
+    };
     void assertNames;
-
-    const all = await registerRoutes({
-      schema: routedSchema,
-      crudRoutes: true,
-    });
-    expect(all.routes).toEqual([
-      "get /users",
-      "get /users/:id",
-      "get /notes",
-      "get /notes/:id",
-      // A table without a primary key cannot address a single row.
-      "get /events",
-    ]);
-    expect(all.plugin.getEndpoints()).toMatchObject({
-      "users.list": "/api/database/users",
-      "users.detail": "/api/database/users/:id",
-    });
+    void assertApiTypes;
 
     const subset = await registerRoutes({
       schema: routedSchema,
-      crudRoutes: { tables: ["notes"] },
+      api: { tables: ["notes"] },
     });
-    expect(subset.routes).toEqual(["get /notes", "get /notes/:id"]);
+    expect(subset.routes).toEqual([
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+      "delete /notes/:id",
+    ]);
+  });
+
+  test.each([false, { tables: [] }, { operations: [] }] as const)(
+    "keeps reads when writes=%j",
+    async (writes) => {
+      const { routes } = await registerRoutes({
+        schema: routedSchema,
+        api: { writes },
+      });
+      expect(routes).toEqual([
+        "get /users",
+        "get /users/:id",
+        "get /notes",
+        "get /notes/:id",
+        "get /events",
+      ]);
+    },
+  );
+
+  test("defaults to all write operations when restricting writable tables", async () => {
+    const { routes } = await registerRoutes({
+      schema: routedSchema,
+      api: { writes: { tables: ["notes"] } },
+    });
+    expect(routes).toEqual([
+      "get /users",
+      "get /users/:id",
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+      "delete /notes/:id",
+      "get /events",
+    ]);
+  });
+
+  test("can disable delete without restricting tables", async () => {
+    const { routes } = await registerRoutes({
+      schema: routedSchema,
+      api: { writes: { operations: ["create", "update"] } },
+    });
+    expect(routes).toEqual([
+      "get /users",
+      "post /users",
+      "get /users/:id",
+      "patch /users/:id",
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+      "get /events",
+      "post /events",
+    ]);
+  });
+
+  test("restricts writable tables and operations together", async () => {
+    const constrained = await registerRoutes({
+      schema: routedSchema,
+      api: {
+        tables: ["users", "notes"],
+        writes: { tables: ["notes"], operations: ["create", "update"] },
+      },
+    });
+    expect(constrained.routes).toEqual([
+      "get /users",
+      "get /users/:id",
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+    ]);
   });
 
   test("fails setup on an exposure list it cannot honor", async () => {
@@ -240,7 +359,7 @@ describe("DatabasePlugin", () => {
       mocks.createDatabaseState.mockResolvedValue(candidate());
       const plugin = new DatabasePlugin({
         schema: routedSchema,
-        crudRoutes: { tables } as unknown as { tables: ["users"] },
+        api: { tables } as unknown as { tables: ["users"] },
       });
       await expect(plugin.setup()).rejects.toMatchObject({
         category: "SETUP_FAILED",
@@ -248,26 +367,145 @@ describe("DatabasePlugin", () => {
     }
   });
 
-  test("refuses to route names it cannot serve unambiguously", async () => {
-    const unsafe = [
-      defineSchema((builder) => ({
-        users: builder.table("users", { id: id() }),
-        Users: builder.table("Users", { id: id() }),
-      })),
-      defineSchema((builder) => ({
-        _hidden: builder.table("_hidden", { id: id() }),
-      })),
-    ];
-    for (const unsafeSchema of unsafe) {
-      mocks.createDatabaseState.mockResolvedValue(candidate());
+  test("rejects invalid or misspelled route restrictions rather than enabling CRUD", async () => {
+    for (const api of [null, [], "false", { write: false }, new Date()]) {
       const plugin = new DatabasePlugin({
-        schema: unsafeSchema,
-        crudRoutes: true,
+        schema: routedSchema,
+        api: api as never,
       });
       await expect(plugin.setup()).rejects.toMatchObject({
         category: "SETUP_FAILED",
       });
     }
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+  });
+
+  test("fails setup on write exposure it cannot honor", async () => {
+    const invalid = [
+      { writes: null },
+      { writes: [] },
+      { writes: "false" },
+      { writes: { operation: ["create"] } },
+      {
+        tables: ["notes"],
+        writes: { tables: ["users"], operations: ["create"] },
+      },
+      {
+        tables: ["notes"],
+        writes: { operations: ["create", "create"] },
+      },
+      {
+        tables: ["notes"],
+        writes: { operations: ["upsert"] },
+      },
+    ];
+    for (const api of invalid) {
+      const plugin = new DatabasePlugin({
+        schema: routedSchema,
+        api: api as never,
+      });
+      await expect(plugin.setup()).rejects.toMatchObject({
+        category: "SETUP_FAILED",
+      });
+    }
+  });
+
+  test("fails setup on a hook key that names no declared table", async () => {
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin({
+      schema: routedSchema,
+      hooks: { missing: { beforeCreate: () => undefined } } as never,
+    });
+    await expect(plugin.setup()).rejects.toMatchObject({
+      category: "SETUP_FAILED",
+    });
+  });
+
+  test.each([undefined, true] as const)(
+    "refuses ambiguous route names with api=%j",
+    async (api) => {
+      const unsafe = [
+        defineSchema((builder) => ({
+          users: builder.table("users", { id: id() }),
+          Users: builder.table("Users", { id: id() }),
+        })),
+        defineSchema((builder) => ({
+          _hidden: builder.table("_hidden", { id: id() }),
+        })),
+      ];
+      for (const unsafeSchema of unsafe) {
+        mocks.createDatabaseState.mockResolvedValue(candidate());
+        const plugin = new DatabasePlugin({
+          schema: unsafeSchema,
+          api,
+        });
+        await expect(plugin.setup()).rejects.toMatchObject({
+          category: "SETUP_FAILED",
+          message: expect.stringContaining("api.tables"),
+          clientMessage: "Database setup failed",
+        });
+      }
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test("supports non-routable table names when generated routes are disabled", async () => {
+    const internalSchema = defineSchema((builder) => ({
+      _events: builder.table("_events", { id: id() }),
+    }));
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin({
+      schema: internalSchema,
+      api: false,
+    });
+    await plugin.setup();
+    const { router, routes } = fakeRouter();
+    plugin.injectRoutes(router);
+    expect(routes).toEqual([]);
+  });
+
+  test.each([false, true, { writes: false }, { tables: ["notes"] }])(
+    "rejects the removed crudRoutes option instead of silently enabling the API: %j",
+    (crudRoutes) => {
+      for (const api of [undefined, false, true]) {
+        expect(
+          () =>
+            new DatabasePlugin({
+              schema: routedSchema,
+              api,
+              crudRoutes,
+            } as never),
+        ).toThrow('"crudRoutes" was renamed to "api"');
+      }
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test("can keep an internal table in the schema without generating its routes", async () => {
+    const internalSchema = defineSchema((builder) => ({
+      notes: builder.table("notes", { id: id() }),
+      _events: builder.table("_events", { id: id() }),
+    }));
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin({
+      schema: internalSchema,
+      api: { tables: ["notes"] },
+    });
+    await plugin.setup();
+    const { router, routes } = fakeRouter();
+    plugin.injectRoutes(router);
+    expect(routes).toEqual([
+      "get /notes",
+      "post /notes",
+      "get /notes/:id",
+      "patch /notes/:id",
+      "delete /notes/:id",
+    ]);
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      internalSchema,
+      expect.any(Function),
+      undefined,
+    );
   });
 
   test("isolates plugin instances and drains their exports independently", async () => {

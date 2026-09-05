@@ -26,7 +26,7 @@ transaction<T>(callback: (tx: TransactionClient) => Promise<T>): Promise<T>;
 
 | Parameter | Type |
 | ------ | ------ |
-| `callback` | (`tx`: `TransactionClient`) => `Promise`\<`T`\> |
+| `callback` | (`tx`: [`TransactionClient`](TypeAlias.TransactionClient.md)) => `Promise`\<`T`\> |
 
 #### Returns
 

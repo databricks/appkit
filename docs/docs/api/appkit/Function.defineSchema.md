@@ -5,7 +5,7 @@ function defineSchema<TTables>(builder: (context: SchemaBuilderContext) => TTabl
 ```
 
 Compile one declared schema. The returned type keeps the table names the
-builder returned, so `crudRoutes` and `hooks` can name only real tables.
+builder returned, so `api.tables` and `hooks` can name only real tables.
 
 ## Type Parameters
 
