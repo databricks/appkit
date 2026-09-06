@@ -313,6 +313,47 @@ const result = await runAgent(classifier, {
 
 MCP hosted tools (`mcpServer(...)`) still require `agents()` (they need a live MCP client). Supervisor-API hosted tools (`supervisorTools.*`), by contrast, **work in standalone `runAgent`** — the adapter has everything it needs to execute them server-side. This makes batch-eval / CI use of supervisor agents possible without `createApp`. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
 
+## Structured output
+
+Give a code agent an `output` Zod schema and its final answer is validated against that schema instead of returned as freeform text:
+
+```ts
+import { createAgent } from "@databricks/appkit/beta";
+import { z } from "zod";
+
+export default createAgent({
+  instructions: "Classify the support ticket.",
+  output: z.object({
+    category: z.enum(["billing", "bug", "feature_request", "how_to", "other"]),
+    urgent: z.boolean(),
+    summary: z.string(),
+  }),
+});
+```
+
+The parsed, schema-valid object shows up on every non-streaming surface and on the stream:
+
+| Surface | Where the object appears |
+| --- | --- |
+| `POST /invocations`, `POST /responses` | top-level `output_parsed` field on the JSON envelope (next to `output`) |
+| `POST /chat` (SSE) | one final `appkit.structured_output` event (`{ data }`) **after** the streamed text |
+| in-process `runAgent` | `RunAgentResult.output`, statically typed as `z.infer` of the schema |
+
+```ts
+import { runAgent } from "@databricks/appkit/beta";
+
+const { output } = await runAgent(classifier, { messages: ticket });
+output?.category; // "billing" | "bug" | … | undefined  — fully typed
+```
+
+A per-call override is also available for one-off shapes: `runAgent(agent, input, { output: SomeSchema })` (it takes precedence over the agent's own schema and retypes the result).
+
+**How it works.** The agent answers normally first (streaming its visible text on `/chat`). Structured output is then produced by a dedicated **non-streaming** completion constrained by the schema via `response_format` — Databricks rejects `response_format` under streaming, so the structured call can't be the streamed one. The answer is validated as-is first (a cheap pre-check for a model that already emitted JSON); otherwise the non-streaming pass reformats it. Either way the JSON is validated with Zod; on a mismatch AppKit re-prompts with the validation errors (up to two retries, invisible to the `/chat` text stream) and then throws a `StructuredOutputError` carrying the last raw output — it never returns partial or unvalidated data. If an endpoint rejects `response_format` outright, AppKit strips it and retries, relying on the prompt plus Zod validation.
+
+:::note Scope
+Structured output is for **code-config agents** (`createAgent`). Markdown `agent.md` agents can't carry a schema, and sub-agents return text into their parent's context (typing buys nothing there). See the live API reference (`npx @databricks/appkit docs "appkit API reference"`) for the exact `createAgent` / `runAgent` / `StructuredOutputError` signatures.
+:::
+
 ## Adding agents to an existing app
 
 Already have an app and want to add agents? What you touch depends on the kind:

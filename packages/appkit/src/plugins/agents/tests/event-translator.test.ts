@@ -130,6 +130,20 @@ describe("AgentEventTranslator", () => {
     }
   });
 
+  test("translates structured_output to appkit.structured_output extension event", () => {
+    const translator = new AgentEventTranslator();
+    const events = translator.translate({
+      type: "structured_output",
+      data: { category: "billing", urgent: true },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("appkit.structured_output");
+    if (events[0].type === "appkit.structured_output") {
+      expect(events[0].data).toEqual({ category: "billing", urgent: true });
+    }
+  });
+
   test("status:complete triggers finalize with response.completed", () => {
     const translator = new AgentEventTranslator();
     translator.translate({ type: "message_delta", content: "Hi" });

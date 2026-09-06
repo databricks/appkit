@@ -48,6 +48,7 @@ export {
   ExecutionError,
   InitializationError,
   ServerError,
+  StructuredOutputError,
   TunnelError,
   ValidationError,
 } from "./errors";

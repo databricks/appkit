@@ -26,5 +26,6 @@ export { ConnectionError } from "./connection";
 export { ExecutionError } from "./execution";
 export { InitializationError } from "./initialization";
 export { ServerError } from "./server";
+export { StructuredOutputError } from "./structured-output";
 export { TunnelError } from "./tunnel";
 export { ValidationError } from "./validation";
