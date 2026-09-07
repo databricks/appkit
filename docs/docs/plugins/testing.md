@@ -142,7 +142,6 @@ The harness validates that required resources' **environment variables are prese
 - `client` — supply your own workspace client instead of the built-in fake. You then own its `currentUser.me()`: AppKit reads `currentUser.id` during boot and can't start without it.
 - `nodeEnv` — defaults to `"test"`. `"development"` is **refused**: dev mode routes the harness's ephemeral port through `get-port`, which throws on port `0`, and it also boots a real Vite server and relaxes validation.
 - `cache` — defaults to in-memory. Overriding it is what would let the cache reach the network, so leave it alone unless that's the point of the test.
-- `closeTimeoutMs` — teardown budget.
 
 ## `createTestPluginContext()`
 
