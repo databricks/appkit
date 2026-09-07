@@ -16,6 +16,7 @@ import type {
 import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { agentDirNames } from "./agent-dirs";
+import { splitFrontmatter } from "./frontmatter";
 
 const logger = createLogger("agents:loader");
 
@@ -77,6 +78,13 @@ interface Frontmatter {
    * rejects non-empty values since there are no siblings to resolve against.
    */
   agents?: string[];
+  /**
+   * Names of global skills (from the shared `skills/` pool or a catalog
+   * volume) to make visible to this agent. Per-agent skills under
+   * `<id>/skills/` are always visible and need not be listed here. Ignored
+   * when the plugin's `autoInheritSkills` makes every global skill visible.
+   */
+  skills?: string[];
   maxSteps?: number;
   maxTokens?: number;
   /**
@@ -128,6 +136,7 @@ const ALLOWED_KEYS = new Set([
   "model",
   "tools",
   "agents",
+  "skills",
   "maxSteps",
   "maxTokens",
   "generationParams",
@@ -311,13 +320,13 @@ export function parseFrontmatter(
   raw: string,
   sourcePath?: string,
 ): { data: Frontmatter | null; content: string } {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) {
-    return { data: null, content: raw.trim() };
+  const { yaml: yamlBlock, body } = splitFrontmatter(raw);
+  if (yamlBlock === null) {
+    return { data: null, content: body };
   }
   let parsed: unknown;
   try {
-    parsed = yaml.load(match[1]);
+    parsed = yaml.load(yamlBlock);
   } catch (err) {
     const src = sourcePath ? ` (${sourcePath})` : "";
     throw new Error(
@@ -325,7 +334,7 @@ export function parseFrontmatter(
     );
   }
   if (parsed === null || parsed === undefined) {
-    return { data: {}, content: match[2].trim() };
+    return { data: {}, content: body };
   }
   if (typeof parsed !== "object" || Array.isArray(parsed)) {
     const src = sourcePath ? ` (${sourcePath})` : "";
@@ -341,7 +350,7 @@ export function parseFrontmatter(
       );
     }
   }
-  return { data: data as Frontmatter, content: match[2].trim() };
+  return { data: data as Frontmatter, content: body };
 }
 
 const isNumber = (v: unknown): v is number => typeof v === "number";
@@ -411,6 +420,44 @@ function parseGenerationParams(
   return Object.keys(out).length > 0 ? (out as GenerationParams) : undefined;
 }
 
+/**
+ * Defensively parses a frontmatter `skills:` list into deduped skill names.
+ * Non-array values and non-string/empty entries are dropped with a warning,
+ * so a malformed list is visible rather than silently applied. Returns
+ * `undefined` when nothing valid is present.
+ */
+function parseSkillsFrontmatter(
+  value: unknown,
+  sourcePath?: string,
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  const where = sourcePath ?? "<inline>";
+  if (!Array.isArray(value)) {
+    logger.warn(
+      "Ignoring 'skills' in %s: expected an array of skill names",
+      where,
+    );
+    return undefined;
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim() === "") {
+      logger.warn(
+        "Ignoring invalid 'skills' entry in %s: %s",
+        where,
+        JSON.stringify(item),
+      );
+      continue;
+    }
+    const name = item.trim();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function buildDefinition(
   name: string,
   raw: string,
@@ -433,6 +480,7 @@ function buildDefinition(
     instructions: content,
     model,
     tools: Object.keys(tools).length > 0 ? tools : undefined,
+    skills: parseSkillsFrontmatter(fm.skills, filePath),
     maxSteps: typeof fm.maxSteps === "number" ? fm.maxSteps : undefined,
     maxTokens: typeof fm.maxTokens === "number" ? fm.maxTokens : undefined,
     generationParams: parseGenerationParams(fm.generationParams, filePath),

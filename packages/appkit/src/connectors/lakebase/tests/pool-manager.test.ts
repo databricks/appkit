@@ -1,16 +1,6 @@
 import type { Pool } from "pg";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-vi.mock("../../../cache", async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const instance = createCacheMock();
-  return {
-    CacheManager: {
-      getInstanceSync: vi.fn(() => instance),
-    },
-  };
-});
-
 const mockPools: Pool[] = [];
 
 vi.mock("../index", () => ({

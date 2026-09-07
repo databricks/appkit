@@ -23,16 +23,18 @@ import {
   type FilterOperator,
   IN_CAP,
   isFilterOperator,
+  MAX_INCLUDE_DEPTH,
+  MAX_INCLUDE_NODES,
   MAX_INCLUDES,
   MAX_WHERE_CONDITIONS,
   MAX_WHERE_DEPTH,
   MAX_WHERE_GROUP_ITEMS,
 } from "../../contract";
+import { invalidDatabaseRequest } from "../../errors";
 import type { AppKitTable, ColumnMeta, Schema } from "../../schema-builder";
 import { filterOperatorsForKind } from "../../schema-builder/types";
 import { columnValueSchema } from "../../schema-builder/validators";
 import {
-  DataPathError,
   type FilterOps,
   type IncludeOptions,
   type IncludeSpec,
@@ -47,7 +49,7 @@ export type ColumnAccess = "public" | "trusted";
 function columnMetaOf(table: AppKitTable, key: string): ColumnMeta {
   const column = table.$columns[key];
   if (!column) {
-    throw new DataPathError(`Unknown column "${table.$name}.${key}"`);
+    throw invalidDatabaseRequest(`Unknown column "${table.$name}.${key}"`);
   }
   return column;
 }
@@ -59,7 +61,9 @@ function readableColumnMeta(
 ): ColumnMeta {
   const column = columnMetaOf(table, key);
   if (column.isPrivate && access !== "trusted") {
-    throw new DataPathError(`Column "${table.$name}.${key}" is not readable`);
+    throw invalidDatabaseRequest(
+      `Column "${table.$name}.${key}" is not readable`,
+    );
   }
   return column;
 }
@@ -83,12 +87,17 @@ export function defaultColumns(table: AppKitTable): Record<string, true> {
   return columns;
 }
 
-/** Drizzle `.returning()` fields that omit private application columns. */
+/** Drizzle `.returning()` fields allowed by the adapter's read capability. */
 export function returningColumns(
   table: AppKitTable,
+  access: ColumnAccess = "public",
 ): Record<string, AnyPgColumn> {
   const columns: Record<string, AnyPgColumn> = {};
-  for (const name of publicColumnNames(table)) {
+  const names =
+    access === "trusted"
+      ? Object.values(table.$columns).map((column) => column.columnName)
+      : publicColumnNames(table);
+  for (const name of names) {
     columns[name] = columnOf(table, name);
   }
   return columns;
@@ -108,7 +117,7 @@ function assertColumnValue(
   value: unknown,
 ): void {
   if (!columnValueSchema(meta).safeParse(value).success) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `Invalid ${operator} operand for "${table.$name}.${meta.columnName}"`,
     );
   }
@@ -121,14 +130,14 @@ function inList(
   value: unknown,
 ): SQL {
   if (!Array.isArray(value)) {
-    throw new DataPathError('The "in" operator requires an array');
+    throw invalidDatabaseRequest('The "in" operator requires an array');
   }
   if (value.length > IN_CAP) {
-    throw new DataPathError(`in list exceeds the ${IN_CAP}-value limit`);
+    throw invalidDatabaseRequest(`in list exceeds the ${IN_CAP}-value limit`);
   }
   for (const item of value) {
     if (item === null) {
-      throw new DataPathError('The "in" operator does not accept null');
+      throw invalidDatabaseRequest('The "in" operator does not accept null');
     }
     assertColumnValue(table, meta, "in", item);
   }
@@ -143,13 +152,13 @@ function translateOperator(
   value: unknown,
 ): SQL {
   if (!supportsOperator(meta, operator)) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `Operator "${operator}" is not supported for "${table.$name}.${meta.columnName}"`,
     );
   }
   if (operator === "is") {
     if (value !== null) {
-      throw new DataPathError('The "is" operator accepts only null');
+      throw invalidDatabaseRequest('The "is" operator accepts only null');
     }
     return isNull(column);
   }
@@ -174,7 +183,7 @@ function translateOperator(
     case "ilike":
       return ilike(column, value as string);
     default:
-      throw new DataPathError(`Unsupported filter operator "${operator}"`);
+      throw invalidDatabaseRequest(`Unsupported filter operator "${operator}"`);
   }
 }
 
@@ -185,7 +194,7 @@ interface WhereBudget {
 function chargeWhereCondition(budget: WhereBudget): void {
   budget.conditions += 1;
   if (budget.conditions > MAX_WHERE_CONDITIONS) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `where exceeds the ${MAX_WHERE_CONDITIONS}-condition limit`,
     );
   }
@@ -199,12 +208,12 @@ function translateWhereNode(
   budget: WhereBudget,
 ): SQL | undefined {
   if (depth > MAX_WHERE_DEPTH) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `where exceeds the ${MAX_WHERE_DEPTH}-level depth limit`,
     );
   }
   if (clause === null || typeof clause !== "object" || Array.isArray(clause)) {
-    throw new DataPathError("where must be an object");
+    throw invalidDatabaseRequest("where must be an object");
   }
   const conditions: SQL[] = [];
   for (const [key, value] of Object.entries(clause)) {
@@ -215,11 +224,13 @@ function translateWhereNode(
         value.length > MAX_WHERE_GROUP_ITEMS
       ) {
         if (Array.isArray(value) && value.length > MAX_WHERE_GROUP_ITEMS) {
-          throw new DataPathError(
+          throw invalidDatabaseRequest(
             `${key} exceeds the ${MAX_WHERE_GROUP_ITEMS}-predicate limit`,
           );
         }
-        throw new DataPathError(`${key} requires a non-empty predicate array`);
+        throw invalidDatabaseRequest(
+          `${key} requires a non-empty predicate array`,
+        );
       }
       const groups = value.map((group) => {
         const translated = translateWhereNode(
@@ -230,7 +241,7 @@ function translateWhereNode(
           budget,
         );
         if (!translated) {
-          throw new DataPathError(`${key} predicates cannot be empty`);
+          throw invalidDatabaseRequest(`${key} predicates cannot be empty`);
         }
         return translated;
       });
@@ -253,14 +264,14 @@ function translateWhereNode(
     ) {
       const operators = Object.entries(value as FilterOps);
       if (operators.length === 0) {
-        throw new DataPathError(
+        throw invalidDatabaseRequest(
           `Filter for "${table.$name}.${key}" cannot be empty`,
         );
       }
       for (const [operator, operand] of operators) {
         chargeWhereCondition(budget);
         if (!isFilterOperator(operator)) {
-          throw new DataPathError(`Unknown filter operator "${operator}"`);
+          throw invalidDatabaseRequest(`Unknown filter operator "${operator}"`);
         }
         conditions.push(
           translateOperator(table, meta, column, operator, operand),
@@ -290,7 +301,7 @@ export function translateOrder(
 ): SQL[] {
   return Object.entries(order).map(([key, direction]) => {
     if (direction !== "asc" && direction !== "desc") {
-      throw new DataPathError(`Unknown order direction "${direction}"`);
+      throw invalidDatabaseRequest(`Unknown order direction "${direction}"`);
     }
     const column = readableColumnMeta(table, key, access)
       .engineColumn as unknown as AnyPgColumn;
@@ -313,20 +324,36 @@ export function selectToColumns(
 
 function tableByName(schema: Schema, name: string): AppKitTable {
   const table = schema.$tables[name];
-  if (!table) throw new DataPathError(`Unknown table "${name}"`);
+  if (!table) throw invalidDatabaseRequest(`Unknown table "${name}"`);
   return table;
 }
 
-/** Translate one relation edge into Drizzle's relational `with` config. */
+/** Translate relation edges into Drizzle's relational `with` config. */
 export function translateInclude(
   table: AppKitTable,
   schema: Schema,
   include: IncludeSpec,
   access: ColumnAccess = "public",
 ): Record<string, unknown> {
+  return translateIncludeTree(table, schema, include, access, 1, { nodes: 0 });
+}
+
+function translateIncludeTree(
+  table: AppKitTable,
+  schema: Schema,
+  include: IncludeSpec,
+  access: ColumnAccess,
+  depth: number,
+  budget: { nodes: number },
+): Record<string, unknown> {
+  if (depth > MAX_INCLUDE_DEPTH) {
+    throw invalidDatabaseRequest(
+      `include exceeds the ${MAX_INCLUDE_DEPTH}-edge depth limit`,
+    );
+  }
   const entries = Object.entries(include);
   if (entries.length > MAX_INCLUDES) {
-    throw new DataPathError(
+    throw invalidDatabaseRequest(
       `include exceeds the ${MAX_INCLUDES}-relation limit`,
     );
   }
@@ -337,11 +364,18 @@ export function translateInclude(
       (candidate) => candidate.name === relationName,
     );
     if (!relation) {
-      throw new DataPathError(
+      throw invalidDatabaseRequest(
         `Unknown relation "${table.$name}.${relationName}"`,
       );
     }
     if (rawOptions === false) continue;
+
+    budget.nodes += 1;
+    if (budget.nodes > MAX_INCLUDE_NODES) {
+      throw invalidDatabaseRequest(
+        `include exceeds the ${MAX_INCLUDE_NODES}-node limit`,
+      );
+    }
 
     const target = tableByName(schema, relation.targetTable);
     if (rawOptions === true) {
@@ -367,11 +401,21 @@ export function translateInclude(
     }
     if (options.limit !== undefined) {
       if (relation.cardinality !== "toMany") {
-        throw new DataPathError("Only to-many relations accept a limit");
+        throw invalidDatabaseRequest("Only to-many relations accept a limit");
       }
       relationConfig.limit = validateLimit(options.limit);
     } else if (relation.cardinality === "toMany") {
       relationConfig.limit = DEFAULT_LIMIT;
+    }
+    if (options.include !== undefined) {
+      relationConfig.with = translateIncludeTree(
+        target,
+        schema,
+        options.include,
+        access,
+        depth + 1,
+        budget,
+      );
     }
     config[relationName] = relationConfig;
   }

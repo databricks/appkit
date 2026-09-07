@@ -106,6 +106,18 @@ function throwIfExceedsStreamLimit(
   }
 }
 
+/** Text of a harmony `reasoning` part: `summary[].text` plus an optional `text`. */
+function reasoningPartText(part: Record<string, unknown>): string {
+  let text = "";
+  if (Array.isArray(part.summary)) {
+    for (const s of part.summary) {
+      if (isRecord(s) && typeof s.text === "string") text += s.text;
+    }
+  }
+  if (typeof part.text === "string") text += part.text;
+  return text;
+}
+
 /**
  * Escape-hatch options: provide an `endpointUrl` + `authenticate()` and the
  * adapter uses a bare `fetch()` to call it. Useful for tests and for pointing
@@ -636,16 +648,32 @@ export class DatabricksAdapter implements AgentAdapter {
           const deltaUnknown = openAiChoicesDelta(parsed);
           if (!isRecord(deltaUnknown)) continue;
 
-          if (typeof deltaUnknown.content === "string") {
-            const content = deltaUnknown.content;
-            throwIfExceedsStreamLimit(
-              "streamed assistant text",
-              fullText.length,
-              content,
-              this.maxStreamTextChars,
-            );
-            fullText += content;
-            yield { type: "message_delta" as const, content };
+          // gpt-oss (harmony) sends delta.content as an array of parts
+          // (text = answer, reasoning = chain-of-thought), not a string.
+          const contentUnknown = deltaUnknown.content;
+          const parts =
+            typeof contentUnknown === "string"
+              ? [{ type: "text", text: contentUnknown }]
+              : Array.isArray(contentUnknown)
+                ? contentUnknown
+                : [];
+
+          for (const part of parts) {
+            if (!isRecord(part)) continue;
+            if (part.type === "text" && typeof part.text === "string") {
+              const content = part.text;
+              throwIfExceedsStreamLimit(
+                "streamed assistant text",
+                fullText.length,
+                content,
+                this.maxStreamTextChars,
+              );
+              fullText += content;
+              yield { type: "message_delta" as const, content };
+            } else if (part.type === "reasoning") {
+              const content = reasoningPartText(part);
+              if (content) yield { type: "thinking" as const, content };
+            }
           }
 
           const toolCallsRaw = deltaUnknown.tool_calls;

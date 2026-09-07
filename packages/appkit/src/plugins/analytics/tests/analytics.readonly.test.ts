@@ -1,16 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
-vi.mock("../../../cache", async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const instance = createCacheMock();
-  return {
-    CacheManager: {
-      getInstanceSync: vi.fn(() => instance),
-    },
-  };
-});
-
+import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin } from "../analytics";
+
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 /**
  * Tests the read-only SQL enforcement on the analytics agent tool.

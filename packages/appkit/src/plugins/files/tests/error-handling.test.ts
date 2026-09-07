@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { AuthenticationError } from "../../../errors";
-import { createApiError, createMockWorkspaceClient } from "../../../testing";
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  useTestCache,
+} from "../../../testing";
 import { withEnv } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
@@ -12,16 +16,8 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  return { mockCacheInstance: createCacheMock() };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 describe("FilesPlugin error handling", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;

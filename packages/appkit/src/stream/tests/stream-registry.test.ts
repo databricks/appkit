@@ -2,6 +2,7 @@ import type { Context } from "@opentelemetry/api";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { EventRingBuffer } from "../buffers";
+import { streamDefaults } from "../defaults";
 import { StreamRegistry } from "../stream-registry";
 import type { StreamEntry } from "../types";
 import { SSEErrorCode } from "../types";
@@ -20,6 +21,7 @@ function createMockStreamEntry(
     lastAccess: Date.now(),
     abortController: new AbortController(),
     traceContext: {} as Context,
+    maxEventSize: streamDefaults.maxEventSize,
     ...overrides,
   };
 }

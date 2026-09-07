@@ -15,13 +15,13 @@ import { vi } from "vitest";
 
 import { InMemoryStorage } from "../cache/storage/memory";
 import { ServiceContext } from "../context/service-context";
-import { createApp } from "../core/appkit";
+import { AppKit, disposeApp } from "../core/appkit";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { fakeUserContext, oboHeaders, setupDatabricksEnv } from "./fixtures";
 import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
-import { claimAppKitSingletons, releaseAppKitSingletons } from "./reset";
+import { dropCoreSingletons } from "./reset-singletons";
 
 // Loose shapes are intentional here; `noExplicitAny` is off repo-wide (see
 // .oxlintrc.json), so a local alias keeps the intent readable.
@@ -30,23 +30,21 @@ type Any = any;
 /**
  * The env snapshot to restore on close, and whether an app currently holds it.
  *
- * One live app at a time (see the guard in `createTestApp`), so the counter is
- * really a flag. Kept as a count so a stray double release cannot drive it
- * negative and strand the baseline.
+ * One live app at a time (see the guard in `createTestApp`), so a flag suffices.
  */
 let envBaseline: NodeJS.ProcessEnv | undefined;
-let liveHarnessApps = 0;
+let harnessAppLive = false;
 
-/** Take the baseline on the first live app. */
+/** Take the baseline on boot. */
 function acquireEnvBaseline(): void {
-  if (liveHarnessApps === 0) envBaseline = { ...process.env };
-  liveHarnessApps += 1;
+  envBaseline = { ...process.env };
+  harnessAppLive = true;
 }
 
-/** Restore the baseline once no apps are left. */
+/** Restore the baseline on close. */
 function releaseEnvBaseline(): void {
-  liveHarnessApps = Math.max(0, liveHarnessApps - 1);
-  if (liveHarnessApps > 0 || !envBaseline) return;
+  harnessAppLive = false;
+  if (!envBaseline) return;
 
   const baseline = envBaseline;
   envBaseline = undefined;
@@ -235,7 +233,7 @@ export async function createTestApp<T extends Plugins>(
   // on-behalf-of fake are process-wide, so a second live app cannot own its
   // own. Checked before any mutation, so a refused boot leaves the live app
   // untouched.
-  if (liveHarnessApps > 0) {
+  if (harnessAppLive) {
     throw new Error(
       "createTestApp: a harness app is already open. AppKit's workspace " +
         "client, cache, and on-behalf-of fake are process-wide, so a second " +
@@ -248,8 +246,16 @@ export async function createTestApp<T extends Plugins>(
   // Wholesale rather than a whitelist: plugins read vars we cannot enumerate.
   acquireEnvBaseline();
 
-  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  let app: Awaited<ReturnType<typeof AppKit._createApp>> | undefined;
   let restoreUserContext: (() => void) | undefined;
+
+  // Runs the booted plugins' shutdown() hooks and closes the server it started;
+  // the harness owns dropping the singletons and restoring env. The `as Any` is
+  // the one escape hatch the symbol-keyed teardown forces on the harness.
+  const disposeBooted = (a: unknown): Promise<void> =>
+    (a as Any)[disposeApp](
+      closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
+    );
 
   try {
     process.env.NODE_ENV = nodeEnv;
@@ -266,7 +272,7 @@ export async function createTestApp<T extends Plugins>(
       ...env,
     });
 
-    claimAppKitSingletons();
+    dropCoreSingletons();
 
     // `responses` only seeds the built-in mock, so alongside a caller-supplied
     // client it would silently do nothing. Refuse instead, matching the
@@ -311,13 +317,16 @@ export async function createTestApp<T extends Plugins>(
     // Both extras are required to stay offline: without explicit storage the
     // cache builds its own client and probes Lakebase, and without the opt-out
     // TelemetryReporter fires an apiClient.request on boot.
-    app = await createApp({
+    app = await AppKit._createApp({
       plugins: bootPlugins as Any,
       client,
       cache: cache ?? {
         storage: new InMemoryStorage({ enabled: true } as Any),
       },
       disableInternalTelemetry: true,
+      // The harness boots repeatedly in one process and runs its own teardown,
+      // so it must not accumulate SIGTERM/SIGINT handlers across boots.
+      installSignalHandlers: false,
     });
 
     const serverExports = (app as Any).server;
@@ -333,13 +342,9 @@ export async function createTestApp<T extends Plugins>(
     const close = () => {
       closed ??= (async () => {
         try {
-          await bootedApp.close(
-            closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
-          );
+          await disposeBooted(bootedApp);
         } finally {
-          // No release here: app.close() -> LifecycleManager.close() already
-          // drops this app's claim. A second release would drop a claim this
-          // app never took.
+          dropCoreSingletons();
           restoreUserContext?.();
           releaseEnvBaseline();
         }
@@ -422,19 +427,15 @@ export async function createTestApp<T extends Plugins>(
     // Teardown must run from the failure path too, or the boot leaks env
     // mutations and singletons into every later test in the file.
     if (app) {
-      // No release alongside this: close() drops the claim itself, and a second
-      // release would drop a claim this app never took.
       try {
-        await app.close(
-          closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
-        );
+        await disposeBooted(app);
       } catch {
         // The boot error is the interesting one; don't let teardown mask it.
       }
-    } else {
-      // Nothing was booted, so nothing else will drop the claim taken above.
-      releaseAppKitSingletons();
     }
+    // dispose() no longer drops the singletons, and a failure before boot may
+    // have left a partial init — drop unconditionally either way.
+    dropCoreSingletons();
     restoreUserContext?.();
     releaseEnvBaseline();
     throw err;

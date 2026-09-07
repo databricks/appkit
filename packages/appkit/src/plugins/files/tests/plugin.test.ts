@@ -7,7 +7,7 @@ import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
-import { withEnv } from "../../../testing";
+import { useTestCache, withEnv } from "../../../testing";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_READ_DEFAULTS,
@@ -16,40 +16,35 @@ import {
 import { FilesPlugin, files } from "../plugin";
 import { PolicyDeniedError, policy } from "../policy";
 
-const { mockClient, MockApiError, mockCacheInstance } = await vi.hoisted(
-  async () => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
+const { mockClient, MockApiError } = await vi.hoisted(async () => {
+  const mockFilesApi = {
+    listDirectoryContents: vi.fn(),
+    download: vi.fn(),
+    getMetadata: vi.fn(),
+    upload: vi.fn(),
+    createDirectory: vi.fn(),
+    delete: vi.fn(),
+  };
 
-    const mockClient = {
-      files: mockFilesApi,
-      config: {
-        host: "https://test.databricks.com",
-        authenticate: vi.fn(),
-      },
-    };
+  const mockClient = {
+    files: mockFilesApi,
+    config: {
+      host: "https://test.databricks.com",
+      authenticate: vi.fn(),
+    },
+  };
 
-    class MockApiError extends Error {
-      statusCode: number;
-      constructor(message: string, statusCode: number) {
-        super(message);
-        this.name = "ApiError";
-        this.statusCode = statusCode;
-      }
+  class MockApiError extends Error {
+    statusCode: number;
+    constructor(message: string, statusCode: number) {
+      super(message);
+      this.name = "ApiError";
+      this.statusCode = statusCode;
     }
+  }
 
-    const { createCacheMock } = await import("../../../testing/cache-mock");
-    const mockCacheInstance = createCacheMock();
-
-    return { mockFilesApi, mockClient, MockApiError, mockCacheInstance };
-  },
-);
+  return { mockFilesApi, mockClient, MockApiError };
+});
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =
@@ -70,19 +65,16 @@ vi.mock("../../../context", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-    getInstance: vi.fn(async () => mockCacheInstance),
-  },
-}));
-
 const VOLUMES_CONFIG = {
   volumes: {
     uploads: { maxUploadSize: 100_000_000, policy: policy.allowAll() },
     exports: { policy: policy.allowAll() },
   },
 };
+
+// Boots AppKit's real in-memory cache; spy on `testCache.current` to assert
+// cache behaviour. No mock of the internal cache module.
+const testCache = useTestCache();
 
 describe("FilesPlugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -2437,6 +2429,8 @@ describe("FilesPlugin", () => {
         },
       );
 
+      const getOrExecute = vi.spyOn(testCache.current, "getOrExecute");
+
       // Alice's request.
       await handler(
         mockReq("obo_vol", {
@@ -2457,7 +2451,7 @@ describe("FilesPlugin", () => {
 
       // Cache is disabled on OBO: `getOrExecute` is bypassed. The SDK
       // must execute on every request — no cross-user staleness possible.
-      expect(mockCacheInstance.getOrExecute).not.toHaveBeenCalled();
+      expect(getOrExecute).not.toHaveBeenCalled();
       expect(mockClient.files.listDirectoryContents).toHaveBeenCalledTimes(2);
     });
 
@@ -2483,6 +2477,8 @@ describe("FilesPlugin", () => {
         },
       );
 
+      const getOrExecute = vi.spyOn(testCache.current, "getOrExecute");
+
       // SP volume request — must consult the cache (cache enabled).
       await listHandler(
         mockReq("uploads", {
@@ -2501,7 +2497,7 @@ describe("FilesPlugin", () => {
         mockRes(),
       );
 
-      const calls = mockCacheInstance.getOrExecute.mock.calls;
+      const calls = getOrExecute.mock.calls;
       // Exactly one cache consultation — the SP volume's. The OBO request
       // bypassed the cache entirely.
       expect(calls).toHaveLength(1);
@@ -2983,18 +2979,9 @@ describe("FilesPlugin", () => {
 
         mockClient.files.createDirectory.mockResolvedValue(undefined);
 
-        // Track which (parts, userKey) pairs go through generateKey so we
-        // can match the invalidation segment exactly.
-        const generateKeyCalls: Array<{
-          parts: (string | number | object)[];
-          userKey: string;
-        }> = [];
-        mockCacheInstance.generateKey.mockImplementation(
-          (parts: (string | number | object)[], userKey: string) => {
-            generateKeyCalls.push({ parts, userKey });
-            return "stub-key";
-          },
-        );
+        // Track which (parts, userKey) pairs go through the real generateKey
+        // so we can match the invalidation segment exactly.
+        const generateKey = vi.spyOn(testCache.current, "generateKey");
 
         await mkdirHandler(
           mockReq("sp_vol", {}, { body: { path: "/Volumes/c/s/sp/foo/bar" } }),
@@ -3002,9 +2989,11 @@ describe("FilesPlugin", () => {
         );
 
         // Exactly one list-cache invalidation key was constructed.
-        const listInvalidations = generateKeyCalls.filter(
-          (c) => Array.isArray(c.parts) && c.parts[0] === "files:sp_vol:list",
-        );
+        const listInvalidations = generateKey.mock.calls
+          .map((c) => ({ parts: c[0], userKey: c[1] }))
+          .filter(
+            (c) => Array.isArray(c.parts) && c.parts[0] === "files:sp_vol:list",
+          );
         expect(listInvalidations).toHaveLength(1);
 
         // The path-segment is the PARENT directory (resolved), not the
@@ -3056,25 +3045,19 @@ describe("FilesPlugin", () => {
 
         mockClient.files.createDirectory.mockResolvedValue(undefined);
 
-        const generateKeyCalls: Array<{
-          parts: (string | number | object)[];
-          userKey: string;
-        }> = [];
-        mockCacheInstance.generateKey.mockImplementation(
-          (parts: (string | number | object)[], userKey: string) => {
-            generateKeyCalls.push({ parts, userKey });
-            return "stub-key";
-          },
-        );
+        const generateKey = vi.spyOn(testCache.current, "generateKey");
 
         await mkdirHandler(
           mockReq("uploads", {}, { body: { path: writePath } }),
           mockRes(),
         );
 
-        const listInvalidations = generateKeyCalls.filter(
-          (c) => Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
-        );
+        const listInvalidations = generateKey.mock.calls
+          .map((c) => ({ parts: c[0], userKey: c[1] }))
+          .filter(
+            (c) =>
+              Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
+          );
         const segments = listInvalidations.map((c) => c.parts[1]);
         expect(segments).toEqual(
           expect.arrayContaining([
@@ -3133,7 +3116,6 @@ describe("FilesPlugin", () => {
         const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
 
         mockClient.files.createDirectory.mockResolvedValue(undefined);
-        mockCacheInstance.generateKey.mockReturnValue("stub-key");
 
         // Deferred promise that gates the cache delete. The handler must
         // await this before writing the success response.
@@ -3141,9 +3123,9 @@ describe("FilesPlugin", () => {
         const deletePending = new Promise<void>((resolve) => {
           releaseDelete = resolve;
         });
-        mockCacheInstance.delete.mockImplementation(
-          async () => await deletePending,
-        );
+        const del = vi
+          .spyOn(testCache.current, "delete")
+          .mockImplementation(async () => await deletePending);
 
         const res = mockRes();
 
@@ -3161,15 +3143,12 @@ describe("FilesPlugin", () => {
         // Use setImmediate to also drain macrotask queue items (telemetry/
         // timeout interceptors may use setTimeout under the hood).
         const deadline = Date.now() + 1000;
-        while (
-          mockCacheInstance.delete.mock.calls.length === 0 &&
-          Date.now() < deadline
-        ) {
+        while (del.mock.calls.length === 0 && Date.now() < deadline) {
           await new Promise((resolve) => setImmediate(resolve));
         }
 
         expect(mockClient.files.createDirectory).toHaveBeenCalledTimes(1);
-        expect(mockCacheInstance.delete).toHaveBeenCalledTimes(1);
+        expect(del).toHaveBeenCalledTimes(1);
 
         // Critical assertion: drain plenty of microtasks AND macrotasks
         // while `cache.delete` is still parked on the deferred. If the

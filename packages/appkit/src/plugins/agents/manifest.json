@@ -32,6 +32,24 @@
             "description": "MLflow experiment id traces are logged to"
           }
         }
+      },
+      {
+        "type": "volume",
+        "alias": "Agent skills",
+        "resourceKey": "agents-skills",
+        "description": "Optional Unity Catalog Volume providing catalog-sourced agent skills (read-only)",
+        "permission": "READ_VOLUME",
+        "fields": {
+          "path": {
+            "env": "DATABRICKS_VOLUME_AGENT_SKILLS",
+            "description": "Volume path for agent skills (e.g. /Volumes/catalog/schema/skills)",
+            "discovery": {
+              "type": "kind",
+              "resourceKind": "volume",
+              "select": "full_name"
+            }
+          }
+        }
       }
     ]
   }

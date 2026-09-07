@@ -131,6 +131,19 @@ entirely.
 
 ***
 
+### skills?
+
+```ts
+optional skills: string[];
+```
+
+Names of global skills (shared `skills/` pool or catalog volume) to make
+visible to this agent. Per-agent skills under `<id>/skills/` are always
+visible and need not be listed. Ignored when the plugin's
+`autoInheritSkills` makes every global skill visible.
+
+***
+
 ### tools?
 
 ```ts

@@ -60,6 +60,16 @@ export interface UseAgentChatOptions {
    * so a buggy handler can't kill the stream.
    */
   onEvent?: (event: AgentChatEvent) => void;
+  /**
+   * Known skill names for this agent — typically
+   * `getPluginClientConfig("agents").skills?.[agent]` mapped to `s.name`.
+   * A leading `/token` in a sent message is treated as skill sugar ONLY
+   * when `token` matches one of these names; anything else is sent
+   * verbatim, so ordinary messages that begin with `/` (paths, commands
+   * like `/tmp is full` or `/usr/bin/python …`) are never mangled. Omit
+   * or leave empty to disable `/`-prefix sugar entirely.
+   */
+  skills?: string[];
 }
 
 export interface UseAgentChatResult {
@@ -85,14 +95,40 @@ export interface UseAgentChatResult {
   /**
    * Send a user turn and stream the response. Aborts any in-flight
    * stream. Resolves when the stream completes (success or error).
+   *
+   * Pass `opts.skill` to force-load a skill for this turn, or prefix the
+   * message with `/skill-name` as sugar — the leading token is parsed off and
+   * sent as the skill only when it matches a name in `options.skills` (the
+   * rest becomes the message); otherwise the message is sent as-is. An
+   * explicit `opts.skill` always wins over a `/`-prefix.
    */
-  send: (message: string) => Promise<void>;
+  send: (message: string, opts?: { skill?: string }) => Promise<void>;
   /**
    * Discard accumulated content, events, and threadId. Aborts any
    * in-flight stream. Use when switching agents or starting a fresh
    * conversation.
    */
   reset: () => void;
+}
+
+/**
+ * `forced` (opts.skill) wins. Otherwise a leading `/skill-name` token is
+ * parsed off the message ONLY when it names a skill in `known` — so a plain
+ * message that happens to start with `/` (a path, a shell command) is sent
+ * verbatim instead of having its first word silently consumed as a skill.
+ */
+function resolveSkill(
+  message: string,
+  forced?: string,
+  known?: string[],
+): { skill?: string; text: string } {
+  if (forced) return { skill: forced, text: message };
+  const match = message.match(/^\/([A-Za-z0-9][\w.:-]*)\s*/);
+  if (!match || !known?.includes(match[1])) return { text: message };
+  const skill = match[1];
+  const rest = message.slice(match[0].length);
+  // When the message is only the token, fall back to a minimal instruction.
+  return { skill, text: rest.trim() === "" ? `Use the ${skill} skill.` : rest };
 }
 
 /**
@@ -129,6 +165,7 @@ export function useAgentChat({
   agent,
   endpoint = "/api/agents/chat",
   onEvent,
+  skills,
 }: UseAgentChatOptions): UseAgentChatResult {
   const [content, setContent] = useState("");
   const [events, setEvents] = useState<AgentChatEvent[]>([]);
@@ -143,6 +180,10 @@ export function useAgentChat({
   const contentRef = useRef("");
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
+  // Refd like onEvent so `send` stays stable when the caller passes a fresh
+  // `skills` array each render (e.g. `config.skills?.[agent] ?? []`).
+  const skillsRef = useRef(skills);
+  skillsRef.current = skills;
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const reset = useCallback(() => {
@@ -158,7 +199,7 @@ export function useAgentChat({
   }, []);
 
   const send = useCallback(
-    async (message: string) => {
+    async (message: string, opts?: { skill?: string }) => {
       // Abort any previous stream — only one chat turn in flight per hook.
       abortControllerRef.current?.abort();
       const controller = new AbortController();
@@ -170,9 +211,16 @@ export function useAgentChat({
       setError(null);
       setIsStreaming(true);
 
-      const payload = {
+      const { skill, text } = resolveSkill(
         message,
+        opts?.skill,
+        skillsRef.current,
+      );
+
+      const payload = {
+        message: text,
         agent,
+        ...(skill ? { skill } : {}),
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
       };
 

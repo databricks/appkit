@@ -10,21 +10,12 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../../context/service-context";
+import { useTestCache } from "../../../testing/test-cache";
 import { ServingPlugin, serving } from "../serving";
 import type { IServingConfig } from "../types";
 
-// Mock CacheManager singleton
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const mockCacheInstance = createCacheMock();
-  return { mockCacheInstance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 // Mock the serving connector
 const mockInvoke = vi.fn();

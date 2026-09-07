@@ -58,8 +58,6 @@ export class CacheManager {
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
-  /** Bumped by {@link reset} so an in-flight init cannot publish over it. */
-  private static generation = 0;
 
   private storage: CacheStorage;
   private config: CacheConfig;
@@ -128,14 +126,13 @@ export class CacheManager {
     }
 
     if (!CacheManager.initPromise) {
-      const generation = CacheManager.generation;
       CacheManager.initPromise = CacheManager.create(userConfig).then(
         (instance) => {
-          // A reset() mid-flight discarded this manager before it existed:
-          // hand it to the awaiting caller, but do not publish it.
-          if (CacheManager.generation === generation) {
-            CacheManager.instance = instance;
-          }
+          // Publishes unconditionally: safe only because every getInstance() is
+          // awaited before any reset(), so a reset() can never land mid-init and
+          // this can never publish over it. A future unawaited-init caller would
+          // reintroduce that stale-publish race (the removed `generation` guard).
+          CacheManager.instance = instance;
           return instance;
         },
       );
@@ -576,7 +573,6 @@ export class CacheManager {
   static reset(): void {
     CacheManager.instance = null;
     CacheManager.initPromise = null;
-    CacheManager.generation += 1;
   }
 
   /**

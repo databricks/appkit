@@ -4,6 +4,7 @@ import {
   createApiError,
   createMockWorkspaceClient,
   getMock,
+  useTestCache,
 } from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
@@ -15,16 +16,9 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  return { mockCacheInstance: createCacheMock() };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache; spy on `testCache.current` to assert the plugin's
+// cache-invalidation calls.
+const testCache = useTestCache();
 
 describe("FilesPlugin delete", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
@@ -55,6 +49,9 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
+    const generateKey = vi.spyOn(testCache.current, "generateKey");
+    const del = vi.spyOn(testCache.current, "delete");
+
     getMock(client, "files.delete").mockResolvedValue(undefined);
 
     await handler(
@@ -67,8 +64,8 @@ describe("FilesPlugin delete", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
-    expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-    expect(mockCacheInstance.delete).toHaveBeenCalled();
+    expect(generateKey).toHaveBeenCalled();
+    expect(del).toHaveBeenCalled();
   });
 
   test("delete without path returns 400", async () => {

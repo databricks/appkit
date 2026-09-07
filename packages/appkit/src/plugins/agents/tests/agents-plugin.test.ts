@@ -32,6 +32,7 @@ interface FakeContext {
   getToolProviders(): Array<{ name: string; provider: ToolProvider }>;
   getPluginNames(): string[];
   addRoute(): void;
+  onLifecycle(): void;
   executeTool: (
     req: unknown,
     pluginName: string,
@@ -48,6 +49,7 @@ function fakeContext(
     getToolProviders: () => providers,
     getPluginNames: () => providers.map((p) => p.name),
     addRoute: vi.fn(),
+    onLifecycle: vi.fn(),
     executeTool: vi.fn(async (_req, p, n, args) => ({
       plugin: p,
       tool: n,

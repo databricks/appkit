@@ -126,6 +126,97 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.72.0](https://github.com/databricks/appkit/compare/v0.71.0...v0.72.0) (2026-09-04)
+
+### appkit
+
+* **appkit:** agent eval framework, judge, mlflow connector ([#478](https://github.com/databricks/appkit/issues/478)) ([2e2c26e](https://github.com/databricks/appkit/commit/2e2c26e90c2bacb9e7e038d1aa842039c708bc97)), closes [#545](https://github.com/databricks/appkit/issues/545) [#545](https://github.com/databricks/appkit/issues/545)
+
+
+## [0.71.0](https://github.com/databricks/appkit/compare/v0.70.0...v0.71.0) (2026-09-03)
+
+### appkit
+
+* **appkit:** degrade typegen on build-time auth errors instead of failing the build ([#561](https://github.com/databricks/appkit/issues/561)) ([5949ec5](https://github.com/databricks/appkit/commit/5949ec5c5c3838f2d4616a5f16b06f90f84c62a1))
+* **appkit:** migrate agent mlflow tracing to @mlflow/core with Unity Catalog support ([#545](https://github.com/databricks/appkit/issues/545)) ([4c767f8](https://github.com/databricks/appkit/commit/4c767f8d2a7502db8678a8432dc52bc0ae43f7df)), closes [#agentTraceIds](https://github.com/databricks/appkit/issues/agentTraceIds)
+
+
+## [0.70.0](https://github.com/databricks/appkit/compare/v0.69.3...v0.70.0) (2026-09-02)
+
+### stream
+
+* **stream:** expose per-plugin streamConfig on BasePluginConfig ([#568](https://github.com/databricks/appkit/issues/568)) ([2d7d17c](https://github.com/databricks/appkit/commit/2d7d17c5111b45b89865be06f0f1409443c4d16f))
+
+
+## [0.69.3](https://github.com/databricks/appkit/compare/v0.69.2...v0.69.3) (2026-09-02)
+
+### appkit
+
+* **appkit:** surface swallowed tool-execution errors in agents plugin ([#560](https://github.com/databricks/appkit/issues/560)) ([2c13806](https://github.com/databricks/appkit/commit/2c13806058390b32e00db1be9586924b87f2642f))
+
+
+## [0.69.2](https://github.com/databricks/appkit/compare/v0.69.1...v0.69.2) (2026-09-02)
+
+### stream
+
+* **stream:** raise SSE event limit to 5 MiB and honour per-call maxEventSize ([#567](https://github.com/databricks/appkit/issues/567)) ([e7474c8](https://github.com/databricks/appkit/commit/e7474c8a57b54e1870bf86e13eb59ca0f6501ecc))
+
+
+## [0.69.1](https://github.com/databricks/appkit/compare/v0.69.0...v0.69.1) (2026-09-01)
+
+### appkit
+
+* **appkit:** extract text from gpt-oss array-shaped delta.content ([#559](https://github.com/databricks/appkit/issues/559)) ([2243d98](https://github.com/databricks/appkit/commit/2243d9808b7e89591811b722a1ae35d86d8c2832))
+
+
+## [0.69.0](https://github.com/databricks/appkit/compare/v0.68.0...v0.69.0) (2026-08-31)
+
+### appkit
+
+* **appkit:** split the agents plugin into focused modules ([#532](https://github.com/databricks/appkit/issues/532)) ([#547](https://github.com/databricks/appkit/issues/547)) ([2329476](https://github.com/databricks/appkit/commit/23294765213c9fc795f38074ecf36f3322dfe266))
+
+
+## [0.68.0](https://github.com/databricks/appkit/compare/v0.67.0...v0.68.0) (2026-08-31)
+
+### appkit
+
+* **appkit:** add opt-in generated database reads ([#527](https://github.com/databricks/appkit/issues/527)) ([0b43f14](https://github.com/databricks/appkit/commit/0b43f14ab6c49aa0fdf7c4285edcf4297bf6461a))
+
+
+## [0.66.1](https://github.com/databricks/appkit/compare/v0.66.0...v0.66.1) (2026-08-26)
+
+### appkit
+
+* **appkit:** exclude lakebase postgres.project from the bundle ([#554](https://github.com/databricks/appkit/issues/554)) ([cc78e27](https://github.com/databricks/appkit/commit/cc78e275821b8a278863f976858e58e2d5aa2fa3))
+
+
+## [0.66.0](https://github.com/databricks/appkit/compare/v0.65.0...v0.66.0) (2026-08-26)
+
+### appkit
+
+* **appkit:** add the service-principal typed DatabasePlugin API ([#526](https://github.com/databricks/appkit/issues/526)) ([847de1f](https://github.com/databricks/appkit/commit/847de1fe3592d28269d9cff4be0eff43f6f2a258))
+
+
 ## [0.65.0](https://github.com/databricks/appkit/compare/v0.64.0...v0.65.0) (2026-08-24)
 
 ### appkit

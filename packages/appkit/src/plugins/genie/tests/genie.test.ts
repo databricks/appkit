@@ -11,22 +11,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { genieConnectorDefaults } from "../../../connectors/genie/defaults";
 import { ServiceContext } from "../../../context/service-context";
 import { Plugin } from "../../../plugin";
+import { useTestCache } from "../../../testing/test-cache";
 import { GeniePlugin, genie } from "../genie";
 import type { IGenieConfig } from "../types";
 
-// Mock CacheManager singleton
-const { mockCacheInstance } = await vi.hoisted(async () => {
-  const { createCacheMock } = await import("../../../testing/cache-mock");
-  const mockCacheInstance = createCacheMock();
-
-  return { mockCacheInstance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 function createMockGenieService() {
   const getMessageAttachmentQueryResult = vi.fn();
