@@ -2,14 +2,18 @@
 export interface DatabaseRegistryEntry {
   /** Full server-side row (includes private columns). */
   row: Record<string, unknown>;
-  /** Accepted insert payload (private + server-generated columns omitted). */
+  /** Default private-safe row returned by collection reads. */
+  publicRow: Record<string, unknown>;
+  /** Trusted insert payload (includes private fields; omits generated columns). */
   insert: Record<string, unknown>;
-  /** Accepted update payload (PK + private + server-generated omitted, all optional). */
+  /** Trusted update payload (includes private fields; omits PK/generated columns). */
   update: Record<string, unknown>;
   /** Per-column filter operators usable in `where`. */
   filters: Record<string, unknown>;
   /** Relations that can be passed to `include`. */
   includes: Record<string, unknown>;
+  /** Literal capability used to omit keyed methods from keyless entities. */
+  hasPrimaryKey: boolean;
 }
 
 /**

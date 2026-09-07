@@ -197,6 +197,7 @@ export class StreamManager {
     const eventBuffer = new EventRingBuffer(
       options?.bufferSize ?? streamDefaults.bufferSize,
     );
+    const maxEventSize = options?.maxEventSize ?? this.maxEventSize;
 
     // setup signals and heartbeat
     const combinedSignal = this._combineSignals(
@@ -225,6 +226,7 @@ export class StreamManager {
       lastAccess: Date.now(),
       abortController,
       traceContext,
+      maxEventSize,
     };
     this.streamRegistry.add(streamEntry);
 
@@ -270,10 +272,12 @@ export class StreamManager {
           if (streamEntry.abortController.signal.aborted) break;
           const eventId = randomUUID();
           const eventData = JSON.stringify(event);
+          const { maxEventSize } = streamEntry;
 
-          // validate event size
-          if (eventData.length > this.maxEventSize) {
-            const errorMsg = `Event exceeds max size of ${this.maxEventSize} bytes`;
+          // UTF-8 bytes, not `String.length`: non-ASCII payloads used to slip
+          // past a limit they exceeded on the wire.
+          if (Buffer.byteLength(eventData, "utf8") > maxEventSize) {
+            const errorMsg = `Event exceeds max size of ${maxEventSize} bytes`;
             const errorCode = SSEErrorCode.INVALID_REQUEST;
             // broadcast error to all connected clients
             this._broadcastErrorToClients(

@@ -8,6 +8,7 @@ This Software contains code from the following open source projects:
 | :--------------- | :---------------- | :----------- | :--------------------------------------------------- |
 | [@ast-grep/napi](https://www.npmjs.com/package/@ast-grep/napi) | 0.37.0 | MIT | https://ast-grep.github.io |
 | [@clack/prompts](https://www.npmjs.com/package/@clack/prompts) | 1.0.1 | MIT | https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme |
+| [@mlflow/core](https://www.npmjs.com/package/@mlflow/core) | 0.4.0 | Apache-2.0 | https://mlflow.org/ |
 | [@opentelemetry/api](https://www.npmjs.com/package/@opentelemetry/api) | 1.9.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/api |
 | [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |
 | [@opentelemetry/auto-instrumentations-node](https://www.npmjs.com/package/@opentelemetry/auto-instrumentations-node) | 0.77.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/auto-instrumentations-node#readme |
@@ -20,8 +21,8 @@ This Software contains code from the following open source projects:
 | [@opentelemetry/resources](https://www.npmjs.com/package/@opentelemetry/resources) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-resources |
 | [@opentelemetry/sdk-logs](https://www.npmjs.com/package/@opentelemetry/sdk-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/sdk-logs |
 | [@opentelemetry/sdk-metrics](https://www.npmjs.com/package/@opentelemetry/sdk-metrics) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/sdk-metrics |
-| [@opentelemetry/sdk-node](https://www.npmjs.com/package/@opentelemetry/sdk-node) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-sdk-node |
 | [@opentelemetry/sdk-trace-base](https://www.npmjs.com/package/@opentelemetry/sdk-trace-base) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-base |
+| [@opentelemetry/sdk-trace-node](https://www.npmjs.com/package/@opentelemetry/sdk-trace-node) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-node |
 | [@opentelemetry/semantic-conventions](https://www.npmjs.com/package/@opentelemetry/semantic-conventions) | 1.38.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions |
 | [@radix-ui/react-accordion](https://www.npmjs.com/package/@radix-ui/react-accordion) | 1.2.12 | MIT | https://radix-ui.com/primitives |
 | [@radix-ui/react-alert-dialog](https://www.npmjs.com/package/@radix-ui/react-alert-dialog) | 1.1.15 | MIT | https://radix-ui.com/primitives |
@@ -53,24 +54,25 @@ This Software contains code from the following open source projects:
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@types/semver](https://www.npmjs.com/package/@types/semver) | 7.7.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/semver |
 | [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
+| [autoevals](https://www.npmjs.com/package/autoevals) | 0.3.0 | MIT | https://www.braintrust.dev/docs |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
 | [cmdk](https://www.npmjs.com/package/cmdk) | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |
 | [commander](https://www.npmjs.com/package/commander) | 2.20.3, 5.1.0, 7.2.0, 8.3.0, 10.0.1, 12.1.0 | MIT | https://github.com/tj/commander.js#readme |
 | [dompurify](https://www.npmjs.com/package/dompurify) | 3.4.11 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
-| [drizzle-orm](https://www.npmjs.com/package/drizzle-orm) | 0.45.1 | Apache-2.0 | https://orm.drizzle.team |
+| [drizzle-orm](https://www.npmjs.com/package/drizzle-orm) | 0.45.2 | Apache-2.0 | https://orm.drizzle.team |
 | [echarts](https://www.npmjs.com/package/echarts) | 6.0.0 | Apache-2.0 | https://echarts.apache.org |
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
 | [express](https://www.npmjs.com/package/express) | 4.22.2 | MIT | http://expressjs.com/ |
 | [get-port](https://www.npmjs.com/package/get-port) | 7.2.0 | MIT | https://github.com/sindresorhus/get-port#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
-| [js-yaml](https://www.npmjs.com/package/js-yaml) | 3.14.2, 4.2.0 | MIT | https://github.com/nodeca/js-yaml#readme |
+| [jiti](https://www.npmjs.com/package/jiti) | 1.21.7, 2.6.1 | MIT | https://github.com/unjs/jiti#readme |
+| [js-yaml](https://www.npmjs.com/package/js-yaml) | 3.14.2, 4.3.1 | MIT | https://github.com/nodeca/js-yaml#readme |
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [magic-string](https://www.npmjs.com/package/magic-string) | 0.30.21 | MIT | https://github.com/Rich-Harris/magic-string#readme |
 | [marked](https://www.npmjs.com/package/marked) | 16.4.2, 17.0.3 | MIT | https://marked.js.org |
-| [mlflow-tracing](https://www.npmjs.com/package/mlflow-tracing) | 0.1.3 | Apache-2.0 | https://mlflow.org/ |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
 | [obug](https://www.npmjs.com/package/obug) | 2.1.1 | MIT | https://github.com/sxzz/obug#readme |
 | [pg](https://www.npmjs.com/package/pg) | 8.18.0 | MIT | https://github.com/brianc/node-postgres |

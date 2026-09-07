@@ -52,6 +52,13 @@ class ProbePlugin extends Plugin {
   /** The client this plugin resolved at request time. */
   seenClient: WorkspaceClient | undefined;
 
+  /** Incremented when harness teardown runs this plugin's shutdown() hook. */
+  shutdownCalls = 0;
+
+  async shutdown(): Promise<void> {
+    this.shutdownCalls += 1;
+  }
+
   injectRoutes(router: IAppRouter): void {
     const r = (
       method: "get" | "post" | "put" | "patch" | "delete",
@@ -132,6 +139,7 @@ class ProbePlugin extends Plugin {
   exports() {
     return {
       seenClient: () => this.seenClient,
+      shutdownCalls: () => this.shutdownCalls,
       whoami: () => ({ userId: getUserContext()?.userId }),
       // Calls through the client so the harness's mock records it — a real
       // OBO client would record nothing here.
@@ -347,6 +355,24 @@ describe("createTestApp", () => {
     await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
   });
 
+  test("close runs a booted plugin's shutdown() hook and releases the socket", async () => {
+    // The path this PR rewired (close() -> disposeApp -> dispose()): a *real*
+    // registered plugin's shutdown() must fire through the boot->teardown wiring,
+    // and the server socket must actually be released — not just re-port-picked
+    // on the next boot. The lifecycle unit test covers this against a mocked
+    // context; this asserts the composed integration path end to end.
+    const app = await createTestApp({ plugins: [probe()] });
+    const port = app.port;
+    await expect(
+      app.get("/api/probe/ping").then((r) => r.status),
+    ).resolves.toBe(200);
+
+    await app.close();
+
+    expect(app.plugins.probe.shutdownCalls()).toBe(1);
+    await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
+  });
+
   describe("resource validation (the strict posture)", () => {
     test("a missing required env var fails the boot", async () => {
       delete process.env.MY_REQUIRED_SECRET;
@@ -450,8 +476,8 @@ describe("createTestApp", () => {
         Object.keys(before).sort(),
       );
 
-      // The singleton claim has to be released too, or this boot reuses the
-      // failed app's half-closed singletons.
+      // The failed app's singletons have to be dropped too, or this boot
+      // reuses its half-closed ones.
       const app = await createTestApp({ plugins: [probe()] });
       try {
         await expect(
@@ -778,8 +804,8 @@ describe("createTestApp — one app at a time", () => {
     await expect(createTestApp({ plugins: [probe()] })).rejects.toThrow();
     await a.close();
 
-    // A refusal that had incremented the counter would leave it at 1 here, so
-    // this close would never restore the baseline.
+    // The refused boot must leave harnessAppLive and the saved baseline alone,
+    // or a's close would not restore the env.
     expect(process.env.NODE_ENV).toBe(before.NODE_ENV);
     expect(process.env.DATABRICKS_WORKSPACE_ID).toBe(
       before.DATABRICKS_WORKSPACE_ID,
@@ -810,7 +836,8 @@ describe("createTestApp — one app at a time", () => {
 
     const second = await createTestApp({ plugins: [probe()] });
     try {
-      // close() is memoized, so this is a no-op rather than a second release.
+      // close() is memoized, so this stale call is a no-op — not a drop that
+      // would reset second's singletons.
       await first.close();
       await expect(
         second.get("/api/probe/from-client").then((r) => r.status),

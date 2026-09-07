@@ -394,7 +394,7 @@ describe("generateQueriesFromDescribe", () => {
     });
   });
 
-  test("fatal rejected DESCRIBE request is not downgraded to offline", async () => {
+  test("an auth-flavoured rejected DESCRIBE degrades to unknown (not on the deny-list)", async () => {
     mocks.readdir.mockResolvedValue(["users.sql"]);
     mocks.readFile.mockResolvedValue("SELECT id FROM users");
     mocks.executeStatement.mockRejectedValueOnce(
@@ -406,13 +406,11 @@ describe("generateQueriesFromDescribe", () => {
       "wh-123",
     );
 
+    // A build-time permission gap is not on the deny-list (404/400): the DESCRIBE
+    // degrades to `unknown` and the has-types gate decides — it does not fail the
+    // build here. Never cached.
     expect(schemas[0].type).toContain("result: unknown");
-    expect(fatalErrors).toEqual([
-      {
-        name: "users",
-        message: "PERMISSION_DENIED: missing warehouse permission",
-      },
-    ]);
+    expect(fatalErrors).toEqual([]);
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
     expect(lastSavedQueries()).not.toHaveProperty("users");
   });
@@ -463,11 +461,11 @@ describe("generateQueriesFromDescribe", () => {
     expect(fatalErrors).toEqual([]);
   });
 
-  test("mixed syntax and fatal failures are both returned", async () => {
-    mocks.readdir.mockResolvedValue(["syntax.sql", "fatal.sql"]);
+  test("mixed syntax and deny-list failures are both returned", async () => {
+    mocks.readdir.mockResolvedValue(["syntax.sql", "bad_id.sql"]);
     mocks.readFile
       .mockResolvedValueOnce("SELECT * FROM missing")
-      .mockResolvedValueOnce("SELECT * FROM auth_blocked");
+      .mockResolvedValueOnce("SELECT * FROM whatever");
     mocks.executeStatement
       .mockResolvedValueOnce({
         statement_id: "stmt-syntax",
@@ -476,7 +474,11 @@ describe("generateQueriesFromDescribe", () => {
           error: { message: "Table not found" },
         },
       })
-      .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
+      // A 404 is on the deny-list — it stays fatal (bad SQL is a ran-and-failed
+      // FAILED statement, above; this is a deterministic client error).
+      .mockRejectedValueOnce(
+        Object.assign(new Error("warehouse wh-123 not found"), { status: 404 }),
+      );
 
     const { schemas, syntaxErrors, fatalErrors } = await describeQueries(
       "/queries",
@@ -488,7 +490,7 @@ describe("generateQueriesFromDescribe", () => {
       { name: "syntax", message: "Table not found" },
     ]);
     expect(fatalErrors).toEqual([
-      { name: "fatal", message: "PERMISSION_DENIED" },
+      { name: "bad_id", message: "warehouse wh-123 not found" },
     ]);
   });
 
@@ -543,7 +545,13 @@ describe("generateQueriesFromDescribe", () => {
     expect(fatalErrors).toEqual([]);
   });
 
-  test("bare timeout and fetch failed messages are not overmatched as connectivity", async () => {
+  test("non-deny-list rejections (param error, expired token) degrade, not fatal", async () => {
+    // Neither carries an HTTP 404/400, so under degrade-by-default both fall off
+    // the deny-list and degrade to `unknown` rather than failing the build. (A
+    // malformed request that surfaces a real 400 status is still fatal — see the
+    // deny-list tests. Catching message-only deterministic errors like
+    // INVALID_PARAMETER_VALUE would require expanding the deny-list beyond
+    // status; deliberately out of scope.)
     mocks.readdir.mockResolvedValue(["timeout.sql", "oauth.sql"]);
     mocks.readFile
       .mockResolvedValueOnce("SELECT id FROM timeout")
@@ -564,26 +572,21 @@ describe("generateQueriesFromDescribe", () => {
     );
 
     expect(schemas).toHaveLength(2);
-    expect(fatalErrors).toEqual([
-      {
-        name: "timeout",
-        message: "INVALID_PARAMETER_VALUE: timeout must be > 0",
-      },
-      {
-        name: "oauth",
-        message: "fetch failed: token expired: EXPIRED_OAUTH_TOKEN",
-      },
-    ]);
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(schemas[1].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([]);
   });
 
-  test("successful describes in a fatal batch are saved", async () => {
-    mocks.readdir.mockResolvedValue(["good.sql", "bad_auth.sql"]);
+  test("successful describes in a deny-list-fatal batch are saved", async () => {
+    mocks.readdir.mockResolvedValue(["good.sql", "bad_id.sql"]);
     mocks.readFile
       .mockResolvedValueOnce("SELECT id FROM good")
-      .mockResolvedValueOnce("SELECT id FROM bad_auth");
+      .mockResolvedValueOnce("SELECT id FROM bad_id");
     mocks.executeStatement
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
-      .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
+      .mockRejectedValueOnce(
+        Object.assign(new Error("malformed request"), { status: 400 }),
+      );
 
     const { schemas, fatalErrors } = await describeQueries(
       "/queries",
@@ -593,10 +596,10 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[1].type).toContain("result: unknown");
     expect(fatalErrors).toEqual([
-      { name: "bad_auth", message: "PERMISSION_DENIED" },
+      { name: "bad_id", message: "malformed request" },
     ]);
     expect(lastSavedQueries()?.good.type).toContain("id: number");
-    expect(lastSavedQueries()).not.toHaveProperty("bad_auth");
+    expect(lastSavedQueries()).not.toHaveProperty("bad_id");
   });
 
   test("empty result (described, no columns) is unknown, not a syntax error, not cached", async () => {

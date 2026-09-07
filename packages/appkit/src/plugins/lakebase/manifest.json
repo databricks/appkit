@@ -16,6 +16,7 @@
           "project": {
             "description": "Full Lakebase Postgres project resource name. Obtain by running `databricks postgres list-projects`, select the desired item from the output array and use its .name value.",
             "examples": ["projects/{project-id}"],
+            "bundleIgnore": true,
             "discovery": {
               "type": "kind",
               "resourceKind": "postgres_project",

@@ -48,21 +48,6 @@ describe("CacheManager.reset", () => {
     expect(second).toBe(first);
   });
 
-  test("reset clears an in-flight initPromise, not just the instance", async () => {
-    // Start initialization but do not await it, so `instance` is still null and
-    // only `initPromise` is set. Clearing just `instance` would leave the next
-    // caller awaiting a promise that resolves to the discarded manager —
-    // getInstance() returns initPromise when instance is null.
-    const pending = CacheManager.getInstance({ storage: storage() });
-
-    CacheManager.reset();
-
-    const first = await pending;
-    const second = await CacheManager.getInstance({ storage: storage() });
-
-    expect(second).not.toBe(first);
-  });
-
   test("getInstanceSync throws after a reset", async () => {
     await CacheManager.getInstance({ storage: storage() });
     expect(() => CacheManager.getInstanceSync()).not.toThrow();

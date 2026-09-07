@@ -1,6 +1,7 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
 
+import type { StreamConfig } from "./execute";
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
@@ -72,6 +73,14 @@ export interface BasePluginConfig {
    * @default true for all telemetry types
    */
   telemetry?: TelemetryOptions;
+
+  /**
+   * SSE stream configuration for this plugin's `executeStream()` calls (buffer
+   * sizes, `maxEventSize`, TTL, heartbeat). Sets the plugin's StreamManager
+   * defaults; a per-call `stream` config still overrides these. Use it to raise
+   * `maxEventSize` above the 5 MiB default when a stream emits larger events.
+   */
+  streamConfig?: StreamConfig;
 }
 
 export type TelemetryOptions =
@@ -262,29 +271,6 @@ export type PluginMap<
   [P in U[number] as P["name"]]: WithAsUser<
     PluginExports<InstanceType<P["plugin"]>>
   >;
-};
-
-/**
- * What `createApp()` returns: every plugin's exports keyed by manifest name,
- * plus the app's own teardown handle.
- *
- * `close()` releases what AppKit acquired — sockets, timers, pools, cache, and
- * telemetry — without terminating the process, so a host can embed AppKit and a
- * test can boot more than once in a file.
- *
- * `Symbol.asyncDispose` is exposed alongside it because a plugin's manifest name
- * can never be a symbol: `await using app = await createApp(...)` is safe even
- * if a plugin were somehow named `close`.
- */
-export type AppHandle<
-  U extends readonly PluginData<PluginConstructor, unknown, string>[],
-> = PluginMap<U> & {
-  /**
-   * @param options.timeoutMs - Overall teardown budget. Defaults to AppKit's
-   *   programmatic budget, which is shorter than the signal path's.
-   */
-  close(options?: { timeoutMs?: number }): Promise<void>;
-  [Symbol.asyncDispose](): Promise<void>;
 };
 
 /** Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. */

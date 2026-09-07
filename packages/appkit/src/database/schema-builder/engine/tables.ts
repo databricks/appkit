@@ -167,6 +167,25 @@ function buildColumn(
   return column;
 }
 
+// PostgreSQL renders a timestamp as `2026-06-29 19:05:19.051709+00` over the
+// text protocol but as ISO-8601 inside the JSON aggregates Drizzle builds for
+// relations, so one column reaches callers in two shapes depending on whether
+// it was included. Both shapes are declared `string`, and only ISO-8601 parses
+// per the ECMAScript grammar, so normalize to it.
+const PG_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:([+-]\d{2})(?::?(\d{2}))?)?$/;
+
+function isoTimestamp(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const parts = PG_TIMESTAMP.exec(value);
+  // Leave `infinity`, `-infinity`, and anything unrecognized untouched.
+  if (!parts) return value;
+  const [, date, time, offsetHours, offsetMinutes] = parts;
+  const offset =
+    offsetHours === undefined ? "" : `${offsetHours}:${offsetMinutes ?? "00"}`;
+  return `${date}T${time}${offset}`;
+}
+
 function buildTable(
   name: string,
   schemaName: string,
@@ -192,6 +211,12 @@ function buildTable(
       throw new SchemaBuildError(
         `Engine column "${name}.${key}" was not constructed`,
       );
+    }
+    if (meta.storageKind === "timestamp") {
+      // Drizzle routes every read path through this decoder, so overriding it
+      // covers direct selects, relation includes, and mutation RETURNING alike.
+      (engineColumn as unknown as Record<string, unknown>).mapFromDriverValue =
+        isoTimestamp;
     }
     meta.engineColumn =
       engineColumn as unknown as MutableColumnMeta["engineColumn"];

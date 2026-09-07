@@ -56,6 +56,12 @@ export interface StreamEntry {
   lastAccess: number;
   abortController: AbortController;
   traceContext: Context;
+  /**
+   * UTF-8 bytes. Lives on the entry, not on `StreamManager`: one manager is
+   * shared by every stream a plugin opens, so reading it off the instance made
+   * per-call overrides silently ineffective.
+   */
+  maxEventSize: number;
   // pending grace-window abort, set while the last client is disconnected
   disconnectGraceTimer?: NodeJS.Timeout;
   /**

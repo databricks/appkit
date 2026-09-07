@@ -160,9 +160,14 @@ export interface DefineSchemaOptions {
   readonly schemaName?: string;
 }
 
-export interface Schema {
+/**
+ * One finalized schema. `TTableName` keeps the declared names in the type, so
+ * configuration that addresses a table by name is checked against the schema
+ * it was written for. Code that accepts any schema uses the default.
+ */
+export interface Schema<TTableName extends string = string> {
   readonly $schemaName: string;
-  readonly $tables: Readonly<Record<string, AppKitTable>>;
+  readonly $tables: Readonly<Record<TTableName, AppKitTable>>;
   readonly $engine: Readonly<Record<string, EngineTable>>;
 }
 
