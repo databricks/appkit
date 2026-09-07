@@ -180,7 +180,7 @@ function sqlStateOf(error: unknown): string | undefined {
 function classifyDriverError(error: unknown): DatabasePluginError {
   const code = sqlStateOf(error);
   const category: DatabaseErrorCategory =
-    code === "40001" || code === "40P01"
+    code === "40001" || code === "40P01" || code === "57014"
       ? "TRANSIENT"
       : code === "42501"
         ? "FORBIDDEN"

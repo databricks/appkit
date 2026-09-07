@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { streamDefaults } from "../defaults";
 import { StreamManager } from "../index";
 
 function createMockResponse(headers: Record<string, string> = {}) {
@@ -1317,5 +1318,94 @@ describe("StreamManager", () => {
       );
       expect(payload?.code).toBe("UPSTREAM_ERROR");
     });
+  });
+});
+
+/**
+ * `maxEventSize` was read off the StreamManager instance (constructor-only), so
+ * per-call values passed via `executeStream({ stream })` type-checked and were
+ * then silently ignored. The constructor path had coverage; the per-call path
+ * did not, which is how it survived.
+ */
+describe("maxEventSize", () => {
+  /** Tracks the default, so raising it can't quietly neuter these tests. */
+  function oversizedEvent() {
+    return {
+      type: "result",
+      data: "x".repeat(streamDefaults.maxEventSize + 64),
+    };
+  }
+
+  function errorEvents(events: string[]) {
+    // SSEWriter emits one res.write per line, so rejoin before parsing
+    return events
+      .join("")
+      .split("\n\n")
+      .filter((frame) => frame.includes("event: error"))
+      .map((frame) => {
+        const line = frame.split("\n").find((l) => l.startsWith("data: "));
+        return line ? JSON.parse(line.slice("data: ".length)) : undefined;
+      });
+  }
+
+  test("drops an oversized event under the default limit", async () => {
+    const manager = new StreamManager();
+    const { mockRes, events } = createMockResponse();
+
+    async function* generator() {
+      yield oversizedEvent();
+    }
+
+    await manager.stream(mockRes as any, generator);
+
+    const errors = errorEvents(events);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("INVALID_REQUEST");
+    expect(events.some((e) => e.includes("event: result"))).toBe(false);
+  });
+
+  test("honours a per-call override", async () => {
+    const manager = new StreamManager();
+    const { mockRes, events } = createMockResponse();
+
+    async function* generator() {
+      yield oversizedEvent();
+    }
+
+    await manager.stream(mockRes as any, generator, {
+      maxEventSize: streamDefaults.maxEventSize * 2,
+    });
+
+    expect(errorEvents(events)).toHaveLength(0);
+    expect(events.some((e) => e.includes("event: result"))).toBe(true);
+  });
+
+  test("a per-call override beats the constructor value", async () => {
+    const manager = new StreamManager({ maxEventSize: 10_000 });
+    const { mockRes, events } = createMockResponse();
+
+    async function* generator() {
+      yield { type: "result", data: "x".repeat(1000) };
+    }
+
+    await manager.stream(mockRes as any, generator, { maxEventSize: 50 });
+
+    expect(errorEvents(events)).toHaveLength(1);
+    expect(errorEvents(events)[0].error).toContain("50 bytes");
+  });
+
+  test("measures UTF-8 bytes, not UTF-16 code units", async () => {
+    // ~730 UTF-16 units (under the limit, so String.length accepted it) but
+    // ~1430 UTF-8 bytes, which is what crosses the wire.
+    const manager = new StreamManager({ maxEventSize: 1000 });
+    const { mockRes, events } = createMockResponse();
+
+    async function* generator() {
+      yield { type: "result", data: "\u00e9".repeat(700) };
+    }
+
+    await manager.stream(mockRes as any, generator);
+
+    expect(errorEvents(events)).toHaveLength(1);
   });
 });

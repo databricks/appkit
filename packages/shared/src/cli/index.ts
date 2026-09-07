@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
 
+import { agentCommand } from "./commands/agent/index.js";
 import { codemodCommand } from "./commands/codemod/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { doctorCommand } from "./commands/doctor/index.js";
@@ -38,5 +39,6 @@ cmd.addCommand(doctorCommand);
 // is still in development (registry + add work end-to-end but aren't announced).
 cmd.addCommand(registryCommand, { hidden: true });
 cmd.addCommand(addCommand, { hidden: true });
+cmd.addCommand(agentCommand);
 
 await cmd.parseAsync();

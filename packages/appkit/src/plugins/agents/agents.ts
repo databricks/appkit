@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type express from "express";
 import pc from "picocolors";
 import type {
   AgentAdapter,
-  AgentRunContext,
   AgentToolDefinition,
   IAppRouter,
   Message,
@@ -14,29 +13,20 @@ import type {
   ResponseOutputMessage,
   ResponseStreamEvent,
   Thread,
-  ToolAnnotations,
   ToolProvider,
 } from "shared";
 
-import {
-  isSupervisorTool,
-  SUPERVISOR_EXTENSION_KEY,
-  type SupervisorTool,
-} from "../../agents/supervisor-api";
+import { isSupervisorTool } from "../../agents/supervisor-api";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
+import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
-import {
-  CODE_AGENTS_SOURCE_DIR,
-  loadCodeAgentsFromDir,
-  resolveCodeAgentsDir,
-} from "../../core/agent/load-code-agents";
-import { normalizeToolResult } from "../../core/agent/normalize-result";
+import { CODE_AGENTS_SOURCE_DIR } from "../../core/agent/load-code-agents";
 import { createPluginsProxy } from "../../core/agent/plugins-map";
-import {
-  buildBaseSystemPrompt,
-  composeSystemPrompt,
-} from "../../core/agent/system-prompt";
+import type {
+  ResolvedSkillCatalog,
+  SkillDefinition,
+} from "../../core/agent/skills";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
@@ -48,10 +38,8 @@ import type {
   AgentDefinition,
   AgentsPluginConfig,
   AgentTools,
-  BaseSystemPromptOption,
   Plugins,
   PluginToolkitProvider,
-  PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
 } from "../../core/agent/types";
@@ -59,6 +47,15 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
+import type { WorkspaceClient } from "../../workspace-client";
+import { ActiveStreamTracker } from "./active-stream-tracker";
+import {
+  buildAdapterExtensions,
+  supervisorToolDescription,
+  warnOnCapabilityMismatch,
+} from "./adapter-extensions";
+import { requiresApproval } from "./approval";
+import { LOAD_SKILL_TOOL_DEF, READ_SKILL_FILE_TOOL_DEF } from "./builtin-tools";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -67,86 +64,41 @@ import {
   currentTraceId,
   initAgentTracing,
   linkTraceToRun,
+  startAgentTracing,
   traceAgent,
-  traceTool,
 } from "./mlflow";
+import { composePromptForAgent } from "./prompt";
+import {
+  type AgentSource,
+  loadCodeAgents,
+  resolveDefaultAgent,
+} from "./registry";
+import { resolveApprovalPolicy, resolveLimits } from "./resolve-config";
 import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
   invocationsRequestSchema,
 } from "./schemas";
+import {
+  dispatchSkillTool,
+  loadGlobalSkills,
+  loadVolumeSkills,
+  renderForcedSkill,
+  resolveAgentSkills,
+} from "./skill-loader";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
+import {
+  dispatchToolCall,
+  type RunState,
+  type ToolDispatchDeps,
+} from "./tool-dispatch";
 
 const logger = createLogger("agents");
 
 /** Deprecated markdown location, read as a fallback with a one-time warning. */
 const LEGACY_MARKDOWN_DIR = "config/agents";
-
-/**
- * Context flag recorded on the in-memory AgentDefinition to indicate whether
- * it came from markdown (file) or from user code. Drives the asymmetric
- * `autoInheritTools` default.
- */
-interface AgentSource {
-  origin: "file" | "code";
-}
-
-/**
- * Decide whether a tool call must traverse the approval gate. Honours both
- * the modern `effect` field (mutating values: write / update / destructive)
- * and the legacy `destructive: true` boolean. The contract is documented on
- * `ToolAnnotations.effect` in shared/agent.ts.
- *
- * Without this, a tool authored only with `effect: "destructive"` (the
- * preferred API) bypassed the gate entirely.
- */
-function requiresApproval(annotations: ToolAnnotations | undefined): boolean {
-  if (!annotations) return false;
-  if (annotations.destructive === true) return true;
-  switch (annotations.effect) {
-    case "write":
-    case "update":
-    case "destructive":
-      return true;
-    case "read":
-    case undefined:
-      return false;
-    default: {
-      const _exhaustive: never = annotations.effect;
-      return false;
-    }
-  }
-}
-
-/**
- * Per-stream state shared between the top-level `executeTool` and any
- * `runSubAgent` calls below it. Carrying the budget counter, abort signal,
- * approval policy, and event-channel through one object is what lets the
- * sub-agent path enforce the same limits and approval gate as the parent.
- *
- * Without this shared state the sub-agent path silently bypassed both the
- * tool-call budget and the destructive-tool approval gate.
- */
-interface RunState {
-  req: express.Request;
-  userId: string;
-  requestId: string;
-  abortController: AbortController;
-  signal: AbortSignal;
-  approvalPolicy: { requireForDestructive: boolean; timeoutMs: number };
-  limits: {
-    maxConcurrentStreamsPerUser: number;
-    maxToolCalls: number;
-    maxSubAgentDepth: number;
-    toolCallTimeoutMs: number;
-  };
-  translator: AgentEventTranslator;
-  outboundEvents: EventChannel<ResponseStreamEvent>;
-  /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
-  toolCallsUsed: { count: number };
-}
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
   static manifest = defineManifest<"agents">(manifest);
@@ -156,17 +108,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   private agents = new Map<string, RegisteredAgent>();
   private defaultAgentName: string | null = null;
-  private activeStreams = new Map<
-    string,
-    { controller: AbortController; userId: string }
-  >();
   /**
-   * Per-user stream count, kept in sync with `activeStreams` so the
-   * concurrent-stream rate limit check is O(1) instead of O(n) over every
-   * active stream on every request. Mutated only via {@link trackStream}
-   * and {@link untrackStream}.
+   * Active SSE streams + per-user counts (the O(1) concurrency-limit check).
+   * Mutated only via {@link trackStream} / {@link untrackStream}.
    */
-  private userStreamCounts = new Map<string, number>();
+  private streams = new ActiveStreamTracker();
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
@@ -206,6 +152,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * negative, or `NaN`) can't degrade into immediate auto-denial of every
    * mutating tool call.
    */
+  /**
+   * Shared global skill pool (bundle `skills/` + catalog volume), loaded once
+   * per registry build. Read by {@link buildRegisteredAgent} to resolve each
+   * agent's visible catalog and by the live `register` path.
+   */
+  private globalSkills: SkillDefinition[] = [];
+
   private cachedApprovalPolicy: {
     requireForDestructive: boolean;
     timeoutMs: number;
@@ -216,23 +169,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     timeoutMs: number;
   } {
     if (this.cachedApprovalPolicy) return this.cachedApprovalPolicy;
-    const cfg = this.config.approval ?? {};
-    const APPROVAL_TIMEOUT_FLOOR_MS = 1_000;
-    const APPROVAL_TIMEOUT_DEFAULT_MS = 60_000;
-    let timeoutMs = cfg.timeoutMs ?? APPROVAL_TIMEOUT_DEFAULT_MS;
-    if (!Number.isFinite(timeoutMs) || timeoutMs < APPROVAL_TIMEOUT_FLOOR_MS) {
-      logger.warn(
-        "approval.timeoutMs=%s is below the %sms floor; using default %sms instead. Mutating tool calls would otherwise auto-deny before any UI could respond.",
-        cfg.timeoutMs,
-        APPROVAL_TIMEOUT_FLOOR_MS,
-        APPROVAL_TIMEOUT_DEFAULT_MS,
-      );
-      timeoutMs = APPROVAL_TIMEOUT_DEFAULT_MS;
-    }
-    this.cachedApprovalPolicy = {
-      requireForDestructive: cfg.requireForDestructive ?? true,
-      timeoutMs,
-    };
+    this.cachedApprovalPolicy = resolveApprovalPolicy(this.config);
     return this.cachedApprovalPolicy;
   }
 
@@ -243,60 +180,34 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     maxSubAgentDepth: number;
     toolCallTimeoutMs: number;
   } {
-    const cfg = this.config.limits ?? {};
-    return {
-      maxConcurrentStreamsPerUser: cfg.maxConcurrentStreamsPerUser ?? 5,
-      maxToolCalls: cfg.maxToolCalls ?? 50,
-      maxSubAgentDepth: cfg.maxSubAgentDepth ?? 3,
-      // 5 minutes is the floor for cold SQL Warehouse / long Genie /
-      // long Lakebase calls. The previous PluginContext default of 30s
-      // truncated legitimate analytics queries on cold compute.
-      toolCallTimeoutMs: cfg.toolCallTimeoutMs ?? 300_000,
-    };
+    return resolveLimits(this.config);
   }
 
   /** Count active streams owned by a given user. O(1). */
   private countUserStreams(userId: string): number {
-    return this.userStreamCounts.get(userId) ?? 0;
+    return this.streams.count(userId);
   }
 
-  /**
-   * Register a stream for `userId` and bump the per-user counter. Paired
-   * with {@link untrackStream}; the two helpers are the only writers to
-   * `activeStreams` + `userStreamCounts`, so the counter cannot drift from
-   * the map.
-   */
   private trackStream(
     requestId: string,
     userId: string,
     controller: AbortController,
   ): void {
-    this.activeStreams.set(requestId, { controller, userId });
-    this.userStreamCounts.set(
-      userId,
-      (this.userStreamCounts.get(userId) ?? 0) + 1,
-    );
+    this.streams.track(requestId, userId, controller);
   }
 
-  /**
-   * Remove a stream from the active map and decrement the per-user
-   * counter. Idempotent — calling twice for the same `requestId` is a
-   * no-op (the second call sees no entry and returns early).
-   */
   private untrackStream(requestId: string): void {
-    const entry = this.activeStreams.get(requestId);
-    if (!entry) return;
-    this.activeStreams.delete(requestId);
-    const next = (this.userStreamCounts.get(entry.userId) ?? 0) - 1;
-    if (next <= 0) {
-      this.userStreamCounts.delete(entry.userId);
-    } else {
-      this.userStreamCounts.set(entry.userId, next);
-    }
+    this.streams.untrack(requestId);
   }
 
   async setup() {
     await initAgentTracing();
+    // Seed mlflow's config right after TelemetryManager.start() (before the
+    // server serves), so the first turn's request-root span is forwarded and
+    // that turn assembles into a trace — not dropped as a cold-start artifact.
+    this.context?.onLifecycle("setup:complete", () => {
+      startAgentTracing();
+    });
     const { agents, defaultAgentName } = await this.buildAgentRegistry();
     this.agents = agents;
     this.defaultAgentName = defaultAgentName;
@@ -343,6 +254,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Two "code" sources: discovered files and the deprecated `agents({ agents })` map.
     const discovered = await this.loadCodeAgents();
     const deprecatedMapRaw = this.config.agents ?? {};
+
+    // Global skills (bundle + configured UC volume) load in parallel; per-agent
+    // skills resolve later during agent build.
+    const [bundleSkills, volumeSkills] = await Promise.all([
+      this.loadGlobalSkills(),
+      this.loadVolumeSkills(),
+    ]);
+    this.globalSkills = [...bundleSkills, ...volumeSkills];
 
     if (Object.keys(deprecatedMapRaw).length > 0) {
       this.warnAgentsMapDeprecated();
@@ -442,25 +361,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     merged: Record<string, { def: AgentDefinition; src: AgentSource }>,
     fileDefault: string | null,
   ): string | null {
-    if (this.config.defaultAgent) {
-      if (!agents.has(this.config.defaultAgent)) {
-        throw new Error(
-          `defaultAgent '${this.config.defaultAgent}' is not registered. Available: ${Array.from(agents.keys()).join(", ")}`,
-        );
-      }
-      return this.config.defaultAgent;
-    }
-
-    const codeDefault = Object.keys(merged)
-      .filter(
-        (id) => merged[id].src.origin === "code" && merged[id].def.default,
-      )
-      .sort()[0];
-    if (codeDefault) return codeDefault;
-
-    if (fileDefault && agents.has(fileDefault)) return fileDefault;
-
-    return agents.keys().next().value ?? null;
+    return resolveDefaultAgent(
+      agents,
+      merged,
+      fileDefault,
+      this.config.defaultAgent,
+    );
   }
 
   /**
@@ -496,54 +402,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return path.resolve(process.cwd(), CODE_AGENTS_SOURCE_DIR);
   }
 
-  /**
-   * Discovers code agents (see {@link resolveCodeAgentsDir} and
-   * {@link loadCodeAgentsFromDir}). Warns if sources exist but nothing was
-   * discovered — usually the build didn't emit the compiled agents — unless
-   * the deprecated `agents({ agents })` map is carrying them instead.
-   */
-  private async loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
-    const resolved = resolveCodeAgentsDir({
-      cwd: process.cwd(),
-      exists: existsSync,
+  private loadCodeAgents(): Promise<Record<string, AgentDefinition>> {
+    return loadCodeAgents({
+      agentsDir: this.resolvedAgentsDir(),
+      hasDeprecatedMap: Object.keys(this.config.agents ?? {}).length > 0,
     });
-
-    const discovered = await loadCodeAgentsFromDir(resolved.dir, {
-      extensions: resolved.extensions,
-    });
-
-    const usingDeprecatedMap = Object.keys(this.config.agents ?? {}).length > 0;
-    const sourceDir = this.resolvedAgentsDir();
-    if (
-      Object.keys(discovered).length === 0 &&
-      !usingDeprecatedMap &&
-      this.hasCodeAgentSources(sourceDir)
-    ) {
-      logger.warn(
-        "Found code-agent sources in %s but discovered no code agents (scanned %s). " +
-          "In a production build, ensure `<dir>/*/agent.ts` is included as tsdown entries so the compiled agents are emitted.",
-        sourceDir,
-        resolved.dir,
-      );
-    }
-
-    return discovered;
-  }
-
-  /** True when `dir` holds at least one `<id>/agent.ts` folder. */
-  private hasCodeAgentSources(dir: string): boolean {
-    try {
-      return readdirSync(dir, { withFileTypes: true }).some((e) => {
-        if (!e.isDirectory() && !e.isSymbolicLink()) return false;
-        try {
-          return readdirSync(path.join(dir, e.name)).includes("agent.ts");
-        } catch {
-          return false;
-        }
-      });
-    } catch {
-      return false;
-    }
   }
 
   private async loadFileDefinitions(
@@ -622,7 +485,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<RegisteredAgent> {
     const adapter = await this.resolveAdapter(def, name);
-    const toolIndex = await this.buildToolIndex(name, def, src);
+    const skills = await this.resolveAgentSkills(name, def, src);
+    const toolIndex = await this.buildToolIndex(name, def, src, skills);
 
     warnOnCapabilityMismatch(name, adapter, toolIndex);
 
@@ -636,7 +500,44 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       maxTokens: def.maxTokens,
       generationParams: def.generationParams,
       ephemeral: def.ephemeral,
+      skills,
     };
+  }
+
+  /** Loads the shared global skill pool from `<agentsDir>/skills/`. */
+  private loadGlobalSkills(): Promise<SkillDefinition[]> {
+    return loadGlobalSkills(this.resolvedAgentsDir());
+  }
+
+  /**
+   * Workspace client used to read catalog skills. v1 reads as the app service
+   * principal; `getWorkspaceClient()` resolves to SP outside a user scope
+   * (boot and skill-tool dispatch are both unscoped). This is the single
+   * switch point for a future OBO mode.
+   */
+  private skillWorkspaceClient(): WorkspaceClient {
+    return getWorkspaceClient();
+  }
+
+  /** Discovers catalog skills from the configured UC Volume (best-effort). */
+  private loadVolumeSkills(): Promise<SkillDefinition[]> {
+    return loadVolumeSkills(this.config, () => this.skillWorkspaceClient());
+  }
+
+  private async resolveAgentSkills(
+    name: string,
+    def: AgentDefinition,
+    src: AgentSource,
+  ): Promise<RegisteredAgent["skills"]> {
+    const inherit = normalizeAutoInherit(this.config.autoInheritSkills);
+    return resolveAgentSkills({
+      name,
+      def,
+      agentsDir: this.resolvedAgentsDir(),
+      isFileOrigin: src.origin === "file",
+      autoInherit: src.origin === "file" ? inherit.file : inherit.code,
+      globalSkills: this.globalSkills,
+    });
   }
 
   private async resolveAdapter(
@@ -687,6 +588,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     agentName: string,
     def: AgentDefinition,
     src: AgentSource,
+    skills?: ResolvedSkillCatalog,
   ): Promise<Map<string, ResolvedToolEntry>> {
     const index = new Map<string, ResolvedToolEntry>();
     const hasDeclaredTools = def.tools !== undefined;
@@ -781,6 +683,23 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       await this.connectHostedTools(hostedToCollect, index);
     }
 
+    // 3. Built-in skill tools, present only when this agent has a visible
+    //    catalog. Injected last so they reliably shadow any same-named tool.
+    if (skills && skills.byAddress.size > 0) {
+      index.set("load_skill", {
+        source: "skill",
+        builtin: "load_skill",
+        catalog: skills,
+        def: LOAD_SKILL_TOOL_DEF,
+      });
+      index.set("read_skill_file", {
+        source: "skill",
+        builtin: "read_skill_file",
+        catalog: skills,
+        def: READ_SKILL_FILE_TOOL_DEF,
+      });
+    }
+
     return index;
   }
 
@@ -825,8 +744,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   private buildPluginsMap(): Plugins {
     const out: Record<string, PluginToolkitProvider> = {};
+    const label = `Agent '${this.name}': tools(plugins)`;
     if (!this.context) {
-      return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
+      return createPluginsProxy(out, label);
     }
     for (const { name, provider } of this.context.getToolProviders()) {
       const direct = (provider as { toolkit?: unknown }).toolkit;
@@ -838,7 +758,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         };
       }
     }
-    return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
+    // Registered plugins that expose no agent tools (e.g. aiSearch) — so a
+    // reference reports "not a ToolProvider", not the misleading "not registered".
+    const nonProviders = new Set(
+      this.context.getPluginNames().filter((n) => !(n in out)),
+    );
+    return createPluginsProxy(out, label, nonProviders);
   }
 
   private async applyAutoInherit(
@@ -1041,9 +966,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   clientConfig(): Record<string, unknown> {
+    // Per-agent skill catalog (name + description) so the client can offer a
+    // `/skill-name` autocomplete / picker. Only agents with a visible catalog
+    // appear here.
+    const skills: Record<string, { name: string; description: string }[]> = {};
+    for (const [name, agent] of this.agents) {
+      if (agent.skills) skills[name] = agent.skills.catalog;
+    }
     return {
       agents: Array.from(this.agents.keys()),
       defaultAgent: this.defaultAgentName,
+      skills,
     };
   }
 
@@ -1056,7 +989,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName, mlflowRunId } = parsed.data;
+    const {
+      message,
+      threadId,
+      agent: agentName,
+      mlflowRunId,
+      skill,
+    } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -1110,7 +1049,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId, mlflowRunId);
+    return this._streamAgent(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      mlflowRunId,
+      skill,
+    );
   }
 
   /**
@@ -1245,6 +1192,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     thread: Thread,
     userId: string,
     mlflowRunId?: string,
+    forcedSkill?: string,
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -1279,10 +1227,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
+      toolErrors: [],
     };
 
+    const deps = this.toolDispatchDeps();
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
+      dispatchToolCall(deps, runState, registered.toolIndex, name, args, 0);
 
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
@@ -1316,7 +1266,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                   .getPluginNames()
                   .filter((n) => n !== this.name && n !== "server")
               : [];
-            const fullPrompt = composePromptForAgent(
+            let fullPrompt = composePromptForAgent(
               registered,
               this.config.baseSystemPrompt,
               {
@@ -1325,6 +1275,15 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
                 toolNames: tools.map((t) => t.name),
               },
             );
+
+            // Deterministic `/skill-name` invocation: eagerly inject the
+            // requested skill's instructions into this turn rather than waiting
+            // for the model to call load_skill. The tool stays available for
+            // the model to auto-select others.
+            if (forcedSkill) {
+              const addendum = this.renderForcedSkill(registered, forcedSkill);
+              if (addendum) fullPrompt = `${fullPrompt}\n\n${addendum}`;
+            }
 
             const messagesWithSystem: Message[] = [
               {
@@ -1491,10 +1450,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator: new AgentEventTranslator(),
       outboundEvents: new EventChannel<ResponseStreamEvent>(),
       toolCallsUsed: { count: 0 },
+      toolErrors: [],
     };
 
+    const deps = this.toolDispatchDeps();
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
+      dispatchToolCall(deps, runState, registered.toolIndex, name, args, 0);
 
     let fullContent = "";
     try {
@@ -1612,247 +1573,46 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       // Lets an eval runner attach assessments to this turn's trace; absent
       // when tracing is disabled.
       ...(mlflowTraceId ? { mlflow_trace_id: mlflowTraceId } : {}),
+      // Tool failures the model recovered from — the non-streaming equivalent
+      // of the streaming path's `tool_result` error events.
+      ...(runState.toolErrors.length > 0
+        ? { tool_errors: runState.toolErrors }
+        : {}),
       output: [message],
     });
   }
 
-  /**
-   * Dispatch a single tool call from either the top-level adapter or a
-   * sub-agent. Centralising this in one method is what makes the budget
-   * counter, approval gate, and abort signal observe sub-agent activity:
-   * `runSubAgent` reuses the same `runState` and so increments the same
-   * counter and emits approval events through the same channel.
-   *
-   * `depth` is the current sub-agent recursion depth (0 at the top level).
-   * It is forwarded to `runSubAgent` when the dispatched entry is itself a
-   * sub-agent, so depth limits remain enforced.
-   */
-  private async dispatchToolCall(
-    runState: RunState,
-    toolIndex: Map<string, ResolvedToolEntry>,
-    name: string,
+  private dispatchSkillTool(
+    entry: Extract<ResolvedToolEntry, { source: "skill" }>,
     args: unknown,
-    depth: number,
-  ): Promise<unknown> {
-    if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
-      runState.abortController.abort(
-        new Error(
-          `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
-        ),
-      );
-      throw new Error(
-        `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
-      );
-    }
-    runState.toolCallsUsed.count++;
-
-    const entry = toolIndex.get(name);
-    if (!entry) throw new Error(`Unknown tool: ${name}`);
-
-    if (
-      runState.approvalPolicy.requireForDestructive &&
-      requiresApproval(entry.def.annotations)
-    ) {
-      const approvalId = randomUUID();
-      for (const ev of runState.translator.translate({
-        type: "approval_pending",
-        approvalId,
-        streamId: runState.requestId,
-        toolName: name,
-        args,
-        annotations: entry.def.annotations,
-      })) {
-        runState.outboundEvents.push(ev);
-      }
-      const decision = await this.approvalGate.wait({
-        approvalId,
-        streamId: runState.requestId,
-        userId: runState.userId,
-        timeoutMs: runState.approvalPolicy.timeoutMs,
-      });
-      if (decision === "deny") {
-        return `Tool execution denied by user approval gate (tool: ${name}).`;
-      }
-    }
-
-    // Traced from here so the span covers execution only, not the approval
-    // wait above (which is human latency).
-    const toolResult = await traceTool(name, args, async () => {
-      let result: unknown;
-      if (entry.source === "toolkit") {
-        if (!this.context) {
-          throw new Error(
-            "Plugin tool execution requires PluginContext; this should never happen through createApp",
-          );
-        }
-        result = await this.context.executeTool(
-          runState.req,
-          entry.pluginName,
-          entry.localName,
-          args,
-          runState.signal,
-          runState.limits.toolCallTimeoutMs,
-        );
-      } else if (entry.source === "function") {
-        // Function tools declare their parameters as a JSON-object schema,
-        // so adapters always serialize `args` as an object. A non-object
-        // value here means the upstream model emitted malformed tool-call
-        // JSON; surface a clear error rather than silently passing through
-        // a wrong-shape value the tool will then choke on.
-        if (typeof args !== "object" || args === null || Array.isArray(args)) {
-          throw new Error(
-            `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
-          );
-        }
-        result = await entry.functionTool.execute(
-          args as Record<string, unknown>,
-        );
-      } else if (entry.source === "mcp") {
-        if (!this.mcpClient) throw new Error("MCP client not connected");
-        const oboToken = runState.req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        result = await this.mcpClient.callTool(
-          entry.mcpToolName,
-          args,
-          mcpAuth,
-        );
-      } else if (entry.source === "subagent") {
-        const childAgent = this.agents.get(entry.agentName);
-        if (!childAgent)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        result = await this.runSubAgent(runState, childAgent, args, depth + 1);
-      } else if (entry.source === "hosted-supervisor") {
-        // Defense-in-depth: should never fire. Hosted-supervisor entries are
-        // routed via `AgentInput.extensions` and the SA endpoint executes
-        // them server-side; their `def` is filtered out of the adapter's
-        // `tools` array, so the model never sees a callable schema for them.
-        // If we reach here, the agent is paired with a non-SA adapter that
-        // somehow surfaced the placeholder def to the model — surface a
-        // clear error rather than crash later in `normalizeToolResult`.
-        throw new Error(
-          `Tool '${name}' is a hosted-supervisor tool and cannot be invoked from the Node process. ` +
-            "It is executed server-side by the Databricks AI Gateway and is only reachable when the agent's model is a Supervisor API adapter.",
-        );
-      }
-
-      return result;
-    });
-
-    return normalizeToolResult(toolResult);
+  ): Promise<string> {
+    return dispatchSkillTool(entry, args, () => this.skillWorkspaceClient());
   }
 
   /**
-   * Runs a sub-agent in response to an `agent-<key>` tool call. Returns the
-   * concatenated text output to hand back to the parent adapter as the tool
-   * result.
-   *
-   * `depth` starts at 1 for a top-level sub-agent invocation (i.e. the
-   * outer `_streamAgent` calls `runSubAgent(..., 1)`) and increments on
-   * each nested `runSubAgent` call. Depths exceeding
-   * `limits.maxSubAgentDepth` are rejected before any adapter work.
-   *
-   * Sub-agent tool calls run through `dispatchToolCall` with the same
-   * `runState` as the parent — the budget counter and approval gate are
-   * therefore enforced for every nested call, not only at the top level.
+   * Renders the prompt addendum for a force-loaded skill (`/skill-name`).
+   * Returns null when the agent has no catalog or the name doesn't resolve —
+   * an unusable request shouldn't fail the whole turn, so it's logged and the
+   * model proceeds with the catalog + `load_skill` still available.
    */
-  private async runSubAgent(
-    runState: RunState,
-    child: RegisteredAgent,
-    args: unknown,
-    depth: number,
-  ): Promise<string> {
-    if (depth > runState.limits.maxSubAgentDepth) {
-      throw new Error(
-        `Sub-agent depth exceeded (limit ${runState.limits.maxSubAgentDepth}). ` +
-          `Raise agents({ limits: { maxSubAgentDepth } }) or break the delegation cycle.`,
-      );
-    }
+  private renderForcedSkill(
+    registered: RegisteredAgent,
+    name: string,
+  ): string | null {
+    return renderForcedSkill(registered, name);
+  }
 
-    const input =
-      typeof args === "object" &&
-      args !== null &&
-      typeof (args as { input?: unknown }).input === "string"
-        ? (args as { input: string }).input
-        : JSON.stringify(args);
-    // Same filter as the top-level path: hosted-supervisor `def` is a
-    // placeholder, not a callable function — exclude from the adapter's
-    // `tools` array. The specs are routed via `extensions` instead.
-    const childTools = Array.from(child.toolIndex.values())
-      .filter((e) => e.source !== "hosted-supervisor")
-      .map((e) => e.def);
-
-    const childExecute = (name: string, childArgs: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, child.toolIndex, name, childArgs, depth);
-
-    const runContext: AgentRunContext = {
-      executeTool: childExecute,
-      signal: runState.signal,
+  /** Collaborators the tool-dispatch path needs, bound to this instance. */
+  private toolDispatchDeps(): ToolDispatchDeps {
+    return {
+      approvalGate: this.approvalGate,
+      context: this.context,
+      getMcpClient: () => this.mcpClient,
+      agents: this.agents,
+      dispatchSkillTool: (entry, args) => this.dispatchSkillTool(entry, args),
+      pluginName: this.name,
+      baseSystemPrompt: this.config.baseSystemPrompt,
     };
-
-    const pluginNames = this.context
-      ? this.context
-          .getPluginNames()
-          .filter((n) => n !== this.name && n !== "server")
-      : [];
-    const systemPrompt = composePromptForAgent(
-      child,
-      this.config.baseSystemPrompt,
-      {
-        agentName: child.name,
-        pluginNames,
-        toolNames: childTools.map((t) => t.name),
-      },
-    );
-
-    const messages: Message[] = [
-      {
-        id: "system",
-        role: "system",
-        content: systemPrompt,
-        createdAt: new Date(),
-      },
-      {
-        id: randomUUID(),
-        role: "user",
-        content: input,
-        createdAt: new Date(),
-      },
-    ];
-
-    return consumeAdapterStream(
-      child.adapter.run(
-        {
-          messages,
-          tools: childTools,
-          threadId: randomUUID(),
-          signal: runState.signal,
-          extensions: buildAdapterExtensions(child.toolIndex),
-        },
-        runContext,
-      ),
-      {
-        signal: runState.signal,
-        // Forward every sub-agent event into the parent's outbound SSE
-        // stream so the client sees nested tool_call / tool_result events
-        // (UI-action tools like apply_filter / highlight_period rely on
-        // this) and the sub-agent's streaming text as it's generated.
-        //
-        // `metadata` is the one exception: sub-agents have their own
-        // threadId, and forwarding it would overwrite the parent's
-        // thread state on the client and break multi-turn continuity.
-        // Approval-pending events emitted by `dispatchToolCall` already
-        // reach `outboundEvents` directly, so they are not routed here.
-        onEvent: (event) => {
-          if (event.type === "metadata") return;
-          for (const translated of runState.translator.translate(event)) {
-            runState.outboundEvents.push(translated);
-          }
-        },
-      },
-    );
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
@@ -1865,7 +1625,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
     const { streamId } = parsed.data;
-    const entry = this.activeStreams.get(streamId);
+    const entry = this.streams.get(streamId);
     if (!entry) {
       // Stream is unknown or already completed — idempotent no-op.
       res.json({ cancelled: true });
@@ -1893,7 +1653,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
     const { streamId, approvalId, decision } = parsed.data;
 
-    const streamEntry = this.activeStreams.get(streamId);
+    const streamEntry = this.streams.get(streamId);
     if (!streamEntry) {
       // Stream has already completed or never existed. Return 404 so the UI
       // knows the approval token is no longer valid (the waiter, if any, has
@@ -2022,115 +1782,6 @@ function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   if (value === undefined) return { file: false, code: false };
   if (typeof value === "boolean") return { file: value, code: value };
   return { file: value.file ?? false, code: value.code ?? false };
-}
-
-function composePromptForAgent(
-  registered: RegisteredAgent,
-  pluginLevel: BaseSystemPromptOption | undefined,
-  ctx: PromptContext,
-): string {
-  const perAgent = registered.baseSystemPrompt;
-  const resolved = perAgent !== undefined ? perAgent : pluginLevel;
-
-  let base = "";
-  if (resolved === false) {
-    base = "";
-  } else if (typeof resolved === "string") {
-    base = resolved;
-  } else if (typeof resolved === "function") {
-    base = resolved(ctx);
-  } else {
-    base = buildBaseSystemPrompt(ctx);
-  }
-
-  return composeSystemPrompt(base, registered.instructions);
-}
-
-/**
- * Pulls the LLM-readable description off any {@link SupervisorTool} kind.
- * Used to populate the synthetic placeholder `def.description` on
- * hosted-supervisor tool-index entries.
- */
-function supervisorToolDescription(spec: SupervisorTool): string {
-  switch (spec.type) {
-    case "genie_space":
-      return spec.genie_space.description;
-    case "uc_function":
-      return spec.uc_function.description;
-    case "knowledge_assistant":
-      return spec.knowledge_assistant.description;
-    case "app":
-      return spec.app.description;
-    case "uc_connection":
-      return spec.uc_connection.description;
-  }
-}
-
-/**
- * Builds the `AgentInput.extensions` payload from a tool index, aggregating
- * the hosted-supervisor specs under {@link SUPERVISOR_EXTENSION_KEY}. Returns
- * `undefined` when there are no adapter-side hosted tools so the field stays
- * absent on the wire — adapters that don't read extensions never see it.
- */
-function buildAdapterExtensions(
-  toolIndex: Map<string, ResolvedToolEntry>,
-): Readonly<Record<string, unknown>> | undefined {
-  const supervisorSpecs: SupervisorTool[] = [];
-  for (const entry of toolIndex.values()) {
-    if (entry.source === "hosted-supervisor") {
-      supervisorSpecs.push(entry.spec);
-    }
-  }
-  if (supervisorSpecs.length === 0) return undefined;
-  return {
-    [SUPERVISOR_EXTENSION_KEY]: { hostedTools: supervisorSpecs },
-  };
-}
-
-/**
- * Compares the adapter's declared capabilities against the tool index and
- * logs a warning when the agent's tool declarations would be silently
- * dropped at runtime. Warn-not-throw: misconfiguration is loud enough to
- * notice without taking the whole app down.
- */
-function warnOnCapabilityMismatch(
-  agentName: string,
-  adapter: AgentAdapter,
-  toolIndex: Map<string, ResolvedToolEntry>,
-): void {
-  const accepted = new Set(adapter.acceptsExtensions ?? []);
-
-  const hostedSupervisorKeys: string[] = [];
-  const inputToolKeys: string[] = [];
-  for (const [key, entry] of toolIndex) {
-    if (entry.source === "hosted-supervisor") {
-      hostedSupervisorKeys.push(key);
-    } else {
-      inputToolKeys.push(key);
-    }
-  }
-
-  if (
-    hostedSupervisorKeys.length > 0 &&
-    !accepted.has(SUPERVISOR_EXTENSION_KEY)
-  ) {
-    logger.warn(
-      `Agent '${agentName}' declares hosted-supervisor tools (${hostedSupervisorKeys.join(", ")}) ` +
-        "but its model adapter does not accept the 'databricks.supervisor' extension. " +
-        "These tools will not reach the model. Pair them with `DatabricksAdapter.fromSupervisorApi(...)`, or remove them.",
-    );
-  }
-
-  // `consumesInputTools` defaults to true. Only warn when an adapter
-  // explicitly opts out (`false`) and an input tool would be silently
-  // ignored.
-  if (adapter.consumesInputTools === false && inputToolKeys.length > 0) {
-    logger.warn(
-      `Agent '${agentName}' declares function tools / sub-agents / MCP tools (${inputToolKeys.join(", ")}) ` +
-        "but its model adapter does not consume input.tools (Supervisor API owns its own tool loop). " +
-        "These tools will not be exposed to the model. See docs/plugins/agents.md.",
-    );
-  }
 }
 
 /**

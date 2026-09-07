@@ -1,6 +1,7 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
 
+import type { StreamConfig } from "./execute";
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
@@ -72,6 +73,14 @@ export interface BasePluginConfig {
    * @default true for all telemetry types
    */
   telemetry?: TelemetryOptions;
+
+  /**
+   * SSE stream configuration for this plugin's `executeStream()` calls (buffer
+   * sizes, `maxEventSize`, TTL, heartbeat). Sets the plugin's StreamManager
+   * defaults; a per-call `stream` config still overrides these. Use it to raise
+   * `maxEventSize` above the 5 MiB default when a stream emits larger events.
+   */
+  streamConfig?: StreamConfig;
 }
 
 export type TelemetryOptions =

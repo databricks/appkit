@@ -361,6 +361,36 @@ describe("translateInclude", () => {
         posts: { order: { secret: "asc" } },
       }),
     ).toThrow(DatabasePluginError);
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { include: { users: { select: ["secret"] } } },
+      }),
+    ).toThrow(DatabasePluginError);
+  });
+
+  it("resolves a second relation edge with the target's own defaults", () => {
+    const config = translateInclude(users, schema, {
+      posts: { include: { users: true } },
+    }) as { posts: { with: Record<string, unknown> } };
+    expect(config.posts.with).toEqual({
+      users: { columns: defaultColumns(users) },
+    });
+
+    const trusted = translateInclude(
+      users,
+      schema,
+      { posts: { include: { users: { select: ["secret"] } } } },
+      "trusted",
+    ) as { posts: { with: { users: Record<string, unknown> } } };
+    expect(trusted.posts.with.users.columns).toEqual({ secret: true });
+  });
+
+  it("stops after the second relation edge", () => {
+    expect(() =>
+      translateInclude(users, schema, {
+        posts: { include: { users: { include: { posts: true } } } },
+      }),
+    ).toThrow(DatabasePluginError);
   });
 
   it("rejects unknown relations and invalid relation limits", () => {

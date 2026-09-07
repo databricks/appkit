@@ -1,4 +1,4 @@
-import { getErrorDiagnostic, isConnectivityError } from "../errors";
+import { classifyBlockingFailure, getErrorDiagnostic } from "../errors";
 import type { DatabricksStatementExecutionResponse } from "../types";
 import {
   extractMetricColumns,
@@ -73,10 +73,18 @@ export async function syncMetrics(
       response = await fetcher(entry.source);
     } catch (err) {
       const reason = `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(err)}`;
-      // Connectivity blips self-converge (retry next pass); auth, a bad
-      // warehouse id, a truncated / multi-chunk result, or a malformed request
-      // are deterministic and must surface — the same split the query path makes.
-      return failedOutcome(index, entry, reason, isConnectivityError(err));
+      // The DESCRIBE never ran (fetcher threw). Degrade by default (connectivity,
+      // auth/permission, SDK/config) so the has-types gate can reuse committed
+      // types; only the deny-list of deterministic client errors (bad warehouse
+      // id 404, malformed request 400) surfaces as fatal — the same split the
+      // query path and preflight make. (Truncated/multi-chunk and zero-column
+      // responses are ran-and-failed, handled below and kept non-transient.)
+      return failedOutcome(
+        index,
+        entry,
+        reason,
+        classifyBlockingFailure(err) !== "deterministic",
+      );
     }
 
     const state = response.status?.state;
@@ -139,7 +147,7 @@ export async function syncMetrics(
           index,
           entry,
           `DESCRIBE TABLE EXTENDED failed: ${getErrorDiagnostic(result.reason)}`,
-          isConnectivityError(result.reason),
+          classifyBlockingFailure(result.reason) !== "deterministic",
         );
         schemas[index] = schema;
         failureSlots[index] = failure;

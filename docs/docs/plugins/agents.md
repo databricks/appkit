@@ -37,7 +37,7 @@ That alone gives you a live HTTP server with `POST /invocations` (and its alias 
 
 ## Level 1: drop a markdown agent package
 
-Each agent lives in its own folder under `server/agents/` with entry file `agent.md`. A folder is an agent only if it holds an entry file (`agent.md` or `agent.ts`); a folder without one is skipped, so per-agent asset folders like `skills/` sit beside the entry.
+Each agent lives in its own folder under `server/agents/` with entry file `agent.md`. A folder is an agent only if it holds an entry file (`agent.md` or `agent.ts`); a folder without one is skipped, so per-agent asset folders sit beside the entry — notably a `skills/` folder holding [Skills](#skills) (on-demand instruction packs the agent loads by name). A shared `server/agents/skills/` folder holds skills available to any agent.
 
 ```
 my-app/
@@ -205,6 +205,67 @@ await createApp({
 ```
 
 Put `supervisor`, `researcher`, and `writer` in their own `server/agents/<id>/agent.ts` folders (default export each) — a markdown parent can also delegate to a code child in a sibling folder via `agents: [helper]` frontmatter. Each key in `agents: {...}` on an `AgentDefinition` becomes an `agent-<key>` tool on the parent. When invoked, the agents plugin runs the child's adapter with a fresh message list (no shared thread state) and returns the aggregated text. Cycles in a code agent's inline `agents: {}` graph are rejected at load (`createAgent`); markdown `agents:` delegation rejects self-references at load and bounds deeper cycles at runtime via `limits.maxSubAgentDepth`.
+
+## Skills
+
+Skills are on-demand instruction packs — the same `SKILL.md` format Claude Code and Cursor use. Only each skill's `name` + `description` sit in the system prompt (always-on, cheap); the full body loads on demand when the agent (or the user) invokes it. This works on any Databricks-served model — AppKit implements the disclosure itself, so it doesn't depend on a provider-native skills feature.
+
+A skill is a directory with a `SKILL.md` plus any bundled reference files:
+
+```
+config/agents/
+  skills/                    # shared pool — any agent can opt in
+    pdf-forms/
+      SKILL.md
+      reference.md
+  planner/
+    agent.md
+    skills/                  # private to the `planner` agent
+      house-style/
+        SKILL.md
+```
+
+```md
+---
+name: pdf-forms
+description: Fill and validate PDF form fields from a data record.
+---
+
+To fill a PDF form:
+
+1. Read `reference.md` for the field-name conventions.
+2. ...
+```
+
+`name` and `description` are required; `license`, `allowed-tools`, and `metadata` are accepted for compatibility with skills authored elsewhere. Unknown keys warn and are ignored.
+
+### Visibility
+
+- **Per-agent skills** (`config/agents/<id>/skills/`) are always visible to that agent.
+- **Global skills** (`config/agents/skills/`, and catalog-volume skills) are **opt-in**: list them in the agent's frontmatter, `skills: [pdf-forms]`. Set `autoInheritSkills: true` (or `{ file, code }`) on the plugin to make every global skill visible without listing — off by default so each agent's always-on catalog stays lean.
+
+### How the agent uses a skill
+
+Two read-only built-in tools are injected into any agent that has a visible catalog:
+
+- `load_skill(skill)` — returns the skill's full instructions plus a manifest of its bundled files.
+- `read_skill_file(skill, path)` — returns the contents of one of those bundled files.
+
+The model calls `load_skill` on its own when a task matches a skill's description. A **user** can force a specific skill for a turn with the `/skill-name` prefix in chat (or the `send(message, { skill })` option on `useAgentChat`); the skill's instructions are injected into that turn deterministically, and `load_skill` remains available for auto-selection. The client reads the per-agent catalog from the plugin's `clientConfig()` payload to power a picker.
+
+### Catalog skills (Unity Catalog Volume)
+
+Point `skillsVolume` (or the `DATABRICKS_VOLUME_AGENT_SKILLS` env var) at a UC Volume laid out the same way — `<volume>/<name>/SKILL.md`. Catalog skills are discovered at boot and on `reload()`, merged into the shared global pool, and read as the **service principal** (`skillCredentialMode` defaults to `"sp"`). They're intended as a shared, curated pool; per-user (OBO) skill volumes are not wired yet. Declaring the optional `volume` resource in the manifest lets the scaffolder grant the SP read access.
+
+### Name collisions
+
+Skill names are addressed bare. If two sources provide the same name, each becomes a qualified `<scope>:name` (`agent:`, `bundle:`, `volume:`) and the bare name is rejected as ambiguous with the alternatives listed. Two skills with the same name from the *same* source is a boot-time error.
+
+### v1 caveats
+
+- **Scripts are not executed.** A skill may reference `scripts/foo.py`; v1 loads prose and reference docs only.
+- **`allowed-tools` is advisory.** It's surfaced as a hint in the loaded skill, not enforced — loading a skill does not restrict the agent's callable tools. It is not a sandbox.
+- **Skill bodies are not per-user access-controlled** (they read as the SP). Keep user-sensitive content out of skill bodies.
 
 ## Level 5: standalone (no `createApp`)
 
@@ -414,6 +475,9 @@ agents({
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string,
   tools?: Record<string, AgentTool>,
   autoInheritTools?: boolean | { file?: boolean, code?: boolean },
+  autoInheritSkills?: boolean | { file?: boolean, code?: boolean }, // default off
+  skillsVolume?: string,        // UC Volume for catalog skills; falls back to DATABRICKS_VOLUME_AGENT_SKILLS
+  skillCredentialMode?: "sp" | "obo", // default "sp" (see Skills)
   threadStore?: ThreadStore,    // default in-memory
   baseSystemPrompt?: false | string | (ctx: PromptContext) => string,
   mcp?: {
@@ -603,6 +667,7 @@ appkit.agents.getThreads(userId);   // list user's threads
 | `endpoint` | string | Model serving endpoint name. Shortcut for `model`. |
 | `model` | string | Same as `endpoint`; either works. |
 | `tools` | array | Unified tool list. Entries are `plugin:<name>` / `plugin:<name>: [t1, t2]` / `plugin:<name>: { only, except, rename, prefix }` for plugin tools, or a bare `<key>` resolved against `agents({ tools: {...} })` for ambient tools. See "Level 2: scope tools in frontmatter" above for examples. |
+| `skills` | array | Names of global skills (shared `skills/` pool or catalog volume) to make visible to this agent. Per-agent skills under `<id>/skills/` are always visible. See [Skills](#skills). |
 | `default` | boolean | First agent id (sorted order) with `default: true` becomes the default agent. |
 | `agents` | array | Sub-agent ids (sibling folders) to delegate to; each becomes an `agent-<id>` tool. Resolves against other markdown and code agents. |
 | `maxSteps` | number | Adapter max-step hint. |

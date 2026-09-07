@@ -2,6 +2,8 @@
 
 ```ts
 type IDatabaseConfig<TSchema> = {
+  crudRoutes?: CrudRoutesConfig<TSchema>;
+  hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: { serialize?: ReadSerializer } };
   schema: TSchema;
 };
 ```
@@ -15,6 +17,22 @@ Configuration for one schema-bound DatabasePlugin instance.
 | `TSchema` *extends* [`Schema`](Interface.Schema.md) |
 
 ## Properties
+
+### crudRoutes?
+
+```ts
+readonly optional crudRoutes: CrudRoutesConfig<TSchema>;
+```
+
+***
+
+### hooks?
+
+```ts
+readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: { serialize?: ReadSerializer } };
+```
+
+***
 
 ### schema
 

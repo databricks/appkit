@@ -1,16 +1,25 @@
 # Function: defineSchema()
 
 ```ts
-function defineSchema(builder: (context: SchemaBuilderContext) => Record<string, AppKitTable>, options?: DefineSchemaOptions): Schema;
+function defineSchema<TTables>(builder: (context: SchemaBuilderContext) => TTables, options?: DefineSchemaOptions): Schema<Extract<keyof TTables, string>>;
 ```
+
+Compile one declared schema. The returned type keeps the table names the
+builder returned, so `crudRoutes` and `hooks` can name only real tables.
+
+## Type Parameters
+
+| Type Parameter |
+| ------ |
+| `TTables` *extends* `Record`\<`string`, `AppKitTable`\> |
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `builder` | (`context`: `SchemaBuilderContext`) => `Record`\<`string`, `AppKitTable`\> |
+| `builder` | (`context`: `SchemaBuilderContext`) => `TTables` |
 | `options?` | `DefineSchemaOptions` |
 
 ## Returns
 
-[`Schema`](Interface.Schema.md)
+[`Schema`](Interface.Schema.md)\<`Extract`\<keyof `TTables`, `string`\>\>

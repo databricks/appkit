@@ -18,10 +18,14 @@ import type { Plugins, PluginToolkitProvider } from "./types";
  * @param contextLabel - prefix included in the error message; differentiates
  *   the runtime context (e.g. `"runAgent: tools(plugins)"` vs
  *   `"AgentsPlugin: tools(plugins)"`) so users know which path to debug.
+ * @param nonProviderNames - names of plugins that ARE registered but expose no
+ *   agent tools (no `.toolkit()`), so a miss on one of these reports "registered
+ *   but not a ToolProvider" instead of the misleading "not registered".
  */
 export function createPluginsProxy(
   entries: Record<string, PluginToolkitProvider>,
   contextLabel: string,
+  nonProviderNames?: ReadonlySet<string>,
 ): Plugins {
   return new Proxy(entries, {
     get(target, prop, receiver) {
@@ -49,6 +53,13 @@ export function createPluginsProxy(
         return undefined;
       }
       const available = Object.keys(target).join(", ") || "(none)";
+      if (nonProviderNames?.has(prop)) {
+        throw new Error(
+          `${contextLabel} referenced plugin '${prop}', which is registered but ` +
+            `exposes no agent tools (no .toolkit() — not a ToolProvider), so it ` +
+            `can't be used from tools(plugins). Tool-providing plugins: ${available}.`,
+        );
+      }
       throw new Error(
         `${contextLabel} referenced plugin '${prop}', but it is not registered. ` +
           `Available: ${available}.`,

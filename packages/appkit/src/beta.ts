@@ -83,6 +83,8 @@ export {
   varchar,
 } from "./database/schema-builder";
 
+// Agent evaluation (eve-style authoring, reports to MLflow)
+export * from "./evals";
 // Agent types
 export type {
   AgentDefinition,

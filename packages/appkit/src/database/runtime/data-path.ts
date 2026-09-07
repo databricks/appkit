@@ -28,6 +28,7 @@ export interface IncludeOptions {
   readonly where?: WhereClause;
   readonly order?: OrderSpec;
   readonly limit?: number;
+  readonly include?: IncludeSpec;
 }
 
 /** Selection and bounds for one declared relation edge. */
