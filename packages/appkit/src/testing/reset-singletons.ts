@@ -4,14 +4,16 @@ import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { TelemetryManager } from "../telemetry";
 
-const logger = createLogger("lifecycle");
+const logger = createLogger("testing");
 
 /**
- * Drop the process-wide singletons `AppKit._createApp` initializes — called on
- * boot to clear a previous test's leakage, and on close.
+ * Drop the process-wide singletons `AppKit._createApp` initializes — called by
+ * the harness on boot to clear a previous test's leakage, and on teardown.
  *
- * A pointer drop, not teardown — close first or the old app's storage and
- * exporters leak. A host that closes then calls `ServiceContext.get()` gets an
+ * Kit-owned: the only caller is the test harness, so it lives here rather than
+ * in core. A pointer drop, not teardown — close the app first (the harness runs
+ * the shutdown phases before this) or the old app's storage and exporters leak.
+ * A caller that drops then reads `ServiceContext.get()` gets an
  * `InitializationError`.
  * @internal
  */

@@ -52,6 +52,13 @@ class ProbePlugin extends Plugin {
   /** The client this plugin resolved at request time. */
   seenClient: WorkspaceClient | undefined;
 
+  /** Incremented when harness teardown runs this plugin's shutdown() hook. */
+  shutdownCalls = 0;
+
+  async shutdown(): Promise<void> {
+    this.shutdownCalls += 1;
+  }
+
   injectRoutes(router: IAppRouter): void {
     const r = (
       method: "get" | "post" | "put" | "patch" | "delete",
@@ -132,6 +139,7 @@ class ProbePlugin extends Plugin {
   exports() {
     return {
       seenClient: () => this.seenClient,
+      shutdownCalls: () => this.shutdownCalls,
       whoami: () => ({ userId: getUserContext()?.userId }),
       // Calls through the client so the harness's mock records it — a real
       // OBO client would record nothing here.
@@ -344,6 +352,24 @@ describe("createTestApp", () => {
         app.get("/api/probe/ping").then((r) => r.status),
       ).resolves.toBe(200);
     }
+    await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
+  });
+
+  test("close runs a booted plugin's shutdown() hook and releases the socket", async () => {
+    // The path this PR rewired (close() -> disposeApp -> dispose()): a *real*
+    // registered plugin's shutdown() must fire through the boot->teardown wiring,
+    // and the server socket must actually be released — not just re-port-picked
+    // on the next boot. The lifecycle unit test covers this against a mocked
+    // context; this asserts the composed integration path end to end.
+    const app = await createTestApp({ plugins: [probe()] });
+    const port = app.port;
+    await expect(
+      app.get("/api/probe/ping").then((r) => r.status),
+    ).resolves.toBe(200);
+
+    await app.close();
+
+    expect(app.plugins.probe.shutdownCalls()).toBe(1);
     await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
   });
 

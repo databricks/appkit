@@ -82,7 +82,6 @@ export {
   type MockWorkspaceClient,
 } from "./mock-workspace-client";
 export { createTestPlugin } from "./create-test-plugin";
-export { resetGlobalState } from "./reset";
 export {
   createTestPluginContext,
   type FakeProvider,

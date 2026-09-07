@@ -194,7 +194,7 @@ export class TelemetryManager {
    * Drop the singleton so the next {@link getInstance} builds a fresh manager.
    *
    * Does not flush: callers `shutdown()` first, then reset — the order
-   * `LifecycleManager.close()` uses.
+   * `LifecycleManager.dispose()` uses.
    *
    * @internal
    */

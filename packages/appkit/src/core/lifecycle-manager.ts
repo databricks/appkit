@@ -5,7 +5,6 @@ import { TelemetryReporter } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { TelemetryManager } from "../telemetry";
 import type { PluginContext } from "./plugin-context";
-import { dropCoreSingletons } from "./reset-singletons";
 
 const logger = createLogger("lifecycle");
 
@@ -46,49 +45,33 @@ export class LifecycleManager {
    */
   private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
-  /** Shorter than the signal path's: a programmatic caller wants its await back. */
-  private static readonly CLOSE_TIMEOUT_MS = 5_000;
+  /** Shorter than the signal path's: the harness wants its await back promptly. */
+  private static readonly DISPOSE_TIMEOUT_MS = 5_000;
 
   /**
    * The in-flight teardown, memoized. A boolean guard would let a second caller
    * return while teardown was still running — fine for a signal, wrong for
-   * `close()`, which must not resolve before resources are released.
+   * {@link dispose}, which must not resolve before resources are released.
    */
   private teardown: Promise<number> | undefined;
   /** Reported by the force-exit log so a stuck shutdown names its phase. */
   private shutdownPhase = "not started";
-  /** Retained so {@link close} removes its own listeners and nothing else. */
-  private signalHandlers: [NodeJS.Signals, () => void][] = [];
-  /** Memoizes {@link close}, so the singleton drop happens once. */
-  private closed: Promise<void> | undefined;
 
   constructor(private readonly context: PluginContext) {}
 
-  /** Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}. */
-  installSignalHandlers(): void {
-    this.signalHandlers = [
-      ["SIGTERM", () => void this.shutdown()],
-      ["SIGINT", () => void this.shutdown()],
-    ];
-    for (const [signal, handler] of this.signalHandlers) {
-      process.once(signal, handler);
-    }
-  }
-
   /**
-   * Detach only this instance's handlers — never `removeAllListeners`, so an
-   * embedding host keeps its own.
+   * Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}. Never
+   * removed: the signal path exits the process, and the harness opts out of
+   * installing them, so nothing accumulates across boots.
    */
-  removeSignalHandlers(): void {
-    for (const [signal, handler] of this.signalHandlers) {
-      process.removeListener(signal, handler);
-    }
-    this.signalHandlers = [];
+  installSignalHandlers(): void {
+    process.once("SIGTERM", () => void this.shutdown());
+    process.once("SIGINT", () => void this.shutdown());
   }
 
   /**
    * Run the graceful-shutdown sequence and **exit the process**. See
-   * {@link close} for the non-exiting twin.
+   * {@link dispose} for the non-exiting twin.
    *
    * Phases:
    * 1. stop the internal-telemetry reporter
@@ -108,7 +91,7 @@ export class LifecycleManager {
   async shutdown(): Promise<void> {
     // Exit 0 on force-timeout: a stuck deploy shutdown is not a crash, and
     // orchestrators read nonzero deploy exits as one. The error log is the
-    // signal instead. Lives here, not in runPhases, because close() must not
+    // signal instead. Lives here, not in runPhases, because dispose() must not
     // inherit it.
     const forceExitTimer = setTimeout(() => {
       logger.error(
@@ -122,7 +105,7 @@ export class LifecycleManager {
     // teardown is ref'd and keeps the loop alive until this fires.
     forceExitTimer.unref();
 
-    const exitCode = await this.runOnce();
+    const exitCode = await this.runPhasesOnce();
 
     clearTimeout(forceExitTimer);
     process.exit(exitCode);
@@ -131,52 +114,30 @@ export class LifecycleManager {
   /**
    * Release everything AppKit acquired **without terminating the process** —
    * same phases and per-phase budgets as {@link shutdown}, no `process.exit`.
+   * The path the test harness uses between boots; it drops the core singletons
+   * and restores env once this resolves.
    *
-   * Handlers are detached before the first `await`, so the SIGTERM-mid-close
-   * window is near zero; if one does land there the signal wins and this promise
-   * never settles. Never throws — a hung phase is logged and `close()` resolves
-   * once its budget is spent, so an `afterEach` cannot hang.
+   * Never throws — a hung phase is logged and this resolves once its budget is
+   * spent, so an `afterEach` cannot hang. The harness never installs the signal
+   * handlers, so there are none to detach here.
+   * @internal
    */
-  async close(options: { timeoutMs?: number } = {}): Promise<void> {
-    // Memoized separately from the phases: `runOnce()` already guarantees the
-    // teardown body runs once, but the singleton reset below must also happen
-    // once. Without this a stale handle's second close() resets whatever app is
-    // live *now* — `await a.close(); createApp(); await a.close()` broke the
-    // second app.
-    this.closed ??= this.closeOnce(options);
-    return this.closed;
-  }
-
-  private async closeOnce(options: { timeoutMs?: number }): Promise<void> {
-    // Before the first await, so a later signal finds no AppKit listener.
-    this.removeSignalHandlers();
-
-    const timeoutMs = options.timeoutMs ?? LifecycleManager.CLOSE_TIMEOUT_MS;
-
+  async dispose(options: { timeoutMs?: number } = {}): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? LifecycleManager.DISPOSE_TIMEOUT_MS;
     try {
-      await this.raceWithTimeout(this.runOnce(), timeoutMs, "close");
+      await this.raceWithTimeout(this.runPhasesOnce(), timeoutMs, "dispose");
     } catch (err) {
       logger.error(
-        "close() did not complete within the %dms budget (phase in flight: %s): %O",
+        "dispose() did not complete within the %dms budget (phase in flight: %s): %O",
         timeoutMs,
         this.shutdownPhase,
         err,
       );
-      // Drop now, not when the orphaned phases settle: a next boot into these
-      // slots must start from a clean reset. Safe because runPhases captured
-      // its own cache and telemetry before its first await and never re-reads
-      // the shared slots.
-      dropCoreSingletons();
-      return;
     }
-
-    // Here rather than in runPhases so the signal path skips it — the process is
-    // dying there, and dropping pointers is pure cost.
-    dropCoreSingletons();
   }
 
   /** No `await` between read and assign — that gap is the re-entrancy window. */
-  private runOnce(): Promise<number> {
+  private runPhasesOnce(): Promise<number> {
     this.teardown ??= this.runPhases();
     return this.teardown;
   }
@@ -185,9 +146,10 @@ export class LifecycleManager {
   private async runPhases(): Promise<number> {
     logger.info("Starting graceful shutdown...");
 
-    // Captured before the first await and never re-read: close() may give up
-    // waiting and reset the singletons while these phases still run, so phase 5
-    // would otherwise skip this app's pool or tear down the *next* app's.
+    // Captured before the first await and never re-read: the harness may give
+    // up waiting (dispose()'s budget) and drop the singletons while these phases
+    // still run, so phase 5 would otherwise skip this app's pool or tear down
+    // the *next* app's.
     let capturedCache: CacheManager | undefined;
     try {
       capturedCache = CacheManager.getInstanceSync();

@@ -96,7 +96,7 @@ expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
 
 ### Teardown
 
-The harness binds a socket and installs signal handlers, so **every boot needs a `close()`**. It releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
+The harness binds a socket, so **every boot needs a `close()`**. It releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
 
 Prefer `await using`, which closes the app at scope exit even if the test throws:
 
@@ -116,7 +116,7 @@ try {
 }
 ```
 
-Miss the close and each boot leaks a listener; Node warns at about six.
+Miss the close and the app stays live — socket bound, singletons and `process.env` not restored — so the next `createTestApp` is refused (one app at a time).
 
 ### Satisfying declared resources
 
@@ -292,7 +292,6 @@ The kit re-exports the request/response/context fixtures AppKit uses internally:
 - `createSuccessfulSQLResponse(rows, columns)` / `createFailedSQLResponse(message)` — build SQL Warehouse statement responses.
 - `setupDatabricksEnv(overrides?)` — set `DATABRICKS_HOST` / `DATABRICKS_WAREHOUSE_ID` to test values.
 - `resetTestCache()` — clear the shared cache singleton between (or within) tests; no-ops if the cache isn't initialized yet.
-- `resetGlobalState()` — drop AppKit's process-wide singletons so a later `createApp` builds fresh ones. `createTestApp`'s `close()` already does this; you need it only if you call `createApp` yourself. Close first, then reset — it drops pointers, it doesn't release resources.
 The kit uses both words deliberately: a **mock** records calls so you can assert on them (`createMockWorkspaceClient`, `mockServiceContext`), while a **fake** stands in and simply works (`FakeProvider`, `FakeToolResponse`).
 
 - `createTestPlugin(factory, config?)` — instantiate a plugin from its factory with the same config merge AppKit applies. See [Full example](#full-example).

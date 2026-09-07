@@ -70,7 +70,6 @@ describe("@databricks/appkit/testing as a standalone surface", () => {
       "getMock",
       "getListeningPort",
       "expectStream",
-      "resetGlobalState",
       "mockServiceContext",
       "createMockRequest",
       "createMockResponse",

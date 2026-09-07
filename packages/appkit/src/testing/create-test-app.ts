@@ -15,13 +15,13 @@ import { vi } from "vitest";
 
 import { InMemoryStorage } from "../cache/storage/memory";
 import { ServiceContext } from "../context/service-context";
-import { createApp } from "../core/appkit";
-import { dropCoreSingletons } from "../core/reset-singletons";
+import { AppKit, disposeApp } from "../core/appkit";
 import type { WorkspaceClient } from "../workspace-client";
 import type { OboOption } from "./fixtures";
 import { fakeUserContext, oboHeaders, setupDatabricksEnv } from "./fixtures";
 import type { CreateMockWorkspaceClientOptions } from "./mock-workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
+import { dropCoreSingletons } from "./reset-singletons";
 
 // Loose shapes are intentional here; `noExplicitAny` is off repo-wide (see
 // .oxlintrc.json), so a local alias keeps the intent readable.
@@ -246,8 +246,16 @@ export async function createTestApp<T extends Plugins>(
   // Wholesale rather than a whitelist: plugins read vars we cannot enumerate.
   acquireEnvBaseline();
 
-  let app: Awaited<ReturnType<typeof createApp>> | undefined;
+  let app: Awaited<ReturnType<typeof AppKit._createApp>> | undefined;
   let restoreUserContext: (() => void) | undefined;
+
+  // Runs the booted plugins' shutdown() hooks and closes the server it started;
+  // the harness owns dropping the singletons and restoring env. The `as Any` is
+  // the one escape hatch the symbol-keyed teardown forces on the harness.
+  const disposeBooted = (a: unknown): Promise<void> =>
+    (a as Any)[disposeApp](
+      closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
+    );
 
   try {
     process.env.NODE_ENV = nodeEnv;
@@ -309,13 +317,16 @@ export async function createTestApp<T extends Plugins>(
     // Both extras are required to stay offline: without explicit storage the
     // cache builds its own client and probes Lakebase, and without the opt-out
     // TelemetryReporter fires an apiClient.request on boot.
-    app = await createApp({
+    app = await AppKit._createApp({
       plugins: bootPlugins as Any,
       client,
       cache: cache ?? {
         storage: new InMemoryStorage({ enabled: true } as Any),
       },
       disableInternalTelemetry: true,
+      // The harness boots repeatedly in one process and runs its own teardown,
+      // so it must not accumulate SIGTERM/SIGINT handlers across boots.
+      installSignalHandlers: false,
     });
 
     const serverExports = (app as Any).server;
@@ -331,12 +342,9 @@ export async function createTestApp<T extends Plugins>(
     const close = () => {
       closed ??= (async () => {
         try {
-          await bootedApp.close(
-            closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
-          );
+          await disposeBooted(bootedApp);
         } finally {
-          // No drop here: app.close() -> LifecycleManager.close() already drops
-          // the singletons for us.
+          dropCoreSingletons();
           restoreUserContext?.();
           releaseEnvBaseline();
         }
@@ -419,18 +427,15 @@ export async function createTestApp<T extends Plugins>(
     // Teardown must run from the failure path too, or the boot leaks env
     // mutations and singletons into every later test in the file.
     if (app) {
-      // No drop alongside this: close() drops the singletons itself.
       try {
-        await app.close(
-          closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
-        );
+        await disposeBooted(app);
       } catch {
         // The boot error is the interesting one; don't let teardown mask it.
       }
-    } else {
-      // Nothing booted, so no close() will run — drop any partial init here.
-      dropCoreSingletons();
     }
+    // dispose() no longer drops the singletons, and a failure before boot may
+    // have left a partial init — drop unconditionally either way.
+    dropCoreSingletons();
     restoreUserContext?.();
     releaseEnvBaseline();
     throw err;
