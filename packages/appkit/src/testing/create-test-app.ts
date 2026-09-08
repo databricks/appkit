@@ -97,9 +97,6 @@ export interface CreateTestAppOptions<T extends Plugins> {
 
   /** Defaults to in-memory, which is what keeps boot offline. */
   cache?: CacheConfig;
-
-  /** Teardown budget. Defaults to AppKit's programmatic budget. */
-  closeTimeoutMs?: number;
 }
 
 /** Per-request options for the {@link TestApp} HTTP methods. */
@@ -215,7 +212,6 @@ export async function createTestApp<T extends Plugins>(
     server: serverOption,
     nodeEnv = "test",
     cache,
-    closeTimeoutMs,
   } = options;
 
   if (nodeEnv === "development") {
@@ -252,10 +248,7 @@ export async function createTestApp<T extends Plugins>(
   // Runs the booted plugins' shutdown() hooks and closes the server it started;
   // the harness owns dropping the singletons and restoring env. The `as Any` is
   // the one escape hatch the symbol-keyed teardown forces on the harness.
-  const disposeBooted = (a: unknown): Promise<void> =>
-    (a as Any)[disposeApp](
-      closeTimeoutMs === undefined ? {} : { timeoutMs: closeTimeoutMs },
-    );
+  const disposeBooted = (a: unknown): Promise<void> => (a as Any)[disposeApp]();
 
   try {
     process.env.NODE_ENV = nodeEnv;

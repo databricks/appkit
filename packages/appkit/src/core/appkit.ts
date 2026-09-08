@@ -279,14 +279,14 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
   /**
    * Internal teardown entry point for the test harness: delegates to the
-   * lifecycle's non-exiting `dispose()` (the phases are canonical there). Not
-   * public API — AppKit does not support re-booting or embedding, so real apps
-   * tear down only through the signal path. The harness drops the core
-   * singletons and restores env after this resolves.
+   * lifecycle's non-exiting `shutdown({ exit: false })` (the phases are
+   * canonical there). Not public API — AppKit does not support re-booting or
+   * embedding, so real apps tear down only through the signal path. The harness
+   * drops the core singletons and restores env after this resolves.
    * @internal
    */
-  async [disposeApp](options: { timeoutMs?: number } = {}): Promise<void> {
-    await this.#lifecycle?.dispose(options);
+  async [disposeApp](): Promise<void> {
+    await this.#lifecycle?.shutdown({ exit: false });
   }
 
   private static bootstrapInternalTelemetry(): void {
