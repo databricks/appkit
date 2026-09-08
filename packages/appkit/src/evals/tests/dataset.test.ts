@@ -63,6 +63,18 @@ describe("readEvalDataset", () => {
     );
   });
 
+  test("ignores a non-positive limit (no LIMIT clause)", async () => {
+    executeStatement.mockResolvedValue({ result: { data: [] } });
+    await readEvalDataset(client, {
+      table: "cat.sch.tbl",
+      warehouseId: "wh1",
+      limit: -5,
+    });
+    expect(executeStatement.mock.calls[0][1].statement).toBe(
+      "SELECT inputs, expectations FROM cat.sch.tbl",
+    );
+  });
+
   test("defaults a missing/non-object inputs cell to {}", async () => {
     executeStatement.mockResolvedValue({
       result: { data: [{ inputs: null }, { inputs: "oops" }] },

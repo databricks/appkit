@@ -145,7 +145,7 @@ export interface EvalDefinition {
    * Run this eval once per row of a Databricks managed evaluation dataset (a
    * Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns).
    * Each row is bound to `t.input`/`t.expected`. Requires the runner to have a
-   * workspace client + warehouse (`--warehouse`). Omit for a single-run eval.
+   * workspace client + warehouse (`--warehouse-id`). Omit for a single-run eval.
    */
   dataset?: { table: string; limit?: number };
   /** The eval body: drive the agent and assert on its behavior. */

@@ -54,7 +54,7 @@ export async function readEvalDataset(
   }
 
   const limit =
-    typeof options.limit === "number"
+    typeof options.limit === "number" && options.limit > 0
       ? ` LIMIT ${Math.floor(options.limit)}`
       : "";
   const connector = new SQLWarehouseConnector({});

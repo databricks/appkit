@@ -160,7 +160,7 @@ async function runOne(
  * via {@link readEvalDataset}. On misconfiguration or read failure, returns a
  * single `undefined` row plus an `error`, so the eval still surfaces one result.
  */
-async function resolveDatasetRows(
+export async function resolveDatasetRows(
   def: EvalDefinition,
   options: RunEvalsOptions,
 ): Promise<{ rows: Array<DatasetRow | undefined>; error?: string }> {
@@ -169,7 +169,7 @@ async function resolveDatasetRows(
     return {
       rows: [undefined],
       error:
-        "dataset eval requires a workspace client and warehouse (pass --warehouse)",
+        "dataset eval requires a workspace client and warehouse (pass --warehouse-id)",
     };
   }
   try {
@@ -178,7 +178,13 @@ async function resolveDatasetRows(
       warehouseId: options.warehouseId,
       limit: def.dataset.limit,
     });
-    return { rows: rows.length ? rows : [undefined] };
+    if (rows.length === 0) {
+      return {
+        rows: [undefined],
+        error: `dataset "${def.dataset.table}" returned no rows`,
+      };
+    }
+    return { rows };
   } catch (err) {
     return {
       rows: [undefined],
