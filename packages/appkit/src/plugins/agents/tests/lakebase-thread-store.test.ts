@@ -92,6 +92,17 @@ describe("LakebaseThreadStore.init (bootstrap)", () => {
       ),
     ).toBe(true);
     expect(statements.some((s) => s.includes("ON DELETE CASCADE"))).toBe(true);
+    // title column present in the fresh CREATE and back-filled via ALTER.
+    expect(
+      statements.some((s) =>
+        /CREATE TABLE IF NOT EXISTS agent_threads .*title text/.test(s),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((s) =>
+        s.includes("ALTER TABLE agent_threads ADD COLUMN IF NOT EXISTS title"),
+      ),
+    ).toBe(true);
     expect(
       statements.some((s) =>
         s.includes("CREATE INDEX IF NOT EXISTS agent_threads_user_updated_idx"),
@@ -327,6 +338,69 @@ describe("LakebaseThreadStore.delete", () => {
       "DELETE FROM agent_threads WHERE id = $1 AND user_id = $2",
     );
     expect(params(query.mock.calls[0])).toEqual(["t1", USER]);
+  });
+});
+
+describe("LakebaseThreadStore.listSummaries", () => {
+  test("projects summaries user-scoped, derives title, counts, orders by recency", async () => {
+    const { pool, query } = makePool();
+    const ts = "2026-04-04T00:00:00.000Z";
+    query.mockResolvedValueOnce(
+      qr([
+        {
+          id: "t1",
+          title: "Weather in Paris",
+          message_count: 3,
+          created_at: ts,
+          updated_at: ts,
+        },
+        {
+          id: "t2",
+          title: "",
+          message_count: 0,
+          created_at: ts,
+          updated_at: ts,
+        },
+      ]),
+    );
+
+    const summaries = await new LakebaseThreadStore({ pool }).listSummaries(
+      USER,
+    );
+
+    const s = sql(query.mock.calls[0]);
+    expect(s).toContain("COALESCE(t.title, left(fm.content, 80)");
+    expect(s).toContain("count(*)::int");
+    expect(s).toContain("LEFT JOIN LATERAL");
+    expect(s).toContain("WHERE t.user_id = $1");
+    expect(s).toContain("ORDER BY t.updated_at DESC");
+    expect(params(query.mock.calls[0])).toEqual([USER]);
+
+    expect(summaries[0]).toMatchObject({
+      id: "t1",
+      title: "Weather in Paris",
+      messageCount: 3,
+    });
+    expect(summaries[0].updatedAt).toBeInstanceOf(Date);
+    expect(summaries[0].createdAt).toBeInstanceOf(Date);
+    expect(summaries[1].title).toBe("");
+  });
+});
+
+describe("LakebaseThreadStore.rename", () => {
+  test("updates title user-scoped without bumping updated_at; reports found", async () => {
+    const { pool, query } = makePool();
+    query.mockResolvedValueOnce(qr([], 1)).mockResolvedValueOnce(qr([], 0));
+    const store = new LakebaseThreadStore({ pool });
+
+    expect(await store.rename("t1", USER, "New title")).toBe(true);
+    expect(await store.rename("t1", OTHER, "New title")).toBe(false);
+
+    const s = sql(query.mock.calls[0]);
+    expect(s).toContain("UPDATE agent_threads SET title = $3");
+    expect(s).toContain("WHERE id = $1 AND user_id = $2");
+    expect(s).not.toContain("updated_at"); // rename must not reorder by recency
+    expect(params(query.mock.calls[0])).toEqual(["t1", USER, "New title"]);
   });
 });
 

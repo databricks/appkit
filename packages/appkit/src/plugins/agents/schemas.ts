@@ -79,6 +79,20 @@ export const invocationsRequestSchema = z.object({
   mlflowRunId: z.string().max(64).optional(),
 });
 
+/** Max characters for a thread title on `PATCH /threads/:id`. */
+const MAX_TITLE_CHARS = 200;
+
+export const renameThreadRequestSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, "title must not be empty")
+    .max(
+      MAX_TITLE_CHARS,
+      `title exceeds the ${MAX_TITLE_CHARS}-character limit`,
+    ),
+});
+
 export const approvalRequestSchema = z.object({
   streamId: z.string().min(1, "streamId is required"),
   approvalId: z.string().min(1, "approvalId is required"),

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import type { Pool } from "pg";
-import type { Message, Thread, ThreadStore, ToolCall } from "shared";
+import type {
+  Message,
+  Thread,
+  ThreadStore,
+  ThreadSummary,
+  ToolCall,
+} from "shared";
 
 import { createLakebasePool } from "../../connectors/lakebase";
 
@@ -28,6 +34,15 @@ export interface LakebaseThreadStoreOptions {
 interface ThreadRow {
   id: string;
   user_id: string;
+  title: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+interface SummaryRow {
+  id: string;
+  title: string | null;
+  message_count: number;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -103,10 +118,15 @@ export class LakebaseThreadStore implements ThreadStore {
       CREATE TABLE IF NOT EXISTS ${this.threads} (
         id uuid PRIMARY KEY,
         user_id text NOT NULL,
+        title text,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    // Bring already-created tables (from an earlier version) up to schema.
+    await this.pool.query(
+      `ALTER TABLE ${this.threads} ADD COLUMN IF NOT EXISTS title text`,
+    );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS agent_threads_user_updated_idx ON ${this.threads} (user_id, updated_at DESC)`,
     );
@@ -133,7 +153,7 @@ export class LakebaseThreadStore implements ThreadStore {
     const { rows } = await this.pool.query<ThreadRow>(
       `INSERT INTO ${this.threads} (id, user_id)
        VALUES ($1, $2)
-       RETURNING id, user_id, created_at, updated_at`,
+       RETURNING id, user_id, title, created_at, updated_at`,
       [id, userId],
     );
     return this.toThread(rows[0], []);
@@ -141,7 +161,7 @@ export class LakebaseThreadStore implements ThreadStore {
 
   async get(threadId: string, userId: string): Promise<Thread | null> {
     const threadResult = await this.pool.query<ThreadRow>(
-      `SELECT id, user_id, created_at, updated_at
+      `SELECT id, user_id, title, created_at, updated_at
        FROM ${this.threads}
        WHERE id = $1 AND user_id = $2`,
       [threadId, userId],
@@ -161,7 +181,7 @@ export class LakebaseThreadStore implements ThreadStore {
 
   async list(userId: string): Promise<Thread[]> {
     const threadResult = await this.pool.query<ThreadRow>(
-      `SELECT id, user_id, created_at, updated_at
+      `SELECT id, user_id, title, created_at, updated_at
        FROM ${this.threads}
        WHERE user_id = $1
        ORDER BY updated_at DESC`,
@@ -232,14 +252,59 @@ export class LakebaseThreadStore implements ThreadStore {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async listSummaries(userId: string): Promise<ThreadSummary[]> {
+    // Summary-only projection — no message bodies. The title resolves to the
+    // explicit rename, else the first user message truncated, else empty; the
+    // count is a scalar subquery. A LATERAL join fetches just the first user
+    // message per thread rather than all messages.
+    const { rows } = await this.pool.query<SummaryRow>(
+      `SELECT t.id,
+              COALESCE(t.title, left(fm.content, 80), '') AS title,
+              (SELECT count(*)::int FROM ${this.messages} m
+                 WHERE m.thread_id = t.id) AS message_count,
+              t.created_at, t.updated_at
+       FROM ${this.threads} t
+       LEFT JOIN LATERAL (
+         SELECT content FROM ${this.messages} m
+         WHERE m.thread_id = t.id AND m.role = 'user'
+         ORDER BY seq LIMIT 1
+       ) fm ON true
+       WHERE t.user_id = $1
+       ORDER BY t.updated_at DESC`,
+      [userId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title ?? "",
+      messageCount: row.message_count,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    }));
+  }
+
+  async rename(
+    threadId: string,
+    userId: string,
+    title: string,
+  ): Promise<boolean> {
+    // Does NOT bump updated_at — recency ordering reflects activity, not renames.
+    const result = await this.pool.query(
+      `UPDATE ${this.threads} SET title = $3 WHERE id = $1 AND user_id = $2`,
+      [threadId, userId, title],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   private toThread(row: ThreadRow, messages: Message[]): Thread {
-    return {
+    const thread: Thread = {
       id: row.id,
       userId: row.user_id,
       messages,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     };
+    if (row.title != null) thread.title = row.title;
+    return thread;
   }
 }
 
