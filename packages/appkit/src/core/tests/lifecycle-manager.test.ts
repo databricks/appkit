@@ -395,7 +395,7 @@ describe("LifecycleManager", () => {
     });
   });
 
-  describe("dispose (the harness path)", () => {
+  describe("shutdown({ exit: false }) (the harness path)", () => {
     test("runs the full teardown sequence without exiting the process", async () => {
       const stop = vi.fn();
       vi.mocked(TelemetryReporter.getInstance).mockReturnValue({
@@ -418,7 +418,7 @@ describe("LifecycleManager", () => {
       const emit = vi.spyOn(ctx, "emitLifecycle");
       const manager = new LifecycleManager(ctx);
 
-      await manager.dispose();
+      await manager.shutdown({ exit: false });
 
       expect(stop).toHaveBeenCalledTimes(1);
       expect(abortActiveOperations).toHaveBeenCalledTimes(1);
@@ -427,8 +427,9 @@ describe("LifecycleManager", () => {
       expect(cacheClose).toHaveBeenCalledTimes(1);
       expect(telemetryShutdown).toHaveBeenCalledTimes(1);
 
-      // dispose() never exits — that is the whole point of the harness path.
-      // (Dropping the core singletons is the harness's job, not the manager's.)
+      // shutdown({ exit: false }) never exits — that is the whole point of the
+      // harness path. (Dropping the core singletons is the harness's job, not
+      // the manager's.)
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
@@ -454,10 +455,10 @@ describe("LifecycleManager", () => {
 
       const observed: string[] = [];
       const first = manager
-        .dispose()
+        .shutdown({ exit: false })
         .then(() => observed.push(`first:${teardownFinished}`));
       const second = manager
-        .dispose()
+        .shutdown({ exit: false })
         .then(() => observed.push(`second:${teardownFinished}`));
 
       // A full macrotask turn, so a guard that resolves the second caller
@@ -477,7 +478,7 @@ describe("LifecycleManager", () => {
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    test("a signal arriving after dispose() joins the same teardown, not a second one", async () => {
+    test("a signal arriving after a harness shutdown joins the same teardown, not a second one", async () => {
       const shutdown = vi.fn().mockResolvedValue(undefined);
       const ctx = contextWithPlugins({
         alpha: { name: "alpha", shutdown } as never,
@@ -485,19 +486,19 @@ describe("LifecycleManager", () => {
       const manager = new LifecycleManager(ctx);
       manager.installSignalHandlers();
 
-      await manager.dispose();
-      // The signal path after a dispose: teardown is memoized, so the phases do
-      // not run twice even though shutdown() is still callable.
+      await manager.shutdown({ exit: false });
+      // The signal path after a harness shutdown: teardown is memoized, so the
+      // phases do not run twice even though the exiting shutdown() is callable.
       await manager.shutdown();
 
       expect(shutdown).toHaveBeenCalledTimes(1);
     });
 
-    test("dispose() after a signal-initiated teardown awaits the in-flight one", async () => {
+    test("a harness shutdown after a signal-initiated teardown awaits the in-flight one", async () => {
       let releaseShutdown: (() => void) | undefined;
-      // Sentinel rather than a tick count: `dispose()` reaches the memo through
-      // raceWithTimeout, so "how many microtasks until it would have settled" is
-      // not a property the test can rely on.
+      // Sentinel rather than a tick count: the harness shutdown joins the
+      // memoized teardown, so "how many microtasks until it would have settled"
+      // is not a property the test can rely on.
       let teardownFinished = false;
       const shutdown = vi.fn(
         () =>
@@ -516,26 +517,26 @@ describe("LifecycleManager", () => {
       const signalPath = manager.shutdown();
       await Promise.resolve();
 
-      let disposeSawFinishedTeardown: boolean | undefined;
-      const disposePath = manager.dispose().then(() => {
-        disposeSawFinishedTeardown = teardownFinished;
+      let harnessSawFinishedTeardown: boolean | undefined;
+      const harnessPath = manager.shutdown({ exit: false }).then(() => {
+        harnessSawFinishedTeardown = teardownFinished;
       });
 
-      // A full macrotask turn, so a dispose() that resolved early would have.
+      // A full macrotask turn, so a harness shutdown that resolved early would.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(disposeSawFinishedTeardown).toBeUndefined();
+      expect(harnessSawFinishedTeardown).toBeUndefined();
 
       releaseShutdown?.();
-      await Promise.all([signalPath, disposePath]);
+      await Promise.all([signalPath, harnessPath]);
 
       expect(shutdown).toHaveBeenCalledTimes(1);
       // It joined the in-flight teardown rather than resolving alongside it.
-      expect(disposeSawFinishedTeardown).toBe(true);
+      expect(harnessSawFinishedTeardown).toBe(true);
       // The signal wanted the process dead, and still gets it.
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    test("a rejecting plugin shutdown() is isolated and dispose() still resolves", async () => {
+    test("a rejecting plugin shutdown() is isolated and the harness shutdown still resolves", async () => {
       const ctx = contextWithPlugins({
         bad: {
           name: "bad",
@@ -548,105 +549,37 @@ describe("LifecycleManager", () => {
       });
       const manager = new LifecycleManager(ctx);
 
-      await expect(manager.dispose()).resolves.toBeUndefined();
+      await expect(manager.shutdown({ exit: false })).resolves.toBeUndefined();
       expect(mockLoggerError).toHaveBeenCalled();
       expect(exitSpy).not.toHaveBeenCalled();
     });
 
-    test("a hung teardown is bounded by dispose()'s budget, logged, and never exits", async () => {
+    test("the harness path is bounded by the internal per-plugin timeout, not an outer one", async () => {
       vi.useFakeTimers();
-      let releaseHook: (() => void) | undefined;
+      // Never resolves on its own: the only bound is now the internal
+      // PLUGIN_SHUTDOWN_TIMEOUT_MS (10s) — the same one the signal path uses —
+      // since the harness path has no outer budget of its own any more.
+      const hanging = vi.fn(() => new Promise<void>(() => {}));
       const ctx = contextWithPlugins({
-        stuck: {
-          name: "stuck",
-          shutdown: vi.fn(
-            () =>
-              new Promise<void>((resolve) => {
-                releaseHook = resolve;
-              }),
-          ),
-        } as never,
+        stuck: { name: "stuck", shutdown: hanging } as never,
       });
       const manager = new LifecycleManager(ctx);
 
-      const disposing = manager.dispose({ timeoutMs: 50 });
-      await vi.advanceTimersByTimeAsync(60);
-      await expect(disposing).resolves.toBeUndefined();
+      const done = manager.shutdown({ exit: false });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(done).resolves.toBeUndefined();
 
-      // The error names the phase that was in flight, which is the whole
-      // reason the phase tracker is retained.
-      const logged = mockLoggerError.mock.calls
-        .map((c) => String(c[0]))
-        .join("\n");
-      expect(logged).toContain("dispose() did not complete");
-      const phases = mockLoggerError.mock.calls.flat().map(String).join(" ");
-      expect(phases).toContain("plugin shutdown() hooks");
-
-      // A hung teardown must not kill the process on the harness path.
+      expect(hanging).toHaveBeenCalledTimes(1);
+      expect(
+        mockLoggerError.mock.calls.some(
+          (c) =>
+            String(c[0]).includes("Error shutting down plugin") &&
+            c[1] === "stuck" &&
+            String(c[2]).includes("timed out"),
+        ),
+      ).toBe(true);
+      // The harness path never exits, even when a phase times out internally.
       expect(exitSpy).not.toHaveBeenCalled();
-
-      // The abandoned phases settle later without incident (their captured
-      // cache/telemetry are torn down, never the next app's — see the capture
-      // test below); the harness drops the singletons once dispose() returns.
-      releaseHook?.();
-      await vi.advanceTimersByTimeAsync(10);
-    });
-  });
-
-  describe("a teardown that outlives dispose()'s budget", () => {
-    test("phase 5 still closes the app's own cache and telemetry, not the next app's", async () => {
-      vi.useFakeTimers();
-
-      // The app being torn down owns these.
-      const ownCacheClose = vi.fn().mockResolvedValue(undefined);
-      const ownTelemetryShutdown = vi.fn().mockResolvedValue(undefined);
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
-        close: ownCacheClose,
-      } as never);
-      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
-        shutdown: ownTelemetryShutdown,
-      } as never);
-
-      // A plugin hook slower than dispose()'s budget but inside its own
-      // per-plugin budget — the files plugin's 10s drain reaches this state.
-      let releaseHook: (() => void) | undefined;
-      const ctx = contextWithPlugins({
-        slow: {
-          name: "slow",
-          shutdown: vi.fn(
-            () =>
-              new Promise<void>((resolve) => {
-                releaseHook = resolve;
-              }),
-          ),
-        } as never,
-      });
-      const manager = new LifecycleManager(ctx);
-
-      const disposing = manager.dispose({ timeoutMs: 50 });
-      await vi.advanceTimersByTimeAsync(60);
-      await expect(disposing).resolves.toBeUndefined();
-
-      // dispose() has given up waiting. Simulate the next app booting into the
-      // static slots, so they now answer with a *different* app's resources.
-      const nextCacheClose = vi.fn().mockResolvedValue(undefined);
-      const nextTelemetryShutdown = vi.fn().mockResolvedValue(undefined);
-      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
-        close: nextCacheClose,
-      } as never);
-      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
-        shutdown: nextTelemetryShutdown,
-      } as never);
-
-      // Now let the orphaned teardown finish and reach phase 5.
-      releaseHook?.();
-      await vi.advanceTimersByTimeAsync(10);
-
-      // It must act on what it captured at the start, never on the current slots.
-      expect(ownCacheClose).toHaveBeenCalledTimes(1);
-      expect(ownTelemetryShutdown).toHaveBeenCalledTimes(1);
-      expect(nextCacheClose).not.toHaveBeenCalled();
-      expect(nextTelemetryShutdown).not.toHaveBeenCalled();
     });
   });
 });
