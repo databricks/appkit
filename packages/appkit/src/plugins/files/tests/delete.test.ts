@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import {
+  createApiError,
+  createMockWorkspaceClient,
+  getMock,
+  useTestCache,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -10,73 +16,28 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache; spy on `testCache.current` to assert the plugin's
+// cache-invalidation calls.
+const testCache = useTestCache();
 
 describe("FilesPlugin delete", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -88,7 +49,10 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
-    mockClient.files.delete.mockResolvedValue(undefined);
+    const generateKey = vi.spyOn(testCache.current, "generateKey");
+    const del = vi.spyOn(testCache.current, "delete");
+
+    getMock(client, "files.delete").mockResolvedValue(undefined);
 
     await handler(
       mockReq("uploads", {
@@ -100,8 +64,8 @@ describe("FilesPlugin delete", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
-    expect(mockCacheInstance.generateKey).toHaveBeenCalled();
-    expect(mockCacheInstance.delete).toHaveBeenCalled();
+    expect(generateKey).toHaveBeenCalled();
+    expect(del).toHaveBeenCalled();
   });
 
   test("delete without path returns 400", async () => {
@@ -122,8 +86,12 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
-    mockClient.files.delete.mockRejectedValue(
-      new MockApiError("Not found", 404),
+    getMock(client, "files.delete").mockRejectedValue(
+      createApiError({
+        statusCode: 404,
+        message: "Not found",
+        errorCode: "ERROR",
+      }),
     );
 
     await handler(

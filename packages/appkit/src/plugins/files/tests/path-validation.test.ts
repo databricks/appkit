@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
+import {
+  createMockWorkspaceClient,
+  getMock,
+  useTestCache,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -11,73 +16,27 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 describe("FilesPlugin path validation", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -87,12 +46,14 @@ describe("FilesPlugin path validation", () => {
   // Defends against regressions where the handler calls the SDK and *also*
   // returns 400 — the status assertion alone wouldn't catch that.
   function expectNoSdkCall() {
-    expect(mockClient.files.download).not.toHaveBeenCalled();
-    expect(mockClient.files.upload).not.toHaveBeenCalled();
-    expect(mockClient.files.delete).not.toHaveBeenCalled();
-    expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
-    expect(mockClient.files.getMetadata).not.toHaveBeenCalled();
-    expect(mockClient.files.listDirectoryContents).not.toHaveBeenCalled();
+    expect(getMock(client, "files.download")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.upload")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.delete")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.createDirectory")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.getMetadata")).not.toHaveBeenCalled();
+    expect(
+      getMock(client, "files.listDirectoryContents"),
+    ).not.toHaveBeenCalled();
   }
 
   test("path with null bytes returns 400", async () => {

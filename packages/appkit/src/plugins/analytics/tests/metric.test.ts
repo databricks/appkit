@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../../app";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
+import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin } from "../analytics";
 import {
   buildMetricSql,
@@ -31,40 +32,9 @@ import type {
   MetricRegistration,
 } from "../types";
 
-// Mirror the analytics.test.ts CacheManager mock so the inner `execute`'s
-// cache interceptor is a no-op pass-through (each request re-executes).
-const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
-  const store = new Map<string, unknown>();
-  const generateKey = (parts: unknown[], userKey: string): string => {
-    const { createHash } = require("node:crypto");
-    const serialized = JSON.stringify([userKey, ...parts]);
-    return createHash("sha256").update(serialized).digest("hex");
-  };
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
-        const cacheKey = generateKey(key, userKey);
-        if (store.has(cacheKey)) return store.get(cacheKey);
-        const result = await fn();
-        store.set(cacheKey, result);
-        return result;
-      },
-    ),
-    generateKey: vi.fn((parts: unknown[], userKey: string) =>
-      generateKey(parts, userKey),
-    ),
-  };
-  return { mockCacheStore: store, mockCacheInstance: instance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache so the metric route's cache interceptor runs under test
+// — no mock of the internal cache module. Boots and clears it before each test.
+const testCache = useTestCache();
 
 // Temp dirs created by `registryDir` / `writeRegistry`, cleaned up after each
 // test. Using real files (pointing the plugin's `AppManager` at the dir, see
@@ -146,7 +116,6 @@ describe("analytics metric route", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });
@@ -1064,8 +1033,12 @@ describe("analytics metric route", () => {
 
       // Capture the composed cache key the inner `execute` hands to the shared
       // CacheManager mock — the same key whether or not metadata is injected.
+      // Spy the real cache's getOrExecute to capture the composed key parts the
+      // metric route's cache interceptor passes — the same whether or not
+      // metadata is injected.
+      const getOrExecuteSpy = vi.spyOn(testCache.current, "getOrExecute");
       const cacheKeyFor = async (mvMeta?: MetricViewsMetadata) => {
-        mockCacheInstance.getOrExecute.mockClear();
+        getOrExecuteSpy.mockClear();
         const plugin = pluginForDir(
           { ...config, metricViewsMetadata: mvMeta },
           registryDir(registry),
@@ -1079,12 +1052,13 @@ describe("analytics metric route", () => {
           createMockResponse(),
         );
         // First getOrExecute call is the SQL execution's cache interceptor.
-        const call = mockCacheInstance.getOrExecute.mock.calls[0];
+        const call = getOrExecuteSpy.mock.calls[0];
         return { cacheKey: call[0], userKey: call[2] };
       };
 
       const withMeta = await cacheKeyFor(REVENUE_METADATA);
       const withoutMeta = await cacheKeyFor(undefined);
+      getOrExecuteSpy.mockRestore();
 
       expect(withMeta.cacheKey).toEqual(withoutMeta.cacheKey);
       expect(withMeta.userKey).toEqual(withoutMeta.userKey);
@@ -2489,7 +2463,6 @@ describe("metric — filter translator", () => {
     beforeEach(async () => {
       config = { timeout: 5000 };
       setupDatabricksEnv();
-      mockCacheStore.clear();
       ServiceContext.reset();
       serviceContextMock = await mockServiceContext();
     });
@@ -2960,7 +2933,6 @@ describe("metric route — lane dispatch", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });

@@ -17,11 +17,12 @@ import {
 
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
+import { createApiError } from "../../../testing";
 import { server as serverPlugin } from "../../server";
 import { files } from "../index";
 import { streamFromString } from "./utils";
 
-const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
+const { mockFilesApi, mockSdkClient } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
@@ -42,25 +43,7 @@ const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
     },
   };
 
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-
-  return { mockFilesApi, mockSdkClient, MockApiError };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    ApiError: MockApiError,
-  };
+  return { mockFilesApi, mockSdkClient };
 });
 
 const MOCK_AUTH_HEADERS = {
@@ -246,7 +229,11 @@ describe("Files Plugin Integration", () => {
 
     test(`GET /api/files/${VOL}/exists returns { exists: false } on 404`, async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
-        new MockApiError("Not found", 404),
+        createApiError({
+          statusCode: 404,
+          message: "Not found",
+          errorCode: "ERROR",
+        }),
       );
 
       const response = await fetch(
@@ -677,7 +664,11 @@ describe("Files Plugin Integration", () => {
 
     test("ApiError 404 preserves upstream status code", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
-        new MockApiError("Not found", 404),
+        createApiError({
+          statusCode: 404,
+          message: "Not found",
+          errorCode: "ERROR",
+        }),
       );
 
       const response = await fetch(
@@ -696,7 +687,11 @@ describe("Files Plugin Integration", () => {
 
     test("ApiError 409 preserves upstream status code", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
-        new MockApiError("Conflict", 409),
+        createApiError({
+          statusCode: 409,
+          message: "Conflict",
+          errorCode: "ERROR",
+        }),
       );
 
       const response = await fetch(

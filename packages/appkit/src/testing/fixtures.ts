@@ -9,6 +9,7 @@ import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import { AuthenticationError } from "../errors";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
+import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
@@ -341,6 +342,102 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
+ * Sets environment variables for the duration of `fn`, then restores them to
+ * their prior state. Each key's prior value (or "was absent") is captured on
+ * entry; on exit, the prior value is restored, or the key is deleted only if
+ * it was previously unset.
+ *
+ * Supports both sync and async `fn`. If `fn` returns a thenable, `withEnv`
+ * returns that promise and restores in `.finally()`. Otherwise, it restores
+ * in a synchronous `finally` and returns the callback's return value.
+ * Restoration runs even if `fn` throws. Nested calls restore in LIFO order.
+ *
+ * @example
+ * ```ts
+ * // Sync: restores synchronously after fn
+ * withEnv({ MY_VAR: "test" }, () => {
+ *   console.log(process.env.MY_VAR); // "test"
+ * });
+ * console.log(process.env.MY_VAR); // prior value (or undefined)
+ *
+ * // Async: restores after promise settles
+ * await withEnv({ MY_VAR: "test" }, async () => {
+ *   await fetch(...);
+ * });
+ * ```
+ */
+/**
+ * Set environment variables and return a function that restores each key to its
+ * prior state — the prior value, or a delete when the key was previously unset.
+ * Shared capture/restore behind {@link withEnv} and the
+ * {@link createTestPluginContext} options path; not part of the public surface.
+ */
+export function applyEnv(vars: Record<string, string>): () => void {
+  const prior = new Map<string, string | undefined>();
+  for (const key of Object.keys(vars)) {
+    prior.set(key, process.env[key]);
+  }
+  Object.assign(process.env, vars);
+  return () => {
+    for (const [key, value] of prior) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
+}
+
+/**
+ * Run a restore on an error path, suppressing any failure it throws so it
+ * cannot replace the caller's original error.
+ */
+function restoreQuietly(restore: () => void): void {
+  try {
+    restore();
+  } catch (restoreError) {
+    // A failed env restore must not mask the caller's original error.
+    void restoreError;
+  }
+}
+
+export function withEnv<T>(
+  vars: Record<string, string>,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
+  const restore = applyEnv(vars);
+
+  let result: T | Promise<T>;
+  try {
+    result = fn();
+  } catch (err) {
+    // Sync throw: restore, but never let a restore failure mask `err`.
+    restoreQuietly(restore);
+    throw err;
+  }
+
+  // Async: restore after the promise settles. On rejection, guard the restore
+  // so it cannot replace the caller's error; on success, let a genuine restore
+  // failure surface.
+  if (result != null && typeof (result as Any).then === "function") {
+    return (result as Promise<T>).then(
+      (value) => {
+        restore();
+        return value;
+      },
+      (err: unknown) => {
+        restoreQuietly(restore);
+        throw err;
+      },
+    );
+  }
+
+  restore();
+  return result;
+}
+
+/**
  * Clears AppKit's process-wide cache singleton so cached values don't leak
  * between tests in the same file.
  *
@@ -562,4 +659,37 @@ export function createFailedSQLResponse(errorMessage: string) {
     },
     statement_id: `stmt-${Date.now()}`,
   };
+}
+
+/**
+ * Creates a genuine `ApiError` instance for testing error paths. Returns a real
+ * instance (where `error instanceof ApiError` holds), suitable for testing
+ * `instanceof` checks and `.statusCode` / `.errorCode` / `.message` accessors.
+ *
+ * @param options Error details: `statusCode`, `message`, and `errorCode`. All required.
+ * @returns A genuine `ApiError` instance.
+ *
+ * @example
+ * ```ts
+ * const error = createApiError({
+ *   statusCode: 404,
+ *   message: "File not found",
+ *   errorCode: "NOT_FOUND",
+ * });
+ * expect(error).toBeInstanceOf(ApiError);
+ * expect(error.statusCode).toBe(404);
+ * ```
+ */
+export function createApiError(options: {
+  statusCode: number;
+  message: string;
+  errorCode: string;
+}): ApiError {
+  return new ApiError(
+    options.message,
+    options.errorCode,
+    options.statusCode,
+    undefined, // response: sensible default for testing
+    [], // details: empty array
+  );
 }

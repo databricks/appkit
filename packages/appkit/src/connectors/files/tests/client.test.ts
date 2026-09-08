@@ -1,55 +1,38 @@
 import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { createApiError } from "../../../testing";
 import type { WorkspaceClient } from "../../../workspace-client";
+import { ApiError } from "../../../workspace-client";
 import { FilesConnector } from "../client";
 import { streamFromChunks, streamFromString } from "./utils";
 
-const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
-  () => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
+const { mockFilesApi, mockConfig, mockClient } = vi.hoisted(() => {
+  const mockFilesApi = {
+    listDirectoryContents: vi.fn(),
+    download: vi.fn(),
+    getMetadata: vi.fn(),
+    upload: vi.fn(),
+    createDirectory: vi.fn(),
+    delete: vi.fn(),
+  };
 
-    const mockConfig = {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    };
+  const mockConfig = {
+    host: "https://test.databricks.com",
+    authenticate: vi.fn(),
+  };
 
-    const mockApiClient = {
-      userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
-    };
-    const mockClient = {
-      files: mockFilesApi,
-      config: mockConfig,
-      apiClient: mockApiClient,
-    } as unknown as WorkspaceClient;
+  const mockApiClient = {
+    userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
+  };
+  const mockClient = {
+    files: mockFilesApi,
+    config: mockConfig,
+    apiClient: mockApiClient,
+  } as unknown as WorkspaceClient;
 
-    class MockApiError extends Error {
-      errorCode: string;
-      statusCode: number;
-      constructor(
-        message: string,
-        errorCode: string,
-        statusCode: number,
-        _response?: any,
-        _details?: any[],
-      ) {
-        super(message);
-        this.name = "ApiError";
-        this.errorCode = errorCode;
-        this.statusCode = statusCode;
-      }
-    }
-
-    return { mockFilesApi, mockConfig, mockClient, MockApiError };
-  },
-);
+  return { mockFilesApi, mockConfig, mockClient };
+});
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
   const actual =
@@ -57,7 +40,6 @@ vi.mock("../../../workspace-client", async (importOriginal) => {
   return {
     ...actual,
     createWorkspaceClient: () => mockClient,
-    ApiError: MockApiError,
   };
 });
 
@@ -375,7 +357,11 @@ describe("FilesConnector", () => {
 
     test("returns false on 404 ApiError", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
-        new MockApiError("Not found", "NOT_FOUND", 404),
+        createApiError({
+          message: "Not found",
+          errorCode: "NOT_FOUND",
+          statusCode: 404,
+        }),
       );
 
       const result = await connector.exists(mockClient, "missing.txt");
@@ -385,7 +371,11 @@ describe("FilesConnector", () => {
 
     test("rethrows non-404 ApiError", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
-        new MockApiError("Server error", "SERVER_ERROR", 500),
+        createApiError({
+          message: "Server error",
+          errorCode: "SERVER_ERROR",
+          statusCode: 500,
+        }),
       );
 
       await expect(connector.exists(mockClient, "file.txt")).rejects.toThrow(
@@ -579,7 +569,7 @@ describe("FilesConnector", () => {
       try {
         await connector.upload(mockClient, "file.txt", "data");
       } catch (error) {
-        expect(error).toBeInstanceOf(MockApiError);
+        expect(error).toBeInstanceOf(ApiError);
         expect((error as any).statusCode).toBe(403);
       }
     });
