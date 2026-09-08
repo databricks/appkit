@@ -13,6 +13,7 @@ import type { AppKitTable, ColumnMeta, Schema } from "../../schema-builder";
 import { buildEngineRelations } from "../../schema-builder/engine/relations";
 import { columnValueSchema } from "../../schema-builder/validators";
 import {
+  andWhere,
   conflictTargetMeta,
   type DataPath,
   type IdValue,
@@ -271,6 +272,20 @@ export function createDrizzleDataPath(
     where === undefined
       ? undefined
       : translateWhere(table, where, columnAccess);
+  /** Narrow by the primary key while preserving an accumulated predicate. */
+  const keyedWhere = (
+    table: AppKitTable,
+    primaryKey: ColumnMeta,
+    id: IdValue,
+    where?: WhereClause,
+  ): SQL | undefined =>
+    where === undefined
+      ? eq(columnOf(table, primaryKey.columnName), id)
+      : translateWhere(
+          table,
+          andWhere({ [primaryKey.columnName]: { eq: id } }, where),
+          columnAccess,
+        );
 
   return {
     async select(table, spec) {
@@ -340,7 +355,7 @@ export function createDrizzleDataPath(
       return expectExactlyOne(mutationRows(table, rows as Row[], columnAccess));
     },
 
-    async update(table, id, values) {
+    async update(table, id, values, where) {
       const engineTable = pgTable(table);
       const parameters = mutationValues(table, values, "update");
       const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
@@ -351,7 +366,7 @@ export function createDrizzleDataPath(
         db
           .update(engineTable)
           .set(parameters)
-          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
+          .where(keyedWhere(table, primaryKey, validatedId, where))
           .returning(returningColumns(table, columnAccess)),
       );
       return expectZeroOrOne(mutationRows(table, rows as Row[], columnAccess));
@@ -375,7 +390,7 @@ export function createDrizzleDataPath(
       return expectExactlyOne(mutationRows(table, rows as Row[], columnAccess));
     },
 
-    async delete(table, id) {
+    async delete(table, id, where) {
       const { meta: primaryKey, value: validatedId } = validatedPrimaryKey(
         table,
         id,
@@ -383,7 +398,7 @@ export function createDrizzleDataPath(
       const rows = await runDatabaseOperation(() =>
         db
           .delete(pgTable(table))
-          .where(eq(columnOf(table, primaryKey.columnName), validatedId))
+          .where(keyedWhere(table, primaryKey, validatedId, where))
           .returning({ id: columnOf(table, primaryKey.columnName) }),
       );
       return expectZeroOrOne(rows as Row[]) !== null;

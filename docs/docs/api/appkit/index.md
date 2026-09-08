@@ -19,6 +19,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AuthenticationError](Class.AuthenticationError.md) | Error thrown when authentication fails. Use for missing tokens, invalid credentials, or authorization failures. |
 | [ConfigurationError](Class.ConfigurationError.md) | Error thrown when configuration is missing or invalid. Use for missing environment variables, invalid settings, or setup issues. |
 | [ConnectionError](Class.ConnectionError.md) | Error thrown when a connection or network operation fails. Use for database pool errors, API failures, timeouts, etc. |
+| [DatabaseValidationError](Class.DatabaseValidationError.md) | Deliberate validation failure raised by a database mutation hook. Generated routes answer `422` and echo only the issues naming a public column; every other failure raised inside a hook stays an opaque server error. |
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
@@ -50,10 +51,12 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [CustomJudgeSpec](Interface.CustomJudgeSpec.md) | A custom LLM-judge definition: a prompt template and choice→score mapping. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [DatabaseRegistry](Interface.DatabaseRegistry.md) | CANONICAL augmentation target. Empty by default; the generated `database.d.ts` augments it via `declare module "@databricks/appkit" { interface DatabaseRegistry { ... } }`. |
+| [DatabaseValidationIssue](Interface.DatabaseValidationIssue.md) | One rejected field; `path` names public columns, never their values. |
 | [DatabricksAuth](Interface.DatabricksAuth.md) | Resolved Databricks host + bearer token for the eval runner's REST calls. |
 | [DiscoveredEval](Interface.DiscoveredEval.md) | An eval file found under `server/agents/<agent>/evals/`. |
 | [DriveResult](Interface.DriveResult.md) | What a driver returns for a single `t.send`. |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
+| [EntityMutationHooks](Interface.EntityMutationHooks.md) | Mutation lifecycle for one entity. A before hook may return a replacement payload, which is revalidated against the trusted schema before it is persisted. Every hook, the mutation, and any write a hook issues through `ctx.app.database` share one transaction, so a rejection anywhere rolls all of them back. Throw `DatabaseValidationError` to answer a generated route with `422`; any other failure stays an opaque server error. |
 | [EvalDefinition](Interface.EvalDefinition.md) | A single eval, default-exported from a `*.eval.ts` file. |
 | [EvalDriver](Interface.EvalDriver.md) | Abstraction over how the agent is driven. The HTTP driver posts to a running app's agents endpoint; future drivers (in-process) implement the same shape. |
 | [EvalResult](Interface.EvalResult.md) | The outcome of running one eval. |
@@ -64,6 +67,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [GenerationParams](Interface.GenerationParams.md) | Optional generation parameters forwarded to the OpenAI-compatible serving request body. Names match the serving API wire keys. Only keys that are set are sent — undefined values are omitted so the endpoint applies its own defaults. Ranges are not validated here; the serving endpoint validates. |
+| [HookApp](Interface.HookApp.md) | The only capability a hook receives: entities bound to its transaction. |
+| [HookContext](Interface.HookContext.md) | Which entity is being mutated, and the surface a hook may write through. |
 | [HostedSupervisorTool](Interface.HostedSupervisorTool.md) | Tagged record returned by every [supervisorTools](Variable.supervisorTools.md) factory. The `__kind` discriminator lets the agents plugin (and standalone `runAgent`) classify these tools without a structural match against the wire format — keeps the SA wire shape free to evolve and avoids namespace collisions with MCP hosted tools (which use `type: "genie-space"` hyphenated, vs SA's `type: "genie_space"` underscored). |
 | [HttpDriverOptions](Interface.HttpDriverOptions.md) | - |
 | [IAiSearchConfig](Interface.IAiSearchConfig.md) | Base configuration interface for AppKit plugins |
@@ -85,6 +90,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PluginToolkitProvider](Interface.PluginToolkitProvider.md) | Minimum shape every entry in the [Plugins](TypeAlias.Plugins.md) map must expose. Core plugins (analytics, files, genie, lakebase) implement this directly via their `.toolkit()` method. The agents plugin and standalone `runAgent` synthesize this shape for any registered plugin that doesn't implement `.toolkit()` directly (falling back to `getAgentTools()` walking). |
 | [PostResult](Interface.PostResult.md) | Structured result for a best-effort POST that must not throw. |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
+| [ReadSerializerContext](Interface.ReadSerializerContext.md) | Which entity and generated operation produced the row being shaped. |
 | [RegisteredAgent](Interface.RegisteredAgent.md) | - |
 | [ReportOutcome](Interface.ReportOutcome.md) | - |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
@@ -131,7 +137,11 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
+| [DatabaseApiConfig](TypeAlias.DatabaseApiConfig.md) | Full generated CRUD for every declared table by default. Set false to disable all generated routes, or use an object to restrict tables and writes. Keyed routes require a public primary key; upsert stays programmatic. Route names must start with a letter, contain only letters, digits, `_`, or `-`, be at most 64 characters, and be unique ignoring case. Invalid names fail setup; exclude internal tables with `api.tables` or use `api: false`. |
+| [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
+| [DatabaseApiWritesConfig](TypeAlias.DatabaseApiWritesConfig.md) | All writes by default; false keeps reads only, and an object narrows writes. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
+| [EntityHooks](TypeAlias.EntityHooks.md) | Response shaping and mutation lifecycle declared for one table. |
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
@@ -143,6 +153,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
+| [ReadSerializer](TypeAlias.ReadSerializer.md) | Shape one already private-safe row before it reaches the wire. A `Promise` is not assignable to the return type, so an async callback fails to compile: serializers run inside the response path and must not add latency there. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
@@ -152,6 +163,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [SupervisorTool](TypeAlias.SupervisorTool.md) | Tools supported by the Databricks AI Gateway Responses API. The shapes match the wire format the endpoint expects, so the adapter passes the array straight into the request body. |
 | [ToolRegistry](TypeAlias.ToolRegistry.md) | - |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |
+| [TransactionClient](TypeAlias.TransactionClient.md) | Entity and SQL capabilities bound to one transaction. |
 
 ## Variables
 
@@ -186,7 +198,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [database](Function.database.md) | Create a typed database plugin registration for a finalized schema. |
 | [defineEval](Function.defineEval.md) | Define an agent eval. Default-export the result from a `server/agents/<id>/evals/*.eval.ts` file. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
-| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `crudRoutes` and `hooks` can name only real tables. |
+| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` and `hooks` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [discoverEvalFiles](Function.discoverEvalFiles.md) | Discover evals under `<rootDir>/server/agents/<agent>/evals/` — co-located with each agent's `agent.{md,ts}` (same folder-per-agent layout the agents plugin discovers). The agent id is the folder name; the eval id is the file path relative to that evals dir with `.eval.ts` stripped. Sorted + stable. |
 | [enumColumn](Function.enumColumn.md) | - |

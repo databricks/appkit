@@ -10,15 +10,19 @@ import {
   id,
   text,
 } from "../../../../database/schema-builder";
+import { DatabaseValidationError } from "../../../../errors";
 import { MAX_RESPONSE_BYTES } from "../../defaults";
 import type { EntityClient } from "../../entity-client";
 import type { ReadSerializer } from "../../types";
 import { type CrudTable, compileCrudTables } from "../contract";
 import {
-  type CrudReadEntity,
+  type CrudEntity,
+  type CrudRouteDeps,
+  createCreateHandler,
+  createDeleteHandler,
   createDetailHandler,
   createListHandler,
-  type ReadRouteDeps,
+  createUpdateHandler,
 } from "../routes";
 
 const schema = defineSchema((builder) => {
@@ -38,11 +42,11 @@ const schema = defineSchema((builder) => {
 
 const tables = compileCrudTables(schema.$tables);
 
-// The routes reach their entity through an untyped export lookup, so the read
+// The routes reach their entity through an untyped export lookup, so the
 // surface they drive has to stay a subset of the real client.
-const _entityClientSatisfiesReads: CrudReadEntity = {} as EntityClient;
+const _entityClientSatisfiesRoutes: CrudEntity = {} as EntityClient;
 
-interface FakeEntity extends CrudReadEntity {
+interface FakeEntity extends CrudEntity {
   readonly calls: Record<string, unknown[]>;
 }
 
@@ -71,6 +75,18 @@ function fakeEntity(rows: Row[], found: Row | null = null): FakeEntity {
     find: async (value) => {
       record("find", value);
       return found;
+    },
+    create: async (values) => {
+      record("create", values);
+      return { id: 1, ...values, token: "secret" };
+    },
+    update: async (value, values) => {
+      record("update", [value, values]);
+      return found && { ...found, ...values };
+    },
+    delete: async (value) => {
+      record("delete", value);
+      return found !== null;
     },
   };
   return entity;
@@ -113,11 +129,26 @@ function request(url: string, params: Record<string, string> = {}): Request {
   return { originalUrl: url, url, params } as unknown as Request;
 }
 
+function writeRequest(
+  url: string,
+  body: unknown,
+  params: Record<string, string> = {},
+  contentType: string | null = "application/json",
+): Request {
+  return {
+    originalUrl: url,
+    url,
+    params,
+    body,
+    is: (type: string) => contentType?.includes(type.split("/")[1]) ?? false,
+  } as unknown as Request;
+}
+
 function deps(
   table: string,
-  entity: CrudReadEntity,
+  entity: CrudEntity,
   serialize?: ReadSerializer,
-): ReadRouteDeps {
+): CrudRouteDeps {
   return {
     table: tables.get(table) as CrudTable,
     entity: () => entity,
@@ -351,5 +382,193 @@ describe("serialization and response limits", () => {
     expect(response.json()).toEqual({
       error: "Database operation forbidden",
     });
+  });
+});
+
+describe("write routes", () => {
+  it("creates a row at 201 and returns only its public columns", async () => {
+    const entity = fakeEntity([]);
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", { name: "Ada" }),
+      response.res,
+    );
+    expect(entity.calls.create).toEqual([{ name: "Ada" }]);
+    expect(response.sent.status).toBe(201);
+    expect(response.json()).toEqual({ id: 1, name: "Ada" });
+    expect(response.sent.headers["Cache-Control"]).toBe("no-store");
+  });
+
+  it("never reshapes a mutation response with a read serializer", async () => {
+    const serialize = vi.fn<ReadSerializer>((row) => ({ ...row, extra: true }));
+    const entity = fakeEntity([]);
+    await createCreateHandler(deps("users", entity, serialize))(
+      writeRequest("/users", { name: "Ada" }),
+      response.res,
+    );
+    expect(serialize).not.toHaveBeenCalled();
+    expect(response.json()).toEqual({ id: 1, name: "Ada" });
+  });
+
+  it("updates a row at 200 and deletes one at 204", async () => {
+    const entity = fakeEntity([], { id: 7, name: "Ada", token: "secret" });
+    await createUpdateHandler(deps("users", entity))(
+      writeRequest("/users/7", { name: "Grace" }, { id: "7" }),
+      response.res,
+    );
+    expect(entity.calls.update).toEqual([[7, { name: "Grace" }]]);
+    expect(response.sent.status).toBe(200);
+    expect(response.json()).toEqual({ id: 7, name: "Grace" });
+
+    const removed = fakeResponse();
+    await createDeleteHandler(deps("users", entity))(
+      request("/users/7", { id: "7" }),
+      removed.res,
+    );
+    expect(entity.calls.delete).toEqual([7]);
+    expect(removed.sent.status).toBe(204);
+    expect(removed.sent.body).toBeUndefined();
+  });
+
+  it("answers 404 when an update or delete matches nothing", async () => {
+    const entity = fakeEntity([], null);
+    await createUpdateHandler(deps("users", entity))(
+      writeRequest("/users/7", { name: "Grace" }, { id: "7" }),
+      response.res,
+    );
+    expect(response.sent.status).toBe(404);
+    expect(response.json()).toEqual({ error: "Database record not found" });
+
+    const removed = fakeResponse();
+    await createDeleteHandler(deps("users", entity))(
+      request("/users/7", { id: "7" }),
+      removed.res,
+    );
+    expect(removed.sent.status).toBe(404);
+  });
+
+  it("requires a JSON body and refuses query parameters", async () => {
+    const entity = fakeEntity([]);
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", "name=Ada", {}, "text/plain"),
+      response.res,
+    );
+    expect(response.sent.status).toBe(415);
+    expect(response.json()).toEqual({
+      error: "Database request body must be JSON",
+    });
+
+    const filtered = fakeResponse();
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users?where=x", { name: "Ada" }),
+      filtered.res,
+    );
+    expect(filtered.sent.status).toBe(400);
+    expect(filtered.json().details).toEqual([
+      { path: ["query"], message: expect.any(String) },
+    ]);
+
+    const patched = fakeResponse();
+    await createUpdateHandler(deps("users", entity))(
+      writeRequest("/users/7?where=x", { name: "Ada" }, { id: "7" }),
+      patched.res,
+    );
+    expect(patched.sent.status).toBe(400);
+
+    const onDelete = fakeResponse();
+    await createDeleteHandler(deps("users", entity))(
+      request("/users/7?cascade=true", { id: "7" }),
+      onDelete.res,
+    );
+    expect(onDelete.sent.status).toBe(400);
+    expect(entity.calls.create).toBeUndefined();
+    expect(entity.calls.update).toBeUndefined();
+    expect(entity.calls.delete).toBeUndefined();
+  });
+
+  it("names a public column the caller may not write", async () => {
+    const entity = fakeEntity([]);
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", { name: "Ada", id: 7 }),
+      response.res,
+    );
+    expect(response.sent.status).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Invalid database request",
+      details: [{ path: ["id"], message: expect.any(String) }],
+    });
+    expect(entity.calls.create).toBeUndefined();
+  });
+
+  it.each([
+    ["a private column", { token: "stolen" }, "stolen"],
+    ["caller markup", { "<script>alert(1)</script>": 1 }, "<script>"],
+  ])("answers %s without repeating it", async (_case, body, secret) => {
+    const entity = fakeEntity([]);
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", body),
+      response.res,
+    );
+    expect(response.sent.status).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Invalid database request",
+      details: [{ path: ["body"], message: expect.any(String) }],
+    });
+    expect(response.sent.body).not.toContain(secret);
+    expect(entity.calls.create).toBeUndefined();
+  });
+
+  it("answers a hook's validation failure with 422 and its public issues", async () => {
+    const entity = fakeEntity([]);
+    entity.create = async () => {
+      throw new DatabaseValidationError("rejected", [
+        { path: ["name"], message: "must not be empty" },
+        { path: ["token"], message: "leaks a private column" },
+        { path: ["internalRule"], message: "leaks an internal rule" },
+      ]);
+    };
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", { name: "" }),
+      response.res,
+    );
+    expect(response.sent.status).toBe(422);
+    expect(response.json()).toEqual({
+      error: "Database request failed validation",
+      details: [{ path: ["name"], message: "must not be empty" }],
+    });
+    expect(response.sent.body).not.toContain("token");
+    expect(response.sent.body).not.toContain("internalRule");
+  });
+
+  it("drops issues a failure cannot afford to carry", async () => {
+    const entity = fakeEntity([]);
+    entity.create = async () => {
+      throw new DatabaseValidationError("rejected", [
+        { path: ["name"], message: "x".repeat(MAX_RESPONSE_BYTES) },
+      ]);
+    };
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", { name: "Ada" }),
+      response.res,
+    );
+    expect(response.sent.status).toBe(422);
+    expect(response.json()).toEqual({
+      error: "Database request failed validation",
+    });
+    expect(Buffer.byteLength(response.sent.body ?? "", "utf8")).toBeLessThan(
+      MAX_RESPONSE_BYTES,
+    );
+  });
+
+  it("keeps a failed write opaque", async () => {
+    const entity = fakeEntity([]);
+    entity.create = async () => {
+      throw new Error('duplicate key value violates "users_pkey"');
+    };
+    await createCreateHandler(deps("users", entity))(
+      writeRequest("/users", { name: "Ada" }),
+      response.res,
+    );
+    expect(response.sent.status).toBe(500);
+    expect(response.json()).toEqual({ error: "Database operation failed" });
   });
 });

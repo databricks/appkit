@@ -9,18 +9,22 @@ import type { Schema } from "../../database/schema-builder";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { compileCrudTables } from "./crud/contract";
-import { resolveExposedTables } from "./crud/exposure";
+import { type CrudExposure, resolveCrudExposure } from "./crud/exposure";
+import { routeOutcome } from "./crud/response";
 import {
-  type CrudReadEntity,
+  type CrudEntity,
+  type CrudOperation,
+  type CrudRouteDeps,
+  createCreateHandler,
+  createDeleteHandler,
   createDetailHandler,
   createListHandler,
-  type ReadRouteDeps,
-  readRouteOutcome,
+  createUpdateHandler,
 } from "./crud/routes";
 import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
 import manifest from "./manifest.json";
-import type { IDatabaseConfig, ReadSerializer } from "./types";
+import type { DatabaseHooks, IDatabaseConfig } from "./types";
 
 /** Schema-driven database plugin */
 export class DatabasePlugin<TSchema extends Schema> extends Plugin<
@@ -33,13 +37,19 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
   private setupPromise: Promise<void> | null = null;
   private draining = false;
   private shutdownPromise: Promise<void> | null = null;
-  private exposedTables: string[] = [];
+  private exposure: CrudExposure = { tables: [], writes: new Map() };
 
   constructor(config: IDatabaseConfig<TSchema>) {
     super({ schema: config.schema });
+    // Do not silently turn a previous opt-out into the default full API.
+    if ("crudRoutes" in config) {
+      throw databaseSetupFailed(
+        '"crudRoutes" was renamed to "api". Use api: false to disable generated routes or api: { writes: false } for reads only.',
+      );
+    }
     this.config = {
       schema: config.schema,
-      crudRoutes: config.crudRoutes,
+      api: config.api,
       hooks: config.hooks,
     };
   }
@@ -49,13 +59,22 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     if (this.draining || this.state) throw databaseSetupFailed();
     if (!this.setupPromise) {
       const attempt = (async () => {
-        this.exposedTables = resolveExposedTables(
-          this.config.crudRoutes,
+        this.exposure = resolveCrudExposure(
+          this.config.api,
           Object.keys(this.config.schema.$tables),
         );
+        // A hook key naming no declared table would silently never run.
+        for (const name of Object.keys(this.hooks() ?? {})) {
+          if (!Object.hasOwn(this.config.schema.$tables, name)) {
+            throw databaseSetupFailed(
+              `hooks names undeclared table ${JSON.stringify(name)}. Use a table declared in schema.`,
+            );
+          }
+        }
         const candidate = await createDatabaseState(
           this.config.schema,
           (operation, options) => this.execute(operation, options),
+          this.hooks(),
         );
         if (this.draining) {
           // Setup may finish while shutdown is waiting; never publish that state.
@@ -70,31 +89,29 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     return this.setupPromise;
   }
 
-  /** Register generated reads for explicitly exposed tables only. */
+  /** Register generated CRUD, subject to the configured table and write restrictions. */
   injectRoutes(router: express.Router): void {
-    if (this.exposedTables.length === 0) return;
+    if (this.exposure.tables.length === 0) return;
     const tables = compileCrudTables(
       Object.fromEntries(
-        this.exposedTables.map((name) => [
+        this.exposure.tables.map((name) => [
           name,
           this.config.schema.$tables[name],
         ]),
       ),
     );
-    const serializers = this.config.hooks as
-      | Record<string, { serialize?: ReadSerializer } | undefined>
-      | undefined;
+    const hooks = this.hooks();
     // Every exposed name is a declared table, so its export is an entity client.
     const entities = () =>
-      this.exports() as unknown as Record<string, CrudReadEntity>;
+      this.exports() as unknown as Record<string, CrudEntity>;
 
     for (const table of tables.values()) {
-      const deps: ReadRouteDeps = {
+      const deps: CrudRouteDeps = {
         table,
         entity: () => entities()[table.name],
-        serialize: serializers?.[table.name]?.serialize,
+        serialize: hooks?.[table.name]?.serialize,
         runRouteSpan: (operation, route, run) =>
-          this.runReadSpan(table.name, operation, route, run),
+          this.runRouteSpan(table.name, operation, route, run),
       };
       this.route(router, {
         name: `${table.name}.list`,
@@ -102,15 +119,45 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
         path: `/${table.name}`,
         handler: createListHandler(deps),
       });
-      if (table.primaryKey) {
+      const writes = this.exposure.writes.get(table.name);
+      if (writes?.has("create")) {
         this.route(router, {
-          name: `${table.name}.detail`,
-          method: "get",
+          name: `${table.name}.create`,
+          method: "post",
+          path: `/${table.name}`,
+          handler: createCreateHandler(deps),
+        });
+      }
+      // Addressing one row needs a public key.
+      if (!table.primaryKey) continue;
+      this.route(router, {
+        name: `${table.name}.detail`,
+        method: "get",
+        path: `/${table.name}/:id`,
+        handler: createDetailHandler(deps),
+      });
+      if (writes?.has("update")) {
+        this.route(router, {
+          name: `${table.name}.update`,
+          method: "patch",
           path: `/${table.name}/:id`,
-          handler: createDetailHandler(deps),
+          handler: createUpdateHandler(deps),
+        });
+      }
+      if (writes?.has("delete")) {
+        this.route(router, {
+          name: `${table.name}.delete`,
+          method: "delete",
+          path: `/${table.name}/:id`,
+          handler: createDeleteHandler(deps),
         });
       }
     }
+  }
+
+  /** Typed hook keys are schema table names, which routing addresses at runtime. */
+  private hooks(): DatabaseHooks | undefined {
+    return this.config.hooks as DatabaseHooks | undefined;
   }
 
   /** Return the typed database API only while the plugin is active. */
@@ -144,10 +191,10 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     return this.shutdownPromise;
   }
 
-  /** Trace one generated read with allowlisted, low-cardinality attributes. */
-  private runReadSpan(
+  /** Trace one generated route with allowlisted, low-cardinality attributes. */
+  private runRouteSpan(
     table: string,
-    operation: "list" | "detail",
+    operation: CrudOperation,
     route: string,
     run: () => Promise<void>,
   ): Promise<void> {
@@ -165,7 +212,7 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
           await run();
           span.setAttribute("outcome", "success");
         } catch (error) {
-          span.setAttribute("outcome", readRouteOutcome(error));
+          span.setAttribute("outcome", routeOutcome(error));
           throw error;
         } finally {
           span.end();

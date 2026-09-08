@@ -235,6 +235,17 @@ describe("createLakebasePool", () => {
       expect(pool.options.connectionTimeoutMillis).toBe(10000);
     });
 
+    test("should forward PostgreSQL timeouts with OAuth authentication", () => {
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+        statement_timeout: 30_000,
+        idle_in_transaction_session_timeout: 15_000,
+      });
+
+      expect(pool.options.statement_timeout).toBe(30_000);
+      expect(pool.options.idle_in_transaction_session_timeout).toBe(15_000);
+    });
+
     test("should configure SSL based on sslMode", () => {
       const pool = createLakebasePool({
         workspaceClient: {} as any,

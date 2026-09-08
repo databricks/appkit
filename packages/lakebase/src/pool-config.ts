@@ -74,6 +74,9 @@ export function getLakebasePgConfig(
     max: poolConfig.max,
     idleTimeoutMillis: poolConfig.idleTimeoutMillis,
     connectionTimeoutMillis: poolConfig.connectionTimeoutMillis,
+    statement_timeout: userConfig.statement_timeout,
+    idle_in_transaction_session_timeout:
+      userConfig.idle_in_transaction_session_timeout,
   };
 }
 
