@@ -14,23 +14,14 @@ export const Route = createFileRoute("/agent-history")({
  * the agents plugin uses LakebaseThreadStore (see server/index.ts).
  */
 function AgentHistoryRoute() {
-  // `undefined` = a fresh conversation; a string = an opened thread.
+  // `undefined` = a fresh conversation; a string = an opened thread. Switching
+  // is driven purely by this prop — no remount — so <AgentThread>'s per-thread
+  // transcript cache survives and re-opening a thread doesn't refetch.
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>();
-  // Bumping this key remounts <AgentThread> for a clean "New" conversation.
-  const [threadKey, setThreadKey] = useState(0);
   // Bumping this tells <ThreadList> to refetch (new/updated thread).
   const [listSignal, setListSignal] = useState(0);
 
-  const openThread = useCallback((id: string) => {
-    setActiveThreadId(id);
-    setThreadKey((k) => k + 1);
-  }, []);
-
-  const newConversation = useCallback(() => {
-    setActiveThreadId(undefined);
-    setThreadKey((k) => k + 1);
-  }, []);
-
+  const newConversation = useCallback(() => setActiveThreadId(undefined), []);
   const refreshList = useCallback(() => setListSignal((n) => n + 1), []);
 
   return (
@@ -50,14 +41,13 @@ function AgentHistoryRoute() {
           <div className="w-72 shrink-0 rounded-lg border bg-card">
             <ThreadList
               activeThreadId={activeThreadId}
-              onSelect={openThread}
+              onSelect={setActiveThreadId}
               onNewThread={newConversation}
               refetchSignal={listSignal}
             />
           </div>
           <div className="min-w-0 flex-1 rounded-lg border bg-card">
             <AgentThread
-              key={threadKey}
               threadId={activeThreadId}
               onThreadCreated={setActiveThreadId}
               onTurnComplete={refreshList}

@@ -150,6 +150,42 @@ describe("useAgentThread", () => {
     });
   });
 
+  test("caches a loaded thread — re-selecting it does not refetch", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input) => {
+        const id = decodeURIComponent(String(input).split("/threads/")[1]);
+        return Promise.resolve(
+          okJson({
+            id,
+            messages: [{ id: `${id}-m1`, role: "user", content: `hi ${id}` }],
+          }),
+        );
+      });
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useAgentThread(id, { agent: "helper" }),
+      { initialProps: { id: "t1" } },
+    );
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content).toBe("hi t1"),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    rerender({ id: "t2" });
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content).toBe("hi t2"),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // Back to t1 — served from cache, no third fetch.
+    rerender({ id: "t1" });
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content).toBe("hi t1"),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   test("reset clears the transcript", async () => {
     const { result } = renderHook(() =>
       useAgentThread(undefined, { agent: "helper" }),

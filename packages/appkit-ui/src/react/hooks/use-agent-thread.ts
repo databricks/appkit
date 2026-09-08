@@ -97,6 +97,11 @@ export function useAgentThread(
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // Per-hook transcript cache, so re-selecting a thread doesn't refetch. Kept
+  // write-through as turns are sent/streamed (see the sync effect below), so a
+  // cached entry stays current — no explicit invalidation needed.
+  const cacheRef = useRef<Map<string, AgentThreadMessage[]>>(new Map());
+
   const {
     content,
     threadId: activeThreadId,
@@ -111,10 +116,18 @@ export function useAgentThread(
   });
 
   // Load history whenever the resume target changes (a fresh id, or a switch).
+  // A cached transcript is served without a network round-trip.
   useEffect(() => {
     if (!resumeId) {
       setCommitted([]);
       return;
+    }
+    const cached = cacheRef.current.get(resumeId);
+    if (cached) {
+      setCommitted(cached);
+      setLoading(false);
+      setHistoryError(null);
+      return; // cache hit — no fetch
     }
     const ac = new AbortController();
     setLoading(true);
@@ -131,15 +144,15 @@ export function useAgentThread(
       })
       .then((thread) => {
         if (ac.signal.aborted) return;
-        setCommitted(
-          (thread.messages ?? [])
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({
-              id: m.id,
-              role: m.role as AgentThreadMessage["role"],
-              content: m.content,
-            })),
-        );
+        const loaded = (thread.messages ?? [])
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            id: m.id,
+            role: m.role as AgentThreadMessage["role"],
+            content: m.content,
+          }));
+        cacheRef.current.set(resumeId, loaded);
+        setCommitted(loaded);
         setLoading(false);
       })
       .catch((err: Error) => {
@@ -161,6 +174,13 @@ export function useAgentThread(
     }
     wasStreaming.current = isStreaming;
   }, [isStreaming, content]);
+
+  // Write-through: keep the active thread's cache entry in sync with the
+  // committed transcript, so switching away and back reflects the latest turns
+  // without a refetch.
+  useEffect(() => {
+    if (activeThreadId) cacheRef.current.set(activeThreadId, committed);
+  }, [activeThreadId, committed]);
 
   // Reflect the active thread id in the URL when persisting.
   useEffect(() => {
