@@ -5,6 +5,12 @@
 // Tracks the `agents` plugin (beta) and its thread endpoints.
 export type { ThreadSummary } from "shared";
 export {
+  AgentThread,
+  type AgentThreadProps,
+  ThreadList,
+  type ThreadListProps,
+} from "./agent";
+export {
   type UseAgentThreadsOptions,
   type UseAgentThreadsResult,
   useAgentThreads,
