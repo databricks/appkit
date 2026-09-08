@@ -36,7 +36,12 @@ const schema = defineSchema((builder) => {
     board_id: fk(() => boards.id).notNull(),
     body: text().notNull(),
   });
-  return { boards, notes };
+  const note_events = builder.table("note_events", {
+    id: id(),
+    note_id: fk(() => notes.id).notNull(),
+    action: text().notNull(),
+  });
+  return { boards, notes, note_events };
 });
 
 /** What an included read returns: relation rows nested under their parent. */
@@ -109,7 +114,7 @@ async function mount(hooks?: Record<string, EntityHooks>) {
 
   const plugin = new DatabasePlugin({
     schema,
-    api: { tables: ["boards", "notes"] },
+    api: { writes: { tables: ["boards", "notes"] } },
     hooks,
   });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry =
@@ -149,8 +154,10 @@ async function mount(hooks?: Record<string, EntityHooks>) {
     plugin,
     database,
     end,
+    handlers,
     list: (query = "") => get("/boards", `/boards${query}`),
-    detail: (id: string) => get("/boards/:id", `/boards/${id}`, { id }),
+    detail: (id: string, query = "") =>
+      get("/boards/:id", `/boards/${id}${query}`, { id }),
   };
 }
 
@@ -188,6 +195,47 @@ describe("the assembled MVP", () => {
         include: { notes: { limit: DEFAULT_LIMIT } },
       },
     ]);
+  });
+
+  test("generates read-only audit routes while keeping board and note CRUD", async () => {
+    const { handlers } = await mount();
+    expect(handlers.has("get /note_events")).toBe(true);
+    expect(handlers.has("get /note_events/:id")).toBe(true);
+    expect(handlers.has("post /note_events")).toBe(false);
+    expect(handlers.has("patch /note_events/:id")).toBe(false);
+    expect(handlers.has("delete /note_events/:id")).toBe(false);
+    for (const table of ["boards", "notes"]) {
+      expect(handlers.has(`post /${table}`)).toBe(true);
+      expect(handlers.has(`patch /${table}/:id`)).toBe(true);
+      expect(handlers.has(`delete /${table}/:id`)).toBe(true);
+    }
+  });
+
+  test("serves the timeline through a generated detail route with bounded audit includes", async () => {
+    const { database, detail } = await mount();
+    const notes = [
+      {
+        id: 1,
+        board_id: 7,
+        body: "looks off",
+        note_events: [{ id: 2, note_id: 1, action: "created" }],
+      },
+    ];
+    database.path.findOne = async (_table, _id, spec) => {
+      database.reads.push(spec ?? {});
+      return { ...storedBoard, notes };
+    };
+    const include = {
+      notes: { limit: 20, include: { note_events: { limit: 5 } } },
+    };
+    const response = await detail(
+      "7",
+      `?include=${encodeURIComponent(JSON.stringify(include))}`,
+    );
+    expect(response.sent.status).toBe(200);
+    expect(database.reads).toEqual([{ include }]);
+    expect(response.json()).toEqual({ id: 7, title: "Q3 review", notes });
+    expect(response.sent.body).not.toContain("retention_note");
   });
 
   test("shapes the response without the private column", async () => {

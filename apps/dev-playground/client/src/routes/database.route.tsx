@@ -125,38 +125,13 @@ declare module "@databricks/appkit" {
   }
 }`;
 
-const REGISTRATION = `// server/index.ts
+const REGISTRATION = `// server/index.ts, inside createApp({ plugins: [...] })
 database({
   schema,
-  // Only these two get HTTP routes. note_events stays server-only.
-  api: { tables: ["boards", "notes"] },
-  hooks: { /* see below */ },
+  // All tables are readable; only boards and notes accept HTTP writes.
+  api: { writes: { tables: ["boards", "notes"] } },
+  hooks: { /* inline hooks shown below */ },
 })`;
-
-const HOOKS_EXAMPLE = `hooks: {
-  notes: {
-    // Refused on the wire, writable here.
-    beforeCreate: (values) => ({
-      ...values,
-      author_email: \`\${values.author}@example.com\`,
-    }),
-
-    // Its write joins the same transaction, so a note
-    // and its event are never out of step.
-    afterCreate: async (row, ctx) => {
-      await ctx.app.database.note_events.create({
-        note_id: row.id,
-        action: "created",
-      });
-    },
-
-    // After commit, on the already-public row.
-    serialize: (row, { operation }) =>
-      operation === "list"
-        ? { ...row, body: String(row.body).slice(0, 120) }
-        : row,
-  },
-}`;
 
 const PRIVATE_COLUMN = `const notes = table("notes", {
   // ...
@@ -171,55 +146,73 @@ await db.notes.create({ author_email });     // accepted
 // Over HTTP, the same declaration removes it from every surface:
 // the select list, where, the create body, and the update body.`;
 
-const AGENT_SEAM = `// An agent is a definition, not a service to look up, so a
-// hook runs one by importing it. This is the agent that ran on
-// the note you just wrote.
+const INLINE_HOOKS = `// server/index.ts
+// Model-based redaction is best-effort, not a privacy guarantee.
 const redactor = createAgent({
-  instructions: "Replace every personal name and email with [redacted].",
+  instructions:
+    "Replace every personal name and email address in the user's text with [redacted]. " +
+    "Return only the rewritten text, nothing else.",
 });
 
-hooks: {
-  notes: {
-    // Atomic with the row: the unredacted body must never reach the
-    // table, so this has to happen before the insert, not after it.
-    // It holds a transaction open — give it a timeout.
-    beforeCreate: async (values) => {
-      const answer = await runAgent(redactor, { messages: values.body });
-      return { ...values, body: answer.text };
-    },
+database({
+  schema,
+  api: { writes: { tables: ["boards", "notes"] } },
+  hooks: {
+    notes: {
+      async beforeCreate(values) {
+        // Cancel the model request before the 30-second transaction deadline.
+        const signal = AbortSignal.timeout(10_000);
+        const answer = await runAgent(redactor, {
+          messages: String(values.body),
+          signal,
+        });
+        // A cancelled stream can return partial text instead of throwing.
+        signal.throwIfAborted();
+        if (answer.events.some(event =>
+          event.type === "status" && event.status === "error"
+        )) {
+          throw new Error("Note redaction failed");
+        }
+        const body = answer.text.trim();
+        if (!body) throw new Error("Note redaction returned no text");
 
-    // The row exists, and this write still shares its transaction, so a
-    // failure here takes the note with it. Good for derived rows; wrong
-    // for best-effort work like sending mail.
-    afterCreate: async (row, ctx) => {
-      await ctx.app.database.note_events.create({
-        note_id: row.id,
-        action: "created",
-      });
-    },
+        return {
+          ...values,
+          body,
+          // Demo only; production apps should use the authenticated session.
+          author_email: \`\${values.author}@example.com\`,
+        };
+      },
 
-    // Not a candidate: no await is possible here. Anything a model
-    // produced has to already be a column by the time a read runs.
-    serialize: (row) => row,
+      async afterCreate(row, ctx) {
+        // HTTP writes are disabled for this table, but this client is trusted
+        // and bound to the note's transaction.
+        await ctx.app.database.note_events.create({
+          note_id: row.id,
+          action: "created",
+        });
+      },
+
+      serialize: (row, { operation }) =>
+        operation === "list"
+          ? { ...row, body: String(row.body).slice(0, 120) }
+          : row,
+    },
   },
-}`;
+});`;
 
-const CUSTOM_ROUTES = `// The generated routes shape rows; they do not group them,
-// and they stop at the exposure list. Everything else is yours.
-app.get("/api/boards/stats", async (_req, res) => {
-  const rows = await db.sql<{ slug: string; notes: string }>\`
-    select b.slug, count(n.id)::text as notes
-    from boards b left join notes n on n.board_id = b.id
-    group by b.slug order by b.slug
-  \`;
-  res.json(rows);
-});
-
-// Two bounded relation edges, including a table with no route of its own.
-const board = await db.boards
-  .where({ slug: req.params.slug })
-  .include({ notes: { limit: 20, include: { note_events: { limit: 5 } } } })
-  .first();`;
+const TIMELINE_QUERY = `// Browser: use the generated board detail route, not a custom controller.
+const include = encodeURIComponent(JSON.stringify({
+  notes: {
+    limit: 20,
+    include: { note_events: { limit: 5 } },
+  },
+}));
+const response = await fetch(
+  \`/api/database/boards/\${boardId}?include=\${include}\`,
+);
+if (!response.ok) throw new Error("Failed to load board timeline");
+const board = await response.json();`;
 
 /** The five default CRUD routes for each exposed table with a public primary key. */
 const GENERATED_ROUTES = [
@@ -256,14 +249,18 @@ const METHOD_TONE: Record<string, string> = {
 function RouteTable() {
   return (
     <div className="space-y-6">
-      {["boards", "notes"].map((table) => (
+      {["boards", "notes", "note_events"].map((table) => (
         <div key={table}>
           <div className="flex items-center gap-2 mb-2">
             <code className="text-sm font-semibold">{table}</code>
-            <Badge variant="secondary">exposed</Badge>
+            <Badge variant={table === "note_events" ? "outline" : "secondary"}>
+              {table === "note_events" ? "read-only" : "full CRUD"}
+            </Badge>
           </div>
           <div className="rounded-md border divide-y">
-            {GENERATED_ROUTES.map((route) => (
+            {GENERATED_ROUTES.filter(
+              (route) => table !== "note_events" || route.method === "GET",
+            ).map((route) => (
               <div
                 key={`${route.method}${route.suffix}`}
                 className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 px-3 py-2"
@@ -285,19 +282,6 @@ function RouteTable() {
           </div>
         </div>
       ))}
-
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <code className="text-sm font-semibold">note_events</code>
-          <Badge variant="outline">not exposed</Badge>
-        </div>
-        <div className="rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground">
-          No routes at all. The table is still fully typed for server code, and
-          a hook writes to it on every note — it is simply unreachable from a
-          browser, including as an <code>include</code> on a table that is
-          exposed.
-        </div>
-      </div>
     </div>
   );
 }
@@ -370,25 +354,26 @@ function DatabaseRoute() {
                   Set <code>api: false</code> to disable generated endpoints
                   while keeping the typed database client available to your own
                   routes and hooks. Use <code>api: {"{ writes: false }"}</code>{" "}
-                  for read-only routes, or <code>api.tables</code> to limit the
-                  exposed tables, as this example does.
+                  for read-only routes on every table. Here,{" "}
+                  <code>api.writes.tables</code> allows writes to boards and
+                  notes while keeping the audit trail read-only.
                 </p>
               </div>
               <CodeBlock code={REGISTRATION} />
               <RouteTable />
               <div className="space-y-2">
                 <p className="text-sm font-medium">
-                  Ask the running server for a table it does not publish
+                  Try writing directly to the read-only audit trail
                 </p>
                 <RefusalProbe
-                  label="Reach note_events through a relation on an exposed table"
-                  request={`GET /api/database/boards?include={"note_events":true}`}
+                  label="Create an audit event over HTTP: no write route is registered"
+                  request="POST /api/database/note_events"
                   send={() =>
-                    fetch(
-                      `/api/database/boards?include=${encodeURIComponent(
-                        JSON.stringify({ note_events: true }),
-                      )}`,
-                    )
+                    fetch("/api/database/note_events", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ note_id: 1, action: "created" }),
+                    })
                   }
                 />
               </div>
@@ -460,49 +445,58 @@ function DatabaseRoute() {
                 is the flow the panel at the top of the page executes.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CardContent>
               <HookLifecycle />
-              <CodeBlock code={HOOKS_EXAMPLE} />
             </CardContent>
           </Card>
 
           <Card className="md:col-span-2">
             <CardHeader>
-              <CardTitle>Running an agent from a write</CardTitle>
+              <CardTitle>Inline hooks</CardTitle>
               <CardDescription>
-                The lifecycle above decides where a model call fits: two steps
-                can await one, and one cannot.
+                Redaction, audit writes, and read previews are defined directly
+                in the plugin registration, without a wrapper or custom routes.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <CodeBlock code={AGENT_SEAM} />
+              <CodeBlock code={INLINE_HOOKS} />
               <p className="text-sm text-muted-foreground">
                 A hook needs nothing from the plugin system to do this.{" "}
-                <code>createAgent</code> returns a definition, so the hook
-                imports it and calls <code>runAgent</code> — the note you added
-                above went through exactly this. What the hook does need from{" "}
-                <code>ctx</code> is <code>ctx.app.database</code>, because that
-                one is bound to this transaction and cannot be imported. The
-                model call is not: it holds a Postgres connection and the row's
-                locks for as long as it runs, and nothing it did is undone if
-                the transaction later rolls back. Redaction that must be atomic
-                with the row belongs in <code>beforeCreate</code> under a
-                timeout; a summary that can arrive a second later belongs after
-                the response, keyed by the row you just wrote.
+                <code>createAgent</code> returns a definition, and the inline
+                hook passes it to <code>runAgent</code>. The capability from{" "}
+                <code>ctx</code> is <code>ctx.app.database</code>, which is
+                bound to the current transaction. Calls to a model or another
+                service do not join that transaction, and rollback cannot undo
+                their external effects.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                The model request receives a 10-second cancellation signal,
+                shorter than the database transaction's 30-second deadline.
+                Cancellation, an agent error status, or blank output rejects the
+                mutation instead of saving the original or partial text. The
+                transaction occupies a pooled connection while it waits, so keep
+                this work short.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                This demonstrates best-effort redaction, not guaranteed removal
+                of personal data. A non-empty model response can still miss
+                names or email addresses; do not use it as the sole privacy
+                control for sensitive data.
               </p>
             </CardContent>
           </Card>
 
           <Card className="md:col-span-2">
             <CardHeader>
-              <CardTitle>Where the generator stops</CardTitle>
+              <CardTitle>Nested reads through the generated API</CardTitle>
               <CardDescription>
-                Aggregates and deeper traversals stay ordinary application code,
-                written against the same typed client.
+                Load a board, its notes, and their audit events in one bounded
+                read. A read-only table can participate in includes without
+                exposing write operations.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <CodeBlock code={CUSTOM_ROUTES} />
+              <CodeBlock code={TIMELINE_QUERY} />
             </CardContent>
           </Card>
         </div>

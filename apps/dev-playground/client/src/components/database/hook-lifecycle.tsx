@@ -1,9 +1,8 @@
 import { Badge } from "@databricks/appkit-ui/react";
 
 /**
- * One create, from request to response. The transaction boundary is the whole
- * point of the picture: it decides what belongs in each step, and it is why
- * the last one is synchronous.
+ * The create transaction and the separate read serializer. Only database
+ * writes through the transaction-bound client share the mutation's rollback.
  */
 
 interface Step {
@@ -17,7 +16,7 @@ const IN_TRANSACTION: Step[] = [
     name: "beforeCreate(values, ctx)",
     kind: "async",
     detail:
-      "May return a replacement payload, revalidated before it is persisted. Where this app stamps the private author_email.",
+      "Calls the redaction agent with a 10-second cancellation signal, rejects failed or blank output, and stamps the private author_email.",
   },
   {
     name: "INSERT",
@@ -79,7 +78,7 @@ export function HookLifecycle() {
       <div className="rounded-md border p-3">
         <div className="mb-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            after commit
+            on a subsequent read
           </span>
         </div>
         <StepRow
@@ -93,9 +92,10 @@ export function HookLifecycle() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        The two async steps are where slow work is possible but expensive:{" "}
-        <code>ctx.app</code> reaches every other plugin from here, and they hold
-        the transaction open, so bound anything that leaves the process.
+        <code>ctx.app.database</code> provides the transaction-bound database
+        client. Import other APIs separately and give network calls their own
+        cancellation signal: the database deadline does not cancel them, and
+        rollback does not undo their external effects.
       </p>
     </div>
   );

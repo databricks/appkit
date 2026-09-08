@@ -65,8 +65,8 @@ const usersOnly: FilePolicy = (_action, _resource, user) => {
   return user.isServicePrincipal !== true;
 };
 
-// Run by the notes beforeCreate hook, not by the agents plugin: an agent is a
-// definition, so anything holding it can call runAgent.
+// Best-effort redaction demonstrates calling an agent from a hook; it is not
+// a guarantee that all personal data will be removed.
 const redactor = createAgent({
   instructions:
     "Replace every personal name and email address in the user's text with [redacted]. " +
@@ -90,43 +90,49 @@ createApp({
       ? [
           database({
             schema,
-            // Boards and their annotations are client-facing; the audit trail
-            // is written by the hook below and stays server-only.
-            api: { tables: ["boards", "notes"] },
+            // Reads are generated for all three tables. Only boards and notes
+            // accept HTTP writes; the audit trail is written by the hook.
+            api: { writes: { tables: ["boards", "notes"] } },
             hooks: {
               notes: {
-                // An agent is a plain definition, so a hook runs one by
-                // importing it. This has to happen before the insert: the
-                // unredacted body must never reach the table. It also holds
-                // the transaction open while the model answers, which is the
-                // trade being made here.
-                //
-                // author_email is a private column: refused on the wire but
-                // writable here. A real app takes it from the session.
-                beforeCreate: async (values) => {
+                async beforeCreate(values) {
+                  // Cancel the model call before the 30-second transaction deadline.
+                  const signal = AbortSignal.timeout(10_000);
                   const answer = await runAgent(redactor, {
                     messages: String(values.body),
+                    signal,
                   });
+                  // A cancelled stream can return accumulated text instead of throwing.
+                  signal.throwIfAborted();
+                  if (
+                    answer.events.some(
+                      (event) =>
+                        event.type === "status" && event.status === "error",
+                    )
+                  ) {
+                    throw new Error("Note redaction failed");
+                  }
+                  const body = answer.text.trim();
+                  if (!body) throw new Error("Note redaction returned no text");
+
                   return {
                     ...values,
-                    body: answer.text || values.body,
+                    body,
+                    // Demo only; production apps should use the authenticated session.
                     author_email: `${values.author}@example.com`,
                   };
                 },
-                // A board page lists many notes, so the list route ships a
-                // preview and the detail route ships the whole body.
-                serialize: (row, { operation }) =>
-                  operation === "list"
-                    ? { ...row, body: String(row.body).slice(0, 120) }
-                    : row,
-                // Runs inside the insert's own transaction: a note and the
-                // event describing it commit together or not at all.
-                afterCreate: async (row, ctx) => {
+                async afterCreate(row, ctx) {
+                  // The audit write joins the note's transaction, not the HTTP API.
                   await ctx.app.database.note_events.create({
                     note_id: row.id,
                     action: "created",
                   });
                 },
+                serialize: (row, { operation }) =>
+                  operation === "list"
+                    ? { ...row, body: String(row.body).slice(0, 120) }
+                    : row,
               },
             },
           }),
@@ -230,46 +236,6 @@ createApp({
               error: "Failed to create product",
               message: err.message,
             });
-          }
-        });
-      }
-
-      // ── Database routes (what a generated route cannot do) ──────────
-
-      if ("database" in appkit) {
-        const db = appkit.database;
-
-        // Aggregates: a generated read shapes rows, it does not group them.
-        app.get("/api/boards/stats", async (_req, res) => {
-          try {
-            const rows = await db.sql<{ slug: string; notes: string }>`
-              select b.slug, count(n.id)::text as notes
-              from boards b left join notes n on n.board_id = b.id
-              group by b.slug order by b.slug
-            `;
-            res.json(rows);
-          } catch (error: unknown) {
-            res.status(500).json({ error: (error as Error).message });
-          }
-        });
-
-        // Two bounded relation edges in one read: a board, its notes, and
-        // the audit trail of each note.
-        app.get("/api/boards/:slug/timeline", async (req, res) => {
-          try {
-            const board = await db.boards
-              .where({ slug: req.params.slug })
-              .include({
-                notes: { limit: 20, include: { note_events: { limit: 5 } } },
-              })
-              .first();
-            if (!board) {
-              res.status(404).json({ error: "No such board" });
-              return;
-            }
-            res.json(board);
-          } catch (error: unknown) {
-            res.status(500).json({ error: (error as Error).message });
           }
         });
       }
