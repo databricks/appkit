@@ -23,6 +23,16 @@ export default defineConfig({
     },
     projects: [
       {
+        plugins: [tsconfigPaths()],
+        test: {
+          name: "playground",
+          root: "./apps/dev-playground",
+          environment: "node",
+          // Playwright owns tests/*.spec.ts; these are isolated server unit tests.
+          include: ["server/**/*.test.ts"],
+        },
+      },
+      {
         plugins: [react()],
         resolve: {
           alias: {

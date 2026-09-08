@@ -48,7 +48,7 @@ interface Timeline extends Board {
   notes?: TimelineNote[];
 }
 
-/** The include is bounded to `notes` because that is the only exposed relation. */
+/** Only a short note preview is needed for the board picker. */
 const BOARDS_URL = `/api/database/boards?include=${encodeURIComponent(
   JSON.stringify({ notes: { limit: 5 } }),
 )}`;
@@ -60,6 +60,14 @@ const notesUrl = (boardId: number) =>
   )}&order=${encodeURIComponent(
     JSON.stringify({ created_at: "desc" }),
   )}&limit=5`;
+
+/** The audit trail is a read-only include on the generated board detail route. */
+const timelineUrl = (boardId: number) =>
+  `/api/database/boards/${boardId}?include=${encodeURIComponent(
+    JSON.stringify({
+      notes: { limit: 20, include: { note_events: { limit: 5 } } },
+    }),
+  )}`;
 
 /** Generated routes answer failures as `{ error, details? }`. */
 function failureMessage(body: unknown, fallback: string): string {
@@ -113,7 +121,7 @@ export function BoardExplorer() {
       }
       const [listed, board] = await Promise.all([
         getJson<{ items: Note[] }>(notesUrl(active.id)),
-        getJson<Timeline>(`/api/boards/${active.slug}/timeline`),
+        getJson<Timeline>(timelineUrl(active.id)),
       ]);
       setNotes(listed.items);
       setTimeline(board);
@@ -306,10 +314,12 @@ export function BoardExplorer() {
             </CardTitle>
             <CardDescription>
               <code className="text-xs break-all">
-                GET /api/boards/{selected ?? ":slug"}/timeline
+                GET /api/database/boards/{board?.id ?? ":id"}?include=…
               </code>{" "}
-              — <code className="text-xs">note_events</code> has no route of its
-              own, so only the server-side client can reach it.
+              reads notes and their events through nested includes. The
+              generated API exposes <code className="text-xs">note_events</code>{" "}
+              for reading only; the hook writes it inside the note's
+              transaction.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
