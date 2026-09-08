@@ -82,6 +82,24 @@ class ProbePlugin extends Plugin<BasePluginConfig> {
     return getUserContext()?.userId;
   }
 
+  /**
+   * The exact shape of the analytics `query` export that PR #385 broke:
+   * an exported method that dereferences `this` (there: `this.queryProcessor`).
+   * If the proxy hands this out unbound, `this` is `undefined` and reading
+   * `this.instanceMarker` throws the reported
+   * "Cannot read properties of undefined" TypeError — before it ever gets to
+   * read the user context. Returns the user id so one assertion proves BOTH
+   * that `this` is bound and that the user scope is applied.
+   */
+  private readonly instanceMarker = "probe-instance";
+  observeViaThis(): string | undefined {
+    // Touch `this` first — this is the line that threw pre-fix.
+    if (this.instanceMarker !== "probe-instance") {
+      throw new Error("wrong instance");
+    }
+    return getUserContext()?.userId;
+  }
+
   // Calls observeSync via `this` — we use this to prove the inner call
   // inherits the user context from the outer wrapped call.
   outerCallsInner(): string | undefined {
@@ -100,6 +118,12 @@ class ProbePlugin extends Plugin<BasePluginConfig> {
   exports() {
     return {
       classMethod: this.observeSync.bind(this),
+      // Unbound class-method reference (the analytics `query: this.query`
+      // pattern). The proxy must bind `this` to the target, or the method
+      // runs with `this === undefined` and throws on the first `this.x`.
+      // Regression guard for PR #385. Points at a method that dereferences
+      // `this` so the test actually fails without the bind.
+      rawClassMethod: this.observeViaThis,
       arrowFn: () => getUserContext()?.userId,
       asyncArrowFn: async () => {
         // Force an await so we exercise AsyncLocalStorage propagation.
@@ -333,6 +357,21 @@ describe("Plugin.asUser proxy", () => {
       const exports = plugin.asUser(createReqWithObo()).exports();
 
       expect((exports as any).classMethod()).toBe("alice");
+    });
+
+    test("unbound class-method export binds `this` and sees user context", () => {
+      // Regression for PR #385: `exports()` returning a bare `this.method`
+      // (e.g. analytics `query: this.query`) must run with `this` bound to
+      // the plugin. Before the fix the wrapper called it with no receiver,
+      // so `this === undefined` and the method threw
+      // "Cannot read properties of undefined (reading 'queryProcessor')".
+      const plugin = new ProbePlugin(config);
+      const exports = plugin.asUser(createReqWithObo()).exports() as any;
+
+      // Must not throw (proves `this` is bound) AND must observe the user
+      // context (proves the OBO scope is still applied around the bound fn).
+      expect(() => exports.rawClassMethod()).not.toThrow();
+      expect(exports.rawClassMethod()).toBe("alice");
     });
 
     test("inline arrow function export sees user context", () => {

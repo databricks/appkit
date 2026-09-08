@@ -129,12 +129,28 @@ class ContextProbePlugin extends Plugin {
     return getUserContext();
   }
 
+  /**
+   * Mirrors the analytics `query` export that PR #385 broke: a class method
+   * that dereferences `this` (there: `this.queryProcessor`). Exported UNBOUND
+   * below. If the asUser proxy hands it out without binding `this`, reading
+   * `this.marker` throws "Cannot read properties of undefined" — the exact
+   * reported symptom — before it can read the user context.
+   */
+  private readonly marker = "probe";
+  getContextViaThis() {
+    if (this.marker !== "probe") throw new Error("wrong instance");
+    return getUserContext();
+  }
+
   exports() {
     return {
       // Class method bound to this
       getContext: this.getContext.bind(this),
       // Inline arrow function — the key case this fix addresses
       getContextArrow: () => getUserContext(),
+      // Unbound class-method reference (the analytics `query: this.query`
+      // pattern). Regression guard for PR #385.
+      getContextRaw: this.getContextViaThis,
     };
   }
 }
@@ -193,6 +209,30 @@ describe("exports-level asUser(req)", () => {
     expect(ctx).toBeDefined();
     expect(ctx.isUserContext).toBe(true);
     expect(ctx.userId).toBe("bob");
+  });
+
+  test("unbound class-method export runs in user context via asUser(req)", async () => {
+    // End-to-end guard for PR #385: exercises the full
+    // createApp → appkit.plugin.asUser(req).method() path with an export
+    // shaped exactly like analytics `query: this.query` (unbound, touches
+    // `this`). Pre-fix this threw "Cannot read properties of undefined".
+    const appkit = (await createApp({ plugins: [probe()] })) as any;
+
+    const req = createMockRequest({
+      headers: {
+        "x-forwarded-access-token": "user-token-abc",
+        "x-forwarded-user": "carol",
+        "x-forwarded-email": "carol@example.com",
+      },
+    });
+
+    const userExports = appkit.probe.asUser(req);
+
+    expect(() => userExports.getContextRaw()).not.toThrow();
+    const ctx = userExports.getContextRaw() as UserContext;
+    expect(ctx).toBeDefined();
+    expect(ctx.isUserContext).toBe(true);
+    expect(ctx.userId).toBe("carol");
   });
 
   test("SP exports (without asUser) do not have user context", async () => {
