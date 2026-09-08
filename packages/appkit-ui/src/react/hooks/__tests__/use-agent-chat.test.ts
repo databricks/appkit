@@ -250,6 +250,49 @@ describe("useAgentChat", () => {
     });
   });
 
+  test("initialThreadId seeds threadId and is forwarded on the first send()", async () => {
+    const { result } = renderHook(() =>
+      useAgentChat({ agent: "helper", initialThreadId: "t-resumed" }),
+    );
+
+    // Seeded synchronously — no send/metadata needed.
+    expect(result.current.threadId).toBe("t-resumed");
+
+    act(() => {
+      void result.current.send("continue please");
+    });
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+
+    // The very first turn continues the resumed thread instead of creating one.
+    expect(capturedCallbacks.payload).toEqual({
+      message: "continue please",
+      agent: "helper",
+      threadId: "t-resumed",
+    });
+  });
+
+  test("changing initialThreadId re-seeds the thread (switch conversations)", async () => {
+    const { result, rerender } = renderHook(
+      ({ id }: { id?: string }) =>
+        useAgentChat({ agent: "helper", initialThreadId: id }),
+      { initialProps: { id: "t-1" } },
+    );
+    expect(result.current.threadId).toBe("t-1");
+
+    rerender({ id: "t-2" });
+    expect(result.current.threadId).toBe("t-2");
+
+    act(() => {
+      void result.current.send("hi");
+    });
+    await waitFor(() => expect(mockConnectSSE).toHaveBeenCalled());
+    expect(capturedCallbacks.payload).toEqual({
+      message: "hi",
+      agent: "helper",
+      threadId: "t-2",
+    });
+  });
+
   test("onEvent is invoked for every parsed event", async () => {
     const onEvent = vi.fn();
     const { result } = renderHook(() =>
