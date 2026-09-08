@@ -16,3 +16,6 @@ coverage
 internal
 
 .isaac/
+
+# local scratch (not committed)
+scratch/
