@@ -88,9 +88,28 @@ export function formatResultsJson(results: EvalResult[]): string {
   return JSON.stringify({ summary: summarize(results), results }, null, 2);
 }
 
-/** Escape a value for use in XML text/attribute content. */
+/**
+ * Drop the characters XML 1.0 forbids even when escaped — the C0 control chars
+ * except tab (9), LF (10), and CR (13). A raw NUL or ANSI escape from an agent
+ * reply or tool arg would otherwise make the JUnit document not well-formed and
+ * a strict CI parser reject it.
+ */
+function stripXmlControlChars(value: string): string {
+  // A regex char class is terser, but oxlint's `no-control-regex` rejects it
+  // (rule enabled repo-wide) — so filter by code point instead of suppressing.
+  let out = "";
+  for (const ch of value) {
+    const code = ch.codePointAt(0) as number;
+    if (code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Escape a value for use in XML text/attribute content (control chars dropped). */
 function escapeXml(value: string): string {
-  return value
+  return stripXmlControlChars(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

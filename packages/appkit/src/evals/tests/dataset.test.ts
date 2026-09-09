@@ -143,4 +143,16 @@ describe("userTurns", () => {
     expect(userTurns({ messages: "nope" })).toEqual([]);
     expect(userTurns({ messages: [] })).toEqual([]);
   });
+
+  test("skips null/non-object entries instead of crashing", () => {
+    expect(
+      userTurns({ messages: [null, { role: "user", content: "hi" }, 42] }),
+    ).toEqual(["hi"]);
+  });
+
+  test("coerces non-string content to an empty string", () => {
+    expect(
+      userTurns({ messages: [{ role: "user", content: { nested: true } }] }),
+    ).toEqual([""]);
+  });
 });

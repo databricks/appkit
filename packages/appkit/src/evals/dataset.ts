@@ -34,10 +34,17 @@ export interface ReadEvalDatasetOptions {
  * yields `[]`.
  */
 export function userTurns(input: Record<string, unknown>): string[] {
-  const messages = Array.isArray(input.messages)
-    ? (input.messages as Array<{ role?: string; content?: string }>)
-    : [];
-  return messages.filter((m) => m.role === "user").map((m) => m.content ?? "");
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+  // Guard each entry: a managed dataset row is external data, so a `null` or
+  // non-object entry must not crash the read, and non-string content coerces to
+  // "" rather than violate the declared `string[]` return.
+  return messages
+    .filter(
+      (m): m is { role?: unknown; content?: unknown } =>
+        typeof m === "object" && m !== null,
+    )
+    .filter((m) => m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : ""));
 }
 
 /** A managed eval dataset is a UC table; only 3-level names are valid. */

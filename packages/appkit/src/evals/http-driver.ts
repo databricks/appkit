@@ -160,10 +160,18 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
     reset(): void {
       threadId = undefined;
     },
-    async send(message: string): Promise<DriveResult> {
+    async send(
+      message: string,
+      opts?: { signal?: AbortSignal },
+    ): Promise<DriveResult> {
       // Bounds connect + the entire read below. Passed to both the fetch and
       // the SSE reader: on expiry the reader is cancelled and the turn fails.
-      const signal = AbortSignal.timeout(timeoutMs);
+      // Composed with the caller's signal (the runner's per-eval timeout) so a
+      // timed-out eval aborts this turn instead of leaking a live stream.
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const signal = opts?.signal
+        ? AbortSignal.any([timeout, opts.signal])
+        : timeout;
       let res: Response;
       try {
         res = await fetch(`${options.baseUrl}${chatPath}`, {

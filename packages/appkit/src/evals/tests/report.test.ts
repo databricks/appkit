@@ -133,4 +133,22 @@ describe("eval reporting", () => {
     // Raw unescaped special chars from the id/detail must not leak through.
     expect(xml).not.toContain("a/b<x>");
   });
+
+  test("formatResultsJUnit drops XML-illegal control chars from messages", () => {
+    const nul = String.fromCharCode(0);
+    const esc = String.fromCharCode(27); // ANSI escape
+    const withControl: EvalResult[] = [
+      {
+        id: `a/ctrl${nul}`,
+        assertions: [],
+        passed: false,
+        error: `boom${esc}[0m bang`,
+      },
+    ];
+    const xml = formatResultsJUnit(withControl);
+    // A raw NUL or ESC would make the document not well-formed — they must be gone.
+    expect(xml).not.toContain(nul);
+    expect(xml).not.toContain(esc);
+    expect(xml).toContain("boom[0m bang");
+  });
 });

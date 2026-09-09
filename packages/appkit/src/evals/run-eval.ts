@@ -22,23 +22,28 @@ class SkipSignal extends Error {
   }
 }
 
-/** Rejects the test race when a per-eval timeout elapses. */
-class TimeoutSignal extends Error {
-  constructor(ms: number) {
-    super(`eval timed out after ${ms}ms`);
-    this.name = "TimeoutSignal";
-  }
-}
-
 /**
  * Deep partial match: every key in `expected` is present in `actual` and equal,
- * recursing into nested plain objects so extra actual keys are ignored.
+ * recursing into nested plain objects so extra actual keys are ignored. Arrays
+ * must match element-for-element (same length, deep-equal items) — an array is
+ * a value, not a partial shape, so reference equality would never match two
+ * equal arrays parsed from JSON.
  */
 function deepContains(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((item, i) => deepContains(actual[i], item))
+    );
+  }
   if (isPlainObject(expected)) {
     if (!isPlainObject(actual)) return false;
-    return Object.keys(expected).every((key) =>
-      deepContains(actual[key], expected[key]),
+    // Require the key to be present, so an expected `undefined` value does not
+    // silently match a key the actual args omit.
+    return Object.keys(expected).every(
+      (key) =>
+        Object.hasOwn(actual, key) && deepContains(actual[key], expected[key]),
     );
   }
   return actual === expected;
@@ -81,6 +86,12 @@ export async function runEval(
   let sessionId: string | undefined;
   let lastTraceId: string | undefined;
   let lastSucceeded = false;
+  // Set when any turn fails at the transport/agent level (driver `succeeded:
+  // false`): surfaced as `infraFailure` so the runner can retry an infra flake.
+  let turnFailed = false;
+  // Aborted when the per-eval timeout elapses, cancelling the in-flight turn so
+  // a timed-out eval doesn't leak a live stream past its deadline.
+  const controller = new AbortController();
 
   const record = (
     label: string,
@@ -128,12 +139,15 @@ export async function runEval(
   const t: TestContext = {
     async send(message) {
       lastInput = message;
-      const r = await options.driver.send(message);
+      const r = await options.driver.send(message, {
+        signal: controller.signal,
+      });
       reply = r.reply;
       toolCalls = r.toolCalls;
       toolCallDetails = r.toolCallDetails;
       sessionId = r.sessionId;
       lastSucceeded = r.succeeded;
+      if (!r.succeeded) turnFailed = true;
       if (r.traceId) lastTraceId = r.traceId;
     },
     reset() {
@@ -175,8 +189,14 @@ export async function runEval(
     calledToolWith(name, expected) {
       const matching = toolCallDetails.filter((c) => c.name === name);
       const pass = matching.some((c) => deepContains(c.args, expected));
+      // Report only the *keys* the agent passed, never their values — actual
+      // args can carry PII/secrets and this detail is persisted into the
+      // JSON/JUnit reports and MLflow rationales (CWE-532). `expected` is
+      // operator-authored, so it stays.
       const seen = matching.length
-        ? matching.map((c) => JSON.stringify(c.args)).join(", ")
+        ? matching
+            .map((c) => `{${Object.keys(c.args).sort().join(", ")}}`)
+            .join(", ")
         : "not called";
       return record(
         `calledToolWith(${name})`,
@@ -184,7 +204,7 @@ export async function runEval(
         undefined,
         `expected tool "${name}" to be called with ${JSON.stringify(
           expected,
-        )} (args seen: ${seen})`,
+        )} (arg keys seen: ${seen})`,
       );
     },
     check(value: string, matcher: Matcher) {
@@ -230,14 +250,17 @@ export async function runEval(
     if (timeoutMs === undefined) {
       await def.test(t);
     } else {
-      // Race the test against a timeout; on elapse the sentinel rejects and we
-      // convert it to a non-passing result. The timer is cleared in `finally`
-      // so it can't keep the process alive after the test settles.
+      // Race the test against a timeout; on elapse we abort the in-flight driver
+      // turn, reject, and convert it to a non-passing result. The timer is
+      // cleared in `finally` so it can't keep the process alive after the test
+      // settles. Note: only the driver turn is cancelled — a test that hangs in
+      // non-driver code (a `t.judge.*` call, an in-test sleep) still runs to its
+      // own completion, though the eval's result is already recorded by then.
       const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new TimeoutSignal(timeoutMs)),
-          timeoutMs,
-        );
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`eval timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
       });
       await Promise.race([Promise.resolve(def.test(t)), timeout]);
     }
@@ -274,5 +297,9 @@ export async function runEval(
     assertions,
     passed,
     traceId: lastTraceId,
+    // Only a *failing* eval whose turn broke at the transport/agent level is a
+    // retryable infra flake; a passing eval (or a pure assertion mismatch, where
+    // the turn itself succeeded) is real signal and must not be retried.
+    infraFailure: (turnFailed && !passed) || undefined,
   };
 }

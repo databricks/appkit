@@ -71,7 +71,15 @@ export interface DriveResult {
  * app's agents endpoint; future drivers (in-process) implement the same shape.
  */
 export interface EvalDriver {
-  send(message: string): Promise<DriveResult>;
+  /**
+   * Drive one turn. `options.signal`, when provided, aborts the in-flight turn:
+   * the runner passes its per-eval timeout signal so a timed-out eval cancels
+   * the request instead of leaking a live stream.
+   */
+  send(
+    message: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<DriveResult>;
   /**
    * Drop the current conversation so the next `send` starts a fresh thread.
    * Optional: drivers without a session concept omit it.
@@ -112,7 +120,8 @@ export interface TestContext {
   /**
    * Assert a tool was called with arguments that deep-contain `expected`: every
    * key in `expected` must equal the actual argument (recursively for nested
-   * objects), so extra arguments are ignored. Gate by default.
+   * objects; arrays match element-for-element), so extra arguments are ignored.
+   * Gate by default.
    */
   calledToolWith(
     name: string,
@@ -172,8 +181,6 @@ export interface EvalDefinition {
 
 /** Per-directory config from `evals.config.ts` (see {@link defineEvalConfig}). */
 export interface EvalConfig {
-  /** LLM judge config. Defaults to the agent's own serving endpoint. */
-  judge?: { model?: string };
   /** Max evals to run concurrently. */
   maxConcurrency?: number;
   /** Default per-eval timeout. */
@@ -191,6 +198,12 @@ export interface EvalResult {
   passed: boolean;
   /** Set when the eval threw before completing. */
   error?: string;
+  /**
+   * A turn failed at the transport/agent level (`succeeded: false`) rather than
+   * on an assertion — a retryable infra flake, distinct from `error` (a thrown
+   * error or per-eval timeout) and from an assertion mismatch (real signal).
+   */
+  infraFailure?: boolean;
   /** MLflow trace id of the eval's last turn, for attaching assessments. */
   traceId?: string;
 }

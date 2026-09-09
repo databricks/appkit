@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { MlflowClient } from "../connectors/mlflow";
@@ -73,9 +74,11 @@ export interface RunEvalsOptions {
   timeoutMs?: number;
   /**
    * Re-run an eval up to this many extra times when it fails on an
-   * infrastructure error (a thrown error or timeout — `result.error` set), to
-   * absorb transient turn/stream flakiness. Assertion failures are NEVER
-   * retried (a wrong reply is real signal, not flake). Defaults to `0`.
+   * infrastructure failure — a thrown error or per-eval timeout (`result.error`)
+   * or a turn that failed at the transport/agent level (`result.infraFailure`,
+   * e.g. a failed fetch, 5xx, or dropped stream) — to absorb transient
+   * turn/stream flakiness. Assertion failures are NEVER retried (a wrong reply
+   * is real signal, not flake). Defaults to `0`.
    */
   retries?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
@@ -142,16 +145,16 @@ async function loadEvalConfig(file: string): Promise<EvalConfig | undefined> {
  * object reached through the `default` chain is taken as the config.
  */
 export function resolveConfigDefault(mod: unknown): EvalConfig | undefined {
-  const seen = new Set<unknown>();
   let candidate: unknown = mod;
-  for (let i = 0; i < 4 && candidate && !seen.has(candidate); i++) {
+  // The `i < 4` cap already bounds a self-referential `default` chain, so no
+  // visited-set is needed (mirrors resolveEvalDefault).
+  for (let i = 0; i < 4 && candidate; i++) {
     const next = (candidate as { default?: unknown }).default;
     if (next === undefined) {
       return typeof candidate === "object"
         ? (candidate as EvalConfig)
         : undefined;
     }
-    seen.add(candidate);
     candidate = next;
   }
   return undefined;
@@ -189,10 +192,12 @@ async function runOne(
   options: RunEvalsOptions,
 ): Promise<EvalResult> {
   try {
-    // Retry only on an infrastructure error (`result.error` — a thrown error or
-    // timeout), to absorb transient turn/stream flakiness; assertion failures
-    // are real signal and returned on the first try. Each attempt gets a fresh
-    // driver, so its thread never carries over the failed attempt's history.
+    // Retry on an infrastructure failure — a thrown error or per-eval timeout
+    // (`result.error`), or a turn that failed at the transport/agent level
+    // (`result.infraFailure`, e.g. a dropped stream or 5xx) — to absorb
+    // transient turn/stream flakiness; assertion failures are real signal and
+    // returned on the first try. Each attempt gets a fresh driver, so its thread
+    // never carries over the failed attempt's history.
     return await runWithRetries(options.retries ?? 0, () =>
       runEval(def, {
         id,
@@ -201,7 +206,10 @@ async function runOne(
           agent: def.agent ?? d.agent,
           headers: options.headers,
           mlflowRunId: runId,
-          timeoutMs: options.timeoutMs,
+          // Match the driver's per-turn cap to the eval's effective timeout so a
+          // `def.timeoutMs` shorter than the driver default can't leave the turn
+          // running past the deadline (`runEval` also aborts it via its signal).
+          timeoutMs: def.timeoutMs ?? options.timeoutMs,
         }),
         strict: options.strict,
         row,
@@ -258,14 +266,17 @@ export async function resolveDatasetRows(
 }
 
 /**
- * Load one discovered eval and run it, expanding a dataset-driven eval into one
- * run per row. Appends one result per row to `results`, emitting `start`/
- * `result` around each. Never throws: a load or dataset-read failure surfaces as
- * a non-passing result. `total` counts eval files, not rows — per-row detail is
- * carried in the result id (`[row i/n]`).
+ * Run one already-loaded eval (from the `loaded` pre-pass), expanding a
+ * dataset-driven eval into one run per row. Appends one result per row to
+ * `results`, emitting `start`/`result` around each. Never throws: a load error
+ * (carried in `loadError`) or a dataset-read failure surfaces as a non-passing
+ * result. `total` counts eval files, not rows — per-row detail is carried in the
+ * result id (`[row i/n]`).
  */
 async function runDiscovered(
   d: DiscoveredEval,
+  def: EvalDefinition,
+  loadError: string | undefined,
   index: number,
   total: number,
   runId: string | undefined,
@@ -275,16 +286,15 @@ async function runDiscovered(
 ): Promise<void> {
   const id = `${d.agent}/${d.id}`;
 
-  let def: EvalDefinition;
-  try {
-    def = await loadEval(d.file);
-  } catch (err) {
+  // The file failed to load in the pre-pass (its `def` is an unused
+  // placeholder) — surface that as one non-passing result.
+  if (loadError) {
     emit({ type: "start", id, index, total });
     const result: EvalResult = {
       id,
       assertions: [],
       passed: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: loadError,
     };
     results.push(result);
     emit({ type: "result", result, index, total });
@@ -307,22 +317,44 @@ async function runDiscovered(
   }
 }
 
+/** Base delay (ms) before the first retry; doubled per attempt, full-jittered, capped. */
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+/** Ceiling for a single retry backoff wait (ms). */
+const MAX_RETRY_DELAY_MS = 5_000;
+
 /**
  * Run `attempt` up to `1 + retries` times, stopping as soon as it returns a
- * result without an `error` (infra failures — thrown errors or timeouts — set
- * `error`; assertion failures do not, so a failed-but-completed eval is returned
- * on the first try and never retried). Returns the last result when every
- * attempt errored. `retries` below 0 is treated as 0.
+ * result that is neither a thrown error / per-eval timeout (`error`) nor a
+ * transport/agent turn failure (`infraFailure`). Assertion failures set
+ * neither, so a failed-but-completed eval is returned on the first try and
+ * never retried. Returns the last result when every attempt failed on infra.
+ *
+ * Between attempts it waits a full-jittered exponential backoff — the targeted
+ * infra flakes (connection refused, the app's 429 stream-cap) are
+ * overload-correlated, so retrying instantly would amplify load. `retries` is
+ * coerced to a finite, non-negative integer, so a `NaN`/`Infinity` from direct
+ * API misuse can't loop forever. `baseDelayMs: 0` disables the wait (tests).
  */
 export async function runWithRetries(
   retries: number,
   attempt: (attemptNumber: number) => Promise<EvalResult>,
+  options: { baseDelayMs?: number } = {},
 ): Promise<EvalResult> {
-  const maxAttempts = 1 + Math.max(0, retries);
+  const baseDelayMs = options.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const maxRetries = Number.isFinite(retries)
+    ? Math.max(0, Math.floor(retries))
+    : 0;
+  const maxAttempts = 1 + maxRetries;
   let result: EvalResult;
   for (let n = 1; ; n++) {
     result = await attempt(n);
-    if (!result.error || n >= maxAttempts) return result;
+    const infraFailed = result.error !== undefined || result.infraFailure;
+    if (!infraFailed || n >= maxAttempts) return result;
+    if (baseDelayMs > 0) {
+      // Full jitter: a random wait in [0, min(cap, base * 2^(n-1))].
+      const ceiling = Math.min(baseDelayMs * 2 ** (n - 1), MAX_RETRY_DELAY_MS);
+      await sleep(Math.random() * ceiling);
+    }
   }
 }
 
@@ -391,6 +423,31 @@ async function finalizeMlflow(
 const DEFAULT_CONCURRENCY = 4;
 
 /**
+ * Resolve the work-pool width: `--concurrency` wins; otherwise the lowest
+ * `maxConcurrency` any *participating* agent's `evals.config.ts` requests
+ * (every eval drives the app as the same user and shares one per-user stream
+ * budget, so the most conservative ceiling governs — a `Math.max` would let one
+ * lax agent raise another's limit past its intent and the server's stream cap);
+ * an agent with no eval in this run doesn't constrain it. Falls back to
+ * {@link DEFAULT_CONCURRENCY}.
+ */
+export function deriveConcurrency(
+  activeAgents: Set<string>,
+  configs: Map<string, EvalConfig>,
+  cliConcurrency: number | undefined,
+): number {
+  const configMin = [...configs.entries()]
+    .filter(([agent]) => activeAgents.has(agent))
+    .map(([, c]) => c.maxConcurrency)
+    .filter((n): n is number => typeof n === "number")
+    .reduce<number | undefined>(
+      (min, n) => (min === undefined ? n : Math.min(min, n)),
+      undefined,
+    );
+  return cliConcurrency ?? configMin ?? DEFAULT_CONCURRENCY;
+}
+
+/**
  * Discover, load, and run every eval under each agent's `evals/` dir, driving
  * the agents on a running app. Never throws for an individual eval — load/run
  * failures become non-passing {@link EvalResult}s.
@@ -450,19 +507,17 @@ export async function runEvalsInDir(
     loaded.push({ d, def });
   }
 
-  // `evals.config.ts` `maxConcurrency` governs the single shared work pool, so
-  // it can't be applied per-agent without splitting the pool. The `--concurrency`
-  // flag wins; else the highest value any agent's config requests (the pool
-  // ceiling); else the built-in default.
-  const configMaxConcurrency = [...configs.values()]
-    .map((c) => c.maxConcurrency)
-    .filter((n): n is number => typeof n === "number")
-    .reduce<number | undefined>(
-      (max, n) => (max === undefined ? n : Math.max(max, n)),
-      undefined,
-    );
-  const concurrency =
-    options.concurrency ?? configMaxConcurrency ?? DEFAULT_CONCURRENCY;
+  // `evals.config.ts` `maxConcurrency` governs the single shared work pool (all
+  // evals run as the same user against one per-user stream budget). Take the
+  // lowest ceiling any *participating* agent requests so a filtered-out or laxer
+  // agent can't raise another's limit past its intent — see
+  // {@link deriveConcurrency}.
+  const activeAgents = new Set(loaded.map((l) => l.d.agent));
+  const concurrency = deriveConcurrency(
+    activeAgents,
+    configs,
+    options.concurrency,
+  );
 
   const total = loaded.length;
   emit({ type: "discovered", total });
@@ -498,23 +553,29 @@ export async function runEvalsInDir(
     // the file's options (CLI wins over `evals.config.ts`; `def.timeoutMs` still
     // overrides, applied inside runEval). `total` counts eval files, not dataset
     // rows — per-row detail is carried in the result id (`[row i/n]`).
-    const perFile = await mapPool(loaded, concurrency, async ({ d }, index) => {
-      const fileResults: EvalResult[] = [];
-      const fileOptions: RunEvalsOptions = {
-        ...options,
-        timeoutMs: options.timeoutMs ?? configs.get(d.agent)?.timeoutMs,
-      };
-      await runDiscovered(
-        d,
-        index,
-        total,
-        runId,
-        fileOptions,
-        emit,
-        fileResults,
-      );
-      return fileResults;
-    });
+    const perFile = await mapPool(
+      loaded,
+      concurrency,
+      async ({ d, def, loadError }, index) => {
+        const fileResults: EvalResult[] = [];
+        const fileOptions: RunEvalsOptions = {
+          ...options,
+          timeoutMs: options.timeoutMs ?? configs.get(d.agent)?.timeoutMs,
+        };
+        await runDiscovered(
+          d,
+          def,
+          loadError,
+          index,
+          total,
+          runId,
+          fileOptions,
+          emit,
+          fileResults,
+        );
+        return fileResults;
+      },
+    );
     const results = perFile.flat();
 
     const summary: EvalRunSummary = { results };

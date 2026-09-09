@@ -91,6 +91,27 @@ function parseHeaders(values: string[]): Record<string, string> {
   return headers;
 }
 
+/**
+ * Parse `--min-pass-rate`: a finite number in `[0, 1]`, or `undefined` when the
+ * flag is unset. Rejects out-of-range and partially-numeric input (`0.5junk`,
+ * `-1`, `2`) by throwing — `Number` (unlike `parseFloat`) rejects trailing junk
+ * — so a bad gate value fails fast instead of silently disabling the CI gate
+ * (`-1` would pass every suite) or inverting it (`2`/`90` would fail every one).
+ */
+export function parsePassRate(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  // `Number("")` and `Number("   ")` are 0 — a valid-looking threshold that
+  // would silently turn an empty/unset CI value (`--min-pass-rate "$VAR"`) into
+  // an always-pass gate. Reject a blank value rather than treat it as 0.
+  if (raw.trim() === "" || !Number.isFinite(n) || n < 0 || n > 1) {
+    throw new Error(
+      `Invalid --min-pass-rate "${raw}" — expected a number in [0, 1]`,
+    );
+  }
+  return n;
+}
+
 interface EvalOptions {
   url: string;
   strict?: boolean;
@@ -256,6 +277,17 @@ async function runAgentEval(
   const retries =
     parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
 
+  // Validate the pass-rate gate up front: a bad value should fail before a whole
+  // run, not silently disable/invert the gate at the end.
+  let minPassRate: number | undefined;
+  try {
+    minPassRate = parsePassRate(opts.minPassRate);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return;
+  }
+
   // In a machine reporter (json/junit), stdout is reserved for the report (it
   // may be piped), so human-facing lines go to stderr and the per-eval live
   // streaming is suppressed. Text mode keeps its current stdout behavior.
@@ -316,7 +348,17 @@ async function runAgentEval(
         ? runner.formatResultsJson(summary.results)
         : runner.formatResultsJUnit(summary.results);
     if (opts.output) {
-      fs.writeFileSync(opts.output, `${report}\n`);
+      try {
+        fs.writeFileSync(opts.output, `${report}\n`);
+      } catch (err) {
+        console.error(
+          `Failed to write ${reporter} report to ${opts.output}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       info(`Wrote ${reporter} report to ${opts.output}`);
     } else {
       process.stdout.write(`${report}\n`);
@@ -324,10 +366,7 @@ async function runAgentEval(
   }
 
   const stats = runner.summarize(summary.results);
-  const minPassRate = opts.minPassRate
-    ? Number.parseFloat(opts.minPassRate)
-    : undefined;
-  if (minPassRate !== undefined && !Number.isNaN(minPassRate)) {
+  if (minPassRate !== undefined) {
     // Threshold mode: gate on the aggregate pass rate rather than requiring
     // every eval to pass.
     const ok = stats.passRate >= minPassRate;
