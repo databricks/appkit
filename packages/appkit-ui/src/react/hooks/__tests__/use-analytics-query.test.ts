@@ -573,4 +573,474 @@ describe("useAnalyticsQuery", () => {
       expect(mockConnectSSE).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("polling", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    });
+
+    test("poll: true enables polling with defaults", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, { poll: true }),
+      );
+
+      // Poll is enabled, so result should have the poll field.
+      expect(result.current.poll).toBeDefined();
+      expect(result.current.poll?.paused).toBe(false);
+      expect(result.current.poll?.attempts).toBe(0);
+    });
+
+    test("poll option enables polling with custom config", async () => {
+      const onPoll = vi.fn();
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: {
+            intervalMs: 500,
+            immediate: true,
+            onPoll,
+          },
+        }),
+      );
+
+      // Poll is enabled.
+      expect(result.current.poll).toBeDefined();
+      expect(result.current.poll?.attempts).toBe(0);
+
+      // Fire the immediate tick.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Should have made one request (from immediate).
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Complete the request so onPoll fires.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [] }),
+        });
+      });
+
+      expect(result.current.poll?.attempts).toBe(1);
+      expect(onPoll).toHaveBeenCalled();
+    }, 15000);
+
+    test("poll forces uncached execution (skipCache in request payload)", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, { poll: { immediate: false } }),
+      );
+
+      expect(mockConnectSSE).not.toHaveBeenCalled();
+
+      // Resume polling to start.
+      await act(async () => {
+        result.current.poll?.resume();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Should have made a request.
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Extract the request payload from the connectSSE call.
+      const payload = lastConnectArgs.payload;
+      const parsed = JSON.parse(payload);
+      expect(parsed.skipCache).toBe(true);
+    });
+
+    test("autoStart is forced to false when polling is enabled", async () => {
+      // When poll is enabled, autoStart should be false regardless of the option.
+      // This means no request fires until the scheduler ticks.
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { immediate: false },
+          autoStart: true, // This should be ignored.
+        }),
+      );
+
+      // Should not have fired any request (autoStart forced to false).
+      expect(mockConnectSSE).not.toHaveBeenCalled();
+
+      // Manual resume should start ticking.
+      await act(async () => {
+        result.current.poll?.resume();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    });
+
+    test("poll refetch triggers an out-of-band re-execution", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, { poll: { immediate: false } }),
+      );
+
+      await act(async () => {
+        result.current.poll?.refetch();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Refetch again (out-of-band, ignores interval).
+      await act(async () => {
+        result.current.poll?.refetch();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+    });
+
+    test("onPoll fires on each settle with the latest result", async () => {
+      const onPoll = vi.fn();
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { immediate: false, onPoll },
+        }),
+      );
+
+      await act(async () => {
+        result.current.poll?.resume();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // First settle.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+
+      expect(onPoll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [{ id: 1 }],
+          loading: false,
+          error: null,
+        }),
+      );
+
+      onPoll.mockClear();
+
+      // Advance to next poll tick.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      // Second settle (should call onPoll again).
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 2 }] }),
+        });
+      });
+
+      expect(onPoll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [{ id: 2 }],
+          loading: false,
+        }),
+      );
+    }, 15000);
+
+    test("parameter change is picked up on NEXT poll tick (not self-fired)", async () => {
+      const { result, rerender } = renderHook(
+        ({ limit }: { limit: number }) =>
+          useAnalyticsQuery(
+            "q",
+            { limit },
+            {
+              poll: { immediate: true, intervalMs: 500 },
+            },
+          ),
+        { initialProps: { limit: 10 } },
+      );
+
+      // Immediate tick should fire once.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Complete the first request.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+
+      // Change params mid-flight (creates new cache key).
+      rerender({ limit: 20 });
+
+      // Should NOT fire immediately (new key is not auto-started).
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Advance to the next poll tick (500ms).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      // Should now fire with the new params.
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+      const secondPayload = lastConnectArgs.payload;
+      const parsed = JSON.parse(secondPayload);
+      expect(parsed.parameters).toEqual({ limit: 20 });
+    });
+
+    test("late completion from old key does not mutate current snapshot", async () => {
+      let firstConnectArgs: any = null;
+      let secondConnectArgs: any = null;
+      let thirdConnectArgs: any = null;
+
+      const { result, rerender } = renderHook(
+        ({ limit }: { limit: number }) =>
+          useAnalyticsQuery(
+            "q",
+            { limit },
+            {
+              poll: { immediate: true, intervalMs: 500 },
+            },
+          ),
+        { initialProps: { limit: 10 } },
+      );
+
+      // First request starts.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      firstConnectArgs = { ...lastConnectArgs };
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      // Complete the first request.
+      await act(async () => {
+        await firstConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+      expect(result.current.data).toEqual([{ id: 1 }]);
+
+      // Advance to next tick.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      // Second request starts (same params, but new poll tick).
+      secondConnectArgs = { ...lastConnectArgs };
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+
+      // Complete the second request.
+      await act(async () => {
+        await secondConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 2 }] }),
+        });
+      });
+      expect(result.current.data).toEqual([{ id: 2 }]);
+
+      // Change params to new key.
+      rerender({ limit: 20 });
+
+      // A poll tick fires immediately for the new key (via cacheKeyRef).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      thirdConnectArgs = { ...lastConnectArgs };
+
+      // The old request's late completion arrives (after params changed).
+      // This should NOT affect the current snapshot (which is now the new key's).
+      const dataBeforeLateEvent = result.current.data;
+      await act(async () => {
+        await firstConnectArgs.onMessage({
+          data: JSON.stringify({
+            type: "result",
+            data: [{ id: 1, old: true }],
+          }),
+        });
+      });
+
+      // The old key's late result should not have affected the current snapshot.
+      expect(result.current.data).toBe(dataBeforeLateEvent);
+    }, 15000);
+
+    test("data is latest-only (never accumulates across polls)", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { immediate: true, intervalMs: 300 },
+        }),
+      );
+
+      // First poll.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ poll: 1 }] }),
+        });
+      });
+      expect(result.current.data).toEqual([{ poll: 1 }]);
+
+      // Second poll (300ms).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ poll: 2 }] }),
+        });
+      });
+      expect(result.current.data).toEqual([{ poll: 2 }]);
+
+      // Third poll (600ms).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ poll: 3 }] }),
+        });
+      });
+      // Should be LATEST only, not accumulated.
+      expect(result.current.data).toEqual([{ poll: 3 }]);
+    });
+
+    test("loading toggles per in-flight poll tick", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { immediate: true, intervalMs: 500 },
+        }),
+      );
+
+      // Start: immediate tick fires, loading should be true.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.loading).toBe(true);
+
+      // Complete the request.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+      expect(result.current.loading).toBe(false);
+
+      // Next poll tick fires, loading should be true again.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(result.current.loading).toBe(true);
+
+      // Complete.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 2 }] }),
+        });
+      });
+      expect(result.current.loading).toBe(false);
+    });
+
+    test("warehouseStatus surfaces during cold poll", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { immediate: true },
+        }),
+      );
+
+      // Immediate tick fires.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.loading).toBe(true);
+      expect(result.current.warehouseStatus).toBeNull();
+
+      // Warehouse status event arrives.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "STARTING", elapsedMs: 500 },
+          }),
+        });
+      });
+      expect(result.current.warehouseStatus).toEqual({
+        state: "STARTING",
+        elapsedMs: 500,
+      });
+      expect(result.current.loading).toBe(true);
+
+      // Result arrives.
+      await act(async () => {
+        await lastConnectArgs.onMessage({
+          data: JSON.stringify({ type: "result", data: [{ id: 1 }] }),
+        });
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.warehouseStatus).toEqual({
+        state: "STARTING",
+        elapsedMs: 500,
+      });
+    });
+
+    test("poll field is present and typed when polling is enabled", () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, { poll: true }),
+      );
+
+      expect(result.current.poll).toBeDefined();
+      expect(result.current.poll?.paused).toBe(false);
+      expect(result.current.poll?.pause).toBeInstanceOf(Function);
+      expect(result.current.poll?.resume).toBeInstanceOf(Function);
+      expect(result.current.poll?.restart).toBeInstanceOf(Function);
+      expect(result.current.poll?.refetch).toBeInstanceOf(Function);
+      expect(result.current.poll?.attempts).toEqual(0);
+      expect(result.current.poll?.errors).toEqual(0);
+      expect(result.current.poll?.skipped).toEqual(0);
+      expect(result.current.poll?.consecutiveErrors).toEqual(0);
+      expect(result.current.poll?.lastLatencyMs).toBe(null);
+      expect(result.current.poll?.latency).toEqual({ p50: null, p95: null });
+    });
+
+    test("poll field is absent when polling is not enabled", () => {
+      const { result } = renderHook(() => useAnalyticsQuery("q", null));
+
+      expect(result.current.poll).toBeUndefined();
+    });
+
+    test("poll pause/resume controls work correctly", async () => {
+      const { result } = renderHook(() =>
+        useAnalyticsQuery("q", null, {
+          poll: { intervalMs: 100, immediate: true },
+        }),
+      );
+
+      // Immediate tick.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.poll?.attempts).toBe(1);
+
+      // Pause.
+      await act(async () => {
+        result.current.poll?.pause();
+      });
+      expect(result.current.poll?.paused).toBe(true);
+
+      // Advance time; no new tick should fire while paused.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(result.current.poll?.attempts).toBe(1);
+
+      // Resume.
+      await act(async () => {
+        result.current.poll?.resume();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.poll?.paused).toBe(false);
+      // Resume fires immediately, then continues on cadence.
+      expect(result.current.poll?.attempts).toBe(2);
+    });
+  });
 });

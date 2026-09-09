@@ -18,6 +18,7 @@ import type {
   UseAnalyticsQueryResult,
 } from "./types";
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
+import { usePoll } from "./use-poll";
 import { useQueryHMR } from "./use-query-hmr";
 
 /** Shallow equality for plain-object query parameters (primitive values only). */
@@ -105,7 +106,11 @@ export function useAnalyticsQuery<
 ): UseAnalyticsQueryResult<InferResultByFormat<T, K, F>> {
   const format = options?.format ?? "JSON_ARRAY";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
-  const autoStart = options?.autoStart ?? true;
+  const pollOption = options?.poll;
+  const isPolling = pollOption !== undefined;
+  // When polling, autoStart is always false (scheduler is sole trigger).
+  // Otherwise, respect the autoStart option (default true).
+  const autoStart = isPolling ? false : (options?.autoStart ?? true);
 
   const devMode = getDevMode();
   const urlSuffix = `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`;
@@ -152,6 +157,14 @@ export function useAnalyticsQuery<
   // request is retained and the store reports the stable idle snapshot.
   const cacheKey = `${urlSuffix}::${payload}`;
 
+  // Track the current cacheKey to guard against late-event races.
+  // When params change to a new key mid-flight, late completions from the old key
+  // will patch the old key's entry, not the current entry.
+  const cacheKeyRef = useRef(cacheKey);
+  useEffect(() => {
+    cacheKeyRef.current = cacheKey;
+  }, [cacheKey]);
+
   const subscribe = useCallback(
     (listener: () => void) => store.subscribe(cacheKey, listener),
     [cacheKey],
@@ -167,6 +180,8 @@ export function useAnalyticsQuery<
   // Register with the shared store on mount / key change; release on cleanup.
   // The store starts the request on first retain of a key and reuses the
   // in-flight request for later subscribers.
+  // When polling is enabled, autoStart is false so the scheduler (usePoll)
+  // is the sole trigger via store.refetch().
   useEffect(() => {
     if (payload === null) return;
     return store.retain(
@@ -195,7 +210,62 @@ export function useAnalyticsQuery<
 
   useQueryHMR(queryKey, start);
 
-  return {
+  // === Polling Integration ===
+  // When polling is enabled, integrate the usePoll scheduler.
+  // Each tick calls refetch(cacheKey) to force uncached re-execution of the current key.
+  const pollRunOnce = useCallback(async () => {
+    // Call refetch with the CURRENT cacheKey to guard against late-event races.
+    // If params changed mid-flight, the old key's completion patches the old entry;
+    // only the current key's completion updates the snapshot we read from.
+    store.refetch(cacheKeyRef.current);
+  }, []);
+
+  const pollConfig = useMemo(() => {
+    if (!isPolling) {
+      // When polling is not enabled, return a config that keeps the scheduler paused.
+      return { immediate: false };
+    }
+    // If poll is a plain `true`, use all defaults (which includes immediate: true).
+    if (pollOption === true) {
+      return {};
+    }
+    // Otherwise, extract the config object.
+    return {
+      intervalMs: (pollOption as any).intervalMs,
+      immediate: (pollOption as any).immediate,
+      backoff: (pollOption as any).backoff,
+      maxConsecutiveErrors: (pollOption as any).maxConsecutiveErrors,
+    };
+  }, [isPolling, pollOption]);
+
+  const pollResult = usePoll(pollRunOnce, pollConfig);
+
+  // Fire the onPoll callback on each settle (after each poll tick completes).
+  // The callback receives the current snapshot state.
+  useEffect(() => {
+    if (!isPolling || pollOption === true) return;
+    const onPoll = (pollOption as any).onPoll;
+    if (!onPoll) return;
+
+    // Fire the callback whenever the snapshot changes and the poll has settled.
+    onPoll({
+      data: snapshot.data,
+      loading: snapshot.loading,
+      error: snapshot.error,
+      errorCode: snapshot.errorCode,
+      warehouseStatus: snapshot.warehouseStatus,
+    });
+  }, [
+    isPolling,
+    pollOption,
+    snapshot.data,
+    snapshot.loading,
+    snapshot.error,
+    snapshot.errorCode,
+    snapshot.warehouseStatus,
+  ]);
+
+  const result: UseAnalyticsQueryResult<ResultType> = {
     data: snapshot.data as ResultType | null,
     loading: snapshot.loading,
     // A serialization failure never creates a store entry, so surface it here.
@@ -206,4 +276,23 @@ export function useAnalyticsQuery<
     errorCode: snapshot.errorCode,
     warehouseStatus: snapshot.warehouseStatus,
   };
+
+  // Add polling controls and telemetry if polling is enabled.
+  if (isPolling) {
+    result.poll = {
+      paused: pollResult.paused,
+      pause: pollResult.pause,
+      resume: pollResult.resume,
+      restart: pollResult.restart,
+      refetch: pollResult.refetch,
+      attempts: pollResult.attempts,
+      errors: pollResult.errors,
+      skipped: pollResult.skipped,
+      consecutiveErrors: pollResult.consecutiveErrors,
+      lastLatencyMs: pollResult.lastLatencyMs,
+      latency: pollResult.latency,
+    };
+  }
+
+  return result;
 }

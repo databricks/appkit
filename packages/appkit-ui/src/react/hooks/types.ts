@@ -44,6 +44,129 @@ export interface TypedArrowTable<
 // Query Options & Result Types
 // ============================================================================
 
+/**
+ * Polling configuration for continuous re-execution of analytics queries.
+ *
+ * When enabled, the query will re-execute on a defined interval, always bypassing
+ * the server cache to fetch fresh data. Each poll tick represents a new database
+ * round-trip.
+ */
+export interface UseAnalyticsQueryPollOptions {
+  /**
+   * Interval between poll ticks in milliseconds. Default: 1000.
+   * Ignored if `poll` is a plain `true`; use the default interval instead.
+   */
+  intervalMs?: number;
+
+  /**
+   * If true (default), fire once at t=0 before entering the interval cadence.
+   * Ignored if `poll` is a plain `true`; use the default behavior (fire immediately).
+   */
+  immediate?: boolean;
+
+  /**
+   * Exponential backoff configuration applied on poll errors.
+   * Default: 1→2→4→8→8… seconds, capped at 8 seconds.
+   * Ignored if `poll` is a plain `true`; use the default backoff.
+   */
+  backoff?: {
+    /** Base backoff in milliseconds. Default: 1000. */
+    baseMs?: number;
+    /** Exponential multiplier. Default: 2. */
+    multiplier?: number;
+    /** Maximum backoff in milliseconds. Default: 8000. */
+    maxMs?: number;
+  };
+
+  /**
+   * Pause the polling scheduler after this many consecutive errors.
+   * If unset, the scheduler retries indefinitely.
+   * Ignored if `poll` is a plain `true`; no max-error threshold applied.
+   */
+  maxConsecutiveErrors?: number;
+
+  /**
+   * Callback fired on each poll settle (after each request completes or errors).
+   * Receives the current settled state: `data`, `loading`, `error`, `errorCode`, `warehouseStatus`.
+   * Useful for side effects, metrics, or aborting polling based on conditions.
+   */
+  onPoll?: (result: {
+    data: unknown;
+    loading: boolean;
+    error: string | null;
+    errorCode: string | null;
+    warehouseStatus: WarehouseStatus | null;
+  }) => void;
+}
+
+/**
+ * Telemetry and controls returned by polling in `useAnalyticsQuery`.
+ * Present only when the `poll` option is enabled.
+ */
+export interface UseAnalyticsQueryPollResult {
+  /**
+   * True if the polling scheduler is paused (no ticking, no pending timer).
+   */
+  paused: boolean;
+
+  /**
+   * Pause the polling scheduler. No more ticks will fire until resume() is called.
+   */
+  pause: () => void;
+
+  /**
+   * Resume the polling scheduler. Polls immediately, then resumes the interval cadence.
+   */
+  resume: () => void;
+
+  /**
+   * Restart the polling scheduler. Clears all telemetry, backoff state, and in-flight
+   * tracking. The scheduler will not fire again unless resume() or refetch() is called.
+   */
+  restart: () => void;
+
+  /**
+   * Trigger an out-of-band poll immediately, ignoring the interval and backoff state.
+   * If a poll is already in-flight, this is skipped (increments skipped count).
+   */
+  refetch: () => void;
+
+  /**
+   * Total number of completed (settled) poll attempts.
+   */
+  attempts: number;
+
+  /**
+   * Total number of poll attempts that encountered an error.
+   */
+  errors: number;
+
+  /**
+   * Total number of poll ticks that were skipped because a request was already in-flight.
+   */
+  skipped: number;
+
+  /**
+   * Current count of consecutive errors. Resets to 0 on a successful poll.
+   */
+  consecutiveErrors: number;
+
+  /**
+   * Latency (in milliseconds) of the most recently settled poll, or null if no polls have settled yet.
+   */
+  lastLatencyMs: number | null;
+
+  /**
+   * Latency percentiles computed over all settled polls.
+   */
+  latency: {
+    /** 50th percentile (median) latency, or null if no polls have settled. */
+    p50: number | null;
+    /** 95th percentile latency, or null if fewer than 20 samples exist. */
+    p95: number | null;
+  };
+}
+
 /** Options for configuring an analytics SSE query */
 export interface UseAnalyticsQueryOptions<
   F extends AnalyticsFormat = "JSON_ARRAY",
@@ -56,6 +179,13 @@ export interface UseAnalyticsQueryOptions<
 
   /** Whether to automatically start the query when the hook is mounted. Default is true. */
   autoStart?: boolean;
+
+  /**
+   * Enable polling: re-execute the query on a defined interval, always bypassing
+   * the server cache for fresh data. Pass `true` for defaults (1s interval, immediate)
+   * or an object to customize interval, backoff, and other behavior.
+   */
+  poll?: true | UseAnalyticsQueryPollOptions;
 }
 
 /**
@@ -109,6 +239,10 @@ export interface UseAnalyticsQueryResult<T> {
    * remains `null` for cache hits where the server skips the readiness check.
    */
   warehouseStatus: WarehouseStatus | null;
+  /**
+   * Polling controls and telemetry. Present only when the `poll` option is enabled.
+   */
+  poll?: UseAnalyticsQueryPollResult;
 }
 
 /**
