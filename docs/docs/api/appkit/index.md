@@ -112,6 +112,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [TestContext](Interface.TestContext.md) | The `t` context passed to an eval's `test` function. |
 | [Thread](Interface.Thread.md) | - |
 | [ThreadStore](Interface.ThreadStore.md) | - |
+| [ThreadSummary](Interface.ThreadSummary.md) | Lightweight thread projection for a history list — no message bodies, so a sidebar of many threads stays cheap. `title` is already resolved (explicit rename, else derived from the first user message; may be empty when neither exists). Returned by [ThreadStore.listSummaries](Interface.ThreadStore.md#listsummaries). |
 | [ToolAnnotations](Interface.ToolAnnotations.md) | - |
 | [ToolConfig](Interface.ToolConfig.md) | - |
 | [ToolEntry](Interface.ToolEntry.md) | Single-tool entry for a plugin's internal tool registry. |

@@ -15,6 +15,7 @@ export type {
   Message,
   Thread,
   ThreadStore,
+  ThreadSummary,
   ToolAnnotations,
   ToolProvider,
 } from "shared";

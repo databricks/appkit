@@ -127,3 +127,52 @@ list(userId: string): Promise<Thread[]>;
 #### Returns
 
 `Promise`\<[`Thread`](Interface.Thread.md)[]\>
+
+***
+
+### listSummaries()?
+
+```ts
+optional listSummaries(userId: string): Promise<ThreadSummary[]>;
+```
+
+Optional cheap list projection for a history sidebar — summaries only, no
+message bodies. When a store omits it, the agents plugin falls back to
+deriving summaries from [list](#list) (correct, just heavier).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `userId` | `string` |
+
+#### Returns
+
+`Promise`\<[`ThreadSummary`](Interface.ThreadSummary.md)[]\>
+
+***
+
+### rename()?
+
+```ts
+optional rename(
+   threadId: string, 
+   userId: string, 
+title: string): Promise<boolean>;
+```
+
+Optional rename of a thread's title (user-scoped). Returns `false` when no
+matching thread exists for the user. When a store omits it, the rename
+route reports the operation as unsupported.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `threadId` | `string` |
+| `userId` | `string` |
+| `title` | `string` |
+
+#### Returns
+
+`Promise`\<`boolean`\>

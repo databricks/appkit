@@ -494,6 +494,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ThreadSummary",
+          label: "ThreadSummary"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ToolAnnotations",
           label: "ToolAnnotations"
         },
