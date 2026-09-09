@@ -25,9 +25,7 @@ class SkipSignal extends Error {
 /**
  * Deep partial match: every key in `expected` is present in `actual` and equal,
  * recursing into nested plain objects so extra actual keys are ignored. Arrays
- * must match element-for-element (same length, deep-equal items) — an array is
- * a value, not a partial shape, so reference equality would never match two
- * equal arrays parsed from JSON.
+ * match element-for-element (same length, deep-equal items).
  */
 function deepContains(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) {
@@ -39,8 +37,7 @@ function deepContains(actual: unknown, expected: unknown): boolean {
   }
   if (isPlainObject(expected)) {
     if (!isPlainObject(actual)) return false;
-    // Require the key to be present, so an expected `undefined` value does not
-    // silently match a key the actual args omit.
+    // Require the key present: an expected `undefined` must not match an omitted key.
     return Object.keys(expected).every(
       (key) =>
         Object.hasOwn(actual, key) && deepContains(actual[key], expected[key]),
@@ -86,11 +83,9 @@ export async function runEval(
   let sessionId: string | undefined;
   let lastTraceId: string | undefined;
   let lastSucceeded = false;
-  // Set when any turn fails at the transport/agent level (driver `succeeded:
-  // false`): surfaced as `infraFailure` so the runner can retry an infra flake.
+  // Any transport/agent turn failure (driver `succeeded: false`) → `infraFailure`, for retry.
   let turnFailed = false;
-  // Aborted when the per-eval timeout elapses, cancelling the in-flight turn so
-  // a timed-out eval doesn't leak a live stream past its deadline.
+  // Aborted on per-eval timeout to cancel the in-flight turn (no leaked stream).
   const controller = new AbortController();
 
   const record = (
@@ -189,10 +184,7 @@ export async function runEval(
     calledToolWith(name, expected) {
       const matching = toolCallDetails.filter((c) => c.name === name);
       const pass = matching.some((c) => deepContains(c.args, expected));
-      // Report only the *keys* the agent passed, never their values — actual
-      // args can carry PII/secrets and this detail is persisted into the
-      // JSON/JUnit reports and MLflow rationales (CWE-532). `expected` is
-      // operator-authored, so it stays.
+      // Keys only, never values: actual args may hold PII/secrets and are persisted to reports (CWE-532).
       const seen = matching.length
         ? matching
             .map((c) => `{${Object.keys(c.args).sort().join(", ")}}`)
@@ -250,12 +242,8 @@ export async function runEval(
     if (timeoutMs === undefined) {
       await def.test(t);
     } else {
-      // Race the test against a timeout; on elapse we abort the in-flight driver
-      // turn, reject, and convert it to a non-passing result. The timer is
-      // cleared in `finally` so it can't keep the process alive after the test
-      // settles. Note: only the driver turn is cancelled — a test that hangs in
-      // non-driver code (a `t.judge.*` call, an in-test sleep) still runs to its
-      // own completion, though the eval's result is already recorded by then.
+      // Race the test against the timeout; on elapse, abort the turn and settle
+      // non-passing. Only the driver turn cancels — non-driver hangs (judge, sleep) run on.
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();

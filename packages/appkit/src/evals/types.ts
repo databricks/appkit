@@ -199,9 +199,8 @@ export interface EvalResult {
   /** Set when the eval threw before completing. */
   error?: string;
   /**
-   * A turn failed at the transport/agent level (`succeeded: false`) rather than
-   * on an assertion — a retryable infra flake, distinct from `error` (a thrown
-   * error or per-eval timeout) and from an assertion mismatch (real signal).
+   * A turn failed at the transport/agent level (`succeeded: false`), not on an
+   * assertion — a retryable infra flake, distinct from `error`.
    */
   infraFailure?: boolean;
   /** MLflow trace id of the eval's last turn, for attaching assessments. */

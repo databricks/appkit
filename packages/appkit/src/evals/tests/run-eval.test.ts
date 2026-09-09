@@ -452,8 +452,7 @@ describe("runEval", () => {
   test("a per-eval timeout aborts the in-flight driver turn", async () => {
     let receivedSignal: AbortSignal | undefined;
     const driver: EvalDriver = {
-      // Resolve only once the turn is aborted — mimics a stream that ends on
-      // cancel rather than running to the driver's own (longer) timeout.
+      // Resolve only when aborted — mimics a stream that ends on cancel.
       send: async (_message, opts) => {
         receivedSignal = opts?.signal;
         await new Promise<void>((resolve) => {

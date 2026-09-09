@@ -89,14 +89,11 @@ export function formatResultsJson(results: EvalResult[]): string {
 }
 
 /**
- * Drop the characters XML 1.0 forbids even when escaped — the C0 control chars
- * except tab (9), LF (10), and CR (13). A raw NUL or ANSI escape from an agent
- * reply or tool arg would otherwise make the JUnit document not well-formed and
- * a strict CI parser reject it.
+ * Drop the C0 control chars XML 1.0 forbids even when escaped (except tab, LF,
+ * CR) — a raw NUL or ANSI escape would otherwise make the JUnit doc reject on parse.
  */
 function stripXmlControlChars(value: string): string {
-  // A regex char class is terser, but oxlint's `no-control-regex` rejects it
-  // (rule enabled repo-wide) — so filter by code point instead of suppressing.
+  // Code-point filter, not a regex: oxlint `no-control-regex` rejects the class.
   let out = "";
   for (const ch of value) {
     const code = ch.codePointAt(0) as number;

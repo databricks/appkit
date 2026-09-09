@@ -166,8 +166,7 @@ export function createHttpDriver(options: HttpDriverOptions): EvalDriver {
     ): Promise<DriveResult> {
       // Bounds connect + the entire read below. Passed to both the fetch and
       // the SSE reader: on expiry the reader is cancelled and the turn fails.
-      // Composed with the caller's signal (the runner's per-eval timeout) so a
-      // timed-out eval aborts this turn instead of leaking a live stream.
+      // Composed with the caller's signal so a per-eval timeout also aborts this turn.
       const timeout = AbortSignal.timeout(timeoutMs);
       const signal = opts?.signal
         ? AbortSignal.any([timeout, opts.signal])

@@ -73,12 +73,9 @@ export interface RunEvalsOptions {
    */
   timeoutMs?: number;
   /**
-   * Re-run an eval up to this many extra times when it fails on an
-   * infrastructure failure — a thrown error or per-eval timeout (`result.error`)
-   * or a turn that failed at the transport/agent level (`result.infraFailure`,
-   * e.g. a failed fetch, 5xx, or dropped stream) — to absorb transient
-   * turn/stream flakiness. Assertion failures are NEVER retried (a wrong reply
-   * is real signal, not flake). Defaults to `0`.
+   * Re-run an eval up to this many extra times when it fails on infrastructure —
+   * a thrown error/timeout (`result.error`) or a transport/agent turn failure
+   * (`result.infraFailure`). Assertion failures are never retried. Defaults to `0`.
    */
   retries?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
@@ -146,8 +143,7 @@ async function loadEvalConfig(file: string): Promise<EvalConfig | undefined> {
  */
 export function resolveConfigDefault(mod: unknown): EvalConfig | undefined {
   let candidate: unknown = mod;
-  // The `i < 4` cap already bounds a self-referential `default` chain, so no
-  // visited-set is needed (mirrors resolveEvalDefault).
+  // `i < 4` bounds the chain; no visited-set needed (cf. resolveEvalDefault).
   for (let i = 0; i < 4 && candidate; i++) {
     const next = (candidate as { default?: unknown }).default;
     if (next === undefined) {
@@ -192,12 +188,8 @@ async function runOne(
   options: RunEvalsOptions,
 ): Promise<EvalResult> {
   try {
-    // Retry on an infrastructure failure — a thrown error or per-eval timeout
-    // (`result.error`), or a turn that failed at the transport/agent level
-    // (`result.infraFailure`, e.g. a dropped stream or 5xx) — to absorb
-    // transient turn/stream flakiness; assertion failures are real signal and
-    // returned on the first try. Each attempt gets a fresh driver, so its thread
-    // never carries over the failed attempt's history.
+    // Each attempt builds a fresh driver, so a retry never inherits the failed
+    // attempt's thread. (runWithRetries defines what counts as retryable.)
     return await runWithRetries(options.retries ?? 0, () =>
       runEval(def, {
         id,
@@ -206,9 +198,7 @@ async function runOne(
           agent: def.agent ?? d.agent,
           headers: options.headers,
           mlflowRunId: runId,
-          // Match the driver's per-turn cap to the eval's effective timeout so a
-          // `def.timeoutMs` shorter than the driver default can't leave the turn
-          // running past the deadline (`runEval` also aborts it via its signal).
+          // Cap the driver turn at the eval's effective timeout (runEval's signal also aborts it).
           timeoutMs: def.timeoutMs ?? options.timeoutMs,
         }),
         strict: options.strict,
@@ -286,8 +276,7 @@ async function runDiscovered(
 ): Promise<void> {
   const id = `${d.agent}/${d.id}`;
 
-  // The file failed to load in the pre-pass (its `def` is an unused
-  // placeholder) — surface that as one non-passing result.
+  // Load failed in the pre-pass (def is a placeholder) → one non-passing result.
   if (loadError) {
     emit({ type: "start", id, index, total });
     const result: EvalResult = {
@@ -329,11 +318,9 @@ const MAX_RETRY_DELAY_MS = 5_000;
  * neither, so a failed-but-completed eval is returned on the first try and
  * never retried. Returns the last result when every attempt failed on infra.
  *
- * Between attempts it waits a full-jittered exponential backoff — the targeted
- * infra flakes (connection refused, the app's 429 stream-cap) are
- * overload-correlated, so retrying instantly would amplify load. `retries` is
- * coerced to a finite, non-negative integer, so a `NaN`/`Infinity` from direct
- * API misuse can't loop forever. `baseDelayMs: 0` disables the wait (tests).
+ * Between attempts it waits a full-jittered exponential backoff (infra flakes
+ * are overload-correlated). `retries` is coerced to a finite non-negative
+ * integer; `baseDelayMs: 0` disables the wait (tests).
  */
 export async function runWithRetries(
   retries: number,
@@ -423,13 +410,10 @@ async function finalizeMlflow(
 const DEFAULT_CONCURRENCY = 4;
 
 /**
- * Resolve the work-pool width: `--concurrency` wins; otherwise the lowest
- * `maxConcurrency` any *participating* agent's `evals.config.ts` requests
- * (every eval drives the app as the same user and shares one per-user stream
- * budget, so the most conservative ceiling governs — a `Math.max` would let one
- * lax agent raise another's limit past its intent and the server's stream cap);
- * an agent with no eval in this run doesn't constrain it. Falls back to
- * {@link DEFAULT_CONCURRENCY}.
+ * Resolve the work-pool width: `--concurrency` wins; else the lowest
+ * `maxConcurrency` any *participating* agent's `evals.config.ts` requests (all
+ * evals share one per-user stream budget, so the most conservative ceiling
+ * governs); else {@link DEFAULT_CONCURRENCY}.
  */
 export function deriveConcurrency(
   activeAgents: Set<string>,
@@ -507,11 +491,7 @@ export async function runEvalsInDir(
     loaded.push({ d, def });
   }
 
-  // `evals.config.ts` `maxConcurrency` governs the single shared work pool (all
-  // evals run as the same user against one per-user stream budget). Take the
-  // lowest ceiling any *participating* agent requests so a filtered-out or laxer
-  // agent can't raise another's limit past its intent — see
-  // {@link deriveConcurrency}.
+  // Pool width from participating agents' configs (see {@link deriveConcurrency}).
   const activeAgents = new Set(loaded.map((l) => l.d.agent));
   const concurrency = deriveConcurrency(
     activeAgents,

@@ -92,18 +92,14 @@ function parseHeaders(values: string[]): Record<string, string> {
 }
 
 /**
- * Parse `--min-pass-rate`: a finite number in `[0, 1]`, or `undefined` when the
- * flag is unset. Rejects out-of-range and partially-numeric input (`0.5junk`,
- * `-1`, `2`) by throwing — `Number` (unlike `parseFloat`) rejects trailing junk
- * — so a bad gate value fails fast instead of silently disabling the CI gate
- * (`-1` would pass every suite) or inverting it (`2`/`90` would fail every one).
+ * Parse `--min-pass-rate`: a finite number in `[0, 1]`, or `undefined` when
+ * unset. Throws on blank, out-of-range, or non-numeric input so a bad gate
+ * value fails fast instead of silently disabling or inverting the CI gate.
  */
 export function parsePassRate(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const n = Number(raw);
-  // `Number("")` and `Number("   ")` are 0 — a valid-looking threshold that
-  // would silently turn an empty/unset CI value (`--min-pass-rate "$VAR"`) into
-  // an always-pass gate. Reject a blank value rather than treat it as 0.
+  // Reject blank too: `Number("")` is 0, which would silently disable the gate.
   if (raw.trim() === "" || !Number.isFinite(n) || n < 0 || n > 1) {
     throw new Error(
       `Invalid --min-pass-rate "${raw}" — expected a number in [0, 1]`,
@@ -277,8 +273,7 @@ async function runAgentEval(
   const retries =
     parsedRetries && parsedRetries > 0 ? parsedRetries : undefined;
 
-  // Validate the pass-rate gate up front: a bad value should fail before a whole
-  // run, not silently disable/invert the gate at the end.
+  // Validate up front so a bad gate value fails before the run, not after.
   let minPassRate: number | undefined;
   try {
     minPassRate = parsePassRate(opts.minPassRate);

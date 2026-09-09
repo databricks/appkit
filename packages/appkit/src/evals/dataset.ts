@@ -35,9 +35,7 @@ export interface ReadEvalDatasetOptions {
  */
 export function userTurns(input: Record<string, unknown>): string[] {
   const messages = Array.isArray(input.messages) ? input.messages : [];
-  // Guard each entry: a managed dataset row is external data, so a `null` or
-  // non-object entry must not crash the read, and non-string content coerces to
-  // "" rather than violate the declared `string[]` return.
+  // Dataset rows are external data: skip null/non-object entries; coerce non-string content to "".
   return messages
     .filter(
       (m): m is { role?: unknown; content?: unknown } =>
