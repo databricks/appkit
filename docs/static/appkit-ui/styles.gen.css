@@ -657,6 +657,9 @@
   .h-\[200px\] {
     height: 200px;
   }
+  .h-\[700px\] {
+    height: 700px;
+  }
   .h-\[calc\(100\%-1px\)\] {
     height: calc(100% - 1px);
   }
@@ -836,6 +839,9 @@
   }
   .max-w-\[80\%\] {
     max-width: 80%;
+  }
+  .max-w-\[85\%\] {
+    max-width: 85%;
   }
   .max-w-\[calc\(100\%-2rem\)\] {
     max-width: calc(100% - 2rem);
@@ -1515,6 +1521,9 @@
   .py-12 {
     padding-block: calc(var(--spacing) * 12);
   }
+  .py-20 {
+    padding-block: calc(var(--spacing) * 20);
+  }
   .pt-0 {
     padding-top: calc(var(--spacing) * 0);
   }
@@ -1713,6 +1722,12 @@
   }
   .text-muted-foreground {
     color: var(--muted-foreground);
+  }
+  .text-muted-foreground\/60 {
+    color: var(--muted-foreground);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+    }
   }
   .text-popover-foreground {
     color: var(--popover-foreground);
@@ -2727,6 +2742,11 @@
       color: var(--accent-foreground);
     }
   }
+  .focus\:text-destructive {
+    &:focus {
+      color: var(--destructive);
+    }
+  }
   .focus\:shadow-md {
     &:focus {
       --tw-shadow: 0 4px 6px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 2px 4px -2px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
@@ -2774,6 +2794,11 @@
   .focus-visible\:border-ring {
     &:focus-visible {
       border-color: var(--ring);
+    }
+  }
+  .focus-visible\:opacity-100 {
+    &:focus-visible {
+      opacity: 100%;
     }
   }
   .focus-visible\:shadow-none {

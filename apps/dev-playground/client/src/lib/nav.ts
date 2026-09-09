@@ -116,6 +116,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: BotIcon,
       },
       {
+        to: "/agent-history",
+        label: "Agent History",
+        description:
+          "Persistent chat history with <ThreadList> + <AgentThread> — resume, rename, delete across restarts.",
+        icon: LayersIcon,
+      },
+      {
         to: "/genie",
         label: "Genie",
         description:

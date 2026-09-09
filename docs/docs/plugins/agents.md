@@ -528,6 +528,46 @@ interface ThreadStore {
 For the exact exported symbols, run `npx @databricks/appkit docs` and open the
 `appkit` API reference.
 
+### Chat-history UI (`@databricks/appkit-ui`)
+
+The persistence above powers a history sidebar on the client. `@databricks/appkit-ui/react/beta` ships two hooks and two drop-in components (beta), built on the thread endpoints (`GET /threads` summaries, `GET /threads/:id`, `PATCH`/`DELETE /threads/:id`):
+
+| Export | Kind | What it does |
+| --- | --- | --- |
+| `useAgentThreads()` | hook | Lists thread summaries; `deleteThread` / `renameThread` (optimistic); `refetch`. Owns the list, not the active chat. |
+| `useAgentThread(threadId?)` | hook | One conversation's transcript — loads history, streams turns (on `useAgentChat`), resumes an existing thread or creates a new one. |
+| `<ThreadList>` | component | History sidebar over `useAgentThreads`: controlled selection (`activeThreadId` / `onSelect`), per-row rename + delete. |
+| `<AgentThread>` | component | Transcript + composer over `useAgentThread`; `onThreadCreated` / `onTurnComplete` let the page refresh the list. |
+
+They're **sibling** pieces (the list and the active conversation are separate lifecycles) — compose them at the page level; the page holds the active thread id:
+
+```tsx
+import { AgentThread, ThreadList } from "@databricks/appkit-ui/react/beta";
+
+function AgentHistory() {
+  const [active, setActive] = useState<string>();
+  const [refresh, setRefresh] = useState(0);
+  return (
+    <div className="flex gap-4 h-[700px]">
+      <ThreadList
+        activeThreadId={active}
+        onSelect={setActive}
+        onNewThread={() => setActive(undefined)}
+        refetchSignal={refresh}
+      />
+      <AgentThread
+        key={active ?? "new"}
+        threadId={active}
+        onThreadCreated={setActive}
+        onTurnComplete={() => setRefresh((n) => n + 1)}
+      />
+    </div>
+  );
+}
+```
+
+The same components work with any `ThreadStore` — the list just isn't durable across restarts unless the agent uses `LakebaseThreadStore`. See the dev-playground `Agent History` route for a working example. `<AgentThread>` renders plain-text messages in v1 (markdown and tool-call chips are a planned enhancement).
+
 ## Configuration reference
 
 ```ts
