@@ -290,6 +290,20 @@ const { data, loading, error } = useAnalyticsQuery(
   loading: boolean; // true while the query is executing
   error: string | null; // error message, or null on success
   warehouseStatus: WarehouseStatus | null; // see "Warehouse readiness" below
+  poll?: {
+    // Present only when polling is enabled
+    paused: boolean;
+    pause(): void;
+    resume(): void;
+    restart(): void;
+    refetch(): void;
+    attempts: number;
+    errors: number;
+    skipped: number;
+    consecutiveErrors: number;
+    lastLatencyMs: number | null;
+    latency: { p50: number | null; p95: number | null };
+  };
 }
 ```
 
@@ -300,6 +314,7 @@ const { data, loading, error } = useAnalyticsQuery(
 | `format`            | `"JSON" \| "ARROW"` | `"JSON"` | Response format                         |
 | `maxParametersSize` | `number`            | `102400` | Max serialized parameters size in bytes |
 | `autoStart`         | `boolean`           | `true`   | Start query on mount                    |
+| `poll`              | (see below)         | `undefined` | Enable periodic query execution (see [Polling](#polling)) |
 
 ### Warehouse readiness
 
@@ -511,6 +526,107 @@ const { data } = useAnalyticsQuery("users", params);
 
 // Bad - creates a new object every render, causing infinite refetches
 const { data } = useAnalyticsQuery("users", { status: sql.string("active") });
+```
+
+### Polling
+
+Enable periodic query execution by passing a `poll` option. This is useful for dashboards that need to refresh data at regular intervals:
+
+```ts
+import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
+
+const { data, loading, error, poll } = useAnalyticsQuery(
+  "spend_summary",
+  params,
+  {
+    poll: {
+      intervalMs: 5000, // Query every 5 seconds
+      immediate: true,  // Fire once at mount
+      onPoll: (result) => console.log("New data:", result.data),
+    },
+  },
+);
+```
+
+**Poll option structure:**
+
+| Field                 | Type     | Default                        | Description                                                                               |
+| -------------------- | -------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `intervalMs`          | `number` | `1000`                         | Milliseconds between query executions                                                      |
+| `immediate`           | `boolean` | `true`                         | Fire the first query at mount (`true`) or defer until the next interval tick (`false`)    |
+| `backoff`             | object   | `{ baseMs: 1000, multiplier: 2, maxMs: 8000 }` | Exponential backoff on consecutive errors — grows delays: 1s, 2s, 4s, 8s, 8s, …           |
+| `backoff.baseMs`      | `number` | `1000`                         | Initial backoff delay in milliseconds                                                     |
+| `backoff.multiplier`  | `number` | `2`                            | Multiplier for each retry                                                                 |
+| `backoff.maxMs`       | `number` | `8000`                         | Maximum backoff delay; subsequent errors stay at this cap                                 |
+| `maxConsecutiveErrors` | `number` | `undefined` (unlimited)        | Pause polling after this many consecutive errors. `undefined` means retry indefinitely     |
+| `onPoll`              | function | `undefined`                    | Callback fired on each poll settle with `{ data, loading, error }`                        |
+
+When `poll` is enabled, the hook returns an additional `poll` field with scheduler control and telemetry:
+
+| Field                | Type                 | Description                                                    |
+| -------------------- | -------------------- | -------------------------------------------------------------- |
+| `paused`              | `boolean`            | Whether polling is currently paused                            |
+| `pause()`             | function             | Pause the polling scheduler; does not abort in-flight queries  |
+| `resume()`            | function             | Resume polling immediately, then re-enter the cadence          |
+| `restart()`           | function             | Pause, reset scheduler state (backoff, attempts), then resume  |
+| `refetch()`           | function             | Trigger a poll immediately without resetting the interval      |
+| `attempts`            | `number`             | Total poll executions so far                                   |
+| `errors`              | `number`             | Total failures so far                                          |
+| `skipped`             | `number`             | Queries skipped due to in-flight or paused state               |
+| `consecutiveErrors`   | `number`             | Current consecutive error count (resets to 0 on success)       |
+| `lastLatencyMs`       | `number \| null`     | Latency of the most recent poll (ms), or `null` if none yet    |
+| `latency`             | object               | P50 and P95 latency percentiles across all polls so far         |
+
+**Key behavior notes:**
+
+- **Each poll tick re-hits the warehouse** — polling ignores the server-side TTL cache. Rows are always fresh.
+- **Parameter changes are picked up on the next tick** — if a parent component changes `params`, the hook continues with the existing interval; the new parameters take effect on the subsequent poll.
+- **`data` is latest-only** — it contains only the most recent result, not accumulated rows. Drive row accumulation, cursors, and row-arrival logic from the `onPoll` callback or store the entire `data` array in a ref/state to build your own history.
+- **Avoid UI flicker** — `loading` toggles on every tick's in-flight query, which can cause spinners to flash repeatedly. **Do not drive full-page spinners off `loading` in poll mode.** Instead:
+  - Show spinners only for the **first load** (`attempts === 1 && loading`)
+  - Or surface only `warehouseStatus` to show cold-start warmup, then update data in place without a spinner during steady polling
+  - Use `poll.lastLatencyMs` to detect stalled queries and show an error indicator instead of a spinner
+
+**Example: updating a live table without UI flicker:**
+
+```tsx
+import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
+import { useRef } from "react";
+
+function LiveTradeTable() {
+  const tableRef = useRef<HTMLTableElement>(null);
+  const { data, loading, poll } = useAnalyticsQuery(
+    "trades",
+    params,
+    {
+      poll: { intervalMs: 2000 },
+    },
+  );
+
+  // Show skeleton only on first load, not on every tick
+  if (loading && poll?.attempts === 1) {
+    return <div>Loading live data…</div>;
+  }
+
+  return (
+    <table ref={tableRef}>
+      <tbody>
+        {data?.map((row) => (
+          <tr key={row.id}>
+            <td>{row.symbol}</td>
+            <td>${row.price}</td>
+            <td>
+              {/* Optional: show latency or error recovery status */}
+              {poll?.consecutiveErrors > 0 && (
+                <span className="text-red-500">Stalled ({poll.consecutiveErrors})</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 ```
 
 ### useMetricView
