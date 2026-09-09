@@ -146,6 +146,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.73.0](https://github.com/databricks/appkit/compare/v0.72.0...v0.73.0) (2026-09-08)
+
+### appkit
+
+* **appkit:** bind `this` on asUser exports so OBO methods keep their receiver ([#577](https://github.com/databricks/appkit/issues/577)) ([e15b087](https://github.com/databricks/appkit/commit/e15b0872dfc6b21a4002d74e7757177c036d692e)), closes [#385](https://github.com/databricks/appkit/issues/385)
+* **appkit:** add database mutations and transactional hooks ([#528](https://github.com/databricks/appkit/issues/528)) ([3e1c6f2](https://github.com/databricks/appkit/commit/3e1c6f239ef16364aab869600fad99f7a54048fa))
+* **appkit:** managed eval datasets + turn semantics (stack 3/5) ([#479](https://github.com/databricks/appkit/issues/479)) ([28fc9b6](https://github.com/databricks/appkit/commit/28fc9b6327ef98c950cd6cef22067994755be92d))
+
+
 ## [0.72.0](https://github.com/databricks/appkit/compare/v0.71.0...v0.72.0) (2026-09-04)
 
 ### appkit
