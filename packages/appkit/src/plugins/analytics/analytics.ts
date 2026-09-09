@@ -28,7 +28,6 @@ import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
-import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import {
@@ -245,8 +244,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format: rawFormat = "JSON_ARRAY" } =
-      req.body as IAnalyticsQueryRequest;
+    const {
+      parameters,
+      format: rawFormat = "JSON_ARRAY",
+      skipCache = false,
+    } = req.body as IAnalyticsQueryRequest;
 
     if (
       rawFormat !== "JSON_ARRAY" &&
@@ -305,6 +307,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         query,
         isAsUser,
         parameters,
+        skipCache,
       );
       return;
     }
@@ -317,6 +320,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     const cacheConfig = {
       ...queryDefaults.cache,
+      // When skipCache is true (used by polling/refetch), disable caching
+      // to force fresh execution on every request.
+      enabled: skipCache ? false : queryDefaults.cache?.enabled,
       cacheKey: [
         "analytics:query",
         query_key,
@@ -821,6 +827,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     query: string,
     isAsUser: boolean,
     parameters: IAnalyticsQueryRequest["parameters"],
+    skipCache: boolean = false,
   ): Promise<void> {
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
@@ -871,6 +878,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           query,
           parameters,
           executorKey,
+          skipCache,
         ),
         this.SQLClient,
         query,
@@ -1002,6 +1010,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     query: string,
     parameters: IAnalyticsQueryRequest["parameters"],
     executorKey: string,
+    skipCache: boolean = false,
   ): QueryExecutor {
     const hashedQuery = this.queryProcessor.hashQuery(query);
     const cache = this.cache;
@@ -1016,6 +1025,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         ) {
           return executor.query(q, params, formatParameters, signal);
         }
+
+        // When skipCache is true (used by polling/refetch), bypass the cache
+        // and execute directly.
+        if (skipCache) {
+          return executor.query(q, params, formatParameters, signal);
+        }
+
         // On a standard warehouse this throws a capability rejection — the
         // cache never stores a rejection, so the fallback still sees the
         // structured error. On Reyden it returns a bounded (<=25 MiB)

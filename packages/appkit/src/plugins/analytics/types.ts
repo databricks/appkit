@@ -125,6 +125,13 @@ export function normalizeAnalyticsFormat(
 export interface IAnalyticsQueryRequest {
   parameters?: Record<string, any>;
   format?: AnalyticsFormat;
+  /**
+   * Internal flag to bypass server-side TTL cache for this request.
+   * When true, the request re-hits the warehouse even with identical params.
+   * Used by polling/refetch operations to force fresh execution.
+   * @internal
+   */
+  skipCache?: boolean;
 }
 
 export interface AnalyticsQueryResponse {

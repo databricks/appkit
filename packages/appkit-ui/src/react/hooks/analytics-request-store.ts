@@ -34,6 +34,8 @@ interface AnalyticsRequestOptions {
   payload: string;
   /** Response format; selects the transport. */
   format: string;
+  /** @internal Force skip cache on next execution; cleared after each run. */
+  skipCache?: boolean;
 }
 
 /** Immutable per-key request state; mirrors the hook's public result shape. */
@@ -162,15 +164,35 @@ async function fetchArrowDirect(
  * format-appropriate transport, reporting state through `controls.patch`.
  */
 function runAnalyticsRequest(
+  cacheKey: string,
   options: AnalyticsRequestOptions,
 ): RequestRunner<AnalyticsRequestSnapshot> {
   return (controls) => {
     controls.patch(LOADING_SNAPSHOT);
 
+    // Check if this cache key is marked for uncached execution; if so,
+    // consume the mark and include skipCache in the payload.
+    const shouldSkipCache = options.skipCache || uncachedKeys.has(cacheKey);
+    if (shouldSkipCache && uncachedKeys.has(cacheKey)) {
+      uncachedKeys.delete(cacheKey);
+    }
+
+    // Build the actual request payload, including skipCache if needed.
+    let requestPayload = options.payload;
+    if (shouldSkipCache) {
+      try {
+        const parsed = JSON.parse(options.payload);
+        requestPayload = JSON.stringify({ ...parsed, skipCache: true });
+      } catch {
+        // If payload parsing fails, use the original payload and let it fail downstream.
+        requestPayload = options.payload;
+      }
+    }
+
     // ARROW_STREAM: the server streams raw Arrow IPC bytes back on the query
     // response body (no SSE). Fetch and decode directly.
     if (options.format === "ARROW_STREAM") {
-      void fetchArrowDirect(controls, options);
+      void fetchArrowDirect(controls, { ...options, payload: requestPayload });
       return;
     }
 
@@ -195,7 +217,7 @@ function runAnalyticsRequest(
 
     connectSSE({
       url: options.url,
-      payload: options.payload,
+      payload: requestPayload,
       signal: controls.signal,
       onMessage: (message) =>
         handleAnalyticsSseMessage(message.data, sseContext),
@@ -207,6 +229,13 @@ function runAnalyticsRequest(
 const store = createRequestStore<AnalyticsRequestSnapshot>(EMPTY_SNAPSHOT);
 
 /**
+ * Internal tracking of which cache keys should force uncached execution on their
+ * next run. Entries are removed after the run to avoid sticking to subsequent
+ * invocations with the same key.
+ */
+const uncachedKeys = new Set<string>();
+
+/**
  * Register a subscriber for `key`, starting the shared request on first use.
  * Returns a `release` function that must be called on unmount.
  */
@@ -215,12 +244,28 @@ export function retain(
   options: AnalyticsRequestOptions,
   autoStart = true,
 ): () => void {
-  return store.retain(key, runAnalyticsRequest(options), autoStart);
+  return store.retain(key, runAnalyticsRequest(key, options), autoStart);
 }
 
 export const start = store.start;
 export const subscribe = store.subscribe;
 export const getSnapshot = store.getSnapshot;
+
+/**
+ * Internal API: re-run a request with cache bypassed.
+ *
+ * Marks the key to force uncached execution on its next run, then calls
+ * store.start() to abort any in-flight run and restart. The mark is consumed
+ * immediately by the runner, so it doesn't persist across multiple refetch
+ * calls or independent hook instances.
+ *
+ * Phase 1 (dormant): used by polling scheduler and refetch in Phase 2+.
+ * @internal
+ */
+export function refetch(cacheKey: string): void {
+  uncachedKeys.add(cacheKey);
+  store.start(cacheKey);
+}
 
 /** Test-only: abort every in-flight request and clear the store. */
 export const resetAnalyticsRequestStore = store.reset;
