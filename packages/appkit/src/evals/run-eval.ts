@@ -3,6 +3,7 @@ import { judgeClosedQA, judgeCustom, judgeFactuality } from "./judge";
 import type {
   AssertionHandle,
   AssertionResult,
+  DriveResult,
   EvalDefinition,
   EvalDriver,
   EvalResult,
@@ -21,6 +22,34 @@ class SkipSignal extends Error {
   }
 }
 
+/**
+ * Deep partial match: every key in `expected` is present in `actual` and equal,
+ * recursing into nested plain objects so extra actual keys are ignored. Arrays
+ * match element-for-element (same length, deep-equal items).
+ */
+function deepContains(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((item, i) => deepContains(actual[i], item))
+    );
+  }
+  if (isPlainObject(expected)) {
+    if (!isPlainObject(actual)) return false;
+    // Require the key present: an expected `undefined` must not match an omitted key.
+    return Object.keys(expected).every(
+      (key) =>
+        Object.hasOwn(actual, key) && deepContains(actual[key], expected[key]),
+    );
+  }
+  return actual === expected;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface RunEvalOptions {
   /** Stable id for the eval (e.g. its file path relative to the evals dir). */
   id: string;
@@ -30,6 +59,11 @@ export interface RunEvalOptions {
   strict?: boolean;
   /** Dataset row bound to `t.input`/`t.expected` for dataset-driven evals. */
   row?: DatasetRow;
+  /**
+   * Runner-level default per-eval timeout (ms). `def.timeoutMs` wins over this;
+   * when both are unset the eval runs unbounded (current behavior).
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -45,9 +79,14 @@ export async function runEval(
   let reply = "";
   let lastInput = "";
   let toolCalls: string[] = [];
+  let toolCallDetails: DriveResult["toolCallDetails"] = [];
   let sessionId: string | undefined;
   let lastTraceId: string | undefined;
   let lastSucceeded = false;
+  // Any transport/agent turn failure (driver `succeeded: false`) → `infraFailure`, for retry.
+  let turnFailed = false;
+  // Aborted on per-eval timeout to cancel the in-flight turn (no leaked stream).
+  const controller = new AbortController();
 
   const record = (
     label: string,
@@ -95,11 +134,15 @@ export async function runEval(
   const t: TestContext = {
     async send(message) {
       lastInput = message;
-      const r = await options.driver.send(message);
+      const r = await options.driver.send(message, {
+        signal: controller.signal,
+      });
       reply = r.reply;
       toolCalls = r.toolCalls;
+      toolCallDetails = r.toolCallDetails;
       sessionId = r.sessionId;
       lastSucceeded = r.succeeded;
+      if (!r.succeeded) turnFailed = true;
       if (r.traceId) lastTraceId = r.traceId;
     },
     reset() {
@@ -138,6 +181,24 @@ export async function runEval(
         })`,
       );
     },
+    calledToolWith(name, expected) {
+      const matching = toolCallDetails.filter((c) => c.name === name);
+      const pass = matching.some((c) => deepContains(c.args, expected));
+      // Keys only, never values: actual args may hold PII/secrets and are persisted to reports (CWE-532).
+      const seen = matching.length
+        ? matching
+            .map((c) => `{${Object.keys(c.args).sort().join(", ")}}`)
+            .join(", ")
+        : "not called";
+      return record(
+        `calledToolWith(${name})`,
+        pass,
+        undefined,
+        `expected tool "${name}" to be called with ${JSON.stringify(
+          expected,
+        )} (arg keys seen: ${seen})`,
+      );
+    },
     check(value: string, matcher: Matcher) {
       const m = matcher(value);
       return record("check", m.pass, m.score, m.detail);
@@ -172,8 +233,25 @@ export async function runEval(
     },
   };
 
+  // `def.timeoutMs` (per-eval) wins over the runner default; when both are
+  // unset the eval runs unbounded (undefined = no timeout).
+  const timeoutMs = def.timeoutMs ?? options.timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
-    await def.test(t);
+    if (timeoutMs === undefined) {
+      await def.test(t);
+    } else {
+      // Race the test against the timeout; on elapse, abort the turn and settle
+      // non-passing. Only the driver turn cancels — non-driver hangs (judge, sleep) run on.
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`eval timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+      await Promise.race([Promise.resolve(def.test(t)), timeout]);
+    }
   } catch (err) {
     if (err instanceof SkipSignal) {
       return {
@@ -193,6 +271,8 @@ export async function runEval(
       error: err instanceof Error ? err.message : String(err),
       traceId: lastTraceId,
     };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const passed = assertions.every(
@@ -205,5 +285,9 @@ export async function runEval(
     assertions,
     passed,
     traceId: lastTraceId,
+    // Only a *failing* eval whose turn broke at the transport/agent level is a
+    // retryable infra flake; a passing eval (or a pure assertion mismatch, where
+    // the turn itself succeeded) is real signal and must not be retried.
+    infraFailure: (turnFailed && !passed) || undefined,
   };
 }

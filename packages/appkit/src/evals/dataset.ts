@@ -21,6 +21,30 @@ export interface ReadEvalDatasetOptions {
   limit?: number;
 }
 
+/**
+ * Extract every user-message content, in order, from an MLflow
+ * `{"messages":[{"role":"user","content":"..."}]}` input. A dataset row can
+ * carry a full multi-turn conversation; replaying these against one thread (one
+ * `t.send` per returned string) lets the agent see the accumulating history.
+ *
+ * Only `role === "user"` turns are returned — any interleaved `assistant`/
+ * `system` messages in the row are ignored, since the agent generates its own
+ * responses; you never inject the dataset's assistant turns. A single-user-turn
+ * row yields a one-element array (backward compatible); a row with no `messages`
+ * yields `[]`.
+ */
+export function userTurns(input: Record<string, unknown>): string[] {
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+  // Dataset rows are external data: skip null/non-object entries; coerce non-string content to "".
+  return messages
+    .filter(
+      (m): m is { role?: unknown; content?: unknown } =>
+        typeof m === "object" && m !== null,
+    )
+    .filter((m) => m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : ""));
+}
+
 /** A managed eval dataset is a UC table; only 3-level names are valid. */
 const UC_TABLE = /^[A-Za-z0-9_]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/;
 
