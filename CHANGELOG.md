@@ -148,6 +148,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.74.0](https://github.com/databricks/appkit/compare/v0.73.0...v0.74.0) (2026-09-09)
+
+### appkit
+
+* **appkit:** eval suite features — concurrency, retries, reporters (stack 4/5) ([#480](https://github.com/databricks/appkit/issues/480)) ([43e5fed](https://github.com/databricks/appkit/commit/43e5fedc999e594325dd4ba1d7be821cda4e2fe3))
+
+
 ## [0.73.0](https://github.com/databricks/appkit/compare/v0.72.0...v0.73.0) (2026-09-08)
 
 ### appkit
