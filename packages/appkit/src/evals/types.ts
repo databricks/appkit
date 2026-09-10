@@ -207,10 +207,13 @@ export interface EvalWebServer {
  * Eval config from `evals.config.ts` (via {@link defineEvalConfig}).
  *
  * Two scopes share this shape: a **root** `evals.config.ts` (project root) may
- * set run-wide settings — `baseUrl` and `webServer` — plus defaults for
- * `maxConcurrency`/`timeoutMs`; a **per-agent** `server/agents/<id>/evals/evals.config.ts`
- * sets only that agent's `maxConcurrency`/`timeoutMs` overrides (`baseUrl`/
- * `webServer` there are ignored — server lifecycle is run-wide).
+ * set run-wide settings — `baseUrl` and `webServer` — plus `maxConcurrency`/
+ * `timeoutMs`; a **per-agent** `server/agents/<id>/evals/evals.config.ts` may set
+ * that agent's `maxConcurrency`/`timeoutMs` (`baseUrl`/`webServer` there are
+ * ignored — server lifecycle is run-wide). Precedence for the shared numeric
+ * fields is CLI flag > root config > per-agent config > built-in default, so a
+ * per-agent value takes effect only when neither the flag nor the root config
+ * sets that field.
  */
 export interface EvalConfig {
   /** Max evals to run concurrently. */

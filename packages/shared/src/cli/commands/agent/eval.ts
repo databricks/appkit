@@ -144,12 +144,14 @@ async function isServerUp(url: string): Promise<boolean> {
  * reuse a server already answering at `url` (unless `reuseExisting: false`),
  * else spawn `command`, poll `url` until it answers or `timeoutMs` elapses.
  * Returns a `stop()` that kills the spawned process group (a no-op when the
- * server was reused). Logs go to stderr so a machine reporter's stdout stays
- * clean. Throws if the server never comes up.
+ * server was reused). Under a machine reporter (`machine`) our logs and the
+ * child's stdout are both routed to stderr, so the report stream on stdout
+ * stays clean. Throws if the server never comes up.
  */
 async function startWebServer(
   webServer: NonNullable<EvalConfig["webServer"]>,
   baseUrl: string,
+  machine: boolean,
 ): Promise<{ stop: () => void }> {
   const url = webServer.url ?? baseUrl;
   const reuse = webServer.reuseExisting !== false;
@@ -162,12 +164,13 @@ async function startWebServer(
 
   console.error(`Starting web server: ${webServer.command}`);
   // `detached` + a negative-PID kill lets us tear down the whole process group
-  // (dev servers spawn child processes). stdout/stderr inherit so the user sees
-  // build output; the server's stdout is not our report stream.
+  // (dev servers spawn child processes). Under a machine reporter the child's
+  // stdout is sent to our stderr (fd 2) so it can't corrupt the report we later
+  // write to stdout; in text mode it inherits so the user sees build output.
   const child: ChildProcess = spawn(webServer.command, {
     shell: true,
     detached: true,
-    stdio: "inherit",
+    stdio: machine ? ["ignore", 2, "inherit"] : "inherit",
   });
 
   let exited = false;
@@ -396,13 +399,15 @@ async function runAgentEval(
   };
 
   // Boot the app under test if the root config declares a webServer (reuses an
-  // already-running server unless told otherwise); always torn down after.
-  const server = config.webServer
-    ? await startWebServer(config.webServer, baseUrl)
-    : undefined;
-
+  // already-running server unless told otherwise); always torn down after. The
+  // boot runs inside the try so a server that never comes up takes the clean
+  // error path below instead of escaping as an unhandled rejection.
+  let server: { stop: () => void } | undefined;
   let summary: EvalRunSummary;
   try {
+    server = config.webServer
+      ? await startWebServer(config.webServer, baseUrl, machine)
+      : undefined;
     summary = await runner.runEvalsInDir({
       rootDir,
       baseUrl,
@@ -420,9 +425,10 @@ async function runAgentEval(
       onEvent: makeProgressReporter(runner, baseUrl, machine, info),
     });
   } catch (err) {
-    // Setup failures (e.g. a bad --experiment for the MLflow run) reject before
-    // any eval runs; surface a clean message + non-zero exit rather than an
-    // unhandled promise rejection with a raw stack.
+    // Setup failures — a web server that never comes up, or e.g. a bad
+    // --experiment for the MLflow run — reject before any eval runs; surface a
+    // clean message + non-zero exit rather than an unhandled promise rejection
+    // with a raw stack.
     console.error(
       `\nEval run failed: ${err instanceof Error ? err.message : String(err)}`,
     );
