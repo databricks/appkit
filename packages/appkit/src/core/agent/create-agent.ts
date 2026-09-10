@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 import { ConfigurationError } from "../../errors";
 import type { AgentDefinition } from "./types";
 
@@ -30,8 +32,25 @@ const AGENT_BRAND: unique symbol = Symbol.for("appkit.agent");
  *   },
  * });
  * ```
+ *
+ * @example Structured output
+ * ```ts
+ * const classify = createAgent({
+ *   instructions: "Classify the ticket.",
+ *   output: z.object({ category: z.string(), urgent: z.boolean() }),
+ * });
+ * // In-process, the result is typed via z.infer:
+ * const { output } = await runAgent(classify, { messages: "..." });
+ * output?.category; // string | undefined
+ * ```
  */
-export function createAgent(def: AgentDefinition): AgentDefinition {
+export function createAgent<S extends z.ZodType>(
+  def: AgentDefinition<z.infer<S>> & { output: S },
+): AgentDefinition<z.infer<S>>;
+export function createAgent(def: AgentDefinition): AgentDefinition;
+export function createAgent(
+  def: AgentDefinition<unknown>,
+): AgentDefinition<unknown> {
   detectCycles(def);
   // Non-enumerable + in-place: identity, JSON, and spread are unaffected.
   Object.defineProperty(def, AGENT_BRAND, {
@@ -58,11 +77,11 @@ export function isCreatedAgent(value: unknown): value is AgentDefinition {
  * Walks the `agents: { ... }` sub-agent tree via DFS and throws if a cycle is
  * found. Cycles would cause infinite recursion at tool-invocation time.
  */
-function detectCycles(def: AgentDefinition): void {
-  const visiting = new Set<AgentDefinition>();
-  const visited = new Set<AgentDefinition>();
+function detectCycles(def: AgentDefinition<unknown>): void {
+  const visiting = new Set<AgentDefinition<unknown>>();
+  const visited = new Set<AgentDefinition<unknown>>();
 
-  const walk = (current: AgentDefinition, path: string[]): void => {
+  const walk = (current: AgentDefinition<unknown>, path: string[]): void => {
     if (visited.has(current)) return;
     if (visiting.has(current)) {
       throw new ConfigurationError(

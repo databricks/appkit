@@ -1283,3 +1283,183 @@ describe("parseTextToolCalls", () => {
     expect(parseTextToolCalls(`${filler}${suffix}`)).toEqual([]);
   });
 });
+
+describe("DatabricksAdapter structured output", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    mockAuthenticate.mockClear();
+  });
+
+  interface FakeResponse {
+    ok: boolean;
+    status?: number;
+    /** SSE chunks for the streaming path. */
+    chunks?: string[];
+    /** Parsed body for the non-streaming (structured) path. */
+    json?: unknown;
+    text?: string;
+  }
+
+  /** Records each request body and replays queued responses in order. */
+  function capturingFetch(
+    bodies: Array<Record<string, unknown>>,
+    responses: FakeResponse[],
+  ): typeof globalThis.fetch {
+    let call = 0;
+    return vi.fn().mockImplementation((_url, init) => {
+      if (init?.body) bodies.push(JSON.parse(init.body));
+      const r = responses[Math.min(call, responses.length - 1)];
+      call++;
+      return Promise.resolve({
+        ok: r.ok,
+        status: r.status ?? (r.ok ? 200 : 400),
+        body: r.ok ? createReadableStream(r.chunks ?? []) : null,
+        json: () => Promise.resolve(r.json),
+        text: () => Promise.resolve(r.text ?? ""),
+      });
+    });
+  }
+
+  /** A non-streaming chat-completion body with a single JSON message. */
+  function completion(content: string): unknown {
+    return { choices: [{ message: { role: "assistant", content } }] };
+  }
+
+  async function collect(
+    gen: AsyncGenerator<AgentEvent>,
+  ): Promise<AgentEvent[]> {
+    const events: AgentEvent[] = [];
+    for await (const ev of gen) events.push(ev);
+    return events;
+  }
+
+  const outputSchema = {
+    type: "object",
+    properties: { answer: { type: "string" } },
+    required: ["answer"],
+  };
+
+  test("tool-free structured run is NON-streaming with response_format", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: true, json: completion('{"answer":"hi"}') },
+    ]);
+
+    const adapter = createAdapter();
+    const events = await collect(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: [],
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].stream).toBe(false);
+    expect(bodies[0].response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "structured_output",
+        schema: outputSchema,
+        strict: true,
+      },
+    });
+    expect(bodies[0].tools).toBeUndefined();
+    // The JSON arrives as a single `message` event (not streamed deltas).
+    expect(events).toContainEqual({
+      type: "message",
+      content: '{"answer":"hi"}',
+    });
+  });
+
+  test("does NOT send response_format when tools are present (stays streaming)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: true, chunks: [textDelta("done"), sseChunk("[DONE]")] },
+    ]);
+
+    const adapter = createAdapter();
+    await collect(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: createTestTools(),
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    expect(bodies[0].response_format).toBeUndefined();
+    expect(bodies[0].tools).toBeDefined();
+    expect(bodies[0].stream).toBe(true);
+  });
+
+  test("400 naming structured output strips response_format and retries once", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      {
+        ok: false,
+        status: 400,
+        text: "INVALID_PARAMETER_VALUE: Structured output is not currently supported with streaming.",
+      },
+      { ok: true, json: completion('{"answer":"ok"}') },
+    ]);
+
+    const adapter = createAdapter();
+    const events = await collect(
+      adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: [],
+          threadId: "t1",
+          outputSchema,
+        },
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    // First body carried response_format; the retry stripped it. Both non-streaming.
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].response_format).toBeDefined();
+    expect(bodies[1].response_format).toBeUndefined();
+    expect(events).toContainEqual({
+      type: "message",
+      content: '{"answer":"ok"}',
+    });
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: "status", status: "error" }),
+    );
+  });
+
+  test("a 400 NOT naming the param propagates (no strip-retry)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = capturingFetch(bodies, [
+      { ok: false, status: 400, text: "Bad request: token limit exceeded" },
+    ]);
+
+    const adapter = createAdapter();
+    await expect(
+      collect(
+        adapter.run(
+          {
+            messages: createTestMessages(),
+            tools: [],
+            threadId: "t1",
+            outputSchema,
+          },
+          { executeTool: vi.fn() },
+        ),
+      ),
+    ).rejects.toThrow(/token limit exceeded/);
+    // Only the original request — no retry for an unrelated 400.
+    expect(bodies).toHaveLength(1);
+  });
+});

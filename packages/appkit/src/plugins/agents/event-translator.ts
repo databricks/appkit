@@ -60,6 +60,14 @@ export class AgentEventTranslator {
             sequence_number: this.seqNum++,
           },
         ];
+      case "structured_output":
+        return [
+          {
+            type: "appkit.structured_output",
+            data: event.data,
+            sequence_number: this.seqNum++,
+          },
+        ];
       case "approval_pending":
         return [
           {
