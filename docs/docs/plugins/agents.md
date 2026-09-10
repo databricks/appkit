@@ -662,7 +662,7 @@ appkit.agents.getThreads(userId);   // list user's threads
 
 ## Evaluating agents
 
-AppKit ships an eve-style eval framework for the agents you build here. You author evals in TypeScript with `defineEval`, drive the agent by sending it messages, and assert on its reply and tool usage with deterministic matchers or LLM judges. Evals run against a **running app** over HTTP (`--url`), and — with Databricks creds and an experiment — report to MLflow as native "Evaluation runs" with per-assertion and per-judge feedback attached to each turn's trace. The eval API is part of the beta surface: import it from `@databricks/appkit/beta`.
+AppKit ships an eval framework for the agents you build here. You author evals in TypeScript with `defineEval`, drive the agent by sending it messages, and assert on its reply and tool usage with deterministic matchers or LLM judges. Evals run against a **running app** over HTTP (`--url`), and — with Databricks creds and an experiment — report to MLflow as native "Evaluation runs" with per-assertion and per-judge feedback attached to each turn's trace. The eval API is part of the beta surface: import it from `@databricks/appkit/beta`.
 
 Evals live beside each agent: `server/agents/<agent-id>/evals/*.eval.ts`. Each file default-exports one `defineEval({ test })`. The agent under test defaults to the parent `<agent-id>` directory; set `agent:` to target a different one.
 
