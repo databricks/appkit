@@ -848,7 +848,7 @@ appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000
 | `--experiment <id>` | MLflow experiment id for the evaluation run (default: `MLFLOW_EXPERIMENT_ID`) |
 | `--warehouse-id <id>` | SQL warehouse id for reading managed evaluation datasets (default: `DATABRICKS_WAREHOUSE_ID`) |
 | `--judge-model <endpoint>` | Databricks serving endpoint to use as the LLM judge for `t.judge.*` (default: `APPKIT_JUDGE_MODEL`) |
-| `--concurrency <n>` | Max evals/dataset rows to drive concurrently (default: 1, serial) |
+| `--concurrency <n>` | Max evals/dataset rows to drive concurrently (default: 4) |
 | `--timeout <ms>` | Default per-eval timeout in ms (a per-eval `timeoutMs` overrides it) |
 | `--retries <n>` | Re-run an eval up to N times when it fails on an infra error (turn/timeout); assertion failures are not retried |
 | `--min-pass-rate <rate>` | Gate on aggregate pass rate (0..1) instead of requiring every eval to pass; exit 1 when below |
@@ -886,7 +886,7 @@ export default defineEvalConfig({
 });
 ```
 
-Precedence: a **CLI flag** wins over the **`evals.config.ts`** value, which wins over the **built-in default** (concurrency `1`, no timeout). A per-eval `def.timeoutMs` overrides both for that eval.
+Precedence: a **CLI flag** wins over the **`evals.config.ts`** value, which wins over the **built-in default** (concurrency `4`, no timeout). A per-eval `def.timeoutMs` overrides both for that eval.
 
 ### MLflow reporting
 
