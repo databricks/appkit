@@ -213,7 +213,7 @@ Skills are on-demand instruction packs — the same `SKILL.md` format Claude Cod
 A skill is a directory with a `SKILL.md` plus any bundled reference files:
 
 ```
-config/agents/
+server/agents/
   skills/                    # shared pool — any agent can opt in
     pdf-forms/
       SKILL.md
@@ -241,8 +241,8 @@ To fill a PDF form:
 
 ### Visibility
 
-- **Per-agent skills** (`config/agents/<id>/skills/`) are always visible to that agent.
-- **Global skills** (`config/agents/skills/`, and catalog-volume skills) are **opt-in**: list them in the agent's frontmatter, `skills: [pdf-forms]`. Set `autoInheritSkills: true` (or `{ file, code }`) on the plugin to make every global skill visible without listing — off by default so each agent's always-on catalog stays lean.
+- **Per-agent skills** (`server/agents/<id>/skills/`) are always visible to that agent.
+- **Global skills** (`server/agents/skills/`, and catalog-volume skills) are **opt-in**: list them in the agent's frontmatter, `skills: [pdf-forms]`. Set `autoInheritSkills: true` (or `{ file, code }`) on the plugin to make every global skill visible without listing — off by default so each agent's always-on catalog stays lean.
 
 ### How the agent uses a skill
 
@@ -664,12 +664,12 @@ appkit.agents.getThreads(userId);   // list user's threads
 
 AppKit ships an eve-style eval framework for the agents you build here. You author evals in TypeScript with `defineEval`, drive the agent by sending it messages, and assert on its reply and tool usage with deterministic matchers or LLM judges. Evals run against a **running app** over HTTP (`--url`), and — with Databricks creds and an experiment — report to MLflow as native "Evaluation runs" with per-assertion and per-judge feedback attached to each turn's trace. The eval API is part of the beta surface: import it from `@databricks/appkit/beta`.
 
-Evals live beside each agent: `config/agents/<agent-id>/evals/*.eval.ts`. Each file default-exports one `defineEval({ test })`. The agent under test defaults to the parent `<agent-id>` directory; set `agent:` to target a different one.
+Evals live beside each agent: `server/agents/<agent-id>/evals/*.eval.ts`. Each file default-exports one `defineEval({ test })`. The agent under test defaults to the parent `<agent-id>` directory; set `agent:` to target a different one.
 
 ### A first eval
 
 ```ts
-// config/agents/query/evals/smoke.eval.ts
+// server/agents/query/evals/smoke.eval.ts
 import { defineEval } from "@databricks/appkit/beta";
 
 export default defineEval({
@@ -691,7 +691,7 @@ appkit agent eval --url http://localhost:3000
 appkit agent eval query --root apps/dev-playground --url http://localhost:3000
 ```
 
-The positional `[filter]` matches evals whose `<agent>/<id>` contains the substring (or an exact agent id). The command discovers every `*.eval.ts` under `config/agents/*/evals/`, drives each against the running app, and exits non-zero if any gate fails.
+The positional `[filter]` matches evals whose `<agent>/<id>` contains the substring (or an exact agent id). The command discovers every `*.eval.ts` under `server/agents/*/evals/`, drives each against the running app, and exits non-zero if any gate fails.
 
 ### Assertions
 
@@ -782,7 +782,7 @@ t.check(t.reply, includes("Paris"));
 
 ### Datasets
 
-Add `dataset: { table }` to sweep a Databricks **managed evaluation dataset** — a Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns. The eval runs once per row; the runner binds each row's `inputs` to `t.input` and `expectations` to `t.expected`. Reading the dataset requires a workspace client and warehouse (`--warehouse` + auth).
+Add `dataset: { table }` to sweep a Databricks **managed evaluation dataset** — a Unity Catalog `catalog.schema.table` with `inputs`/`expectations` columns. The eval runs once per row; the runner binds each row's `inputs` to `t.input` and `expectations` to `t.expected`. Reading the dataset requires a workspace client and warehouse (`--warehouse-id` + auth).
 
 ```ts
 import { defineEval, isJudgeConfigured, userTurns } from "@databricks/appkit/beta";
@@ -827,26 +827,26 @@ Run a dataset eval:
 
 ```bash
 appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000 \
-  --profile <profile> --warehouse <warehouse-id> --judge-model <endpoint>
+  --profile <profile> --warehouse-id <warehouse-id> --judge-model <endpoint>
 ```
 
 ### Running evals & CI
 
-`appkit agent eval [filter]` — run agent evals (`config/agents/<id>/evals/*.eval.ts`) against a running app.
+`appkit agent eval [filter]` — run agent evals (`server/agents/<id>/evals/*.eval.ts`) against a running app.
 
 | Flag | Description |
 |---|---|
 | `[filter]` | Only run evals whose `<agent>/<id>` contains this substring (or an exact agent id) |
 | `--url <url>` | Base URL of the running app (default `http://localhost:3000`) |
 | `--strict` | Fail on soft-assertion misses too |
-| `--root <dir>` | Project root containing `config/agents/` (default: cwd) |
+| `--root <dir>` | Project root containing `server/agents/` (default: cwd) |
 | `--header <header...>` | Extra request header as `'Key: value'` (repeatable) |
 | `--tag <tag...>` | Only run evals tagged with one of these tags (repeatable) |
 | `--profile <name>` | Databricks CLI profile to authenticate with via OAuth (default: `DATABRICKS_CONFIG_PROFILE`) |
 | `--databricks-host <host>` | Databricks host for writing MLflow assessments (default: `DATABRICKS_HOST`) |
 | `--databricks-token <token>` | Databricks token for writing MLflow assessments (default: `DATABRICKS_TOKEN`) |
 | `--experiment <id>` | MLflow experiment id for the evaluation run (default: `MLFLOW_EXPERIMENT_ID`) |
-| `--warehouse <id>` | SQL warehouse id for reading managed evaluation datasets (default: `DATABRICKS_WAREHOUSE_ID`) |
+| `--warehouse-id <id>` | SQL warehouse id for reading managed evaluation datasets (default: `DATABRICKS_WAREHOUSE_ID`) |
 | `--judge-model <endpoint>` | Databricks serving endpoint to use as the LLM judge for `t.judge.*` (default: `APPKIT_JUDGE_MODEL`) |
 | `--concurrency <n>` | Max evals/dataset rows to drive concurrently (default: 1, serial) |
 | `--timeout <ms>` | Default per-eval timeout in ms (a per-eval `timeoutMs` overrides it) |
@@ -877,7 +877,7 @@ appkit agent eval --url "$APP_URL" \
 Drop an `evals.config.ts` beside an agent's evals to set defaults for that agent's runs:
 
 ```ts
-// config/agents/query/evals/evals.config.ts
+// server/agents/query/evals/evals.config.ts
 import { defineEvalConfig } from "@databricks/appkit/beta";
 
 export default defineEvalConfig({
