@@ -2,13 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import * as semver from "semver";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  parseDepSpec,
   partitionDeps,
   partitionVerified,
   pluginExportName,
   profileFromEnv,
+  reconcileDeps,
   resolveItems,
   resolveWithinBase,
   scopesForResources,
@@ -336,5 +339,94 @@ describe("partitionDeps (dependency-injection guard)", () => {
       "evil@https://attacker/e.tgz",
       "git+ssh://attacker/x",
     ]);
+  });
+});
+
+describe("parseDepSpec", () => {
+  it("splits a scoped name with a range", () => {
+    expect(parseDepSpec("@databricks/appkit-ui@^0.41.0")).toEqual({
+      name: "@databricks/appkit-ui",
+      range: "^0.41.0",
+    });
+  });
+
+  it("returns no range for a scoped name without one", () => {
+    expect(parseDepSpec("@databricks/appkit-ui")).toEqual({
+      name: "@databricks/appkit-ui",
+    });
+  });
+
+  it("splits a plain name with a range", () => {
+    expect(parseDepSpec("react@19.2.0")).toEqual({
+      name: "react",
+      range: "19.2.0",
+    });
+  });
+
+  it("returns no range for a bare name", () => {
+    expect(parseDepSpec("lodash")).toEqual({ name: "lodash" });
+  });
+});
+
+describe("reconcileDeps (never-downgrade guard)", () => {
+  it("installs a package that is not already present", () => {
+    const res = reconcileDeps(["lucide-react@^0.554.0"], {}, semver);
+    expect(res).toEqual({ install: ["lucide-react@^0.554.0"], skipped: [] });
+  });
+
+  // ^0.x locks the minor, so 0.73.0 is outside ^0.41.0 — must not be downgraded.
+  it("skips a dep whose installed version is newer than the requested range", () => {
+    const res = reconcileDeps(
+      ["@databricks/appkit-ui@^0.41.0"],
+      { "@databricks/appkit-ui": "^0.73.0" },
+      semver,
+    );
+    expect(res).toEqual({
+      install: [],
+      skipped: ["@databricks/appkit-ui@^0.41.0"],
+    });
+  });
+
+  it("upgrades when the installed version is older than the requested floor", () => {
+    const res = reconcileDeps(
+      ["@databricks/appkit-ui@^0.41.0"],
+      { "@databricks/appkit-ui": "~0.40.0" },
+      semver,
+    );
+    expect(res).toEqual({
+      install: ["@databricks/appkit-ui@^0.41.0"],
+      skipped: [],
+    });
+  });
+
+  it("skips when the installed exact version equals the requested one", () => {
+    const res = reconcileDeps(["react@19.2.0"], { react: "19.2.0" }, semver);
+    expect(res).toEqual({ install: [], skipped: ["react@19.2.0"] });
+  });
+
+  it("skips a caret-range dep already satisfied by a newer install", () => {
+    const res = reconcileDeps(
+      ["typescript@^5.0.0"],
+      { typescript: "^5.9.0" },
+      semver,
+    );
+    expect(res).toEqual({ install: [], skipped: ["typescript@^5.0.0"] });
+  });
+
+  it("leaves an unparseable installed range untouched (workspace:*)", () => {
+    const res = reconcileDeps(
+      ["@databricks/appkit-ui@^0.41.0"],
+      { "@databricks/appkit-ui": "workspace:*" },
+      semver,
+    );
+    expect(res).toEqual({
+      install: [],
+      skipped: ["@databricks/appkit-ui@^0.41.0"],
+    });
+  });
+
+  it("keeps a present package when the registry asks for no specific version", () => {
+    const res = reconcileDeps(["lodash"], { lodash: "^4.17.0" }, semver);
+    expect(res).toEqual({ install: [], skipped: ["lodash"] });
   });
 });

@@ -187,7 +187,81 @@ export function partitionDeps(deps: string[]): {
   return { safe, rejected };
 }
 
-function installDependencies(deps: string[], cwd: string): void {
+/** Splits an npm spec into `name` and optional version `range`, handling the
+ * leading `@` of scoped names (`@databricks/appkit-ui@^0.41.0` → name
+ * `@databricks/appkit-ui`, range `^0.41.0`; `lodash` → no range). */
+export function parseDepSpec(spec: string): { name: string; range?: string } {
+  const at = spec.lastIndexOf("@");
+  // at <= 0 means either no `@` (bare name) or the scope's `@` at index 0.
+  if (at <= 0) return { name: spec };
+  return { name: spec.slice(0, at), range: spec.slice(at + 1) };
+}
+
+/**
+ * Registry `dependencies` are floors ("needs at least this version"), not pins.
+ * Against the versions already in the target `package.json`, returns which specs
+ * to install: missing packages (as declared) and genuine upgrades (installed
+ * floor below the requested floor). A package already at a same-or-newer version
+ * is skipped so the package manager never downgrades it; ranges that can't be
+ * compared (workspace:*, catalog:, git) are skipped for the same reason.
+ *
+ * `semver` is injected so the caller can lazy-load it (see `installDependencies`).
+ */
+export function reconcileDeps(
+  specs: string[],
+  installed: Record<string, string>,
+  { gte, minVersion }: Pick<typeof import("semver"), "gte" | "minVersion">,
+): { install: string[]; skipped: string[] } {
+  // minVersion() throws on ranges it can't parse (workspace:*, catalog:, git);
+  // treat those as uncomparable and skip rather than risk a downgrade.
+  const floor = (range: string): string | null => {
+    try {
+      return minVersion(range)?.version ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const install: string[] = [];
+  const skipped: string[] = [];
+  for (const spec of specs) {
+    const { name, range } = parseDepSpec(spec);
+    const have = installed[name];
+    if (!have) {
+      install.push(spec); // missing → install as declared
+      continue;
+    }
+    if (!range) {
+      skipped.push(spec); // present, no version asked → keep what's there
+      continue;
+    }
+    const reqFloor = floor(range);
+    const haveFloor = floor(have);
+    if (!reqFloor || !haveFloor) {
+      skipped.push(spec); // can't compare safely → don't touch
+    } else if (gte(haveFloor, reqFloor)) {
+      skipped.push(spec); // installed is same-or-newer → keep (no downgrade)
+    } else {
+      install.push(spec); // installed is older than required → upgrade
+    }
+  }
+  return { install, skipped };
+}
+
+/** Merged dependencies + devDependencies (name → declared range) of a
+ * package.json, tolerating a missing/unreadable file (returns {}). */
+function readInstalledRanges(pkgPath: string): Record<string, string> {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    return { ...pkg.dependencies, ...pkg.devDependencies };
+  } catch {
+    return {};
+  }
+}
+
+async function installDependencies(deps: string[], cwd: string): Promise<void> {
   if (deps.length === 0) return;
 
   const { safe, rejected } = partitionDeps(deps);
@@ -200,7 +274,8 @@ function installDependencies(deps: string[], cwd: string): void {
   }
   if (safe.length === 0) return;
 
-  if (!fs.existsSync(path.join(cwd, "package.json"))) {
+  const pkgPath = path.join(cwd, "package.json");
+  if (!fs.existsSync(pkgPath)) {
     console.warn(
       pc.yellow(
         `No package.json found — install these manually: ${safe.join(" ")}`,
@@ -208,18 +283,36 @@ function installDependencies(deps: string[], cwd: string): void {
     );
     return;
   }
+
+  // Lazy import: this file is loaded eagerly by the CLI entry, so keep semver
+  // (only needed here) off the startup path — as with server-register/env-writer.
+  const semver = await import("semver");
+  const { install, skipped } = reconcileDeps(
+    safe,
+    readInstalledRanges(pkgPath),
+    semver,
+  );
+  if (skipped.length > 0) {
+    console.log(
+      pc.dim(
+        `Keeping already-installed (registry asked for an older/equal range): ${skipped.join(", ")}`,
+      ),
+    );
+  }
+  if (install.length === 0) return;
+
   const pm = detectPackageManager(cwd);
   const subcommand = pm === "npm" ? "install" : "add";
-  console.log(`\nInstalling dependencies with ${pm}: ${safe.join(" ")}`);
+  console.log(`\nInstalling dependencies with ${pm}: ${install.join(" ")}`);
   // `--` stops the PM from parsing any dep as a flag (defense in depth).
-  const result = spawnSync(pm, [subcommand, "--", ...safe], {
+  const result = spawnSync(pm, [subcommand, "--", ...install], {
     stdio: "inherit",
     cwd,
   });
   if (result.status !== 0) {
     console.warn(
       pc.yellow(
-        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${safe.join(" ")}`,
+        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${install.join(" ")}`,
       ),
     );
   }
@@ -472,7 +565,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     }
   }
 
-  installDependencies([...deps], findNearestPackageJson(cwd));
+  await installDependencies([...deps], findNearestPackageJson(cwd));
 
   if (hasPlugin) {
     console.log(pc.dim("\nRegistering plugins (appkit plugin sync)..."));
