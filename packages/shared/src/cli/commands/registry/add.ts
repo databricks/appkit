@@ -5,6 +5,7 @@ import process from "node:process";
 
 import { Command } from "commander";
 import pc from "picocolors";
+import { gte, minVersion } from "semver";
 
 import {
   fetchRegistryItem,
@@ -187,6 +188,81 @@ export function partitionDeps(deps: string[]): {
   return { safe, rejected };
 }
 
+/** Splits an npm spec into `name` and optional version `range`, handling the
+ * leading `@` of scoped names (`@databricks/appkit-ui@^0.41.0` → name
+ * `@databricks/appkit-ui`, range `^0.41.0`; `lodash` → no range). */
+export function parseDepSpec(spec: string): { name: string; range?: string } {
+  const at = spec.lastIndexOf("@");
+  // at <= 0 means either no `@` (bare name) or the scope's `@` at index 0.
+  if (at <= 0) return { name: spec };
+  return { name: spec.slice(0, at), range: spec.slice(at + 1) };
+}
+
+/** minVersion() but null-safe: returns null for unparseable ranges
+ * (`workspace:*`, `catalog:`, git/tarball URLs) instead of throwing. */
+function rangeFloor(range: string): string | null {
+  try {
+    return minVersion(range)?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Registry `dependencies` are floors ("needs at least this version"), not pins.
+ * Given the versions already declared in the target `package.json`, decide which
+ * specs to actually install: packages that are missing (installed as declared)
+ * and genuine upgrades (installed floor below the requested floor). A package
+ * already at the same-or-newer version is skipped, so `pnpm add` never rewrites
+ * it downward — the reported bug, where e.g. `@databricks/appkit-ui@^0.41.0`
+ * from the registry downgraded an app on 0.73.x (0.73.0 is outside `^0.41.0`).
+ * Ranges we can't compare on either side (workspace:*, catalog:, git) are left
+ * untouched — skipped — since downgrading a linked/pinned dep is never right.
+ */
+export function reconcileDeps(
+  specs: string[],
+  installed: Record<string, string>,
+): { install: string[]; skipped: string[] } {
+  const install: string[] = [];
+  const skipped: string[] = [];
+  for (const spec of specs) {
+    const { name, range } = parseDepSpec(spec);
+    const have = installed[name];
+    if (!have) {
+      install.push(spec); // missing → install as declared
+      continue;
+    }
+    if (!range) {
+      skipped.push(spec); // present, no version asked → keep what's there
+      continue;
+    }
+    const reqFloor = rangeFloor(range);
+    const haveFloor = rangeFloor(have);
+    if (!reqFloor || !haveFloor) {
+      skipped.push(spec); // can't compare safely → don't touch
+    } else if (gte(haveFloor, reqFloor)) {
+      skipped.push(spec); // installed is same-or-newer → keep (no downgrade)
+    } else {
+      install.push(spec); // installed is older than required → upgrade
+    }
+  }
+  return { install, skipped };
+}
+
+/** Merged dependencies + devDependencies (name → declared range) of a
+ * package.json, tolerating a missing/unreadable file (returns {}). */
+function readInstalledRanges(pkgPath: string): Record<string, string> {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    return { ...pkg.dependencies, ...pkg.devDependencies };
+  } catch {
+    return {};
+  }
+}
+
 function installDependencies(deps: string[], cwd: string): void {
   if (deps.length === 0) return;
 
@@ -200,7 +276,8 @@ function installDependencies(deps: string[], cwd: string): void {
   }
   if (safe.length === 0) return;
 
-  if (!fs.existsSync(path.join(cwd, "package.json"))) {
+  const pkgPath = path.join(cwd, "package.json");
+  if (!fs.existsSync(pkgPath)) {
     console.warn(
       pc.yellow(
         `No package.json found — install these manually: ${safe.join(" ")}`,
@@ -208,18 +285,34 @@ function installDependencies(deps: string[], cwd: string): void {
     );
     return;
   }
+
+  // Registry deps are floors, not pins: skip anything already installed at a
+  // same-or-newer version so we never downgrade the app's own packages.
+  const { install, skipped } = reconcileDeps(
+    safe,
+    readInstalledRanges(pkgPath),
+  );
+  if (skipped.length > 0) {
+    console.log(
+      pc.dim(
+        `Keeping already-installed (registry asked for an older/equal range): ${skipped.join(", ")}`,
+      ),
+    );
+  }
+  if (install.length === 0) return;
+
   const pm = detectPackageManager(cwd);
   const subcommand = pm === "npm" ? "install" : "add";
-  console.log(`\nInstalling dependencies with ${pm}: ${safe.join(" ")}`);
+  console.log(`\nInstalling dependencies with ${pm}: ${install.join(" ")}`);
   // `--` stops the PM from parsing any dep as a flag (defense in depth).
-  const result = spawnSync(pm, [subcommand, "--", ...safe], {
+  const result = spawnSync(pm, [subcommand, "--", ...install], {
     stdio: "inherit",
     cwd,
   });
   if (result.status !== 0) {
     console.warn(
       pc.yellow(
-        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${safe.join(" ")}`,
+        `Dependency install exited with code ${result.status ?? "unknown"} — install manually if needed: ${install.join(" ")}`,
       ),
     );
   }
