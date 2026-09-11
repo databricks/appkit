@@ -6,8 +6,10 @@ import {
   databaseSetupFailed,
 } from "../../database/errors";
 import type { Schema } from "../../database/schema-builder";
+import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { assertDatabaseConfig } from "./config";
 import { compileCrudTables } from "./crud/contract";
 import { type CrudExposure, resolveCrudExposure } from "./crud/exposure";
 import { routeOutcome } from "./crud/response";
@@ -23,13 +25,18 @@ import {
 } from "./crud/routes";
 import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
+import { loadDefaultDatabaseSchema } from "./load-schema";
 import manifest from "./manifest.json";
-import type { DatabaseHooks, IDatabaseConfig } from "./types";
+import type {
+  DatabaseHooks,
+  DefaultDatabaseSchema,
+  IDatabaseConfig,
+} from "./types";
 
 /** Schema-driven database plugin */
-export class DatabasePlugin<TSchema extends Schema> extends Plugin<
-  IDatabaseConfig<TSchema>
-> {
+export class DatabasePlugin<
+  TSchema extends Schema = DefaultDatabaseSchema,
+> extends Plugin<IDatabaseConfig<TSchema>> {
   /** Plugin metadata and required PostgreSQL resource. */
   static manifest = manifest as PluginManifest<"database">;
   declare protected config: IDatabaseConfig<TSchema>;
@@ -38,15 +45,11 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
   private draining = false;
   private shutdownPromise: Promise<void> | null = null;
   private exposure: CrudExposure = { tables: [], writes: new Map() };
+  private resolvedSchema: Schema | null = null;
 
-  constructor(config: IDatabaseConfig<TSchema>) {
+  constructor(config: IDatabaseConfig<TSchema> = {}) {
+    assertDatabaseConfig(config);
     super({ schema: config.schema });
-    // Do not silently turn a previous opt-out into the default full API.
-    if ("crudRoutes" in config) {
-      throw databaseSetupFailed(
-        '"crudRoutes" was renamed to "api". Use api: false to disable generated routes or api: { writes: false } for reads only.',
-      );
-    }
     this.config = {
       schema: config.schema,
       api: config.api,
@@ -59,20 +62,32 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
     if (this.draining || this.state) throw databaseSetupFailed();
     if (!this.setupPromise) {
       const attempt = (async () => {
-        this.exposure = resolveCrudExposure(
+        const schema =
+          this.config.schema === undefined
+            ? await loadDefaultDatabaseSchema()
+            : this.config.schema;
+        try {
+          assertFinalizedSchema(schema);
+        } catch {
+          throw databaseSetupFailed(
+            "schema must be a finalized AppKit schema created with defineSchema().",
+          );
+        }
+        if (this.draining) throw databaseSetupFailed();
+        const exposure = resolveCrudExposure(
           this.config.api,
-          Object.keys(this.config.schema.$tables),
+          Object.keys(schema.$tables),
         );
         // A hook key naming no declared table would silently never run.
         for (const name of Object.keys(this.hooks() ?? {})) {
-          if (!Object.hasOwn(this.config.schema.$tables, name)) {
+          if (!Object.hasOwn(schema.$tables, name)) {
             throw databaseSetupFailed(
               `hooks names undeclared table ${JSON.stringify(name)}. Use a table declared in schema.`,
             );
           }
         }
         const candidate = await createDatabaseState(
-          this.config.schema,
+          schema,
           (operation, options) => this.execute(operation, options),
           this.hooks(),
         );
@@ -82,6 +97,8 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
           await candidate.pool.end().catch(() => undefined);
           throw databaseSetupFailed();
         }
+        this.resolvedSchema = schema;
+        this.exposure = exposure;
         this.state = candidate;
       })();
       this.setupPromise = attempt;
@@ -92,12 +109,11 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
   /** Register generated CRUD, subject to the configured table and write restrictions. */
   injectRoutes(router: express.Router): void {
     if (this.exposure.tables.length === 0) return;
+    const schema = this.resolvedSchema;
+    if (!schema) throw databaseSetupFailed();
     const tables = compileCrudTables(
       Object.fromEntries(
-        this.exposure.tables.map((name) => [
-          name,
-          this.config.schema.$tables[name],
-        ]),
+        this.exposure.tables.map((name) => [name, schema.$tables[name]]),
       ),
     );
     const hooks = this.hooks();
@@ -222,10 +238,33 @@ export class DatabasePlugin<TSchema extends Schema> extends Plugin<
   }
 }
 
-/** Create a typed database plugin registration for a finalized schema. */
+type DatabaseRegistration<TSchema extends Schema> = {
+  plugin: PluginConstructor<BasePluginConfig, DatabasePlugin<TSchema>>;
+  config: IDatabaseConfig<TSchema>;
+  name: "database";
+};
+
+/**
+ * Create the database plugin. Omit configuration to load
+ * `config/database/schema.ts`, or supply a typed schema override.
+ */
 export function database<TSchema extends Schema>(
-  config: IDatabaseConfig<TSchema>,
-) {
+  config: IDatabaseConfig<TSchema> & { readonly schema: TSchema },
+): DatabaseRegistration<TSchema> & {
+  config: IDatabaseConfig<TSchema> & { readonly schema: TSchema };
+};
+/**
+ * Register the database plugin with opinionated defaults and full HTTP CRUD.
+ * By default, setup loads the named `schema` export from the application's
+ * `config/database/schema.ts`. Registration itself performs no file or database I/O.
+ */
+export function database<TSchema extends Schema = DefaultDatabaseSchema>(
+  config?: IDatabaseConfig<TSchema>,
+): DatabaseRegistration<TSchema>;
+export function database<TSchema extends Schema = DefaultDatabaseSchema>(
+  config: IDatabaseConfig<TSchema> = {},
+): DatabaseRegistration<TSchema> {
+  assertDatabaseConfig(config);
   return {
     plugin: DatabasePlugin as unknown as PluginConstructor<
       BasePluginConfig,

@@ -4,7 +4,7 @@
 type IDatabaseConfig<TSchema> = {
   api?: DatabaseApiConfig<TSchema>;
   hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
-  schema: TSchema;
+  schema?: TSchema;
 };
 ```
 
@@ -12,9 +12,9 @@ Configuration for one schema-bound DatabasePlugin instance.
 
 ## Type Parameters
 
-| Type Parameter |
-| ------ |
-| `TSchema` *extends* [`Schema`](Interface.Schema.md) |
+| Type Parameter | Default type |
+| ------ | ------ |
+| `TSchema` *extends* [`Schema`](Interface.Schema.md) | `DefaultDatabaseSchema` |
 
 ## Properties
 
@@ -49,8 +49,12 @@ readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: Entit
 
 ***
 
-### schema
+### schema?
 
 ```ts
-readonly schema: TSchema;
+readonly optional schema: TSchema;
 ```
+
+Explicit schema override. When omitted, setup loads the named `schema`
+export from `config/database/schema.ts` under the application's working
+directory. Missing or invalid declarations fail setup before pool creation.

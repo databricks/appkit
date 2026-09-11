@@ -1,7 +1,7 @@
 # Type Alias: DatabaseApiConfig\<TSchema\>
 
 ```ts
-type DatabaseApiConfig<TSchema> =
+type DatabaseApiConfig<TSchema> = 
   | boolean
   | {
   tables?: readonly SchemaTableName<TSchema>[];

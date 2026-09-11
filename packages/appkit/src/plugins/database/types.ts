@@ -1,5 +1,13 @@
+import type { DatabaseRegistry } from "../../database/contract";
 import type { Schema } from "../../database/schema-builder";
 import type { EntityMutationHooks } from "./hooks";
+
+type RegistryTableName = Extract<keyof DatabaseRegistry, string>;
+
+/** @internal Infer conventional schema names from typegen, when available. */
+export type DefaultDatabaseSchema = Schema<
+  [RegistryTableName] extends [never] ? string : RegistryTableName
+>;
 
 /** Table names declared by one finalized schema. */
 export type SchemaTableName<TSchema extends Schema> = Extract<
@@ -72,8 +80,13 @@ export type EntityHooks<TTable extends string = string> =
 export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
 
 /** Configuration for one schema-bound DatabasePlugin instance. */
-export type IDatabaseConfig<TSchema extends Schema> = {
-  readonly schema: TSchema;
+export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
+  /**
+   * Explicit schema override. When omitted, setup loads the named `schema`
+   * export from `config/database/schema.ts` under the application's working
+   * directory. Missing or invalid declarations fail setup before pool creation.
+   */
+  readonly schema?: TSchema;
   /**
    * Generated HTTP CRUD is enabled for all tables by default, using the app's
    * service principal. Every admitted caller receives the enabled operations;

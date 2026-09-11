@@ -1,4 +1,4 @@
-import { createLakebasePool } from "../../connectors/lakebase";
+import { initializeLakebasePool } from "../../connectors/lakebase";
 import {
   classifyDatabaseError,
   DatabasePluginError,
@@ -30,7 +30,7 @@ const logger = createLogger("database");
 
 /** Resources owned by one successfully initialized plugin instance. */
 export interface DatabaseState {
-  readonly pool: ReturnType<typeof createLakebasePool>;
+  readonly pool: Awaited<ReturnType<typeof initializeLakebasePool>>;
   readonly exports: DatabaseExports;
   readonly deactivate: () => void;
 }
@@ -175,12 +175,12 @@ export async function createDatabaseState<TSchema extends Schema>(
   }
 
   let active = true;
-  let pool: ReturnType<typeof createLakebasePool> | undefined;
+  let pool: DatabaseState["pool"] | undefined;
   const assertActive = () => {
     if (!active) throw new DatabasePluginError("INTERNAL", "runtime");
   };
   try {
-    pool = createLakebasePool({
+    pool = await initializeLakebasePool({
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });

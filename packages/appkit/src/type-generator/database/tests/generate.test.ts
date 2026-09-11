@@ -237,7 +237,28 @@ describe("generateDatabaseTypes", () => {
     await fs.writeFile(
       consumer,
       `
-        import type { DatabaseExports } from "@databricks/appkit/beta";
+        import { database, type DatabaseExports, type IDatabaseConfig } from "@databricks/appkit/beta";
+        database();
+        database({});
+        const defaults: IDatabaseConfig = { api: { writes: false } };
+        database(defaults);
+        database({
+          api: { tables: ["posts"], writes: { operations: ["create"] } },
+          hooks: {
+            posts: {
+              beforeCreate(values) {
+                const title: string = values.title;
+                // @ts-expect-error inferred hook fields are not any
+                const invalid: number = values.title;
+                return { ...values, title };
+              },
+            },
+          },
+        });
+        // @ts-expect-error default API restrictions use generated table names
+        database({ api: { tables: ["missing"] } });
+        // @ts-expect-error default hooks use generated table names
+        database({ hooks: { missing: { beforeCreate() {} } } });
         declare const db: DatabaseExports;
         db.users.where({ name: { ilike: "%ada%" } }).include({ posts: { limit: 2 } });
         db.posts.where({ score: { gte: 1 }, and: [{ status: ["draft"] }] });
@@ -267,13 +288,22 @@ describe("generateDatabaseTypes", () => {
           target: "ES2022",
           module: "ESNext",
           moduleResolution: "Bundler",
+          esModuleInterop: true,
+          resolveJsonModule: true,
+          skipLibCheck: true,
           baseUrl: options.root,
           paths: {
             "@databricks/appkit": [
               path.join(sourceRoot, "database/contract/index.ts"),
             ],
             "@databricks/appkit/beta": [
-              path.join(sourceRoot, "plugins/database/entity-types.ts"),
+              path.join(sourceRoot, "plugins/database/index.ts"),
+            ],
+            shared: [path.resolve(appkitRoot, "../shared/src/index.ts")],
+            // CI runs unit tests before build, including imports of shared subpaths.
+            "shared/*": [path.resolve(appkitRoot, "../shared/src/*")],
+            "@databricks/lakebase": [
+              path.resolve(appkitRoot, "../lakebase/src/index.ts"),
             ],
           },
         },

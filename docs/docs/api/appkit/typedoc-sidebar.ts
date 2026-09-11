@@ -199,8 +199,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatasetRow",
+          label: "DatasetRow"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.DiscoveredEval",
           label: "DiscoveredEval"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DiscoveredEvalConfig",
+          label: "DiscoveredEvalConfig"
         },
         {
           type: "doc",
@@ -381,6 +391,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.PromptContext",
           label: "PromptContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ReadEvalDatasetOptions",
+          label: "ReadEvalDatasetOptions"
         },
         {
           type: "doc",
@@ -862,6 +877,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.defineEvalConfig",
+          label: "defineEvalConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.defineManifest",
           label: "defineManifest"
         },
@@ -874,6 +894,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.defineTool",
           label: "defineTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.discoverEvalConfigs",
+          label: "discoverEvalConfigs"
         },
         {
           type: "doc",
@@ -929,6 +954,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.formatEvalResults",
           label: "formatEvalResults"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatResultsJson",
+          label: "formatResultsJson"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.formatResultsJUnit",
+          label: "formatResultsJUnit"
         },
         {
           type: "doc",
@@ -1067,6 +1102,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.readEvalDataset",
+          label: "readEvalDataset"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.reportToMlflow",
           label: "reportToMlflow"
         },
@@ -1082,6 +1122,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.resolveWorkspaceClient",
+          label: "resolveWorkspaceClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.runAgent",
           label: "runAgent"
         },
@@ -1094,6 +1139,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.runEvalsInDir",
           label: "runEvalsInDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runWithRetries",
+          label: "runWithRetries"
         },
         {
           type: "doc",
@@ -1119,6 +1169,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.toolsFromRegistry",
           label: "toolsFromRegistry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.userTurns",
+          label: "userTurns"
         },
         {
           type: "doc",

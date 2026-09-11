@@ -213,6 +213,9 @@ jobs:
         working-directory: pr-template
         run: npm install
 
+      - name: Validate database template startup declarations
+        run: pnpm exec tsx tools/check-database-template.ts pr-template
+
       # npm install above runs under the JFrog .npmrc (setup-jfrog-npm), which
       # bakes internal registry URLs into the regenerated lock. Rewrite them back
       # to public npm and fail-closed if any non-public registry remains, so the

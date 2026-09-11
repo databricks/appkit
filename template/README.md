@@ -9,6 +9,9 @@ A Databricks App powered by [AppKit](https://developers.databricks.com/docs/appk
 {{- if .plugins.lakebase}}
 - **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
 {{- end}}
+{{- if .plugins.database}}
+- **Database** -- Schema-driven PostgreSQL access with generated CRUD routes
+{{- end}}
 {{- if .plugins.genie}}
 - **Genie** -- AI/BI Genie conversational interface for natural language data queries
 {{- end}}
@@ -42,6 +45,20 @@ DATABRICKS_APP_PORT=8000
 #### Lakebase Configuration
 
 The Lakebase plugin requires additional environment variables for PostgreSQL connectivity. To learn how to configure the Lakebase plugin, see the [Lakebase plugin documentation](https://developers.databricks.com/docs/appkit/v0/plugins/lakebase).
+{{- end}}
+
+{{- if .plugins.database}}
+
+#### Database schema
+
+`database()` loads `config/database/schema.ts`. The generated schema starts empty,
+so initialization does not require sample tables or expose existing data.
+Add your table declarations after creating the corresponding PostgreSQL tables;
+AppKit does not create or migrate them. CRUD routes are enabled for declared tables
+by default, and can be restricted with `api` in the plugin configuration.
+
+During local development, the PostgreSQL username is resolved from your Databricks
+credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are not set.
 {{- end}}
 
 ### CLI Authentication
