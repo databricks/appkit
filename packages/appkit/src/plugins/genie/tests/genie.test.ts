@@ -339,13 +339,14 @@ describe("Genie Plugin", () => {
       // the handler actually wrote (captured by the mock response). toEmit pins
       // the real event ORDER; collect() lets us also pin the key payload values
       // structurally, not by brittle substring match.
-      await expectStream(mockRes).toEmit(
+      const stream = expectStream(mockRes);
+      await stream.toEmit(
         "message_start",
         "status",
         "message_result",
         "query_result",
       );
-      const events = await expectStream(mockRes).collect();
+      const events = await stream.collect();
       expect(events.find((e) => e.type === "message_start")).toMatchObject({
         conversationId: "new-conv-id",
       });

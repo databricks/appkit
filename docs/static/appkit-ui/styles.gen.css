@@ -401,6 +401,9 @@
   .\!m-0 {
     margin: calc(var(--spacing) * 0) !important;
   }
+  .m-1 {
+    margin: calc(var(--spacing) * 1);
+  }
   .-mx-1 {
     margin-inline: calc(var(--spacing) * -1);
   }
@@ -716,6 +719,9 @@
   }
   .w-\(--sidebar-width\) {
     width: var(--sidebar-width);
+  }
+  .w-1 {
+    width: calc(var(--spacing) * 1);
   }
   .w-1\/2 {
     width: calc(1/2 * 100%);

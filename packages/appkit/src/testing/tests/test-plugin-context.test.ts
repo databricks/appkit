@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { PluginContext } from "../../core/plugin-context";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { createMockRequest } from "../fixtures";
 import { createTestPluginContext } from "../test-plugin-context";
 
 // A minimal real plugin for exercising attach() end-to-end.
@@ -40,11 +41,7 @@ function mockReq(
     "x-forwarded-user": "alice",
   },
 ): express.Request {
-  return {
-    body: {},
-    headers,
-    header: (name: string) => headers[name.toLowerCase()],
-  } as unknown as express.Request;
+  return createMockRequest({ headers }) as unknown as express.Request;
 }
 
 describe("createTestPluginContext — construction", () => {

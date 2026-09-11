@@ -9,7 +9,7 @@ import { CacheManager } from "../../../cache";
 import { resolveSkillCatalog } from "../../../core/agent/skills/resolve-catalog";
 import type { SkillDefinition } from "../../../core/agent/skills/types";
 import type { ResolvedToolEntry } from "../../../core/agent/types";
-import { createTestPluginContext } from "../../../testing";
+import { createMockRequest, createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
 import {
   dispatchToolCall,
@@ -49,25 +49,15 @@ beforeEach(() => {
   };
 });
 
-function mockReq(): express.Request {
-  // Carry OBO headers so PluginContext.executeTool's asUser(req) resolves a
-  // user scope (the mock context enforces the real token precondition).
-  const headers: Record<string, string> = {
-    "x-forwarded-access-token": "user-token",
-    "x-forwarded-user": "alice",
-  };
-  return {
-    body: {},
-    headers,
-    header: (name: string) => headers[name.toLowerCase()],
-  } as unknown as express.Request;
-}
-
 function makeRunState(plugin: AgentsPlugin) {
   const abortController = new AbortController();
   const pushed: unknown[] = [];
   const runState = {
-    req: mockReq(),
+    // `obo` carries the forwarded identity headers so executeTool's asUser(req)
+    // resolves a user scope (the mock context enforces the token precondition).
+    req: createMockRequest({
+      obo: { token: "user-token", userId: "alice" },
+    }) as unknown as express.Request,
     userId: "alice",
     requestId: "stream-1",
     abortController,

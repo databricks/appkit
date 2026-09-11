@@ -5,13 +5,16 @@
  * `@tools/test-helpers` importers keep working; new code (inside or outside
  * this repo) should import from `@databricks/appkit/testing` instead.
  *
+ * The integration suites have already moved to the public entry point, which is
+ * what verifies the published surface is self-sufficient. The remaining
+ * importers are unit suites, migrated opportunistically.
+ *
  * Note: `mockServiceContext` is now synchronous (the previous dynamic
  * `import()` became a static one to avoid a circular-init trap once packaged).
  * Existing `await mockServiceContext(...)` call sites are unaffected — awaiting
  * a non-promise is a no-op, and `Awaited<ReturnType<...>>` unwraps identically.
  */
 export {
-  createConfigurableMockWorkspaceClient,
   createFailedSQLResponse,
   createMockRequest,
   createMockResponse,

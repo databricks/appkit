@@ -1,6 +1,10 @@
 import type { Server } from "node:http";
 
-import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
+import {
+  getListeningPort,
+  mockServiceContext,
+  setupDatabricksEnv,
+} from "@databricks/appkit/testing";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 // Set required env vars BEFORE imports that use them
@@ -20,7 +24,9 @@ describe("ServerPlugin Integration", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9876; // Use non-standard port to avoid conflicts
+  // This block alone pins a port, because it asserts the server honours a
+  // configured one. Every other block below uses an ephemeral port.
+  const TEST_PORT = 9876;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -37,7 +43,7 @@ describe("ServerPlugin Integration", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+    baseUrl = `http://127.0.0.1:${await getListeningPort(server)}`;
 
     // Wait a bit for server to be ready
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -90,7 +96,6 @@ describe("ServerPlugin with custom plugin", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9877;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -122,7 +127,7 @@ describe("ServerPlugin with custom plugin", () => {
     const app = await createApp({
       plugins: [
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
         testPlugin({}),
@@ -130,9 +135,7 @@ describe("ServerPlugin with custom plugin", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    baseUrl = `http://127.0.0.1:${await getListeningPort(server)}`;
   });
 
   afterAll(async () => {
@@ -174,7 +177,6 @@ describe("ServerPlugin with extend() via onPluginsReady", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9878;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -184,7 +186,7 @@ describe("ServerPlugin with extend() via onPluginsReady", () => {
     const app = await createApp({
       plugins: [
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
       ],
@@ -198,9 +200,7 @@ describe("ServerPlugin with extend() via onPluginsReady", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    baseUrl = `http://127.0.0.1:${await getListeningPort(server)}`;
   });
 
   afterAll(async () => {
@@ -229,7 +229,6 @@ describe("createApp with async onPluginsReady callback", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9885;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -239,7 +238,7 @@ describe("createApp with async onPluginsReady callback", () => {
     const app = await createApp({
       plugins: [
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
       ],
@@ -254,9 +253,7 @@ describe("createApp with async onPluginsReady callback", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    baseUrl = `http://127.0.0.1:${await getListeningPort(server)}`;
   });
 
   afterAll(async () => {
@@ -286,7 +283,6 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   let originalNodeEnv: string | undefined;
-  const TEST_PORT = 9879;
   const unhandledRejections: unknown[] = [];
   // Only count rejections raised by this suite's handlers — other suites in
   // the same worker may legitimately produce unrelated rejections.
@@ -377,7 +373,7 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
     const app = await createApp({
       plugins: [
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
         }),
         throwingPlugin({}),
@@ -385,9 +381,7 @@ describe("ServerPlugin error handling for rejected async handlers", () => {
     });
 
     server = app.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    baseUrl = `http://127.0.0.1:${await getListeningPort(server)}`;
   });
 
   afterAll(async () => {

@@ -46,34 +46,31 @@ export class LifecycleManager {
   private static readonly PHASE_SHUTDOWN_TIMEOUT_MS = 2_000;
 
   /**
-   * Guards against re-entrant shutdown (e.g. SIGTERM followed by SIGINT).
-   * The flag set in `shutdown` must remain synchronous and first — any
-   * `await` before it would open a window for a second signal to re-enter
-   * the sequence.
+   * The in-flight teardown, memoized. A boolean guard would let a second caller
+   * return while teardown was still running — fine for a signal, wrong for the
+   * harness path (`{ exit: false }`), which must not resolve before resources
+   * are released.
    */
-  private isShuttingDown = false;
-  /**
-   * Name of the shutdown phase currently in flight, so the force-exit log
-   * can say where shutdown got stuck without extra bookkeeping.
-   */
+  private teardown: Promise<number> | undefined;
+  /** Reported by the force-exit log so a stuck shutdown names its phase. */
   private shutdownPhase = "not started";
 
   constructor(private readonly context: PluginContext) {}
 
   /**
-   * Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}.
-   *
-   * Uses `process.once` (not `on`) so a repeated signal cannot register the
-   * handler twice; re-entrancy from a *different* signal is guarded by
-   * `isShuttingDown` inside {@link shutdown}.
+   * Install the SIGTERM/SIGINT handlers that trigger {@link shutdown}. Never
+   * removed: the signal path exits the process, and the harness opts out of
+   * installing them, so nothing accumulates across boots.
    */
   installSignalHandlers(): void {
-    process.once("SIGTERM", () => this.shutdown());
-    process.once("SIGINT", () => this.shutdown());
+    process.once("SIGTERM", () => void this.shutdown());
+    process.once("SIGINT", () => void this.shutdown());
   }
 
   /**
-   * Run the graceful-shutdown sequence and exit the process.
+   * Run the graceful-shutdown sequence. Exits the process unless
+   * `exit: false` — the flag the test harness passes so it can tear a booted
+   * app down between tests without killing the vitest process.
    *
    * Phases:
    * 1. stop the internal-telemetry reporter
@@ -83,25 +80,28 @@ export class LifecycleManager {
    * 4. emit the `"shutdown"` lifecycle event, bounded
    * 5. close the cache storage and flush telemetry concurrently, each bounded
    *
+   * Every phase is individually bounded, so the sequence always completes —
+   * `{ exit: false }` therefore needs no outer timeout and an `afterEach`
+   * cannot hang on it. A second call joins the first teardown.
+   *
    * Exits 0 on completion (and on the force-exit backstop): a deliberate
    * shutdown is not a crash. Exit 1 is reserved for an unexpected error
    * thrown by the sequence itself.
    */
-  async shutdown(): Promise<void> {
-    // Must stay synchronous and first: any await before the flag is set
-    // would let a second signal re-enter the shutdown sequence.
-    if (this.isShuttingDown) return;
-    this.isShuttingDown = true;
+  async shutdown(options: { exit?: boolean } = {}): Promise<void> {
+    const exit = options.exit ?? true;
 
-    logger.info("Starting graceful shutdown...");
+    if (!exit) {
+      // Harness path: no backstop, no process.exit. The phases are internally
+      // bounded, and this is fully awaited before the harness drops the
+      // singletons — so phase 5 always acts on this app's own cache/telemetry.
+      await this.runPhasesOnce();
+      return;
+    }
 
-    let exitCode = 0;
-
-    // Force exit once the overall budget is spent. Exit 0 is deliberate:
-    // a force-timeout still happens on a routine deploy (deliberate
-    // shutdown, not a crash), and orchestrators record nonzero exits on
-    // deploys as crashes. The error log below is the stuck-shutdown
-    // signal instead of the exit code.
+    // Exit 0 on force-timeout: a stuck deploy shutdown is not a crash, and
+    // orchestrators read nonzero deploy exits as one. The error log is the
+    // signal instead. Belt-and-suspenders over the per-phase budgets.
     const forceExitTimer = setTimeout(() => {
       logger.error(
         "Graceful shutdown did NOT complete within the %dms budget (phase in flight: %s); force-exiting with code 0.",
@@ -110,12 +110,27 @@ export class LifecycleManager {
       );
       process.exit(0);
     }, LifecycleManager.SHUTDOWN_TIMEOUT_MS);
-    // unref so this backstop timer never by itself keeps the process alive.
-    // Any real pending teardown (OTEL export timer, DB pool sockets, the
-    // still-open HTTP listener) is a ref'd handle that holds the loop open
-    // until this fires; if nothing is ref'd, there is nothing left to tear
-    // down and exiting early is correct.
+    // unref'd so the backstop alone never holds the process open; real pending
+    // teardown is ref'd and keeps the loop alive until this fires.
     forceExitTimer.unref();
+
+    const exitCode = await this.runPhasesOnce();
+
+    clearTimeout(forceExitTimer);
+    process.exit(exitCode);
+  }
+
+  /** No `await` between read and assign — that gap is the re-entrancy window. */
+  private runPhasesOnce(): Promise<number> {
+    this.teardown ??= this.runPhases();
+    return this.teardown;
+  }
+
+  /** Run the phases and report an exit code; no process-termination concerns. */
+  private async runPhases(): Promise<number> {
+    logger.info("Starting graceful shutdown...");
+
+    let exitCode = 0;
 
     try {
       const plugins = Array.from(this.context.getPlugins().values());
@@ -184,17 +199,16 @@ export class LifecycleManager {
       exitCode = 1;
     }
 
-    clearTimeout(forceExitTimer);
-    process.exit(exitCode);
+    return exitCode;
   }
 
-  /** Close the cache storage, bounded and error-isolated. */
+  /** Bounded and error-isolated. Reads the cache manager at phase-5 time. */
   private async closeCacheStorage(): Promise<void> {
-    let cache: CacheManager;
+    let cache: CacheManager | undefined;
     try {
       cache = CacheManager.getInstanceSync();
     } catch {
-      // Cache was never initialized — nothing to close.
+      // Never initialized — nothing to close.
       return;
     }
     try {
@@ -208,11 +222,19 @@ export class LifecycleManager {
     }
   }
 
-  /** Flush and shut down the telemetry SDK, bounded and error-isolated. */
+  /** Bounded and error-isolated. Reads the telemetry manager at phase-5 time. */
   private async flushTelemetry(): Promise<void> {
+    let telemetry: TelemetryManager | undefined;
+    try {
+      telemetry = TelemetryManager.getInstance();
+    } catch {
+      // Unavailable or mocked away — nothing to flush.
+      return;
+    }
+    if (!telemetry) return;
     try {
       await this.raceWithTimeout(
-        TelemetryManager.getInstance().shutdown(),
+        telemetry.shutdown(),
         LifecycleManager.PHASE_SHUTDOWN_TIMEOUT_MS,
         "telemetry flush",
       );
