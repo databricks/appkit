@@ -3,9 +3,15 @@ import { beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 
-const mocks = vi.hoisted(() => ({ createDatabaseState: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  createDatabaseState: vi.fn(),
+  loadDefaultDatabaseSchema: vi.fn(),
+}));
 vi.mock("../lifecycle", () => ({
   createDatabaseState: mocks.createDatabaseState,
+}));
+vi.mock("../load-schema", () => ({
+  loadDefaultDatabaseSchema: mocks.loadDefaultDatabaseSchema,
 }));
 
 import { DatabasePlugin, database } from "../database";
@@ -79,7 +85,10 @@ function candidate(marker = "one") {
 }
 
 describe("DatabasePlugin", () => {
-  beforeEach(() => mocks.createDatabaseState.mockReset());
+  beforeEach(() => {
+    mocks.createDatabaseState.mockReset();
+    mocks.loadDefaultDatabaseSchema.mockReset();
+  });
 
   test("retains schema and declares the fixed beta postgres manifest", () => {
     const definition = database({ schema });
@@ -104,6 +113,123 @@ describe("DatabasePlugin", () => {
     expect(
       (plugin as unknown as { config: Record<string, unknown> }).config,
     ).toEqual({ schema });
+  });
+
+  test("accepts omitted and empty configuration without doing I/O during registration", () => {
+    for (const definition of [database(), database({}), database(undefined)]) {
+      expect(definition).toMatchObject({ name: "database", config: {} });
+    }
+    new DatabasePlugin();
+    expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+  });
+
+  test.each([undefined, {}, { schema: undefined }])(
+    "loads the conventional schema and enables full CRUD with config=%j",
+    async (config) => {
+      mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
+      const automatic = await registerRoutes(config);
+      const explicit = await registerRoutes({ schema: routedSchema });
+      expect(automatic.routes).toEqual(explicit.routes);
+      expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce();
+      expect(mocks.createDatabaseState).toHaveBeenNthCalledWith(
+        1,
+        routedSchema,
+        expect.any(Function),
+        undefined,
+      );
+    },
+  );
+
+  test("applies API restrictions and hooks to the discovered schema", async () => {
+    mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
+    const hooks = { notes: { beforeCreate: vi.fn() } };
+    const { routes } = await registerRoutes({
+      api: { tables: ["notes"], writes: false },
+      hooks,
+    });
+    expect(routes).toEqual(["get /notes", "get /notes/:id"]);
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      hooks,
+    );
+  });
+
+  test("keeps the default schema's typed client available when HTTP is disabled", async () => {
+    mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
+    const { routes, plugin } = await registerRoutes({ api: false });
+    expect(routes).toEqual([]);
+    expect(plugin.exports()).toHaveProperty("operation");
+  });
+
+  test("never loads the convention when an explicit schema is supplied", async () => {
+    await registerRoutes({ schema: routedSchema });
+    expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+  });
+
+  test.each([null, false, 0, "", [], new Date()])(
+    "rejects invalid config=%j rather than enabling defaults",
+    (config) => {
+      expect(() => database(config as never)).toThrow("configuration object");
+      expect(() => new DatabasePlugin(config as never)).toThrow(
+        "configuration object",
+      );
+      expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([null, {}, { $tables: {} }])(
+    "rejects an invalid explicit schema instead of falling back: %j",
+    async (invalid) => {
+      const plugin = new DatabasePlugin({ schema: invalid as never });
+      await expect(plugin.setup()).rejects.toMatchObject({
+        category: "SETUP_FAILED",
+        message: expect.stringContaining("defineSchema()"),
+      });
+      expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test("does not allocate or publish when default schema loading fails", async () => {
+    const error = new Error("Default schema unavailable");
+    mocks.loadDefaultDatabaseSchema.mockRejectedValue(error);
+    const plugin = new DatabasePlugin();
+    await expect(plugin.setup()).rejects.toBe(error);
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    expect(() => plugin.exports()).toThrow();
+    const { router, routes } = fakeRouter();
+    plugin.injectRoutes(router);
+    expect(routes).toEqual([]);
+  });
+
+  test("shares one schema load across concurrent setup calls", async () => {
+    const loaded = deferred<typeof routedSchema>();
+    mocks.loadDefaultDatabaseSchema.mockReturnValue(loaded.promise);
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin();
+    const first = plugin.setup();
+    const second = plugin.setup();
+    expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce();
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    loaded.resolve(routedSchema);
+    await Promise.all([first, second]);
+    expect(mocks.createDatabaseState).toHaveBeenCalledOnce();
+  });
+
+  test("does not create a pool when shutdown happens during schema loading", async () => {
+    const loaded = deferred<typeof routedSchema>();
+    mocks.loadDefaultDatabaseSchema.mockReturnValue(loaded.promise);
+    const plugin = new DatabasePlugin();
+    const setup = plugin.setup();
+    const shutdown = plugin.shutdown();
+    loaded.resolve(routedSchema);
+    await expect(setup).rejects.toMatchObject({ category: "SETUP_FAILED" });
+    await shutdown;
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    expect(() => plugin.exports()).toThrow();
   });
 
   test("publishes only after readiness and setup is single-flight", async () => {

@@ -10,9 +10,10 @@ This plugin is currently **beta**. APIs may change between minor releases. Impor
 :::
 <!-- AUTO-GENERATED: stability-banner-end -->
 
-Declare a schema and use `database({ schema })` to get generated HTTP CRUD and a
-server-side database client. CRUD is enabled for every declared table by default.
-Use `api` to restrict the generated routes without disabling server-side access.
+Declare your tables in `config/database/schema.ts` and register `database()` to
+get generated HTTP CRUD and a server-side database client. CRUD is enabled for
+every declared table by default. Use `api` to restrict the generated routes
+without disabling server-side access.
 
 :::caution[Shared application access]
 This plugin uses the app's service principal in deployed Databricks Apps. It does
@@ -34,18 +35,24 @@ The database tables must already exist and match the declared schema. This plugi
 checks connectivity during setup; it does not create or migrate tables.
 
 ```ts
-import { createApp, server } from "@databricks/appkit";
-import { database, defineSchema, id, text } from "@databricks/appkit/beta";
+// config/database/schema.ts
+import { defineSchema, id, text } from "@databricks/appkit/beta";
 
-const schema = defineSchema((builder) => ({
+export const schema = defineSchema((builder) => ({
   notes: builder.table("notes", {
     id: id(),
     body: text().notNull(),
   }),
 }));
+```
+
+```ts
+// server/index.ts
+import { createApp, server } from "@databricks/appkit";
+import { database } from "@databricks/appkit/beta";
 
 const AppKit = await createApp({
-  plugins: [server(), database({ schema })],
+  plugins: [server(), database()],
 });
 ```
 
@@ -62,6 +69,36 @@ With the server plugin enabled, this registers:
 A table without a public primary key supports list and create only. `upsert` is
 available to server code but has no generated HTTP route.
 
+## Schema discovery and overrides
+
+`database()` and `database({})` use the same defaults. During setup, the plugin
+loads the named `schema` export from `config/database/schema.ts`, relative to the
+application's working directory. The file must export a finalized `defineSchema()`
+result. Missing files, import failures, and invalid exports fail setup before the
+plugin creates a connection pool; they do not silently create an empty schema.
+
+Keep `config/database/schema.ts` and its local imports in your deployment. The
+plugin loads TypeScript through Jiti, so a plain Node production process does not
+need a separate TypeScript loader. The schema module should only declare tables,
+not connect to the database or start the app.
+
+For a different layout or a deployment that contains only a server bundle, import
+the schema explicitly and pass it to the plugin:
+
+```ts
+import { schema } from "../config/database/schema";
+
+database({ schema });
+```
+
+An explicit schema always takes precedence and skips file discovery. An invalid
+explicit schema fails setup instead of falling back to another file.
+
+Run `appkit generate-types` to generate the database registry. With that registry,
+configuration without an explicit schema still infers table names and hook payloads.
+An explicitly supplied schema also checks configuration keys against its own table
+names.
+
 ## Restrict the generated API
 
 Omitting `api`, or setting it to `true` or `{}`, enables full CRUD. Restrictions
@@ -69,29 +106,28 @@ are optional. There is no separate write opt-in.
 
 ```ts
 // No generated HTTP routes. The server-side client still works.
-database({ schema, api: false });
+database({ api: false });
 
 // Read-only routes for every table.
-database({ schema, api: { writes: false } });
+database({ api: { writes: false } });
 
 // Full CRUD for selected tables only.
-database({ schema, api: { tables: ["notes"] } });
+database({ api: { tables: ["notes"] } });
 
 // Allow reads, create, and update, but not delete.
 database({
-  schema,
   api: { writes: { operations: ["create", "update"] } },
 });
 
 // Read every table, but allow writes only to notes.
 database({
-  schema,
   api: { writes: { tables: ["notes"] } },
 });
 ```
 
 | Option | Default | Effect |
 | --- | --- | --- |
+| `schema` | Named export in `config/database/schema.ts` | Overrides automatic schema loading |
 | `api` | `true` | `false` disables all generated routes |
 | `api.tables` | All declared tables | Limits which tables have routes |
 | `api.writes` | `true` | `false` keeps only read routes |
@@ -153,7 +189,6 @@ other plugins or external services transactional.
 import { DatabaseValidationError } from "@databricks/appkit";
 
 database({
-  schema,
   hooks: {
     notes: {
       beforeCreate(values) {
