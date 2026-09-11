@@ -120,6 +120,8 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
+// Hidden from CLI scaffolding; still available for explicit SDK configuration.
+export { database } from "./plugins/database";
 export type {
   DatabaseApiConfig,
   DatabaseApiWriteOperation,
