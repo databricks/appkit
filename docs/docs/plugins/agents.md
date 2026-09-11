@@ -465,6 +465,69 @@ Supervisor and chat-completions adapters can both appear in the same `agents({ a
 Some hosted tool kinds return their final assistant text without incremental `output_text.delta` events. The adapter has a recovery path that pulls the text out of `response.completed.output[]` so the turn is not silently empty. Set `DEBUG=appkit:agents:supervisor-api` to log the per-turn event-type histogram if you want to verify which path a turn took.
 :::
 
+## Thread persistence
+
+Conversation threads are held by a `ThreadStore`. The default is
+`InMemoryThreadStore` — fine for local dev and single-process demos, but it
+**loses every thread on restart** and grows without bound. For any real
+deployment, pass a persistent store.
+
+AppKit ships `LakebaseThreadStore`, backed by Databricks Lakebase (Postgres):
+
+```ts
+import { agents, LakebaseThreadStore } from "@databricks/appkit/beta";
+
+agents({
+  threadStore: new LakebaseThreadStore(),
+});
+```
+
+With no arguments it creates its own connection pool via `createLakebasePool()`
+(OAuth token refresh handled internally) and closes it on plugin shutdown. It
+**self-bootstraps** its schema on setup — two tables, `agent_threads` and
+`agent_messages` (FK `ON DELETE CASCADE`) — with `CREATE TABLE IF NOT EXISTS`,
+so a fresh Lakebase database needs no migration step. If setup can't reach the
+database, the app fails boot fast rather than silently degrading.
+
+**Per-user isolation.** The app service principal owns the tables, and **every**
+query filters `WHERE user_id = $` — a user can never read or mutate another
+user's threads. This is the security boundary; there is no cross-user read path.
+
+**Deploying with Lakebase.** The agents manifest declares an **optional**
+`postgres` resource. Bind it at deploy time so the app's Lakebase host,
+database, and endpoint are injected as `PGHOST` / `PGDATABASE` /
+`LAKEBASE_ENDPOINT`. Apps that don't bind it keep the in-memory default. The
+service principal needs `CAN_CONNECT_AND_CREATE` (the store issues `CREATE
+TABLE`).
+
+**Options.**
+
+```ts
+new LakebaseThreadStore({
+  pool,          // reuse an existing pg.Pool (not closed on shutdown — you own it)
+  tableSchema,   // optional Postgres schema to hold the tables (default: search_path)
+});
+```
+
+**Custom stores.** Any object implementing the `ThreadStore` contract works.
+The two lifecycle hooks are optional — implement them when your backing store
+needs setup or teardown:
+
+```ts
+interface ThreadStore {
+  create(userId: string): Promise<Thread>;
+  get(threadId: string, userId: string): Promise<Thread | null>;
+  list(userId: string): Promise<Thread[]>;
+  addMessage(threadId: string, userId: string, message: Message): Promise<void>;
+  delete(threadId: string, userId: string): Promise<boolean>;
+  init?(): Promise<void>;   // called once in setup (fail-fast connectivity/bootstrap)
+  close?(): Promise<void>;  // called in shutdown (release resources)
+}
+```
+
+For the exact exported symbols, run `npx @databricks/appkit docs` and open the
+`appkit` API reference.
+
 ## Configuration reference
 
 ```ts

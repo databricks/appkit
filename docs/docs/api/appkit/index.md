@@ -23,6 +23,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
+| [LakebaseThreadStore](Class.LakebaseThreadStore.md) | Persistent [ThreadStore](Interface.ThreadStore.md) backed by Databricks Lakebase (Postgres). |
 | [MlflowClient](Class.MlflowClient.md) | A thin client over the Databricks workspace REST API, owning the host + bearer token so callers (eval-run creation, assessment writes, the judge's serving endpoint) don't each re-derive URLs or re-attach auth. The host is normalized once at construction. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
@@ -86,6 +87,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [LakebasePool](Interface.LakebasePool.md) | Subset of `pg.Pool` exposed by the Lakebase plugin. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
 | [LakebasePoolManager](Interface.LakebasePoolManager.md) | Manages multiple Lakebase connection pools keyed by an identifier (e.g. userId). |
+| [LakebaseThreadStoreOptions](Interface.LakebaseThreadStoreOptions.md) | - |
 | [MatchResult](Interface.MatchResult.md) | Result of a deterministic matcher run against a value. |
 | [McpConnectAllResult](Interface.McpConnectAllResult.md) | Per-endpoint outcome of [AppKitMcpClient.connectAll](Class.AppKitMcpClient.md#connectall). Callers (the agents plugin in particular) use the split to warn at startup when some MCP servers are unreachable without aborting boot for the rest. |
 | [Message](Interface.Message.md) | - |
@@ -120,6 +122,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [TestContext](Interface.TestContext.md) | The `t` context passed to an eval's `test` function. |
 | [Thread](Interface.Thread.md) | - |
 | [ThreadStore](Interface.ThreadStore.md) | - |
+| [ThreadSummary](Interface.ThreadSummary.md) | Lightweight thread projection for a history list — no message bodies, so a sidebar of many threads stays cheap. `title` is already resolved (explicit rename, else derived from the first user message; may be empty when neither exists). Returned by [ThreadStore.listSummaries](Interface.ThreadStore.md#listsummaries). |
 | [ToolAnnotations](Interface.ToolAnnotations.md) | - |
 | [ToolConfig](Interface.ToolConfig.md) | - |
 | [ToolEntry](Interface.ToolEntry.md) | Single-tool entry for a plugin's internal tool registry. |

@@ -68,6 +68,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.LakebaseThreadStore",
+          label: "LakebaseThreadStore"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.MlflowClient",
           label: "MlflowClient"
         },
@@ -364,6 +369,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebaseThreadStoreOptions",
+          label: "LakebaseThreadStoreOptions"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.MatchResult",
           label: "MatchResult"
         },
@@ -531,6 +541,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ThreadStore",
           label: "ThreadStore"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ThreadSummary",
+          label: "ThreadSummary"
         },
         {
           type: "doc",

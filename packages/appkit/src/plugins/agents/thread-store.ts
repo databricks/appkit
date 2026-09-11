@@ -1,6 +1,31 @@
 import { randomUUID } from "node:crypto";
 
-import type { Message, Thread, ThreadStore } from "shared";
+import type { Message, Thread, ThreadStore, ThreadSummary } from "shared";
+
+/** Longest derived title (first user message is truncated to this). */
+const DERIVED_TITLE_MAX = 80;
+
+/**
+ * Project a full {@link Thread} to a {@link ThreadSummary}: explicit `title`
+ * wins, else the first user message truncated, else empty. Shared by
+ * {@link InMemoryThreadStore.listSummaries} and the agents plugin's fallback
+ * for stores that don't implement `listSummaries`.
+ */
+export function deriveThreadSummary(thread: Thread): ThreadSummary {
+  const explicit = thread.title?.trim();
+  const firstUser = thread.messages.find((m) => m.role === "user")?.content;
+  const title =
+    explicit && explicit.length > 0
+      ? explicit
+      : (firstUser?.slice(0, DERIVED_TITLE_MAX) ?? "");
+  return {
+    id: thread.id,
+    title,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    messageCount: thread.messages.length,
+  };
+}
 
 /**
  * In-memory thread store backed by a nested Map.
@@ -39,6 +64,23 @@ export class InMemoryThreadStore implements ThreadStore {
     return Array.from(this.userMap(userId).values()).sort(
       (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
     );
+  }
+
+  async listSummaries(userId: string): Promise<ThreadSummary[]> {
+    return (await this.list(userId)).map(deriveThreadSummary);
+  }
+
+  async rename(
+    threadId: string,
+    userId: string,
+    title: string,
+  ): Promise<boolean> {
+    const thread = this.userMap(userId).get(threadId);
+    if (!thread) return false;
+    // Deliberately does NOT touch updatedAt — recency ordering reflects
+    // conversation activity, not renames.
+    thread.title = title;
+    return true;
   }
 
   async addMessage(
