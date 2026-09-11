@@ -1,7 +1,13 @@
-import { createLakebasePool } from "../../connectors/lakebase";
+import {
+  createLakebasePool,
+  getUsernameWithApiLookup,
+} from "../../connectors/lakebase";
+import { getClientOptions } from "../../context/client-options";
+import { ServiceContext } from "../../context/service-context";
 import {
   classifyDatabaseError,
   DatabasePluginError,
+  databaseSetupFailed,
 } from "../../database/errors";
 import type { DataPath } from "../../database/runtime";
 import {
@@ -12,6 +18,7 @@ import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
+import { createWorkspaceClient } from "../../workspace-client";
 import {
   IDLE_IN_TRANSACTION_TIMEOUT_MS,
   STATEMENT_TIMEOUT_MS,
@@ -180,7 +187,21 @@ export async function createDatabaseState<TSchema extends Schema>(
     if (!active) throw new DatabasePluginError("INTERNAL", "runtime");
   };
   try {
+    // Use the app's startup identity, never a request's OBO context. Local
+    // user credentials need an API lookup when PGUSER/client ID is not set.
+    const client = ServiceContext.isInitialized()
+      ? ServiceContext.get().client
+      : createWorkspaceClient({ clientOptions: getClientOptions() });
+    const workspaceClient = client.toLegacyWorkspaceClient();
+    const user = await getUsernameWithApiLookup({ workspaceClient });
+    if (!user) {
+      throw databaseSetupFailed(
+        "Could not determine the PostgreSQL user from the current Databricks credentials. Check your authentication or set PGUSER explicitly.",
+      );
+    }
     pool = createLakebasePool({
+      workspaceClient,
+      user,
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });

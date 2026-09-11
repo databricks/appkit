@@ -13,7 +13,16 @@ const mocks = vi.hoisted(() => ({
   createDrizzleDataPath: vi.fn(),
 }));
 
-vi.mock("../../../connectors/lakebase", () => ({
+vi.mock("../../../workspace-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../workspace-client")>()),
+  createWorkspaceClient: () => ({
+    toLegacyWorkspaceClient: () => ({
+      currentUser: { me: async () => ({ userName: "test-user" }) },
+    }),
+  }),
+}));
+vi.mock("../../../connectors/lakebase", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../connectors/lakebase")>()),
   createLakebasePool: mocks.createLakebasePool,
 }));
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({

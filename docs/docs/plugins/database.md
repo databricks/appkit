@@ -34,6 +34,15 @@ as described in [Lakebase configuration](./lakebase.md#environment-variables).
 The database tables must already exist and match the declared schema. This plugin
 checks connectivity during setup; it does not create or migrate tables.
 
+New apps include an empty `config/database/schema.ts`, so `database()` can start
+without requiring sample tables. Replace the empty declaration with your models
+when their PostgreSQL tables are ready.
+
+For local development, the plugin resolves the PostgreSQL username from the
+current Databricks credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are absent.
+An explicitly configured username still takes precedence; no request-level OBO
+connection is introduced.
+
 ```ts
 // config/database/schema.ts
 import { defineSchema, id, text } from "@databricks/appkit/beta";

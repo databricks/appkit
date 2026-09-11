@@ -1,5 +1,6 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { ServiceContext } from "../../../context/service-context";
 import { DatabasePluginError } from "../../../database/errors";
 import type { DataPath, Row } from "../../../database/runtime";
 import { defineSchema, id, text } from "../../../database/schema-builder";
@@ -8,9 +9,19 @@ const mocks = vi.hoisted(() => ({
   createLakebasePool: vi.fn(),
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
+  currentUser: vi.fn(),
 }));
-
-vi.mock("../../../connectors/lakebase", () => ({
+const clients = vi.hoisted(() => ({
+  legacy: { currentUser: { me: mocks.currentUser } },
+}));
+vi.mock("../../../workspace-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../workspace-client")>()),
+  createWorkspaceClient: () => ({
+    toLegacyWorkspaceClient: () => clients.legacy,
+  }),
+}));
+vi.mock("../../../connectors/lakebase", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../connectors/lakebase")>()),
   createLakebasePool: mocks.createLakebasePool,
 }));
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
@@ -90,7 +101,77 @@ function arrange(path = fakePath()) {
   return { pool, db, path, execute };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("PGUSER", "");
+  vi.stubEnv("DATABRICKS_CLIENT_ID", "");
+  mocks.currentUser.mockResolvedValue({ userName: "local-user@example.test" });
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
 describe("createDatabaseState", () => {
+  test("resolves local user credentials without PGUSER or a service principal ID", async () => {
+    const { execute } = arrange();
+    await createDatabaseState(schema, execute);
+    expect(mocks.currentUser).toHaveBeenCalledOnce();
+    expect(mocks.createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: "local-user@example.test",
+        workspaceClient: clients.legacy,
+      }),
+    );
+  });
+
+  test.each([
+    ["PGUSER", "explicit-role"],
+    ["DATABRICKS_CLIENT_ID", "deployed-service-principal"],
+  ])("preserves %s without an identity API call", async (key, user) => {
+    vi.stubEnv(key, user);
+    const { execute } = arrange();
+    await createDatabaseState(schema, execute);
+    expect(mocks.currentUser).not.toHaveBeenCalled();
+    expect(mocks.createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({ user }),
+    );
+  });
+
+  test("uses the app's configured client for both identity lookup and pool authentication", async () => {
+    const legacy = {
+      currentUser: {
+        me: vi.fn(async () => ({ userName: "configured-app-user" })),
+      },
+    };
+    vi.spyOn(ServiceContext, "isInitialized").mockReturnValue(true);
+    vi.spyOn(ServiceContext, "get").mockReturnValue({
+      client: { toLegacyWorkspaceClient: () => legacy },
+      serviceUserId: "app-user-id",
+      workspaceId: Promise.resolve("test-workspace"),
+    } as unknown as ReturnType<typeof ServiceContext.get>);
+    const { execute } = arrange();
+    await createDatabaseState(schema, execute);
+    expect(legacy.currentUser.me).toHaveBeenCalledOnce();
+    expect(mocks.currentUser).not.toHaveBeenCalled();
+    expect(mocks.createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceClient: legacy,
+        user: "configured-app-user",
+      }),
+    );
+  });
+
+  test("does not create a pool when the current credentials cannot resolve a username", async () => {
+    const { execute } = arrange();
+    mocks.currentUser.mockRejectedValueOnce(
+      new Error("Identity lookup unavailable"),
+    );
+    await expect(createDatabaseState(schema, execute)).rejects.toMatchObject({
+      category: "SETUP_FAILED",
+    });
+    expect(mocks.createLakebasePool).not.toHaveBeenCalled();
+  });
   test("accepts authentic populated and empty schemas but rejects a forgery before allocation", async () => {
     arrange();
     await expect(
@@ -130,6 +211,8 @@ describe("createDatabaseState", () => {
     const state = await pending;
     expect(mocks.createLakebasePool).toHaveBeenCalledTimes(1);
     expect(mocks.createLakebasePool).toHaveBeenCalledWith({
+      workspaceClient: clients.legacy,
+      user: "local-user@example.test",
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
