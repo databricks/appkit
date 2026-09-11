@@ -90,7 +90,7 @@ function resourceRow(type: string): ResourceRequirementRow {
 describe("resolveItems", () => {
   it("returns requested items in order", async () => {
     const fetch = vi.fn(async (name: string) => item(name));
-    const result = await resolveItems(["a", "b"], null, fetch);
+    const result = await resolveItems(["a", "b"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
 
@@ -101,7 +101,7 @@ describe("resolveItems", () => {
       c: item("c"),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    const result = await resolveItems(["a"], null, fetch);
+    const result = await resolveItems(["a"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b", "c"]);
   });
 
@@ -112,7 +112,7 @@ describe("resolveItems", () => {
       shared: item("shared"),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    const result = await resolveItems(["a", "b"], null, fetch);
+    const result = await resolveItems(["a", "b"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b", "shared"]);
     expect(fetch).toHaveBeenCalledTimes(3);
   });
@@ -123,7 +123,7 @@ describe("resolveItems", () => {
       b: item("b", { registryDependencies: ["a"] }),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    const result = await resolveItems(["a"], null, fetch);
+    const result = await resolveItems(["a"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -134,7 +134,7 @@ describe("resolveItems", () => {
       b: item("b"),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    const result = await resolveItems(["a"], null, fetch);
+    const result = await resolveItems(["a"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b"]);
   });
 
@@ -146,7 +146,7 @@ describe("resolveItems", () => {
       ...item("analytics"),
       files: [],
     }));
-    const result = await resolveItems(["evil"], null, fetch);
+    const result = await resolveItems(["evil"], fetch);
     expect(result.map((i) => i.name)).toEqual(["evil"]);
   });
 
@@ -155,7 +155,7 @@ describe("resolveItems", () => {
   it("rejects a top-level ref that is not a plain slug (no fetch)", async () => {
     const fetch = vi.fn();
     await expect(
-      resolveItems(["../../attacker/repo/payload"], null, fetch),
+      resolveItems(["../../attacker/repo/payload"], fetch),
     ).rejects.toThrow(/Invalid registry item name/);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -165,7 +165,7 @@ describe("resolveItems", () => {
       a: item("a", { registryDependencies: ["../../evil"] }),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    await expect(resolveItems(["a"], null, fetch)).rejects.toThrow(
+    await expect(resolveItems(["a"], fetch)).rejects.toThrow(
       /Invalid registry item name/,
     );
   });
@@ -180,7 +180,7 @@ describe("resolveItems", () => {
       active--;
       return item(name);
     });
-    const result = await resolveItems(["a", "b", "c"], null, fetch);
+    const result = await resolveItems(["a", "b", "c"], fetch);
     expect(result.map((i) => i.name)).toEqual(["a", "b", "c"]);
     expect(maxActive).toBeGreaterThan(1); // ran in parallel, not one-at-a-time
   });
@@ -216,7 +216,7 @@ describe("partitionVerified", () => {
       "evil-dep": item("evil-dep"),
     };
     const fetch = vi.fn(async (name: string) => graph[name]);
-    const items = await resolveItems(["verified-a"], null, fetch);
+    const items = await resolveItems(["verified-a"], fetch);
     const res = partitionVerified(
       items.map((i) => i.name),
       new Set(["verified-a"]), // only the top-level item is verified

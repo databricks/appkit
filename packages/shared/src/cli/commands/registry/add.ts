@@ -24,12 +24,7 @@ import {
   validateBundle,
   writeConfig,
 } from "./config-writer";
-import {
-  JS_IDENTIFIER,
-  REGISTRY_REPO,
-  type RegistryToken,
-  resolveToken,
-} from "./constants";
+import { JS_IDENTIFIER, REGISTRY_REPO } from "./constants";
 import { parseEnv } from "./env-reconcile";
 import {
   extractRequirements,
@@ -277,11 +272,7 @@ interface PluginSummary {
  */
 export async function resolveItems(
   names: string[],
-  token: RegistryToken | null,
-  fetchItem: (
-    name: string,
-    token: RegistryToken | null,
-  ) => Promise<RegistryItem> = fetchRegistryItem,
+  fetchItem: (name: string) => Promise<RegistryItem> = fetchRegistryItem,
 ): Promise<RegistryItem[]> {
   const seen = new Set<string>();
   const ordered: RegistryItem[] = [];
@@ -307,7 +298,7 @@ export async function resolveItems(
   while (level.length > 0) {
     const items = await Promise.all(
       level.map(async (key) => {
-        const item = await fetchItem(key, token);
+        const item = await fetchItem(key);
         // Pin to the fetch key: the body's self-reported `name` is untrusted
         // and could claim a verified name to slip past the gate. The key is the
         // trustworthy identity the index keys `verified` on.
@@ -370,20 +361,14 @@ export function partitionVerified(
 
 async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
-  const token = resolveToken();
-  if (token) {
-    console.log(
-      `Using ${token.envName} to fetch from ${REGISTRY_REPO} (private).`,
-    );
-  }
 
   // Resolve the full graph and fetch the verified index concurrently (two
   // independent round-trips). Item resolution is read-only — nothing is written
   // or installed until after the gate below.
   const verifiedP = opts.allowUnverified
     ? Promise.resolve(null)
-    : fetchVerifiedNames(token);
-  const items = await resolveItems(refs, token);
+    : fetchVerifiedNames();
+  const items = await resolveItems(refs);
 
   // Integrity gate over the *entire resolved set* (not just requested names, so
   // an unverified transitive dep can't ride in on a verified item). Fails closed:
@@ -683,8 +668,7 @@ entries are never clobbered. Interactive by default; pass --yes for agents/CI
 values non-interactively. Pass --profile to validate the bundle after writing.
 
 The frontend/server roots are detected from common layouts, so you can run
-this from the repo root. While the registry repo is private, a read token is
-resolved from \`gh auth token\` or APPKIT_REGISTRY_TOKEN / GITHUB_TOKEN / GH_TOKEN.
+this from the repo root.
 
 Examples:
   $ appkit add metric-card           # UI component
