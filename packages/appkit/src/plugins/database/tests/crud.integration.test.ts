@@ -8,22 +8,13 @@ import type { ITelemetry } from "../../../telemetry";
 import type { EntityHooks } from "../types";
 
 const mocks = vi.hoisted(() => ({
-  createLakebasePool: vi.fn(),
+  initializeLakebasePool: vi.fn(),
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
 }));
 
-vi.mock("../../../workspace-client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../workspace-client")>()),
-  createWorkspaceClient: () => ({
-    toLegacyWorkspaceClient: () => ({
-      currentUser: { me: async () => ({ userName: "test-user" }) },
-    }),
-  }),
-}));
-vi.mock("../../../connectors/lakebase", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../connectors/lakebase")>()),
-  createLakebasePool: mocks.createLakebasePool,
+vi.mock("../../../connectors/lakebase", () => ({
+  initializeLakebasePool: mocks.initializeLakebasePool,
 }));
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDb: mocks.createDrizzleDb,
@@ -134,7 +125,7 @@ function fakeResponse() {
 
 async function mount(hooks: Record<string, EntityHooks>) {
   const database = memoryDataPath();
-  mocks.createLakebasePool.mockReturnValue({
+  mocks.initializeLakebasePool.mockResolvedValue({
     end: vi.fn(async () => undefined),
   });
   mocks.createDrizzleDb.mockReturnValue({});
@@ -204,7 +195,7 @@ const auditingHooks: Record<string, EntityHooks> = {
 };
 
 beforeEach(() => {
-  mocks.createLakebasePool.mockReset();
+  mocks.initializeLakebasePool.mockReset();
   mocks.createDrizzleDb.mockReset();
   mocks.createDrizzleDataPath.mockReset();
 });
