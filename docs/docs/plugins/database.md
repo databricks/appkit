@@ -34,9 +34,10 @@ as described in [Lakebase configuration](./lakebase.md#environment-variables).
 The database tables must already exist and match the declared schema. This plugin
 checks connectivity during setup; it does not create or migrate tables.
 
-New apps include an empty `config/database/schema.ts`, so `database()` can start
-without requiring sample tables. Replace the empty declaration with your models
-when their PostgreSQL tables are ready.
+Apps scaffolded with the Database plugin selected include an empty
+`config/database/schema.ts`, so `database()` can start without requiring sample
+tables. Replace the empty declaration with your models when their PostgreSQL
+tables are ready.
 
 For local development, AppKit's Lakebase connector resolves the PostgreSQL
 username from the application's Databricks credentials when `PGUSER` and
