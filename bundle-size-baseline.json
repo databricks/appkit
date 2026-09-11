@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1166198,
-        "unpacked": 4031979
+        "packed": 1166347,
+        "unpacked": 4032202
       },
       "dist": {
         "total": {
-          "raw": 4017505,
-          "gzip": 1367913
+          "raw": 4017728,
+          "gzip": 1368088
         },
         "js": {
-          "raw": 1192280,
-          "gzip": 420241
+          "raw": 1192347,
+          "gzip": 420316
         },
         "types": {
           "raw": 433710,
-          "gzip": 156071
+          "gzip": 156073
         },
         "maps": {
-          "raw": 2380720,
-          "gzip": 787783
+          "raw": 2380876,
+          "gzip": 787881
         },
         "css": {
           "raw": 0,
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 94459,
+          "gzip": 94484,
           "composition": {
-            "initialGzip": 94002,
+            "initialGzip": 94027,
             "lazyGzip": 457,
-            "totalGzip": 94459,
-            "own": 284010,
+            "totalGzip": 94484,
+            "own": 284062,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 77249,
+                "gzip": 77275,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1344,
+                "gzip": 1343,
                 "kind": "initial"
               },
               {
@@ -189,13 +189,13 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 358131,
+        "packed": 358128,
         "unpacked": 1443865
       },
       "dist": {
         "total": {
           "raw": 1439919,
-          "gzip": 483864
+          "gzip": 483863
         },
         "js": {
           "raw": 404113,
@@ -203,7 +203,7 @@
         },
         "types": {
           "raw": 234763,
-          "gzip": 85827
+          "gzip": 85826
         },
         "maps": {
           "raw": 784645,
