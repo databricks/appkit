@@ -218,7 +218,7 @@ interface EvalOptions {
   databricksToken?: string;
   experiment?: string;
   judgeModel?: string;
-  concurrency?: number;
+  concurrency?: string;
   warehouseId?: string;
   timeout?: string;
   retries?: string;
@@ -366,9 +366,9 @@ async function runAgentEval(
   const warehouseId = opts.warehouseId ?? process.env.DATABRICKS_WAREHOUSE_ID;
   const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
-  // Max concurrency: the `--concurrency` flag (already parsed by its argParser)
-  // wins over the root config's value; else the runner's built-in default.
-  const concurrency = opts.concurrency ?? config.maxConcurrency;
+  // Max concurrency: the `--concurrency` flag wins over the root config's value
+  // (junk/zero/negative → undefined, so it falls back); else the runner default.
+  const concurrency = positiveInt(opts.concurrency) ?? config.maxConcurrency;
 
   // Runner-level default per-eval timeout (ms). --timeout flag wins over the
   // root config; a per-eval `timeoutMs` overrides both (applied in the runner).
@@ -508,7 +508,6 @@ export const agentEvalCommand = new Command("eval")
   .option(
     "--concurrency <n>",
     "Max evals to run concurrently (default 4; keep at or below the app's max concurrent streams per user)",
-    (v) => Number.parseInt(v, 10),
   )
   .option(
     "--root <dir>",
