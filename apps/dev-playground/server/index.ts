@@ -12,8 +12,15 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch } from "@databricks/appkit/beta";
+import {
+  agents,
+  aiSearch,
+  createAgent,
+  database,
+  runAgent,
+} from "@databricks/appkit/beta";
 
+import { schema } from "../config/database/schema";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -58,6 +65,14 @@ const usersOnly: FilePolicy = (_action, _resource, user) => {
   return user.isServicePrincipal !== true;
 };
 
+// Best-effort redaction demonstrates calling an agent from a hook; it is not
+// a guarantee that all personal data will be removed.
+const redactor = createAgent({
+  instructions:
+    "Replace every personal name and email address in the user's text with [redacted]. " +
+    "Return only the rewritten text, nothing else.",
+});
+
 createApp({
   plugins: [
     server(),
@@ -69,6 +84,60 @@ createApp({
     }),
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
+    // Setup queries the database before publishing anything, so the plugin
+    // only joins the app once an instance is actually configured.
+    ...(process.env.LAKEBASE_ENDPOINT
+      ? [
+          database({
+            schema,
+            // Reads are generated for all three tables. Only boards and notes
+            // accept HTTP writes; the audit trail is written by the hook.
+            api: { writes: { tables: ["boards", "notes"] } },
+            hooks: {
+              notes: {
+                async beforeCreate(values) {
+                  // Cancel the model call before the 30-second transaction deadline.
+                  const signal = AbortSignal.timeout(10_000);
+                  const answer = await runAgent(redactor, {
+                    messages: String(values.body),
+                    signal,
+                  });
+                  // A cancelled stream can return accumulated text instead of throwing.
+                  signal.throwIfAborted();
+                  if (
+                    answer.events.some(
+                      (event) =>
+                        event.type === "status" && event.status === "error",
+                    )
+                  ) {
+                    throw new Error("Note redaction failed");
+                  }
+                  const body = answer.text.trim();
+                  if (!body) throw new Error("Note redaction returned no text");
+
+                  return {
+                    ...values,
+                    body,
+                    // Demo only; production apps should use the authenticated session.
+                    author_email: `${values.author}@example.com`,
+                  };
+                },
+                async afterCreate(row, ctx) {
+                  // The audit write joins the note's transaction, not the HTTP API.
+                  await ctx.app.database.note_events.create({
+                    note_id: row.id,
+                    action: "created",
+                  });
+                },
+                serialize: (row, { operation }) =>
+                  operation === "list"
+                    ? { ...row, body: String(row.body).slice(0, 120) }
+                    : row,
+              },
+            },
+          }),
+        ]
+      : []),
     files({
       volumes: {
         // Smart Dashboard saved views land here. Backed by
