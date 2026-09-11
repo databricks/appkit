@@ -5,7 +5,6 @@ import process from "node:process";
 
 import { Command } from "commander";
 import pc from "picocolors";
-import { gte, minVersion } from "semver";
 
 import {
   fetchRegistryItem,
@@ -198,31 +197,30 @@ export function parseDepSpec(spec: string): { name: string; range?: string } {
   return { name: spec.slice(0, at), range: spec.slice(at + 1) };
 }
 
-/** minVersion() but null-safe: returns null for unparseable ranges
- * (`workspace:*`, `catalog:`, git/tarball URLs) instead of throwing. */
-function rangeFloor(range: string): string | null {
-  try {
-    return minVersion(range)?.version ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Registry `dependencies` are floors ("needs at least this version"), not pins.
- * Given the versions already declared in the target `package.json`, decide which
- * specs to actually install: packages that are missing (installed as declared)
- * and genuine upgrades (installed floor below the requested floor). A package
- * already at the same-or-newer version is skipped, so `pnpm add` never rewrites
- * it downward — the reported bug, where e.g. `@databricks/appkit-ui@^0.41.0`
- * from the registry downgraded an app on 0.73.x (0.73.0 is outside `^0.41.0`).
- * Ranges we can't compare on either side (workspace:*, catalog:, git) are left
- * untouched — skipped — since downgrading a linked/pinned dep is never right.
+ * Against the versions already in the target `package.json`, returns which specs
+ * to install: missing packages (as declared) and genuine upgrades (installed
+ * floor below the requested floor). A package already at a same-or-newer version
+ * is skipped so the package manager never downgrades it; ranges that can't be
+ * compared (workspace:*, catalog:, git) are skipped for the same reason.
+ *
+ * `semver` is injected so the caller can lazy-load it (see `installDependencies`).
  */
 export function reconcileDeps(
   specs: string[],
   installed: Record<string, string>,
+  { gte, minVersion }: Pick<typeof import("semver"), "gte" | "minVersion">,
 ): { install: string[]; skipped: string[] } {
+  // minVersion() throws on ranges it can't parse (workspace:*, catalog:, git);
+  // treat those as uncomparable and skip rather than risk a downgrade.
+  const floor = (range: string): string | null => {
+    try {
+      return minVersion(range)?.version ?? null;
+    } catch {
+      return null;
+    }
+  };
   const install: string[] = [];
   const skipped: string[] = [];
   for (const spec of specs) {
@@ -236,8 +234,8 @@ export function reconcileDeps(
       skipped.push(spec); // present, no version asked → keep what's there
       continue;
     }
-    const reqFloor = rangeFloor(range);
-    const haveFloor = rangeFloor(have);
+    const reqFloor = floor(range);
+    const haveFloor = floor(have);
     if (!reqFloor || !haveFloor) {
       skipped.push(spec); // can't compare safely → don't touch
     } else if (gte(haveFloor, reqFloor)) {
@@ -263,7 +261,7 @@ function readInstalledRanges(pkgPath: string): Record<string, string> {
   }
 }
 
-function installDependencies(deps: string[], cwd: string): void {
+async function installDependencies(deps: string[], cwd: string): Promise<void> {
   if (deps.length === 0) return;
 
   const { safe, rejected } = partitionDeps(deps);
@@ -286,11 +284,13 @@ function installDependencies(deps: string[], cwd: string): void {
     return;
   }
 
-  // Registry deps are floors, not pins: skip anything already installed at a
-  // same-or-newer version so we never downgrade the app's own packages.
+  // Lazy import: this file is loaded eagerly by the CLI entry, so keep semver
+  // (only needed here) off the startup path — as with server-register/env-writer.
+  const semver = await import("semver");
   const { install, skipped } = reconcileDeps(
     safe,
     readInstalledRanges(pkgPath),
+    semver,
   );
   if (skipped.length > 0) {
     console.log(
@@ -565,7 +565,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     }
   }
 
-  installDependencies([...deps], findNearestPackageJson(cwd));
+  await installDependencies([...deps], findNearestPackageJson(cwd));
 
   if (hasPlugin) {
     console.log(pc.dim("\nRegistering plugins (appkit plugin sync)..."));
