@@ -4,6 +4,28 @@ The `t` context passed to an eval's `test` function.
 
 ## Properties
 
+### expected
+
+```ts
+readonly expected: Record<string, unknown> | undefined;
+```
+
+The current dataset row's `expectations` (ground truth / guidelines), or
+`undefined` when the row has none or the eval isn't dataset-driven.
+
+***
+
+### input
+
+```ts
+readonly input: Record<string, unknown>;
+```
+
+The current dataset row's `inputs` when the eval is dataset-driven (see
+[EvalDefinition.dataset](Interface.EvalDefinition.md#dataset)); `{}` for a plain single-run eval.
+
+***
+
 ### judge
 
 ```ts
@@ -15,9 +37,10 @@ judge: {
 ```
 
 LLM-as-judge scoring of the last reply (via autoevals → a Databricks judge
-model). Each returns a scored, soft-by-default assertion; chain `.atLeast(n)`
-to set the pass threshold or `.gate()` to make it a hard gate. Requires the
-judge to be configured (`--judge-model`).
+model). Each returns a scored assertion that gates by default (a miss fails
+the eval); chain `.atLeast(n)` to change the pass threshold or `.soft()` to
+demote to a tracked-only metric. Requires the judge to be configured
+(`--judge-model`).
 
 #### closedQA()
 
@@ -125,6 +148,29 @@ Assert a tool was called during the run (gate by default).
 
 ***
 
+### calledToolWith()
+
+```ts
+calledToolWith(name: string, expected: Record<string, unknown>): AssertionHandle;
+```
+
+Assert a tool was called with arguments that deep-contain `expected`: every
+key in `expected` must equal the actual argument (recursively for nested
+objects), so extra arguments are ignored. Gate by default.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `name` | `string` |
+| `expected` | `Record`\<`string`, `unknown`\> |
+
+#### Returns
+
+[`AssertionHandle`](Interface.AssertionHandle.md)
+
+***
+
 ### check()
 
 ```ts
@@ -143,6 +189,22 @@ Assert a value against a matcher, e.g. `t.check(t.reply, includes("Sunny"))`.
 #### Returns
 
 [`AssertionHandle`](Interface.AssertionHandle.md)
+
+***
+
+### reset()
+
+```ts
+reset(): void;
+```
+
+Start a fresh conversation: the next `send` opens a new thread with no
+history. Use to run several independent one-shot checks in one test.
+Consecutive `send`s (without a `reset`) stay in one multi-turn conversation.
+
+#### Returns
+
+`void`
 
 ***
 

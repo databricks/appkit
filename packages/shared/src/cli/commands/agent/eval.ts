@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 
 import { Command, Option } from "commander";
@@ -55,12 +56,26 @@ interface EvalRunner {
     token?: string;
   }): unknown;
   formatEvalHeadline(result: unknown): string;
+  loadRootEvalConfig(rootDir: string): Promise<EvalConfig | undefined>;
   evalGlyph(result: unknown): string;
   formatEvalDetail(result: unknown): string[];
   formatSummaryLine(results: unknown[]): string;
   formatResultsJson(results: unknown[]): string;
   formatResultsJUnit(results: unknown[]): string;
   summarize(results: unknown[]): { allPassed: boolean; passRate: number };
+}
+
+/** Subset of `@databricks/appkit/beta`'s `EvalConfig` the CLI reads. */
+interface EvalConfig {
+  maxConcurrency?: number;
+  timeoutMs?: number;
+  baseUrl?: string;
+  webServer?: {
+    command: string;
+    url?: string;
+    timeoutMs?: number;
+    reuseExisting?: boolean;
+  };
 }
 
 /**
@@ -114,8 +129,86 @@ function positiveInt(raw: string | undefined): number | undefined {
   return n > 0 ? n : undefined;
 }
 
+/** True when `url` answers with any HTTP response (a 404 still proves it's up). */
+async function isServerUp(url: string): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(2000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Start the app under test per a root config's `webServer`, à la Playwright:
+ * reuse a server already answering at `url` (unless `reuseExisting: false`),
+ * else spawn `command`, poll `url` until it answers or `timeoutMs` elapses.
+ * Returns a `stop()` that kills the spawned process group (a no-op when the
+ * server was reused). Under a machine reporter (`machine`) our logs and the
+ * child's stdout are both routed to stderr, so the report stream on stdout
+ * stays clean. Throws if the server never comes up.
+ */
+async function startWebServer(
+  webServer: NonNullable<EvalConfig["webServer"]>,
+  baseUrl: string,
+  machine: boolean,
+): Promise<{ stop: () => void }> {
+  const url = webServer.url ?? baseUrl;
+  const reuse = webServer.reuseExisting !== false;
+  const noop = { stop: () => {} };
+
+  if (reuse && (await isServerUp(url))) {
+    console.error(`Reusing server already running at ${url}`);
+    return noop;
+  }
+
+  console.error(`Starting web server: ${webServer.command}`);
+  // `detached` + a negative-PID kill lets us tear down the whole process group
+  // (dev servers spawn child processes). Under a machine reporter the child's
+  // stdout is sent to our stderr (fd 2) so it can't corrupt the report we later
+  // write to stdout; in text mode it inherits so the user sees build output.
+  const child: ChildProcess = spawn(webServer.command, {
+    shell: true,
+    detached: true,
+    stdio: machine ? ["ignore", 2, "inherit"] : "inherit",
+  });
+
+  let exited = false;
+  child.on("exit", () => {
+    exited = true;
+  });
+
+  const stop = (): void => {
+    if (exited || child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      // Group already gone, or never became a leader — best-effort.
+    }
+  };
+
+  const deadline = Date.now() + (webServer.timeoutMs ?? 60_000);
+  try {
+    while (Date.now() < deadline) {
+      if (exited) throw new Error("web server exited before becoming ready");
+      if (await isServerUp(url)) {
+        console.error(`Web server ready at ${url}`);
+        return { stop };
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } catch (err) {
+    stop();
+    throw err;
+  }
+  stop();
+  throw new Error(
+    `web server did not respond at ${url} within ${webServer.timeoutMs ?? 60_000}ms`,
+  );
+}
+
 interface EvalOptions {
-  url: string;
+  url?: string;
   strict?: boolean;
   root?: string;
   header?: string[];
@@ -125,7 +218,7 @@ interface EvalOptions {
   databricksToken?: string;
   experiment?: string;
   judgeModel?: string;
-  concurrency?: number;
+  concurrency?: string;
   warehouseId?: string;
   timeout?: string;
   retries?: string;
@@ -245,6 +338,15 @@ async function runAgentEval(
 ): Promise<void> {
   const runner = await loadRunner();
 
+  // Root `evals.config.ts` (project root) carries run-wide settings — baseUrl,
+  // webServer, and defaults for concurrency/timeout. A CLI flag always wins.
+  const rootDir = opts.root ?? process.cwd();
+  const config = (await runner.loadRootEvalConfig(rootDir)) ?? {};
+
+  // Base URL: --url flag > config.baseUrl > built-in default. `--url` has no
+  // commander default so an unset flag is undefined and lets config win.
+  const baseUrl = opts.url ?? config.baseUrl ?? "http://localhost:8000";
+
   // Databricks credentials shared by auth resolution and the workspace client:
   // an explicit flag/DATABRICKS_* env wins, else the SDK resolves from the CLI
   // profile.
@@ -264,8 +366,13 @@ async function runAgentEval(
   const warehouseId = opts.warehouseId ?? process.env.DATABRICKS_WAREHOUSE_ID;
   const workspaceClient = runner.resolveWorkspaceClient(credentials);
 
-  // Runner-level default per-eval timeout (ms). A per-eval `timeoutMs` wins.
-  const timeoutMs = positiveInt(opts.timeout);
+  // Max concurrency: the `--concurrency` flag wins over the root config's value
+  // (junk/zero/negative → undefined, so it falls back); else the runner default.
+  const concurrency = positiveInt(opts.concurrency) ?? config.maxConcurrency;
+
+  // Runner-level default per-eval timeout (ms). --timeout flag wins over the
+  // root config; a per-eval `timeoutMs` overrides both (applied in the runner).
+  const timeoutMs = positiveInt(opts.timeout) ?? config.timeoutMs;
 
   // Extra attempts for evals that fail on an infra error (turn/timeout). Junk
   // or negative input falls back to no retries.
@@ -291,33 +398,44 @@ async function runAgentEval(
     else console.log(msg);
   };
 
+  // Boot the app under test if the root config declares a webServer (reuses an
+  // already-running server unless told otherwise); always torn down after. The
+  // boot runs inside the try so a server that never comes up takes the clean
+  // error path below instead of escaping as an unhandled rejection.
+  let server: { stop: () => void } | undefined;
   let summary: EvalRunSummary;
   try {
+    server = config.webServer
+      ? await startWebServer(config.webServer, baseUrl, machine)
+      : undefined;
     summary = await runner.runEvalsInDir({
-      rootDir: opts.root,
-      baseUrl: opts.url,
+      rootDir,
+      baseUrl,
       filter,
       tags: opts.tag,
       strict: opts.strict,
       headers: opts.header ? parseHeaders(opts.header) : undefined,
-      concurrency: opts.concurrency,
+      concurrency,
       mlflow: resolveMlflow(opts, auth),
       judge: resolveJudge(opts, auth),
       workspaceClient,
       warehouseId,
       timeoutMs,
       retries,
-      onEvent: makeProgressReporter(runner, opts.url, machine, info),
+      onEvent: makeProgressReporter(runner, baseUrl, machine, info),
     });
   } catch (err) {
-    // Setup failures (e.g. a bad --experiment for the MLflow run) reject before
-    // any eval runs; surface a clean message + non-zero exit rather than an
-    // unhandled promise rejection with a raw stack.
+    // Setup failures — a web server that never comes up, or e.g. a bad
+    // --experiment for the MLflow run — reject before any eval runs; surface a
+    // clean message + non-zero exit rather than an unhandled promise rejection
+    // with a raw stack.
     console.error(
       `\nEval run failed: ${err instanceof Error ? err.message : String(err)}`,
     );
     process.exitCode = 1;
     return;
+  } finally {
+    server?.stop();
   }
 
   // The final human summary always shows (stderr for machine reporters so it
@@ -382,12 +500,14 @@ export const agentEvalCommand = new Command("eval")
     "[filter]",
     "Only run evals whose <agent>/<id> contains this substring (or an exact agent id)",
   )
-  .option("--url <url>", "Base URL of the running app", "http://localhost:3000")
+  .option(
+    "--url <url>",
+    "Base URL of the app to drive (default: evals.config.ts baseUrl, else http://localhost:8000)",
+  )
   .option("--strict", "Fail on soft-assertion misses too", false)
   .option(
     "--concurrency <n>",
     "Max evals to run concurrently (default 4; keep at or below the app's max concurrent streams per user)",
-    (v) => Number.parseInt(v, 10),
   )
   .option(
     "--root <dir>",
