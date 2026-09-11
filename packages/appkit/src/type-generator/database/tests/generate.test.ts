@@ -300,6 +300,8 @@ describe("generateDatabaseTypes", () => {
               path.join(sourceRoot, "plugins/database/index.ts"),
             ],
             shared: [path.resolve(appkitRoot, "../shared/src/index.ts")],
+            // CI runs unit tests before build, including imports of shared subpaths.
+            "shared/*": [path.resolve(appkitRoot, "../shared/src/*")],
             "@databricks/lakebase": [
               path.resolve(appkitRoot, "../lakebase/src/index.ts"),
             ],
