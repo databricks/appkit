@@ -152,6 +152,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.75.0](https://github.com/databricks/appkit/compare/v0.74.1...v0.75.0) (2026-09-11)
+
+### appkit
+
+* **appkit:** auto-start app under test for agent evals (stack 6/6) ([#482](https://github.com/databricks/appkit/issues/482)) ([038454d](https://github.com/databricks/appkit/commit/038454db78f92130ae1333d2e15fa878bec57253))
+
+
 ## [0.74.1](https://github.com/databricks/appkit/compare/v0.74.0...v0.74.1) (2026-09-11)
 
 ### shared
