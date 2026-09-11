@@ -8,15 +8,15 @@ import {
 } from "../warehouse-status";
 
 /**
- * Build a minimal WorkspaceClient stub exposing only `warehouses.get`, the one
- * method these helpers touch. Cast through `unknown` to the SDK type so callers
- * type-check without us constructing a real client.
+ * Build a minimal WorkspaceClient stub exposing only `warehouses.getWarehouse`,
+ * the one method these helpers touch. Cast through `unknown` to the SDK type so
+ * callers type-check without us constructing a real client.
  */
 function makeClient(get: ReturnType<typeof vi.fn>): WorkspaceClient {
-  return { warehouses: { get } } as unknown as WorkspaceClient;
+  return { warehouses: { getWarehouse: get } } as unknown as WorkspaceClient;
 }
 
-/** A warehouses.get resolution carrying a given lifecycle state. */
+/** A warehouses.getWarehouse resolution carrying a given lifecycle state. */
 const stateResponse = (state: WarehouseState) => ({ state });
 
 describe("getWarehouseState", () => {

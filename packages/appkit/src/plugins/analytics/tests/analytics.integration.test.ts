@@ -98,7 +98,7 @@ describe("Analytics Plugin Integration", () => {
 
   beforeEach(() => {
     mockClient.mocks.executeStatement.mockReset();
-    mockClient.mocks.getStatement.mockReset();
+    mockClient.mocks.getStatementResult.mockReset();
     getAppQuerySpy.mockReset();
   });
 
@@ -110,8 +110,8 @@ describe("Analytics Plugin Integration", () => {
         ["Bob", "25"],
       ];
       const mockColumns = [
-        { name: "name", type_name: "STRING" },
-        { name: "age", type_name: "STRING" },
+        { name: "name", typeName: "STRING" },
+        { name: "age", typeName: "STRING" },
       ];
 
       getAppQuerySpy.mockResolvedValueOnce({
@@ -148,7 +148,7 @@ describe("Analytics Plugin Integration", () => {
       expect(mockClient.mocks.executeStatement).toHaveBeenCalledWith(
         expect.objectContaining({
           statement: testQuery,
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.anything(),
       );

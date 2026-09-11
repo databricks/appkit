@@ -54,12 +54,12 @@ export function parseDatabricksType(typeText: string): DataType {
 export function buildEmptyArrowIPCBase64(
   columns: Array<{
     name?: string;
-    type_text?: string;
-    type_name?: string;
+    typeText?: string;
+    typeName?: string;
   }>,
 ): string {
   const fields = columns.map((col, index) => {
-    const typeText = col.type_text ?? col.type_name ?? "STRING";
+    const typeText = col.typeText ?? col.typeName ?? "STRING";
     let dataType: DataType;
     try {
       dataType = parseDatabricksType(typeText);
