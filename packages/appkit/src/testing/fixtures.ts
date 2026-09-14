@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
@@ -5,10 +7,12 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
+import { AuthenticationError } from "../errors";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
+import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 // Test fixtures intentionally use loose shapes; `noExplicitAny` is disabled
-// repo-wide (see biome.json), so a local alias keeps the intent readable.
+// repo-wide (see .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
 /**
@@ -121,8 +125,60 @@ export type OboOption =
       email?: string;
     };
 
-/** Build the forwarded identity headers an `obo` option implies. */
-function oboHeaders(obo: Exclude<OboOption, false>): Record<string, string> {
+/**
+ * The one fake of `ServiceContext.createUserContext` this kit uses, shared by
+ * `mockServiceContext` and `createTestApp`.
+ *
+ * Shared rather than duplicated because the two used to disagree, and neither
+ * matched production: a missing token went unrejected and `tokenFingerprint`
+ * was absent, which silently disables Lakebase pool rotation — `pool-manager`
+ * treats a missing fingerprint as "not stale", so the drain-and-recreate branch
+ * could never run under a fake.
+ *
+ * @internal
+ */
+export function fakeUserContext(
+  client: Any,
+  ids: { warehouseId?: Any; workspaceId: Any },
+) {
+  return (
+    token: string,
+    userId: string,
+    userName?: string,
+    userEmail?: string,
+  ): Any => {
+    // Same rejection as production, so a path that forgets to forward the token
+    // fails here instead of only in a deployed app.
+    if (!token) throw AuthenticationError.missingToken("user token");
+    return {
+      client,
+      userId,
+      userName,
+      userEmail,
+      // Derived from the token exactly as production does. Keyed on the user it
+      // would be constant across tokens, and rotation compares this value.
+      tokenFingerprint: createHash("sha256")
+        .update(token)
+        .digest("hex")
+        .slice(0, 16),
+      warehouseId: ids.warehouseId,
+      workspaceId: ids.workspaceId,
+      isUserContext: true,
+    };
+  };
+}
+
+/**
+ * Build the forwarded identity headers an `obo` option implies.
+ *
+ * Exported so `createTestApp`'s request methods use the same convention as
+ * `createMockRequest` rather than a second one.
+ *
+ * @internal
+ */
+export function oboHeaders(
+  obo: Exclude<OboOption, false>,
+): Record<string, string> {
   const opts = obo === true ? {} : obo;
   const headers: Record<string, string> = {
     "x-forwarded-access-token": opts.token ?? "test-user-token",
@@ -333,28 +389,6 @@ export interface TestContextOptions {
 }
 
 /**
- * Creates a default mock WorkspaceClient for testing (SQL succeeds, warehouse
- * RUNNING).
- */
-export function createMockWorkspaceClient() {
-  return {
-    statementExecution: {
-      executeStatement: vi.fn().mockResolvedValue({
-        status: { state: "SUCCEEDED" },
-        result: { data: [] },
-      }),
-    },
-    // Analytics route now calls `warehouses.get` before issuing SQL to
-    // ensure the warehouse is RUNNING. Default to RUNNING so existing
-    // tests that only care about SQL behaviour aren't affected.
-    warehouses: {
-      get: vi.fn().mockResolvedValue({ state: "RUNNING" }),
-      start: vi.fn().mockResolvedValue(undefined),
-    },
-  };
-}
-
-/**
  * Builds a {@link ServiceContextState} value for testing without touching the
  * singleton. Internal building block for {@link mockServiceContext}, which
  * installs the state as spies — that installer is the public entry point.
@@ -396,17 +430,12 @@ export function mockServiceContext(options: TestContextOptions = {}) {
 
   const createUserContextSpy = vi
     .spyOn(ServiceContext, "createUserContext")
-    .mockImplementation((_token: string, userId: string, userName?: string) => {
-      return {
-        client: (options.userDatabricksClient ||
-          createMockWorkspaceClient()) as Any,
-        userId,
-        userName,
-        warehouseId: serviceContext.warehouseId,
-        workspaceId: serviceContext.workspaceId,
-        isUserContext: true,
-      };
-    });
+    .mockImplementation(
+      fakeUserContext(
+        options.userDatabricksClient || createMockWorkspaceClient(),
+        serviceContext,
+      ),
+    );
 
   return {
     serviceContext,
@@ -532,41 +561,5 @@ export function createFailedSQLResponse(errorMessage: string) {
       },
     },
     statement_id: `stmt-${Date.now()}`,
-  };
-}
-
-/**
- * A WorkspaceClient whose `executeStatement`/`getStatement` are bare `vi.fn()`s
- * (no default resolution) so a test can script exactly what SQL returns.
- * `warehouses.get` defaults to RUNNING.
- */
-export function createConfigurableMockWorkspaceClient() {
-  const executeStatement = vi.fn();
-  const getStatement = vi.fn();
-  // Analytics route now calls `warehouses.get` before issuing SQL; default to
-  // RUNNING so callers that don't care about warehouse readiness don't have
-  // to wire it up.
-  const warehousesGet = vi.fn().mockResolvedValue({ state: "RUNNING" });
-  const warehousesStart = vi.fn().mockResolvedValue(undefined);
-
-  const client = {
-    statementExecution: {
-      executeStatement,
-      getStatement,
-    },
-    warehouses: {
-      get: warehousesGet,
-      start: warehousesStart,
-    },
-  };
-
-  return {
-    client,
-    mocks: {
-      executeStatement,
-      getStatement,
-      warehousesGet,
-      warehousesStart,
-    },
   };
 }

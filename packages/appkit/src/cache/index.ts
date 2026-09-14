@@ -128,6 +128,10 @@ export class CacheManager {
     if (!CacheManager.initPromise) {
       CacheManager.initPromise = CacheManager.create(userConfig).then(
         (instance) => {
+          // Publishes unconditionally: safe only because every getInstance() is
+          // awaited before any reset(), so a reset() can never land mid-init and
+          // this can never publish over it. A future unawaited-init caller would
+          // reintroduce that stale-publish race (the removed `generation` guard).
           CacheManager.instance = instance;
           return instance;
         },
@@ -555,6 +559,20 @@ export class CacheManager {
   /** Close the cache */
   async close(): Promise<void> {
     await this.storage.close();
+  }
+
+  /**
+   * Drop the singleton so the next {@link getInstance} builds a fresh manager.
+   *
+   * Both fields must clear — `getInstance()` falls back to `initPromise` when
+   * `instance` is null. A pointer drop, not teardown: call {@link close} first
+   * or the old storage leaks (a `pg.Pool` under `PersistentStorage`).
+   *
+   * @internal
+   */
+  static reset(): void {
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
   }
 
   /**

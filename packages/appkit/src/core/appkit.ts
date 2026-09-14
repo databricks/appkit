@@ -27,10 +27,20 @@ import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
 
+/**
+ * Internal teardown entry for the test harness (see `createTestApp`).
+ * Symbol-keyed so it cannot collide with — or be shadowed by — a plugin
+ * manifest name, and so it stays off the public `PluginMap` surface.
+ * @internal
+ */
+export const disposeApp = Symbol("appkit.internal.dispose");
+
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
+  /** Owns the shutdown sequence; assigned once every plugin has started. */
+  #lifecycle: LifecycleManager | undefined;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
@@ -190,6 +200,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
       client?: WorkspaceClient;
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
+      /**
+       * Skip installing the SIGTERM/SIGINT handlers. Internal, and not exposed
+       * on {@link createApp}: only the test harness sets it, because it boots
+       * repeatedly in one process and manages its own teardown, so
+       * accumulating signal handlers would be a leak.
+       */
+      installSignalHandlers?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -231,11 +248,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     await instance.#context.emitLifecycle("setup:complete");
 
-    const handle = instance as unknown as PluginMap<T>;
+    const app = instance as unknown as PluginMap<T>;
 
     if (config.onPluginsReady) {
       logger.debug("Running onPluginsReady hook");
-      await config.onPluginsReady(handle);
+      await config.onPluginsReady(app);
       logger.debug("onPluginsReady hook completed");
     }
 
@@ -252,9 +269,24 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // plugin has started. Applies uniformly whether or not a server plugin
     // is present — server-less apps still get their telemetry flushed and
     // plugin shutdown() hooks run.
-    new LifecycleManager(instance.#context).installSignalHandlers();
+    instance.#lifecycle = new LifecycleManager(instance.#context);
+    if (config.installSignalHandlers !== false) {
+      instance.#lifecycle.installSignalHandlers();
+    }
 
-    return handle;
+    return app;
+  }
+
+  /**
+   * Internal teardown entry point for the test harness: delegates to the
+   * lifecycle's non-exiting `shutdown({ exit: false })` (the phases are
+   * canonical there). Not public API — AppKit does not support re-booting or
+   * embedding, so real apps tear down only through the signal path. The harness
+   * drops the core singletons and restores env after this resolves.
+   * @internal
+   */
+  async [disposeApp](): Promise<void> {
+    await this.#lifecycle?.shutdown({ exit: false });
   }
 
   private static bootstrapInternalTelemetry(): void {
@@ -388,6 +420,7 @@ export async function createApp<
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
     client?: WorkspaceClient;
+    /** Runs after plugin setup but **before** the server starts. */
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     disableInternalTelemetry?: boolean;
   } = {},

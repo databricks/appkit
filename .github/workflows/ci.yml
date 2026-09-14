@@ -213,6 +213,16 @@ jobs:
         working-directory: pr-template
         run: npm install
 
+      # The scaffold's own vitest suite, run against the tarballs built above
+      # rather than the published versions template/package.json pins. This is
+      # the only CI check that exercises the template's example test, and the
+      # only one that consumes @databricks/appkit/testing the way a customer
+      # does — through a real npm install of a packed tarball. Before the zip,
+      # so a broken example fails the build instead of shipping.
+      - name: Run the template's own tests
+        working-directory: pr-template
+        run: npm test
+
       # npm install above runs under the JFrog .npmrc (setup-jfrog-npm), which
       # bakes internal registry URLs into the regenerated lock. Rewrite them back
       # to public npm and fail-closed if any non-public registry remains, so the

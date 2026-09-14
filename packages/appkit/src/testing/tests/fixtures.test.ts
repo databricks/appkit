@@ -3,8 +3,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../cache";
 import { InMemoryStorage } from "../../cache/storage";
 import { ServiceContext } from "../../context";
+import { AuthenticationError } from "../../errors";
 import {
   createMockRequest,
+  mockServiceContext,
   resetTestCache,
   useServiceContextMock,
 } from "../fixtures";
@@ -99,6 +101,50 @@ describe("resetTestCache", () => {
     await resetTestCache();
 
     expect(await cache.get("k")).toBeNull();
+  });
+});
+
+describe("mockServiceContext — user context matches production", () => {
+  test("the fingerprint is derived from the token, not the user", () => {
+    // Lakebase rotates its pool by comparing this. A user-keyed value would be
+    // constant across tokens, so `pool-manager` would never see a change and the
+    // drain-and-recreate branch could never run under this fake.
+    const mock = mockServiceContext();
+    try {
+      const fp = (token: string) =>
+        ServiceContext.createUserContext(token, "same").tokenFingerprint;
+      expect(fp("tok-a")).toBe(fp("tok-a"));
+      expect(fp("tok-a")).not.toBe(fp("tok-b"));
+      expect(fp("tok-a")).toMatch(/^[0-9a-f]{16}$/);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("a missing token is refused, with production's error class", () => {
+    const mock = mockServiceContext();
+    try {
+      expect(() => ServiceContext.createUserContext("", "nobody")).toThrow(
+        AuthenticationError,
+      );
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("userEmail is carried through", () => {
+    const mock = mockServiceContext();
+    try {
+      const ctx = ServiceContext.createUserContext(
+        "tok",
+        "u-1",
+        "Alice",
+        "alice@example.com",
+      );
+      expect(ctx.userEmail).toBe("alice@example.com");
+    } finally {
+      mock.restore();
+    }
   });
 });
 
