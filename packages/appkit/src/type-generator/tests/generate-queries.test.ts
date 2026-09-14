@@ -93,7 +93,7 @@ function succeededResult(columns: [string, string, string | null][]) {
 
 /**
  * Build a SUCCEEDED DESCRIBE QUERY response whose rows arrive only as a base64
- * Arrow IPC `attachment` (no `data_array`) — the ARROW_STREAM/INLINE wire shape
+ * Arrow IPC `attachment` (no `dataArray`) — the ARROW_STREAM/INLINE wire shape
  * the fetcher now requests. The describeOne path pipes this through
  * normalizeResultRows, which decodes the attachment so convertToQueryType can
  * read the columns. Each [name, type, comment] triple becomes one DESCRIBE row.
@@ -114,7 +114,7 @@ async function succeededArrowAttachmentResult(
     statementId: "stmt-arrow",
     status: { state: "SUCCEEDED" },
     manifest: { format: "ARROW_STREAM" },
-    // No data_array — rows live in the attachment, like a real INLINE Arrow
+    // No dataArray — rows live in the attachment, like a real INLINE Arrow
     // response. This is the condition the silent-degrade bug left unread.
     result: { attachment },
   };
@@ -160,7 +160,7 @@ describe("generateQueriesFromDescribe", () => {
 
   test("ARROW attachment path — decodes Arrow rows into a real query schema", async () => {
     // The warehouse answers ARROW_STREAM/INLINE: columns arrive only as a
-    // base64 Arrow IPC attachment with data_array undefined. describeOne pipes
+    // base64 Arrow IPC attachment with dataArray undefined. describeOne pipes
     // this through normalizeResultRows before convertToQueryType, so the schema
     // resolves to real columns instead of the degraded `result: unknown`.
     mocks.readdir.mockResolvedValue(["users.sql"]);

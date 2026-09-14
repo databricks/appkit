@@ -158,7 +158,7 @@ function formatParametersType(sql: string): string {
 /**
  * Decode a base64 Arrow IPC attachment from a DESCRIBE QUERY response and
  * extract column metadata. Returns the same shape as rows parsed from the
- * legacy data_array path.
+ * legacy dataArray path.
  *
  * IMPORTANT: a DESCRIBE QUERY response is itself a result *table* with rows
  * shaped like `(col_name, data_type, comment)` describing the user query's
@@ -196,7 +196,7 @@ export function convertToQueryType(
   sql: string,
   queryName: string,
 ): { type: string; hasResults: boolean } {
-  const dataRows = result.result?.data_array || [];
+  const dataRows = result.result?.dataArray || [];
   let columns = dataRows.map((row) => ({
     name: row[0] || "",
     type_name: row[1]?.toUpperCase() || "STRING",
@@ -204,10 +204,10 @@ export function convertToQueryType(
   }));
 
   // Fallback: serverless warehouses return ARROW_STREAM format with an inline
-  // base64 attachment instead of data_array. Decode the Arrow IPC rows (the
+  // base64 attachment instead of dataArray. Decode the Arrow IPC rows (the
   // DESCRIBE QUERY result table) to extract column names and types.
   if (columns.length === 0 && result.result?.attachment) {
-    logger.debug("data_array empty, decoding Arrow IPC attachment for schema");
+    logger.debug("dataArray empty, decoding Arrow IPC attachment for schema");
     try {
       columns = columnsFromArrowAttachment(result.result.attachment);
     } catch (err) {
@@ -849,7 +849,7 @@ export async function generateQueriesFromDescribe(
           "DESCRIBE result for %s: state=%s, rows=%d, hasAttachment=%s",
           queryName,
           result.status.state,
-          result.result?.data_array?.length ?? 0,
+          result.result?.dataArray?.length ?? 0,
           !!result.result?.attachment,
         );
 
