@@ -28,7 +28,6 @@ import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
-import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import {
@@ -245,8 +244,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format: rawFormat = "JSON_ARRAY" } =
-      req.body as IAnalyticsQueryRequest;
+    const {
+      parameters,
+      format: rawFormat = "JSON_ARRAY",
+      skipCache: rawSkipCache = false,
+    } = req.body as IAnalyticsQueryRequest;
+
+    // Only an explicit boolean `true` triggers a cache-bypassing refresh.
+    // Coerce any other value (truthy strings, numbers) to false so an
+    // untrusted body can't enable it with a non-boolean.
+    const skipCache = rawSkipCache === true;
 
     if (
       rawFormat !== "JSON_ARRAY" &&
@@ -305,6 +312,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         query,
         isAsUser,
         parameters,
+        skipCache,
       );
       return;
     }
@@ -326,6 +334,17 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         executorKey,
       ],
     };
+
+    // Refresh (polling/refetch): drop any cached entry so the execute below is
+    // a miss. It re-hits the warehouse, repopulates the shared entry
+    // (write-through, so other readers stop seeing the stale value), and still
+    // coalesces with concurrent refreshes via the cache's in-flight dedup — a
+    // plain cache-disable would do neither.
+    if (skipCache) {
+      await this.cache.delete(
+        this.cache.generateKey(cacheConfig.cacheKey, executorKey),
+      );
+    }
 
     // Cache/retry/timeout are scoped to the SQL execution itself (inner
     // `execute`) so the warehouse-readiness phase isn't subject to retries
@@ -821,6 +840,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     query: string,
     isAsUser: boolean,
     parameters: IAnalyticsQueryRequest["parameters"],
+    skipCache: boolean = false,
   ): Promise<void> {
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
@@ -871,6 +891,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           query,
           parameters,
           executorKey,
+          skipCache,
         ),
         this.SQLClient,
         query,
@@ -1002,12 +1023,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     query: string,
     parameters: IAnalyticsQueryRequest["parameters"],
     executorKey: string,
+    skipCache: boolean = false,
   ): QueryExecutor {
     const hashedQuery = this.queryProcessor.hashQuery(query);
     const cache = this.cache;
     const ttl = queryDefaults.cache?.ttl;
     return {
-      query: (q, params, formatParameters, signal) => {
+      query: async (q, params, formatParameters, signal) => {
         // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
         // short-lived pre-signed URLs, so those pass straight through.
         if (
@@ -1016,19 +1038,30 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         ) {
           return executor.query(q, params, formatParameters, signal);
         }
+
+        const arrowKey = [
+          "analytics:query:arrow",
+          query_key,
+          JSON.stringify(parameters),
+          hashedQuery,
+          executorKey,
+        ];
+
+        // Refresh (polling/refetch): drop the cached entry so getOrExecute is a
+        // miss. It re-hits the warehouse, repopulates the shared entry
+        // (write-through), and still coalesces concurrent refreshes — a plain
+        // bypass would leave other readers stale to TTL and lose that dedup.
+        if (skipCache) {
+          await cache.delete(cache.generateKey(arrowKey, executorKey));
+        }
+
         // On a standard warehouse this throws a capability rejection — the
         // cache never stores a rejection, so the fallback still sees the
         // structured error. On Reyden it returns a bounded (<=25 MiB)
         // attachment that caches like the JSON path's rows. The shared signal
         // dedupes concurrent renders (e.g. React StrictMode double-mount).
         return cache.getOrExecute(
-          [
-            "analytics:query:arrow",
-            query_key,
-            JSON.stringify(parameters),
-            hashedQuery,
-            executorKey,
-          ],
+          arrowKey,
           (sharedSignal) =>
             executor.query(q, params, formatParameters, sharedSignal ?? signal),
           executorKey,

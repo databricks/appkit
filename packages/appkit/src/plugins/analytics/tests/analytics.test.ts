@@ -39,7 +39,11 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
   const instance = {
     get: vi.fn(),
     set: vi.fn(),
-    delete: vi.fn(),
+    // Model the real CacheManager.delete: actually evict the entry so a
+    // subsequent getOrExecute misses (used by the skipCache refresh path).
+    delete: vi.fn(async (key: string) => {
+      store.delete(key);
+    }),
     getOrExecute: vi.fn(
       async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
         const cacheKey = generateKey(key, userKey);
@@ -340,6 +344,106 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes1.write).toHaveBeenCalledWith("event: result\n");
       expect(mockRes2.write).toHaveBeenCalledWith("event: result\n");
+    });
+
+    test("skipCache refreshes the shared entry (re-hits warehouse + write-through)", async () => {
+      mockCacheInstance.delete.mockClear();
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test WHERE foo = :foo",
+        isAsUser: false,
+      });
+
+      // Distinct results per execution so we can tell a fresh run from a
+      // cache hit: first the "stale" value, then the "fresh" value.
+      const executeMock = vi
+        .fn()
+        .mockResolvedValueOnce({ result: { data: [{ id: 1, v: "stale" }] } })
+        .mockResolvedValueOnce({ result: { data: [{ id: 1, v: "fresh" }] } });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const body = { parameters: { foo: sql.string("bar") } };
+
+      // 1) Prime the shared cache with the "stale" value.
+      const res1 = createMockResponse();
+      await handler(
+        createMockRequest({ params: { query_key: "q" }, body }),
+        res1,
+      );
+
+      // 2) Same params, but skipCache: must invalidate + re-execute (not served
+      // the stale hit), then repopulate the entry with the fresh value.
+      const res2 = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { query_key: "q" },
+          body: { ...body, skipCache: true },
+        }),
+        res2,
+      );
+
+      // 3) Same params, no skipCache: served from the REFRESHED entry — no new
+      // execution, and it returns the fresh value (write-through), not "stale".
+      const res3 = createMockResponse();
+      await handler(
+        createMockRequest({ params: { query_key: "q" }, body }),
+        res3,
+      );
+
+      // Two executions total: initial + the skipCache refresh. Step 3 is a hit.
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(mockCacheInstance.delete).toHaveBeenCalledTimes(1);
+
+      expect(res1.write).toHaveBeenCalledWith(
+        expect.stringContaining('"v":"stale"'),
+      );
+      expect(res2.write).toHaveBeenCalledWith(
+        expect.stringContaining('"v":"fresh"'),
+      );
+      expect(res3.write).toHaveBeenCalledWith(
+        expect.stringContaining('"v":"fresh"'),
+      );
+    });
+
+    test("skipCache is ignored unless the body value is boolean true", async () => {
+      mockCacheInstance.delete.mockClear();
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test WHERE foo = :foo",
+        isAsUser: false,
+      });
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1, name: "cached" }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const body = { parameters: { foo: sql.string("bar") } };
+
+      // Prime the cache, then repeat with a truthy-but-non-boolean skipCache.
+      await handler(
+        createMockRequest({ params: { query_key: "q" }, body }),
+        createMockResponse(),
+      );
+      await handler(
+        createMockRequest({
+          params: { query_key: "q" },
+          body: { ...body, skipCache: "true" as unknown as boolean },
+        }),
+        createMockResponse(),
+      );
+
+      // The non-boolean did not bypass: second request was a cache hit and the
+      // entry was never invalidated.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(mockCacheInstance.delete).not.toHaveBeenCalled();
     });
 
     test("should share cache across users for .sql files (global cache)", async () => {
