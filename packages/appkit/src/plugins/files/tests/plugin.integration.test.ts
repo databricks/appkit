@@ -1,6 +1,10 @@
 import http, { type Server } from "node:http";
 
-import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
+import {
+  getListeningPort,
+  mockServiceContext,
+  setupDatabricksEnv,
+} from "@databricks/appkit/testing";
 import {
   afterAll,
   beforeAll,
@@ -66,29 +70,6 @@ const MOCK_AUTH_HEADERS = {
 
 /** Volume key used in all integration tests. */
 const VOL = "files";
-
-/**
- * Wait for the supplied server to finish binding, then return the
- * OS-assigned port. Required when tests pass `port: 0` to `serverPlugin`
- * — `appkit.server.start()` returns as soon as `listen()` is invoked but
- * before the bind completes, so `server.address()` returns `null` until
- * the `listening` event fires.
- */
-async function getListeningPort(server: Server): Promise<number> {
-  const addr = server.address();
-  if (addr && typeof addr === "object" && typeof addr.port === "number") {
-    return addr.port;
-  }
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", () => resolve());
-    server.once("error", (err) => reject(err));
-  });
-  const ready = server.address();
-  if (!ready || typeof ready !== "object") {
-    throw new Error("Server is listening but address() returned null");
-  }
-  return ready.port;
-}
 
 describe("Files Plugin Integration", () => {
   let server: Server;

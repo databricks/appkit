@@ -2,8 +2,28 @@ import type express from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CacheManager } from "../../../cache";
-import { createTestPluginContext } from "../../../testing";
+import { createMockRequest, createTestPluginContext } from "../../../testing";
 import { AgentsPlugin } from "../agents";
+
+// Partial-mock the tracing module: traceAgent/traceTool still run their
+// callbacks, but the trace id is deterministic and run-linking is a spy.
+const linkTraceToRun = vi.hoisted(() => vi.fn());
+let mockTraceId: string | undefined;
+vi.mock("../mlflow", () => ({
+  initAgentTracing: vi.fn(async () => {}),
+  traceAgent: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  traceTool: (
+    _name: string,
+    _inputs: unknown,
+    fn: (span: { setOutputs: () => void }) => Promise<unknown>,
+  ) => fn({ setOutputs: () => {} }),
+  currentTraceId: () => mockTraceId,
+  linkTraceToRun,
+}));
 
 /**
  * Surface-level guarantees on the agents plugin's HTTP route handlers when
@@ -21,6 +41,8 @@ import { AgentsPlugin } from "../agents";
  */
 
 beforeEach(() => {
+  linkTraceToRun.mockClear();
+  mockTraceId = undefined;
   (CacheManager as any).instance = {
     get: vi.fn(),
     set: vi.fn(),
@@ -33,15 +55,10 @@ beforeEach(() => {
 });
 
 function mockReq(body: unknown, userId = "alice"): express.Request {
-  const headers: Record<string, string> = {
-    "x-forwarded-user": userId,
-    "x-forwarded-access-token": "fake-token",
-  };
-  return {
+  return createMockRequest({
     body,
-    headers,
-    header: (name: string) => headers[name.toLowerCase()],
-  } as unknown as express.Request;
+    obo: { token: "fake-token", userId },
+  }) as unknown as express.Request;
 }
 
 function mockRes() {
@@ -61,12 +78,12 @@ function mockRes() {
   };
 }
 
-function seedPlugin(): AgentsPlugin {
+function seedPlugin(adapter: unknown = { async *run() {} }): AgentsPlugin {
   const plugin = new AgentsPlugin({});
   (plugin as any).agents.set("default", {
     name: "default",
     instructions: "hi",
-    adapter: { async *run() {} },
+    adapter,
     toolIndex: new Map(),
   });
   (plugin as any).defaultAgentName = "default";
@@ -373,6 +390,70 @@ describe("POST /invocations & /responses — successful invoke", () => {
       type: "output_text",
       text: "hello world",
     });
+  });
+
+  function seedEchoPlugin(): AgentsPlugin {
+    const plugin = seedPlugin({
+      async *run() {
+        yield { type: "message_delta", content: "ok" };
+      },
+    });
+    (plugin as any).threadStore = {
+      create: vi.fn().mockResolvedValue({ id: "t-new", messages: [] }),
+      addMessage: vi.fn(),
+      delete: vi.fn(),
+    };
+    return plugin;
+  }
+
+  async function invoke(
+    plugin: AgentsPlugin,
+    body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const { res, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvoke: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvoke(mockReq(body), res);
+    return json.mock.calls[0]?.[0] as Record<string, unknown>;
+  }
+
+  test("links the trace to the run and echoes mlflow_trace_id when tracing is on", async () => {
+    mockTraceId = "tr-abc123";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, {
+      input: "hi",
+      mlflowRunId: "run-99",
+    });
+
+    expect(linkTraceToRun).toHaveBeenCalledWith("run-99");
+    expect(payload.mlflow_trace_id).toBe("tr-abc123");
+  });
+
+  test("omits mlflow_trace_id and does not link when tracing is off", async () => {
+    mockTraceId = undefined; // currentTraceId() no-ops when disabled
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    expect(payload).not.toHaveProperty("mlflow_trace_id");
+  });
+
+  test("does not link when no run id is supplied even if tracing is on", async () => {
+    mockTraceId = "tr-standalone";
+    const plugin = seedEchoPlugin();
+
+    const payload = await invoke(plugin, { input: "hi" });
+
+    expect(linkTraceToRun).not.toHaveBeenCalled();
+    // Trace still exists and its id is surfaced — just not linked to a run.
+    expect(payload.mlflow_trace_id).toBe("tr-standalone");
   });
 });
 

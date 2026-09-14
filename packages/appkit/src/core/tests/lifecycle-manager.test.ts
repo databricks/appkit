@@ -380,5 +380,206 @@ describe("LifecycleManager", () => {
       expect(signals).toContain("SIGINT");
       onceSpy.mockRestore();
     });
+
+    test("a manager that never installs them adds no listener", () => {
+      // The harness boots this way (installSignalHandlers: false), so repeated
+      // boots in one process must not accumulate handlers — there is no removal
+      // path any more.
+      const termBaseline = process.listenerCount("SIGTERM");
+      const intBaseline = process.listenerCount("SIGINT");
+
+      new LifecycleManager(contextWithPlugins({}));
+
+      expect(process.listenerCount("SIGTERM")).toBe(termBaseline);
+      expect(process.listenerCount("SIGINT")).toBe(intBaseline);
+    });
+  });
+
+  describe("shutdown({ exit: false }) (the harness path)", () => {
+    test("runs the full teardown sequence without exiting the process", async () => {
+      const stop = vi.fn();
+      vi.mocked(TelemetryReporter.getInstance).mockReturnValue({
+        stop,
+      } as never);
+      const cacheClose = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(CacheManager.getInstanceSync).mockReturnValue({
+        close: cacheClose,
+      } as never);
+      const telemetryShutdown = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(TelemetryManager.getInstance).mockReturnValue({
+        shutdown: telemetryShutdown,
+      } as never);
+
+      const abortActiveOperations = vi.fn();
+      const shutdown = vi.fn().mockResolvedValue(undefined);
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", abortActiveOperations, shutdown } as never,
+      });
+      const emit = vi.spyOn(ctx, "emitLifecycle");
+      const manager = new LifecycleManager(ctx);
+
+      await manager.shutdown({ exit: false });
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(abortActiveOperations).toHaveBeenCalledTimes(1);
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(emit).toHaveBeenCalledWith("shutdown");
+      expect(cacheClose).toHaveBeenCalledTimes(1);
+      expect(telemetryShutdown).toHaveBeenCalledTimes(1);
+
+      // shutdown({ exit: false }) never exits — that is the whole point of the
+      // harness path. (Dropping the core singletons is the harness's job, not
+      // the manager's.)
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("is idempotent: teardown runs once and the second call awaits it", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      // Set only once the plugin hook has actually finished. Asserting against
+      // this flag (rather than counting microtask ticks) is what makes the test
+      // sensitive to a guard that returns early while teardown is in flight.
+      let teardownFinished = false;
+      const shutdown = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = () => {
+              teardownFinished = true;
+              resolve();
+            };
+          }),
+      );
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const observed: string[] = [];
+      const first = manager
+        .shutdown({ exit: false })
+        .then(() => observed.push(`first:${teardownFinished}`));
+      const second = manager
+        .shutdown({ exit: false })
+        .then(() => observed.push(`second:${teardownFinished}`));
+
+      // A full macrotask turn, so a guard that resolves the second caller
+      // early has every chance to settle before the assertion below.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(observed).toEqual([]);
+
+      releaseShutdown?.();
+      await Promise.all([first, second]);
+
+      // Both callers must observe a *completed* teardown. The old boolean
+      // guard resolved the second caller with teardown still running.
+      expect(observed).toEqual(
+        expect.arrayContaining(["first:true", "second:true"]),
+      );
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("a signal arriving after a harness shutdown joins the same teardown, not a second one", async () => {
+      const shutdown = vi.fn().mockResolvedValue(undefined);
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+      manager.installSignalHandlers();
+
+      await manager.shutdown({ exit: false });
+      // The signal path after a harness shutdown: teardown is memoized, so the
+      // phases do not run twice even though the exiting shutdown() is callable.
+      await manager.shutdown();
+
+      expect(shutdown).toHaveBeenCalledTimes(1);
+    });
+
+    test("a harness shutdown after a signal-initiated teardown awaits the in-flight one", async () => {
+      let releaseShutdown: (() => void) | undefined;
+      // Sentinel rather than a tick count: the harness shutdown joins the
+      // memoized teardown, so "how many microtasks until it would have settled"
+      // is not a property the test can rely on.
+      let teardownFinished = false;
+      const shutdown = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseShutdown = () => {
+              teardownFinished = true;
+              resolve();
+            };
+          }),
+      );
+      const ctx = contextWithPlugins({
+        alpha: { name: "alpha", shutdown } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const signalPath = manager.shutdown();
+      await Promise.resolve();
+
+      let harnessSawFinishedTeardown: boolean | undefined;
+      const harnessPath = manager.shutdown({ exit: false }).then(() => {
+        harnessSawFinishedTeardown = teardownFinished;
+      });
+
+      // A full macrotask turn, so a harness shutdown that resolved early would.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(harnessSawFinishedTeardown).toBeUndefined();
+
+      releaseShutdown?.();
+      await Promise.all([signalPath, harnessPath]);
+
+      expect(shutdown).toHaveBeenCalledTimes(1);
+      // It joined the in-flight teardown rather than resolving alongside it.
+      expect(harnessSawFinishedTeardown).toBe(true);
+      // The signal wanted the process dead, and still gets it.
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    test("a rejecting plugin shutdown() is isolated and the harness shutdown still resolves", async () => {
+      const ctx = contextWithPlugins({
+        bad: {
+          name: "bad",
+          shutdown: vi.fn().mockRejectedValue(new Error("teardown blew up")),
+        } as never,
+        good: {
+          name: "good",
+          shutdown: vi.fn().mockResolvedValue(undefined),
+        } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      await expect(manager.shutdown({ exit: false })).resolves.toBeUndefined();
+      expect(mockLoggerError).toHaveBeenCalled();
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    test("the harness path is bounded by the internal per-plugin timeout, not an outer one", async () => {
+      vi.useFakeTimers();
+      // Never resolves on its own: the only bound is now the internal
+      // PLUGIN_SHUTDOWN_TIMEOUT_MS (10s) — the same one the signal path uses —
+      // since the harness path has no outer budget of its own any more.
+      const hanging = vi.fn(() => new Promise<void>(() => {}));
+      const ctx = contextWithPlugins({
+        stuck: { name: "stuck", shutdown: hanging } as never,
+      });
+      const manager = new LifecycleManager(ctx);
+
+      const done = manager.shutdown({ exit: false });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(done).resolves.toBeUndefined();
+
+      expect(hanging).toHaveBeenCalledTimes(1);
+      expect(
+        mockLoggerError.mock.calls.some(
+          (c) =>
+            String(c[0]).includes("Error shutting down plugin") &&
+            c[1] === "stuck" &&
+            String(c[2]).includes("timed out"),
+        ),
+      ).toBe(true);
+      // The harness path never exits, even when a phase times out internally.
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
   });
 });

@@ -4,6 +4,10 @@ tmp
 node_modules
 .env
 
+# Staging dir and zip produced by tools/prepare-template-artifact.ts
+pr-template
+appkit-template-*.zip
+
 coverage
 
 *.tsbuildinfo

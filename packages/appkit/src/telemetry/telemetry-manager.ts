@@ -281,6 +281,12 @@ export class TelemetryManager {
    * or repeated calls await the same in-flight flush. Awaited by the core
    * lifecycle manager during graceful shutdown — that manager owns the
    * process signal handlers, so telemetry no longer registers its own.
+   *
+   * Survives re-`initialize()`. `shutdownPromise` is deliberately *not* cleared
+   * when the flush settles, and that is safe: the memo is only ever reassigned
+   * for whatever providers are currently live, so a stale resolved promise can
+   * only be returned when there is nothing to flush. The covering test asserts
+   * every provider set across repeated initialize/shutdown cycles is flushed.
    */
   async shutdown(): Promise<void> {
     const providers = [
@@ -307,5 +313,17 @@ export class TelemetryManager {
     }
 
     return this.shutdownPromise;
+  }
+
+  /**
+   * Drop the singleton so the next {@link getInstance} builds a fresh manager.
+   *
+   * Does not flush: callers `shutdown()` first, then reset — the order
+   * `LifecycleManager.shutdown()` uses.
+   *
+   * @internal
+   */
+  static reset(): void {
+    TelemetryManager.instance = undefined;
   }
 }
