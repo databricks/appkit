@@ -1026,8 +1026,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           return executor.query(q, params, formatParameters, signal);
         }
 
-        // When skipCache is true (used by polling/refetch), bypass the cache
-        // and execute directly.
+        // Bypass the cache on refetch.
         if (skipCache) {
           return executor.query(q, params, formatParameters, signal);
         }

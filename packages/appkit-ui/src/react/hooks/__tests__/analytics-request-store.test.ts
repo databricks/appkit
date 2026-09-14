@@ -79,22 +79,15 @@ describe("analytics-request-store", () => {
       retain("k", JSON_OPTS);
       const firstSignal = capturedCallbacks.signal;
 
-      // Mark the first signal as aborted to simulate abort behavior
-      Object.defineProperty(firstSignal, "aborted", {
-        value: false,
-        configurable: true,
-      });
-
-      // Now refetch — should call connectSSE a second time
+      // refetch should call connectSSE a second time.
       refetch("k");
 
       expect(mockConnectSSE).toHaveBeenCalledTimes(2);
 
-      // The second call is a fresh start (new signal).
+      // The second call is a fresh start with a distinct signal.
       const secondCall = mockConnectSSE.mock.calls[1];
       const secondSignal = secondCall[0].signal;
 
-      // Signals are distinct.
       expect(secondSignal).not.toBe(firstSignal);
     });
 
@@ -185,12 +178,7 @@ describe("analytics-request-store", () => {
 
       release1();
 
-      // After teardown, re-retain the same key without refetch.
-      // The uncached mark should not persist.
-      retain("k", JSON_OPTS);
-
-      // Teardown is deferred, so this will reuse the existing entry.
-      // Let's wait for teardown and then re-retain explicitly.
+      // Re-retain the same key without refetch; the uncached mark should not persist.
       resetAnalyticsRequestStore();
       vi.clearAllMocks();
 

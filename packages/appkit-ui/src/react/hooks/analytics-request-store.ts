@@ -170,14 +170,13 @@ function runAnalyticsRequest(
   return (controls) => {
     controls.patch(LOADING_SNAPSHOT);
 
-    // Check if this cache key is marked for uncached execution; if so,
-    // consume the mark and include skipCache in the payload.
+    // Consume any one-shot uncached mark for this key.
     const shouldSkipCache = options.skipCache || uncachedKeys.has(cacheKey);
-    if (shouldSkipCache && uncachedKeys.has(cacheKey)) {
+    if (uncachedKeys.has(cacheKey)) {
       uncachedKeys.delete(cacheKey);
     }
 
-    // Build the actual request payload, including skipCache if needed.
+    // Build the request payload, injecting skipCache when needed.
     let requestPayload = options.payload;
     if (shouldSkipCache) {
       try {
@@ -258,8 +257,6 @@ export const getSnapshot = store.getSnapshot;
  * store.start() to abort any in-flight run and restart. The mark is consumed
  * immediately by the runner, so it doesn't persist across multiple refetch
  * calls or independent hook instances.
- *
- * Phase 1 (dormant): used by polling scheduler and refetch in Phase 2+.
  * @internal
  */
 export function refetch(cacheKey: string): void {
