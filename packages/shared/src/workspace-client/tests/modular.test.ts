@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, productCalls } = vi.hoisted(() => ({
+const { ctorOpts, patTokens, m2mOpts, productCalls } = vi.hoisted(() => ({
   ctorOpts: [] as Array<Record<string, unknown>>,
   patTokens: [] as string[],
+  m2mOpts: [] as Array<Record<string, unknown>>,
   productCalls: [] as Array<[string, string]>,
 }));
 
@@ -23,6 +24,10 @@ vi.mock("@databricks/sdk-auth/credentials", () => ({
     patTokens.push(token);
     return { kind: "pat", token };
   }),
+  newM2mCredentials: vi.fn((opts: Record<string, unknown>) => {
+    m2mOpts.push(opts);
+    return { kind: "m2m", ...opts };
+  }),
 }));
 vi.mock("@databricks/sdk-core/clientinfo", () => ({
   setProduct: vi.fn((name: string, version: string) => {
@@ -38,18 +43,32 @@ vi.mock("@databricks/sdk-core/clientinfo", () => ({
 import { buildWarehousesClient } from "../modular";
 
 describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
-  const originalHost = process.env.DATABRICKS_HOST;
+  // Auth resolution reads these env vars; snapshot + clear them so the dev
+  // machine's own DATABRICKS_* values never leak into a case.
+  const AUTH_ENV = [
+    "DATABRICKS_HOST",
+    "DATABRICKS_CLIENT_ID",
+    "DATABRICKS_CLIENT_SECRET",
+    "DATABRICKS_TOKEN",
+  ] as const;
+  const originalEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
     ctorOpts.length = 0;
     patTokens.length = 0;
+    m2mOpts.length = 0;
     productCalls.length = 0;
-    delete process.env.DATABRICKS_HOST;
+    for (const key of AUTH_ENV) {
+      originalEnv[key] = process.env[key];
+      delete process.env[key];
+    }
   });
 
   afterEach(() => {
-    if (originalHost === undefined) delete process.env.DATABRICKS_HOST;
-    else process.env.DATABRICKS_HOST = originalHost;
+    for (const key of AUTH_ENV) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
   });
 
   test("prepends https:// to a scheme-less explicit host", () => {
@@ -94,6 +113,61 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(ctorOpts[0].host).toBeUndefined();
     expect(ctorOpts[0].credentials).toBeUndefined();
     expect(ctorOpts[0].profileOptions).toBeUndefined();
+  });
+
+  test("service-principal by default: DATABRICKS_CLIENT_ID/SECRET + host env → M2M creds", () => {
+    // The Databricks Apps runtime injects the app's SP credentials this way
+    // (env only, no config file). The modular SDK's default chain reads no env,
+    // so we must map them to M2M credentials ourselves.
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildWarehousesClient({});
+    expect(m2mOpts).toEqual([
+      {
+        host: "https://envhost.cloud.databricks.com",
+        clientId: "sp-client-id",
+        clientSecret: "sp-secret",
+      },
+    ]);
+    expect(ctorOpts[0].credentials).toEqual({
+      kind: "m2m",
+      host: "https://envhost.cloud.databricks.com",
+      clientId: "sp-client-id",
+      clientSecret: "sp-secret",
+    });
+    expect(patTokens).toEqual([]);
+  });
+
+  test("falls back to DATABRICKS_TOKEN (PAT) when no client id/secret is set", () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_TOKEN = "env-pat";
+    buildWarehousesClient({});
+    expect(patTokens).toEqual(["env-pat"]);
+    expect(ctorOpts[0].credentials).toEqual({ kind: "pat", token: "env-pat" });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("an explicit (OBO) token wins over env SP credentials — no escalation", () => {
+    // asUser passes the user's token; it must NOT be shadowed by the SP env
+    // creds the deployed runtime also sets.
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildWarehousesClient({ token: "user-token", host: "https://x" });
+    expect(patTokens).toEqual(["user-token"]);
+    expect(ctorOpts[0].credentials).toEqual({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("M2M needs a host: client id/secret with no resolvable host falls through to the default chain", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildWarehousesClient({});
+    expect(m2mOpts).toEqual([]);
+    expect(ctorOpts[0].credentials).toBeUndefined();
   });
 
   test("client-info: sanitizes an invalid product name (e.g. @databricks/appkit) rather than crashing the client build", () => {
