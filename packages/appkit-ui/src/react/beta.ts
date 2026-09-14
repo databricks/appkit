@@ -1,6 +1,27 @@
 // Beta React components -- APIs may change between minor releases.
 // Import from '@databricks/appkit-ui/react' once graduated to stable.
 
+// Agent thread history — hooks + components for a persistent chat sidebar.
+// Tracks the `agents` plugin (beta) and its thread endpoints.
+export type { ThreadSummary } from "shared";
+export {
+  AgentThread,
+  type AgentThreadProps,
+  ThreadList,
+  type ThreadListProps,
+} from "./agent";
+export {
+  type UseAgentThreadsOptions,
+  type UseAgentThreadsResult,
+  useAgentThreads,
+} from "./hooks/use-agent-threads";
+export {
+  type AgentThreadMessage,
+  type UseAgentThreadOptions,
+  type UseAgentThreadResult,
+  useAgentThread,
+} from "./hooks/use-agent-thread";
+
 // AI Search hook + types. Tracks the `aiSearch` plugin, which ships at beta
 // from '@databricks/appkit/beta'.
 export type {

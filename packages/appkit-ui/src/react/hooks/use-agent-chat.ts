@@ -54,6 +54,14 @@ export interface UseAgentChatOptions {
    */
   endpoint?: string;
   /**
+   * Resume an existing thread: seeds `threadId` so the first `send()`
+   * continues that thread instead of creating a new one. Changing it
+   * re-seeds (switch conversations). Without it, a thread id is only
+   * assigned by the server on the first turn. Used by `useAgentThread`
+   * to resume persisted threads; also handy on its own.
+   */
+  initialThreadId?: string;
+  /**
    * Called for every parsed SSE event before any state update. Use this
    * to drive tool-call rows, approval cards, inspectors, or anything
    * beyond the streaming text content. Errors thrown here are swallowed
@@ -164,19 +172,22 @@ function resolveSkill(
 export function useAgentChat({
   agent,
   endpoint = "/api/agents/chat",
+  initialThreadId,
   onEvent,
   skills,
 }: UseAgentChatOptions): UseAgentChatResult {
   const [content, setContent] = useState("");
   const [events, setEvents] = useState<AgentChatEvent[]>([]);
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(
+    initialThreadId ?? null,
+  );
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Refs avoid the standard "stale closure" problem with `send` and
   // `onEvent`: `send` is a stable callback that reads the latest
   // threadId/onEvent without re-mounting connectSSE on every render.
-  const threadIdRef = useRef<string | null>(null);
+  const threadIdRef = useRef<string | null>(initialThreadId ?? null);
   const contentRef = useRef("");
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
@@ -292,6 +303,16 @@ export function useAgentChat({
     },
     [agent, endpoint],
   );
+
+  // Re-seed the thread id when the caller switches to a different existing
+  // thread (e.g. useAgentThread resuming a persisted one), so the next send()
+  // continues it. A server-assigned id (from metadata) is never clobbered:
+  // that path leaves `initialThreadId` unchanged, so this effect doesn't fire.
+  useEffect(() => {
+    const next = initialThreadId ?? null;
+    threadIdRef.current = next;
+    setThreadId(next);
+  }, [initialThreadId]);
 
   // Abort any in-flight stream when the component unmounts.
   useEffect(() => {
