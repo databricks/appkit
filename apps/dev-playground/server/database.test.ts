@@ -1,7 +1,7 @@
 import type { HookContext, IDatabaseConfig } from "@databricks/appkit/beta";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import type { schema } from "../config/database/schema";
+import { schema } from "../config/database/schema";
 
 const mocks = vi.hoisted(() => ({
   createApp: vi.fn(async (_config: unknown) => undefined),
@@ -86,12 +86,19 @@ afterEach(() => {
 const beforeCreate = () => hooks.beforeCreate(values, context);
 
 describe("inline playground database registration", () => {
-  test("enables reads for all tables and HTTP writes only for boards and notes", () => {
-    expect(Object.keys(databaseConfig.schema.$tables)).toEqual([
+  test("declares three tables in the conventional schema file", () => {
+    expect(Object.keys(schema.$tables)).toEqual([
       "boards",
       "notes",
       "note_events",
     ]);
+  });
+
+  test("leaves schema discovery to config/database/schema.ts", () => {
+    expect(databaseConfig.schema).toBeUndefined();
+  });
+
+  test("enables reads for all tables and HTTP writes only for boards and notes", () => {
     expect(databaseConfig.api).toEqual({
       writes: { tables: ["boards", "notes"] },
     });
