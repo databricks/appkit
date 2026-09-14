@@ -156,7 +156,8 @@ calledToolWith(name: string, expected: Record<string, unknown>): AssertionHandle
 
 Assert a tool was called with arguments that deep-contain `expected`: every
 key in `expected` must equal the actual argument (recursively for nested
-objects), so extra arguments are ignored. Gate by default.
+objects; arrays match element-for-element), so extra arguments are ignored.
+Gate by default.
 
 #### Parameters
 

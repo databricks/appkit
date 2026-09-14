@@ -157,10 +157,9 @@ Progress callback, invoked as evals are discovered, started, and finished.
 optional retries: number;
 ```
 
-Re-run an eval up to this many extra times when it fails on an
-infrastructure error (a thrown error or timeout — `result.error` set), to
-absorb transient turn/stream flakiness. Assertion failures are NEVER
-retried (a wrong reply is real signal, not flake). Defaults to `0`.
+Re-run an eval up to this many extra times when it fails on infrastructure —
+a thrown error/timeout (`result.error`) or a transport/agent turn failure
+(`result.infraFailure`). Assertion failures are never retried. Defaults to `0`.
 
 ***
 

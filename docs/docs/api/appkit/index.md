@@ -199,7 +199,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
 | [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
-| [database](Function.database.md) | Create a typed database plugin registration for a finalized schema. |
+| [database](Function.database.md) | Create the database plugin. Omit configuration to load `config/database/schema.ts`, or supply a typed schema override. |
 | [defineEval](Function.defineEval.md) | Define an agent eval. Default-export the result from a `server/agents/<id>/evals/*.eval.ts` file. |
 | [defineEvalConfig](Function.defineEvalConfig.md) | Define per-directory eval config. Default-export from `evals.config.ts`. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
@@ -256,7 +256,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [runAgent](Function.runAgent.md) | Standalone agent execution without `createApp`. Resolves the adapter, binds inline tools, and drives the adapter's `run()` loop to completion. |
 | [runEval](Function.runEval.md) | Run a single eval against a driver. Never throws for assertion or agent failures — those become a non-passing [EvalResult](Interface.EvalResult.md). Only a malformed eval definition surfaces as `result.error`. |
 | [runEvalsInDir](Function.runEvalsInDir.md) | Discover, load, and run every eval under each agent's `evals/` dir, driving the agents on a running app. Never throws for an individual eval — load/run failures become non-passing [EvalResult](Interface.EvalResult.md)s. |
-| [runWithRetries](Function.runWithRetries.md) | Run `attempt` up to `1 + retries` times, stopping as soon as it returns a result without an `error` (infra failures — thrown errors or timeouts — set `error`; assertion failures do not, so a failed-but-completed eval is returned on the first try and never retried). Returns the last result when every attempt errored. `retries` below 0 is treated as 0. |
+| [runWithRetries](Function.runWithRetries.md) | Run `attempt` up to `1 + retries` times, stopping as soon as it returns a result that is neither a thrown error / per-eval timeout (`error`) nor a transport/agent turn failure (`infraFailure`). Assertion failures set neither, so a failed-but-completed eval is returned on the first try and never retried. Returns the last result when every attempt failed on infra. |
 | [summarize](Function.summarize.md) | - |
 | [text](Function.text.md) | - |
 | [timestamp](Function.timestamp.md) | - |

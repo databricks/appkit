@@ -1,17 +1,16 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { DatabasePluginError } from "../../../database/errors";
 import type { DataPath, Row } from "../../../database/runtime";
 import { defineSchema, id, text } from "../../../database/schema-builder";
 
 const mocks = vi.hoisted(() => ({
-  createLakebasePool: vi.fn(),
+  initializeLakebasePool: vi.fn(),
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
 }));
-
 vi.mock("../../../connectors/lakebase", () => ({
-  createLakebasePool: mocks.createLakebasePool,
+  initializeLakebasePool: mocks.initializeLakebasePool,
 }));
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDb: mocks.createDrizzleDb,
@@ -80,7 +79,7 @@ const txSurface = (tx: unknown) => tx as TestTransaction;
 function arrange(path = fakePath()) {
   const pool = { end: vi.fn(async () => undefined) };
   const db = { marker: Symbol("db") };
-  mocks.createLakebasePool.mockReturnValue(pool);
+  mocks.initializeLakebasePool.mockResolvedValue(pool);
   mocks.createDrizzleDb.mockReturnValue(db);
   mocks.createDrizzleDataPath.mockReturnValue(path);
   const execute = vi.fn(async (operation) => ({
@@ -89,6 +88,9 @@ function arrange(path = fakePath()) {
   }));
   return { pool, db, path, execute };
 }
+
+beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
 describe("createDatabaseState", () => {
   test("accepts authentic populated and empty schemas but rejects a forgery before allocation", async () => {
@@ -102,14 +104,14 @@ describe("createDatabaseState", () => {
         arrange().execute,
       ),
     ).resolves.toBeDefined();
-    mocks.createLakebasePool.mockClear();
+    mocks.initializeLakebasePool.mockClear();
     await expect(
       createDatabaseState(
         { $tables: Object.create(null) } as typeof schema,
         arrange().execute,
       ),
     ).rejects.toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
-    expect(mocks.createLakebasePool).not.toHaveBeenCalled();
+    expect(mocks.initializeLakebasePool).not.toHaveBeenCalled();
   });
 
   test("builds one default runtime, all entities, and waits for readiness", async () => {
@@ -128,8 +130,8 @@ describe("createDatabaseState", () => {
     expect(settled).toBe(false);
     ready.resolve([]);
     const state = await pending;
-    expect(mocks.createLakebasePool).toHaveBeenCalledTimes(1);
-    expect(mocks.createLakebasePool).toHaveBeenCalledWith({
+    expect(mocks.initializeLakebasePool).toHaveBeenCalledTimes(1);
+    expect(mocks.initializeLakebasePool).toHaveBeenCalledWith({
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
@@ -180,11 +182,11 @@ describe("createDatabaseState", () => {
     },
   );
 
-  test("sanitizes synchronous pool construction failures", async () => {
+  test("sanitizes connector initialization failures", async () => {
     const { execute } = arrange();
-    mocks.createLakebasePool.mockImplementationOnce(() => {
-      throw new Error("secret host and credential details");
-    });
+    mocks.initializeLakebasePool.mockRejectedValueOnce(
+      new Error("secret host and credential details"),
+    );
 
     const error = await createDatabaseState(schema, execute).catch(
       (caught) => caught,
