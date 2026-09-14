@@ -64,6 +64,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [EvalResult](Interface.EvalResult.md) | The outcome of running one eval. |
 | [EvalRunSummary](Interface.EvalRunSummary.md) | - |
 | [EvalSummary](Interface.EvalSummary.md) | - |
+| [EvalWebServer](Interface.EvalWebServer.md) | Auto-start config for the app under test, à la Playwright's `webServer`. When set in a root `evals.config.ts`, the CLI boots the app before running evals and tears it down after — so you don't have to start the server by hand. |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
 | [FunctionTool](Interface.FunctionTool.md) | - |
@@ -211,6 +212,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [evalGlyph](Function.evalGlyph.md) | Status glyph for a single eval result. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
+| [findRootEvalConfig](Function.findRootEvalConfig.md) | Path to the root `evals.config.ts` (from [defineEvalConfig](Function.defineEvalConfig.md)) at `<rootDir>/evals.config.ts`, or `undefined` when absent. The root config holds run-wide settings (`baseUrl`, `webServer`); it's distinct from the per-agent configs found by [discoverEvalConfigs](Function.discoverEvalConfigs.md). |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
 | [fk](Function.fk.md) | Declare foreign-key to another column. |
 | [formatEvalDetail](Function.formatEvalDetail.md) | Indented detail lines for a failing eval (error + failing assertions). |
@@ -241,6 +243,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [jsonb](Function.jsonb.md) | - |
 | [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
 | [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for one subdirectory per agent, each containing `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed by agent id (folder name). Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |
+| [loadRootEvalConfig](Function.loadRootEvalConfig.md) | Load the root `evals.config.ts` under `rootDir` (the project root), or return `undefined` when there is none. This is the run-wide config carrying `baseUrl`/`webServer`; the CLI reads it to resolve options and manage the app-under-test lifecycle before calling [runEvalsInDir](Function.runEvalsInDir.md). |
 | [matches](Function.matches.md) | Passes when the value matches `pattern`. |
 | [mcpServer](Function.mcpServer.md) | Factory for declaring a custom MCP server tool. |
 | [normalizeHost](Function.normalizeHost.md) | Ensure the host has a scheme (Databricks env often lacks `https://`). |

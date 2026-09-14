@@ -254,6 +254,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.EvalWebServer",
+          label: "EvalWebServer"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.FilePolicyUser",
           label: "FilePolicyUser"
         },
@@ -932,6 +937,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.findRootEvalConfig",
+          label: "findRootEvalConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.findServerFile",
           label: "findServerFile"
         },
@@ -1079,6 +1089,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.loadAgentsFromDir",
           label: "loadAgentsFromDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadRootEvalConfig",
+          label: "loadRootEvalConfig"
         },
         {
           type: "doc",
