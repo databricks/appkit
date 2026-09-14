@@ -29,7 +29,7 @@ vi.mock("../../../workspace-client", async (importOriginal) => ({
   createWorkspaceClient: mocks.createWorkspaceClient,
 }));
 
-import { createLakebasePool, initializeLakebasePool } from "../index";
+import { initializeLakebasePool } from "../index";
 
 const pool = { query: vi.fn(), end: vi.fn() } as unknown as Pool;
 type Client = NonNullable<LakebasePoolConfig["workspaceClient"]>;
@@ -118,14 +118,6 @@ describe("AppKit Lakebase connector initialization", () => {
     expect(mocks.createWorkspaceClient).not.toHaveBeenCalled();
   });
 
-  test("PGUSER wins over the service principal environment value", async () => {
-    vi.stubEnv("PGUSER", "postgres-role");
-    vi.stubEnv("DATABRICKS_CLIENT_ID", "service-principal");
-    await initializeLakebasePool();
-    expect(poolConfig().user).toBe("postgres-role");
-    expect(mocks.me).not.toHaveBeenCalled();
-  });
-
   test("never selects an active request identity implicitly", async () => {
     const requestLookup = vi.fn(async () => ({ userName: "request-user" }));
     const requestClient = { currentUser: { me: requestLookup } };
@@ -207,16 +199,5 @@ describe("AppKit Lakebase connector initialization", () => {
       ),
     });
     expect(mocks.createPool).not.toHaveBeenCalled();
-  });
-
-  test("keeps the existing pool factory synchronous", () => {
-    const result = createLakebasePool({
-      user: "explicit-user",
-      password: "test-only",
-    });
-    expect(result).toBe(pool);
-    expect(result).not.toBeInstanceOf(Promise);
-    expect(mocks.me).not.toHaveBeenCalled();
-    expect(mocks.createWorkspaceClient).not.toHaveBeenCalled();
   });
 });

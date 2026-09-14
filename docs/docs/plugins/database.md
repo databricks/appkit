@@ -39,12 +39,9 @@ Apps scaffolded with the Database plugin selected include an empty
 tables. Replace the empty declaration with your models when their PostgreSQL
 tables are ready.
 
-For local development, AppKit's Lakebase connector resolves the PostgreSQL
-username from the application's Databricks credentials when `PGUSER` and
-`DATABRICKS_CLIENT_ID` are absent. The Database plugin delegates connection
-initialization to this connector, which uses `@databricks/lakebase` underneath.
-An explicitly configured username still takes precedence; the Database plugin
-does not introduce a request-level OBO connection.
+For local development, the PostgreSQL username is resolved from your Databricks
+credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are absent. An explicitly
+configured username takes precedence.
 
 ```ts
 // config/database/schema.ts

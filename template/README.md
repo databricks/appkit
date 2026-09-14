@@ -56,9 +56,6 @@ so initialization does not require sample tables or expose existing data.
 Add your table declarations after creating the corresponding PostgreSQL tables;
 AppKit does not create or migrate them. CRUD routes are enabled for declared tables
 by default, and can be restricted with `api` in the plugin configuration.
-
-During local development, the PostgreSQL username is resolved from your Databricks
-credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are not set.
 {{- end}}
 
 ### CLI Authentication
