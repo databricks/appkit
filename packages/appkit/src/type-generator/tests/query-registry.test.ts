@@ -307,10 +307,10 @@ describe("defaultForType", () => {
 describe("convertToQueryType", () => {
   // DESCRIBE QUERY returns rows as [col_name, data_type, comment]
   const mockResponse: DatabricksStatementExecutionResponse = {
-    statement_id: "test-123",
+    statementId: "test-123",
     status: { state: "SUCCEEDED" },
     result: {
-      data_array: [
+      dataArray: [
         ["id", "STRING", null],
         ["name", "STRING", null],
         ["count", "INT", null],
@@ -373,10 +373,10 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
 
   test("uses column comment when available", () => {
     const responseWithComment: DatabricksStatementExecutionResponse = {
-      statement_id: "test-123",
+      statementId: "test-123",
       status: { state: "SUCCEEDED" },
       result: {
-        data_array: [["total", "DECIMAL", "Total amount in USD"]],
+        dataArray: [["total", "DECIMAL", "Total amount in USD"]],
       },
     };
 
@@ -391,10 +391,10 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
 
   test("quotes invalid column identifiers", () => {
     const responseWithInvalidName: DatabricksStatementExecutionResponse = {
-      statement_id: "test-123",
+      statementId: "test-123",
       status: { state: "SUCCEEDED" },
       result: {
-        data_array: [["(1 = 1)", "BOOLEAN", null]],
+        dataArray: [["(1 = 1)", "BOOLEAN", null]],
       },
     };
 
@@ -414,9 +414,9 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
 
   test("returns hasResults: false when no columns exist", () => {
     const emptyResponse: DatabricksStatementExecutionResponse = {
-      statement_id: "test-123",
+      statementId: "test-123",
       status: { state: "SUCCEEDED" },
-      result: { data_array: [] },
+      result: { dataArray: [] },
     };
     const { hasResults } = convertToQueryType(
       emptyResponse,
@@ -439,7 +439,7 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
         { col_name: "active", data_type: "BOOLEAN", comment: null },
       ]);
       const response: DatabricksStatementExecutionResponse = {
-        statement_id: "test-arrow",
+        statementId: "test-arrow",
         status: { state: "SUCCEEDED" },
         result: { attachment },
       };
@@ -467,7 +467,7 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
         { col_name: "id", data_type: "int", comment: null },
       ]);
       const response: DatabricksStatementExecutionResponse = {
-        statement_id: "test-arrow",
+        statementId: "test-arrow",
         status: { state: "SUCCEEDED" },
         result: { attachment },
       };
@@ -477,15 +477,15 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       expect(type).toContain("id: number");
     });
 
-    test("prefers data_array over attachment when both are present", () => {
+    test("prefers dataArray over attachment when both are present", () => {
       const attachment = describeQueryAttachment([
         { col_name: "from_arrow", data_type: "STRING", comment: null },
       ]);
       const response: DatabricksStatementExecutionResponse = {
-        statement_id: "test-both",
+        statementId: "test-both",
         status: { state: "SUCCEEDED" },
         result: {
-          data_array: [["from_data_array", "INT", null]],
+          dataArray: [["from_data_array", "INT", null]],
           attachment,
         },
       };
@@ -498,7 +498,7 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
     test("logs a warning and yields the unknown-result fallback on malformed attachment", () => {
       mockLoggerWarn.mockClear();
       const response: DatabricksStatementExecutionResponse = {
-        statement_id: "test-bad",
+        statementId: "test-bad",
         status: { state: "SUCCEEDED" },
         result: { attachment: "not-valid-arrow-ipc" },
       };

@@ -2,34 +2,39 @@
  * Databricks statement execution response interface for DESCRIBE QUERY /
  * DESCRIBE TABLE EXTENDED.
  *
+ * A hand-written camelCase subset of the modular SDK's `StatementResponse` —
+ * only the fields the type generators read. `describeAdaptive` narrows the SDK
+ * response into this type directly (the sole difference is `dataArray`, which
+ * the SDK types as `JsonValue[][]`; DESCRIBE cells are always string/null).
+ *
  * Two result shapes matter here:
- *  - `result.data_array` — rows already materialized as JSON arrays. Present
+ *  - `result.dataArray` — rows already materialized as JSON arrays. Present
  *    when the warehouse returns `JSON_ARRAY` (and what every mocked test
  *    builds).
  *  - `result.attachment` — a base64-encoded Arrow IPC stream. Present when the
  *    statement runs with `format: "ARROW_STREAM"` + `disposition: "INLINE"`,
  *    which is the SDK's default disposition. The single row lands here and
- *    `data_array` is left undefined. {@link normalizeResultRows} decodes this
- *    back into `data_array` so downstream parsers stay shape-agnostic.
+ *    `dataArray` is left undefined. {@link normalizeResultRows} decodes this
+ *    back into `dataArray` so downstream parsers stay shape-agnostic.
  *
- * @property statement_id - the id of the statement
+ * @property statementId - the id of the statement
  * @property status - the status of the statement
  * @property manifest - result metadata; `manifest.format` echoes the wire
  *   format (`ARROW_STREAM`, `JSON_ARRAY`, ...) the warehouse chose.
- * @property result - the result; either `data_array` (rows as
+ * @property result - the result; either `dataArray` (rows as
  *   `[col_name, data_type, comment]` arrays) or `attachment` (base64 Arrow IPC)
  */
 export interface DatabricksStatementExecutionResponse {
-  statement_id: string;
+  statementId: string;
   status: {
     state: string;
-    error?: { error_code?: string; message?: string };
+    error?: { errorCode?: string; message?: string };
   };
   manifest?: {
     format?: string;
   };
   result?: {
-    data_array?: (string | null)[][];
+    dataArray?: (string | null)[][];
     /** Base64-encoded Arrow IPC stream (ARROW_STREAM + INLINE disposition). */
     attachment?: string;
     /**
@@ -37,9 +42,9 @@ export interface DatabricksStatementExecutionResponse {
      * limit). Its presence means this response holds only the FIRST chunk;
      * {@link normalizeResultRows} throws rather than emit truncated types.
      */
-    next_chunk_index?: number;
-    /** Companion to {@link next_chunk_index}: link to fetch the next chunk. */
-    next_chunk_internal_link?: string;
+    nextChunkIndex?: number;
+    /** Companion to {@link nextChunkIndex}: link to fetch the next chunk. */
+    nextChunkInternalLink?: string;
   };
 }
 
