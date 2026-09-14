@@ -16,7 +16,10 @@
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
  */
-import { newPatCredentials } from "@databricks/sdk-auth/credentials";
+import {
+  newM2mCredentials,
+  newPatCredentials,
+} from "@databricks/sdk-auth/credentials";
 import { addToDefault, setProduct } from "@databricks/sdk-core/clientinfo";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -37,12 +40,13 @@ function normalizeHost(host: string | undefined): string | undefined {
 }
 
 /**
- * Map wrapper options onto the modular SDK's `ClientOptions`. Mirrors
- * `buildLegacyWorkspaceClient`'s auth resolution verbatim, including the
- * privilege-escalation guard: check `token !== undefined` (NOT truthiness) so an
- * explicitly-passed token — even an empty string — pins the PAT path and fails
- * loudly at request time rather than silently authenticating as the service
- * principal via the default chain (which would be an OBO privilege escalation).
+ * Map wrapper options onto the modular SDK's `ClientOptions`, reproducing the
+ * legacy SDK's auth resolution: explicit token → PAT (the OBO path); profile →
+ * profile file; otherwise the service principal from the environment. It carries
+ * the privilege-escalation guard — check `token !== undefined` (NOT truthiness)
+ * so an explicitly-passed token, even an empty string, pins the PAT path and
+ * fails loudly at request time rather than silently falling through to the
+ * service-principal env credentials (which would be an OBO privilege escalation).
  */
 function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
   const clientOptions: ClientOptions = {};
@@ -57,12 +61,34 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     clientOptions.host = host;
   }
   if (opts.token !== undefined) {
+    // Explicit token (this is the OBO path: `asUser` passes the user's token).
     clientOptions.credentials = newPatCredentials(opts.token);
   } else if (opts.profile) {
     clientOptions.profileOptions = { profile: opts.profile };
+  } else {
+    // No token, no profile: authenticate as the service principal from the
+    // environment, the way the legacy SDK did. The modular SDK's default auth
+    // chain resolves ONLY from a `~/.databrickscfg` profile — it reads no
+    // `DATABRICKS_*` env vars — so on the Databricks Apps runtime (which injects
+    // the app's SP credentials via env, with no config file) it would find no
+    // credentials and every request would fail. Resolve them here instead:
+    // M2M (client id + secret, what Apps injects) first, then a PAT, else fall
+    // through to the default chain for local dev with a config file.
+    const clientId = process.env.DATABRICKS_CLIENT_ID;
+    const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
+    const envToken = process.env.DATABRICKS_TOKEN;
+    if (host && clientId && clientSecret) {
+      clientOptions.credentials = newM2mCredentials({
+        host,
+        clientId,
+        clientSecret,
+      });
+    } else if (envToken) {
+      clientOptions.credentials = newPatCredentials(envToken);
+    }
+    // Otherwise leave credentials unset and let the SDK walk its profile-based
+    // default chain (local dev with `~/.databrickscfg`).
   }
-  // Neither token nor profile → leave credentials unset so the SDK walks its
-  // default auth chain (env vars + ~/.databrickscfg), matching the legacy `{}` case.
   return clientOptions;
 }
 
