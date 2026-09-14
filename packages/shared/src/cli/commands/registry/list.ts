@@ -3,13 +3,7 @@ import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
 
-import { registryAuthHeaders } from "./client";
-import {
-  REGISTRY_INDEX_API_URL,
-  REGISTRY_INDEX_URL,
-  REGISTRY_REPO,
-  resolveToken,
-} from "./constants";
+import { REGISTRY_INDEX_URL, REGISTRY_REPO } from "./constants";
 
 interface RegistryIndexItem {
   name: string;
@@ -111,34 +105,24 @@ function printTable(items: RegistryIndexItem[]): void {
   }
 }
 
-/** Fetches the registry index (token-aware), or exits with a helpful message. */
+/** Fetches the registry index from the public raw URL, or exits with a message. */
 async function fetchIndex(): Promise<RegistryIndexItem[]> {
-  const token = resolveToken();
-  const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
-
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
-    res = await fetch(url, { headers: registryAuthHeaders(token) });
+    res = await fetch(REGISTRY_INDEX_URL);
   } catch (err) {
-    console.error(pc.red(`Failed to reach the registry at ${url}`));
+    console.error(
+      pc.red(`Failed to reach the registry at ${REGISTRY_INDEX_URL}`),
+    );
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  if (res.status === 404 || res.status === 401 || res.status === 403) {
+  if (!res.ok) {
     console.error(
       pc.red(
         `Could not read the registry index from ${REGISTRY_REPO} (HTTP ${res.status}).`,
       ),
     );
-    if (!token) {
-      console.error(
-        "  If the repo is private, set APPKIT_REGISTRY_TOKEN (or GITHUB_TOKEN) to a token with read access.",
-      );
-    }
-    process.exit(1);
-  }
-  if (!res.ok) {
-    console.error(pc.red(`Registry returned HTTP ${res.status} for ${url}`));
     process.exit(1);
   }
 
