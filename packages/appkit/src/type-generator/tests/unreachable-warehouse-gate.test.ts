@@ -140,7 +140,7 @@ describe("--wait gate: environmental query failures (real query path)", () => {
   test("non-terminal DESCRIBE + no committed types → crashes instead of silently exiting 0", async () => {
     mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-pending",
+      statementId: "stmt-pending",
       status: { state: "PENDING" },
     });
 
@@ -162,7 +162,7 @@ describe("--wait gate: environmental query failures (real query path)", () => {
   test("non-terminal DESCRIBE + committed types → warns unavailable and keeps them", async () => {
     mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-pending",
+      statementId: "stmt-pending",
       status: { state: "RUNNING" },
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
