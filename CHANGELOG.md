@@ -154,6 +154,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.75.1](https://github.com/databricks/appkit/compare/v0.75.0...v0.75.1) (2026-09-14)
+
+### appkit
+
+* **appkit:** allow database initialization without arguments ([#582](https://github.com/databricks/appkit/issues/582)) ([056a2e7](https://github.com/databricks/appkit/commit/056a2e7fd8b578ac1fe53d8be1c0712e4446df3e))
+
+
 ## [0.75.0](https://github.com/databricks/appkit/compare/v0.74.1...v0.75.0) (2026-09-11)
 
 ### appkit

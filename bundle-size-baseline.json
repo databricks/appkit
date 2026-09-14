@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1168060,
-        "unpacked": 4037471
+        "packed": 1172301,
+        "unpacked": 4052149
       },
       "dist": {
         "total": {
-          "raw": 4022997,
-          "gzip": 1369885
+          "raw": 4037675,
+          "gzip": 1375496
         },
         "js": {
-          "raw": 1193482,
-          "gzip": 420650
+          "raw": 1198091,
+          "gzip": 422528
         },
         "types": {
-          "raw": 436366,
-          "gzip": 157067
+          "raw": 437677,
+          "gzip": 157479
         },
         "maps": {
-          "raw": 2382354,
-          "gzip": 788350
+          "raw": 2391112,
+          "gzip": 791671
         },
         "css": {
           "raw": 0,
@@ -31,22 +31,22 @@
           "raw": 10795,
           "gzip": 3818
         },
-        "fileCount": 817
+        "fileCount": 821
       },
       "entries": [
         {
           "id": ".",
-          "gzip": 100277,
+          "gzip": 100285,
           "composition": {
-            "initialGzip": 97703,
+            "initialGzip": 97711,
             "lazyGzip": 2574,
-            "totalGzip": 100277,
+            "totalGzip": 100285,
             "own": 320370,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 93605,
+                "gzip": 93613,
                 "kind": "initial"
               },
               {
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 94528,
+          "gzip": 95264,
           "composition": {
-            "initialGzip": 94073,
-            "lazyGzip": 455,
-            "totalGzip": 94528,
-            "own": 284185,
+            "initialGzip": 94807,
+            "lazyGzip": 457,
+            "totalGzip": 95264,
+            "own": 286281,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 77322,
+                "gzip": 78052,
                 "kind": "initial"
               },
               {
@@ -89,7 +89,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 3229,
+                "gzip": 3232,
                 "kind": "initial"
               },
               {
@@ -99,7 +99,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 1343,
+                "gzip": 1344,
                 "kind": "initial"
               },
               {
@@ -119,12 +119,12 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 141,
+                "gzip": 142,
                 "kind": "lazy"
               },
               {
                 "label": "index.js",
-                "gzip": 122,
+                "gzip": 123,
                 "kind": "lazy"
               }
             ]
@@ -132,17 +132,17 @@
         },
         {
           "id": "./testing",
-          "gzip": 17271,
+          "gzip": 17270,
           "composition": {
-            "initialGzip": 17271,
+            "initialGzip": 17270,
             "lazyGzip": 0,
-            "totalGzip": 17271,
+            "totalGzip": 17270,
             "own": 52822,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 17271,
+                "gzip": 17270,
                 "kind": "initial"
               }
             ]
@@ -189,13 +189,13 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 358127,
+        "packed": 358132,
         "unpacked": 1443865
       },
       "dist": {
         "total": {
           "raw": 1439919,
-          "gzip": 483863
+          "gzip": 483864
         },
         "js": {
           "raw": 404113,
@@ -203,7 +203,7 @@
         },
         "types": {
           "raw": 234763,
-          "gzip": 85826
+          "gzip": 85827
         },
         "maps": {
           "raw": 784645,
