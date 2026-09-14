@@ -244,4 +244,33 @@ describe("analytics-request-store", () => {
       release();
     });
   });
+
+  describe("uncached mark does not leak from a no-op refetch", () => {
+    test("refetch on a key with no live entry does not skipCache a later retain", () => {
+      // No entry exists for "ghost": store.start no-ops, so the runner never
+      // runs and never consumes the mark. It must not stick to the next retain.
+      refetch("ghost");
+      expect(mockConnectSSE).not.toHaveBeenCalled();
+
+      const release = retain("ghost", JSON_OPTS);
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+      const payload = JSON.parse(mockConnectSSE.mock.calls[0][0].payload);
+      expect(payload.skipCache).toBeUndefined();
+
+      release();
+    });
+
+    test("resetAnalyticsRequestStore clears any pending uncached mark", () => {
+      refetch("ghost");
+      resetAnalyticsRequestStore();
+      vi.clearAllMocks();
+
+      const release = retain("ghost", JSON_OPTS);
+      const payload = JSON.parse(mockConnectSSE.mock.calls[0][0].payload);
+      expect(payload.skipCache).toBeUndefined();
+
+      release();
+    });
+  });
 });

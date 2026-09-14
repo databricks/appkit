@@ -262,7 +262,16 @@ export const getSnapshot = store.getSnapshot;
 export function refetch(cacheKey: string): void {
   uncachedKeys.add(cacheKey);
   store.start(cacheKey);
+  // `store.start` is a synchronous no-op when the key has no live entry (e.g.
+  // the last subscriber released and teardown ran). In that case the runner
+  // never ran and never consumed the mark, so clear it here to avoid leaking
+  // skipCache onto a later `retain` of the same key. When the runner did run
+  // it already deleted the mark synchronously, so this is a harmless no-op.
+  uncachedKeys.delete(cacheKey);
 }
 
 /** Test-only: abort every in-flight request and clear the store. */
-export const resetAnalyticsRequestStore = store.reset;
+export function resetAnalyticsRequestStore(): void {
+  uncachedKeys.clear();
+  store.reset();
+}

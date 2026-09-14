@@ -247,8 +247,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const {
       parameters,
       format: rawFormat = "JSON_ARRAY",
-      skipCache = false,
+      skipCache: rawSkipCache = false,
     } = req.body as IAnalyticsQueryRequest;
+
+    // Only an explicit boolean `true` triggers a cache-bypassing refresh.
+    // Coerce any other value (truthy strings, numbers) to false so an
+    // untrusted body can't enable it with a non-boolean.
+    const skipCache = rawSkipCache === true;
 
     if (
       rawFormat !== "JSON_ARRAY" &&
@@ -320,9 +325,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     const cacheConfig = {
       ...queryDefaults.cache,
-      // When skipCache is true (used by polling/refetch), disable caching
-      // to force fresh execution on every request.
-      enabled: skipCache ? false : queryDefaults.cache?.enabled,
       cacheKey: [
         "analytics:query",
         query_key,
@@ -332,6 +334,17 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         executorKey,
       ],
     };
+
+    // Refresh (polling/refetch): drop any cached entry so the execute below is
+    // a miss. It re-hits the warehouse, repopulates the shared entry
+    // (write-through, so other readers stop seeing the stale value), and still
+    // coalesces with concurrent refreshes via the cache's in-flight dedup — a
+    // plain cache-disable would do neither.
+    if (skipCache) {
+      await this.cache.delete(
+        this.cache.generateKey(cacheConfig.cacheKey, executorKey),
+      );
+    }
 
     // Cache/retry/timeout are scoped to the SQL execution itself (inner
     // `execute`) so the warehouse-readiness phase isn't subject to retries
@@ -1016,7 +1029,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const cache = this.cache;
     const ttl = queryDefaults.cache?.ttl;
     return {
-      query: (q, params, formatParameters, signal) => {
+      query: async (q, params, formatParameters, signal) => {
         // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
         // short-lived pre-signed URLs, so those pass straight through.
         if (
@@ -1026,9 +1039,20 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           return executor.query(q, params, formatParameters, signal);
         }
 
-        // Bypass the cache on refetch.
+        const arrowKey = [
+          "analytics:query:arrow",
+          query_key,
+          JSON.stringify(parameters),
+          hashedQuery,
+          executorKey,
+        ];
+
+        // Refresh (polling/refetch): drop the cached entry so getOrExecute is a
+        // miss. It re-hits the warehouse, repopulates the shared entry
+        // (write-through), and still coalesces concurrent refreshes — a plain
+        // bypass would leave other readers stale to TTL and lose that dedup.
         if (skipCache) {
-          return executor.query(q, params, formatParameters, signal);
+          await cache.delete(cache.generateKey(arrowKey, executorKey));
         }
 
         // On a standard warehouse this throws a capability rejection — the
@@ -1037,13 +1061,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         // attachment that caches like the JSON path's rows. The shared signal
         // dedupes concurrent renders (e.g. React StrictMode double-mount).
         return cache.getOrExecute(
-          [
-            "analytics:query:arrow",
-            query_key,
-            JSON.stringify(parameters),
-            hashedQuery,
-            executorKey,
-          ],
+          arrowKey,
           (sharedSignal) =>
             executor.query(q, params, formatParameters, sharedSignal ?? signal),
           executorKey,
