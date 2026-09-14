@@ -13,6 +13,7 @@ import type {
   ResponseOutputMessage,
   ResponseStreamEvent,
   Thread,
+  ThreadStore,
   ToolProvider,
 } from "shared";
 
@@ -79,6 +80,7 @@ import {
   cancelRequestSchema,
   chatRequestSchema,
   invocationsRequestSchema,
+  renameThreadRequestSchema,
 } from "./schemas";
 import {
   dispatchSkillTool,
@@ -87,7 +89,7 @@ import {
   renderForcedSkill,
   resolveAgentSkills,
 } from "./skill-loader";
-import { InMemoryThreadStore } from "./thread-store";
+import { deriveThreadSummary, InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 import {
   dispatchToolCall,
@@ -114,7 +116,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   private streams = new ActiveStreamTracker();
   private mcpClient: AppKitMcpClient | null = null;
-  private threadStore;
+  private threadStore: ThreadStore;
   private approvalGate = new ToolApprovalGate();
   /** Guards the `agents({ agents })` deprecation warning to once per instance. */
   private agentsMapDeprecationWarned = false;
@@ -201,6 +203,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   async setup() {
+    // Fail boot fast if the thread store can't initialize (e.g. Lakebase
+    // unreachable or schema bootstrap denied). No-op for in-memory stores.
+    await this.threadStore.init?.();
     await initAgentTracing();
     // Seed mlflow's config right after TelemetryManager.start() (before the
     // server serves), so the first turn's request-root span is forwarded and
@@ -947,6 +952,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       handler: async (req, res) => this._handleGetThread(req, res),
     });
     this.route(router, {
+      name: "renameThread",
+      method: "patch",
+      path: "/threads/:threadId",
+      handler: async (req, res) => this._handleRenameThread(req, res),
+    });
+    this.route(router, {
       name: "deleteThread",
       method: "delete",
       path: "/threads/:threadId",
@@ -1686,8 +1697,43 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ) {
     const userId = this.resolveUserId(req);
-    const threads = await this.threadStore.list(userId);
+    // Prefer the store's cheap summary projection; fall back to deriving from
+    // full threads for custom stores that don't implement listSummaries.
+    const threads = this.threadStore.listSummaries
+      ? await this.threadStore.listSummaries(userId)
+      : (await this.threadStore.list(userId)).map(deriveThreadSummary);
     res.json({ threads });
+  }
+
+  private async _handleRenameThread(
+    req: express.Request,
+    res: express.Response,
+  ) {
+    if (!this.threadStore.rename) {
+      res
+        .status(501)
+        .json({ error: "This thread store does not support renaming" });
+      return;
+    }
+    const parsed = renameThreadRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    const userId = this.resolveUserId(req);
+    const renamed = await this.threadStore.rename(
+      req.params.threadId,
+      userId,
+      parsed.data.title,
+    );
+    if (!renamed) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+    res.json({ renamed: true, title: parsed.data.title });
   }
 
   private async _handleGetThread(req: express.Request, res: express.Response) {
@@ -1744,6 +1790,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       await this.mcpClient.close();
       this.mcpClient = null;
     }
+    // Release any pool the thread store owns. No-op for in-memory stores.
+    await this.threadStore.close?.();
   }
 
   exports() {

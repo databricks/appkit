@@ -26,6 +26,18 @@ messages: Message[];
 
 ***
 
+### title?
+
+```ts
+optional title: string;
+```
+
+Optional human title. Defaults to a value derived from the first user
+message (see [ThreadStore.listSummaries](Interface.ThreadStore.md#listsummaries)); an explicit rename via
+[ThreadStore.rename](Interface.ThreadStore.md#rename) takes precedence. Undefined until renamed.
+
+***
+
 ### updatedAt
 
 ```ts

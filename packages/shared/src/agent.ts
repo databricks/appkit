@@ -94,6 +94,26 @@ export interface Thread {
   messages: Message[];
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Optional human title. Defaults to a value derived from the first user
+   * message (see {@link ThreadStore.listSummaries}); an explicit rename via
+   * {@link ThreadStore.rename} takes precedence. Undefined until renamed.
+   */
+  title?: string;
+}
+
+/**
+ * Lightweight thread projection for a history list — no message bodies, so a
+ * sidebar of many threads stays cheap. `title` is already resolved (explicit
+ * rename, else derived from the first user message; may be empty when neither
+ * exists). Returned by {@link ThreadStore.listSummaries}.
+ */
+export interface ThreadSummary {
+  id: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +126,29 @@ export interface ThreadStore {
   list(userId: string): Promise<Thread[]>;
   addMessage(threadId: string, userId: string, message: Message): Promise<void>;
   delete(threadId: string, userId: string): Promise<boolean>;
+  /**
+   * Optional cheap list projection for a history sidebar — summaries only, no
+   * message bodies. When a store omits it, the agents plugin falls back to
+   * deriving summaries from {@link list} (correct, just heavier).
+   */
+  listSummaries?(userId: string): Promise<ThreadSummary[]>;
+  /**
+   * Optional rename of a thread's title (user-scoped). Returns `false` when no
+   * matching thread exists for the user. When a store omits it, the rename
+   * route reports the operation as unsupported.
+   */
+  rename?(threadId: string, userId: string, title: string): Promise<boolean>;
+  /**
+   * Optional one-time initialization — e.g. verify connectivity and bootstrap
+   * a backing schema. Called once during agents-plugin setup, so a failure
+   * here fails boot fast. In-memory stores omit it.
+   */
+  init?(): Promise<void>;
+  /**
+   * Optional teardown — e.g. close an owned connection pool. Called during
+   * agents-plugin shutdown. In-memory stores omit it.
+   */
+  close?(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

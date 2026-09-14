@@ -15,6 +15,7 @@ export type {
   Message,
   Thread,
   ThreadStore,
+  ThreadSummary,
   ToolAnnotations,
   ToolProvider,
 } from "shared";
@@ -105,6 +106,8 @@ export type {
 export {
   agentIdFromMarkdownPath,
   isToolkitEntry,
+  LakebaseThreadStore,
+  type LakebaseThreadStoreOptions,
   loadAgentFromFile,
   loadAgentsFromDir,
 } from "./plugins/agents";

@@ -28,3 +28,7 @@ export {
   type ToolkitOptions,
 } from "../../core/agent/types";
 export { AgentsPlugin, agents } from "./agents";
+export {
+  LakebaseThreadStore,
+  type LakebaseThreadStoreOptions,
+} from "./lakebase-thread-store";

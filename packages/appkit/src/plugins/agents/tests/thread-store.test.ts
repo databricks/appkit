@@ -136,4 +136,73 @@ describe("InMemoryThreadStore", () => {
     expect(user1Threads).toHaveLength(2);
     expect(user2Threads).toHaveLength(1);
   });
+
+  test("listSummaries() derives title from first user message + counts, sorted", async () => {
+    const store = new InMemoryThreadStore();
+    const empty = await store.create("user-1");
+    const chatted = await store.create("user-1");
+    await store.addMessage(chatted.id, "user-1", {
+      id: "m1",
+      role: "user",
+      content: "What is the weather in Paris today?",
+      createdAt: new Date(),
+    });
+    await store.addMessage(chatted.id, "user-1", {
+      id: "m2",
+      role: "assistant",
+      content: "Sunny.",
+      createdAt: new Date(),
+    });
+
+    const summaries = await store.listSummaries("user-1");
+    expect(summaries).toHaveLength(2);
+    // (ordering is covered by the list() test; two same-ms creates can tie)
+    const chattedSummary = summaries.find((s) => s.id === chatted.id);
+    expect(chattedSummary?.title).toBe("What is the weather in Paris today?");
+    expect(chattedSummary?.messageCount).toBe(2);
+    expect(chattedSummary?.updatedAt).toBeInstanceOf(Date);
+    // Empty thread → empty derived title, zero count.
+    const emptySummary = summaries.find((s) => s.id === empty.id);
+    expect(emptySummary?.title).toBe("");
+    expect(emptySummary?.messageCount).toBe(0);
+  });
+
+  test("listSummaries() truncates a long derived title to 80 chars", async () => {
+    const store = new InMemoryThreadStore();
+    const t = await store.create("user-1");
+    await store.addMessage(t.id, "user-1", {
+      id: "m1",
+      role: "user",
+      content: "x".repeat(200),
+      createdAt: new Date(),
+    });
+    const [summary] = await store.listSummaries("user-1");
+    expect(summary.title).toHaveLength(80);
+  });
+
+  test("rename() sets the title, wins over the derived default, and does not reorder", async () => {
+    const store = new InMemoryThreadStore();
+    const t = await store.create("user-1");
+    await store.addMessage(t.id, "user-1", {
+      id: "m1",
+      role: "user",
+      content: "original first message",
+      createdAt: new Date(),
+    });
+    const before = (await store.get(t.id, "user-1"))?.updatedAt.getTime();
+
+    expect(await store.rename(t.id, "user-1", "My renamed thread")).toBe(true);
+
+    const [summary] = await store.listSummaries("user-1");
+    expect(summary.title).toBe("My renamed thread");
+    // Rename must not bump updatedAt.
+    expect((await store.get(t.id, "user-1"))?.updatedAt.getTime()).toBe(before);
+  });
+
+  test("rename() returns false for wrong user or missing thread", async () => {
+    const store = new InMemoryThreadStore();
+    const t = await store.create("user-1");
+    expect(await store.rename(t.id, "user-2", "nope")).toBe(false);
+    expect(await store.rename("missing", "user-1", "nope")).toBe(false);
+  });
 });
