@@ -1,7 +1,7 @@
 # Type Alias: DatabaseApiWritesConfig\<TSchema\>
 
 ```ts
-type DatabaseApiWritesConfig<TSchema> =
+type DatabaseApiWritesConfig<TSchema> = 
   | boolean
   | {
   operations?: readonly DatabaseApiWriteOperation[];

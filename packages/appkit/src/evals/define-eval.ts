@@ -1,4 +1,4 @@
-import type { EvalDefinition } from "./types";
+import type { EvalConfig, EvalDefinition } from "./types";
 
 /**
  * Define an agent eval. Default-export the result from a
@@ -24,4 +24,9 @@ export function defineEval(def: EvalDefinition): EvalDefinition {
     throw new Error("defineEval: `test` must be a function");
   }
   return def;
+}
+
+/** Define per-directory eval config. Default-export from `evals.config.ts`. */
+export function defineEvalConfig(config: EvalConfig): EvalConfig {
+  return config;
 }

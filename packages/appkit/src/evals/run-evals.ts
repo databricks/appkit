@@ -1,14 +1,22 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { MlflowClient } from "../connectors/mlflow";
-import { type DiscoveredEval, discoverEvalFiles } from "./discover";
+import type { WorkspaceClient } from "../workspace-client";
+import { type DatasetRow, readEvalDataset } from "./dataset";
+import {
+  type DiscoveredEval,
+  discoverEvalConfigs,
+  discoverEvalFiles,
+  findRootEvalConfig,
+} from "./discover";
 import { createHttpDriver } from "./http-driver";
 import { configureJudge, teardownJudge } from "./judge";
 import { type ReportOutcome, reportToMlflow } from "./mlflow-report";
 import { createEvalRun, type FinishOutcome, finishEvalRun } from "./mlflow-run";
 import { mapPool } from "./pool";
 import { runEval } from "./run-eval";
-import type { EvalDefinition, EvalResult } from "./types";
+import type { EvalConfig, EvalDefinition, EvalResult } from "./types";
 
 export interface RunEvalsOptions {
   /** Project root containing `server/agents/`. Defaults to `process.cwd()`. */
@@ -17,12 +25,15 @@ export interface RunEvalsOptions {
   baseUrl: string;
   /** Substring filter on `<agent>/<id>` (or an exact agent id). */
   filter?: string;
+  /**
+   * Only run evals whose `tags` intersect this list. Empty/undefined runs all.
+   * Tags live on the eval def, so filtering happens after each file is loaded.
+   */
+  tags?: string[];
   /** Soft assertion failures also fail the eval. */
   strict?: boolean;
   /** Extra request headers for the driver (e.g. auth for a deployed app). */
   headers?: Record<string, string>;
-  /** Per-turn wall-clock timeout (ms) before a turn is failed. Defaults to 120s. */
-  timeoutMs?: number;
   /**
    * Max evals to drive concurrently. Each eval opens one stream to the app as
    * the same user, so keep this at or below the app's
@@ -47,8 +58,27 @@ export interface RunEvalsOptions {
    * Databricks serving endpoint (`model`).
    */
   judge?: { host: string; token: string; model: string };
+  /**
+   * Workspace client used to read managed evaluation datasets (for evals that
+   * declare `dataset`). Required alongside {@link warehouseId} for those evals.
+   */
+  workspaceClient?: WorkspaceClient;
+  /** SQL warehouse id used to read managed evaluation datasets. */
+  warehouseId?: string;
   /** Wall-clock timestamp (ms) for run create/finish — pass `Date.now()`. */
   now?: number;
+  /**
+   * Default per-eval timeout (ms): `runEval` races the whole test against it and
+   * it also caps each driver turn. A per-eval `def.timeoutMs` overrides it, and
+   * it wins over an agent's `evals.config.ts` `timeoutMs`. Unbounded when unset.
+   */
+  timeoutMs?: number;
+  /**
+   * Re-run an eval up to this many extra times when it fails on infrastructure —
+   * a thrown error/timeout (`result.error`) or a transport/agent turn failure
+   * (`result.infraFailure`). Assertion failures are never retried. Defaults to `0`.
+   */
+  retries?: number;
   /** Progress callback, invoked as evals are discovered, started, and finished. */
   onEvent?: (event: EvalProgress) => void;
 }
@@ -66,12 +96,11 @@ export interface EvalRunSummary {
 }
 
 /**
- * Load a `*.eval.ts` file and return its default-exported {@link EvalDefinition}.
- * Uses tsx's programmatic loader so TypeScript eval files run without a build
- * step. The specifier is indirected so the type checker doesn't try to resolve
- * tsx's internal entry.
+ * Import a TypeScript file with tsx's programmatic loader so eval files run
+ * without a build step. The specifier is indirected so the type checker doesn't
+ * try to resolve tsx's internal entry.
  */
-async function loadEval(file: string): Promise<EvalDefinition> {
+async function tsImportFile(file: string): Promise<unknown> {
   const tsxApi = "tsx/esm/api";
   let tsImport: (specifier: string, parentURL: string) => Promise<unknown>;
   try {
@@ -83,13 +112,63 @@ async function loadEval(file: string): Promise<EvalDefinition> {
       "Running .eval.ts files requires `tsx`. Install it as a dev dependency (`pnpm add -D tsx`).",
     );
   }
+  return tsImport(pathToFileURL(file).href, import.meta.url);
+}
 
-  const mod = await tsImport(pathToFileURL(file).href, import.meta.url);
+/**
+ * Load a `*.eval.ts` file and return its default-exported {@link EvalDefinition}.
+ */
+async function loadEval(file: string): Promise<EvalDefinition> {
+  const mod = await tsImportFile(file);
   const def = resolveEvalDefault(mod);
   if (!def) {
     throw new Error(`${file}: must default-export defineEval({ test })`);
   }
   return def;
+}
+
+/**
+ * Load an `evals.config.ts` file and return its default-exported
+ * {@link EvalConfig}. A malformed/missing default surfaces as `undefined` so a
+ * bad config never aborts a whole run.
+ */
+async function loadEvalConfig(file: string): Promise<EvalConfig | undefined> {
+  const mod = await tsImportFile(file);
+  return resolveConfigDefault(mod);
+}
+
+/**
+ * Load the root `evals.config.ts` under `rootDir` (the project root), or return
+ * `undefined` when there is none. This is the run-wide config carrying
+ * `baseUrl`/`webServer`; the CLI reads it to resolve options and manage the
+ * app-under-test lifecycle before calling {@link runEvalsInDir}.
+ */
+export async function loadRootEvalConfig(
+  rootDir: string,
+): Promise<EvalConfig | undefined> {
+  const file = findRootEvalConfig(rootDir);
+  if (!file) return undefined;
+  return loadEvalConfig(file);
+}
+
+/**
+ * Unwrap the config default export across module-interop shapes (see
+ * {@link resolveEvalDefault}). A config has no `.test`, so the first plain
+ * object reached through the `default` chain is taken as the config.
+ */
+export function resolveConfigDefault(mod: unknown): EvalConfig | undefined {
+  let candidate: unknown = mod;
+  // `i < 4` bounds the chain; no visited-set needed (cf. resolveEvalDefault).
+  for (let i = 0; i < 4 && candidate; i++) {
+    const next = (candidate as { default?: unknown }).default;
+    if (next === undefined) {
+      return typeof candidate === "object"
+        ? (candidate as EvalConfig)
+        : undefined;
+    }
+    candidate = next;
+  }
+  return undefined;
 }
 
 /**
@@ -110,25 +189,38 @@ export function resolveEvalDefault(mod: unknown): EvalDefinition | undefined {
 }
 
 /**
- * Load and run a single discovered eval. Never throws — a load/run failure
- * becomes a non-passing {@link EvalResult} so one bad eval can't abort the run.
+ * Run one eval turn against a fresh driver. Never throws — a run failure becomes
+ * a non-passing {@link EvalResult} so one bad eval can't abort the run. `row`
+ * binds the current managed-dataset row (see {@link resolveDatasetRows}), or is
+ * `undefined` for a plain single-run eval.
  */
 async function runOne(
   d: DiscoveredEval,
   id: string,
+  def: EvalDefinition,
+  row: DatasetRow | undefined,
   runId: string | undefined,
   options: RunEvalsOptions,
 ): Promise<EvalResult> {
   try {
-    const def = await loadEval(d.file);
-    const driver = createHttpDriver({
-      baseUrl: options.baseUrl,
-      agent: def.agent ?? d.agent,
-      headers: options.headers,
-      mlflowRunId: runId,
-      timeoutMs: options.timeoutMs,
-    });
-    return await runEval(def, { id, driver, strict: options.strict });
+    // Each attempt builds a fresh driver, so a retry never inherits the failed
+    // attempt's thread. (runWithRetries defines what counts as retryable.)
+    return await runWithRetries(options.retries ?? 0, () =>
+      runEval(def, {
+        id,
+        driver: createHttpDriver({
+          baseUrl: options.baseUrl,
+          agent: def.agent ?? d.agent,
+          headers: options.headers,
+          mlflowRunId: runId,
+          // Cap the driver turn at the eval's effective timeout (runEval's signal also aborts it).
+          timeoutMs: def.timeoutMs ?? options.timeoutMs,
+        }),
+        strict: options.strict,
+        row,
+        timeoutMs: options.timeoutMs,
+      }),
+    );
   } catch (err) {
     return {
       id,
@@ -137,6 +229,148 @@ async function runOne(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * Resolve the rows a (possibly dataset-driven) eval runs over. A plain eval
+ * yields a single `undefined` row; a dataset eval reads its Unity Catalog table
+ * via {@link readEvalDataset}. On misconfiguration or read failure, returns a
+ * single `undefined` row plus an `error`, so the eval still surfaces one result.
+ */
+export async function resolveDatasetRows(
+  def: EvalDefinition,
+  options: RunEvalsOptions,
+): Promise<{ rows: Array<DatasetRow | undefined>; error?: string }> {
+  if (!def.dataset) return { rows: [undefined] };
+  if (!options.workspaceClient || !options.warehouseId) {
+    return {
+      rows: [undefined],
+      error:
+        "dataset eval requires a workspace client and warehouse (pass --warehouse-id)",
+    };
+  }
+  try {
+    const rows = await readEvalDataset(options.workspaceClient, {
+      table: def.dataset.table,
+      warehouseId: options.warehouseId,
+      limit: def.dataset.limit,
+    });
+    if (rows.length === 0) {
+      return {
+        rows: [undefined],
+        error: `dataset "${def.dataset.table}" returned no rows`,
+      };
+    }
+    return { rows };
+  } catch (err) {
+    return {
+      rows: [undefined],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Run one already-loaded eval (from the `loaded` pre-pass), expanding a
+ * dataset-driven eval into one run per row. Appends one result per row to
+ * `results`, emitting `start`/`result` around each. Never throws: a load error
+ * (carried in `loadError`) or a dataset-read failure surfaces as a non-passing
+ * result. `total` counts eval files, not rows — per-row detail is carried in the
+ * result id (`[row i/n]`).
+ */
+async function runDiscovered(
+  d: DiscoveredEval,
+  def: EvalDefinition,
+  loadError: string | undefined,
+  index: number,
+  total: number,
+  runId: string | undefined,
+  options: RunEvalsOptions,
+  emit: (event: EvalProgress) => void,
+  results: EvalResult[],
+): Promise<void> {
+  const id = `${d.agent}/${d.id}`;
+
+  // Load failed in the pre-pass (def is a placeholder) → one non-passing result.
+  if (loadError) {
+    emit({ type: "start", id, index, total });
+    const result: EvalResult = {
+      id,
+      assertions: [],
+      passed: false,
+      error: loadError,
+    };
+    results.push(result);
+    emit({ type: "result", result, index, total });
+    return;
+  }
+
+  const { rows, error: datasetError } = await resolveDatasetRows(def, options);
+
+  for (let r = 0; r < rows.length; r++) {
+    const rowId =
+      def.dataset && rows.length > 1
+        ? `${id} [row ${r + 1}/${rows.length}]`
+        : id;
+    emit({ type: "start", id: rowId, index, total });
+    const result: EvalResult = datasetError
+      ? { id: rowId, assertions: [], passed: false, error: datasetError }
+      : await runOne(d, rowId, def, rows[r], runId, options);
+    results.push(result);
+    emit({ type: "result", result, index, total });
+  }
+}
+
+/** Base delay (ms) before the first retry; doubled per attempt, full-jittered, capped. */
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+/** Ceiling for a single retry backoff wait (ms). */
+const MAX_RETRY_DELAY_MS = 5_000;
+
+/**
+ * Run `attempt` up to `1 + retries` times, stopping as soon as it returns a
+ * result that is neither a thrown error / per-eval timeout (`error`) nor a
+ * transport/agent turn failure (`infraFailure`). Assertion failures set
+ * neither, so a failed-but-completed eval is returned on the first try and
+ * never retried. Returns the last result when every attempt failed on infra.
+ *
+ * Between attempts it waits a full-jittered exponential backoff (infra flakes
+ * are overload-correlated). `retries` is coerced to a finite non-negative
+ * integer; `baseDelayMs: 0` disables the wait (tests).
+ */
+export async function runWithRetries(
+  retries: number,
+  attempt: (attemptNumber: number) => Promise<EvalResult>,
+  options: { baseDelayMs?: number } = {},
+): Promise<EvalResult> {
+  const baseDelayMs = options.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const maxRetries = Number.isFinite(retries)
+    ? Math.max(0, Math.floor(retries))
+    : 0;
+  const maxAttempts = 1 + maxRetries;
+  let result: EvalResult;
+  for (let n = 1; ; n++) {
+    result = await attempt(n);
+    const infraFailed = result.error !== undefined || result.infraFailure;
+    if (!infraFailed || n >= maxAttempts) return result;
+    if (baseDelayMs > 0) {
+      // Full jitter: a random wait in [0, min(cap, base * 2^(n-1))].
+      const ceiling = Math.min(baseDelayMs * 2 ** (n - 1), MAX_RETRY_DELAY_MS);
+      await sleep(Math.random() * ceiling);
+    }
+  }
+}
+
+/**
+ * Whether an eval's `tags` satisfy a `--tag` filter: `true` when the filter is
+ * empty/undefined (no filtering), otherwise only when the eval shares at least
+ * one tag with it. An eval with no tags never matches a non-empty filter.
+ */
+export function matchesTags(
+  defTags: string[] | undefined,
+  filterTags: string[] | undefined,
+): boolean {
+  if (!filterTags || filterTags.length === 0) return true;
+  return defTags?.some((t) => filterTags.includes(t)) ?? false;
 }
 
 /** Configure the LLM judge when judge creds were supplied; otherwise a no-op. */
@@ -191,6 +425,28 @@ async function finalizeMlflow(
 const DEFAULT_CONCURRENCY = 4;
 
 /**
+ * Resolve the work-pool width: `--concurrency` wins; else the lowest
+ * `maxConcurrency` any *participating* agent's `evals.config.ts` requests (all
+ * evals share one per-user stream budget, so the most conservative ceiling
+ * governs); else {@link DEFAULT_CONCURRENCY}.
+ */
+export function deriveConcurrency(
+  activeAgents: Set<string>,
+  configs: Map<string, EvalConfig>,
+  cliConcurrency: number | undefined,
+): number {
+  const configMin = [...configs.entries()]
+    .filter(([agent]) => activeAgents.has(agent))
+    .map(([, c]) => c.maxConcurrency)
+    .filter((n): n is number => typeof n === "number")
+    .reduce<number | undefined>(
+      (min, n) => (min === undefined ? n : Math.min(min, n)),
+      undefined,
+    );
+  return cliConcurrency ?? configMin ?? DEFAULT_CONCURRENCY;
+}
+
+/**
  * Discover, load, and run every eval under each agent's `evals/` dir, driving
  * the agents on a running app. Never throws for an individual eval — load/run
  * failures become non-passing {@link EvalResult}s.
@@ -210,7 +466,55 @@ export async function runEvalsInDir(
   }
 
   const emit = options.onEvent ?? (() => {});
-  const total = discovered.length;
+
+  // Load each agent's `evals.config.ts` (best-effort, per-agent): its settings
+  // apply only to that agent's evals. A malformed/missing config never aborts
+  // the run — the agent just falls back to CLI options and built-in defaults.
+  const configs = new Map<string, EvalConfig>();
+  for (const c of discoverEvalConfigs(root)) {
+    try {
+      const cfg = await loadEvalConfig(c.file);
+      if (cfg) configs.set(c.agent, cfg);
+    } catch {
+      // Ignore: fall back to CLI options / defaults for this agent.
+    }
+  }
+
+  // Load each eval def and apply the `--tag` filter up front. Tags live on the
+  // def, so a tag miss removes the eval entirely (like the substring filter
+  // excludes files) rather than surfacing as a result. Load failures are kept
+  // so a broken file still reports as a non-passing result.
+  const loaded: Array<{
+    d: DiscoveredEval;
+    def: EvalDefinition;
+    loadError?: string;
+  }> = [];
+  for (const d of discovered) {
+    let def: EvalDefinition;
+    try {
+      def = await loadEval(d.file);
+    } catch (err) {
+      loaded.push({
+        d,
+        // No def loaded; placeholder def is never run (error short-circuits).
+        def: { test: () => {} },
+        loadError: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (!matchesTags(def.tags, options.tags)) continue;
+    loaded.push({ d, def });
+  }
+
+  // Pool width from participating agents' configs (see {@link deriveConcurrency}).
+  const activeAgents = new Set(loaded.map((l) => l.d.agent));
+  const concurrency = deriveConcurrency(
+    activeAgents,
+    configs,
+    options.concurrency,
+  );
+
+  const total = loaded.length;
   emit({ type: "discovered", total });
 
   // The judge sets OPENAI_* env vars globally (autoevals reads them per call),
@@ -236,20 +540,38 @@ export async function runEvalsInDir(
       emit({ type: "run-created", runId });
     }
 
-    // Run evals through a bounded pool so independent turns overlap instead of
-    // summing their latencies. runOne never throws, so a pool worker never
-    // rejects; results preserve discovery order (mapPool writes by index).
-    const results = await mapPool(
-      discovered,
-      options.concurrency ?? DEFAULT_CONCURRENCY,
-      async (d, index) => {
-        const id = `${d.agent}/${d.id}`;
-        emit({ type: "start", id, index, total });
-        const result = await runOne(d, id, runId, options);
-        emit({ type: "result", result, index, total });
-        return result;
+    // Run each loaded (tag-filtered) eval through the bounded pool — one in-flight
+    // stream per eval, so the pool respects the server's per-user stream cap (see
+    // mapPool/concurrency). A dataset eval expands into per-row runs that execute
+    // serially within its slot; results preserve discovery order (mapPool writes
+    // by index) and row order within each file. Per-agent timeout is folded into
+    // the file's options (CLI wins over `evals.config.ts`; `def.timeoutMs` still
+    // overrides, applied inside runEval). `total` counts eval files, not dataset
+    // rows — per-row detail is carried in the result id (`[row i/n]`).
+    const perFile = await mapPool(
+      loaded,
+      concurrency,
+      async ({ d, def, loadError }, index) => {
+        const fileResults: EvalResult[] = [];
+        const fileOptions: RunEvalsOptions = {
+          ...options,
+          timeoutMs: options.timeoutMs ?? configs.get(d.agent)?.timeoutMs,
+        };
+        await runDiscovered(
+          d,
+          def,
+          loadError,
+          index,
+          total,
+          runId,
+          fileOptions,
+          emit,
+          fileResults,
+        );
+        return fileResults;
       },
     );
+    const results = perFile.flat();
 
     const summary: EvalRunSummary = { results };
     const mlflow = await finalizeMlflow(mlflowClient, runId, results, options);
