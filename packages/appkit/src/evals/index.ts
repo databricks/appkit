@@ -5,9 +5,22 @@ export {
   type PostResult,
   type ResolveDatabricksAuthOptions,
   resolveDatabricksAuth,
+  resolveWorkspaceClient,
 } from "../connectors/mlflow";
-export { defineEval } from "./define-eval";
-export { type DiscoveredEval, discoverEvalFiles } from "./discover";
+export {
+  type DatasetRow,
+  type ReadEvalDatasetOptions,
+  readEvalDataset,
+  userTurns,
+} from "./dataset";
+export { defineEval, defineEvalConfig } from "./define-eval";
+export {
+  type DiscoveredEval,
+  type DiscoveredEvalConfig,
+  discoverEvalConfigs,
+  discoverEvalFiles,
+  findRootEvalConfig,
+} from "./discover";
 export { createHttpDriver, type HttpDriverOptions } from "./http-driver";
 export {
   configureJudge,
@@ -28,6 +41,8 @@ export {
   formatEvalDetail,
   formatEvalHeadline,
   formatEvalResults,
+  formatResultsJson,
+  formatResultsJUnit,
   formatSummaryLine,
   summarize,
 } from "./report";
@@ -35,8 +50,10 @@ export { type RunEvalOptions, runEval } from "./run-eval";
 export {
   type EvalProgress,
   type EvalRunSummary,
+  loadRootEvalConfig,
   type RunEvalsOptions,
   runEvalsInDir,
+  runWithRetries,
 } from "./run-evals";
 export type {
   AssertionHandle,
@@ -46,6 +63,7 @@ export type {
   EvalDefinition,
   EvalDriver,
   EvalResult,
+  EvalWebServer,
   Matcher,
   MatchResult,
   Severity,

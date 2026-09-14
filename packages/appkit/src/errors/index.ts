@@ -23,6 +23,10 @@ export { AuthenticationError } from "./authentication";
 export { AppKitError } from "./base";
 export { ConfigurationError } from "./configuration";
 export { ConnectionError } from "./connection";
+export {
+  DatabaseValidationError,
+  type DatabaseValidationIssue,
+} from "./database-validation";
 export { ExecutionError } from "./execution";
 export { InitializationError } from "./initialization";
 export { ServerError } from "./server";

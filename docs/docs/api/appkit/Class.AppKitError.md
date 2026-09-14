@@ -30,6 +30,7 @@ console.error(error.toJSON()); // Safe for logging, sensitive values redacted
 - [`AuthenticationError`](Class.AuthenticationError.md)
 - [`ConfigurationError`](Class.ConfigurationError.md)
 - [`ConnectionError`](Class.ConnectionError.md)
+- [`DatabaseValidationError`](Class.DatabaseValidationError.md)
 - [`ExecutionError`](Class.ExecutionError.md)
 - [`InitializationError`](Class.InitializationError.md)
 - [`ServerError`](Class.ServerError.md)

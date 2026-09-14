@@ -506,7 +506,9 @@ export abstract class Plugin<
             // themselves; leave them untouched.
             if (typeof raw === "function") return raw;
             if (isPlainObject(raw)) {
-              return wrapExportFunctions(raw, wrapCall);
+              return wrapExportFunctions(raw, (fn) =>
+                wrapCall(fn.bind(target)),
+              );
             }
             return raw;
           };

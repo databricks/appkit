@@ -38,6 +38,17 @@ id: string;
 
 ***
 
+### infraFailure?
+
+```ts
+optional infraFailure: boolean;
+```
+
+A turn failed at the transport/agent level (`succeeded: false`), not on an
+assertion — a retryable infra flake, distinct from `error`.
+
+***
+
 ### passed
 
 ```ts
