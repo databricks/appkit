@@ -12,15 +12,9 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import {
-  agents,
-  aiSearch,
-  createAgent,
-  database,
-  runAgent,
-} from "@databricks/appkit/beta";
+import { agents, aiSearch, database, runAgent } from "@databricks/appkit/beta";
 
-import { schema } from "../config/database/schema";
+import redactor from "./agents/redactor/agent";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -65,14 +59,6 @@ const usersOnly: FilePolicy = (_action, _resource, user) => {
   return user.isServicePrincipal !== true;
 };
 
-// Best-effort redaction demonstrates calling an agent from a hook; it is not
-// a guarantee that all personal data will be removed.
-const redactor = createAgent({
-  instructions:
-    "Replace every personal name and email address in the user's text with [redacted]. " +
-    "Return only the rewritten text, nothing else.",
-});
-
 createApp({
   plugins: [
     server(),
@@ -88,13 +74,17 @@ createApp({
     // only joins the app once an instance is actually configured.
     ...(process.env.LAKEBASE_ENDPOINT
       ? [
+          // The schema is loaded from config/database/schema.ts.
           database({
-            schema,
             // Reads are generated for all three tables. Only boards and notes
             // accept HTTP writes; the audit trail is written by the hook.
             api: { writes: { tables: ["boards", "notes"] } },
+            // Example of Hooks integration between Database and Agents
             hooks: {
+              // Hook per entity
               notes: {
+                // Before a new Note is created, receive the values to be insert
+                // You can use this moment to do another operation like call a LLM and add the value in the values to be inserted
                 async beforeCreate(values) {
                   // Cancel the model call before the 30-second transaction deadline.
                   const signal = AbortSignal.timeout(10_000);
@@ -122,6 +112,8 @@ createApp({
                     author_email: `${values.author}@example.com`,
                   };
                 },
+                // After a note is created, receiving the inserted value.
+                // You can use this moment to trigger a new operation immediately that relies on the insert
                 async afterCreate(row, ctx) {
                   // The audit write joins the note's transaction, not the HTTP API.
                   await ctx.app.database.note_events.create({
@@ -129,6 +121,7 @@ createApp({
                     action: "created",
                   });
                 },
+                // Utility callback to allow you to change the payload from a list operation if necessary.
                 serialize: (row, { operation }) =>
                   operation === "list"
                     ? { ...row, body: String(row.body).slice(0, 120) }
@@ -176,7 +169,7 @@ createApp({
     serving(),
     agents({
       // Every agent lives under server/agents/<id>/ — code agents as agent.ts
-      // (helper, supervisor, sql_analyst, dashboard_pilot), markdown agents as
+      // (helper, supervisor, sql_analyst, dashboard_pilot, redactor), markdown agents as
       // agent.md (query, insights, anomaly, autocomplete). `query` (markdown
       // dispatcher) delegates to the code `sql_analyst` + `dashboard_pilot` to
       // wire the /smart-dashboard route. `insights` and `anomaly` are ephemeral
