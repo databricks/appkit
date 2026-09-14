@@ -33,6 +33,8 @@ export type {
   ServingEndpointRegistry,
   TypedArrowTable,
   UseAnalyticsQueryOptions,
+  UseAnalyticsQueryPollOptions,
+  UseAnalyticsQueryPollResult,
   UseAnalyticsQueryResult,
   UseMetricViewOptions,
   UseMetricViewResult,
