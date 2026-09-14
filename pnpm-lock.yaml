@@ -263,9 +263,24 @@ importers:
       '@databricks/lakebase':
         specifier: workspace:*
         version: link:../lakebase
+      '@databricks/sdk-auth':
+        specifier: 0.46.0
+        version: 0.46.0
+      '@databricks/sdk-core':
+        specifier: 0.46.0
+        version: 0.46.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-options':
+        specifier: 0.46.0
+        version: 0.46.0
+      '@databricks/sdk-statementexecution':
+        specifier: 0.46.0
+        version: 0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)
+      '@databricks/sdk-warehouses':
+        specifier: 0.46.0
+        version: 0.46.0
       '@mlflow/core':
         specifier: 0.4.0
         version: 0.4.0(bufferutil@4.0.9)
