@@ -5,6 +5,7 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
+import type { z } from "zod";
 
 import type { GenerationParams } from "../../agents/databricks";
 import type { McpHostPolicyConfig } from "../../connectors/mcp";
@@ -124,7 +125,7 @@ export type AgentTools = Record<string, AgentTool>;
  */
 export type AgentToolsFn = (plugins: Plugins) => AgentTools;
 
-export interface AgentDefinition {
+export interface AgentDefinition<TOutput = string> {
   /**
    * Stable identifier for the agent. **Optional and informational** —
    * when the definition is registered via `agents: { foo: def }` (code) or
@@ -154,6 +155,15 @@ export interface AgentDefinition {
   default?: boolean;
   /** System prompt body. For markdown-loaded agents this is the file body. */
   instructions: string;
+  /**
+   * Optional Zod schema the agent's final answer is validated against; when
+   * set, the agent returns a typed object instead of text — surfaced as
+   * `output_parsed` on `/invocations`, a final `structured_output` SSE event
+   * on `/chat`, and `RunAgentResult.output` in-process. Prefer {@link
+   * createAgent} so the in-process result is typed via `z.infer`. Code-config
+   * agents only — markdown agents can't carry a schema.
+   */
+  output?: z.ZodType<TOutput>;
   /**
    * Model adapter (or endpoint-name string sugar for
    * `DatabricksAdapter.fromServingEndpoint({ endpointName })`). Optional —
@@ -399,6 +409,15 @@ export interface RegisteredAgent {
   generationParams?: GenerationParams;
   /** Mirrors `AgentDefinition.ephemeral` — skip thread persistence. */
   ephemeral?: boolean;
+  /**
+   * Mirrors `AgentDefinition.output` — the Zod schema the final answer is
+   * validated against. Present only for agents that declared structured
+   * output. Untyped here (the registry `Map` is string-keyed); `z.infer`
+   * typing lives on `createAgent`/`runAgent`.
+   */
+  output?: z.ZodType;
+  /** The {@link output} schema converted to JSON Schema, memoized at registration. Present iff `output` is. */
+  outputSchema?: Record<string, unknown>;
   /**
    * Resolved per-agent skill catalog (visibility + collision rules applied).
    * Present when any skill is visible to this agent; drives the always-on

@@ -42,6 +42,7 @@ export {
 export { createAgent } from "./core/agent/create-agent";
 export {
   type RunAgentInput,
+  type RunAgentOptions,
   type RunAgentResult,
   runAgent,
 } from "./core/agent/run-agent";
