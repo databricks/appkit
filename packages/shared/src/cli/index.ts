@@ -41,4 +41,10 @@ cmd.addCommand(registryCommand, { hidden: true });
 cmd.addCommand(addCommand, { hidden: true });
 cmd.addCommand(agentCommand);
 
-await cmd.parseAsync();
+// Surface a clean message for any uncaught setup failure (e.g. a root
+// evals.config.ts that throws on import) instead of a raw unhandled-rejection
+// stack; a non-zero exit still gates CI.
+await cmd.parseAsync().catch((err: unknown) => {
+  console.error(`\n${err instanceof Error ? err.message : String(err)}`);
+  process.exitCode = 1;
+});

@@ -146,6 +146,53 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.75.1](https://github.com/databricks/appkit/compare/v0.75.0...v0.75.1) (2026-09-14)
+
+### appkit
+
+* **appkit:** allow database initialization without arguments ([#582](https://github.com/databricks/appkit/issues/582)) ([056a2e7](https://github.com/databricks/appkit/commit/056a2e7fd8b578ac1fe53d8be1c0712e4446df3e))
+
+
+## [0.75.0](https://github.com/databricks/appkit/compare/v0.74.1...v0.75.0) (2026-09-11)
+
+### appkit
+
+* **appkit:** auto-start app under test for agent evals (stack 6/6) ([#482](https://github.com/databricks/appkit/issues/482)) ([038454d](https://github.com/databricks/appkit/commit/038454db78f92130ae1333d2e15fa878bec57253))
+
+
+## [0.74.1](https://github.com/databricks/appkit/compare/v0.74.0...v0.74.1) (2026-09-11)
+
+### shared
+
+* **shared:** don't downgrade already-installed deps in appkit add ([#580](https://github.com/databricks/appkit/issues/580)) ([f488288](https://github.com/databricks/appkit/commit/f488288adcf77de50124fd8864cee7010e15f881))
+
+
+## [0.74.0](https://github.com/databricks/appkit/compare/v0.73.0...v0.74.0) (2026-09-09)
+
+### appkit
+
+* **appkit:** eval suite features — concurrency, retries, reporters (stack 4/5) ([#480](https://github.com/databricks/appkit/issues/480)) ([43e5fed](https://github.com/databricks/appkit/commit/43e5fedc999e594325dd4ba1d7be821cda4e2fe3))
+
+
+## [0.73.0](https://github.com/databricks/appkit/compare/v0.72.0...v0.73.0) (2026-09-08)
+
+### appkit
+
+* **appkit:** bind `this` on asUser exports so OBO methods keep their receiver ([#577](https://github.com/databricks/appkit/issues/577)) ([e15b087](https://github.com/databricks/appkit/commit/e15b0872dfc6b21a4002d74e7757177c036d692e)), closes [#385](https://github.com/databricks/appkit/issues/385)
+* **appkit:** add database mutations and transactional hooks ([#528](https://github.com/databricks/appkit/issues/528)) ([3e1c6f2](https://github.com/databricks/appkit/commit/3e1c6f239ef16364aab869600fad99f7a54048fa))
+* **appkit:** managed eval datasets + turn semantics (stack 3/5) ([#479](https://github.com/databricks/appkit/issues/479)) ([28fc9b6](https://github.com/databricks/appkit/commit/28fc9b6327ef98c950cd6cef22067994755be92d))
+
+
 ## [0.72.0](https://github.com/databricks/appkit/compare/v0.71.0...v0.72.0) (2026-09-04)
 
 ### appkit

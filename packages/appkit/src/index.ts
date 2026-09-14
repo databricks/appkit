@@ -45,6 +45,8 @@ export {
   AuthenticationError,
   ConfigurationError,
   ConnectionError,
+  DatabaseValidationError,
+  type DatabaseValidationIssue,
   ExecutionError,
   InitializationError,
   ServerError,

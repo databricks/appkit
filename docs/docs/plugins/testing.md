@@ -160,6 +160,130 @@ The harness validates that required resources' **environment variables are prese
 - `nodeEnv` — defaults to `"test"`. `"development"` is **refused**: dev mode routes the harness's ephemeral port through `get-port`, which throws on port `0`, and it also boots a real Vite server and relaxes validation.
 - `cache` — defaults to in-memory. Override it only when reaching the network is the point of the test.
 
+## Testing your plugin
+
+`createTestApp({ plugins })` boots a **real** AppKit app, with the real Express wiring, routes, and resource validation, then hands you methods to call it like a client would:
+
+```ts
+import { createTestApp, expectStream } from "@databricks/appkit/testing";
+
+test("my plugin answers a request", async () => {
+  const app = await createTestApp({ plugins: [myPlugin()] });
+  try {
+    const res = await app.post("/api/my-plugin/thing", { body: { q: 1 }, obo: true });
+    expect(res.status).toBe(200);
+    await expectStream(res).toEmit("status", "result");
+  } finally {
+    await app.close();
+  }
+});
+```
+
+No workspace, no credentials, no network. The harness pins a non-development `NODE_ENV`, binds an ephemeral port, installs a fake workspace client, and keeps the cache in memory so nothing reaches out.
+
+Paths are the full mounted route. A plugin's prefix is `/api/` plus its manifest name in kebab-case, so a plugin named `mySearch` serves at `/api/my-search/…`.
+
+### Which harness?
+
+| | `createTestApp` | `createTestPluginContext` |
+| --- | --- | --- |
+| Boots the app | Yes | No |
+| Binds a socket | Yes (ephemeral port) | No |
+| Express middleware, error handler | Real | Not involved |
+| Resource / env validation | Real, and strict | Not involved |
+| Workspace client | Faked and injected | Fake it yourself with `mockServiceContext` |
+| Needs `close()` | **Yes** | No |
+| Speed | Fast, but pays for a socket | Fastest |
+
+Use `createTestApp` for a plugin's HTTP behavior end to end. Use `createTestPluginContext` to unit-test wiring: route registration, tool dispatch, timeout composition. Name harness suites `*.integration.test.ts`, matching the existing convention.
+
+### Faking what your plugin reads
+
+Declare responses by dotted path — `"<service>.<method>"` on AppKit's workspace-client facade:
+
+```ts
+const app = await createTestApp({
+  plugins: [myPlugin()],
+  responses: {
+    "jobs.getRun": { state: "TERMINATED", result_state: "SUCCESS" },
+    "statementExecution.executeStatement": { status: { state: "SUCCEEDED" } },
+    "apiClient.request": { results: [] },
+  },
+});
+```
+
+A function value receives the call arguments, so you can script per-argument behavior or reject to test an error path. `responses` configures the built-in mock, so passing it alongside your own `client` is rejected rather than silently ignored — configure the responses on that client instead. Any path you **don't** declare resolves `undefined` rather than crashing — see [Mocking Databricks services](#mocking-databricks-services) for the trade-off it makes.
+
+For the response *shapes*, follow the service types on the Databricks SDK. The kit doesn't validate them, so a wrong shape fails in your plugin, not in the fake.
+
+With one app open, `app.client` is the very object your handler resolves at runtime — reached inside a plugin via `getExecutionContext().client` — so you can assert calls on it:
+
+```ts
+import { getMock } from "@databricks/appkit/testing";
+
+expect(getMock(app.client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 42 });
+```
+
+`getMock` exists because facade accessors are typed against the SDK, so `expect(app.client.jobs.getRun).toHaveBeenCalled()` won't typecheck.
+
+### Requests
+
+`app.get/post/put/patch/delete(path, options?)` return a native `Response`, so `expectStream` composes directly with no bridge.
+
+- `body` — a non-string value is JSON-encoded with `content-type: application/json`. A string is sent as-is.
+- `headers` — merged last, so they win over anything the harness set.
+- `obo` — `true` for the default test user, or `{ userId, token, email }`. Same shorthand as `createMockRequest({ obo })`, so a handler using `asUser(req)` resolves that identity.
+- `signal` — forwarded to `fetch`.
+
+### Teardown
+
+The harness binds a socket, so **every boot needs a `close()`**. It releases the socket, runs your plugin's `shutdown()` hooks, drops AppKit's singletons, and restores `process.env` to its pre-boot state. It's idempotent.
+
+Prefer `await using`, which closes the app at scope exit even if the test throws:
+
+```ts
+await using app = await createTestApp({ plugins: [myPlugin()] });
+// released at scope exit
+```
+
+`try/finally` works too, and is what you need if the app has to outlive a block:
+
+```ts
+const app = await createTestApp({ plugins: [myPlugin()] });
+try {
+  // ...
+} finally {
+  await app.close();
+}
+```
+
+Miss the close and the app stays live — socket bound, singletons and `process.env` not restored — so the next `createTestApp` is refused (one app at a time).
+
+### Satisfying declared resources
+
+The harness runs the real validator with a strict posture, so a plugin whose manifest requires a resource fails the boot unless its env var is set. Supply it with `env`:
+
+```ts
+// Throws: MY_WAREHOUSE_ID is required by the manifest.
+await createTestApp({ plugins: [myPlugin()] });
+
+// Boots.
+await createTestApp({ plugins: [myPlugin()], env: { MY_WAREHOUSE_ID: "w-1" } });
+```
+
+That makes "my plugin declares its resources correctly" a genuine assertion. `env` is restored on `close()`.
+
+:::note What this does not check
+The harness validates that required resources' **environment variables are present**. It does **not** validate config *values* against your manifest's `config.schema` — no runtime validator exists for that yet. A test that boots successfully tells you your resource declarations and env are wired up; it says nothing about whether your config values are well-formed.
+:::
+
+### Other options
+
+- `server: false` — no socket. Plugin setup, validation, and teardown still run; the request methods throw if called. Useful when you only care that a plugin boots.
+- `client` — supply your own workspace client instead of the built-in fake. You then own its `currentUser.me()`: AppKit reads `currentUser.id` during boot and can't start without it.
+- `nodeEnv` — defaults to `"test"`. `"development"` is **refused**: dev mode routes the harness's ephemeral port through `get-port`, which throws on port `0`, and it also boots a real Vite server and relaxes validation.
+- `cache` — defaults to in-memory. Overriding it is what would let the cache reach the network, so leave it alone unless that's the point of the test.
+
 ## `createTestPluginContext()`
 
 `PluginContext` is the mediator AppKit passes to every plugin: it buffers routes, tracks tool providers, and runs cross-plugin tool calls with user scoping and a timeout. `createTestPluginContext()` returns the **real** context with three edges faked:
