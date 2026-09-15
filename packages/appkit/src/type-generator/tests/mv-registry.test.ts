@@ -45,10 +45,10 @@ function mockDescribeResponse(
   payload: unknown,
 ): DatabricksStatementExecutionResponse {
   return {
-    statement_id: "stmt-mock",
+    statementId: "stmt-mock",
     status: { state: "SUCCEEDED" },
     result: {
-      data_array: [[JSON.stringify(payload)]],
+      dataArray: [[JSON.stringify(payload)]],
     },
   };
 }
@@ -359,7 +359,7 @@ describe("resolveMetricConfig — FQN naming (UC-accurate)", () => {
     // crashing the pass — exactly the pre-existing degrade behavior.
     const fetcher =
       async (): Promise<DatabricksStatementExecutionResponse> => ({
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "FAILED", error: { message: "no such table" } },
       });
     const { schemas, failures } = await syncMetrics(resolution, fetcher);
@@ -556,7 +556,7 @@ describe("parseDescribeTableExtendedJson", () => {
   test("throws on a FAILED status", () => {
     expect(() =>
       parseDescribeTableExtendedJson({
-        statement_id: "x",
+        statementId: "x",
         status: { state: "FAILED", error: { message: "no such table" } },
       }),
     ).toThrowError(/no such table/);
@@ -565,9 +565,9 @@ describe("parseDescribeTableExtendedJson", () => {
   test("throws when the response is empty", () => {
     expect(() =>
       parseDescribeTableExtendedJson({
-        statement_id: "x",
+        statementId: "x",
         status: { state: "SUCCEEDED" },
-        result: { data_array: [] },
+        result: { dataArray: [] },
       }),
     ).toThrowError(/no rows/);
   });
@@ -575,9 +575,9 @@ describe("parseDescribeTableExtendedJson", () => {
   test("throws when the cell is not a JSON string", () => {
     expect(() =>
       parseDescribeTableExtendedJson({
-        statement_id: "x",
+        statementId: "x",
         status: { state: "SUCCEEDED" },
-        result: { data_array: [[null]] },
+        result: { dataArray: [[null]] },
       }),
     ).toThrowError(/JSON string/);
   });
@@ -680,8 +680,8 @@ describe("createWorkspaceDescribeFetcher", () => {
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatchObject({
       statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
-      warehouse_id: "wh-1",
-      wait_timeout: "30s",
+      warehouseId: "wh-1",
+      waitTimeout: "30s",
       // describeAdaptive tries JSON_ARRAY first (standard DBSQL); it falls back
       // to ARROW_STREAM only if the warehouse rejects that format.
       format: "JSON_ARRAY",
@@ -691,7 +691,7 @@ describe("createWorkspaceDescribeFetcher", () => {
 
   test("decodes an Arrow attachment-only response into parseable columns (fetcher → normalizer → parser)", async () => {
     // The warehouse answers ARROW_STREAM/INLINE: rows arrive as a base64 Arrow
-    // IPC attachment with `data_array` undefined. Before the normalizer was
+    // IPC attachment with `dataArray` undefined. Before the normalizer was
     // wired in, parseDescribeTableExtendedJson read this as "no rows" and the
     // metric shipped degraded. Now the fetcher pipes the response through
     // normalizeResultRows, so the real describe doc is recovered end-to-end.
@@ -701,12 +701,12 @@ describe("createWorkspaceDescribeFetcher", () => {
         executeStatement: async (req: Record<string, unknown>) => {
           statements.push(req);
           return {
-            statement_id: "stmt-arrow",
+            statementId: "stmt-arrow",
             status: { state: "SUCCEEDED" },
             manifest: { format: "ARROW_STREAM" },
-            // Only an attachment — no data_array (the bug's trigger condition).
+            // Only an attachment — no dataArray (the bug's trigger condition).
             result: { attachment: ARROW_ATTACHMENT_B64 },
-          } as DatabricksStatementExecutionResponse;
+          };
         },
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
@@ -715,7 +715,7 @@ describe("createWorkspaceDescribeFetcher", () => {
     const response = await fetcher("appkit_demo.public.revenue_metrics");
 
     // The fetcher decoded the attachment: rows are now readable.
-    expect(response.result?.data_array).toBeDefined();
+    expect(response.result?.dataArray).toBeDefined();
     const parsed = parseDescribeTableExtendedJson(response);
     const cols = extractMetricColumns(parsed);
     // The real revenue_metrics describe doc carries measures and dimensions.
@@ -1005,7 +1005,7 @@ describe("syncMetrics", () => {
 
   test("a multi-chunk (truncated) DESCRIBE surfaces as a loud failure, not a crash (fetcher → normalizer → syncMetrics)", async () => {
     // End-to-end loudness check for the truncation guard. The warehouse paginates
-    // the DESCRIBE result (sets next_chunk_index on the first chunk); the fetcher
+    // the DESCRIBE result (sets nextChunkIndex on the first chunk); the fetcher
     // pipes the response through normalizeResultRows, which THROWS rather than
     // emit partial types. That throw must be caught inside describeOne and
     // recorded as a MetricSyncFailure — never an uncaught crash that aborts the
@@ -1015,16 +1015,15 @@ describe("syncMetrics", () => {
     });
     const client = {
       statementExecution: {
-        executeStatement: async () =>
-          ({
-            statement_id: "stmt-chunked",
-            status: { state: "SUCCEEDED" },
-            manifest: { format: "ARROW_STREAM" },
-            result: {
-              attachment: ARROW_ATTACHMENT_B64,
-              next_chunk_index: 1,
-            },
-          }) as DatabricksStatementExecutionResponse,
+        executeStatement: async () => ({
+          statementId: "stmt-chunked",
+          status: { state: "SUCCEEDED" },
+          manifest: { format: "ARROW_STREAM" },
+          result: {
+            attachment: ARROW_ATTACHMENT_B64,
+            nextChunkIndex: 1,
+          },
+        }),
       },
     } as unknown as Parameters<typeof createWorkspaceDescribeFetcher>[0];
     const fetcher = createWorkspaceDescribeFetcher(client, "wh-1");
@@ -1134,24 +1133,24 @@ describe("syncMetrics — failure transience (D′)", () => {
     [
       "a FAILED statement",
       {
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "FAILED", error: { message: "no such table" } },
       },
     ],
     [
       "a SUCCEEDED statement with zero rows",
       {
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "SUCCEEDED" },
-        result: { data_array: [] },
+        result: { dataArray: [] },
       },
     ],
     [
       "an unparseable payload",
       {
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "SUCCEEDED" },
-        result: { data_array: [["{not json"]] },
+        result: { dataArray: [["{not json"]] },
       },
     ],
     ["zero extracted columns", mockDescribeResponse({ unrelated: true })],
@@ -1198,7 +1197,7 @@ describe("syncMetrics — DESCRIBE state classification", () => {
     test(`a non-terminal ${state} response degrades the schema without recording a failure`, async () => {
       const fetcher =
         async (): Promise<DatabricksStatementExecutionResponse> => ({
-          statement_id: "stmt-mock",
+          statementId: "stmt-mock",
           status: { state },
         });
 
@@ -1222,7 +1221,7 @@ describe("syncMetrics — DESCRIBE state classification", () => {
   test("a FAILED response stays a genuine failure (and its schema is degraded)", async () => {
     const fetcher =
       async (): Promise<DatabricksStatementExecutionResponse> => ({
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "FAILED", error: { message: "no such table" } },
       });
 
@@ -1241,9 +1240,9 @@ describe("syncMetrics — DESCRIBE state classification", () => {
     // wrong FQN, not warehouse readiness.
     const fetcher =
       async (): Promise<DatabricksStatementExecutionResponse> => ({
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "SUCCEEDED" },
-        result: { data_array: [] },
+        result: { dataArray: [] },
       });
 
     const { schemas, failures } = await syncMetrics(
@@ -1430,7 +1429,7 @@ describe("syncMetrics — bounded-concurrency scheduling", () => {
         throw new Error(`boom ${key}`);
       }
       if (key === nonTerminal) {
-        return { statement_id: "stmt-mock", status: { state: "PENDING" } };
+        return { statementId: "stmt-mock", status: { state: "PENDING" } };
       }
       return mockDescribeResponse({
         columns: [
@@ -1602,7 +1601,7 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     ): Promise<DatabricksStatementExecutionResponse> =>
       fqn.endsWith("cold_metric")
         ? // Stopped/cold warehouse: wait_timeout elapsed → non-terminal, no rows.
-          { statement_id: "stmt-mock", status: { state: "PENDING" } }
+          { statementId: "stmt-mock", status: { state: "PENDING" } }
         : // Genuinely measure-less view: SUCCEEDED with dimension columns only.
           mockDescribeResponse({
             columns: [{ name: "region", type: "STRING", is_measure: false }],
@@ -1767,7 +1766,7 @@ describe("metric metadata bundle", () => {
     // Non-terminal DESCRIBE → degraded schema (empty column arrays).
     const fetcher =
       async (): Promise<DatabricksStatementExecutionResponse> => ({
-        statement_id: "stmt-mock",
+        statementId: "stmt-mock",
         status: { state: "PENDING" },
       });
     const { schemas } = await syncMetrics(resolution, fetcher);

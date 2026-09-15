@@ -8,7 +8,15 @@
   ],
   "workspaces": {
     "packages/appkit": {
-      "ignoreDependencies": ["vitest", "@databricks/sdk-experimental"]
+      "ignoreDependencies": [
+        "vitest",
+        "@databricks/sdk-auth",
+        "@databricks/sdk-core",
+        "@databricks/sdk-experimental",
+        "@databricks/sdk-options",
+        "@databricks/sdk-statementexecution",
+        "@databricks/sdk-warehouses"
+      ]
     },
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]

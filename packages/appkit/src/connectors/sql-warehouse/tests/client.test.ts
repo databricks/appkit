@@ -1,7 +1,10 @@
 import { tableFromIPC } from "apache-arrow";
 import { describe, expect, test, vi } from "vitest";
 
-import type { sql } from "../../../workspace-client";
+import type {
+  ExternalLink,
+  StatementResponse,
+} from "../../../workspace-client";
 
 vi.mock("../../../telemetry", () => {
   const mockMeter = {
@@ -40,11 +43,11 @@ function createConnector() {
 
 // `_transformDataArray` is async — it paginates multi-chunk EXTERNAL_LINKS
 // results. The workspace client is only touched when following
-// `next_chunk_index`, so a bare stub suffices for the inline / JSON /
+// `nextChunkIndex`, so a bare stub suffices for the inline / JSON /
 // single-chunk cases; the multi-chunk tests pass a real mock.
 function transform(
   connector: SQLWarehouseConnector,
-  response: sql.StatementResponse,
+  response: StatementResponse,
   workspaceClient: unknown = {},
 ) {
   return (connector as any)._transformDataArray(response, workspaceClient);
@@ -58,11 +61,11 @@ const REAL_ARROW_ATTACHMENT =
 
 describe("SQLWarehouseConnector._transformDataArray", () => {
   describe("classic warehouse (JSON_ARRAY + INLINE)", () => {
-    test("transforms data_array rows into named objects", async () => {
+    test("transforms dataArray rows into named objects", async () => {
       const connector = createConnector();
       // Real response shape from classic warehouse: INLINE + JSON_ARRAY
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "JSON_ARRAY",
@@ -71,14 +74,14 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
             columns: [
               {
                 name: "test_col",
-                type_text: "INT",
-                type_name: "INT",
+                typeText: "INT",
+                typeName: "INT",
                 position: 0,
               },
               {
                 name: "test_col2",
-                type_text: "INT",
-                type_name: "INT",
+                typeText: "INT",
+                typeName: "INT",
                 position: 1,
               },
             ],
@@ -87,33 +90,33 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
           truncated: false,
         },
         result: {
-          data_array: [["1", "2"]],
+          dataArray: [["1", "2"]],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result.result.data).toEqual([{ test_col: "1", test_col2: "2" }]);
-      expect(result.result.data_array).toBeUndefined();
+      expect(result.result.dataArray).toBeUndefined();
     });
 
     test("parses JSON strings in STRING columns", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "JSON_ARRAY",
           schema: {
             columns: [
-              { name: "id", type_name: "INT" },
-              { name: "metadata", type_name: "STRING" },
+              { name: "id", typeName: "INT" },
+              { name: "metadata", typeName: "STRING" },
             ],
           },
         },
         result: {
-          data_array: [["1", '{"key":"value"}']],
+          dataArray: [["1", '{"key":"value"}']],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result.result.data[0].metadata).toEqual({ key: "value" });
@@ -125,26 +128,26 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       const connector = createConnector();
       // Real response shape from classic warehouse: EXTERNAL_LINKS + ARROW_STREAM
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
             columns: [
-              { name: "test_col", type_name: "INT" },
-              { name: "test_col2", type_name: "INT" },
+              { name: "test_col", typeName: "INT" },
+              { name: "test_col2", typeName: "INT" },
             ],
           },
         },
         result: {
-          external_links: [
+          externalLinks: [
             {
-              external_link: "https://storage.example.com/chunk0",
+              externalLink: "https://storage.example.com/chunk0",
               expiration: "2026-04-15T00:00:00Z",
             },
           ],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result.result.statement_id).toBe("stmt-1");
@@ -156,9 +159,9 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     test("passes attachment through unchanged for client-side decoding", async () => {
       const connector = createConnector();
       // Real response shape from serverless warehouse: INLINE + ARROW_STREAM
-      // Data arrives in result.attachment as base64-encoded Arrow IPC, not data_array.
+      // Data arrives in result.attachment as base64-encoded Arrow IPC, not dataArray.
       const response = {
-        statement_id: "00000001-test-stmt",
+        statementId: "00000001-test-stmt",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
@@ -167,30 +170,30 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
             columns: [
               {
                 name: "test_col",
-                type_text: "INT",
-                type_name: "INT",
+                typeText: "INT",
+                typeName: "INT",
                 position: 0,
               },
               {
                 name: "test_col2",
-                type_text: "INT",
-                type_name: "INT",
+                typeText: "INT",
+                typeName: "INT",
                 position: 1,
               },
             ],
-            total_chunk_count: 1,
-            chunks: [{ chunk_index: 0, row_offset: 0, row_count: 1 }],
+            totalChunkCount: 1,
+            chunks: [{ chunkIndex: 0, row_offset: 0, row_count: 1 }],
             total_row_count: 1,
           },
           truncated: false,
         },
         result: {
-          chunk_index: 0,
+          chunkIndex: 0,
           row_offset: 0,
           row_count: 1,
           attachment: REAL_ARROW_ATTACHMENT,
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
@@ -206,56 +209,56 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     test("preserves manifest and status alongside attachment", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "00000001-test-stmt",
+        statementId: "00000001-test-stmt",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
             columns: [
-              { name: "test_col", type_name: "INT" },
-              { name: "test_col2", type_name: "INT" },
+              { name: "test_col", typeName: "INT" },
+              { name: "test_col2", typeName: "INT" },
             ],
           },
         },
         result: {
-          chunk_index: 0,
+          chunkIndex: 0,
           row_count: 1,
           attachment: REAL_ARROW_ATTACHMENT,
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       // Manifest, statement_id, and attachment are all preserved
       expect(result.manifest.format).toBe("ARROW_STREAM");
-      expect(result.statement_id).toBe("00000001-test-stmt");
+      expect(result.statementId).toBe("00000001-test-stmt");
       expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
     });
 
     test("synthesizes an empty Arrow IPC attachment for empty results so the client always gets a Table", async () => {
       const connector = createConnector();
-      // Empty result: no attachment, no data_array, no external_links — but
+      // Empty result: no attachment, no dataArray, no external_links — but
       // the manifest still describes the schema. The connector should fill in
       // `attachment` with a zero-row Arrow IPC matching the schema.
       const response = {
-        statement_id: "stmt-empty",
+        statementId: "stmt-empty",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
             columns: [
-              { name: "user_id", type_text: "BIGINT", type_name: "BIGINT" },
-              { name: "name", type_text: "STRING", type_name: "STRING" },
+              { name: "user_id", typeText: "BIGINT", typeName: "BIGINT" },
+              { name: "name", typeText: "STRING", typeName: "STRING" },
               {
                 name: "balance",
-                type_text: "DECIMAL(10,2)",
-                type_name: "DECIMAL",
+                typeText: "DECIMAL(10,2)",
+                typeName: "DECIMAL",
               },
             ],
           },
           total_row_count: 0,
         },
         result: {},
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const transformed = await transform(connector, response);
       const attachment: string = transformed.result.attachment;
@@ -275,18 +278,18 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     test("does NOT synthesize an attachment when external_links are present", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-ext",
+        statementId: "stmt-ext",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
-          schema: { columns: [{ name: "x", type_text: "INT" }] },
+          schema: { columns: [{ name: "x", typeText: "INT" }] },
         },
         result: {
-          external_links: [
-            { external_link: "https://example.com/x", expiration: "9999" },
+          externalLinks: [
+            { externalLink: "https://example.com/x", expiration: "9999" },
           ],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const transformed = await transform(connector, response);
       // External-links path returns the statement_id projection — no attachment.
@@ -296,21 +299,21 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
 
     test("empty external_links array is a zero-row result → synthesizes an empty table (not the streaming path)", async () => {
       const connector = createConnector();
-      // Some warehouses emit `external_links: []` for a zero-row result rather
+      // Some warehouses emit `externalLinks: []` for a zero-row result rather
       // than omitting it. An empty array must NOT go down the streaming path
       // (streamChunks([]) rejects) — synthesize an empty Arrow table instead.
       const response = {
-        statement_id: "stmt-empty-ext",
+        statementId: "stmt-empty-ext",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
-            columns: [{ name: "x", type_text: "INT", type_name: "INT" }],
+            columns: [{ name: "x", typeText: "INT", typeName: "INT" }],
           },
           total_row_count: 0,
         },
-        result: { external_links: [] },
-      } as unknown as sql.StatementResponse;
+        result: { externalLinks: [] },
+      } as unknown as StatementResponse;
 
       const transformed = await transform(connector, response);
       const attachment: string = transformed.result.attachment;
@@ -323,11 +326,11 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     test("does NOT synthesize an attachment when schema is missing", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-no-schema",
+        statementId: "stmt-no-schema",
         status: { state: "SUCCEEDED" },
         manifest: { format: "ARROW_STREAM" },
         result: {},
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const transformed = await transform(connector, response);
       // Without a schema we cannot build a Table — pass through unchanged.
@@ -340,11 +343,11 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       // base64 chars decodes to ~27 MiB, comfortably above the limit.
       const oversized = "A".repeat(36 * 1024 * 1024);
       const response = {
-        statement_id: "stmt-oversized",
+        statementId: "stmt-oversized",
         status: { state: "SUCCEEDED" },
         manifest: { format: "ARROW_STREAM" },
         result: { attachment: oversized },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       await expect(transform(connector, response)).rejects.toThrow(
         /exceeds maximum size/,
@@ -352,28 +355,28 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     });
   });
 
-  describe("ARROW_STREAM with data_array (hypothetical inline variant)", () => {
-    test("transforms data_array like JSON_ARRAY path", async () => {
+  describe("ARROW_STREAM with dataArray (hypothetical inline variant)", () => {
+    test("transforms dataArray like JSON_ARRAY path", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
             columns: [
-              { name: "id", type_name: "INT" },
-              { name: "value", type_name: "STRING" },
+              { name: "id", typeName: "INT" },
+              { name: "value", typeName: "STRING" },
             ],
           },
         },
         result: {
-          data_array: [
+          dataArray: [
             ["1", "hello"],
             ["2", "world"],
           ],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result.result.data).toEqual([
@@ -384,88 +387,88 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
   });
 
   describe("edge cases", () => {
-    test("returns response unchanged when no data_array, attachment, or schema", async () => {
+    test("returns response unchanged when no dataArray, attachment, or schema", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: { format: "JSON_ARRAY" },
         result: {},
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
       expect(result).toBe(response);
     });
 
-    test("attachment takes priority over data_array when both present", async () => {
+    test("attachment takes priority over dataArray when both present", async () => {
       const connector = createConnector();
       const response = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
           schema: {
             columns: [
-              { name: "test_col", type_name: "INT" },
-              { name: "test_col2", type_name: "INT" },
+              { name: "test_col", typeName: "INT" },
+              { name: "test_col2", typeName: "INT" },
             ],
           },
         },
         result: {
           attachment: REAL_ARROW_ATTACHMENT,
-          data_array: [["999", "999"]],
+          dataArray: [["999", "999"]],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
 
       const result = await transform(connector, response);
-      // Should pass attachment through (client decodes), not transform data_array
+      // Should pass attachment through (client decodes), not transform dataArray
       expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
       expect(result.result.data).toBeUndefined();
     });
   });
 
   describe("multi-chunk EXTERNAL_LINKS pagination", () => {
-    function multiChunkResponse(totalChunks: number): sql.StatementResponse {
+    function multiChunkResponse(totalChunks: number): StatementResponse {
       return {
-        statement_id: "stmt-multi",
+        statementId: "stmt-multi",
         status: { state: "SUCCEEDED" },
         manifest: {
           format: "ARROW_STREAM",
-          total_chunk_count: totalChunks,
-          schema: { columns: [{ name: "x", type_name: "INT" }] },
+          totalChunkCount: totalChunks,
+          schema: { columns: [{ name: "x", typeName: "INT" }] },
         },
         result: {
-          external_links: [
+          externalLinks: [
             {
-              chunk_index: 0,
-              external_link: "https://example.com/chunk0",
-              next_chunk_index: 1,
+              chunkIndex: 0,
+              externalLink: "https://example.com/chunk0",
+              nextChunkIndex: 1,
             },
           ],
         },
-      } as unknown as sql.StatementResponse;
+      } as unknown as StatementResponse;
     }
 
-    test("follows next_chunk_index to resolve every chunk's links", async () => {
+    test("follows nextChunkIndex to resolve every chunk's links", async () => {
       const connector = createConnector();
-      const getStatementResultChunkN = vi
+      const getResultData = vi
         .fn()
         .mockResolvedValueOnce({
-          external_links: [
+          externalLinks: [
             {
-              chunk_index: 1,
-              external_link: "https://example.com/chunk1",
-              next_chunk_index: 2,
+              chunkIndex: 1,
+              externalLink: "https://example.com/chunk1",
+              nextChunkIndex: 2,
             },
           ],
         })
         .mockResolvedValueOnce({
-          external_links: [
-            { chunk_index: 2, external_link: "https://example.com/chunk2" },
+          externalLinks: [
+            { chunkIndex: 2, externalLink: "https://example.com/chunk2" },
           ],
         });
       const workspaceClient = {
-        statementExecution: { getStatementResultChunkN },
+        statementExecution: { getResultData },
       };
 
       const result = await transform(
@@ -474,16 +477,14 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
         workspaceClient,
       );
 
-      expect(getStatementResultChunkN).toHaveBeenCalledTimes(2);
-      expect(getStatementResultChunkN).toHaveBeenNthCalledWith(
+      expect(getResultData).toHaveBeenCalledTimes(2);
+      expect(getResultData).toHaveBeenNthCalledWith(
         1,
-        expect.objectContaining({ statement_id: "stmt-multi", chunk_index: 1 }),
+        expect.objectContaining({ statementId: "stmt-multi", chunkIndex: 1 }),
         expect.anything(),
       );
       expect(
-        result.result.external_links.map(
-          (l: sql.ExternalLink) => l.external_link,
-        ),
+        result.result.external_links.map((l: ExternalLink) => l.externalLink),
       ).toEqual([
         "https://example.com/chunk0",
         "https://example.com/chunk1",
@@ -491,20 +492,20 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       ]);
     });
 
-    test("is bounded by total_chunk_count when next_chunk_index never terminates", async () => {
+    test("is bounded by totalChunkCount when nextChunkIndex never terminates", async () => {
       const connector = createConnector();
       // Misbehaving warehouse: always advertises another chunk.
-      const getStatementResultChunkN = vi.fn().mockResolvedValue({
-        external_links: [
+      const getResultData = vi.fn().mockResolvedValue({
+        externalLinks: [
           {
-            chunk_index: 1,
-            external_link: "https://example.com/loop",
-            next_chunk_index: 99,
+            chunkIndex: 1,
+            externalLink: "https://example.com/loop",
+            nextChunkIndex: 99,
           },
         ],
       });
       const workspaceClient = {
-        statementExecution: { getStatementResultChunkN },
+        statementExecution: { getResultData },
       };
 
       const result = await transform(
@@ -513,8 +514,8 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
         workspaceClient,
       );
 
-      // Terminates (no hang) — capped at total_chunk_count fetches.
-      expect(getStatementResultChunkN).toHaveBeenCalledTimes(2);
+      // Terminates (no hang) — capped at totalChunkCount fetches.
+      expect(getResultData).toHaveBeenCalledTimes(2);
       expect(result.result.external_links.length).toBeGreaterThan(0);
     });
   });

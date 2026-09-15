@@ -23,6 +23,24 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
 const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
 
+// Modular SDK packages we carry a pnpm patch for (`patches/`). A pnpm patch is
+// applied only at *this* monorepo's install and does NOT travel through a normal
+// `npm install`, so a deployed consumer would otherwise resolve the unpatched
+// registry copy. We ship the patched copy *inside* appkit's own tarball via
+// npm `bundledDependencies`: it lands in `<consumer>/node_modules/@databricks/
+// appkit/node_modules/<pkg>`, which Node's nested resolution prefers for appkit's
+// own imports — on any package manager, including the Databricks Apps runtime's
+// npm. Extensible: when a future patch is added, list its package here.
+// (Their transitive deps — sdk-core/sdk-auth/zod — stay external and are already
+// declared in appkit's dependencies, so they resolve from the consumer.)
+const BUNDLED_PATCHED_PACKAGES = ["@databricks/sdk-statementexecution"];
+
+// This script builds BOTH the appkit and appkit-ui tarballs, so only bundle a
+// patched package into the tarball whose package actually declares it as a
+// dependency (captured before the CLI-dependency merge below). appkit-ui does
+// not depend on the modular SDK packages, so it bundles nothing.
+const ownDependencyNames = new Set(Object.keys(pkg.dependencies ?? {}));
+
 if (prerelease) {
   pkg.version = `${pkg.version}-pr.${prerelease}`;
 }
@@ -63,6 +81,34 @@ if (fs.existsSync(sharedPostinstall)) {
 // Add CLI dependencies from shared package (required for bin commands to work)
 pkg.dependencies = pkg.dependencies || {};
 Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
+
+// Ship pnpm-patched SDK packages inside the tarball via `bundledDependencies`
+// (see BUNDLED_PATCHED_PACKAGES above). Copy the patched copy from this
+// monorepo's node_modules (pnpm applies the patch there) into the tarball's
+// node_modules and list it as bundled so npm packs it and the consumer resolves
+// appkit's imports to it. `dereference: true` resolves pnpm's symlink to the
+// real (patched) files.
+const bundled: string[] = [];
+for (const depName of BUNDLED_PATCHED_PACKAGES) {
+  // Skip packages this tarball's package doesn't depend on (e.g. appkit-ui).
+  if (!ownDependencyNames.has(depName)) {
+    continue;
+  }
+  const src = path.resolve("node_modules", depName);
+  if (!fs.existsSync(src)) {
+    throw new Error(
+      `bundledDependencies: patched package not found at ${src} — is it installed + patched?`,
+    );
+  }
+  const dest = path.join("tmp/node_modules", depName);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.cpSync(src, dest, { recursive: true, dereference: true });
+  bundled.push(depName);
+}
+if (bundled.length > 0) {
+  pkg.bundledDependencies = bundled;
+}
 
 fs.writeFileSync("tmp/package.json", JSON.stringify(pkg, null, 2));
 

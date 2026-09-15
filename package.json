@@ -94,6 +94,9 @@
       "protobufjs@<7.6.2": "7.6.2",
       "qs@<6.15.2": "6.15.2",
       "size-sensor": "1.0.3"
+    },
+    "patchedDependencies": {
+      "@databricks/sdk-statementexecution@0.46.0": "patches/@databricks__sdk-statementexecution@0.46.0.patch"
     }
   }
 }

@@ -700,7 +700,7 @@ describe("analytics metric route", () => {
         expect.objectContaining({
           statement:
             "SELECT MEASURE(`arr`) AS `arr` FROM `cat`.`sch`.`revenue_metrics`",
-          warehouse_id: "test-warehouse-id",
+          warehouseId: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
       );
@@ -748,7 +748,7 @@ describe("analytics metric route", () => {
               result: { data: [] },
             }),
           },
-          warehouses: { get: warehouseGet, start: vi.fn() },
+          warehouses: { getWarehouse: warehouseGet, startWarehouse: vi.fn() },
         },
       });
       const mockReq = createMockRequest({

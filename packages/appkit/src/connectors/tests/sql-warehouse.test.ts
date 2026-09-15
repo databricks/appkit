@@ -61,7 +61,7 @@ describe("SQLWarehouseConnector", () => {
       await expect(
         connector.executeStatement(mockWorkspaceClient as any, {
           statement: sensitiveStatement,
-          warehouse_id: "test-warehouse",
+          warehouseId: "test-warehouse",
         }),
       ).rejects.toThrow();
 
@@ -89,7 +89,9 @@ describe("SQLWarehouseConnector", () => {
             statement_id: "stmt-123",
             status: { state: "RUNNING" },
           }),
-          getStatement: vi.fn().mockRejectedValue(new Error("polling timeout")),
+          getStatementResult: vi
+            .fn()
+            .mockRejectedValue(new Error("polling timeout")),
         },
         config: { host: "https://test.databricks.com" },
       };
@@ -97,7 +99,7 @@ describe("SQLWarehouseConnector", () => {
       await expect(
         connector.executeStatement(mockWorkspaceClient as any, {
           statement: "SELECT secret_data FROM vault",
-          warehouse_id: "test-warehouse",
+          warehouseId: "test-warehouse",
         }),
       ).rejects.toThrow();
 
@@ -115,6 +117,141 @@ describe("SQLWarehouseConnector", () => {
       expect(loggedOutput).not.toContain("vault");
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe("statement error-code propagation", () => {
+    let connector: SQLWarehouseConnector;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      connector = new SQLWarehouseConnector({ timeout: 5000 });
+    });
+
+    // Regression: the modular `@databricks/sdk-core` `ApiError` carries the
+    // Databricks error code on `.code`, whereas the legacy SDK used
+    // `.errorCode`. The analytics arrow disposition/format fallback keys on
+    // this code ("INVALID_PARAMETER_VALUE" / "NOT_IMPLEMENTED") to switch
+    // INLINE→EXTERNAL_LINKS, so the connector MUST surface either field as
+    // `ExecutionError.errorCode` — reading only `.errorCode` broke every arrow
+    // query (the INLINE+ARROW_STREAM probe rejection went unrecognized).
+    test("surfaces the modular SDK ApiError.code as ExecutionError.errorCode", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      class FakeApiError extends Error {
+        readonly code = "INVALID_PARAMETER_VALUE";
+      }
+      const mockWorkspaceClient = {
+        statementExecution: {
+          executeStatement: vi
+            .fn()
+            .mockRejectedValue(
+              new FakeApiError(
+                "Incompatible parameters: The format field must be JSON_ARRAY when the disposition field is INLINE.",
+              ),
+            ),
+        },
+        config: { host: "https://test.databricks.com" },
+      };
+
+      await expect(
+        connector.executeStatement(mockWorkspaceClient as any, {
+          statement: "SELECT 1",
+          warehouseId: "test-warehouse",
+          disposition: "INLINE",
+          format: "ARROW_STREAM",
+        }),
+      ).rejects.toMatchObject({ errorCode: "INVALID_PARAMETER_VALUE" });
+
+      errorSpy.mockRestore();
+    });
+
+    // A failed statement STATUS (not a thrown ApiError) still carries the code
+    // on `status.error.errorCode` — the SDK unmarshals `error_code` there, so
+    // that path was already correct and must stay so.
+    test("surfaces status.error.errorCode from a FAILED statement status", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const mockWorkspaceClient = {
+        statementExecution: {
+          executeStatement: vi.fn().mockResolvedValue({
+            statementId: "stmt-123",
+            status: {
+              state: "FAILED",
+              error: {
+                errorCode: "INVALID_PARAMETER_VALUE",
+                message: "bad parameter",
+              },
+            },
+          }),
+        },
+        config: { host: "https://test.databricks.com" },
+      };
+
+      await expect(
+        connector.executeStatement(mockWorkspaceClient as any, {
+          statement: "SELECT 1",
+          warehouseId: "test-warehouse",
+        }),
+      ).rejects.toMatchObject({ errorCode: "INVALID_PARAMETER_VALUE" });
+
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe("bigint count normalization", () => {
+    let connector: SQLWarehouseConnector;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      connector = new SQLWarehouseConnector({ timeout: 5000 });
+    });
+
+    // Regression: the modular SDK types rowCount/byteCount/rowOffset (and the
+    // per-chunk BaseChunkInfo counts) as `bigint`, whereas the legacy SDK used
+    // `number`. Reyden's INLINE+ARROW_STREAM result is cached by the analytics
+    // arrow path, and `JSON.stringify` throws ("Do not know how to serialize a
+    // BigInt") on any surviving bigint — which broke EVERY query on Reyden. The
+    // connector must coerce these to `number` at the SDK boundary so the result
+    // stays serializable for the cache / SSE frames.
+    test("coerces bigint manifest/result/chunk counts so the result is JSON-serializable", async () => {
+      const mockWorkspaceClient = {
+        statementExecution: {
+          executeStatement: vi.fn().mockResolvedValue({
+            statementId: "stmt-1",
+            status: { state: "SUCCEEDED" },
+            manifest: {
+              format: "JSON_ARRAY",
+              totalRowCount: 2n,
+              totalByteCount: 100n,
+              chunks: [
+                { chunkIndex: 0, rowOffset: 0n, rowCount: 2n, byteCount: 100n },
+              ],
+              schema: { columns: [{ name: "id", typeName: "INT" }] },
+            },
+            result: {
+              dataArray: [["1"], ["2"]],
+              rowOffset: 0n,
+              rowCount: 2n,
+              byteCount: 100n,
+            },
+          }),
+        },
+        config: { host: "https://test.databricks.com" },
+      };
+
+      const out: any = await connector.executeStatement(
+        mockWorkspaceClient as any,
+        { statement: "SELECT id FROM t", warehouseId: "reyden" },
+      );
+
+      // The arrow cache serializes exactly this — it must not throw.
+      expect(() => JSON.stringify(out)).not.toThrow();
+      // Counts are coerced to number (legacy parity), including per-chunk ones.
+      expect(typeof out.manifest.totalRowCount).toBe("number");
+      expect(typeof out.manifest.totalByteCount).toBe("number");
+      expect(typeof out.manifest.chunks[0].byteCount).toBe("number");
+      expect(typeof out.result.rowCount).toBe("number");
     });
   });
 
@@ -137,7 +274,9 @@ describe("SQLWarehouseConnector", () => {
     test("emits a single RUNNING update and returns when warehouse is already running", async () => {
       const get = vi.fn().mockResolvedValue({ state: "RUNNING" });
       const start = vi.fn();
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const updates: any[] = [];
 
       await connector.ensureWarehouseRunning(wsClient as any, "wh-1", {
@@ -158,7 +297,9 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
       const start = vi.fn().mockResolvedValue(undefined);
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const updates: any[] = [];
 
       const promise = connector.ensureWarehouseRunning(
@@ -191,7 +332,9 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
       const start = vi.fn();
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const updates: any[] = [];
 
       const promise = connector.ensureWarehouseRunning(
@@ -212,7 +355,9 @@ describe("SQLWarehouseConnector", () => {
     test("rejects when warehouse is DELETED", async () => {
       const get = vi.fn().mockResolvedValue({ state: "DELETED" });
       const start = vi.fn();
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const updates: any[] = [];
 
       await expect(
@@ -228,7 +373,9 @@ describe("SQLWarehouseConnector", () => {
     test("rejects when warehouse is DELETING", async () => {
       const get = vi.fn().mockResolvedValue({ state: "DELETING" });
       const start = vi.fn();
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const updates: any[] = [];
 
       await expect(
@@ -243,7 +390,9 @@ describe("SQLWarehouseConnector", () => {
 
     test("aborts immediately when signal is already aborted", async () => {
       const get = vi.fn();
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       const controller = new AbortController();
       controller.abort();
 
@@ -258,7 +407,9 @@ describe("SQLWarehouseConnector", () => {
 
     test("times out if warehouse never reaches RUNNING", async () => {
       const get = vi.fn().mockResolvedValue({ state: "STARTING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
 
       const promise = connector.ensureWarehouseRunning(
         wsClient as any,
@@ -281,7 +432,7 @@ describe("SQLWarehouseConnector", () => {
 
     test("rejects when warehouse_id is empty", async () => {
       const wsClient = {
-        warehouses: { get: vi.fn(), start: vi.fn() },
+        warehouses: { getWarehouse: vi.fn(), startWarehouse: vi.fn() },
       };
 
       await expect(
@@ -293,7 +444,9 @@ describe("SQLWarehouseConnector", () => {
 
     test("skips the SDK round-trip on a subsequent call within the recently-running TTL", async () => {
       const get = vi.fn().mockResolvedValue({ state: "RUNNING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
 
       const updates1: any[] = [];
       await connector.ensureWarehouseRunning(wsClient as any, "wh-cache", {
@@ -314,7 +467,9 @@ describe("SQLWarehouseConnector", () => {
     test("rejects with ConfigurationError when STOPPED and autoStart is false", async () => {
       const get = vi.fn().mockResolvedValue({ state: "STOPPED" });
       const start = vi.fn();
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
 
       await expect(
         connector.ensureWarehouseRunning(wsClient as any, "wh-no-auto", {
@@ -332,7 +487,9 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       const updates: any[] = [];
 
       const promise = connector.ensureWarehouseRunning(
@@ -356,7 +513,9 @@ describe("SQLWarehouseConnector", () => {
       const sensitive =
         "getaddrinfo ENOTFOUND adb-1234567890.10.azuredatabricks.net";
       const get = vi.fn().mockRejectedValue(new Error(sensitive));
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
 
       await expect(
         connector.ensureWarehouseRunning(wsClient as any, "wh-leak", {
@@ -381,7 +540,9 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
       const start = vi.fn().mockResolvedValue(undefined);
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const allUpdates = [0, 1, 2].map(() => [] as { state: string }[]);
 
       const waits = allUpdates.map((updates) =>
@@ -406,7 +567,9 @@ describe("SQLWarehouseConnector", () => {
         .fn()
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       const controller = new AbortController();
 
       const aborted = connector.ensureWarehouseRunning(
@@ -438,7 +601,9 @@ describe("SQLWarehouseConnector", () => {
         .fn()
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       const mount1 = new AbortController();
 
       const first = connector.ensureWarehouseRunning(
@@ -467,7 +632,9 @@ describe("SQLWarehouseConnector", () => {
 
     test("orphan before warehouses.start is aborted on the next microtask", async () => {
       const get = vi.fn().mockResolvedValue({ state: "STARTING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       const controller = new AbortController();
 
       const only = connector.ensureWarehouseRunning(
@@ -485,7 +652,7 @@ describe("SQLWarehouseConnector", () => {
       await Promise.resolve();
 
       expect(get).toHaveBeenCalledTimes(1);
-      expect(wsClient.warehouses.start).not.toHaveBeenCalled();
+      expect(wsClient.warehouses.startWarehouse).not.toHaveBeenCalled();
     });
 
     test("orphan after warehouses.start runs poll to completion", async () => {
@@ -495,7 +662,9 @@ describe("SQLWarehouseConnector", () => {
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
       const start = vi.fn().mockResolvedValue(undefined);
-      const wsClient = { warehouses: { get, start } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: start },
+      };
       const controller = new AbortController();
 
       const only = connector.ensureWarehouseRunning(
@@ -532,7 +701,9 @@ describe("SQLWarehouseConnector", () => {
         .fn()
         .mockResolvedValueOnce({ state: "STARTING" })
         .mockResolvedValueOnce({ state: "RUNNING" });
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const wsClient = {
+        warehouses: { getWarehouse: get, startWarehouse: vi.fn() },
+      };
       let callCount = 0;
 
       const promise = connector.ensureWarehouseRunning(
