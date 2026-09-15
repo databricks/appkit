@@ -1,4 +1,9 @@
-import { ApiError, files, genie } from "@databricks/appkit";
+import {
+  ApiError,
+  files,
+  genie,
+  getExecutionContext,
+} from "@databricks/appkit";
 import {
   createApiError,
   createMockRequest,
@@ -97,7 +102,9 @@ describe("createApiError — simulate a typed workspace error", () => {
 
     const res = await app.get("/api/files/reports/metadata?path=report.csv");
 
-    expect(res.ok).toBe(false);
+    // The seeded ApiError's typed status survives to the response — not
+    // collapsed to a generic 500.
+    expect(res.status).toBe(404);
   });
 });
 
@@ -158,6 +165,11 @@ describe("createTestPlugin — instantiate a factory the way production does", (
     const plugin = createTestPlugin(genie, { spaces: { demo: "space-test" } });
 
     expect(plugin.name).toBe("genie");
+    // The merge reaches the instance's config, not just the manifest name.
+    expect(
+      (plugin as unknown as { config: { spaces?: Record<string, string> } })
+        .config.spaces?.demo,
+    ).toBe("space-test");
   });
 });
 
@@ -229,11 +241,16 @@ describe("expectStream — assert the ordered events a stream emits", () => {
 describe("useServiceContextMock — spy the data-plane singleton in one line", () => {
   // Spies the ServiceContext singleton directly — the seam beneath the client
   // createTestApp injects.
-  const ctx = useServiceContextMock();
+  const fakeClient = createMockWorkspaceClient();
+  const ctx = useServiceContextMock({ serviceDatabricksClient: fakeClient });
 
-  test("installs live spies over the service context", () => {
-    expect(ctx.current.getSpy).toBeDefined();
-    expect(ctx.current.createUserContextSpy).toBeDefined();
-    expect(ctx.current.createUserContextSpy).not.toHaveBeenCalled();
+  test("intercepts ServiceContext.get so the resolved context is the fake", () => {
+    // Not just "the spies exist": getExecutionContext() reads ServiceContext.get()
+    // outside a user context, so a real interception hands back the faked context
+    // — and the client we installed.
+    const resolved = getExecutionContext();
+    expect(resolved).toBe(ctx.current.serviceContext);
+    expect(resolved.client).toBe(fakeClient);
+    expect(ctx.current.getSpy).toHaveBeenCalled();
   });
 });
