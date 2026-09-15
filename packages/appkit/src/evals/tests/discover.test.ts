@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { discoverEvalFiles } from "../discover";
+import {
+  discoverEvalConfigs,
+  discoverEvalFiles,
+  findRootEvalConfig,
+} from "../discover";
 
 let root: string;
 
@@ -40,5 +44,36 @@ describe("discoverEvalFiles", () => {
 
   test("returns empty when there is no server/agents dir", () => {
     expect(discoverEvalFiles(root)).toEqual([]);
+  });
+});
+
+describe("discoverEvalConfigs", () => {
+  test("finds each agent's evals.config.ts, omits agents without one", () => {
+    write("server/agents/support/evals/basic.eval.ts");
+    write("server/agents/support/evals/evals.config.ts");
+    write("server/agents/analyst/evals/sql.eval.ts");
+
+    const found = discoverEvalConfigs(root);
+
+    expect(found.map((c) => c.agent)).toEqual(["support"]);
+    expect(found[0].file).toBe(
+      path.join(root, "server/agents/support/evals/evals.config.ts"),
+    );
+  });
+
+  test("returns empty when there is no server/agents dir", () => {
+    expect(discoverEvalConfigs(root)).toEqual([]);
+  });
+});
+
+describe("findRootEvalConfig", () => {
+  test("finds a root evals.config.ts", () => {
+    write("evals.config.ts");
+    expect(findRootEvalConfig(root)).toBe(path.join(root, "evals.config.ts"));
+  });
+
+  test("returns undefined when absent (and ignores per-agent configs)", () => {
+    write("server/agents/support/evals/evals.config.ts");
+    expect(findRootEvalConfig(root)).toBeUndefined();
   });
 });

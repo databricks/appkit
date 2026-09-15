@@ -342,31 +342,6 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
- * Sets environment variables for the duration of `fn`, then restores them to
- * their prior state. Each key's prior value (or "was absent") is captured on
- * entry; on exit, the prior value is restored, or the key is deleted only if
- * it was previously unset.
- *
- * Supports both sync and async `fn`. If `fn` returns a thenable, `withEnv`
- * returns that promise and restores in `.finally()`. Otherwise, it restores
- * in a synchronous `finally` and returns the callback's return value.
- * Restoration runs even if `fn` throws. Nested calls restore in LIFO order.
- *
- * @example
- * ```ts
- * // Sync: restores synchronously after fn
- * withEnv({ MY_VAR: "test" }, () => {
- *   console.log(process.env.MY_VAR); // "test"
- * });
- * console.log(process.env.MY_VAR); // prior value (or undefined)
- *
- * // Async: restores after promise settles
- * await withEnv({ MY_VAR: "test" }, async () => {
- *   await fetch(...);
- * });
- * ```
- */
-/**
  * Set environment variables and return a function that restores each key to its
  * prior state — the prior value, or a delete when the key was previously unset.
  * Shared capture/restore behind {@link withEnv} and the
@@ -402,6 +377,31 @@ function restoreQuietly(restore: () => void): void {
   }
 }
 
+/**
+ * Sets environment variables for the duration of `fn`, then restores them to
+ * their prior state. Each key's prior value (or "was absent") is captured on
+ * entry; on exit, the prior value is restored, or the key is deleted only if
+ * it was previously unset.
+ *
+ * Supports both sync and async `fn`. If `fn` returns a thenable, `withEnv`
+ * returns that promise and restores in `.finally()`. Otherwise, it restores
+ * in a synchronous `finally` and returns the callback's return value.
+ * Restoration runs even if `fn` throws. Nested calls restore in LIFO order.
+ *
+ * @example
+ * ```ts
+ * // Sync: restores synchronously after fn
+ * withEnv({ MY_VAR: "test" }, () => {
+ *   console.log(process.env.MY_VAR); // "test"
+ * });
+ * console.log(process.env.MY_VAR); // prior value (or undefined)
+ *
+ * // Async: restores after promise settles
+ * await withEnv({ MY_VAR: "test" }, async () => {
+ *   await fetch(...);
+ * });
+ * ```
+ */
 export function withEnv<T>(
   vars: Record<string, string>,
   fn: () => T | Promise<T>,

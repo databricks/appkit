@@ -7,4 +7,3 @@
 
 export { agents } from "./agents";
 export { aiSearch } from "./ai-search";
-export { database } from "./database";

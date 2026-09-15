@@ -1,8 +1,6 @@
 import type { Request, Response } from "express";
 
 import {
-  classifyDatabaseError,
-  type DatabaseErrorDetail,
   DatabasePluginError,
   invalidDatabaseInput,
 } from "../../../database/errors";
@@ -13,47 +11,45 @@ import type {
   Row,
   WhereClause,
 } from "../../../database/runtime";
-import { MAX_RESPONSE_BYTES } from "../defaults";
 import type { ReadSerializer } from "../types";
 import type { JsonValue } from "./codecs";
 import type { CrudTable } from "./contract";
 import { decodeDetailQuery, decodeListQuery } from "./query";
+import { decodeCreateBody, decodeId, decodeUpdateBody } from "./request";
+import { sendEmpty, sendError, sendJson, sendListPage } from "./response";
 
-/** The `EntityClient` subset a generated read drives. */
-export interface CrudReadEntity {
-  where(where: WhereClause): CrudReadEntity;
-  order(order: OrderSpec): CrudReadEntity;
-  select(columns: string[]): CrudReadEntity;
-  include(include: IncludeSpec): CrudReadEntity;
-  limit(limit: number): CrudReadEntity;
-  offset(offset: number): CrudReadEntity;
+/** The `EntityClient` subset the generated routes drive. */
+export interface CrudEntity {
+  where(where: WhereClause): CrudEntity;
+  order(order: OrderSpec): CrudEntity;
+  select(columns: string[]): CrudEntity;
+  include(include: IncludeSpec): CrudEntity;
+  limit(limit: number): CrudEntity;
+  offset(offset: number): CrudEntity;
   toArray(): Promise<Row[]>;
   find(id: IdValue): Promise<Row | null>;
+  create(values: Row): Promise<Row>;
+  update(id: IdValue, values: Row): Promise<Row | null>;
+  delete(id: IdValue): Promise<boolean>;
 }
 
-/** Everything one table's generated reads need from the plugin instance. */
-export interface ReadRouteDeps {
+/** Which generated operation a span and its route belong to. */
+export type CrudOperation = "list" | "detail" | "create" | "update" | "delete";
+
+/** Everything one table's generated routes need from the plugin instance. */
+export interface CrudRouteDeps {
   readonly table: CrudTable;
   /** Resolved per request so a draining plugin cannot serve a stale client. */
-  entity(): CrudReadEntity;
+  entity(): CrudEntity;
   readonly serialize?: ReadSerializer;
   runRouteSpan(
-    operation: "list" | "detail",
+    operation: CrudOperation,
     route: string,
     run: () => Promise<void>,
   ): Promise<void>;
 }
 
-type ReadHandler = (req: Request, res: Response) => Promise<void>;
-
-/** Low-cardinality span outcome for one failed generated read. */
-export function readRouteOutcome(
-  error: unknown,
-): "not_found" | "rejected" | "failed" {
-  const { statusCode } = classifyDatabaseError(error, "read");
-  if (statusCode === 404) return "not_found";
-  return statusCode < 500 ? "rejected" : "failed";
-}
+type RouteHandler = (req: Request, res: Response) => Promise<void>;
 
 /** Express normalizes `req.query`; the decoders need the untouched string. */
 function rawQuery(req: Request): string {
@@ -83,7 +79,7 @@ function stableOrder(
 }
 
 function serializeRow(
-  deps: ReadRouteDeps,
+  deps: CrudRouteDeps,
   operation: "list" | "detail",
   row: Row,
 ): JsonValue {
@@ -97,65 +93,24 @@ function serializeRow(
 }
 
 /**
- * Row data is never cacheable by a shared proxy or a browser: the same URL can
- * answer differently once the underlying table or the caller's rights change.
+ * A write takes its whole input from the path and the body. A query string
+ * would silently look like a filter, so it is refused rather than ignored.
  */
-function writeJson(res: Response, status: number, payload: string): void {
-  res.status(status);
-  res.type("application/json");
-  res.setHeader("Cache-Control", "no-store");
-  res.send(payload);
-}
-
-/** Measure the encoded body before sending so no partial response escapes. */
-function sendJson(res: Response, body: JsonValue): void {
-  const payload = JSON.stringify(body);
-  if (Buffer.byteLength(payload, "utf8") > MAX_RESPONSE_BYTES) {
-    throw new DatabasePluginError("PAYLOAD_TOO_LARGE", "read");
+function assertNoQuery(req: Request): void {
+  if (rawQuery(req) !== "") {
+    throw invalidDatabaseInput(["query"], "Writes accept no query parameters");
   }
-  writeJson(res, 200, payload);
 }
 
-/**
- * Encode the list envelope one row at a time, charging each encoded row
- * against the byte budget before the next row is shaped, so one response
- * never costs more than the budget in memory.
- */
-function encodeListPayload(
-  deps: ReadRouteDeps,
-  rows: Row[],
-  limit: number,
-  offset: number,
-): string {
-  const prefix = '{"items":[';
-  const suffix = `],"limit":${limit},"offset":${offset}}`;
-  let bytes =
-    Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8");
-  const items: string[] = [];
-  for (const row of rows) {
-    const encoded = JSON.stringify(serializeRow(deps, "list", row));
-    bytes += Buffer.byteLength(encoded, "utf8") + (items.length > 0 ? 1 : 0);
-    if (bytes > MAX_RESPONSE_BYTES) {
-      throw new DatabasePluginError("PAYLOAD_TOO_LARGE", "read");
-    }
-    items.push(encoded);
+/** The body parser only ran if the caller declared JSON. */
+function assertJsonBody(req: Request): void {
+  if (!req.is("application/json")) {
+    throw new DatabasePluginError("UNSUPPORTED_MEDIA_TYPE", "write");
   }
-  return prefix + items.join(",") + suffix;
-}
-
-/** Answer with the failure's safe category and the field it concerns. */
-function writeError(res: Response, error: unknown): void {
-  if (res.headersSent) return;
-  const safe = classifyDatabaseError(error, "read");
-  const body: { error: string; details?: readonly DatabaseErrorDetail[] } = {
-    error: safe.clientMessage,
-  };
-  if (safe.details && safe.details.length > 0) body.details = safe.details;
-  writeJson(res, safe.statusCode, JSON.stringify(body));
 }
 
 /** `GET /:table` — one bounded page in the `{ items, limit, offset }` envelope. */
-export function createListHandler(deps: ReadRouteDeps): ReadHandler {
+export function createListHandler(deps: CrudRouteDeps): RouteHandler {
   const primaryKey = deps.table.primaryKey?.meta.columnName;
   const route = `/${deps.table.name}`;
 
@@ -173,26 +128,28 @@ export function createListHandler(deps: ReadRouteDeps): ReadHandler {
         if (decoded.include) query = query.include(decoded.include);
 
         const rows = await query.toArray();
-        writeJson(
+        sendListPage(
           res,
-          200,
-          encodeListPayload(deps, rows, decoded.limit, decoded.offset),
+          rows,
+          (row) => serializeRow(deps, "list", row),
+          decoded.limit,
+          decoded.offset,
         );
       });
     } catch (error) {
-      writeError(res, error);
+      sendError(res, deps.table, "read", error);
     }
   };
 }
 
 /** `GET /:table/:id` — one public row, or 404 when nothing matches. */
-export function createDetailHandler(deps: ReadRouteDeps): ReadHandler {
+export function createDetailHandler(deps: CrudRouteDeps): RouteHandler {
   const route = `/${deps.table.name}/:id`;
 
   return async (req, res) => {
     try {
       await deps.runRouteSpan("detail", route, async () => {
-        const id = deps.table.decodeId(req.params.id);
+        const id = decodeId(deps.table, req.params.id);
         const decoded = decodeDetailQuery(deps.table, rawQuery(req));
         let query = deps.entity();
         if (decoded.select) query = query.select(decoded.select);
@@ -200,10 +157,72 @@ export function createDetailHandler(deps: ReadRouteDeps): ReadHandler {
 
         const row = await query.find(id);
         if (row === null) throw new DatabasePluginError("NOT_FOUND", "read");
-        sendJson(res, serializeRow(deps, "detail", row));
+        sendJson(res, 200, serializeRow(deps, "detail", row));
       });
     } catch (error) {
-      writeError(res, error);
+      sendError(res, deps.table, "read", error);
+    }
+  };
+}
+
+/**
+ * `POST /:table` — the created row at `201`. A mutation answers the row the
+ * database actually holds, so a read serializer never reshapes it.
+ */
+export function createCreateHandler(deps: CrudRouteDeps): RouteHandler {
+  const route = `/${deps.table.name}`;
+
+  return async (req, res) => {
+    try {
+      await deps.runRouteSpan("create", route, async () => {
+        assertNoQuery(req);
+        assertJsonBody(req);
+        const values = decodeCreateBody(deps.table, req.body);
+        const row = await deps.entity().create(values);
+        sendJson(res, 201, deps.table.projectPublicRow(row));
+      });
+    } catch (error) {
+      sendError(res, deps.table, "write", error);
+    }
+  };
+}
+
+/** `PATCH /:table/:id` — the updated row at `200`, or 404 when it is gone. */
+export function createUpdateHandler(deps: CrudRouteDeps): RouteHandler {
+  const route = `/${deps.table.name}/:id`;
+
+  return async (req, res) => {
+    try {
+      await deps.runRouteSpan("update", route, async () => {
+        assertNoQuery(req);
+        assertJsonBody(req);
+        const id = decodeId(deps.table, req.params.id);
+        const values = decodeUpdateBody(deps.table, req.body);
+        const row = await deps.entity().update(id, values);
+        if (row === null) throw new DatabasePluginError("NOT_FOUND", "write");
+        sendJson(res, 200, deps.table.projectPublicRow(row));
+      });
+    } catch (error) {
+      sendError(res, deps.table, "write", error);
+    }
+  };
+}
+
+/** `DELETE /:table/:id` — `204` with no body, or 404 when nothing matched. */
+export function createDeleteHandler(deps: CrudRouteDeps): RouteHandler {
+  const route = `/${deps.table.name}/:id`;
+
+  return async (req, res) => {
+    try {
+      await deps.runRouteSpan("delete", route, async () => {
+        assertNoQuery(req);
+        const id = decodeId(deps.table, req.params.id);
+        const deleted = await deps.entity().delete(id);
+        if (!deleted) throw new DatabasePluginError("NOT_FOUND", "write");
+        sendEmpty(res, 204);
+      });
+    } catch (error) {
+      sendError(res, deps.table, "write", error);
     }
   };
 }

@@ -34,6 +34,31 @@ Whether the turn completed without an agent/stream error.
 
 ***
 
+### toolCallDetails
+
+```ts
+toolCallDetails: {
+  args: Record<string, unknown>;
+  name: string;
+}[];
+```
+
+Tool calls with their parsed arguments, in call order.
+
+#### args
+
+```ts
+args: Record<string, unknown>;
+```
+
+#### name
+
+```ts
+name: string;
+```
+
+***
+
 ### toolCalls
 
 ```ts
