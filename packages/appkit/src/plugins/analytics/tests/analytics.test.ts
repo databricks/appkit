@@ -22,48 +22,13 @@ import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../../context/service-context";
+import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
-// Mock CacheManager singleton with actual caching behavior
-const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
-  const store = new Map<string, unknown>();
-
-  const generateKey = (parts: unknown[], userKey: string): string => {
-    const { createHash } = require("node:crypto");
-    const allParts = [userKey, ...parts];
-    const serialized = JSON.stringify(allParts);
-    return createHash("sha256").update(serialized).digest("hex");
-  };
-
-  const instance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
-        const cacheKey = generateKey(key, userKey);
-        if (store.has(cacheKey)) {
-          return store.get(cacheKey);
-        }
-        const result = await fn();
-        store.set(cacheKey, result);
-        return result;
-      },
-    ),
-    generateKey: vi.fn((parts: unknown[], userKey: string) =>
-      generateKey(parts, userKey),
-    ),
-  };
-
-  return { mockCacheStore: store, mockCacheInstance: instance };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Real in-memory cache so the plugin's caching path runs under test — no mock
+// of the internal cache module. Boots and clears the cache before each test.
+useTestCache();
 
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;
@@ -72,7 +37,6 @@ describe("Analytics Plugin", () => {
   beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
-    mockCacheStore.clear();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
   });
@@ -1577,14 +1541,17 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
-      const executeMock = vi.fn().mockImplementation((_wc, _opts, signal) => {
-        // Simulate a signal that becomes aborted before the failure surfaces —
-        // e.g. the client cancelled the SSE stream mid-query. Use vitest's
-        // getter spy rather than Object.defineProperty so we don't try to
-        // override the native non-configurable AbortSignal.aborted getter.
-        if (signal) {
-          vi.spyOn(signal, "aborted", "get").mockReturnValue(true);
-        }
+      const mockRes = createMockResponse();
+
+      const executeMock = vi.fn().mockImplementation(() => {
+        // Simulate the client cancelling mid-query: firing the response's
+        // "close" event aborts the handler's own AbortController (see
+        // `onClose` in `_handleArrowStreamQuery`), exactly as a real disconnect
+        // would. Modelling the abort on the handler signal — the one the
+        // fallback guard actually checks — rather than on whatever signal
+        // reaches executeStatement keeps this independent of how the cache
+        // threads its shared signal into the inner fn.
+        mockRes.end();
         return Promise.reject(
           new Error(
             "INVALID_PARAMETER_VALUE: ARROW_STREAM not supported with INLINE disposition",
@@ -1600,12 +1567,11 @@ describe("Analytics Plugin", () => {
         params: { query_key: "test_query" },
         body: { parameters: {}, format: "ARROW_STREAM" },
       });
-      const mockRes = createMockResponse();
 
       await handler(mockReq, mockRes);
 
-      // Even though the error message would normally trigger fallback, the
-      // aborted signal should short-circuit and prevent a second statement.
+      // The aborted request short-circuits the INLINE→EXTERNAL_LINKS fallback,
+      // so exactly one statement runs.
       expect(executeMock).toHaveBeenCalledTimes(1);
     });
 

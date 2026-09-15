@@ -5,6 +5,7 @@ import type {
   IAppRequest,
   ToolProvider,
 } from "shared";
+import { afterEach, onTestFinished } from "vitest";
 
 import { CacheManager } from "../cache";
 import { InMemoryStorage } from "../cache/storage";
@@ -12,7 +13,8 @@ import { isToolProvider, PluginContext } from "../core/plugin-context";
 import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import { createMockTelemetry } from "./fixtures";
+import { applyEnv, createMockTelemetry, mockServiceContext } from "./fixtures";
+import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 /**
  * A concrete (non-function) fake tool response — returned as-is. Covers the
@@ -51,6 +53,30 @@ export type FakeToolResponse =
  * name; each inner key becomes a tool that returns the mapped response.
  */
 export type FakeProviders = Record<string, Record<string, FakeToolResponse>>;
+
+/**
+ * Options for {@link createTestPluginContext} when called with a second parameter.
+ * When provided, `createTestPluginContext` installs a service context seeded
+ * from a mock workspace client, plus optional environment variables.
+ */
+export interface TestPluginContextOptions {
+  /**
+   * Responses keyed by dotted path (`"jobs.getRun"`) for the mocked workspace
+   * client. Passed directly to {@link createMockWorkspaceClient}.
+   */
+  responses?: Record<string, unknown>;
+  /**
+   * Environment variables to set for the test. Captured on entry, restored
+   * (or deleted if they were unset) on exit via an `afterEach` hook and/or
+   * explicit {@link TestPluginContext.restore}.
+   */
+  env?: Record<string, string>;
+  /**
+   * If `true`, throw when a workspace client path with no declared response is
+   * called, instead of resolving `undefined`. Defaults to `false` (never crash).
+   */
+  strict?: boolean;
+}
 
 /** A single dispatch observed by a fake provider. */
 export interface RecordedToolCall {
@@ -144,6 +170,14 @@ export interface TestPluginContext {
    * gate on `isReady`. Returns the same plugin for chaining.
    */
   attach<P extends Plugin>(plugin: P): Promise<P>;
+  /**
+   * Restore the service context and environment variables to their pre-test state.
+   * Called automatically via `afterEach` when options were provided to
+   * `createTestPluginContext`. Can also be called explicitly for escape hatches
+   * (e.g., cleanup inside a test body). Idempotent — safe to call multiple times.
+   * Only present if the context was created with options.
+   */
+  restore?: () => void;
 }
 
 /**
@@ -164,18 +198,39 @@ export interface TestPluginContext {
  * Nothing about `PluginContext` is reimplemented.
  *
  * @param fakes - Canned tool responses keyed by plugin then tool name.
+ * @param options - When provided, installs a mock workspace client seeded from
+ *   `responses`, mocks the service context, and sets `env`. Omit it for the
+ *   original behavior.
  *
  * @example
  * ```ts
+ * // No options
  * const mock = createTestPluginContext({ analytics: { query: fixtureRows } });
  * await mock.attach(agentsPlugin);
  * // ...exercise a handler that dispatches analytics.query...
  * expect(mock.toolCalls[0]).toMatchObject({ plugin: "analytics", asUser: true });
+ *
+ * // With options — installs service context + seeded client
+ * const mock = createTestPluginContext(
+ *   {},
+ *   { responses: { "jobs.getRun": { state: "DONE" } } },
+ * );
  * ```
  */
 export function createTestPluginContext(
   fakes: FakeProviders = {},
+  options?: TestPluginContextOptions,
 ): TestPluginContext {
+  // No options: original behavior.
+  if (!options) {
+    return createTestPluginContextSync(fakes);
+  }
+
+  // Options provided: install the seeded client, service context, and scoped env.
+  return createTestPluginContextWithOptions(fakes, options);
+}
+
+function createTestPluginContextSync(fakes: FakeProviders): TestPluginContext {
   const telemetry = createMockTelemetry();
   const ctx = new PluginContext({ telemetry });
 
@@ -348,6 +403,61 @@ export function createTestPluginContext(
     providers,
     registerProvider,
     attach,
+  };
+}
+
+function createTestPluginContextWithOptions(
+  fakes: FakeProviders,
+  options: TestPluginContextOptions,
+): TestPluginContext {
+  const { responses = {}, env: envVars = {}, strict = false } = options;
+
+  // Build a mock workspace client seeded from responses
+  const client = createMockWorkspaceClient({
+    responses,
+    strict,
+  });
+
+  // Install the mock service context with the seeded client
+  const serviceContextMock = mockServiceContext({
+    serviceDatabricksClient: client,
+  });
+
+  // Set env (captured for restore) via the shared helper.
+  const restoreEnv = applyEnv(envVars);
+
+  // Create the base context (without options this time, since we're handling everything)
+  const base = createTestPluginContextSync(fakes);
+
+  // Restore function: restores env and service context (idempotent)
+  let hasRestored = false;
+  const restore = () => {
+    if (hasRestored) return;
+    hasRestored = true;
+    restoreEnv();
+    serviceContextMock.restore();
+  };
+
+  // Auto-restore after the current test. This helper is documented and used
+  // from inside a test body, where a runtime-registered `afterEach` does NOT run
+  // for that test (Vitest only collects `afterEach` before the test runs) — the
+  // reason the old `afterEach` here silently leaked. `onTestFinished` is the hook
+  // built for runtime registration and fires after the creating test. If called
+  // at collection scope instead, it throws, so fall back to `afterEach` there.
+  try {
+    onTestFinished(() => {
+      restore();
+    });
+  } catch {
+    afterEach(() => {
+      restore();
+    });
+  }
+
+  // Return the context with the restore method
+  return {
+    ...base,
+    restore,
   };
 }
 

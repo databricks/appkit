@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
+import {
+  createMockWorkspaceClient,
+  getMock,
+  useTestCache,
+} from "../../../testing";
 import { FilesPlugin } from "../plugin";
 import {
   getRouteHandler,
@@ -11,73 +16,27 @@ import {
   VOLUMES_CONFIG,
 } from "./_test-helpers";
 
-const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
-    createDirectory: vi.fn(),
-    delete: vi.fn(),
-  };
-  const mockClient = {
-    files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
-  };
-  class MockApiError extends Error {
-    statusCode: number;
-    constructor(message: string, statusCode: number) {
-      super(message);
-      this.name = "ApiError";
-      this.statusCode = statusCode;
-    }
-  }
-  const mockCacheInstance = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    getOrExecute: vi.fn(
-      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
-        fn(),
-    ),
-    generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
-  };
-  return { mockClient, MockApiError, mockCacheInstance };
-});
-
-vi.mock("../../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../workspace-client")>();
-  return {
-    ...actual,
-    createWorkspaceClient: (..._args: unknown[]) => mockClient,
-    ApiError: MockApiError,
-  };
-});
-
-vi.mock("../../../context", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../../context")>();
-  return {
-    ...actual,
-    getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
-  };
-});
-
-vi.mock("../../../cache", () => ({
-  CacheManager: {
-    getInstanceSync: vi.fn(() => mockCacheInstance),
-  },
-}));
+// Boots AppKit's real in-memory cache (no cache-module mock needed).
+useTestCache();
 
 describe("FilesPlugin raw endpoint security headers", () => {
   let serviceContextMock: Awaited<ReturnType<typeof setupTestEnv>>;
 
+  let client: ReturnType<typeof createMockWorkspaceClient>;
+
   beforeEach(async () => {
-    serviceContextMock = await setupTestEnv();
+    client = createMockWorkspaceClient({
+      strict: true,
+      responses: {
+        "files.listDirectoryContents": undefined,
+        "files.download": undefined,
+        "files.getMetadata": undefined,
+        "files.upload": undefined,
+        "files.createDirectory": undefined,
+        "files.delete": undefined,
+      },
+    });
+    serviceContextMock = await setupTestEnv(client);
   });
 
   afterEach(() => {
@@ -89,7 +48,9 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    mockClient.files.download.mockResolvedValue(makeStreamResponse("data"));
+    getMock(client, "files.download").mockResolvedValue(
+      makeStreamResponse("data"),
+    );
 
     await handler(
       mockReq("uploads", {
@@ -109,7 +70,9 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    mockClient.files.download.mockResolvedValue(makeStreamResponse("PNG data"));
+    getMock(client, "files.download").mockResolvedValue(
+      makeStreamResponse("PNG data"),
+    );
 
     await handler(
       mockReq("uploads", {
@@ -135,7 +98,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    mockClient.files.download.mockResolvedValue(
+    getMock(client, "files.download").mockResolvedValue(
       makeStreamResponse("<html></html>"),
     );
 
@@ -162,7 +125,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    mockClient.files.download.mockResolvedValue(
+    getMock(client, "files.download").mockResolvedValue(
       makeStreamResponse("<svg></svg>"),
     );
 
@@ -184,7 +147,9 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    mockClient.files.download.mockResolvedValue(makeStreamResponse("content"));
+    getMock(client, "files.download").mockResolvedValue(
+      makeStreamResponse("content"),
+    );
 
     await handler(
       mockReq("uploads", {

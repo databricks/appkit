@@ -42,17 +42,6 @@ import type { ITelemetry, TelemetryProvider } from "../../telemetry";
 import { TelemetryManager } from "../../telemetry";
 import { isDevOboFallback, Plugin } from "../plugin";
 
-vi.mock("../../workspace-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../workspace-client")>();
-  return {
-    ...actual,
-    ApiError: class extends Error {
-      statusCode = 500;
-    },
-  };
-});
-
 vi.mock("../../app");
 vi.mock("../../cache", () => ({
   CacheManager: { getInstanceSync: vi.fn() },

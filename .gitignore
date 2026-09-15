@@ -20,3 +20,5 @@ coverage
 internal
 
 .isaac/
+
+.codex-tmp/
