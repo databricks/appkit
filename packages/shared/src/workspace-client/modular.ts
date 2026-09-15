@@ -20,7 +20,7 @@ import {
   newM2mCredentials,
   newPatCredentials,
 } from "@databricks/sdk-auth/credentials";
-import { addToDefault, setProduct } from "@databricks/sdk-core/clientinfo";
+import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
@@ -67,13 +67,16 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     clientOptions.profileOptions = { profile: opts.profile };
   } else {
     // No token, no profile: authenticate as the service principal from the
-    // environment, the way the legacy SDK did. The modular SDK's default auth
-    // chain resolves ONLY from a `~/.databrickscfg` profile — it reads no
-    // `DATABRICKS_*` env vars — so on the Databricks Apps runtime (which injects
-    // the app's SP credentials via env, with no config file) it would find no
-    // credentials and every request would fail. Resolve them here instead:
-    // M2M (client id + secret, what Apps injects) first, then a PAT, else fall
-    // through to the default chain for local dev with a config file.
+    // environment. The SDK's own default chain DOES read the DATABRICKS_* env
+    // vars (host, client id/secret, token) — but its M2M strategy feeds the RAW
+    // `DATABRICKS_HOST` straight into OAuth token-endpoint discovery, and the
+    // Databricks Apps runtime sets that host scheme-less (e.g.
+    // `x.cloud.databricks.com`), so discovery fails with `Invalid URL` and every
+    // request dies as "Warehouse readiness check failed". Resolve the SP here
+    // with the scheme-normalized `host` instead: M2M from client id + secret
+    // (what Apps injects), else PAT from `DATABRICKS_TOKEN`, else fall through to
+    // the SDK default chain (local dev, where a `~/.databrickscfg` host already
+    // carries a scheme).
     const clientId = process.env.DATABRICKS_CLIENT_ID;
     const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
     const envToken = process.env.DATABRICKS_TOKEN;
@@ -89,59 +92,60 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     // Otherwise leave credentials unset and let the SDK walk its profile-based
     // default chain (local dev with `~/.databrickscfg`).
   }
+  const httpClient = buildHttpClient(opts);
+  if (httpClient) {
+    clientOptions.httpClient = httpClient;
+  }
   return clientOptions;
 }
 
-// The modular SDK has no per-client User-Agent option; product/client-info is a
-// process-global set once via `setProduct`/`addToDefault` before any client is
-// built. The AppKit product/version/userAgentExtra arrive on `opts.clientOptions`
-// (from `getClientOptions()`); build-time callers omit them and are left unstamped,
-// preserving the legacy behavior where build-time clients carry no AppKit UA. The
-// flag latches only once we actually stamp, so a first (unstamped) build-time
-// client never blocks a later runtime client from stamping.
-let clientInfoStamped = false;
-
 /**
- * Coerce an arbitrary string into a valid client-info segment. The modular SDK
- * validates keys as simple tokens and throws `ClientInfoError` on anything else,
- * so the legacy product name `@databricks/appkit` (with `@` and `/`) is rejected
- * — collapse invalid runs to `-` and trim the ends (`@databricks/appkit` →
- * `databricks-appkit`).
+ * Wrap the SDK's default fetch transport to prepend AppKit's product segment to
+ * the outgoing `User-Agent`, preserving the exact legacy string (e.g.
+ * `@databricks/appkit/0.75.1`) that Databricks-side dashboards match on.
+ *
+ * Why the transport and not `setProduct`: the modular SDK's client-info API
+ * validates the product as a simple token and rejects `@databricks/appkit` (the
+ * `@`/`/`), and it is process-global. Setting the header on the `httpClient`
+ * instead keeps the literal product name, is per-client, and — unlike a pnpm
+ * patch — ships inside appkit's bundled `dist`, so it also reaches deployed apps
+ * (npm-installed from the tarball, where pnpm patches do not apply). The SDK's
+ * own client-info (`sdk-js-core/…`, runtime) is already on `request.headers`, so
+ * prepending keeps it intact after AppKit's segment.
+ *
+ * Returns `undefined` when no product is configured (build-time callers), leaving
+ * the SDK's default User-Agent untouched — matching the legacy behavior where
+ * build-time clients carried no AppKit UA.
  */
-function toClientInfoKey(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-function ensureClientInfo(opts: WorkspaceClientOptions): void {
-  if (clientInfoStamped) {
-    return;
-  }
+function buildHttpClient(opts: WorkspaceClientOptions): HttpClient | undefined {
   const co = opts.clientOptions;
   if (!co?.product || !co?.productVersion) {
-    return;
+    return undefined;
   }
-  // User-Agent stamping is best-effort: a value the SDK's client-info validator
-  // rejects must NEVER break client construction (the legacy SDK stamped the UA
-  // without validating). On failure the outbound request just carries the SDK's
-  // default User-Agent.
-  try {
-    setProduct(toClientInfoKey(co.product), co.productVersion);
-    if (co.userAgentExtra) {
-      for (const [key, value] of Object.entries(co.userAgentExtra)) {
-        addToDefault(toClientInfoKey(key), String(value));
-      }
+  const segments = [`${co.product}/${co.productVersion}`];
+  if (co.userAgentExtra) {
+    for (const [key, value] of Object.entries(co.userAgentExtra)) {
+      segments.push(`${key}/${String(value)}`);
     }
-    clientInfoStamped = true;
-  } catch {
-    clientInfoStamped = true;
   }
+  const appkitUserAgent = segments.join(" ");
+  const base = newFetchHttpClient();
+  return {
+    send(request) {
+      const existing = request.headers.get("User-Agent");
+      request.headers.set(
+        "User-Agent",
+        existing ? `${appkitUserAgent} ${existing}` : appkitUserAgent,
+      );
+      return base.send(request);
+    },
+  };
 }
 
 /** Build a modular Warehouses client from wrapper options. */
 export function buildWarehousesClient(
   opts: WorkspaceClientOptions,
 ): WarehousesClient {
-  ensureClientInfo(opts);
   return new WarehousesClient(mapToClientOptions(opts));
 }
 
@@ -149,7 +153,6 @@ export function buildWarehousesClient(
 export function buildStatementExecutionClient(
   opts: WorkspaceClientOptions,
 ): StatementExecutionClient {
-  ensureClientInfo(opts);
   return new StatementExecutionClient(mapToClientOptions(opts));
 }
 
