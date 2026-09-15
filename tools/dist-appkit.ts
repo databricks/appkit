@@ -35,6 +35,12 @@ const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
 // declared in appkit's dependencies, so they resolve from the consumer.)
 const BUNDLED_PATCHED_PACKAGES = ["@databricks/sdk-statementexecution"];
 
+// This script builds BOTH the appkit and appkit-ui tarballs, so only bundle a
+// patched package into the tarball whose package actually declares it as a
+// dependency (captured before the CLI-dependency merge below). appkit-ui does
+// not depend on the modular SDK packages, so it bundles nothing.
+const ownDependencyNames = new Set(Object.keys(pkg.dependencies ?? {}));
+
 if (prerelease) {
   pkg.version = `${pkg.version}-pr.${prerelease}`;
 }
@@ -84,6 +90,10 @@ Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
 // real (patched) files.
 const bundled: string[] = [];
 for (const depName of BUNDLED_PATCHED_PACKAGES) {
+  // Skip packages this tarball's package doesn't depend on (e.g. appkit-ui).
+  if (!ownDependencyNames.has(depName)) {
+    continue;
+  }
   const src = path.resolve("node_modules", depName);
   if (!fs.existsSync(src)) {
     throw new Error(
