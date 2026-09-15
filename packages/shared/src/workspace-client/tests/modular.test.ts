@@ -3,11 +3,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, m2mOpts, productCalls } = vi.hoisted(() => ({
+const { ctorOpts, patTokens, m2mOpts } = vi.hoisted(() => ({
   ctorOpts: [] as Array<Record<string, unknown>>,
   patTokens: [] as string[],
   m2mOpts: [] as Array<Record<string, unknown>>,
-  productCalls: [] as Array<[string, string]>,
 }));
 
 vi.mock("@databricks/sdk-warehouses/v1", () => ({
@@ -29,18 +28,41 @@ vi.mock("@databricks/sdk-auth/credentials", () => ({
     return { kind: "m2m", ...opts };
   }),
 }));
-vi.mock("@databricks/sdk-core/clientinfo", () => ({
-  setProduct: vi.fn((name: string, version: string) => {
-    // Mirror the real SDK: reject client-info keys that aren't simple tokens.
-    if (/[^A-Za-z0-9._-]/.test(name)) {
-      throw new Error(`Invalid key: ${name}.`);
-    }
-    productCalls.push([name, version]);
-  }),
-  addToDefault: vi.fn(),
+// The default transport: its `send` echoes the final request headers so tests
+// can assert the User-Agent the wrapper set before delegating.
+vi.mock("@databricks/sdk-core/http", () => ({
+  newFetchHttpClient: vi.fn(() => ({
+    send: vi.fn((request: { headers: Headers }) =>
+      Promise.resolve({
+        statusCode: 200,
+        headers: request.headers,
+        body: null,
+      }),
+    ),
+  })),
 }));
 
 import { buildWarehousesClient } from "../modular";
+
+/** Drive the wrapped httpClient with one request and return the UA it set. */
+async function sentUserAgent(
+  httpClient: unknown,
+  seedUserAgent?: string,
+): Promise<string | null> {
+  const headers = new Headers(
+    seedUserAgent ? { "User-Agent": seedUserAgent } : undefined,
+  );
+  await (
+    httpClient as {
+      send: (r: {
+        url: string;
+        method: string;
+        headers: Headers;
+      }) => Promise<unknown>;
+    }
+  ).send({ url: "https://x", method: "GET", headers });
+  return headers.get("User-Agent");
+}
 
 describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
   // Auth resolution reads these env vars; snapshot + clear them so the dev
@@ -57,7 +79,6 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     ctorOpts.length = 0;
     patTokens.length = 0;
     m2mOpts.length = 0;
-    productCalls.length = 0;
     for (const key of AUTH_ENV) {
       originalEnv[key] = process.env[key];
       delete process.env[key];
@@ -116,9 +137,10 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
   });
 
   test("service-principal by default: DATABRICKS_CLIENT_ID/SECRET + host env → M2M creds", () => {
-    // The Databricks Apps runtime injects the app's SP credentials this way
-    // (env only, no config file). The modular SDK's default chain reads no env,
-    // so we must map them to M2M credentials ourselves.
+    // The Databricks Apps runtime injects the app's SP credentials via env. The
+    // SDK's default chain would read them too, but its M2M strategy uses the raw
+    // scheme-less DATABRICKS_HOST for OAuth discovery (→ Invalid URL); we resolve
+    // M2M here with the scheme-normalized host so discovery succeeds.
     process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
     process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
     process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
@@ -170,18 +192,35 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(ctorOpts[0].credentials).toBeUndefined();
   });
 
-  test("client-info: sanitizes an invalid product name (e.g. @databricks/appkit) rather than crashing the client build", () => {
+  test("User-Agent: prepends the exact @databricks/appkit product segment (dashboards match on it)", async () => {
     // Regression: the modular SDK's `setProduct` rejects `@databricks/appkit`
-    // (INVALID_KEY), which the legacy SDK accepted. UA stamping must be
-    // best-effort — a bad product string must never break client construction.
-    const client = buildWarehousesClient({
+    // (the `@`/`/`). We set the UA on the httpClient transport instead, keeping
+    // the literal legacy product string that Databricks-side dashboards match.
+    buildWarehousesClient({
       clientOptions: {
         product: "@databricks/appkit",
         productVersion: "0.64.0",
         userAgentExtra: { mode: "dev" },
       },
     } as never);
-    expect(client).toBeDefined();
-    expect(productCalls[0]).toEqual(["databricks-appkit", "0.64.0"]);
+    // The SDK's own client-info UA is already on the request; ours prepends.
+    const ua = await sentUserAgent(ctorOpts[0].httpClient, "sdk-js-core/1.0.0");
+    expect(ua).toBe("@databricks/appkit/0.64.0 mode/dev sdk-js-core/1.0.0");
+  });
+
+  test("User-Agent: sets the product segment even when the request has no prior UA", async () => {
+    buildWarehousesClient({
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never);
+    const ua = await sentUserAgent(ctorOpts[0].httpClient);
+    expect(ua).toBe("@databricks/appkit/0.64.0");
+  });
+
+  test("no product configured (build-time) → no httpClient override (SDK default UA)", () => {
+    buildWarehousesClient({ host: "https://x" });
+    expect(ctorOpts[0].httpClient).toBeUndefined();
   });
 });
