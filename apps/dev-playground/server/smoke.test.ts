@@ -78,18 +78,22 @@ describe("dev-playground server plugins", () => {
   test("POST /api/telemetry-examples/combined threads the userId through every span", async () => {
     // This route really calls `fetch("https://example.com")` (its
     // external-api span). Left alone the suite would need the internet, so
-    // non-loopback requests are stubbed — loopback must pass through, because
-    // that is how the harness reaches its own server.
+    // non-app requests are stubbed — requests to the app under test must pass
+    // through, because that is how the harness reaches its own server. Match on
+    // the app's *actual* base URL rather than string-matching localhost, so it
+    // stays correct whatever host/port the harness binds (IPv4 or IPv6 `[::1]`).
     const realFetch = globalThis.fetch;
+    let appBaseUrl: string | undefined;
     vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
-      return /127\.0\.0\.1|localhost/.test(url)
+      return appBaseUrl && url.startsWith(appBaseUrl)
         ? realFetch(input, init)
         : Promise.resolve(new Response("stubbed", { status: 200 }));
     });
 
     try {
       await using app = await createTestApp({ plugins: [telemetryExamples()] });
+      appBaseUrl = app.baseUrl;
 
       const res = await app.post("/api/telemetry-examples/combined", {
         body: { userId: "smoke-user" },
@@ -107,15 +111,41 @@ describe("dev-playground server plugins", () => {
     }
   });
 
-  test("lakebase-examples degrades to no routes when Lakebase is unconfigured", async () => {
+  test("lakebase-examples registers its routes when Lakebase is configured", async () => {
+    // A bare 404 can't tell "plugin degraded" from a path typo, so assert the
+    // route is *present*. injectRoutes gates only on PGHOST/LAKEBASE_ENDPOINT,
+    // so with those set the example routes register. setup() still fails fast —
+    // a ConfigurationError with no PGUSER, before any pool connect, so no
+    // network — and the plugin swallows it, so the app boots regardless.
+    await using app = await createTestApp({
+      plugins: [lakebaseExamples()],
+      env: {
+        PGHOST: "test-host.example",
+        LAKEBASE_ENDPOINT: "test-endpoint.example",
+      },
+    });
+
+    expect(app.plugins["lakebase-examples"]).toBeDefined();
+    // Present, not 404: the health route answers (503, since the pool never
+    // really connected) — proving the route registered, not that a path exists
+    // by accident.
+    expect(
+      (await app.get("/api/lakebase-examples/raw/health")).status,
+    ).not.toBe(404);
+  });
+
+  test("lakebase-examples registers no routes when Lakebase is unconfigured", async () => {
     // Its setup() and injectRoutes() both bail on missing PGHOST/LAKEBASE_ENDPOINT.
-    // The app must still boot; the routes must simply be absent.
+    // The app must still boot; the routes must simply be absent — the same real
+    // route that answers above is 404 here, so presence tracks configuration.
     await using app = await createTestApp({
       plugins: [lakebaseExamples()],
       env: { PGHOST: "", LAKEBASE_ENDPOINT: "" },
     });
 
     expect(app.plugins["lakebase-examples"]).toBeDefined();
-    expect((await app.get("/api/lakebase-examples/raw")).status).toBe(404);
+    expect((await app.get("/api/lakebase-examples/raw/health")).status).toBe(
+      404,
+    );
   });
 });
