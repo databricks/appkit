@@ -352,11 +352,58 @@ describe("SQLWarehouseConnector", () => {
       expect(states).toEqual(["STARTING", "RUNNING"]);
     });
 
+    test("does not block the query when the status probe (get) fails", async () => {
+      // A failed status probe (e.g. the caller can run statements on the
+      // warehouse but lacks CAN_VIEW to read its status, or a transient
+      // control-plane error) must not gate the query — readiness is an
+      // optimization, and the Statement Execution API starts/waits on its own.
+      const get = vi
+        .fn()
+        .mockRejectedValue(new Error("permission denied reading warehouse"));
+      const start = vi.fn();
+      const wsClient = { warehouses: { get, start } };
+      const updates: any[] = [];
+
+      await expect(
+        connector.ensureWarehouseRunning(wsClient as any, "wh-probe-fail", {
+          onStatus: (u) => updates.push(u),
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
+      // No status is emitted and the RUNNING observation is not cached, so the
+      // next call probes again.
+      expect(updates).toHaveLength(0);
+    });
+
+    test("still surfaces cancellation when the probe fails due to an abort", async () => {
+      const controller = new AbortController();
+      const get = vi.fn().mockImplementation(() => {
+        controller.abort();
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        return Promise.reject(err);
+      });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+
+      await expect(
+        connector.ensureWarehouseRunning(wsClient as any, "wh-probe-abort", {
+          onStatus: () => {},
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow(/canceled/i);
+    });
+
     test("does not leak raw SDK error text in the rethrown error", async () => {
       const sensitive =
         "getaddrinfo ENOTFOUND adb-1234567890.10.azuredatabricks.net";
-      const get = vi.fn().mockRejectedValue(new Error(sensitive));
-      const wsClient = { warehouses: { get, start: vi.fn() } };
+      // The status probe (get) no longer blocks the query, so exercise a path
+      // that still throws — an auto-start (`start`) failure — to verify raw SDK
+      // text is sanitized out of the rethrown readiness error.
+      const get = vi.fn().mockResolvedValue({ state: "STOPPED" });
+      const start = vi.fn().mockRejectedValue(new Error(sensitive));
+      const wsClient = { warehouses: { get, start } };
 
       await expect(
         connector.ensureWarehouseRunning(wsClient as any, "wh-leak", {
