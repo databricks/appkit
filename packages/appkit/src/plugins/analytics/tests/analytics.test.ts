@@ -1716,6 +1716,94 @@ describe("Analytics Plugin", () => {
       expect(executeMock).toHaveBeenCalledTimes(1);
     });
 
+    test("a failed warehouse status probe does not block the query or escape the route", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      const warehouseGet = vi
+        .fn()
+        .mockRejectedValue(new Error("permission denied reading warehouse"));
+      serviceContextMock.restore();
+      serviceContextMock = await mockServiceContext({
+        serviceDatabricksClient: {
+          statementExecution: { executeStatement: vi.fn() },
+          warehouses: { get: warehouseGet, start: vi.fn() },
+        },
+      });
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      // The status GET is only a readiness probe. Its rejection must be
+      // contained, after which Statement Execution remains authoritative.
+      await expect(handler(mockReq, mockRes)).resolves.toBeUndefined();
+
+      expect(warehouseGet).toHaveBeenCalledTimes(1);
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"data":[{"id":1}]'),
+      );
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("a valid not-running warehouse status still blocks the query", async () => {
+      const plugin = new AnalyticsPlugin({
+        ...config,
+        autoStartWarehouse: false,
+      });
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      const warehouseGet = vi.fn().mockResolvedValue({ state: "STOPPED" });
+      serviceContextMock.restore();
+      serviceContextMock = await mockServiceContext({
+        serviceDatabricksClient: {
+          statementExecution: { executeStatement: vi.fn() },
+          warehouses: { get: warehouseGet, start: vi.fn() },
+        },
+      });
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      // This is a successful probe with an actionable state, so readiness
+      // remains a gate. StreamManager contains the route error for the app.
+      await expect(handler(mockReq, mockRes)).resolves.toBeUndefined();
+
+      expect(warehouseGet).toHaveBeenCalledTimes(1);
+      expect(executeMock).not.toHaveBeenCalled();
+      expect(mockRes.write).not.toHaveBeenCalledWith("event: result\n");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
     test("should return 404 when query file is not found", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
