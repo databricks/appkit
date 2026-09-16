@@ -622,10 +622,41 @@ export class SQLWarehouseConnector {
         );
       }
 
-      const info = await workspaceClient.warehouses.get(
-        { id: warehouseId },
-        this._createContext(signal),
-      );
+      let info: Awaited<ReturnType<typeof workspaceClient.warehouses.get>>;
+      try {
+        info = await workspaceClient.warehouses.get(
+          { id: warehouseId },
+          this._createContext(signal),
+        );
+      } catch (error) {
+        // A real cancellation must still surface as canceled, not be swallowed
+        // as a probe failure.
+        if (
+          signal?.aborted ||
+          (error instanceof Error && error.name === "AbortError")
+        ) {
+          throw ExecutionError.canceled();
+        }
+        // The status probe itself failed for a non-abort reason — e.g. the
+        // caller can submit statements to this warehouse but lacks CAN_VIEW to
+        // read its status, or a transient control-plane error. Readiness is a
+        // UX/auto-start optimization, not a correctness gate: the Statement
+        // Execution API auto-starts and waits for the warehouse on its own. So
+        // rather than block the query on an unobservable status, record the
+        // probe failure and let execution proceed.
+        span.addEvent("warehouse.status_probe_failed", {
+          "db.warehouse_id": warehouseId,
+          "error.message":
+            error instanceof Error ? error.message : String(error),
+        });
+        logger.debug(
+          "Warehouse status probe failed for %s; skipping readiness gate and proceeding: %O",
+          warehouseId,
+          error,
+        );
+        span.setAttribute("db.warehouse.status_probe_failed", true);
+        return;
+      }
       const state = info?.state;
       const summary = info?.health?.summary;
 
