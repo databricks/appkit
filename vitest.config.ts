@@ -59,6 +59,19 @@ export default defineConfig({
           environment: "node",
         },
       },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
+          name: "dev-playground",
+          root: "./apps/dev-playground",
+          environment: "node",
+          // tests/ holds Playwright specs. Vitest's default `**/*.spec.ts`
+          // glob would collect them and they fail on import with "Playwright
+          // Test did not expect test.describe() to be called here". They run
+          // via `pnpm test:integration`.
+          exclude: ["**/node_modules/**", "**/dist/**", "tests/**"],
+        },
+      },
     ],
   },
 });
