@@ -156,6 +156,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.76.0](https://github.com/databricks/appkit/compare/v0.75.1...v0.76.0) (2026-09-16)
+
+### appkit
+
+* **appkit:** don't block queries when the warehouse status probe fails ([#588](https://github.com/databricks/appkit/issues/588)) ([3edd3cd](https://github.com/databricks/appkit/commit/3edd3cd641b14235c3633967d57cabe18c4f1026))
+* **appkit:** add createTestApp, a never-crash mock client ([#540](https://github.com/databricks/appkit/issues/540)) ([1fc5160](https://github.com/databricks/appkit/commit/1fc5160aec42de7fe3dc733b390bd9ad565826e7))
+* **appkit:** add testing-kit helpers for env, errors, context, and cache ([#555](https://github.com/databricks/appkit/issues/555)) ([ac74ddf](https://github.com/databricks/appkit/commit/ac74ddf4d5d515fc71a1e0642c9b944f2e2cf6d3))
+
+
 ## [0.75.1](https://github.com/databricks/appkit/compare/v0.75.0...v0.75.1) (2026-09-14)
 
 ### appkit
