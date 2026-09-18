@@ -384,8 +384,25 @@ export async function initAgentTracing(): Promise<void> {
       logger.info("MLflow agent tracing enabled (experiment %s)", id);
     }
   } catch (err) {
-    logger.warn("MLflow agent tracing disabled: %O", err);
+    if (isModuleNotFound(err)) {
+      logger.warn(
+        "MLflow agent tracing requires the optional `@mlflow/core` package. " +
+          "Install it to enable tracing: npm i @mlflow/core",
+      );
+    } else {
+      logger.warn("MLflow agent tracing disabled: %O", err);
+    }
   }
+}
+
+/** True when a dynamic `import()` failed because the package isn't installed. */
+function isModuleNotFound(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err.code === "ERR_MODULE_NOT_FOUND" || err.code === "MODULE_NOT_FOUND")
+  );
 }
 
 /**
