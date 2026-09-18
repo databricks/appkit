@@ -35,6 +35,8 @@ await createApp({
 
 That alone gives you a live HTTP server with `POST /invocations` (and its alias `POST /responses`) wired to a markdown-driven agent. Use `POST /chat` instead when you want the streaming, HITL-capable surface.
 
+> **Optional dependencies.** Two opt-in features load their heavy dependencies lazily, so they are declared as optional peer dependencies and are *not* installed with AppKit by default: agent tracing to an MLflow experiment needs `@mlflow/core` (`npm i @mlflow/core`), and the eval judges below need `autoevals` (`npm i autoevals`). Skip them and agents still run — tracing simply stays off and `t.judge.*` reports the missing package.
+
 ## Level 1: drop a markdown agent package
 
 Each agent lives in its own folder under `server/agents/` with entry file `agent.md`. A folder is an agent only if it holds an entry file (`agent.md` or `agent.ts`); a folder without one is skipped, so per-agent asset folders sit beside the entry — notably a `skills/` folder holding [Skills](#skills) (on-demand instruction packs the agent loads by name). A shared `server/agents/skills/` folder holds skills available to any agent.
@@ -729,7 +731,7 @@ Call `t.skip("reason")` to skip an eval, and read `t.reply`, `t.toolCalls`, and 
 
 ### LLM-as-judge
 
-`t.judge.*` scores the last reply with an LLM judge (via `autoevals` pointed at a Databricks serving endpoint). Each judge returns a scored assertion (0..1) that **gates by default** — a miss fails the eval. Chain `.atLeast(n)` to set the pass threshold, or `.soft()` to track it only. Judges require a judge model: pass `--judge-model <endpoint>` (or set `APPKIT_JUDGE_MODEL`) plus Databricks auth; without one, `t.judge.*` throws with a clear message.
+`t.judge.*` scores the last reply with an LLM judge (via `autoevals` pointed at a Databricks serving endpoint). Each judge returns a scored assertion (0..1) that **gates by default** — a miss fails the eval. Chain `.atLeast(n)` to set the pass threshold, or `.soft()` to track it only. Judges require a judge model: pass `--judge-model <endpoint>` (or set `APPKIT_JUDGE_MODEL`) plus Databricks auth; without one, `t.judge.*` throws with a clear message. `autoevals` is an optional peer dependency — install it (`npm i autoevals`) to use the judges.
 
 ```ts
 async test(t) {

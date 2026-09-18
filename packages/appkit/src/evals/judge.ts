@@ -15,6 +15,9 @@ type AutoEvals = typeof import("autoevals");
 
 let mod: AutoEvals | undefined;
 let enabled = false;
+// Set when the dynamic import failed because `autoevals` (an optional peer) is
+// not installed, so `ensure()` can point at the fix instead of the auth path.
+let notInstalled = false;
 // Whether configureJudge overwrote the OPENAI_* env vars and they still need
 // restoring, plus the values to restore them to.
 let configured = false;
@@ -51,8 +54,9 @@ export async function configureJudge(config: JudgeConfig): Promise<void> {
     configured = true;
     mod.init({ defaultModel: config.model });
     enabled = true;
-  } catch {
+  } catch (err) {
     enabled = false;
+    notInstalled = isModuleNotFound(err);
   }
 }
 
@@ -80,6 +84,16 @@ function restoreEnv(key: string, prev: string | undefined): void {
   else process.env[key] = prev;
 }
 
+/** True when a dynamic `import()` failed because the package isn't installed. */
+function isModuleNotFound(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err.code === "ERR_MODULE_NOT_FOUND" || err.code === "MODULE_NOT_FOUND")
+  );
+}
+
 /** Normalize an autoevals `Score` into a `JudgeScore`. */
 export function toJudgeScore(s: {
   score?: number | null;
@@ -95,7 +109,9 @@ export function toJudgeScore(s: {
 function ensure(): AutoEvals {
   if (!enabled || !mod) {
     throw new Error(
-      "LLM judge is not configured. Pass --judge-model and authenticate via --profile (or DATABRICKS_HOST/DATABRICKS_TOKEN) to use t.judge.*",
+      notInstalled
+        ? "LLM judge requires the optional `autoevals` package. Install it to use t.judge.*: npm i autoevals"
+        : "LLM judge is not configured. Pass --judge-model and authenticate via --profile (or DATABRICKS_HOST/DATABRICKS_TOKEN) to use t.judge.*",
     );
   }
   return mod;

@@ -261,9 +261,6 @@ importers:
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
-      '@mlflow/core':
-        specifier: 0.4.0
-        version: 0.4.0(bufferutil@4.0.9)
       '@opentelemetry/api':
         specifier: 1.9.0
         version: 1.9.0
@@ -315,9 +312,6 @@ importers:
       apache-arrow:
         specifier: 21.1.0
         version: 21.1.0
-      autoevals:
-        specifier: 0.3.0
-        version: 0.3.0(ws@8.21.0(bufferutil@4.0.9))(zod@4.3.6)
       dotenv:
         specifier: 16.6.1
         version: 16.6.1
@@ -364,6 +358,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@mlflow/core':
+        specifier: 0.4.0
+        version: 0.4.0(bufferutil@4.0.9)
       '@opentelemetry/context-async-hooks':
         specifier: 2.8.0
         version: 2.8.0(@opentelemetry/api@1.9.0)
@@ -385,6 +382,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 5.1.1
         version: 5.1.1(rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.2))
+      autoevals:
+        specifier: 0.3.0
+        version: 0.3.0(ws@8.21.0(bufferutil@4.0.9))(zod@4.3.6)
       vitest:
         specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.3)(jiti@2.6.1)(jsdom@27.0.0(bufferutil@4.0.9)(postcss@8.5.6))(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.2)

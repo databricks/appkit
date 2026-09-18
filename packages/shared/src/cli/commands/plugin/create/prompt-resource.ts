@@ -1,5 +1,3 @@
-import { isCancel, select, text } from "@clack/prompts";
-
 import {
   getDefaultFieldsForType,
   humanizeResourceType,
@@ -25,6 +23,7 @@ export interface ResourceSpec {
 export async function promptOneResource(opts?: {
   type?: string;
 }): Promise<ResourceSpec | null> {
+  const { isCancel, select, text } = await import("@clack/prompts");
   let type = opts?.type;
 
   if (!type) {

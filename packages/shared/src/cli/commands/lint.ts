@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import type { SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 
 interface BaseRule {
@@ -188,6 +189,9 @@ export function lintSource(
   activeRules: Rule[] = rules,
   isTest = false,
 ): Violation[] {
+  const require = createRequire(import.meta.url);
+  const { Lang, parse } =
+    require("@ast-grep/napi") as typeof import("@ast-grep/napi");
   const violations: Violation[] = [];
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
   const root = parse(lang, content).root();

@@ -2,17 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import {
-  cancel,
-  confirm,
-  intro,
-  isCancel,
-  multiselect,
-  outro,
-  select,
-  spinner,
-  text,
-} from "@clack/prompts";
 import { Command, Option } from "commander";
 
 import { PLUGIN_NAME_PATTERN } from "../../../../naming";
@@ -233,6 +222,17 @@ function runNonInteractive(opts: CreateOptions): void {
 }
 
 async function runInteractive(): Promise<void> {
+  const {
+    cancel,
+    confirm,
+    intro,
+    isCancel,
+    multiselect,
+    outro,
+    select,
+    spinner,
+    text,
+  } = await import("@clack/prompts");
   intro("Create a new AppKit plugin");
 
   try {
