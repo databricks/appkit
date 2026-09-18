@@ -158,6 +158,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.76.1](https://github.com/databricks/appkit/compare/v0.76.0...v0.76.1) (2026-09-18)
+
+### appkit
+
+* **appkit:** don't eager-load optional/heavy deps (mlflow/autoevals peers, lazy [@clack](https://github.com/clack) + [@ast-grep](https://github.com/ast-grep) CLI) ([#589](https://github.com/databricks/appkit/issues/589)) ([389321d](https://github.com/databricks/appkit/commit/389321da360c5b2c48de4f9e2d6449d0cbf2141e))
+
+
 ## [0.76.0](https://github.com/databricks/appkit/compare/v0.75.1...v0.76.0) (2026-09-16)
 
 ### appkit
