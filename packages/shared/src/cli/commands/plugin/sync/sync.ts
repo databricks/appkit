@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import { Lang, parse, type SgNode } from "@ast-grep/napi";
+import type { SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 
 import {
@@ -647,6 +648,9 @@ async function runPluginsSync(options: {
       console.log(`Server entry file: ${relativePath}`);
     }
 
+    const require = createRequire(import.meta.url);
+    const { Lang, parse } =
+      require("@ast-grep/napi") as typeof import("@ast-grep/napi");
     const content = fs.readFileSync(serverFile, "utf-8");
     const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
     const ast = parse(lang, content);

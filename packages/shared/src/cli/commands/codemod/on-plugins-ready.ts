@@ -1,7 +1,7 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import { Lang, parse } from "@ast-grep/napi";
 import { Command } from "commander";
 
 const SEARCH_DIRS = ["server", "src", "."];
@@ -56,6 +56,9 @@ function findTsFiles(dir: string, files: string[] = []): string[] {
 }
 
 function isAlreadyMigrated(content: string): boolean {
+  const require = createRequire(import.meta.url);
+  const { Lang, parse } =
+    require("@ast-grep/napi") as typeof import("@ast-grep/napi");
   const ast = parse(Lang.TypeScript, content);
   const root = ast.root();
   return root.findAll("createApp({ $$$PROPS })").some((match) => {
