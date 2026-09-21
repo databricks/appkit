@@ -45,15 +45,7 @@ With `analytics()`, drop a `.sql` file in `config/queries/` and it's served at `
 
 ## Plugins
 
-AppKit's power comes from its plugin system. Each plugin adds a focused capability with minimal configuration.
-
-- **Server Plugin** — The base Express host that every app includes; other plugins inject their routes into it.
-- **Analytics Plugin** — Query your Lakehouse from your app. Define SQL as files, execute against Databricks SQL Warehouses, and get caching, parameterization, and on-behalf-of user execution for free.
-- **Genie Plugin** — A conversational AI interface powered by Databricks AI/BI Genie. Let users ask natural-language questions of your data, with automatic chart inference.
-- **Files Plugin** — Browse, upload, and manage files in Unity Catalog Volumes, with multiple volumes, content-type validation, and on-behalf-of access.
-- **Lakebase Plugin** — OLTP operations against Databricks Lakebase with automatic OAuth token management. Returns a standard `pg.Pool` compatible with Prisma, Drizzle, TypeORM, and other ORMs.
-
-More plugins — including `agents`, `ai-search`, and `database` — are available in beta from `@databricks/appkit/beta`.
+AppKit's power comes from its plugin system. Each plugin adds a focused capability — analytics, Genie, files, Lakebase, and more — with minimal configuration. See the [plugins documentation](https://developers.databricks.com/docs/appkit/v0/plugins) for the full list and API.
 
 > Missing a plugin? [Open an issue](https://github.com/databricks/appkit/issues/new) and tell us what you need — community input directly shapes the roadmap.
 
