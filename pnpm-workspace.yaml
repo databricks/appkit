@@ -5,3 +5,16 @@ packages:
   # deps resolve to the monorepo; knip skips them via the apps/** ignore.
   - "apps/scratch/*"
   - "docs"
+overrides:
+  conventional-changelog-conventionalcommits: 9.1.0
+  '@opentelemetry/core@<2.8.0': 2.8.0
+  protobufjs@<7.6.2: 7.6.2
+  qs@<6.15.2: 6.15.2
+  size-sensor: 1.0.3
+allowBuilds:
+  '@appthreat/sqlite3': true
+  autoevals: false
+  core-js: false
+  core-js-pure: false
+  esbuild: true
+  protobufjs: false
