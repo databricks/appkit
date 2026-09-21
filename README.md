@@ -45,7 +45,7 @@ With `analytics()`, drop a `.sql` file in `config/queries/` and it's served at `
 
 ## Plugins
 
-AppKit's power comes from its plugin system. Each plugin adds a focused capability — analytics, Genie, files, Lakebase, and more — with minimal configuration. See the [plugins documentation](https://developers.databricks.com/docs/appkit/v0/plugins) for the full list and API.
+AppKit's power comes from its plugin system. Each plugin adds a focused capability — analytics, Genie, files, and more — with minimal configuration. See the [plugins documentation](https://developers.databricks.com/docs/appkit/v0/plugins) for the full list and API.
 
 > Missing a plugin? [Open an issue](https://github.com/databricks/appkit/issues/new) and tell us what you need — community input directly shapes the roadmap.
 
