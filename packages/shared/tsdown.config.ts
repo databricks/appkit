@@ -13,7 +13,11 @@ export default defineConfig({
   clean: false,
   hash: false,
   skipNodeModulesBundle: true,
-  external: [/^@databricks\//],
+  external: (id) => {
+    // Keep npm packages external in both JavaScript and declaration output.
+    if (id.startsWith("@/")) return false;
+    return /^[^./]/.test(id) || id.includes("/node_modules/");
+  },
   tsconfig: "./tsconfig.json",
   outExtensions: () => ({
     js: ".js",
