@@ -8,7 +8,12 @@
   ],
   "workspaces": {
     "packages/appkit": {
-      "ignoreDependencies": ["vitest", "@databricks/sdk-experimental"]
+      "ignoreDependencies": [
+        "vitest",
+        "@databricks/sdk-experimental",
+        "@mlflow/core",
+        "autoevals"
+      ]
     },
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]

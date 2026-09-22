@@ -8,21 +8,20 @@ This Software contains code from the following open source projects:
 | :--------------- | :---------------- | :----------- | :--------------------------------------------------- |
 | [@ast-grep/napi](https://www.npmjs.com/package/@ast-grep/napi) | 0.37.0 | MIT | https://ast-grep.github.io |
 | [@clack/prompts](https://www.npmjs.com/package/@clack/prompts) | 1.0.1 | MIT | https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme |
-| [@mlflow/core](https://www.npmjs.com/package/@mlflow/core) | 0.4.0 | Apache-2.0 | https://mlflow.org/ |
 | [@opentelemetry/api](https://www.npmjs.com/package/@opentelemetry/api) | 1.9.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/api |
-| [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |
+| [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |
 | [@opentelemetry/auto-instrumentations-node](https://www.npmjs.com/package/@opentelemetry/auto-instrumentations-node) | 0.77.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/auto-instrumentations-node#readme |
-| [@opentelemetry/exporter-logs-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-logs-otlp-proto) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/exporter-logs-otlp-proto |
-| [@opentelemetry/exporter-metrics-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-metrics-otlp-proto) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-exporter-metrics-otlp-proto |
-| [@opentelemetry/exporter-trace-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-trace-otlp-proto) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/exporter-trace-otlp-proto |
-| [@opentelemetry/instrumentation](https://www.npmjs.com/package/@opentelemetry/instrumentation) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-instrumentation |
+| [@opentelemetry/exporter-logs-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-logs-otlp-proto) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/exporter-logs-otlp-proto |
+| [@opentelemetry/exporter-metrics-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-metrics-otlp-proto) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-exporter-metrics-otlp-proto |
+| [@opentelemetry/exporter-trace-otlp-proto](https://www.npmjs.com/package/@opentelemetry/exporter-trace-otlp-proto) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/exporter-trace-otlp-proto |
+| [@opentelemetry/instrumentation](https://www.npmjs.com/package/@opentelemetry/instrumentation) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-instrumentation |
 | [@opentelemetry/instrumentation-express](https://www.npmjs.com/package/@opentelemetry/instrumentation-express) | 0.67.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/instrumentation-express#readme |
 | [@opentelemetry/instrumentation-http](https://www.npmjs.com/package/@opentelemetry/instrumentation-http) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/opentelemetry-instrumentation-http |
-| [@opentelemetry/resources](https://www.npmjs.com/package/@opentelemetry/resources) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-resources |
-| [@opentelemetry/sdk-logs](https://www.npmjs.com/package/@opentelemetry/sdk-logs) | 0.205.0, 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/sdk-logs |
-| [@opentelemetry/sdk-metrics](https://www.npmjs.com/package/@opentelemetry/sdk-metrics) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/sdk-metrics |
-| [@opentelemetry/sdk-trace-base](https://www.npmjs.com/package/@opentelemetry/sdk-trace-base) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-base |
-| [@opentelemetry/sdk-trace-node](https://www.npmjs.com/package/@opentelemetry/sdk-trace-node) | 2.1.0, 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-node |
+| [@opentelemetry/resources](https://www.npmjs.com/package/@opentelemetry/resources) | 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-resources |
+| [@opentelemetry/sdk-logs](https://www.npmjs.com/package/@opentelemetry/sdk-logs) | 0.219.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/sdk-logs |
+| [@opentelemetry/sdk-metrics](https://www.npmjs.com/package/@opentelemetry/sdk-metrics) | 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/sdk-metrics |
+| [@opentelemetry/sdk-trace-base](https://www.npmjs.com/package/@opentelemetry/sdk-trace-base) | 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-base |
+| [@opentelemetry/sdk-trace-node](https://www.npmjs.com/package/@opentelemetry/sdk-trace-node) | 2.8.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/packages/opentelemetry-sdk-trace-node |
 | [@opentelemetry/semantic-conventions](https://www.npmjs.com/package/@opentelemetry/semantic-conventions) | 1.38.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions |
 | [@radix-ui/react-accordion](https://www.npmjs.com/package/@radix-ui/react-accordion) | 1.2.12 | MIT | https://radix-ui.com/primitives |
 | [@radix-ui/react-alert-dialog](https://www.npmjs.com/package/@radix-ui/react-alert-dialog) | 1.1.15 | MIT | https://radix-ui.com/primitives |
@@ -54,7 +53,6 @@ This Software contains code from the following open source projects:
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@types/semver](https://www.npmjs.com/package/@types/semver) | 7.7.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/semver |
 | [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
-| [autoevals](https://www.npmjs.com/package/autoevals) | 0.3.0 | MIT | https://www.braintrust.dev/docs |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
 | [cmdk](https://www.npmjs.com/package/cmdk) | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |

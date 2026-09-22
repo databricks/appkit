@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit",
   "type": "module",
-  "version": "0.76.0",
+  "version": "0.76.1",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -72,7 +72,6 @@
     "@ast-grep/napi": "0.37.0",
     "@databricks/lakebase": "workspace:*",
     "@databricks/sdk-experimental": "0.17.0",
-    "@mlflow/core": "0.4.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/api-logs": "0.219.0",
     "@opentelemetry/auto-instrumentations-node": "0.77.0",
@@ -90,7 +89,6 @@
     "@opentelemetry/semantic-conventions": "1.38.0",
     "@types/semver": "7.7.1",
     "apache-arrow": "21.1.0",
-    "autoevals": "0.3.0",
     "dotenv": "16.6.1",
     "drizzle-orm": "0.45.2",
     "express": "4.22.2",
@@ -108,14 +106,23 @@
     "zod": "4.3.6"
   },
   "peerDependencies": {
+    "@mlflow/core": "0.4.0",
+    "autoevals": "0.3.0",
     "vitest": ">=3"
   },
   "peerDependenciesMeta": {
+    "@mlflow/core": {
+      "optional": true
+    },
+    "autoevals": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@mlflow/core": "0.4.0",
     "@opentelemetry/context-async-hooks": "2.8.0",
     "@types/express": "4.17.25",
     "@types/js-yaml": "4.0.9",
@@ -123,6 +130,7 @@
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "5.1.1",
+    "autoevals": "0.3.0",
     "vitest": "3.2.4"
   },
   "overrides": {

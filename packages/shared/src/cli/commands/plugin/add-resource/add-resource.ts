@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { cancel, intro, outro } from "@clack/prompts";
 import { Command } from "commander";
 
 import { promptOneResource } from "../create/prompt-resource";
@@ -153,6 +152,7 @@ function runNonInteractive(opts: AddResourceOptions): void {
 }
 
 async function runInteractive(opts: AddResourceOptions): Promise<void> {
+  const { cancel, intro, outro } = await import("@clack/prompts");
   intro("Add resource to plugin manifest");
 
   const cwd = process.cwd();

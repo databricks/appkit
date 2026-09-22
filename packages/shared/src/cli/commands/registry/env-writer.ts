@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { autocomplete, isCancel, select, text } from "@clack/prompts";
 import pc from "picocolors";
 
 import type { BindingValueNeed } from "./config-plan";
@@ -86,6 +85,7 @@ export function capChoices<T>(
 
 /** Free-text prompt for one env need; undefined to skip. */
 async function promptText(need: EnvNeed): Promise<string | undefined> {
+  const { isCancel, text } = await import("@clack/prompts");
   const tag = need.required ? "required" : "optional";
   const answer = await text({
     message: `${need.env} (${need.resourceType}, ${tag})`,
@@ -101,6 +101,7 @@ async function selectFrom(
   message: string,
   choices: { value: string; label: string }[],
 ): Promise<string | typeof MANUAL | null> {
+  const { isCancel, select } = await import("@clack/prompts");
   const picked = await select({
     message,
     options: [...choices, { value: MANUAL, label: "Enter manually / skip" }],
@@ -119,6 +120,7 @@ async function autocompleteFrom(
   message: string,
   choices: { value: string; label: string }[],
 ): Promise<string | typeof MANUAL | null> {
+  const { autocomplete, isCancel } = await import("@clack/prompts");
   const picked = await autocomplete({
     message,
     options: [...choices, { value: MANUAL, label: "Enter manually / skip" }],
@@ -278,6 +280,7 @@ export async function collectBindingValues(
   needs: BindingValueNeed[],
   opts: EnvSyncOptions,
 ): Promise<Record<string, string>> {
+  const { isCancel, text } = await import("@clack/prompts");
   const out: Record<string, string> = {};
   for (const need of needs) {
     const fromFlag = opts.values?.[need.fieldKey];
