@@ -4,6 +4,7 @@ import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
 import { createLakebasePool } from "../connectors/lakebase";
 import { getClientOptions } from "../context/client-options";
+import { getCurrentPrincipalKey } from "../context/execution-context";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
@@ -551,7 +552,8 @@ export class CacheManager {
    * @returns Cache key
    */
   generateKey(parts: (string | number | object)[], userKey: string): string {
-    const allParts = [userKey, ...parts];
+    // Legacy partitions remain supported, but cannot override the principal namespace.
+    const allParts = [getCurrentPrincipalKey(), userKey, ...parts];
     const serialized = JSON.stringify(allParts);
     return createHash("sha256").update(serialized).digest("hex");
   }

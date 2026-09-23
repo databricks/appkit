@@ -1,10 +1,16 @@
 import type express from "express";
 import { describe, expect, test, vi } from "vitest";
 
+import {
+  getCallerContext,
+  getCurrentPrincipalKey,
+  runInCallerContext,
+} from "../../context";
 import { PluginContext } from "../../core/plugin-context";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { createMockRequest } from "../fixtures";
+import { createMockWorkspaceClient } from "../mock-workspace-client";
 import { createTestPluginContext } from "../test-plugin-context";
 
 // A minimal real plugin for exercising attach() end-to-end.
@@ -33,8 +39,7 @@ class ProbePlugin extends Plugin {
  * timeout, route recording) rather than a reimplementation.
  */
 
-// Default to a well-formed OBO request (user token + user id) so executeTool's
-// asUser path resolves. Pass `{}` explicitly to model a token-less request.
+// Direct dispatch uses forwarded identity unless a caller is already open.
 function mockReq(
   headers: Record<string, string> = {
     "x-forwarded-access-token": "user-token",
@@ -61,21 +66,28 @@ describe("createTestPluginContext — construction", () => {
   });
 });
 
-describe("createTestPluginContext — executeTool runs the REAL user-scoping path", () => {
-  test("dispatches through asUser and returns the canned static response", async () => {
+function asCaller<T>(userId: string, fn: () => T): T {
+  return runInCallerContext(
+    {
+      principal: { type: "user", userId },
+      client: createMockWorkspaceClient(),
+      workspaceId: Promise.resolve("test-workspace"),
+    },
+    fn,
+  );
+}
+
+describe("createTestPluginContext ambient tool identity", () => {
+  test("inherits the caller and returns the canned static response", async () => {
     const rows = [{ user: "alice", n: 3 }];
     const mock = createTestPluginContext({ analytics: { top_users: rows } });
 
-    const result = await mock.ctx.executeTool(
-      mockReq(),
-      "analytics",
-      "top_users",
-      { limit: 10 },
+    const result = await asCaller("alice", () =>
+      mock.ctx.executeTool(mockReq(), "analytics", "top_users", { limit: 10 }),
     );
 
     expect(result).toEqual(rows);
-    // executeTool resolves the user scope via provider.asUser(req), and the
-    // fake resolves the user id from the request headers.
+    // The fake observes the real ambient scope, not the request headers.
     expect(mock.toolCalls).toHaveLength(1);
     expect(mock.toolCalls[0]).toMatchObject({
       plugin: "analytics",
@@ -84,24 +96,19 @@ describe("createTestPluginContext — executeTool runs the REAL user-scoping pat
       asUser: true,
       userId: "alice",
     });
-    // The OBO request object is the one we passed in.
-    expect(mock.providers.get("analytics")?.asUserRequests).toHaveLength(1);
+    expect(mock.providers.get("analytics")?.asUserRequests).toHaveLength(0);
   });
 
-  test("rejects a token-less request the way the real asUser does", async () => {
-    // The fake asUser enforces the same token precondition as Plugin.asUser,
-    // so a header-less request must reject rather than silently record
-    // asUser: true — this is what makes the OBO assertion meaningful.
+  test("rejects missing credentials without an ambient scope", async () => {
     const mock = createTestPluginContext({ analytics: { top_users: [] } });
 
     await expect(
       mock.ctx.executeTool(mockReq({}), "analytics", "top_users", {}),
-    ).rejects.toThrow(/Missing user token/);
-    // The dispatch never reached the tool.
-    expect(mock.toolCalls).toHaveLength(0);
+    ).rejects.toThrow(/token/i);
+    expect(mock.toolCalls).toEqual([]);
   });
 
-  test("rejects a request with a token but no user id", async () => {
+  test("rejects a token without a forwarded user", async () => {
     const mock = createTestPluginContext({ analytics: { top_users: [] } });
 
     await expect(
@@ -111,22 +118,79 @@ describe("createTestPluginContext — executeTool runs the REAL user-scoping pat
         "top_users",
         {},
       ),
-    ).rejects.toThrow(/Missing user id|user id/i);
-    expect(mock.toolCalls).toHaveLength(0);
+    ).rejects.toThrow(/user/i);
+    expect(mock.toolCalls).toEqual([]);
   });
 
-  test("records the resolved user id so a test can assert who the tool ran as", async () => {
-    const mock = createTestPluginContext({ analytics: { top_users: [] } });
-    await mock.ctx.executeTool(
-      mockReq({
-        "x-forwarded-access-token": "tok",
-        "x-forwarded-user": "bob",
-      }),
-      "analytics",
-      "top_users",
-      {},
+  test("establishes real ALS from the request and restores it after dispatch", async () => {
+    const mock = createTestPluginContext({
+      analytics: {
+        identity: async () => {
+          await Promise.resolve();
+          return getCurrentPrincipalKey();
+        },
+      },
+    });
+    await expect(
+      mock.ctx.executeTool(mockReq(), "analytics", "identity", {}),
+    ).resolves.toBe("user:alice");
+    expect(mock.toolCalls[0]).toMatchObject({ asUser: true, userId: "alice" });
+    expect(getCallerContext()).toBeUndefined();
+  });
+
+  test("inherits an existing caller even without request credentials", async () => {
+    const mock = createTestPluginContext({
+      analytics: { identity: () => getCurrentPrincipalKey() },
+    });
+    await expect(
+      asCaller("injected", () =>
+        mock.ctx.executeTool(mockReq({}), "analytics", "identity", {}),
+      ),
+    ).resolves.toBe("user:injected");
+  });
+
+  test("isolates concurrent request scopes and restores them after failure", async () => {
+    const mock = createTestPluginContext({
+      analytics: {
+        identity: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          const principal = getCurrentPrincipalKey();
+          if (principal === "user:bob") throw new Error(principal);
+          return principal;
+        },
+      },
+    });
+    const results = await Promise.allSettled(
+      ["alice", "bob"].map((userId) =>
+        mock.ctx.executeTool(
+          createMockRequest({ obo: { userId } }),
+          "analytics",
+          "identity",
+          {},
+        ),
+      ),
     );
-    expect(mock.toolCalls[0]).toMatchObject({ asUser: true, userId: "bob" });
+    expect(results).toEqual([
+      { status: "fulfilled", value: "user:alice" },
+      { status: "rejected", reason: new Error("user:bob") },
+    ]);
+    expect(getCallerContext()).toBeUndefined();
+  });
+
+  test("ambient identity wins over a conflicting request user", async () => {
+    const mock = createTestPluginContext({ analytics: { top_users: [] } });
+    await asCaller("alice", () =>
+      mock.ctx.executeTool(
+        mockReq({
+          "x-forwarded-access-token": "tok",
+          "x-forwarded-user": "bob",
+        }),
+        "analytics",
+        "top_users",
+        {},
+      ),
+    );
+    expect(mock.toolCalls[0]).toMatchObject({ asUser: true, userId: "alice" });
   });
 
   test("invokes a function response with the args and the composed signal", async () => {
@@ -211,16 +275,13 @@ describe("createTestPluginContext — executeTool runs the REAL user-scoping pat
 
 describe("createTestPluginContext — asUser dev-mode branch", () => {
   test("in development, a token-less request is allowed through (no throw)", async () => {
-    // The fake asUser mirrors Plugin.asUser's dev-mode behavior: under
-    // NODE_ENV=development a missing token skips impersonation instead of
-    // throwing. The rest of the suite runs under NODE_ENV=test, so this is the
-    // only place that branch is exercised.
+    // Direct dispatch without a caller scope stays SP in development too.
     const prev = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
     try {
       const mock = createTestPluginContext({ analytics: { top_users: [] } });
 
-      // No forwarded headers at all — would reject in production.
+      // The development-only fallback is also used at the dispatch boundary.
       const result = await mock.ctx.executeTool(
         mockReq({}),
         "analytics",
@@ -229,10 +290,9 @@ describe("createTestPluginContext — asUser dev-mode branch", () => {
       );
 
       expect(result).toEqual([]);
-      // It still records the dispatch as an OBO call; userId is unset because
-      // no user header was present (dev skips impersonation, does not invent one).
+      // No caller was established.
       expect(mock.toolCalls).toHaveLength(1);
-      expect(mock.toolCalls[0]).toMatchObject({ asUser: true });
+      expect(mock.toolCalls[0]).toMatchObject({ asUser: false });
       expect(mock.toolCalls[0]?.userId).toBeUndefined();
     } finally {
       process.env.NODE_ENV = prev;

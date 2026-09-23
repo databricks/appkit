@@ -1,16 +1,18 @@
 import type {
+  AppKitApi,
   BasePlugin,
   CacheConfig,
   InputPluginMap,
   OptionalConfigPluginDef,
   PluginConstructor,
   PluginData,
-  PluginMap,
 } from "shared";
 
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { createRequestScope } from "../context/request-scope";
+import { scopeApi } from "../context/scoped-api";
 import {
   isInternalTelemetryEnabled,
   TelemetryReporter,
@@ -41,6 +43,29 @@ export class AppKit<TPlugins extends InputPluginMap> {
   #context: PluginContext;
   /** Owns the shutdown sequence; assigned once every plugin has started. */
   #lifecycle: LifecycleManager | undefined;
+
+  /** Execute a block or a single plugin call as the requesting user. */
+  asUser(req: import("express").Request) {
+    const scope = createRequestScope(req);
+    const kit: Record<string, unknown> = Object.create(null);
+    for (const [name, plugin] of Object.entries(this.#pluginInstances)) {
+      Object.defineProperty(kit, name, {
+        enumerable: true,
+        get: () =>
+          scopeApi(
+            scope.run(() => plugin.exports?.() ?? {}),
+            scope,
+            plugin,
+          ),
+      });
+    }
+    Object.defineProperty(kit, "run", {
+      value: async <T>(
+        fn: (kit: Record<string, unknown>) => T | Promise<T>,
+      ): Promise<T> => scope.run(() => fn(kit)),
+    });
+    return Object.freeze(kit);
+  }
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
@@ -90,6 +115,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
     pluginData: OptionalConfigPluginDef<T>,
     extraData?: Record<string, unknown>,
   ) {
+    if (name === "run" || /^as[A-Z]/.test(name)) {
+      throw new Error(
+        `Plugin name "${name}" is reserved for execution scoping`,
+      );
+    }
     const { plugin: Plugin, config: pluginConfig } = pluginData;
     const baseConfig = {
       ...config,
@@ -156,10 +186,8 @@ export class AppKit<TPlugins extends InputPluginMap> {
    * since the plugin manages its own `asUser` per-call (e.g. files plugin).
    * When it returns a plain object, the standard `asUser` wrapper is added.
    *
-   * The OBO-side wrapping lives inside `Plugin.asUser` — calling
-   * `plugin.asUser(req).exports()` returns exports whose functions already
-   * run inside the user's AsyncLocalStorage scope. AppKit only adapts the
-   * shape; it does not own the user-context concept.
+   * This preserves the deprecated per-plugin API. Both entry points delegate
+   * to the shared request scope; new code should use the app-level API.
    */
   private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
     // If plugin doesn't implement exports(), return empty object
@@ -181,6 +209,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     return {
       ...objExports,
       /**
+       * @deprecated Use appkit.asUser(req) instead.
        * Execute operations using the user's identity from the request.
        * Returns user-scoped exports where all methods execute with the
        * user's Databricks credentials instead of the service principal.
@@ -198,7 +227,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
       client?: WorkspaceClient;
-      onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+      onPluginsReady?: (appkit: AppKitApi<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
       /**
        * Skip installing the SIGTERM/SIGINT handlers. Internal, and not exposed
@@ -208,7 +237,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
        */
       installSignalHandlers?: boolean;
     } = {},
-  ): Promise<PluginMap<T>> {
+  ): Promise<AppKitApi<T>> {
     // Initialize core services
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
@@ -248,7 +277,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     await instance.#context.emitLifecycle("setup:complete");
 
-    const app = instance as unknown as PluginMap<T>;
+    const app = instance as typeof instance & AppKitApi<T>;
 
     if (config.onPluginsReady) {
       logger.debug("Running onPluginsReady hook");
@@ -421,9 +450,9 @@ export async function createApp<
     cache?: CacheConfig;
     client?: WorkspaceClient;
     /** Runs after plugin setup but **before** the server starts. */
-    onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+    onPluginsReady?: (appkit: AppKitApi<T>) => void | Promise<void>;
     disableInternalTelemetry?: boolean;
   } = {},
-): Promise<PluginMap<T>> {
+): Promise<AppKitApi<T>> {
   return AppKit._createApp(config);
 }

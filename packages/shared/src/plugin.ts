@@ -248,6 +248,7 @@ export type WithAsUser<SDK> = SDK extends (...args: any[]) => any
   ? SDK
   : SDK & {
       /**
+       * @deprecated Use appkit.asUser(req) instead.
        * Execute operations using the user's identity from the request.
        * Returns a user-scoped SDK where all methods execute with the
        * user's Databricks credentials instead of the service principal.
@@ -272,6 +273,38 @@ export type PluginMap<
     PluginExports<InstanceType<P["plugin"]>>
   >;
 };
+
+/** A scoped SDK cannot change the execution principal through chaining. */
+export type ScopedExports<T> = T extends (...args: any[]) => any
+  ? T
+  : T extends Promise<infer R>
+    ? Promise<ScopedExports<R>>
+    : T extends object
+      ? {
+          [K in keyof T as K extends `as${Capitalize<string>}`
+            ? never
+            : K]: ScopedExports<T[K]>;
+        }
+      : T;
+
+export type ScopedPluginMap<
+  U extends readonly PluginData<PluginConstructor, unknown, string>[],
+> = {
+  [P in U[number] as P["name"]]: ScopedExports<
+    PluginExports<InstanceType<P["plugin"]>>
+  >;
+};
+
+export type UserScopedApp<
+  U extends readonly PluginData<PluginConstructor, unknown, string>[],
+> = ScopedPluginMap<U> & {
+  run<T>(fn: (kit: ScopedPluginMap<U>) => T | Promise<T>): Promise<T>;
+};
+
+/** App instance with plugin exports and an explicit caller-scoped entry point. */
+export type AppKitApi<
+  U extends readonly PluginData<PluginConstructor, unknown, string>[],
+> = PluginMap<U> & { asUser(req: IAppRequest): UserScopedApp<U> };
 
 /** Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. */
 export type PluginData<T, U, N> = { plugin: T; config: U; name: N };

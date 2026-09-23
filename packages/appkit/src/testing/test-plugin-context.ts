@@ -9,11 +9,17 @@ import { afterEach, onTestFinished } from "vitest";
 
 import { CacheManager } from "../cache";
 import { InMemoryStorage } from "../cache/storage";
+import { getCallerContext } from "../context";
+import { createRequestScope } from "../context/request-scope";
 import { isToolProvider, PluginContext } from "../core/plugin-context";
-import { AuthenticationError } from "../errors";
 import type { Plugin } from "../plugin";
 import type { ITelemetry } from "../telemetry";
-import { applyEnv, createMockTelemetry, mockServiceContext } from "./fixtures";
+import {
+  applyEnv,
+  createMockTelemetry,
+  fakeUserContext,
+  mockServiceContext,
+} from "./fixtures";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
 
 /**
@@ -89,17 +95,8 @@ export interface RecordedToolCall {
   /** The abort signal `executeTool` composed (timeout ∘ caller). */
   signal?: AbortSignal;
   /**
-   * Whether the dispatch was resolved through the on-behalf-of (`asUser`)
-   * path. `PluginContext.executeTool` always calls `provider.asUser(req)`, so
-   * for a tool reached through `executeTool` this is `true` — and, because the
-   * fake `asUser` enforces the same token precondition as the real
-   * {@link Plugin.asUser}, a request with no `x-forwarded-access-token` makes
-   * that call **throw** rather than record `asUser: true`. The meaningful
-   * assertions are therefore: a well-formed request records `asUser: true`
-   * with {@link userId} set, and a token-less request rejects.
-   *
-   * The fake replicates the token precondition only, not the real dev-mode
-   * OTel `isDevOboFallback()` marker — assert OBO here, not via that flag.
+   * Whether dispatch ran in a caller scope, inherited or established from
+   * the forwarded request credentials.
    */
   asUser: boolean;
   /**
@@ -185,7 +182,7 @@ export interface TestPluginContext {
  * workspace, no OpenTelemetry pipeline, no network.
  *
  * The context is the *real* class, so route buffering, the tool registry,
- * timeout composition, and the on-behalf-of (`asUser`) path all run for real.
+ * timeout composition, and ambient caller inheritance all run for real.
  * Only three edges are faked, matching the seams the class actually has:
  *
  * - **Telemetry** is a mock provider injected into the context (the one
@@ -230,9 +227,15 @@ export function createTestPluginContext(
   return createTestPluginContextWithOptions(fakes, options);
 }
 
-function createTestPluginContextSync(fakes: FakeProviders): TestPluginContext {
+function createTestPluginContextSync(
+  fakes: FakeProviders,
+  client = createMockWorkspaceClient(),
+): TestPluginContext {
   const telemetry = createMockTelemetry();
-  const ctx = new PluginContext({ telemetry });
+  const createCallerContext = fakeUserContext(client, {
+    workspaceId: Promise.resolve("test-workspace-id"),
+  });
+  const ctx = new PluginContext({ telemetry, createCallerContext });
 
   const toolCalls: RecordedToolCall[] = [];
   const routes: RecordedRoute[] = [];
@@ -307,48 +310,36 @@ function createTestPluginContextSync(fakes: FakeProviders): TestPluginContext {
 
     const base: ToolProvider = {
       getAgentTools: () => record.tools,
-      executeAgentTool: (toolName, args, signal) =>
-        resolve(toolName, args, signal, false, undefined),
+      executeAgentTool: (toolName, args, signal) => {
+        const caller = getCallerContext();
+        return resolve(
+          toolName,
+          args,
+          signal,
+          !!caller,
+          caller?.principal.userId,
+        );
+      },
     };
 
-    // Mirror the real `Plugin.asUser` token precondition (plugin.ts) so the
-    // recorded `asUser` flag reflects genuine user-scope resolution rather than
-    // being unconditionally true: a request with no `x-forwarded-access-token`
-    // throws `missingToken` (production behavior), except in development where
-    // the real code skips impersonation. This is edge-faking of asUser's
-    // *contract*, not a reimplementation of `runInUserContext`/`ServiceContext`.
-    //
-    // Deliberately NOT reproduced: the real dev-mode path sets an OTel
-    // `DEV_OBO_FALLBACK_KEY` marker (read by `isDevOboFallback()`). That key is
-    // module-private telemetry plumbing; assert OBO via the recorded
-    // `asUser`/`userId` fields, not `isDevOboFallback()`.
+    // Reuse production header validation and ALS. Only the client is faked.
     const asUser = (req: IAppRequest): ToolProvider => {
       record.asUserRequests.push(req as express.Request);
-      const token = (req as express.Request)
-        .header?.("x-forwarded-access-token")
-        ?.trim();
-      const userId = (req as express.Request)
-        .header?.("x-forwarded-user")
-        ?.trim();
-      const isDev = process.env.NODE_ENV === "development";
-
-      if (!token && !isDev) {
-        throw AuthenticationError.missingToken("user token");
-      }
-      if (token && !userId && !isDev) {
-        throw AuthenticationError.missingUserId();
-      }
+      const scope = createRequestScope(
+        req as express.Request,
+        createCallerContext,
+      );
 
       return {
         ...base,
         executeAgentTool: (toolName, args, signal) =>
-          resolve(toolName, args, signal, true, userId),
+          scope.run(() => base.executeAgentTool(toolName, args, signal)),
       };
     };
 
-    // `registerToolProvider` expects the full ToolProviderPlugin shape
-    // (BasePlugin & ToolProvider & { asUser }). executeTool only ever calls
-    // `asUser` and `executeAgentTool`; the remaining BasePlugin surface is
+    // executeTool calls executeAgentTool under the ambient caller scope.
+    // Keep asUser for older tests that call the provider directly.
+    // The remaining BasePlugin surface is
     // never touched for a registered provider, so a focused fake plus a cast
     // is sufficient and avoids reimplementing a plugin.
     const provider = {
@@ -427,7 +418,7 @@ function createTestPluginContextWithOptions(
   const restoreEnv = applyEnv(envVars);
 
   // Create the base context (without options this time, since we're handling everything)
-  const base = createTestPluginContextSync(fakes);
+  const base = createTestPluginContextSync(fakes, client);
 
   // Restore function: restores env and service context (idempotent)
   let hasRestored = false;
