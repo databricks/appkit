@@ -77,7 +77,7 @@ function processAllFiles(dir: string): void {
     if (
       entry.name === "node_modules" ||
       entry.name === "dist" ||
-      entry.name.startsWith(".")
+      (entry.isDirectory() && entry.name.startsWith("."))
     ) {
       continue;
     }
@@ -99,7 +99,7 @@ function processAllFiles(dir: string): void {
       // Replace simple placeholders
       for (const [key, value] of Object.entries(placeholders)) {
         if (content.includes(key)) {
-          content = content.replace(new RegExp(key, "g"), value);
+          content = content.replaceAll(key, value);
           modified = true;
         }
       }
