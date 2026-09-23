@@ -164,6 +164,82 @@ jobs:
           DATABRICKS_WORKSPACE_ID: e2e-mock
           DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
 
+  template-deploy-shape:
+    name: Template Deploy-Shape (pnpm frozen-lockfile smoke test)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.appkit == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Scaffold template into scratch directory
+        run: pnpm exec tsx tools/smoke-test-template.ts
+
+      - name: Install dependencies (frozen lockfile from committed pnpm-lock.yaml)
+        working-directory: .smoke-test/app
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify @ast-grep/napi-linux-x64-gnu materialized
+        run: |
+          if [ ! -d ".smoke-test/app/node_modules/@ast-grep/napi-linux-x64-gnu" ]; then
+            echo "❌ Error: @ast-grep/napi-linux-x64-gnu did not materialize"
+            echo ""
+            echo "Expected: .smoke-test/app/node_modules/@ast-grep/napi-linux-x64-gnu/"
+            echo ""
+            echo "This indicates that supportedArchitectures or allowBuilds in pnpm-workspace.yaml"
+            echo "are misconfigured or the platform is not linux-x64-glibc. The deployed app would"
+            echo "fail to load @ast-grep/napi (used by 'appkit lint' for AST-based linting)."
+            echo ""
+            exit 1
+          fi
+          echo "✓ @ast-grep/napi-linux-x64-gnu materialized"
+
+      - name: Verify native binary is present and accessible
+        run: |
+          # Verify the binary directory and at least one .node file exist.
+          # This confirms that the native optional dependency was correctly materialized on this platform.
+          BINARY_DIR=".smoke-test/app/node_modules/@ast-grep/napi-linux-x64-gnu"
+          if [ ! -d "$BINARY_DIR" ]; then
+            echo "❌ Error: native binary directory not found: $BINARY_DIR"
+            ls -la ".smoke-test/app/node_modules/@ast-grep/"
+            exit 1
+          fi
+          # Check for .node files
+          NODE_FILES=$(find "$BINARY_DIR" -name "*.node" -type f)
+          if [ -z "$NODE_FILES" ]; then
+            echo "❌ Error: no .node files found in $BINARY_DIR"
+            ls -la "$BINARY_DIR"
+            exit 1
+          fi
+          echo "✓ Native binary verified"
+          echo "$NODE_FILES"
+
+      - name: Build client and server
+        working-directory: .smoke-test/app
+        run: |
+          echo "Running build:client and build:server (skips prebuild typegen, which needs a workspace)"
+          pnpm run build:client
+          pnpm run build:server
+
+      - name: Verify build outputs exist
+        run: |
+          if [ ! -f ".smoke-test/app/client/dist/index.html" ]; then
+            echo "❌ Error: client build did not produce dist/index.html"
+            exit 1
+          fi
+          if [ ! -f ".smoke-test/app/dist/server.js" ]; then
+            echo "❌ Error: server build did not produce dist/server.js"
+            exit 1
+          fi
+          echo "✓ Build outputs verified"
+
   pr-template-artifact:
     name: PR Template Artifact
     needs: detect-changes
