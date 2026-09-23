@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   AgentAdapter,
@@ -15,7 +15,11 @@ import {
   SUPERVISOR_EXTENSION_KEY,
   type SupervisorTool,
 } from "../../agents/supervisor-api";
+import { type Principal, runInCallerContext } from "../../context";
+import { getClientOptions } from "../../context/client-options";
+import { AuthenticationError, ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
+import { createWorkspaceClient } from "../../workspace-client";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
@@ -42,11 +46,22 @@ export interface RunAgentInput {
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
   /**
+   * Explicit user credentials for standalone execution. Host and workspace ID
+   * are required, so no CLI profile or service-principal identity is selected.
+   * Omit to inherit the ambient scope, or use SP when no caller scope is open.
+   * Obtain the token through a trusted authentication flow, not model input.
+   */
+  caller?: {
+    readonly token: string;
+    readonly principal: Principal;
+    readonly host: string;
+    readonly workspaceId: string;
+  };
+  /**
    * Optional plugin list. Required when `def.tools` is the function form
    * `(plugins) => Record<string, AgentTool>` and the function dereferences
    * any plugins. `runAgent` constructs a fresh instance per plugin and
-   * dispatches tool calls against it as the service principal (no OBO —
-   * there is no HTTP request in standalone mode).
+   * dispatches tool calls with the run's ambient principal.
    */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
 }
@@ -63,12 +78,12 @@ export interface RunAgentResult {
  * inline tools, and drives the adapter's `run()` loop to completion.
  *
  * Limitations vs. running through the agents() plugin:
- * - **No OBO and no approval gate** — there is no HTTP request, so plugin
- *   tools run as the service principal. The agents-plugin approval gate
+ * - **No approval gate**: tools inherit the run's principal, SP by default.
+ *   Explicit caller credentials enable user execution. The agents-plugin gate
  *   that prompts for human confirmation on `effect: "write" | "update" |
  *   "destructive"` tools is also absent. LLM-controlled tool arguments
- *   flow straight through to the SP. Treat standalone runAgent as a
- *   trusted-prompt environment (CI, batch eval, internal scripts) — not
+ *   flow straight through to the tools. Treat standalone runAgent as a
+ *   trusted-prompt environment (CI, batch eval, internal scripts), not
  *   as an exposed user-facing surface.
  * - **Hosted tools (MCP) are not supported** — they require a live MCP
  *   client that only exists inside the agents plugin's lifecycle.
@@ -87,6 +102,43 @@ export interface RunAgentResult {
  *   createApp instead" message — not mid-stream.
  */
 export async function runAgent(
+  def: AgentDefinition,
+  input: RunAgentInput,
+): Promise<RunAgentResult> {
+  if (input.caller) {
+    const { principal, host, workspaceId } = input.caller;
+    const token = input.caller.token.trim();
+    if (!token) throw AuthenticationError.missingToken("user token");
+    if (principal.type !== "user" || !principal.userId.trim()) {
+      throw AuthenticationError.missingUserId();
+    }
+    if (!host.trim() || !workspaceId.trim()) {
+      throw new ConfigurationError(
+        "runAgent caller requires host and workspaceId",
+      );
+    }
+    const caller = {
+      principal: { ...principal, userId: principal.userId.trim() },
+      client: createWorkspaceClient({
+        token,
+        host,
+        authType: "pat",
+        clientOptions: getClientOptions(),
+      }),
+      workspaceId: Promise.resolve(workspaceId),
+      tokenFingerprint: createHash("sha256")
+        .update(token)
+        .digest("hex")
+        .slice(0, 16),
+    };
+    // Credentials are not carried into adapter inputs, tools, or sub-agent options.
+    const { caller: _credentials, ...scopedInput } = input;
+    return runInCallerContext(caller, () => runStandalone(def, scopedInput));
+  }
+  return runStandalone(def, input);
+}
+
+async function runStandalone(
   def: AgentDefinition,
   input: RunAgentInput,
 ): Promise<RunAgentResult> {
@@ -580,11 +632,8 @@ function providerCacheLookup(
 /**
  * Lightweight `ToolProvider` shape check used by standalone `runAgent`.
  *
- * Distinct from `core/plugin-context.isToolProvider` which also requires
- * `asUser` (request-scoped, only meaningful when running inside `createApp`
- * with a live HTTP context). Standalone plugins are constructed without a
- * `WorkspaceClient` and have no request to scope to, so checking only the
- * two `ToolProvider` methods is the right narrowing here.
+ * Standalone plugins need only these methods. Execution identity is inherited
+ * from the run's caller scope, without requiring a per-plugin asUser helper.
  */
 function isStandaloneToolProvider(value: unknown): value is ToolProvider {
   if (typeof value !== "object" || value === null) return false;
