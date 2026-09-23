@@ -1,6 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { ConfigurationError } from "../errors";
+import {
+  AppResources,
+  type AppResourceBindings,
+} from "../resources/app-resources";
+import {
+  getWarehouseId as getResourceWarehouseId,
+  runWithResourceBindings,
+} from "../resources/warehouse";
 import {
   type CallerContext,
   type ExecutionContext,
@@ -18,7 +25,7 @@ import {
 interface CallerScope {
   readonly caller: CallerContext & UserContext;
   // Legacy overrides stay outside caller identity. New callers use the app binding.
-  readonly legacyResources?: Readonly<{ warehouseId?: Promise<string> }>;
+  readonly legacyResources?: AppResourceBindings;
 }
 
 const executionContextStorage = new AsyncLocalStorage<CallerScope>();
@@ -32,7 +39,9 @@ function runInCallerScope<T>(
     caller: immutableCallerContext(callerContext),
     legacyResources,
   });
-  return executionContextStorage.run(scope, fn);
+  return runWithResourceBindings(legacyResources, () =>
+    executionContextStorage.run(scope, fn),
+  );
 }
 
 /**
@@ -115,24 +124,20 @@ export function getWorkspaceClient() {
 }
 
 /**
- * Get the app's warehouse binding, independently of the executing principal.
- * Deprecated user scopes can still supply their original warehouse override.
+ * @deprecated Import getWarehouseId from @databricks/appkit instead of context.
  */
 export function getWarehouseId(): Promise<string> {
-  const warehouseId = resolveWarehouseId(executionContextStorage.getStore());
-  if (!warehouseId) {
-    throw ConfigurationError.resourceNotFound(
-      "Warehouse ID",
-      "No plugin requires a SQL Warehouse. Add a sql_warehouse resource to your plugin manifest, or set DATABRICKS_WAREHOUSE_ID",
-    );
-  }
-  return warehouseId;
+  warnContextDeprecation(
+    "context.getWarehouseId",
+    "getWarehouseId() from @databricks/appkit",
+  );
+  return getResourceWarehouseId();
 }
 
 function resolveWarehouseId(scope: CallerScope | undefined) {
   return scope?.legacyResources
     ? scope.legacyResources.warehouseId
-    : ServiceContext.get().warehouseId;
+    : AppResources.get().warehouseId;
 }
 
 /**

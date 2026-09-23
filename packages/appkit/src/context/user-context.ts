@@ -23,7 +23,7 @@ export interface UserContext {
   userEmail?: string;
   /** Truncated SHA-256 hash of the user's OBO token, used to detect token rotation */
   tokenFingerprint?: string;
-  /** @deprecated Use getWarehouseId(). Warehouse bindings are separate from caller identity. */
+  /** @deprecated Use getWarehouseId() from @databricks/appkit. */
   warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID (inherited from service context) */
   workspaceId: Promise<string>;
@@ -84,7 +84,10 @@ export function legacyUserContext(
     Object.defineProperties(
       {
         get warehouseId() {
-          warnContextDeprecation("UserContext.warehouseId", "getWarehouseId()");
+          warnContextDeprecation(
+            "UserContext.warehouseId",
+            "getWarehouseId() from @databricks/appkit",
+          );
           return resolveWarehouseId();
         },
       },
