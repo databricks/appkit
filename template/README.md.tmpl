@@ -19,7 +19,7 @@ A Databricks App powered by [AppKit](https://developers.databricks.com/docs/appk
 
 ## Prerequisites
 
-- Node.js v22+ and npm
+- Node.js v22+ and pnpm
 - Databricks CLI (for deployment)
 - Access to a Databricks workspace
 
@@ -99,7 +99,7 @@ databricks bundle deploy --profile production
 ### Install Dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### Development
@@ -107,7 +107,7 @@ npm install
 Run the app in development mode with hot reload:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 The app will be available at the URL shown in the console output.
@@ -117,7 +117,7 @@ The app will be available at the URL shown in the console output.
 Build both client and server for production:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 This creates:
@@ -130,7 +130,7 @@ This creates:
 Run the production build:
 
 ```bash
-npm start
+pnpm start
 ```
 
 ## Code Quality
@@ -139,15 +139,15 @@ There are a few commands to help you with code quality:
 
 ```bash
 # Type checking
-npm run typecheck
+pnpm run typecheck
 
 # Linting
-npm run lint
-npm run lint:fix
+pnpm run lint
+pnpm run lint:fix
 
 # Formatting
-npm run format
-npm run format:fix
+pnpm run format
+pnpm run format:fix
 ```
 
 ## Deployment with Databricks Asset Bundles
