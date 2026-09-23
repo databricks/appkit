@@ -6,6 +6,7 @@ import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
 
+import { detectPackageManager } from "../../package-manager";
 import {
   fetchRegistryItem,
   fetchVerifiedNames,
@@ -154,13 +155,6 @@ export function pluginExportName(item: RegistryItem): string | null {
   // Prefer the camelCase toPlugin instance over the PascalCase class.
   const chosen = names.find((n) => /^[a-z]/.test(n)) ?? names[0];
   return chosen && JS_IDENTIFIER.test(chosen) ? chosen : null;
-}
-
-function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
-  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
-  if (fs.existsSync(path.join(cwd, "bun.lockb"))) return "bun";
-  return "npm";
 }
 
 /**
