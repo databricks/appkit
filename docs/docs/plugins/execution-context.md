@@ -64,6 +64,29 @@ now include the principal namespace even when an explicit legacy user key is
 supplied. Existing stored entries will have a cold miss after upgrading; users
 and SP continue to have separate cache entries and in-flight work.
 
+## Standalone agents
+
+Standalone `runAgent` can opt into user execution without an HTTP request:
+
+```ts
+await runAgent(agent, {
+  messages: "Summarize my data",
+  caller: {
+    token: userToken,
+    principal: { type: "user", userId },
+    host: "https://your-workspace.cloud.databricks.com",
+    workspaceId,
+  },
+});
+```
+
+Get credentials through a trusted authentication flow, never from model output.
+The caller applies to plugin initialization, model adapters, tools, and nested
+agents. Omitting it inherits an existing caller scope or defaults to SP.
+Invalid explicit credentials reject even in development. No service context or
+CLI profile is initialized implicitly. Standalone execution still has no approval
+gate and is intended for trusted scripts and evaluations.
+
 ## Development fallback
 
 With `NODE_ENV=development`, `asUser(req)` without a token logs a warning and
