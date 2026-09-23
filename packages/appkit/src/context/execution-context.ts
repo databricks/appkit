@@ -10,17 +10,30 @@ import { warnContextDeprecation } from "./deprecation";
 import { ServiceContext } from "./service-context";
 import {
   immutableCallerContext,
+  legacyUserContext,
   toCallerContext,
   type UserContext,
 } from "./user-context";
 
-/**
- * AsyncLocalStorage for execution context.
- * Used to pass caller context through the call stack without explicit parameters.
- */
-const executionContextStorage = new AsyncLocalStorage<
-  CallerContext & UserContext
->();
+interface CallerScope {
+  readonly caller: CallerContext & UserContext;
+  // Legacy overrides stay outside caller identity. New callers use the app binding.
+  readonly legacyResources?: Readonly<{ warehouseId?: Promise<string> }>;
+}
+
+const executionContextStorage = new AsyncLocalStorage<CallerScope>();
+
+function runInCallerScope<T>(
+  callerContext: CallerContext,
+  fn: () => T,
+  legacyResources?: CallerScope["legacyResources"],
+): T {
+  const scope = Object.freeze({
+    caller: immutableCallerContext(callerContext),
+    legacyResources,
+  });
+  return executionContextStorage.run(scope, fn);
+}
 
 /**
  * Run a function with an immutable snapshot of the caller context.
@@ -34,15 +47,22 @@ export function runInCallerContext<T>(
   callerContext: CallerContext,
   fn: () => T,
 ): T {
-  return executionContextStorage.run(immutableCallerContext(callerContext), fn);
+  return runInCallerScope(callerContext, fn);
 }
 
 /** @deprecated Use runInCallerContext. */
 export function runInUserContext<T>(
-  userContext: UserContext | CallerContext,
+  userContext: UserContext | (CallerContext & Pick<UserContext, "warehouseId">),
   fn: () => T,
 ): T {
   warnContextDeprecation("runInUserContext", "runInCallerContext");
+  if (!("principal" in userContext) || "warehouseId" in userContext) {
+    return runInCallerScope(
+      toCallerContext(userContext),
+      fn,
+      Object.freeze({ warehouseId: userContext.warehouseId }),
+    );
+  }
   return runInCallerContext(toCallerContext(userContext), fn);
 }
 
@@ -57,7 +77,7 @@ export function runInUserContext<T>(
 export function getExecutionContext(): ExecutionContext {
   const callerContext = executionContextStorage.getStore();
   if (callerContext) {
-    return callerContext;
+    return callerContext.caller;
   }
   return ServiceContext.get();
 }
@@ -95,17 +115,24 @@ export function getWorkspaceClient() {
 }
 
 /**
- * Get the warehouse ID promise.
+ * Get the app's warehouse binding, independently of the executing principal.
+ * Deprecated user scopes can still supply their original warehouse override.
  */
 export function getWarehouseId(): Promise<string> {
-  const ctx = getExecutionContext();
-  if (!ctx.warehouseId) {
+  const warehouseId = resolveWarehouseId(executionContextStorage.getStore());
+  if (!warehouseId) {
     throw ConfigurationError.resourceNotFound(
       "Warehouse ID",
       "No plugin requires a SQL Warehouse. Add a sql_warehouse resource to your plugin manifest, or set DATABRICKS_WAREHOUSE_ID",
     );
   }
-  return ctx.warehouseId;
+  return warehouseId;
+}
+
+function resolveWarehouseId(scope: CallerScope | undefined) {
+  return scope?.legacyResources
+    ? scope.legacyResources.warehouseId
+    : ServiceContext.get().warehouseId;
 }
 
 /**
@@ -129,11 +156,14 @@ export function isInUserContext(): boolean {
  * to be initialized and never throws.
  */
 export function getCallerContext(): CallerContext | undefined {
-  return executionContextStorage.getStore();
+  return executionContextStorage.getStore()?.caller;
 }
 
 /** @deprecated Use getCallerContext and its principal field. */
 export function getUserContext(): (CallerContext & UserContext) | undefined {
   warnContextDeprecation("getUserContext", "getCallerContext");
-  return executionContextStorage.getStore();
+  const scope = executionContextStorage.getStore();
+  return scope
+    ? legacyUserContext(scope.caller, () => resolveWarehouseId(scope))
+    : undefined;
 }

@@ -11,6 +11,7 @@ import {
   getCurrentPrincipalKey,
   getCurrentUserId,
   getExecutionContext,
+  getWarehouseId,
   getWorkspaceClient,
   isCallerContext,
   runInCallerContext,
@@ -36,7 +37,6 @@ function caller(userId: string): CallerContext {
     client: createMockWorkspaceClient(),
     principal: { type: "user", userId },
     workspaceId: service.workspaceId,
-    warehouseId: service.warehouseId,
   };
 }
 
@@ -155,7 +155,7 @@ describe("caller execution context", () => {
       }),
     );
     expect(context.client).toBe(client);
-    expect(context.warehouseId).toBe(service.warehouseId);
+    expect(context).not.toHaveProperty("warehouseId");
     expect(context.workspaceId).toBe(service.workspaceId);
     expect(context.tokenFingerprint).toHaveLength(16);
     expect(Object.isFrozen(context)).toBe(true);
@@ -186,6 +186,7 @@ describe("caller execution context", () => {
           expect(legacy.userName).toBe("Alice");
           expect(legacy.userEmail).toBe("alice@example.com");
           expect(legacy.isUserContext).toBe(true);
+          expect(legacy.warehouseId).toBe(service.warehouseId);
           return 42;
         }),
       ).toBe(42);
@@ -201,6 +202,7 @@ describe("caller execution context", () => {
       "UserContext.userName",
       "UserContext.userEmail",
       "UserContext.isUserContext",
+      "UserContext.warehouseId",
     ]) {
       expect(
         warn.mock.calls.filter(([message]) =>
@@ -223,5 +225,96 @@ describe("caller execution context", () => {
     });
     expect(legacy).not.toHaveProperty("principal");
     expect(Object.isFrozen(legacy)).toBe(false);
+  });
+
+  test("shares the app warehouse without changing the caller's client", async () => {
+    expect(getWarehouseId()).toBe(service.warehouseId);
+    const alice = caller("alice");
+    await runInCallerContext(alice, async () => {
+      await Promise.resolve();
+      expect(getCallerContext()).not.toHaveProperty("warehouseId");
+      expect(getExecutionContext()).not.toHaveProperty("warehouseId");
+      expect(getWarehouseId()).toBe(service.warehouseId);
+      expect(await getWarehouseId()).toBe("warehouse-123");
+      expect(getWorkspaceClient()).toBe(alice.client);
+    });
+    expect(getWorkspaceClient()).toBe(service.client);
+  });
+
+  test("reports a missing app warehouse in both service and caller scopes", () => {
+    vi.mocked(ServiceContext.get).mockReturnValue({
+      ...service,
+      warehouseId: undefined,
+    });
+    expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
+    runInCallerContext(caller("alice"), () => {
+      expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
+    });
+  });
+
+  test("ignores resource fields on canonical caller inputs", () => {
+    const input = {
+      ...caller("alice"),
+      warehouseId: Promise.resolve("not-the-app-warehouse"),
+    };
+    runInCallerContext(input, () => {
+      expect(getCallerContext()).not.toHaveProperty("warehouseId");
+      expect(getWarehouseId()).toBe(service.warehouseId);
+    });
+  });
+
+  test("isolates and snapshots legacy warehouse overrides outside caller identity", async () => {
+    const warehouseId = Promise.resolve("legacy-warehouse");
+    const legacy: UserContext = {
+      client: createMockWorkspaceClient(),
+      workspaceId: service.workspaceId,
+      userId: "alice",
+      isUserContext: true,
+      warehouseId,
+    };
+    await Promise.all([
+      runInUserContext(legacy, async () => {
+        legacy.warehouseId = Promise.resolve("changed");
+        await Promise.resolve();
+        expect(getWarehouseId()).toBe(warehouseId);
+        expect(getUserContext()?.warehouseId).toBe(warehouseId);
+        expect(getCallerContext()).not.toHaveProperty("warehouseId");
+        expect(getWorkspaceClient()).toBe(legacy.client);
+        await expect(
+          runInCallerContext(caller("bob"), async () => {
+            expect(getWarehouseId()).toBe(service.warehouseId);
+            throw new Error("nested failure");
+          }),
+        ).rejects.toThrow("nested failure");
+        expect(getWarehouseId()).toBe(warehouseId);
+      }),
+      runInCallerContext(caller("charlie"), async () => {
+        await Promise.resolve();
+        expect(getWarehouseId()).toBe(service.warehouseId);
+      }),
+    ]);
+    expect(getWarehouseId()).toBe(service.warehouseId);
+  });
+
+  test("preserves a missing warehouse in legacy contexts", () => {
+    runInUserContext(
+      {
+        client: service.client,
+        workspaceId: service.workspaceId,
+        userId: "alice",
+        isUserContext: true,
+      },
+      () => {
+        expect(getUserContext()?.warehouseId).toBeUndefined();
+        expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
+      },
+    );
+  });
+
+  test("legacy entry points accept warehouse-free caller contexts", () => {
+    runInUserContext(caller("alice"), () => {
+      expect(getWarehouseId()).toBe(service.warehouseId);
+      expect(getUserContext()?.warehouseId).toBe(service.warehouseId);
+    });
   });
 });

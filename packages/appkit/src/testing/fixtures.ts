@@ -139,10 +139,7 @@ export type OboOption =
  *
  * @internal
  */
-export function fakeUserContext(
-  client: Any,
-  ids: { warehouseId?: Any; workspaceId: Any },
-) {
+export function fakeUserContext(client: Any, ids: { workspaceId: Any }) {
   return (
     token: string,
     userId: string,
@@ -161,7 +158,6 @@ export function fakeUserContext(
         .update(token)
         .digest("hex")
         .slice(0, 16),
-      warehouseId: ids.warehouseId,
       workspaceId: ids.workspaceId,
     });
   };
