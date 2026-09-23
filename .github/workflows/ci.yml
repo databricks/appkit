@@ -165,7 +165,7 @@ jobs:
           DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
 
   template-deploy-shape:
-    name: Template Deploy-Shape (pnpm frozen-lockfile smoke test)
+    name: Template Deploy-Shape (pnpm install, build, and startup)
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
@@ -183,130 +183,36 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
-
-      - name: Scaffold template into scratch directory
-        run: pnpm exec tsx tools/smoke-test-template.ts
-
-      - name: Install dependencies (frozen lockfile from committed pnpm-lock.yaml)
-        working-directory: .smoke-test/app
+          cache: 'pnpm'
+      - name: Install tooling dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Verify Linux native dependency loads
-        working-directory: .smoke-test/app
-        run: |
-          node <<'NODE'
-          const assert = require('node:assert/strict');
-          const { createRequire } = require('node:module');
-          // Resolve from the parent dependency to support pnpm's isolated layout.
-          const napiRequire = createRequire(require.resolve('@ast-grep/napi'));
-          const binaryPath = napiRequire.resolve('@ast-grep/napi-linux-x64-gnu');
-          napiRequire('@ast-grep/napi-linux-x64-gnu');
-          const { Lang, parse } = require('@ast-grep/napi');
-          assert.equal(parse(Lang.JavaScript, 'const value = 1;').root().kind(), 'program');
-          console.log(`✓ Native binary loaded and parser verified: ${binaryPath}`);
-          NODE
-
-      - name: Verify @ast-grep/napi runtime-loads successfully (pnpm)
-        working-directory: .smoke-test/app
-        run: |
-          node -e "const n = require('@ast-grep/napi'); if (typeof n.parse !== 'function') { throw new Error('parse function not found'); } console.log('✓ @ast-grep/napi.parse is callable');"
-
-      - name: Build client and server
-        working-directory: .smoke-test/app
-        run: |
-          echo "Running build:client and build:server (skips prebuild typegen, which needs a workspace)"
-          pnpm run build:client
-          pnpm run build:server
-
-      - name: Verify build outputs exist
-        run: |
-          if [ ! -f ".smoke-test/app/client/dist/index.html" ]; then
-            echo "❌ Error: client build did not produce dist/index.html"
-            exit 1
-          fi
-          if [ ! -f ".smoke-test/app/dist/server.js" ]; then
-            echo "❌ Error: server build did not produce dist/server.js"
-            exit 1
-          fi
-          echo "✓ Build outputs verified"
+      - name: Install, build, and start the pnpm template
+        run: pnpm exec tsx tools/smoke-test-template.ts --package-manager pnpm --output-dir .smoke-test/app-pnpm --run
 
   template-deploy-shape-npm:
-    name: Template Deploy-Shape (npm install smoke test)
+    name: Template Deploy-Shape (npm install, build, and startup)
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
-
-      - name: Scaffold template into scratch directory (npm)
-        run: pnpm exec tsx tools/smoke-test-template.ts --package-manager npm --output-dir .smoke-test/app-npm
-
-      - name: Install dependencies (npm from committed package-lock.json)
-        working-directory: .smoke-test/app-npm
-        run: npm install
-
-      - name: Verify @ast-grep/napi-linux-x64-gnu materialized
-        run: |
-          if [ ! -d ".smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu" ]; then
-            echo "❌ Error: @ast-grep/napi-linux-x64-gnu did not materialize with npm install"
-            echo ""
-            echo "Expected: .smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu/"
-            echo ""
-            echo "The committed package-lock.json is missing the linux entry or the root"
-            echo "optionalDependencies pin was removed. The deployed app would fail to load"
-            echo "@ast-grep/napi (used by 'appkit lint' for AST-based linting)."
-            echo ""
-            exit 1
-          fi
-          echo "✓ @ast-grep/napi-linux-x64-gnu materialized"
-
-      - name: Verify native binary is present and accessible
-        run: |
-          BINARY_DIR=".smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu"
-          if [ ! -d "$BINARY_DIR" ]; then
-            echo "❌ Error: native binary directory not found: $BINARY_DIR"
-            ls -la ".smoke-test/app-npm/node_modules/@ast-grep/" || true
-            exit 1
-          fi
-          NODE_FILES=$(find "$BINARY_DIR" -name "*.node" -type f)
-          if [ -z "$NODE_FILES" ]; then
-            echo "❌ Error: no .node files found in $BINARY_DIR"
-            ls -la "$BINARY_DIR"
-            exit 1
-          fi
-          echo "✓ Native binary verified"
-          echo "$NODE_FILES"
-
-      - name: Verify @ast-grep/napi runtime-loads successfully (npm)
-        working-directory: .smoke-test/app-npm
-        run: |
-          node -e "const n = require('@ast-grep/napi'); if (typeof n.parse !== 'function') { throw new Error('parse function not found'); } console.log('✓ @ast-grep/napi.parse is callable');"
-
-      - name: Build client and server (using npm scripts)
-        working-directory: .smoke-test/app-npm
-        run: |
-          echo "Running npm run build:client and npm run build:server"
-          npm run build:client
-          npm run build:server
-
-      - name: Verify build outputs exist
-        run: |
-          if [ ! -f ".smoke-test/app-npm/client/dist/index.html" ]; then
-            echo "❌ Error: client build did not produce dist/index.html"
-            exit 1
-          fi
-          if [ ! -f ".smoke-test/app-npm/dist/server.js" ]; then
-            echo "❌ Error: server build did not produce dist/server.js"
-            exit 1
-          fi
-          echo "✓ Build outputs verified"
+          cache: 'pnpm'
+      - name: Install tooling dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install, build, and start the npm template
+        run: pnpm exec tsx tools/smoke-test-template.ts --package-manager npm --output-dir .smoke-test/app-npm --run
 
   pr-template-artifact:
     name: PR Template Artifact
@@ -370,6 +276,9 @@ jobs:
           # --lockfile-only skips rebuilding node_modules over npm's install above.
           pnpm install --lockfile-only --no-frozen-lockfile
           echo "✓ Regenerated pnpm-lock.yaml"
+
+      - name: Verify bundled SDKs in both template locks
+        run: pnpm exec tsx tools/check-template-artifact.ts pr-template
 
       # The scaffold's own vitest suite, run against the tarballs built above
       # rather than the published versions template/package.json pins. This is
@@ -500,4 +409,3 @@ jobs:
     with:
       appkit-remote: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
       appkit-ref: ${{ github.head_ref || github.ref_name }}
-

@@ -16,14 +16,3 @@ allowBuilds:
   '@databricks/appkit': true
   '@databricks/appkit-ui': true
   protobufjs: true
-
-supportedArchitectures:
-  os:
-    - linux
-    - darwin
-  cpu:
-    - x64
-    - arm64
-  libc:
-    - glibc
-    - musl
