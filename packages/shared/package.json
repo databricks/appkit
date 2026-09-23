@@ -33,6 +33,7 @@
     "@types/js-yaml": "4.0.9",
     "@types/json-schema": "7.0.15",
     "@types/node": "25.2.3",
+    "@types/semver": "7.7.1",
     "@types/ws": "8.18.1"
   },
   "types": "./dist/index.d.ts",
@@ -53,6 +54,7 @@
     "dotenv": "16.6.1",
     "js-yaml": "4.3.1",
     "picocolors": "1.1.1",
+    "semver": "7.7.3",
     "yaml": "2.8.2",
     "zod": "4.3.6"
   }

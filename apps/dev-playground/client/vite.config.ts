@@ -29,7 +29,6 @@ export default defineConfig({
   },
   resolve: {
     dedupe: ["react", "react-dom", "recharts"],
-    preserveSymlinks: true,
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@databricks/appkit-ui": path.resolve(

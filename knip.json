@@ -19,6 +19,7 @@
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
     }
   },
+  "ignoreDependencies": ["react-docgen-typescript"],
   "ignore": [
     "**/*.generated.ts",
     "**/*.example.tsx",

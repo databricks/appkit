@@ -3,13 +3,13 @@
   "type": "module",
   "private": true,
   "version": "0.0.2",
-  "packageManager": "pnpm@10.21.0",
+  "packageManager": "pnpm@11.0.8",
   "scripts": {
     "build": "pnpm -r --filter=!docs build:package && pnpm sync:template && pnpm exec tsx tools/generate-plugin-doc-banners.ts && pnpm exec tsx tools/bundle-size.ts",
     "size": "tsx tools/bundle-size.ts",
     "size:baseline": "tsx tools/bundle-size.ts --baseline",
     "size:compare": "tsx tools/bundle-size.ts --compare",
-    "sync:template": "appkit plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
+    "sync:template": "node packages/shared/bin/appkit.js plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "oxlint --fix && oxfmt",
     "check": "oxlint && oxfmt --check",
@@ -21,13 +21,13 @@
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
     "deploy:playground": "pnpm pack:sdk && tsx tools/playground/deploy-playground.ts",
     "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
-    "clean": "pnpm -r clean",
+    "clean": "pnpm -r run clean",
     "dev": "pnpm build && NODE_ENV=development turbo watch build:watch dev",
     "dev:inspect": "NODE_ENV=development pnpm --filter=dev-playground dev:inspect",
     "docs:dev": "pnpm --filter=docs dev",
     "docs:build": "pnpm --filter=docs build",
     "docs:serve": "pnpm --filter=docs serve",
-    "docs:clean": "pnpm --filter=docs clean",
+    "docs:clean": "pnpm --filter=docs run clean",
     "docs:check:fix": "oxlint docs/ --fix && oxfmt docs/",
     "docs:check": "oxlint docs/ && oxfmt --check docs/",
     "docs:format": "oxfmt docs/",
@@ -69,31 +69,24 @@
     "@types/node": "24.7.2",
     "@vitejs/plugin-react": "5.0.4",
     "@vitest/coverage-istanbul": "3.2.4",
+    "esbuild": "0.25.10",
     "husky": "9.1.7",
     "jsdom": "27.0.0",
     "knip": "5.86.0",
     "lint-staged": "15.5.2",
+    "ora": "9.0.0",
     "oxfmt": "0.62.0",
     "oxlint": "1.77.0",
     "publint": "0.3.15",
+    "react-docgen-typescript": "2.4.0",
     "release-it": "19.2.0",
     "tsdown": "0.20.3",
     "tsx": "4.20.6",
     "turbo": "2.6.1",
     "typescript": "5.9.3",
+    "vite": "7.2.4",
     "vite-tsconfig-paths": "5.1.4",
     "vitest": "3.2.4",
     "zod": "4.3.6"
-  },
-  "resolutions": {
-    "conventional-changelog-conventionalcommits": "9.1.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@opentelemetry/core@<2.8.0": "2.8.0",
-      "protobufjs@<7.6.2": "7.6.2",
-      "qs@<6.15.2": "6.15.2",
-      "size-sensor": "1.0.3"
-    }
   }
 }
