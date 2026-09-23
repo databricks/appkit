@@ -1,4 +1,5 @@
 import type { ServiceContextState } from "./service-context";
+import type { UserContext } from "./user-context";
 
 /** The caller identity whose permissions authorize execution, not its resources. */
 export type CallerPrincipal = Readonly<{
@@ -18,6 +19,8 @@ export interface CallerContext {
   /** Truncated SHA-256 hash of the caller token, used to detect rotation. */
   readonly tokenFingerprint?: string;
   readonly workspaceId: Promise<string>;
+  /** @deprecated Use getWarehouseId(). Only legacy context access exposes this field. */
+  readonly warehouseId?: Promise<string>;
 }
 
 const snapshots = new WeakSet<CallerContext>();
@@ -35,7 +38,10 @@ export function snapshotCallerContext(ctx: CallerContext): CallerContext {
   return snapshot;
 }
 
-export type ExecutionContext = ServiceContextState | CallerContext;
+export type ExecutionContext =
+  | ServiceContextState
+  | CallerContext
+  | UserContext;
 
 export function isCallerContext(ctx: ExecutionContext): ctx is CallerContext {
   return "principal" in ctx && ctx.principal.type === "user";
