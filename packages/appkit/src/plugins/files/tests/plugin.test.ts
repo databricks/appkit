@@ -2739,7 +2739,6 @@ describe("FilesPlugin", () => {
         (_token: string, userId: string) => ({
           client: userClient as any,
           principal: { type: "user", userId },
-          warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
         }),
       );
@@ -2914,7 +2913,6 @@ describe("FilesPlugin", () => {
         (_token: string, userId: string) => ({
           client: userClient as any,
           principal: { type: "user", userId },
-          warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
         }),
       );
@@ -3347,7 +3345,6 @@ describe("FilesPlugin", () => {
         (_token: string, userId: string) => ({
           client: userClient as any,
           principal: { type: "user", userId },
-          warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
         }),
       );

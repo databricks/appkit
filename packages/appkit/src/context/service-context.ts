@@ -30,7 +30,10 @@ export interface ServiceContextState {
   readonly client: WorkspaceClient;
   /** The service principal's user ID */
   readonly serviceUserId: string;
-  /** @deprecated Use getWarehouseId() from @databricks/appkit. */
+  /**
+   * @deprecated Use getWarehouseId() from @databricks/appkit.
+   * Retained for one release before removal.
+   */
   readonly warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
   readonly workspaceId: Promise<string>;

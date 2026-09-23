@@ -48,6 +48,10 @@ Credentials still come from the current execution context.
 helper are deprecated compatibility accessors. Use the package-root helper for
 new code. Warehouse environment lookup and development discovery are unchanged.
 
+The service-context property is retained for one release with a one-time
+deprecation warning, then scheduled for removal. Internal callers use the
+resource accessor already.
+
 ## SQL parameters
 
 Use `:paramName` placeholders and optionally annotate parameter types using SQL comments:
