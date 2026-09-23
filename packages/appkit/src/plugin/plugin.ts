@@ -16,7 +16,11 @@ import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
-import { getCurrentUserId, runInUserContext, ServiceContext } from "../context";
+import {
+  getCurrentUserId,
+  runInCallerContext,
+  ServiceContext,
+} from "../context";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -406,7 +410,7 @@ export abstract class Plugin<
    *
    * Returns the `x-forwarded-user` header when present. In development mode
    * (`NODE_ENV=development`) falls back to the current context user ID so
-   * that callers outside an active `runInUserContext` scope still get a
+   * that callers outside an active `runInCallerContext` scope still get a
    * consistent value.
    *
    * @throws AuthenticationError in production when no user header is present.
@@ -458,7 +462,7 @@ export abstract class Plugin<
 
     const effectiveUserId = userId || "dev-user";
 
-    const userContext = ServiceContext.createUserContext(
+    const userContext = ServiceContext.createCallerContext(
       token,
       effectiveUserId,
       undefined,
@@ -468,7 +472,7 @@ export abstract class Plugin<
     return this._createAsUserProxy(
       (fn) =>
         (...args) =>
-          runInUserContext(userContext, () => fn(...args)),
+          runInCallerContext(userContext, () => fn(...args)),
     );
   }
 
@@ -477,7 +481,7 @@ export abstract class Plugin<
    * in the result of `exports()` — runs inside `wrapCall`.
    *
    * `wrapCall` decides the per-call scope. Two strategies are used today:
-   *   - real OBO:     fn => (...args) => runInUserContext(userContext, () => fn(...args))
+   *   - real OBO:     fn => (...args) => runInCallerContext(userContext, () => fn(...args))
    *   - dev fallback: fn => (...args) => otelContext.with(DEV_OBO_FALLBACK_KEY=true, () => fn(...args))
    *
    * `exports` is intercepted because methods captured in the returned

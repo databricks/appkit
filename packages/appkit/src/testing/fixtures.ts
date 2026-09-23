@@ -7,6 +7,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { CacheManager } from "../cache";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
+import { immutableCallerContext } from "../context/user-context";
 import { AuthenticationError } from "../errors";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { ApiError } from "../workspace-client";
@@ -127,7 +128,7 @@ export type OboOption =
     };
 
 /**
- * The one fake of `ServiceContext.createUserContext` this kit uses, shared by
+ * The one fake of `ServiceContext.createCallerContext` this kit uses, shared by
  * `mockServiceContext` and `createTestApp`.
  *
  * Shared rather than duplicated because the two used to disagree, and neither
@@ -151,11 +152,9 @@ export function fakeUserContext(
     // Same rejection as production, so a path that forgets to forward the token
     // fails here instead of only in a deployed app.
     if (!token) throw AuthenticationError.missingToken("user token");
-    return {
+    return immutableCallerContext({
       client,
-      userId,
-      userName,
-      userEmail,
+      principal: { type: "user", userId, userName, userEmail },
       // Derived from the token exactly as production does. Keyed on the user it
       // would be constant across tokens, and rotation compares this value.
       tokenFingerprint: createHash("sha256")
@@ -164,8 +163,7 @@ export function fakeUserContext(
         .slice(0, 16),
       warehouseId: ids.warehouseId,
       workspaceId: ids.workspaceId,
-      isUserContext: true,
-    };
+    });
   };
 }
 
@@ -504,7 +502,7 @@ function buildServiceContextState(
 
 /**
  * Mocks the `ServiceContext` singleton for testing — spies `get`,
- * `initialize`, `isInitialized`, and `createUserContext` so code that resolves
+ * `initialize`, `isInitialized`, and `createCallerContext` so code that resolves
  * the service principal or an on-behalf-of user context gets test doubles.
  * Call in `beforeEach`; call the returned `restore()` in `afterEach`.
  *
@@ -525,8 +523,10 @@ export function mockServiceContext(options: TestContextOptions = {}) {
     .spyOn(ServiceContext, "isInitialized")
     .mockReturnValue(true);
 
+  // Keep the public spy handle name for existing tests. The deprecated factory
+  // delegates to createCallerContext, so this spy covers both entry points.
   const createUserContextSpy = vi
-    .spyOn(ServiceContext, "createUserContext")
+    .spyOn(ServiceContext, "createCallerContext")
     .mockImplementation(
       fakeUserContext(
         options.userDatabricksClient || createMockWorkspaceClient(),

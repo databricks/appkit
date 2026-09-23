@@ -1,58 +1,90 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { ConfigurationError } from "../errors";
+import {
+  type CallerContext,
+  type ExecutionContext,
+  isCallerContext,
+} from "./caller-context";
+import { warnContextDeprecation } from "./deprecation";
 import { ServiceContext } from "./service-context";
 import {
-  type ExecutionContext,
-  isUserContext,
+  immutableCallerContext,
+  toCallerContext,
   type UserContext,
 } from "./user-context";
 
 /**
  * AsyncLocalStorage for execution context.
- * Used to pass user context through the call stack without explicit parameters.
+ * Used to pass caller context through the call stack without explicit parameters.
  */
-const executionContextStorage = new AsyncLocalStorage<UserContext>();
+const executionContextStorage = new AsyncLocalStorage<
+  CallerContext & UserContext
+>();
 
 /**
- * Run a function in the context of a user.
- * All calls within the function will have access to the user context.
+ * Run a function with an immutable snapshot of the caller context.
+ * Nested and concurrent scopes keep their own identities.
  *
- * @param userContext - The user context to use
+ * @param callerContext - The caller context to use
  * @param fn - The function to run
  * @returns The result of the function
  */
-export function runInUserContext<T>(userContext: UserContext, fn: () => T): T {
-  return executionContextStorage.run(userContext, fn);
+export function runInCallerContext<T>(
+  callerContext: CallerContext,
+  fn: () => T,
+): T {
+  return executionContextStorage.run(immutableCallerContext(callerContext), fn);
+}
+
+/** @deprecated Use runInCallerContext. */
+export function runInUserContext<T>(
+  userContext: UserContext | CallerContext,
+  fn: () => T,
+): T {
+  warnContextDeprecation("runInUserContext", "runInCallerContext");
+  return runInCallerContext(toCallerContext(userContext), fn);
 }
 
 /**
  * Get the current execution context.
  *
- * - If running inside a user context (via asUser), returns the user context
+ * - If running inside a caller context (via asUser), returns the caller context
  * - Otherwise, returns the service context
  *
  * @throws Error if ServiceContext is not initialized
  */
 export function getExecutionContext(): ExecutionContext {
-  const userContext = executionContextStorage.getStore();
-  if (userContext) {
-    return userContext;
+  const callerContext = executionContextStorage.getStore();
+  if (callerContext) {
+    return callerContext;
   }
   return ServiceContext.get();
 }
 
 /**
- * Get the current user ID for cache keying and telemetry.
- *
- * Returns the user ID if in user context, otherwise the service user ID.
+ * Get the principal key for future cache keying: `app` or `user:<id>`.
+ */
+export function getCurrentPrincipalKey(): string {
+  const ctx = getExecutionContext();
+  return isCallerContext(ctx) ? `user:${ctx.principal.userId}` : "app";
+}
+
+/** The initiating user in a caller scope; no user actor exists in service scope. */
+export function getCurrentActorId(): string | undefined {
+  return getCallerContext()?.principal.userId;
+}
+
+/**
+ * @deprecated Use getCurrentPrincipalKey for new cache keys or getCurrentActorId
+ * for audit. Preserves the bare user or service ID for existing callers.
  */
 export function getCurrentUserId(): string {
-  const ctx = getExecutionContext();
-  if (isUserContext(ctx)) {
-    return ctx.userId;
-  }
-  return ctx.serviceUserId;
+  warnContextDeprecation(
+    "getCurrentUserId",
+    "getCurrentPrincipalKey (cache) or getCurrentActorId (audit)",
+  );
+  return getCurrentActorId() ?? ServiceContext.get().serviceUserId;
 }
 
 /**
@@ -92,10 +124,16 @@ export function isInUserContext(): boolean {
 }
 
 /**
- * Get the user context if one is active, otherwise `undefined`.
+ * Get the caller context if one is active, otherwise `undefined`.
  * Unlike `getExecutionContext()`, this does not require `ServiceContext`
  * to be initialized and never throws.
  */
-export function getUserContext(): UserContext | undefined {
+export function getCallerContext(): CallerContext | undefined {
+  return executionContextStorage.getStore();
+}
+
+/** @deprecated Use getCallerContext and its principal field. */
+export function getUserContext(): (CallerContext & UserContext) | undefined {
+  warnContextDeprecation("getUserContext", "getCallerContext");
   return executionContextStorage.getStore();
 }
