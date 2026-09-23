@@ -3,6 +3,7 @@ import type { TelemetryConfig } from "shared";
 import {
   getCurrentUserId,
   isInUserContext,
+  normalizeIdentityError,
 } from "../../context/execution-context";
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
@@ -65,7 +66,8 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
             span.setStatus({ code: SpanStatusCode.OK });
           }
           return result;
-        } catch (error) {
+        } catch (caught) {
+          const error = normalizeIdentityError(caught);
           if (!isAborted) {
             span.recordException(error as Error);
             span.setStatus({ code: SpanStatusCode.ERROR });

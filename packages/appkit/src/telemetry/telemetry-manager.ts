@@ -36,6 +36,7 @@ import {
 import type { TelemetryOptions } from "shared";
 
 import { createLogger } from "../logging/logger";
+import { ExecutionSpanProcessor } from "./execution-span-processor";
 import { TelemetryProvider } from "./telemetry-provider";
 import { AppKitSampler } from "./trace-sampler";
 import type { TelemetryConfig } from "./types";
@@ -205,7 +206,7 @@ export class TelemetryManager {
       this.tracerProvider = new NodeTracerProvider({
         resource: this.resource,
         sampler: new AppKitSampler(),
-        spanProcessors: this.spanProcessors,
+        spanProcessors: [new ExecutionSpanProcessor(), ...this.spanProcessors],
       });
       this.tracerProvider.register();
       logger.debug(

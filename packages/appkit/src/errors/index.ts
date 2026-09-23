@@ -20,6 +20,7 @@
  */
 
 export { AuthenticationError } from "./authentication";
+export { IdentityExpiredError } from "./identity-expired";
 export { AppKitError } from "./base";
 export { ConfigurationError } from "./configuration";
 export { ConnectionError } from "./connection";

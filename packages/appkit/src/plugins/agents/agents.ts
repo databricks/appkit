@@ -19,6 +19,7 @@ import type {
 import { isSupervisorTool } from "../../agents/supervisor-api";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
+import { normalizeIdentityError } from "../../context/execution-context";
 import { createRequestScope } from "../../context/request-scope";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
@@ -45,6 +46,7 @@ import type {
   ResolvedToolEntry,
 } from "../../core/agent/types";
 import { isToolkitEntry } from "../../core/agent/types";
+import { IdentityExpiredError } from "../../errors/identity-expired";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -1350,8 +1352,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           outboundEvents.close();
           return;
         }
-        logger.error("Agent chat error: %O", error);
-        outboundEvents.close(error);
+        const failure = normalizeIdentityError(error);
+        logger.error("Agent chat error: %O", failure);
+        outboundEvents.close(failure);
         return;
       } finally {
         // Any pending approval gates for this stream are auto-denied so the
@@ -1532,7 +1535,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         res.status(499).json({ error: "Request aborted" });
         return;
       }
-      logger.error("Agent invoke error: %O", error);
+      const failure = normalizeIdentityError(error);
+      if (failure instanceof IdentityExpiredError) {
+        res
+          .status(401)
+          .json({ error: failure.clientMessage, code: failure.code });
+        return;
+      }
+      logger.error("Agent invoke error: %O", failure);
       const message =
         process.env.NODE_ENV === "production"
           ? "Internal server error"

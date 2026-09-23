@@ -69,6 +69,7 @@ export {
   DatabaseValidationError,
   type DatabaseValidationIssue,
   ExecutionError,
+  IdentityExpiredError,
   InitializationError,
   ServerError,
   TunnelError,

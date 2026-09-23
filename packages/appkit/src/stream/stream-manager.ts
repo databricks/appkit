@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
 
+import { normalizeIdentityError } from "../context/execution-context";
 import { AppKitError } from "../errors/base";
 import { ExecutionError } from "../errors/execution";
+import { IdentityExpiredError } from "../errors/identity-expired";
 import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
@@ -303,7 +305,8 @@ export class StreamManager {
         }
 
         this._finalizeStream(streamEntry);
-      } catch (error) {
+      } catch (caught) {
+        const error = normalizeIdentityError(caught);
         // Two distinct messages: a *raw* one for server-side logs (full
         // detail, statement fragments, correlation IDs) and a *client*
         // one for the SSE payload (sanitized, stable, safe to render in
@@ -318,7 +321,11 @@ export class StreamManager {
         // Upstream structured code (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
         // NOT_IMPLEMENTED). UI should branch on this, not on `error`.
         const upstreamCode =
-          error instanceof ExecutionError ? error.errorCode : undefined;
+          error instanceof IdentityExpiredError
+            ? error.code
+            : error instanceof ExecutionError
+              ? error.errorCode
+              : undefined;
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
 
