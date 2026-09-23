@@ -76,6 +76,8 @@ describe("ServiceContext", () => {
       expect(state.client).toBe(client);
       expect(state.serviceUserId).toBe("service-user-123");
       expect(await state.workspaceId).toBe("ws-456");
+      expect(Object.isFrozen(state)).toBe(true);
+      expect(Reflect.set(state, "serviceUserId", "another-user")).toBe(false);
     });
 
     test("should create a WorkspaceClient when none is provided", async () => {

@@ -2738,10 +2738,9 @@ describe("FilesPlugin", () => {
       serviceContextMock.createUserContextSpy.mockImplementation(
         (_token: string, userId: string) => ({
           client: userClient as any,
-          userId,
+          principal: { type: "user", userId },
           warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
-          isUserContext: true,
         }),
       );
 
@@ -2914,10 +2913,9 @@ describe("FilesPlugin", () => {
       serviceContextMock.createUserContextSpy.mockImplementation(
         (_token: string, userId: string) => ({
           client: userClient as any,
-          userId,
+          principal: { type: "user", userId },
           warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
-          isUserContext: true,
         }),
       );
 
@@ -3348,10 +3346,9 @@ describe("FilesPlugin", () => {
       serviceContextMock.createUserContextSpy.mockImplementation(
         (_token: string, userId: string) => ({
           client: userClient as any,
-          userId,
+          principal: { type: "user", userId },
           warehouseId: serviceContextMock.serviceContext.warehouseId,
           workspaceId: serviceContextMock.serviceContext.workspaceId,
-          isUserContext: true,
         }),
       );
 

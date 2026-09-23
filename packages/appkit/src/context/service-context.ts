@@ -12,8 +12,10 @@ import {
   type sql,
   type WorkspaceClient,
 } from "../workspace-client";
+import type { CallerContext } from "./caller-context";
 import { getClientOptions } from "./client-options";
-import type { UserContext } from "./user-context";
+import { warnContextDeprecation } from "./deprecation";
+import { immutableCallerContext, type UserContext } from "./user-context";
 
 /**
  * Service context holds the service principal client and shared resources.
@@ -21,13 +23,13 @@ import type { UserContext } from "./user-context";
  */
 export interface ServiceContextState {
   /** WorkspaceClient authenticated as the service principal */
-  client: WorkspaceClient;
+  readonly client: WorkspaceClient;
   /** The service principal's user ID */
-  serviceUserId: string;
+  readonly serviceUserId: string;
   /** Promise that resolves to the warehouse ID (only present when a plugin requires `SQL_WAREHOUSE` resource) */
-  warehouseId?: Promise<string>;
+  readonly warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
-  workspaceId: Promise<string>;
+  readonly workspaceId: Promise<string>;
 }
 
 /**
@@ -88,19 +90,20 @@ export class ServiceContext {
   }
 
   /**
-   * Create a user context from request headers.
+   * Create an immutable caller context from the existing user request headers.
    *
    * @param token - The user's access token from x-forwarded-access-token header
    * @param userId - The user's ID from x-forwarded-user header
    * @param userName - Optional user name
+   * @param userEmail - Optional email from x-forwarded-email
    * @throws Error if token is not provided
    */
-  static createUserContext(
+  static createCallerContext(
     token: string,
     userId: string,
     userName?: string,
     userEmail?: string,
-  ): UserContext {
+  ): CallerContext {
     if (!token) {
       throw AuthenticationError.missingToken("user token");
     }
@@ -127,16 +130,29 @@ export class ServiceContext {
       .digest("hex")
       .slice(0, 16);
 
-    return {
+    return immutableCallerContext({
       client: userClient,
-      userId,
-      userName,
-      userEmail,
+      principal: { type: "user", userId, userName, userEmail },
       tokenFingerprint,
       warehouseId: serviceCtx.warehouseId,
       workspaceId: serviceCtx.workspaceId,
-      isUserContext: true,
-    };
+    });
+  }
+
+  /** @deprecated Use ServiceContext.createCallerContext. */
+  static createUserContext(
+    token: string,
+    userId: string,
+    userName?: string,
+    userEmail?: string,
+  ): CallerContext & UserContext {
+    warnContextDeprecation(
+      "ServiceContext.createUserContext",
+      "ServiceContext.createCallerContext",
+    );
+    return immutableCallerContext(
+      ServiceContext.createCallerContext(token, userId, userName, userEmail),
+    );
   }
 
   /**
@@ -173,12 +189,12 @@ export class ServiceContext {
           ? Promise.resolve(resolvedWarehouseId)
           : undefined;
 
-      return {
+      return Object.freeze({
         client: wsClient,
         serviceUserId: currentUser.id,
         warehouseId,
         workspaceId: Promise.resolve(resolvedWorkspaceId),
-      };
+      });
     } catch (e) {
       if (e instanceof ConfigError) {
         throw ConfigurationError.databricksAuthenticationSetupFailed(

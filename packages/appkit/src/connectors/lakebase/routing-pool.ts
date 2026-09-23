@@ -1,7 +1,7 @@
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 
-import { getUserContext } from "../../context/execution-context";
-import type { UserContext } from "../../context/user-context";
+import type { CallerContext } from "../../context/caller-context";
+import { getCallerContext } from "../../context/execution-context";
 
 /**
  * Subset of `pg.Pool` exposed by the Lakebase plugin.
@@ -26,7 +26,7 @@ export interface LakebasePool {
  * A `pg.Pool`-like wrapper that routes queries to the appropriate pool
  * based on the current execution context.
  *
- * When called inside `runInUserContext()` (set up by `Plugin.asUser(req)`),
+ * When called inside `runInCallerContext()` (set up by `Plugin.asUser(req)`),
  * queries route to the per-user pool returned by `resolveUserPool`.
  * Otherwise, queries route to the service-principal pool.
  *
@@ -37,11 +37,11 @@ export interface LakebasePool {
 export class RoutingPool implements LakebasePool {
   constructor(
     private spPool: Pool,
-    private resolveUserPool: (ctx: UserContext) => Pool,
+    private resolveUserPool: (ctx: CallerContext) => Pool,
   ) {}
 
   private activePool(): Pool {
-    const userCtx = getUserContext();
+    const userCtx = getCallerContext();
     return userCtx ? this.resolveUserPool(userCtx) : this.spPool;
   }
 

@@ -52,7 +52,13 @@ describe("RoutingPool", () => {
     expect(result.rows).toEqual([{ source: "user" }]);
     expect(userPool.query).toHaveBeenCalledWith("SELECT 1", undefined);
     expect(spPool.query).not.toHaveBeenCalled();
-    expect(resolveUserPool).toHaveBeenCalledWith(userCtx);
+    expect(resolveUserPool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: userCtx.client,
+        workspaceId: userCtx.workspaceId,
+        principal: expect.objectContaining({ type: "user", userId: "user-1" }),
+      }),
+    );
   });
 
   test("connect() routes to user pool inside runInUserContext", async () => {

@@ -52,6 +52,39 @@ export const resourceTypeSchema = z
   ])
   .describe("Type of Databricks resource");
 
+/** Apps user_api_scopes for resource types with confirmed OBO support. */
+export const SCOPE_BY_TYPE = {
+  sql_warehouse: "sql", // sql:restricted-query is the read-only variant.
+  serving_endpoint: "model-serving",
+  genie_space: "genie",
+  volume: "files",
+  vector_search_index: "vector-search",
+  uc_connection: "catalog.connections",
+  // uc_function uses sql, or mcp.functions through managed MCP. Confirm later.
+  // experiment and job are SP-only; there is no mlflow or jobs scope.
+} as const satisfies Partial<Record<ResourceType, string>>;
+
+// A postgres user_api_scope exists, so Lakebase is platform-OBO-capable.
+// It stays app-only for v1 because the connector connects as the SP today (audit A7).
+export const APP_ONLY_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
+  "secret",
+  "database",
+  "postgres",
+]);
+
+/** Capabilities that need a user_api_scope but have no resource ID. */
+export const capabilityScopeSchema = z.enum([
+  "ai-gateway",
+  "mcp.external",
+  "mcp.functions",
+  "workspace.workspace",
+  "catalog.catalogs:read",
+  "catalog.schemas:read",
+  "catalog.tables:read",
+]);
+
+export type CapabilityScope = z.infer<typeof capabilityScopeSchema>;
+
 export const secretPermissionSchema = z
   .enum(["READ", "WRITE", "MANAGE"])
   .describe("Permission for secret resources (order: weakest to strongest)");
@@ -668,6 +701,10 @@ export const pluginScaffoldingRulesSchema = z
 
 export const pluginManifestSchema = z
   .object({
+    scopes: z
+      .array(capabilityScopeSchema)
+      .optional()
+      .describe("Capability-only user_api_scopes with no resource ID."),
     $schema: z
       .string()
       .optional()
