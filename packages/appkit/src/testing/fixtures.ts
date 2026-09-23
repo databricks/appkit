@@ -9,7 +9,10 @@ import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import { immutableCallerContext } from "../context/user-context";
 import { AuthenticationError } from "../errors";
-import { AppResources } from "../resources/app-resources";
+import {
+  AppResources,
+  type AppResourceBindings,
+} from "../resources/app-resources";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
@@ -486,13 +489,15 @@ export interface TestContextOptions {
  * installs the state as spies — that installer is the public entry point.
  */
 function buildServiceContextState(
-  options: TestContextOptions = {},
+  options: TestContextOptions,
+  resources: AppResourceBindings,
 ): ServiceContextState {
   return {
     client: (options.serviceDatabricksClient ||
       createMockWorkspaceClient()) as Any,
     serviceUserId: options.serviceUserId || "test-service-user",
-    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+    // Preserve the deprecated field for external test callers during migration.
+    warehouseId: resources.warehouseId,
     workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
   };
 }
@@ -507,13 +512,12 @@ function buildServiceContextState(
  * @returns The mock context plus the spies and a `restore()` helper.
  */
 export function mockServiceContext(options: TestContextOptions = {}) {
-  const serviceContext = buildServiceContextState(options);
+  const resources = Object.freeze({
+    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+  });
+  const serviceContext = buildServiceContextState(options, resources);
 
-  const resourcesSpy = vi
-    .spyOn(AppResources, "get")
-    .mockReturnValue(
-      Object.freeze({ warehouseId: serviceContext.warehouseId }),
-    );
+  const resourcesSpy = vi.spyOn(AppResources, "get").mockReturnValue(resources);
 
   const getSpy = vi
     .spyOn(ServiceContext, "get")

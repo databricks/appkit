@@ -31,8 +31,11 @@ const service = Object.freeze({
   client: createMockWorkspaceClient(),
   serviceUserId: "service-123",
   workspaceId: Promise.resolve("workspace-123"),
-  warehouseId: Promise.resolve("warehouse-123"),
 } satisfies ExecutionContext);
+
+const appResources = Object.freeze({
+  warehouseId: Promise.resolve("warehouse-123"),
+});
 
 function caller(userId: string): CallerContext {
   return {
@@ -45,9 +48,7 @@ function caller(userId: string): CallerContext {
 describe("caller execution context", () => {
   beforeEach(() => {
     vi.spyOn(ServiceContext, "get").mockReturnValue(service);
-    vi.spyOn(AppResources, "get").mockReturnValue({
-      warehouseId: service.warehouseId,
-    });
+    vi.spyOn(AppResources, "get").mockReturnValue(appResources);
   });
 
   afterEach(() => {
@@ -191,7 +192,7 @@ describe("caller execution context", () => {
           expect(legacy.userName).toBe("Alice");
           expect(legacy.userEmail).toBe("alice@example.com");
           expect(legacy.isUserContext).toBe(true);
-          expect(legacy.warehouseId).toBe(service.warehouseId);
+          expect(legacy.warehouseId).toBe(appResources.warehouseId);
           expect(getLegacyWarehouseId()).toBe(getWarehouseId());
           return 42;
         }),
@@ -235,13 +236,13 @@ describe("caller execution context", () => {
   });
 
   test("shares the app warehouse without changing the caller's client", async () => {
-    expect(getWarehouseId()).toBe(service.warehouseId);
+    expect(getWarehouseId()).toBe(appResources.warehouseId);
     const alice = caller("alice");
     await runInCallerContext(alice, async () => {
       await Promise.resolve();
       expect(getCallerContext()).not.toHaveProperty("warehouseId");
       expect(getExecutionContext()).not.toHaveProperty("warehouseId");
-      expect(getWarehouseId()).toBe(service.warehouseId);
+      expect(getWarehouseId()).toBe(appResources.warehouseId);
       expect(await getWarehouseId()).toBe("warehouse-123");
       expect(getWorkspaceClient()).toBe(alice.client);
     });
@@ -263,7 +264,7 @@ describe("caller execution context", () => {
     };
     runInCallerContext(input, () => {
       expect(getCallerContext()).not.toHaveProperty("warehouseId");
-      expect(getWarehouseId()).toBe(service.warehouseId);
+      expect(getWarehouseId()).toBe(appResources.warehouseId);
     });
   });
 
@@ -286,7 +287,7 @@ describe("caller execution context", () => {
         expect(getWorkspaceClient()).toBe(legacy.client);
         await expect(
           runInCallerContext(caller("bob"), async () => {
-            expect(getWarehouseId()).toBe(service.warehouseId);
+            expect(getWarehouseId()).toBe(appResources.warehouseId);
             throw new Error("nested failure");
           }),
         ).rejects.toThrow("nested failure");
@@ -294,10 +295,10 @@ describe("caller execution context", () => {
       }),
       runInCallerContext(caller("charlie"), async () => {
         await Promise.resolve();
-        expect(getWarehouseId()).toBe(service.warehouseId);
+        expect(getWarehouseId()).toBe(appResources.warehouseId);
       }),
     ]);
-    expect(getWarehouseId()).toBe(service.warehouseId);
+    expect(getWarehouseId()).toBe(appResources.warehouseId);
   });
 
   test("preserves a missing warehouse in legacy contexts", () => {
@@ -317,8 +318,8 @@ describe("caller execution context", () => {
 
   test("legacy entry points accept warehouse-free caller contexts", () => {
     runInUserContext(caller("alice"), () => {
-      expect(getWarehouseId()).toBe(service.warehouseId);
-      expect(getUserContext()?.warehouseId).toBe(service.warehouseId);
+      expect(getWarehouseId()).toBe(appResources.warehouseId);
+      expect(getUserContext()?.warehouseId).toBe(appResources.warehouseId);
     });
   });
 });
