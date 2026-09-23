@@ -15,7 +15,11 @@ import {
 import type { CallerContext } from "./caller-context";
 import { getClientOptions } from "./client-options";
 import { warnContextDeprecation } from "./deprecation";
-import { immutableCallerContext, type UserContext } from "./user-context";
+import {
+  immutableCallerContext,
+  legacyUserContext,
+  type UserContext,
+} from "./user-context";
 
 /**
  * Service context holds the service principal client and shared resources.
@@ -134,7 +138,6 @@ export class ServiceContext {
       client: userClient,
       principal: { type: "user", userId, userName, userEmail },
       tokenFingerprint,
-      warehouseId: serviceCtx.warehouseId,
       workspaceId: serviceCtx.workspaceId,
     });
   }
@@ -150,9 +153,11 @@ export class ServiceContext {
       "ServiceContext.createUserContext",
       "ServiceContext.createCallerContext",
     );
-    return immutableCallerContext(
+    const caller = immutableCallerContext(
       ServiceContext.createCallerContext(token, userId, userName, userEmail),
     );
+    const warehouseId = ServiceContext.get().warehouseId;
+    return legacyUserContext(caller, () => warehouseId);
   }
 
   /**

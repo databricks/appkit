@@ -23,7 +23,7 @@ export interface UserContext {
   userEmail?: string;
   /** Truncated SHA-256 hash of the user's OBO token, used to detect token rotation */
   tokenFingerprint?: string;
-  /** Promise that resolves to the warehouse ID (inherited from service context, only present when a plugin requires `SQL_WAREHOUSE` resource) */
+  /** @deprecated Use getWarehouseId(). Warehouse bindings are separate from caller identity. */
   warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID (inherited from service context) */
   workspaceId: Promise<string>;
@@ -43,7 +43,6 @@ export function immutableCallerContext(
     client: ctx.client,
     principal,
     tokenFingerprint: ctx.tokenFingerprint,
-    warehouseId: ctx.warehouseId,
     workspaceId: ctx.workspaceId,
     get userId() {
       warnContextDeprecation(
@@ -76,6 +75,24 @@ export function immutableCallerContext(
   });
 }
 
+/** Expose the old resource field only through the deprecated context APIs. */
+export function legacyUserContext(
+  ctx: CallerContext & UserContext,
+  resolveWarehouseId: () => Promise<string> | undefined,
+): CallerContext & UserContext {
+  return Object.freeze(
+    Object.defineProperties(
+      {
+        get warehouseId() {
+          warnContextDeprecation("UserContext.warehouseId", "getWarehouseId()");
+          return resolveWarehouseId();
+        },
+      },
+      Object.getOwnPropertyDescriptors(ctx),
+    ),
+  ) as CallerContext & UserContext;
+}
+
 /** Normalize legacy inputs before opening a caller scope. */
 export function toCallerContext(
   ctx: CallerContext | UserContext,
@@ -90,7 +107,6 @@ export function toCallerContext(
       userEmail: ctx.userEmail,
     },
     tokenFingerprint: ctx.tokenFingerprint,
-    warehouseId: ctx.warehouseId,
     workspaceId: ctx.workspaceId,
   };
 }

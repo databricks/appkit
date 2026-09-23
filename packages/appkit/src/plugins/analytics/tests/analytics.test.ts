@@ -130,7 +130,9 @@ describe("Analytics Plugin", () => {
       await handler(mockReq, mockRes);
 
       // Verify service workspace client is used
-      expect(capturedWorkspaceClient).toBeDefined();
+      expect(capturedWorkspaceClient).toBe(
+        serviceContextMock.serviceContext.client,
+      );
 
       // Verify executeStatement is called with correct statement
       expect(executeMock).toHaveBeenCalledWith(
@@ -197,8 +199,13 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // Verify a workspace client is used
-      expect(capturedWorkspaceClient).toBeDefined();
+      const callerContext =
+        serviceContextMock.createUserContextSpy.mock.results[0].value;
+      expect(callerContext).not.toHaveProperty("warehouseId");
+      expect(capturedWorkspaceClient).toBe(callerContext.client);
+      expect(capturedWorkspaceClient).not.toBe(
+        serviceContextMock.serviceContext.client,
+      );
 
       // Verify the query is executed with correct statement
       expect(executeMock).toHaveBeenCalledWith(

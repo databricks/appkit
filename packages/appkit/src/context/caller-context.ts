@@ -8,13 +8,12 @@ export type Principal = Readonly<{
   userEmail?: string;
 }>;
 
-/** Caller identity and shared resources for one immutable execution scope. */
+/** Caller identity and workspace for one immutable execution scope. */
 export interface CallerContext {
   readonly client: ServiceContextState["client"];
   readonly principal: Principal;
   /** Truncated SHA-256 hash of the caller token, used to detect rotation. */
   readonly tokenFingerprint?: string;
-  readonly warehouseId?: Promise<string>;
   readonly workspaceId: Promise<string>;
 }
 
