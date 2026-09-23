@@ -14,6 +14,7 @@ import {
 } from "../../connectors/lakebase";
 import { getClientOptions } from "../../context/client-options";
 import { getCallerContext } from "../../context/execution-context";
+import { assertResourceExecution } from "../../context/resource-capabilities";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -43,11 +44,8 @@ const OBO_POOL_DEFAULTS = {
  * Wraps `@databricks/lakebase` to provide a standard `pg.Pool` with automatic
  * OAuth token refresh, integrated with AppKit's logger and OpenTelemetry setup.
  *
- * Supports On-Behalf-Of (OBO) via `asUser(req)` — each user gets a separate
- * `pg.Pool` authenticated with their Databricks identity, enabling features
- * like Row-Level Security (RLS). Routing is handled transparently by
- * {@link RoutingPool}, which reads the execution context set by the base
- * class `asUser()`.
+ * App-only in v1. Caller-scoped operations reject before opening a connection.
+ * The platform's postgres user scope is deferred for this connector.
  *
  * @example
  * ```ts
@@ -60,8 +58,6 @@ const OBO_POOL_DEFAULTS = {
  * // Service principal query
  * const result = await AppKit.lakebase.query("SELECT * FROM users WHERE id = $1", [userId]);
  *
- * // User-scoped query (per-user pool, RLS enforced)
- * const mine = await AppKit.lakebase.asUser(req).query("SELECT * FROM my_data");
  * ```
  */
 export class LakebasePlugin extends Plugin implements ToolProvider {
@@ -124,8 +120,8 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   /**
    * Executes a parameterized SQL query against the Lakebase pool.
    *
-   * When called inside `asUser(req)`, the query automatically routes to
-   * the per-user pool via {@link RoutingPool}.
+   * New caller scopes enforce the app-only resource contract. Deprecated
+   * user entry points retain their established per-user pool routing.
    *
    * @param text - SQL query string, using `$1`, `$2`, ... placeholders
    * @param values - Parameter values corresponding to placeholders
@@ -296,9 +292,10 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
 
   /**
    * Returns the pool config for the current execution context.
-   * Inside `asUser(req)`, returns user-scoped config; otherwise SP config.
+   * Caller scopes reject; plain execution returns SP configuration.
    */
   private activePoolConfig() {
+    assertResourceExecution("postgres");
     const ctx = getCallerContext();
     if (ctx) {
       const user = ctx.principal.userEmail ?? ctx.principal.userId;
@@ -314,14 +311,12 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   /**
    * Returns the plugin's public API, accessible via `AppKit.lakebase`.
    *
-   * - `pool` — The connection pool (routes to per-user pool when inside `asUser(req)`)
-   * - `query` — Convenience method for executing parameterized SQL queries
-   * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
-   *   Inside `asUser(req)`, returns user-scoped config.
-   * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction.
-   *   Inside `asUser(req)`, returns user-scoped config.
+   * - `pool`: The service-principal connection pool.
+   * - `query`: Convenience method for executing parameterized SQL queries.
+   * - `getOrmConfig()`: SP configuration for Drizzle, TypeORM, Sequelize, etc.
+   * - `getPgConfig()`: A service-principal `pg.PoolConfig` for manual pools.
    *
-   * Use `AppKit.lakebase.asUser(req)` to get the same API backed by a per-user pool.
+   * Caller-scoped access is rejected in v1, including cached pool handles.
    */
   exports() {
     return {

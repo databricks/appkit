@@ -6,6 +6,10 @@ import {
   normalizeIdentityError,
 } from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
+import {
+  assertPluginExecution,
+  getPluginResourceTypes,
+} from "../context/resource-capabilities";
 import { ServiceContext } from "../context/service-context";
 import { createLogger } from "../logging/logger";
 import {
@@ -242,6 +246,7 @@ export class PluginContext {
           : timeoutSignal;
 
         try {
+          assertPluginExecution(provider);
           const result = await provider.executeAgentTool(
             toolName,
             args,
@@ -268,9 +273,10 @@ export class PluginContext {
     // Inherit the caller or establish request user scope before the span and tool run.
     return getCallerContext()
       ? executeInCurrentScope()
-      : createRequestScope(req, this.createCallerContext).run(
-          executeInCurrentScope,
-        );
+      : createRequestScope(req, getPluginResourceTypes(provider), {
+          createCaller: this.createCallerContext,
+          legacy: true,
+        }).run(executeInCurrentScope);
   }
 
   /**

@@ -20,6 +20,10 @@ import { getCurrentUserId } from "../context";
 import { warnContextDeprecation } from "../context/deprecation";
 import { normalizeIdentityError } from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
+import {
+  assertPluginExecution,
+  getPluginResourceTypes,
+} from "../context/resource-capabilities";
 import { scopePlugin } from "../context/scoped-api";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
@@ -351,7 +355,11 @@ export abstract class Plugin<
   /** @deprecated Use appkit.asUser(req) to scope the whole app. */
   asUser(req: express.Request): this {
     warnContextDeprecation("Plugin.asUser", "appkit.asUser(req)");
-    return scopePlugin(this, createRequestScope(req));
+    assertPluginExecution(this);
+    return scopePlugin(
+      this,
+      createRequestScope(req, getPluginResourceTypes(this), { legacy: true }),
+    );
   }
 
   // streaming execution with interceptors
@@ -361,6 +369,7 @@ export abstract class Plugin<
     options: StreamExecutionSettings,
     userKey?: string,
   ) {
+    assertPluginExecution(this);
     // destructure options
     const {
       stream: streamConfig,
@@ -449,6 +458,7 @@ export abstract class Plugin<
     options: PluginExecutionSettings,
     userKey?: string,
   ): Promise<ExecutionResult<T>> {
+    assertPluginExecution(this);
     const executeConfig = this._buildExecutionConfig(options);
 
     const interceptors = this._buildInterceptors(executeConfig);

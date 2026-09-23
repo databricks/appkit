@@ -95,6 +95,30 @@ is already open, fallback retains it instead of widening to SP. The marker does
 not leak outside the scope. Production never falls back when credentials are
 missing.
 
+## App-only resources and missing credentials
+
+The manifest capability contract keeps `secret`, `database`, and `postgres`
+app-only for the new `appkit.asUser` and `runInCallerContext` APIs. Accessing
+those resources through these caller-scoped plugin APIs or tools
+raises a clear error, such as "Lakebase does not support OBO
+(on-behalf-of-user) execution; it runs as the service principal."
+The check applies when using cached handles inside a later user scope too.
+It does not reject unrelated plugins merely because an app-only plugin is
+installed. Required resources, runtime requirements, and configured optional
+resources determine the plugin's resource capability.
+
+Deprecated `plugin.asUser` and `runInUserContext`, direct request-based tool
+dispatch, and the existing agents HTTP routes retain their established resource
+behavior, including Lakebase per-user routing. They still establish user identity
+and reject missing production credentials; they never fall back to SP by omission.
+Using a deprecated entry point inside a new guarded scope cannot disable its guards.
+
+Missing-token messages distinguish OBO-capable resources from generic operations.
+For an OBO-capable resource, the message explains that no user token was forwarded
+and the app may be deployed service-principal-only. Otherwise the generic missing
+user token error remains. The app-level check uses the registered plugins' active
+resource metadata because no individual plugin has been selected yet.
+
 ## Credential expiration and telemetry
 
 A structured downstream HTTP 401 inside a caller scope throws

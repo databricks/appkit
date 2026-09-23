@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { describe, expect, test, vi } from "vitest";
 
+import { runInCallerContext } from "../../../context/execution-context";
 import { RoutingPool } from "../routing-pool";
 
 function makeMockPool(label: string) {
@@ -18,6 +19,28 @@ function makeMockPool(label: string) {
 }
 
 describe("RoutingPool", () => {
+  test("new caller scopes reject queries and connects without touching either pool", () => {
+    const spPool = makeMockPool("sp");
+    const userPool = makeMockPool("user");
+    const resolveUserPool = vi.fn(() => userPool);
+    const pool = new RoutingPool(spPool, resolveUserPool);
+    const caller = {
+      client: {} as any,
+      principal: { type: "user" as const, userId: "alice" },
+      workspaceId: Promise.resolve("workspace"),
+    };
+    for (const operation of [
+      () => pool.query("SELECT 1"),
+      () => pool.connect(),
+    ]) {
+      expect(() =>
+        runInCallerContext<Promise<unknown>>(caller, operation),
+      ).toThrow(/Lakebase does not support OBO/);
+    }
+    expect(resolveUserPool).not.toHaveBeenCalled();
+    expect(spPool.query).not.toHaveBeenCalled();
+    expect(spPool.connect).not.toHaveBeenCalled();
+  });
   test("routes to SP pool when no user context is active", async () => {
     const spPool = makeMockPool("sp");
     const userPool = makeMockPool("user");
