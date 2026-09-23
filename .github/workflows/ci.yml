@@ -206,6 +206,11 @@ jobs:
           console.log(`✓ Native binary loaded and parser verified: ${binaryPath}`);
           NODE
 
+      - name: Verify @ast-grep/napi runtime-loads successfully (pnpm)
+        working-directory: .smoke-test/app
+        run: |
+          node -e "const n = require('@ast-grep/napi'); if (typeof n.parse !== 'function') { throw new Error('parse function not found'); } console.log('✓ @ast-grep/napi.parse is callable');"
+
       - name: Build client and server
         working-directory: .smoke-test/app
         run: |
@@ -220,6 +225,84 @@ jobs:
             exit 1
           fi
           if [ ! -f ".smoke-test/app/dist/server.js" ]; then
+            echo "❌ Error: server build did not produce dist/server.js"
+            exit 1
+          fi
+          echo "✓ Build outputs verified"
+
+  template-deploy-shape-npm:
+    name: Template Deploy-Shape (npm install smoke test)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.appkit == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Scaffold template into scratch directory (npm)
+        run: pnpm exec tsx tools/smoke-test-template.ts --package-manager npm --output-dir .smoke-test/app-npm
+
+      - name: Install dependencies (npm from committed package-lock.json)
+        working-directory: .smoke-test/app-npm
+        run: npm install
+
+      - name: Verify @ast-grep/napi-linux-x64-gnu materialized
+        run: |
+          if [ ! -d ".smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu" ]; then
+            echo "❌ Error: @ast-grep/napi-linux-x64-gnu did not materialize with npm install"
+            echo ""
+            echo "Expected: .smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu/"
+            echo ""
+            echo "The committed package-lock.json is missing the linux entry or the root"
+            echo "optionalDependencies pin was removed. The deployed app would fail to load"
+            echo "@ast-grep/napi (used by 'appkit lint' for AST-based linting)."
+            echo ""
+            exit 1
+          fi
+          echo "✓ @ast-grep/napi-linux-x64-gnu materialized"
+
+      - name: Verify native binary is present and accessible
+        run: |
+          BINARY_DIR=".smoke-test/app-npm/node_modules/@ast-grep/napi-linux-x64-gnu"
+          if [ ! -d "$BINARY_DIR" ]; then
+            echo "❌ Error: native binary directory not found: $BINARY_DIR"
+            ls -la ".smoke-test/app-npm/node_modules/@ast-grep/" || true
+            exit 1
+          fi
+          NODE_FILES=$(find "$BINARY_DIR" -name "*.node" -type f)
+          if [ -z "$NODE_FILES" ]; then
+            echo "❌ Error: no .node files found in $BINARY_DIR"
+            ls -la "$BINARY_DIR"
+            exit 1
+          fi
+          echo "✓ Native binary verified"
+          echo "$NODE_FILES"
+
+      - name: Verify @ast-grep/napi runtime-loads successfully (npm)
+        working-directory: .smoke-test/app-npm
+        run: |
+          node -e "const n = require('@ast-grep/napi'); if (typeof n.parse !== 'function') { throw new Error('parse function not found'); } console.log('✓ @ast-grep/napi.parse is callable');"
+
+      - name: Build client and server (using npm scripts)
+        working-directory: .smoke-test/app-npm
+        run: |
+          echo "Running npm run build:client and npm run build:server"
+          npm run build:client
+          npm run build:server
+
+      - name: Verify build outputs exist
+        run: |
+          if [ ! -f ".smoke-test/app-npm/client/dist/index.html" ]; then
+            echo "❌ Error: client build did not produce dist/index.html"
+            exit 1
+          fi
+          if [ ! -f ".smoke-test/app-npm/dist/server.js" ]; then
             echo "❌ Error: server build did not produce dist/server.js"
             exit 1
           fi
@@ -270,9 +353,23 @@ jobs:
       - name: Prepare template artifact
         run: pnpm exec tsx tools/prepare-template-artifact.ts
 
-      - name: Install template dependencies
+      # Regenerate both lockfiles: the prepare-template-artifact script rewrites
+      # package.json deps to file: references (local tarballs), which invalidates
+      # the committed locks. We regenerate here under the JFrog .npmrc (set up
+      # by setup-jfrog-npm), which bakes JFrog URLs into the locks; the rewrite
+      # step below fixes that to point back to public npm.
+      - name: Regenerate template lockfiles (npm and pnpm)
         working-directory: pr-template
-        run: npm install
+        run: |
+          echo "Regenerating package-lock.json..."
+          npm install
+          echo "✓ Regenerated package-lock.json and node_modules"
+          echo "Regenerating pnpm-lock.yaml (lockfile-only to skip node_modules rebuild)..."
+          # --no-frozen-lockfile allows regeneration even though the committed lock is now stale
+          # (prepare-template-artifact rewrote package.json deps to file: references).
+          # --lockfile-only skips rebuilding node_modules over npm's install above.
+          pnpm install --lockfile-only --no-frozen-lockfile
+          echo "✓ Regenerated pnpm-lock.yaml"
 
       # The scaffold's own vitest suite, run against the tarballs built above
       # rather than the published versions template/package.json pins. This is
@@ -285,14 +382,14 @@ jobs:
         run: npm test
 
       # npm install above runs under the JFrog .npmrc (setup-jfrog-npm), which
-      # bakes internal registry URLs into the regenerated lock. Rewrite them back
+      # bakes internal registry URLs into the regenerated locks. Rewrite them back
       # to public npm and fail-closed if any non-public registry remains, so the
       # shipped scaffold installs from npmjs.org. --allow-file permits the bundled
       # appkit/appkit-ui tarballs that prepare-template-artifact.ts pins.
-      - name: Rewrite and validate template lockfile registry
+      - name: Rewrite and validate template lockfiles registry
         run: >
-          pnpm exec tsx tools/check-template-lock-registry.ts
-          pr-template/package-lock.json --rewrite --allow-file
+          pnpm exec tsx tools/check-template-lock-registry.ts pr-template/pnpm-lock.yaml --rewrite --allow-file &&
+          pnpm exec tsx tools/check-template-lock-registry.ts pr-template/package-lock.json --rewrite --allow-file
 
       - name: Create zip artifact
         working-directory: pr-template
