@@ -18,10 +18,12 @@ import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import { getCurrentUserId } from "../context";
 import { warnContextDeprecation } from "../context/deprecation";
+import { normalizeIdentityError } from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
 import { scopePlugin } from "../context/scoped-api";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
+import { IdentityExpiredError } from "../errors/identity-expired";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
 import {
@@ -409,10 +411,14 @@ export abstract class Plugin<
       );
 
       // check if result is a generator
-      if (self._checkIfGenerator(result)) {
-        yield* result;
-      } else {
-        yield result;
+      try {
+        if (self._checkIfGenerator(result)) {
+          yield* result;
+        } else {
+          yield result;
+        }
+      } catch (error) {
+        throw normalizeIdentityError(error);
       }
     };
 
@@ -435,7 +441,8 @@ export abstract class Plugin<
    * - `{ ok: true, data: T }` on success
    * - `{ ok: false, status: number, message: string }` on failure
    *
-   * Errors are never thrown — the method is production-safe.
+   * Caller credential expiration retains the failure result and additionally
+   * exposes a typed error, preserving existing result-based callers.
    */
   protected async execute<T>(
     fn: (signal?: AbortSignal) => Promise<T>,
@@ -461,7 +468,8 @@ export abstract class Plugin<
         context,
       );
       return { ok: true, data };
-    } catch (error) {
+    } catch (caught) {
+      const error = normalizeIdentityError(caught);
       logger.error("Plugin execution failed", { error, plugin: this.name });
 
       if (error instanceof AppKitError) {
@@ -469,6 +477,7 @@ export abstract class Plugin<
           ok: false,
           status: error.statusCode,
           message: error.message,
+          ...(error instanceof IdentityExpiredError ? { error } : {}),
         };
       }
 

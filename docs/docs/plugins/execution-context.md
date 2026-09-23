@@ -94,3 +94,43 @@ runs with default app credentials, marked `DEV_OBO_FALLBACK`. If a caller scope
 is already open, fallback retains it instead of widening to SP. The marker does
 not leak outside the scope. Production never falls back when credentials are
 missing.
+
+## Credential expiration and telemetry
+
+A structured downstream HTTP 401 inside a caller scope throws
+`IdentityExpiredError` with code `IDENTITY_EXPIRED`. It includes the existing
+token fingerprint, not the token or upstream credential-bearing error. Obtain
+fresh user credentials before retrying. Non-401 failures and SP execution keep
+their existing behavior. Plugin `execute()` preserves its failed-result envelope
+and adds the typed error in the optional `error` field; SSE streams expose `IDENTITY_EXPIRED`
+in the error payload's `errorCode` field.
+
+AppKit-managed spans include `appkit.execution.principal` (`app` or `user`) and
+`appkit.execution.principal_id` (user or SP ID, or `app` before initialization).
+`appkit.execution.actor_id` is present when an initiating user exists. Tokens
+are never attached to these attributes.
+
+## Real user execution locally
+
+Run the app locally, then open a separate terminal for an opt-in OBO proxy:
+
+```sh
+NODE_ENV=development npx appkit dev-obo \
+  --profile <your-user-profile> \
+  --target http://127.0.0.1:3000 \
+  --port 3001
+```
+
+Open `http://127.0.0.1:3001`. Choose a user profile for the same workspace as
+the app. The CLI obtains credentials using that explicit profile and injects
+`x-forwarded-access-token`, `x-forwarded-user`, and optional email headers into
+requests to the local app. It never writes or prints tokens, and refreshes its
+in-memory credentials after 30 seconds of use. Refresh failures reject instead
+of falling back to SP.
+
+The proxy accepts only loopback HTTP targets and same-origin browser requests.
+It is disabled in production and deployed Apps. Use it only with a trusted local
+app and do not publish it through a tunnel. WebSocket upgrades are not proxied;
+HTTP and SSE requests work. This emulates user credentials, not the platform's
+consent flow or resource provisioning. Without this proxy, the existing marked
+development fallback still applies.

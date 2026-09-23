@@ -4,6 +4,7 @@ import type express from "express";
 import type { AgentRunContext, Message, ResponseStreamEvent } from "shared";
 
 import type { AppKitMcpClient } from "../../connectors/mcp";
+import { normalizeIdentityError } from "../../context/execution-context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import type {
@@ -142,7 +143,8 @@ export async function dispatchToolCall(
     toolResult = await traceTool(name, args, () =>
       runToolEntry(deps, runState, entry, name, args, depth),
     );
-  } catch (err) {
+  } catch (caught) {
+    const err = normalizeIdentityError(caught);
     const error = err instanceof Error ? err.message : String(err);
     logger.error(
       "Tool '%s' failed (request %s): %O",
