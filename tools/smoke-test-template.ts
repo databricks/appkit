@@ -13,11 +13,13 @@
  * - {{.appEnv}} → (empty, which means the conditional block is omitted)
  *
  * Usage:
- *   tsx tools/smoke-test-template.ts [--output-dir <path>]
+ *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>]
  *
  * Options:
- *   --output-dir   Optional. Scratch directory for the scaffolded app.
- *                  Defaults to ".smoke-test/app".
+ *   --output-dir        Optional. Scratch directory for the scaffolded app.
+ *                       Defaults to ".smoke-test/app".
+ *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
+ *                       Defaults to "pnpm". (short: -p)
  */
 
 import {
@@ -37,12 +39,15 @@ const ROOT = process.cwd();
 const { values } = parseArgs({
   options: {
     "output-dir": { type: "string", default: ".smoke-test/app" },
+    "package-manager": { type: "string", default: "pnpm", short: "p" },
   },
   strict: true,
 });
 
 // oxlint-disable-next-line typescript/no-non-null-assertion -- default value guarantees this is defined
 const outputDir = values["output-dir"]!;
+// oxlint-disable-next-line typescript/no-non-null-assertion -- default value guarantees this is defined
+const packageManager = values["package-manager"]!;
 const SCRATCH_DIR = resolve(ROOT, outputDir);
 
 // Clean up any prior run
@@ -55,6 +60,24 @@ mkdirSync(SCRATCH_DIR, { recursive: true });
 const templateSrc = join(ROOT, "template");
 cpSync(templateSrc, SCRATCH_DIR, { recursive: true });
 console.log(`✓ Copied template → ${outputDir}`);
+
+// Delete the irrelevant lockfile for the non-selected PM
+if (packageManager === "pnpm") {
+  const npmLockPath = join(SCRATCH_DIR, "package-lock.json");
+  if (existsSync(npmLockPath)) {
+    rmSync(npmLockPath);
+  }
+} else if (packageManager === "npm") {
+  const pnpmLockPath = join(SCRATCH_DIR, "pnpm-lock.yaml");
+  if (existsSync(pnpmLockPath)) {
+    rmSync(pnpmLockPath);
+  }
+} else {
+  console.error(
+    `Unsupported package manager: ${packageManager}. Expected 'pnpm' or 'npm'.`,
+  );
+  process.exit(1);
+}
 
 // Render placeholders in key files
 const placeholders = {
@@ -180,4 +203,8 @@ console.log(
   "✓ Rendered placeholders, stripped Go template conditionals, and renamed .tmpl files",
 );
 console.log(`\nTemplate scaffolded to ${SCRATCH_DIR}`);
-console.log("Next step: pnpm install --frozen-lockfile in that directory");
+if (packageManager === "pnpm") {
+  console.log("Next step: pnpm install --frozen-lockfile in that directory");
+} else if (packageManager === "npm") {
+  console.log("Next step: npm install in that directory");
+}
