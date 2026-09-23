@@ -23,6 +23,14 @@ export default defineConfig({
     },
     projects: [
       {
+        test: {
+          name: "tools",
+          root: "./tools",
+          environment: "node",
+          include: ["*.test.ts"],
+        },
+      },
+      {
         plugins: [react()],
         resolve: {
           alias: {

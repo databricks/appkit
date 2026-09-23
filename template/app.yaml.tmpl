@@ -1,4 +1,4 @@
-command: ['pnpm', 'run', 'start']
+command: ['{{or .packageManager "pnpm"}}', 'run', 'start']
 {{- if .appEnv}}
 env:
 {{.appEnv}}
