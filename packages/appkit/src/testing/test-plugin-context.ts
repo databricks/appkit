@@ -325,10 +325,10 @@ function createTestPluginContextSync(
     // Reuse production header validation and ALS. Only the client is faked.
     const asUser = (req: IAppRequest): ToolProvider => {
       record.asUserRequests.push(req as express.Request);
-      const scope = createRequestScope(
-        req as express.Request,
-        createCallerContext,
-      );
+      const scope = createRequestScope(req as express.Request, [], {
+        createCaller: createCallerContext,
+        legacy: true,
+      });
 
       return {
         ...base,

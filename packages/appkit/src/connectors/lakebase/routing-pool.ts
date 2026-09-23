@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type { CallerContext } from "../../context/caller-context";
 import { getCallerContext } from "../../context/execution-context";
+import { assertResourceExecution } from "../../context/resource-capabilities";
 
 /**
  * Subset of `pg.Pool` exposed by the Lakebase plugin.
@@ -23,16 +24,8 @@ export interface LakebasePool {
 }
 
 /**
- * A `pg.Pool`-like wrapper that routes queries to the appropriate pool
- * based on the current execution context.
- *
- * When called inside `runInCallerContext()` (set up by `Plugin.asUser(req)`),
- * queries route to the per-user pool returned by `resolveUserPool`.
- * Otherwise, queries route to the service-principal pool.
- *
- * This enables OBO (On-Behalf-Of) without custom `asUser()` overrides —
- * the base class sets up AsyncLocalStorage context, and the RoutingPool
- * reads it transparently.
+ * A `pg.Pool`-like compatibility wrapper. New caller scopes enforce the v1
+ * app-only contract. Deprecated entry points retain existing per-user routing.
  */
 export class RoutingPool implements LakebasePool {
   constructor(
@@ -41,6 +34,8 @@ export class RoutingPool implements LakebasePool {
   ) {}
 
   private activePool(): Pool {
+    // Strict scopes reject before resolving a pool; legacy OBO keeps its user pool.
+    assertResourceExecution("postgres");
     const userCtx = getCallerContext();
     return userCtx ? this.resolveUserPool(userCtx) : this.spPool;
   }

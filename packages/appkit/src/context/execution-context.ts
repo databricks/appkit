@@ -19,16 +19,28 @@ import {
   type UserContext,
 } from "./user-context";
 
-const executionContextStorage = new AsyncLocalStorage<CallerContext>();
+interface CallerScope {
+  readonly caller: CallerContext;
+  readonly legacyExecution: boolean;
+}
+
+const executionContextStorage = new AsyncLocalStorage<CallerScope>();
 
 function runInCallerScope<T>(
   callerContext: CallerContext,
   fn: () => T,
   legacyResources?: WarehouseBinding,
+  legacyExecution = false,
 ): T {
-  const caller = snapshotCallerContext(callerContext);
+  const scope = Object.freeze({
+    caller: snapshotCallerContext(callerContext),
+    // Deprecated entry points cannot disable guards in an existing new scope.
+    legacyExecution:
+      legacyExecution &&
+      (executionContextStorage.getStore()?.legacyExecution ?? true),
+  });
   return runWithResourceBindings(legacyResources, () =>
-    executionContextStorage.run(caller, () => {
+    executionContextStorage.run(scope, () => {
       try {
         const result = fn();
         if (result instanceof Promise) {
@@ -71,6 +83,19 @@ export function runInCallerContext<T>(
   return runInCallerScope(callerContext, fn);
 }
 
+/** @internal Preserve legacy resource behavior without weakening an enclosing scope. */
+export function runInLegacyCallerContext<T>(
+  caller: CallerContext,
+  fn: () => T,
+): T {
+  return runInCallerScope(caller, fn, undefined, true);
+}
+
+/** @internal Legacy user entry points retain their established resource routing. */
+export function isLegacyCallerScope(): boolean {
+  return executionContextStorage.getStore()?.legacyExecution === true;
+}
+
 /** @deprecated Use runInCallerContext. */
 export function runInUserContext<T>(
   userContext: UserContext | (CallerContext & Pick<UserContext, "warehouseId">),
@@ -82,9 +107,10 @@ export function runInUserContext<T>(
       toCallerContext(userContext),
       fn,
       Object.freeze({ warehouseId: userContext.warehouseId }),
+      true,
     );
   }
-  return runInCallerContext(toCallerContext(userContext), fn);
+  return runInLegacyCallerContext(toCallerContext(userContext), fn);
 }
 
 /**
@@ -98,7 +124,7 @@ export function runInUserContext<T>(
 export function getExecutionContext():
   | ServiceContextState
   | (CallerContext & UserContext) {
-  const callerContext = executionContextStorage.getStore();
+  const callerContext = getCallerContext();
   if (callerContext) {
     return legacyUserContext(callerContext, captureWarehouseId());
   }
@@ -169,12 +195,12 @@ export function isInUserContext(): boolean {
  * to be initialized and never throws.
  */
 export function getCallerContext(): CallerContext | undefined {
-  return executionContextStorage.getStore();
+  return executionContextStorage.getStore()?.caller;
 }
 
 /** @deprecated Use getCallerContext and its principal field. */
 export function getUserContext(): (CallerContext & UserContext) | undefined {
   warnContextDeprecation("getUserContext", "getCallerContext");
-  const scope = executionContextStorage.getStore();
-  return scope ? legacyUserContext(scope, captureWarehouseId()) : undefined;
+  const caller = getCallerContext();
+  return caller ? legacyUserContext(caller, captureWarehouseId()) : undefined;
 }
