@@ -54,6 +54,10 @@
             "type": "string",
             "enum": ["beta", "ga"]
           },
+          "deprecated": {
+            "description": "When true, the plugin is deprecated. It still ships and functions, but tooling (e.g. `appkit plugin list`) may hide or flag it. The recommended replacement is noted in the plugin description.",
+            "type": "boolean"
+          },
           "scaffolding": {
             "description": "Plugin-level scaffolding metadata propagated from the plugin manifest.",
             "type": "object",

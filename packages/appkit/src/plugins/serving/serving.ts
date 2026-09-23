@@ -41,6 +41,10 @@ interface ResolvedEndpoint {
   name: string;
 }
 
+/**
+ * @deprecated The `serving` plugin is deprecated and will be removed in a
+ * future release. Use the `agents` plugin instead.
+ */
 export class ServingPlugin extends Plugin {
   static manifest = defineManifest<"serving">(manifest);
 
@@ -68,6 +72,11 @@ export class ServingPlugin extends Plugin {
   }
 
   async setup(): Promise<void> {
+    logger.warn(
+      "The `serving` plugin is deprecated and will be removed in a future release. " +
+        "Use the `agents` plugin instead.",
+    );
+
     const cacheFile = path.join(
       process.cwd(),
       "node_modules",
@@ -342,6 +351,8 @@ export class ServingPlugin extends Plugin {
 }
 
 /**
+ * @deprecated The `serving` plugin is deprecated and will be removed in a
+ * future release. Use the `agents` plugin instead.
  * @internal
  */
 export const serving = toPlugin(ServingPlugin);

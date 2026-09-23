@@ -100,6 +100,7 @@ async function loadPluginEntry(
         manifest.stability !== "ga" && {
           stability: manifest.stability,
         }),
+      ...(manifest.deprecated && { deprecated: manifest.deprecated }),
       ...(manifest.scaffolding && {
         scaffolding: manifest.scaffolding,
       }),

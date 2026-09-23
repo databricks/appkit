@@ -1,8 +1,9 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "serving",
-  "displayName": "Model Serving Plugin",
-  "description": "Authenticated proxy to Databricks Model Serving endpoints",
+  "displayName": "Model Serving Plugin (deprecated)",
+  "description": "DEPRECATED: use the agents plugin instead. Authenticated proxy to Databricks Model Serving endpoints",
+  "deprecated": true,
   "resources": {
     "required": [
       {
