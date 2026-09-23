@@ -8,7 +8,7 @@
  * `resolved` field in npm format or `resolution`/tarball URLs in pnpm format).
  * If a private/internal registry (Artifactory, JFrog, GitHub Packages, Verdaccio,
  * an internal mirror) ever leaks in — e.g. because the lockfile was regenerated
- * on a machine with a custom `.npmrc` or `.npmrc` — scaffolded apps would either
+ * on a machine with a custom `.npmrc` — scaffolded apps would either
  * fail install (no access) or silently pull from a non-public source. This check
  * fails CI before that ships.
  *
