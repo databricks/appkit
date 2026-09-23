@@ -36,6 +36,18 @@ await createApp({
 
 The execution context is determined by the SQL file name, not by the hook call.
 
+### Warehouse binding
+
+The warehouse is an app resource, not part of the caller's identity. After
+`createApp()` initializes Analytics, custom plugins can read the binding with
+`getWarehouseId` from `@databricks/appkit`. It returns a `Promise<string>` and
+uses the same app warehouse for service-principal and caller executions.
+Credentials still come from the current execution context.
+
+`ServiceContextState.warehouseId` and the old context-module `getWarehouseId`
+helper are deprecated compatibility accessors. Use the package-root helper for
+new code. Warehouse environment lookup and development discovery are unchanged.
+
 ## SQL parameters
 
 Use `:paramName` placeholders and optionally annotate parameter types using SQL comments:

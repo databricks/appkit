@@ -9,6 +9,7 @@ import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import { immutableCallerContext } from "../context/user-context";
 import { AuthenticationError } from "../errors";
+import { AppResources } from "../resources/app-resources";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
@@ -500,12 +501,19 @@ function buildServiceContextState(
  * Mocks the `ServiceContext` singleton for testing — spies `get`,
  * `initialize`, `isInitialized`, and `createCallerContext` so code that resolves
  * the service principal or an on-behalf-of user context gets test doubles.
+ * Also supplies the app-level warehouse binding through AppResources.
  * Call in `beforeEach`; call the returned `restore()` in `afterEach`.
  *
  * @returns The mock context plus the spies and a `restore()` helper.
  */
 export function mockServiceContext(options: TestContextOptions = {}) {
   const serviceContext = buildServiceContextState(options);
+
+  const resourcesSpy = vi
+    .spyOn(AppResources, "get")
+    .mockReturnValue(
+      Object.freeze({ warehouseId: serviceContext.warehouseId }),
+    );
 
   const getSpy = vi
     .spyOn(ServiceContext, "get")
@@ -541,6 +549,7 @@ export function mockServiceContext(options: TestContextOptions = {}) {
       initSpy.mockRestore();
       isInitializedSpy.mockRestore();
       createUserContextSpy.mockRestore();
+      resourcesSpy.mockRestore();
     },
   };
 }

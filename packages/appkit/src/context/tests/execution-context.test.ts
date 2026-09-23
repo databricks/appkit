@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { getWarehouseId } from "../../resources";
+import { AppResources } from "../../resources/app-resources";
 import { createMockWorkspaceClient } from "../../testing/mock-workspace-client";
 import * as workspaceClient from "../../workspace-client";
 import { getUserContext } from "../execution-context";
@@ -11,7 +13,7 @@ import {
   getCurrentPrincipalKey,
   getCurrentUserId,
   getExecutionContext,
-  getWarehouseId,
+  getWarehouseId as getLegacyWarehouseId,
   getWorkspaceClient,
   isCallerContext,
   runInCallerContext,
@@ -43,6 +45,9 @@ function caller(userId: string): CallerContext {
 describe("caller execution context", () => {
   beforeEach(() => {
     vi.spyOn(ServiceContext, "get").mockReturnValue(service);
+    vi.spyOn(AppResources, "get").mockReturnValue({
+      warehouseId: service.warehouseId,
+    });
   });
 
   afterEach(() => {
@@ -187,6 +192,7 @@ describe("caller execution context", () => {
           expect(legacy.userEmail).toBe("alice@example.com");
           expect(legacy.isUserContext).toBe(true);
           expect(legacy.warehouseId).toBe(service.warehouseId);
+          expect(getLegacyWarehouseId()).toBe(getWarehouseId());
           return 42;
         }),
       ).toBe(42);
@@ -203,6 +209,7 @@ describe("caller execution context", () => {
       "UserContext.userEmail",
       "UserContext.isUserContext",
       "UserContext.warehouseId",
+      "context.getWarehouseId",
     ]) {
       expect(
         warn.mock.calls.filter(([message]) =>
@@ -242,10 +249,7 @@ describe("caller execution context", () => {
   });
 
   test("reports a missing app warehouse in both service and caller scopes", () => {
-    vi.mocked(ServiceContext.get).mockReturnValue({
-      ...service,
-      warehouseId: undefined,
-    });
+    vi.mocked(AppResources.get).mockReturnValue({});
     expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
     runInCallerContext(caller("alice"), () => {
       expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");

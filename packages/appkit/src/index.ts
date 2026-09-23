@@ -45,6 +45,7 @@ export {
   getExecutionContext,
 } from "./context";
 export { createApp } from "./core";
+export { getWarehouseId } from "./resources";
 export type { DatabaseRegistry } from "./database/contract";
 // Errors
 export {
