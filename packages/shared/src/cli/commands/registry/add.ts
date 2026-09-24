@@ -295,7 +295,7 @@ async function installDependencies(deps: string[], cwd: string): Promise<void> {
   }
   if (install.length === 0) return;
 
-  const pm = detectPackageManager(cwd);
+  const pm = detectPackageManager(cwd, "npm");
   const subcommand = pm === "npm" ? "install" : "add";
   console.log(`\nInstalling dependencies with ${pm}: ${install.join(" ")}`);
   // `--` stops the PM from parsing any dep as a flag (defense in depth).

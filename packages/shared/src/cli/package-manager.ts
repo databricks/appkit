@@ -3,36 +3,54 @@ import path from "node:path";
 
 type PackageManager = "pnpm" | "npm" | "yarn" | "bun";
 
+function isPackageManager(value: string): value is PackageManager {
+  return (
+    value === "pnpm" || value === "npm" || value === "yarn" || value === "bun"
+  );
+}
+
 /**
- * Detects the package manager for a given working directory.
- * Detection order:
- * 1. process.env.npm_config_user_agent (e.g. "pnpm/8.6.0 ...")
- * 2. Lockfile presence in cwd (pnpm-lock.yaml, yarn.lock, bun.lockb, package-lock.json)
- * 3. Default to pnpm
+ * Prefers the project's packageManager field, then its lockfiles, then
+ * npm_config_user_agent. The launcher (e.g. npx) may use a different manager.
  */
-export function detectPackageManager(cwd: string): PackageManager {
-  // Check environment variable first (npm_config_user_agent set by the package manager)
+export function detectPackageManager(
+  cwd: string,
+  fallback: PackageManager = "pnpm",
+): PackageManager {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(cwd, "package.json"), "utf-8"),
+    ) as { packageManager?: unknown } | null;
+    if (typeof pkg?.packageManager === "string") {
+      const name = pkg.packageManager.split("@")[0];
+      if (isPackageManager(name)) return name;
+    }
+  } catch {
+    // A missing or unreadable manifest still permits lockfile detection.
+  }
+
+  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
+  if (
+    fs.existsSync(path.join(cwd, "bun.lock")) ||
+    fs.existsSync(path.join(cwd, "bun.lockb"))
+  ) {
+    return "bun";
+  }
+  if (
+    fs.existsSync(path.join(cwd, "package-lock.json")) ||
+    fs.existsSync(path.join(cwd, "npm-shrinkwrap.json"))
+  ) {
+    return "npm";
+  }
+
   const userAgent = process.env.npm_config_user_agent;
   if (userAgent) {
     const firstToken = userAgent.split("/")[0];
-    if (
-      firstToken === "pnpm" ||
-      firstToken === "npm" ||
-      firstToken === "yarn" ||
-      firstToken === "bun"
-    ) {
-      return firstToken;
-    }
+    if (isPackageManager(firstToken)) return firstToken;
   }
 
-  // Check for lockfile presence
-  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
-  if (fs.existsSync(path.join(cwd, "bun.lockb"))) return "bun";
-  if (fs.existsSync(path.join(cwd, "package-lock.json"))) return "npm";
-
-  // Default fallback
-  return "pnpm";
+  return fallback;
 }
 
 /**
