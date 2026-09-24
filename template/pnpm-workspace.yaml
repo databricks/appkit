@@ -1,0 +1,29 @@
+packages:
+  - '.'
+
+overrides:
+  vite: npm:rolldown-vite@7.1.14
+  '@opentelemetry/core': 2.8.0
+  systeminformation: 5.31.7
+  fast-uri: 3.1.0
+  socks: 2.8.7
+  bare-path: 3.1.1
+  bare-url: 2.5.2
+
+allowBuilds:
+  '@ast-grep/napi': true
+  esbuild: true
+  '@databricks/appkit': true
+  '@databricks/appkit-ui': true
+  protobufjs: true
+
+supportedArchitectures:
+  os:
+    - linux
+    - darwin
+  cpu:
+    - x64
+    - arm64
+  libc:
+    - glibc
+    - musl

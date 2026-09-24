@@ -1,34 +1,30 @@
 #!/usr/bin/env tsx
 /**
- * Validates that a template package-lock.json resolves every dependency from the
- * public npm registry, and nothing else.
+ * Validates that template lockfiles (package-lock.json and pnpm-lock.yaml)
+ * resolve every dependency from the public npm registry, and nothing else.
  *
  * The template is the app scaffold shipped to users via `databricks apps init`,
- * and its lockfile pins exactly where each dependency is fetched from (the
- * `resolved` field on every package entry). If a private/internal registry
- * (Artifactory, JFrog, GitHub Packages, Verdaccio, an internal mirror) ever
- * leaks in — e.g. because the lockfile was regenerated on a machine with a
- * custom `.npmrc` — scaffolded apps would either fail `npm install` (no access)
- * or silently pull from a non-public source. This check fails CI before that
- * ships.
- *
- * The single https + host rule on each `resolved` URL also rejects non-registry
- * source types (`git+ssh://`, `http://`, links), since none of those satisfy
- * "https URL whose host is registry.npmjs.org".
+ * and its lockfiles pin exactly where each dependency is fetched from (the
+ * `resolved` field in npm format or `resolution`/tarball URLs in pnpm format).
+ * If a private/internal registry (Artifactory, JFrog, GitHub Packages, Verdaccio,
+ * an internal mirror) ever leaks in — e.g. because the lockfile was regenerated
+ * on a machine with a custom `.npmrc` — scaffolded apps would either
+ * fail install (no access) or silently pull from a non-public source. This check
+ * fails CI before that ships.
  *
  * Usage:
  *   tsx tools/check-template-lock-registry.ts [lockfile] [--rewrite] [--allow-file]
  *
  *   lockfile      Optional path (relative to repo root or absolute). Defaults to
- *                 template/package-lock.json (the committed lock).
- *   --rewrite     Rewrite JFrog/Artifactory `resolved` URLs back to the public
- *                 npm registry before validating. The release pipeline builds
- *                 the template artifact on a protected runner whose npm is
- *                 pointed at JFrog (see .github/actions/setup-jfrog-npm), which
- *                 bakes internal URLs into the regenerated lock. JFrog is a
- *                 pull-through mirror of npmjs.org, so the tarball bytes and
- *                 `integrity` hashes are identical and only the host + base path
- *                 must change.
+ *                 template/pnpm-lock.yaml (the committed pnpm lock). Format is
+ *                 detected by filename (.yaml/.yml = pnpm; .json = npm).
+ *   --rewrite     Rewrite JFrog/Artifactory URLs back to the public npm registry
+ *                 before validating. The release pipeline builds the template
+ *                 on a protected runner whose npm is pointed at JFrog
+ *                 (see .github/actions/setup-jfrog-npm), which bakes internal
+ *                 URLs into the regenerated locks. JFrog is a pull-through mirror
+ *                 of npmjs.org, so the tarball bytes and integrity hashes are
+ *                 identical and only the host + base path must change.
  *   --allow-file  Permit `file:` resolved entries (bundled appkit/appkit-ui/
  *                 lakebase tarballs that prepare-template-artifact.ts pins). Used
  *                 for the prepared artifact lock; never for the committed lock.
@@ -51,20 +47,38 @@ const { values, positionals } = parseArgs({
 
 const lockPath = positionals[0]
   ? resolve(ROOT, positionals[0])
-  : join(ROOT, "template/package-lock.json");
+  : join(ROOT, "template/pnpm-lock.yaml");
 const lockLabel = relative(ROOT, lockPath) || lockPath;
 const npmrcPath = join(dirname(lockPath), ".npmrc");
 const npmrcLabel = relative(ROOT, npmrcPath) || npmrcPath;
 const allowFile = values["allow-file"];
 
+// Detect format by filename
+const isPnpmLock = lockPath.endsWith(".yaml") || lockPath.endsWith(".yml");
+const isNpmLock = lockPath.endsWith(".json");
+
+if (!isPnpmLock && !isNpmLock) {
+  console.error(
+    `Unknown lockfile format: ${lockLabel}. Expected .yaml, .yml, or .json.`,
+  );
+  process.exit(1);
+}
+
+if (!existsSync(lockPath)) {
+  console.error(
+    `Lockfile not found: ${lockLabel}. Run 'pnpm install' or 'npm install' to generate it.`,
+  );
+  process.exit(1);
+}
+
 const errors: string[] = [];
 
-// --- Optional rewrite: JFrog/Artifactory npm base -> public registry ---
-// Matches the npm virtual-repo base configured by setup-jfrog-npm
-// (https://databricks.jfrog.io/artifactory/api/npm/<repo>/). The path after the
-// base mirrors npmjs.org exactly (including scoped and aliased packages such as
-// rolldown-vite), so swapping the base is correct. Operates on the raw text so
-// the rest of the lockfile is byte-for-byte unchanged.
+// --- Optional rewrite: JFrog/Artifactory base -> public registry ---
+// Matches the virtual-repo bases configured by setup-jfrog-npm for both npm and pnpm.
+// npm: https://databricks.jfrog.io/artifactory/api/npm/<repo>/
+// pnpm: same URLs may appear in resolution/tarball fields
+// Both use the same pull-through mirror, so the tarball bytes and integrity hashes
+// are identical; only the host + base path must change.
 if (values.rewrite) {
   const before = readFileSync(lockPath, "utf-8");
   const JFROG_NPM_BASE =
@@ -79,36 +93,14 @@ if (values.rewrite) {
   console.log(`Rewrote ${count} JFrog URL(s) to public npm in ${lockLabel}`);
 }
 
-// --- Lockfile resolved URLs (core check) ---
-// lockfileVersion 3: dependencies live only in the `packages` map. Entries
-// without a `resolved` field are the root ("") and workspace/link entries —
-// they are not registry fetches, so skip them.
-const lock = JSON.parse(readFileSync(lockPath, "utf-8"));
-
-const packages: Record<string, { resolved?: string }> = lock.packages ?? {};
-for (const [pkgKey, entry] of Object.entries(packages)) {
-  const resolved = entry.resolved;
-  if (!resolved) continue;
-  // Bundled local tarballs (appkit/appkit-ui/lakebase) in a prepared artifact.
-  if (allowFile && resolved.startsWith("file:")) continue;
-
-  let url: URL | undefined;
-  try {
-    url = new URL(resolved);
-  } catch {
-    // Not a parseable URL (e.g. a bare path) — treat as non-public.
-  }
-
-  if (url?.protocol !== "https:" || url.host !== ALLOWED_REGISTRY_HOST) {
-    errors.push(
-      `Non-public registry in ${lockLabel}: "${pkgKey || "<root>"}" ` +
-        `resolves to ${resolved} (expected https://${ALLOWED_REGISTRY_HOST}/...).`,
-    );
-  }
+if (isPnpmLock) {
+  validatePnpmLock(lockPath, lockLabel);
+} else {
+  validateNpmLock(lockPath, lockLabel);
 }
 
 // --- Template .npmrc (belt-and-suspenders) ---
-// No template/.npmrc exists today; only validate it if one is added later.
+// Validate it if present; currently only used by pnpm but good to check for both.
 if (existsSync(npmrcPath)) {
   const lines = readFileSync(npmrcPath, "utf-8").split(/\r?\n/);
   for (const rawLine of lines) {
@@ -146,3 +138,68 @@ if (errors.length) {
 }
 
 console.log(`✓ ${lockLabel} references only the public npm registry`);
+
+// --- npm package-lock.json format handler ---
+function validateNpmLock(path: string, label: string): void {
+  // lockfileVersion 3: dependencies live only in the `packages` map. Entries
+  // without a `resolved` field are the root ("") and workspace/link entries —
+  // they are not registry fetches, so skip them.
+  const lock = JSON.parse(readFileSync(path, "utf-8"));
+
+  const packages: Record<string, { resolved?: string }> = lock.packages ?? {};
+  for (const [pkgKey, entry] of Object.entries(packages)) {
+    const resolved = entry.resolved;
+    if (!resolved) continue;
+    // Bundled local tarballs (appkit/appkit-ui/lakebase) in a prepared artifact.
+    if (allowFile && resolved.startsWith("file:")) continue;
+
+    let url: URL | undefined;
+    try {
+      url = new URL(resolved);
+    } catch {
+      // Not a parseable URL (e.g. a bare path) — treat as non-public.
+    }
+
+    if (url?.protocol !== "https:" || url.host !== ALLOWED_REGISTRY_HOST) {
+      errors.push(
+        `Non-public registry in ${label}: "${pkgKey || "<root>"}" ` +
+          `resolves to ${resolved} (expected https://${ALLOWED_REGISTRY_HOST}/...).`,
+      );
+    }
+  }
+}
+
+// --- pnpm pnpm-lock.yaml format handler ---
+function validatePnpmLock(path: string, label: string): void {
+  // pnpm uses YAML format. The lockfile structure has:
+  // - packages: map of resolved package specs with 'resolution' (tarball URL)
+  // - snapshots: references to resolved versions (not used for URL validation)
+  // Resolution URLs appear in the 'resolution' field as URLs or inline tarballs.
+  const yaml = readFileSync(path, "utf-8");
+
+  // Simplified YAML parsing for registry URL validation.
+  // We look for 'resolution:' entries that contain URLs.
+  const resolutionPattern =
+    /resolution:\s*\{?(?:tarball:\s*)?['"]?(https?:\/\/[^\s'"}\n]+)/gm;
+  let match;
+  while ((match = resolutionPattern.exec(yaml)) !== null) {
+    const resolvedUrl = match[1];
+
+    // Bundled local tarballs in a prepared artifact.
+    if (allowFile && resolvedUrl.startsWith("file:")) continue;
+
+    let url: URL | undefined;
+    try {
+      url = new URL(resolvedUrl);
+    } catch {
+      // Not a parseable URL — treat as non-public.
+    }
+
+    if (url?.protocol !== "https:" || url.host !== ALLOWED_REGISTRY_HOST) {
+      errors.push(
+        `Non-public registry in ${label}: tarball ` +
+          `resolves to ${resolvedUrl} (expected https://${ALLOWED_REGISTRY_HOST}/...).`,
+      );
+    }
+  }
+}

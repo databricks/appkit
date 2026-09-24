@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "type": "module",
+  "packageManager": "pnpm@11.0.8",
   "scripts": {
     "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server.js",
     "dev": "NODE_ENV=development tsx watch --tsconfig ./tsconfig.server.json --env-file-if-exists=./.env ./server/server.ts",
     "build:client": "tsc -b tsconfig.client.json && vite build --config client/vite.config.ts",
     "build:server": "tsc -b tsconfig.server.json && tsdown -c tsdown.server.config.ts",
-    "build": "npm run build:server && npm run build:client",
+    "build": "pnpm run build:server && pnpm run build:client",
     "typecheck": "tsc -b tsconfig.server.json && tsc -b tsconfig.client.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -17,8 +18,8 @@
     "format:fix": "prettier --write .",
     "test": "vitest run",
     "clean": "rm -rf client/dist dist build node_modules",
-    "prebuild": "npm run sync && npm run typegen -- --wait",
-    "predev": "npm run sync && npm run typegen",
+    "prebuild": "pnpm run sync && pnpm run typegen --wait",
+    "predev": "pnpm run sync && pnpm run typegen",
     "sync": "appkit plugin sync --write --silent",
     "typegen": "appkit generate-types",
     "setup": "appkit setup --write"
@@ -71,14 +72,5 @@
     "typescript-eslint": "8.48.0",
     "vite": "npm:rolldown-vite@7.1.14",
     "vitest": "4.1.9"
-  },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14",
-    "@opentelemetry/core": "2.8.0",
-    "systeminformation": "5.31.7",
-    "fast-uri": "3.1.0",
-    "socks": "2.8.7",
-    "bare-path": "3.1.1",
-    "bare-url": "2.5.2"
   }
 }
