@@ -131,6 +131,15 @@ export type AgentEvent =
   | { type: "metadata"; data: Record<string, unknown> }
   | {
       /**
+       * Emitted by the agents plugin (not adapters) after the streamed text:
+       * the parsed, schema-validated object. Wire event:
+       * {@link AppKitStructuredOutputEvent}.
+       */
+      type: "structured_output";
+      data: unknown;
+    }
+  | {
+      /**
        * Emitted by the agents plugin (not adapters) when a mutating tool call
        * is awaiting human approval — fires for tools annotated with
        * `effect: "write" | "update" | "destructive"` (preferred) or the
@@ -245,6 +254,19 @@ export interface AppKitMetadataEvent {
  * arrives before the server-side timeout, the call is auto-denied and the
  * agent receives a denial string as the tool output.
  */
+/**
+ * Emitted once on `/chat`, after the streamed assistant text, when the agent
+ * declared an `output` schema. `data` is the parsed, schema-validated object.
+ * The `appkit.` prefix matches the other AppKit-injected wire events
+ * (`appkit.thinking`, `appkit.metadata`); the equivalent non-streaming field
+ * is `output_parsed`.
+ */
+export interface AppKitStructuredOutputEvent {
+  type: "appkit.structured_output";
+  data: unknown;
+  sequence_number: number;
+}
+
 export interface AppKitApprovalPendingEvent {
   type: "appkit.approval_pending";
   approval_id: string;
@@ -264,6 +286,7 @@ export type ResponseStreamEvent =
   | ResponseFailedEvent
   | AppKitThinkingEvent
   | AppKitMetadataEvent
+  | AppKitStructuredOutputEvent
   | AppKitApprovalPendingEvent;
 
 // ---------------------------------------------------------------------------
@@ -275,6 +298,14 @@ export interface AgentInput {
   tools: AgentToolDefinition[];
   threadId: string;
   signal?: AbortSignal;
+  /**
+   * JSON Schema to constrain a tool-free completion to, for adapters that
+   * support server-side structured output (OpenAI-compatible `response_format`).
+   * Adapters that can't ignore it — the structured-output resolver then falls
+   * back to prompt + Zod validation. Already stripped of the top-level
+   * `$schema` key by {@link toToolJSONSchema}.
+   */
+  outputSchema?: Record<string, unknown>;
   /**
    * Adapter-specific opaque payloads, keyed by adapter namespace. The
    * shared contract intentionally does not enumerate keys — see each

@@ -102,6 +102,37 @@ export async function streamPath(
 }
 
 /**
+ * POSTs `body` to a serving endpoint as a non-streaming request (forces
+ * `stream: false`) and returns the parsed JSON (`{ choices: [{ message }] }`).
+ * Used by the structured-output path.
+ *
+ * @internal Not part of the public AppKit surface. Like {@link streamPath},
+ * the endpoint name is caller-controlled and hard-coded by internal callers;
+ * do not expose to user input (workspace-credentialled SSRF).
+ */
+export async function query(
+  client: ApiClientLike,
+  endpointName: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const { stream: _stream, ...cleanBody } = body;
+  const context = contextFromAbortSignal(signal);
+  return client.apiClient.request(
+    {
+      path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
+      method: "POST",
+      headers: new Headers({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      }),
+      payload: { ...cleanBody, stream: false },
+    },
+    context,
+  );
+}
+
+/**
  * Returns the raw SSE byte stream from a serving endpoint. Thin wrapper over
  * {@link streamPath} that handles serving-specific URL encoding and forces
  * `stream: true` in the payload.

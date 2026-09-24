@@ -9,6 +9,7 @@ import type {
   PluginData,
   ToolProvider,
 } from "shared";
+import type { z } from "zod";
 
 import {
   isSupervisorTool,
@@ -18,6 +19,10 @@ import {
 import { createLogger } from "../../logging/logger";
 import { consumeAdapterStream } from "./consume-adapter-stream";
 import { createPluginsProxy } from "./plugins-map";
+import {
+  buildStructuringPass,
+  resolveStructuredOutput,
+} from "./structured-output";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
   type FunctionTool,
@@ -25,6 +30,7 @@ import {
   isFunctionTool,
 } from "./tools/function-tool";
 import { isHostedTool } from "./tools/hosted-tools";
+import { toToolJSONSchema } from "./tools/json-schema";
 import type {
   AgentDefinition,
   AgentTool,
@@ -51,11 +57,28 @@ export interface RunAgentInput {
   plugins?: PluginData<PluginConstructor, unknown, string>[];
 }
 
-export interface RunAgentResult {
+/** Per-call options for {@link runAgent}. */
+export interface RunAgentOptions {
+  /**
+   * Structured-output schema override for this call. Takes precedence over the
+   * agent's own `output` schema. When either is set, `runAgent` validates the
+   * final answer and populates {@link RunAgentResult.output}, throwing a
+   * `StructuredOutputError` if it can't produce a valid object.
+   */
+  output?: z.ZodType;
+}
+
+export interface RunAgentResult<TOutput = string> {
   /** Aggregated text output from all `message_delta` events. */
   text: string;
   /** Every event the adapter yielded, in order. Useful for inspection/tests. */
   events: AgentEvent[];
+  /**
+   * Parsed, schema-validated object — present only when the agent (or the
+   * per-call override) declared an `output` schema. Statically typed via
+   * `z.infer` when the agent was built with `createAgent({ output })`.
+   */
+  output?: TOutput;
 }
 
 /**
@@ -86,10 +109,22 @@ export interface RunAgentResult {
  *   `PluginContext`) throw at standalone-init time with a clear "use
  *   createApp instead" message — not mid-stream.
  */
-export async function runAgent(
-  def: AgentDefinition,
+// Per-call schema override drives the result type via z.infer.
+export function runAgent<S extends z.ZodType>(
+  def: AgentDefinition<unknown>,
   input: RunAgentInput,
-): Promise<RunAgentResult> {
+  options: RunAgentOptions & { output: S },
+): Promise<RunAgentResult<z.infer<S>>>;
+// No override — the result type comes from the agent's own `output` schema.
+export function runAgent<TOutput = string>(
+  def: AgentDefinition<TOutput>,
+  input: RunAgentInput,
+): Promise<RunAgentResult<TOutput>>;
+export async function runAgent(
+  def: AgentDefinition<unknown>,
+  input: RunAgentInput,
+  options?: RunAgentOptions,
+): Promise<RunAgentResult<unknown>> {
   // Single shared cache for the whole call graph: parent + every nested
   // sub-agent dispatch share constructed plugin instances. Without this,
   // each nested `runAgent` would build its own cache, re-instantiate every
@@ -97,14 +132,43 @@ export async function runAgent(
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
-  return runAgentInternal(def, input, providerCache);
+
+  const { text, events, adapter, baseMessages } = await runAgentInternal(
+    def,
+    input,
+    providerCache,
+  );
+
+  const schema = options?.output ?? def.output;
+  if (!schema) return { text, events };
+
+  // Structured output is produced by a separate tool-free, non-streaming
+  // structuring pass (Databricks rejects response_format under streaming),
+  // so the main run above always streams the visible answer normally.
+  const output = await resolveStructuredOutput({
+    schema,
+    baseMessages,
+    finalText: text,
+    runStructuringPass: buildStructuringPass(adapter, toToolJSONSchema(schema)),
+    signal: input.signal,
+  });
+  return { text, events, output };
+}
+
+interface RawRunResult {
+  text: string;
+  events: AgentEvent[];
+  /** Adapter used for the run — reused for the structuring pass. */
+  adapter: AgentAdapter;
+  /** Normalized system + input messages the run saw (structuring-pass seed). */
+  baseMessages: Message[];
 }
 
 async function runAgentInternal(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
-): Promise<RunAgentResult> {
+): Promise<RawRunResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
@@ -193,7 +257,12 @@ async function runAgentInternal(
     },
   });
 
-  return { text, events };
+  return {
+    text,
+    events,
+    adapter,
+    baseMessages: messages,
+  };
 }
 
 /**
@@ -263,7 +332,9 @@ async function initStandalonePlugins(
   }
 }
 
-async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
+async function resolveAdapter(
+  def: AgentDefinition<unknown>,
+): Promise<AgentAdapter> {
   const { model } = def;
   if (!model) {
     const { DatabricksAdapter } = await import("../../agents/databricks");
@@ -344,7 +415,7 @@ type StandaloneEntry =
  * references throw a named "not registered" error via the proxy.
  */
 function buildStandaloneToolIndex(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   plugins: PluginData<PluginConstructor, unknown, string>[],
   providerCache: Map<string, ToolProvider>,
 ): Map<string, StandaloneEntry> {
@@ -389,7 +460,7 @@ function buildStandaloneToolIndex(
  * directly (no construction at toolkit-call time).
  */
 function resolveDefTools(
-  def: AgentDefinition,
+  def: AgentDefinition<unknown>,
   plugins: PluginData<PluginConstructor, unknown, string>[],
   providerCache: Map<string, ToolProvider>,
 ): AgentTools {
