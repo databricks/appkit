@@ -5,21 +5,17 @@ import {
   ConfigurationError,
   InitializationError,
 } from "../errors";
-import { AppResources } from "../resources/app-resources";
+import { WarehouseResource } from "../resources/warehouse";
 import {
   type ClientOptions,
   ConfigError,
   createWorkspaceClient,
   type WorkspaceClient,
 } from "../workspace-client";
-import type { CallerContext } from "./caller-context";
+import { type CallerContext, snapshotCallerContext } from "./caller-context";
 import { getClientOptions } from "./client-options";
 import { warnContextDeprecation } from "./deprecation";
-import {
-  immutableCallerContext,
-  legacyUserContext,
-  type UserContext,
-} from "./user-context";
+import { legacyUserContext, type UserContext } from "./user-context";
 
 /**
  * Service context holds the service principal identity and workspace client.
@@ -32,7 +28,7 @@ export interface ServiceContextState {
   readonly serviceUserId: string;
   /**
    * @deprecated Use getWarehouseId() from @databricks/appkit.
-   * Retained for one release before removal.
+   * Retained for backward compatibility.
    */
   readonly warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
@@ -41,7 +37,7 @@ export interface ServiceContextState {
 
 /**
  * ServiceContext is a singleton that manages the service principal's
- * WorkspaceClient and workspace ID. Resource bindings are owned by AppResources.
+ * WorkspaceClient and workspace ID. WarehouseResource owns warehouse bindings.
  *
  * It's initialized once at app startup and provides the foundation
  * for both service principal and user context execution.
@@ -137,7 +133,7 @@ export class ServiceContext {
       .digest("hex")
       .slice(0, 16);
 
-    return immutableCallerContext({
+    return snapshotCallerContext({
       client: userClient,
       principal: { type: "user", userId, userName, userEmail },
       tokenFingerprint,
@@ -156,10 +152,13 @@ export class ServiceContext {
       "ServiceContext.createUserContext",
       "ServiceContext.createCallerContext",
     );
-    const caller = immutableCallerContext(
-      ServiceContext.createCallerContext(token, userId, userName, userEmail),
+    const caller = ServiceContext.createCallerContext(
+      token,
+      userId,
+      userName,
+      userEmail,
     );
-    const warehouseId = AppResources.get().warehouseId;
+    const warehouseId = WarehouseResource.get()?.warehouseId;
     return legacyUserContext(caller, () => warehouseId);
   }
 
@@ -183,14 +182,14 @@ export class ServiceContext {
         await Promise.all([
           ServiceContext.getWorkspaceId(wsClient),
           wsClient.currentUser.me(),
-          AppResources.resolve(wsClient, options),
+          WarehouseResource.resolve(wsClient, options?.warehouseId),
         ]);
 
       if (!currentUser.id) {
         throw ConfigurationError.resourceNotFound("Service user ID");
       }
 
-      const resources = AppResources.bind(resolvedResources);
+      const resources = WarehouseResource.bind(resolvedResources);
 
       return Object.freeze({
         client: wsClient,
@@ -244,6 +243,6 @@ export class ServiceContext {
   static reset(): void {
     ServiceContext.instance = null;
     ServiceContext.initPromise = null;
-    AppResources.reset();
+    WarehouseResource.reset();
   }
 }

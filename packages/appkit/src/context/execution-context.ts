@@ -1,46 +1,30 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import {
-  AppResources,
-  type AppResourceBindings,
-} from "../resources/app-resources";
-import {
+  captureWarehouseId,
   getWarehouseId as getResourceWarehouseId,
   runWithResourceBindings,
+  type WarehouseBinding,
 } from "../resources/warehouse";
-import {
-  type CallerContext,
-  type ExecutionContext,
-  isCallerContext,
-} from "./caller-context";
+import { type CallerContext, snapshotCallerContext } from "./caller-context";
 import { warnContextDeprecation } from "./deprecation";
-import { ServiceContext } from "./service-context";
+import { ServiceContext, type ServiceContextState } from "./service-context";
 import {
-  immutableCallerContext,
   legacyUserContext,
   toCallerContext,
   type UserContext,
 } from "./user-context";
 
-interface CallerScope {
-  readonly caller: CallerContext & UserContext;
-  // Legacy overrides stay outside caller identity. New callers use the app binding.
-  readonly legacyResources?: AppResourceBindings;
-}
-
-const executionContextStorage = new AsyncLocalStorage<CallerScope>();
+const executionContextStorage = new AsyncLocalStorage<CallerContext>();
 
 function runInCallerScope<T>(
   callerContext: CallerContext,
   fn: () => T,
-  legacyResources?: CallerScope["legacyResources"],
+  legacyResources?: WarehouseBinding,
 ): T {
-  const scope = Object.freeze({
-    caller: immutableCallerContext(callerContext),
-    legacyResources,
-  });
+  const caller = snapshotCallerContext(callerContext);
   return runWithResourceBindings(legacyResources, () =>
-    executionContextStorage.run(scope, fn),
+    executionContextStorage.run(caller, fn),
   );
 }
 
@@ -83,10 +67,12 @@ export function runInUserContext<T>(
  *
  * @throws Error if ServiceContext is not initialized
  */
-export function getExecutionContext(): ExecutionContext {
+export function getExecutionContext():
+  | ServiceContextState
+  | (CallerContext & UserContext) {
   const callerContext = executionContextStorage.getStore();
   if (callerContext) {
-    return callerContext.caller;
+    return legacyUserContext(callerContext, captureWarehouseId());
   }
   return ServiceContext.get();
 }
@@ -95,8 +81,8 @@ export function getExecutionContext(): ExecutionContext {
  * Get the principal key for future cache keying: `app` or `user:<id>`.
  */
 export function getCurrentPrincipalKey(): string {
-  const ctx = getExecutionContext();
-  return isCallerContext(ctx) ? `user:${ctx.principal.userId}` : "app";
+  const caller = getCallerContext();
+  return caller ? `user:${caller.principal.userId}` : "app";
 }
 
 /** The initiating user in a caller scope; no user actor exists in service scope. */
@@ -120,7 +106,7 @@ export function getCurrentUserId(): string {
  * Get the WorkspaceClient for the current execution context.
  */
 export function getWorkspaceClient() {
-  return getExecutionContext().client;
+  return (getCallerContext() ?? ServiceContext.get()).client;
 }
 
 /**
@@ -134,17 +120,11 @@ export function getWarehouseId(): Promise<string> {
   return getResourceWarehouseId();
 }
 
-function resolveWarehouseId(scope: CallerScope | undefined) {
-  return scope?.legacyResources
-    ? scope.legacyResources.warehouseId
-    : AppResources.get().warehouseId;
-}
-
 /**
  * Get the workspace ID promise.
  */
 export function getWorkspaceId(): Promise<string> {
-  return getExecutionContext().workspaceId;
+  return (getCallerContext() ?? ServiceContext.get()).workspaceId;
 }
 
 /**
@@ -161,14 +141,12 @@ export function isInUserContext(): boolean {
  * to be initialized and never throws.
  */
 export function getCallerContext(): CallerContext | undefined {
-  return executionContextStorage.getStore()?.caller;
+  return executionContextStorage.getStore();
 }
 
 /** @deprecated Use getCallerContext and its principal field. */
 export function getUserContext(): (CallerContext & UserContext) | undefined {
   warnContextDeprecation("getUserContext", "getCallerContext");
   const scope = executionContextStorage.getStore();
-  return scope
-    ? legacyUserContext(scope.caller, () => resolveWarehouseId(scope))
-    : undefined;
+  return scope ? legacyUserContext(scope, captureWarehouseId()) : undefined;
 }

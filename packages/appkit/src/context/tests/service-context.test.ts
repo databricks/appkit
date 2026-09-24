@@ -7,7 +7,7 @@ import {
   InitializationError,
 } from "../../errors";
 import { getWarehouseId } from "../../resources";
-import { AppResources } from "../../resources/app-resources";
+import { WarehouseResource } from "../../resources/warehouse";
 import { ServiceContext } from "../service-context";
 
 // ── Mock the workspace-client wrapper ──────────────────────────────
@@ -139,7 +139,7 @@ describe("ServiceContext", () => {
       await expect(
         ServiceContext.initialize({ warehouseId: true }),
       ).rejects.toThrow(ConfigurationError);
-      expect(() => AppResources.get()).toThrow(InitializationError);
+      expect(WarehouseResource.get()).toBeUndefined();
     });
 
     test("shares one warehouse discovery across concurrent initialization calls", async () => {
