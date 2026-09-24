@@ -2,6 +2,7 @@ import {
   type CallerContext,
   type ExecutionContext,
   isCallerContext,
+  snapshotCallerContext,
 } from "./caller-context";
 import { warnContextDeprecation } from "./deprecation";
 import type { ServiceContextState } from "./service-context";
@@ -32,18 +33,23 @@ export interface UserContext {
 }
 
 /**
- * Freeze the identity snapshot while preserving deprecated property access.
- * SDK clients and promises retain their own internal lifecycle.
+ * @deprecated Use snapshotCallerContext for identity-only snapshots.
+ * Retains the legacy fields for existing callers.
  */
 export function immutableCallerContext(
   ctx: CallerContext,
 ): CallerContext & UserContext {
-  const principal = Object.freeze({ ...ctx.principal });
+  warnContextDeprecation("immutableCallerContext", "snapshotCallerContext");
+  return legacyIdentityContext(ctx);
+}
+
+function legacyIdentityContext(
+  ctx: CallerContext,
+): CallerContext & UserContext {
+  const caller = snapshotCallerContext(ctx);
+  const { principal } = caller;
   return Object.freeze({
-    client: ctx.client,
-    principal,
-    tokenFingerprint: ctx.tokenFingerprint,
-    workspaceId: ctx.workspaceId,
+    ...caller,
     get userId() {
       warnContextDeprecation(
         "UserContext.userId",
@@ -77,7 +83,7 @@ export function immutableCallerContext(
 
 /** Expose the old resource field only through the deprecated context APIs. */
 export function legacyUserContext(
-  ctx: CallerContext & UserContext,
+  ctx: CallerContext,
   resolveWarehouseId: () => Promise<string> | undefined,
 ): CallerContext & UserContext {
   return Object.freeze(
@@ -91,7 +97,7 @@ export function legacyUserContext(
           return resolveWarehouseId();
         },
       },
-      Object.getOwnPropertyDescriptors(ctx),
+      Object.getOwnPropertyDescriptors(legacyIdentityContext(ctx)),
     ),
   ) as CallerContext & UserContext;
 }

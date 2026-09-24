@@ -12,6 +12,7 @@ export {
 } from "./execution-context";
 export {
   type CallerContext,
+  type CallerPrincipal,
   type ExecutionContext,
   type Principal,
   isCallerContext,

@@ -38,6 +38,7 @@ export {
 } from "./connectors/lakebase";
 export {
   type CallerContext,
+  type CallerPrincipal,
   type ExecutionContext,
   type Principal,
   getCurrentActorId,

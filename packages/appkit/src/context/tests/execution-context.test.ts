@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { getWarehouseId } from "../../resources";
-import { AppResources } from "../../resources/app-resources";
+import { WarehouseResource } from "../../resources/warehouse";
 import { createMockWorkspaceClient } from "../../testing/mock-workspace-client";
 import * as workspaceClient from "../../workspace-client";
 import { getUserContext } from "../execution-context";
@@ -20,7 +20,11 @@ import {
   runInUserContext,
   ServiceContext,
 } from "../index";
-import { type ExecutionContext, isUserContext } from "../user-context";
+import {
+  type ExecutionContext,
+  immutableCallerContext,
+  isUserContext,
+} from "../user-context";
 
 const { warn } = vi.hoisted(() => ({ warn: vi.fn() }));
 vi.mock("../../logging/logger", () => ({
@@ -48,7 +52,7 @@ function caller(userId: string): CallerContext {
 describe("caller execution context", () => {
   beforeEach(() => {
     vi.spyOn(ServiceContext, "get").mockReturnValue(service);
-    vi.spyOn(AppResources, "get").mockReturnValue(appResources);
+    vi.spyOn(WarehouseResource, "get").mockReturnValue(appResources);
   });
 
   afterEach(() => {
@@ -127,6 +131,10 @@ describe("caller execution context", () => {
       if (!active) throw new Error("Expected an active caller");
       expect(getCurrentPrincipalKey()).toBe("user:alice");
       expect(Object.isFrozen(active)).toBe(true);
+      expect(active).not.toHaveProperty("userId");
+      expect(active).not.toHaveProperty("userName");
+      expect(active).not.toHaveProperty("userEmail");
+      expect(active).not.toHaveProperty("isUserContext");
       expect(Object.isFrozen(active.principal)).toBe(true);
       expect(Reflect.set(active.principal, "userId", "charlie")).toBe(false);
       expect(Reflect.set(active, "principal", input.principal)).toBe(false);
@@ -241,7 +249,7 @@ describe("caller execution context", () => {
     await runInCallerContext(alice, async () => {
       await Promise.resolve();
       expect(getCallerContext()).not.toHaveProperty("warehouseId");
-      expect(getExecutionContext()).not.toHaveProperty("warehouseId");
+      expect(getExecutionContext().warehouseId).toBe(appResources.warehouseId);
       expect(getWarehouseId()).toBe(appResources.warehouseId);
       expect(await getWarehouseId()).toBe("warehouse-123");
       expect(getWorkspaceClient()).toBe(alice.client);
@@ -250,7 +258,7 @@ describe("caller execution context", () => {
   });
 
   test("reports a missing app warehouse in both service and caller scopes", () => {
-    vi.mocked(AppResources.get).mockReturnValue({});
+    vi.mocked(WarehouseResource.get).mockReturnValue({});
     expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
     runInCallerContext(caller("alice"), () => {
       expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
@@ -316,10 +324,70 @@ describe("caller execution context", () => {
     );
   });
 
+  test("public compatibility views keep identity and warehouse snapshots after the scope closes", async () => {
+    const warehouseId = Promise.resolve("legacy-warehouse");
+    const legacy: UserContext = {
+      client: service.client,
+      workspaceId: service.workspaceId,
+      userId: "alice",
+      isUserContext: true,
+      warehouseId,
+    };
+    const [execution, user] = runInUserContext(
+      legacy,
+      () => [getExecutionContext(), getUserContext()] as const,
+    );
+    legacy.warehouseId = Promise.resolve("changed");
+    vi.mocked(WarehouseResource.get).mockReturnValue({});
+    await runInCallerContext(caller("bob"), async () => {
+      await Promise.resolve();
+      if (!isUserContext(execution)) throw new Error("Expected user context");
+      expect(execution.userId).toBe("alice");
+      expect(execution.warehouseId).toBe(warehouseId);
+      expect(user?.warehouseId).toBe(warehouseId);
+      expect(Object.isFrozen(execution)).toBe(true);
+    });
+  });
+
+  test("captured compatibility views retain the app warehouse across rebinding", () => {
+    const [execution, user] = runInCallerContext(
+      caller("alice"),
+      () => [getExecutionContext(), getUserContext()] as const,
+    );
+    vi.mocked(WarehouseResource.get).mockReturnValue({
+      warehouseId: Promise.resolve("new-lifecycle"),
+    });
+    expect(execution.warehouseId).toBe(appResources.warehouseId);
+    expect(user?.warehouseId).toBe(appResources.warehouseId);
+  });
+
+  test("uninitialized resources do not prevent reading caller identity", () => {
+    vi.mocked(WarehouseResource.get).mockReturnValue(undefined);
+    runInCallerContext(caller("alice"), () => {
+      const execution = getExecutionContext();
+      expect(getCurrentActorId()).toBe("alice");
+      expect(getWorkspaceClient()).toBe(execution.client);
+      expect(() => execution.warehouseId).toThrow("not initialized");
+    });
+  });
+
   test("legacy entry points accept warehouse-free caller contexts", () => {
     runInUserContext(caller("alice"), () => {
       expect(getWarehouseId()).toBe(appResources.warehouseId);
       expect(getUserContext()?.warehouseId).toBe(appResources.warehouseId);
+    });
+  });
+
+  test("retains the deprecated snapshot helper with legacy identity access", () => {
+    const original = caller("alice");
+    const snapshot = immutableCallerContext(original);
+    expect(snapshot.userId).toBe("alice");
+    expect(snapshot.isUserContext).toBe(true);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(original).not.toHaveProperty("userId");
+    runInCallerContext(snapshot, () => {
+      expect(getCallerContext()).not.toHaveProperty("userId");
+      expect(getCurrentActorId()).toBe("alice");
     });
   });
 });

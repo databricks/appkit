@@ -5,14 +5,14 @@ import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import { CacheManager } from "../cache";
+import { snapshotCallerContext } from "../context/caller-context";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
-import { immutableCallerContext } from "../context/user-context";
 import { AuthenticationError } from "../errors";
 import {
-  AppResources,
-  type AppResourceBindings,
-} from "../resources/app-resources";
+  WarehouseResource,
+  type WarehouseBinding,
+} from "../resources/warehouse";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
@@ -153,7 +153,7 @@ export function fakeUserContext(client: Any, ids: { workspaceId: Any }) {
     // Same rejection as production, so a path that forgets to forward the token
     // fails here instead of only in a deployed app.
     if (!token) throw AuthenticationError.missingToken("user token");
-    return immutableCallerContext({
+    return snapshotCallerContext({
       client,
       principal: { type: "user", userId, userName, userEmail },
       // Derived from the token exactly as production does. Keyed on the user it
@@ -490,7 +490,7 @@ export interface TestContextOptions {
  */
 function buildServiceContextState(
   options: TestContextOptions,
-  resources: AppResourceBindings,
+  resources: WarehouseBinding,
 ): ServiceContextState {
   return {
     client: (options.serviceDatabricksClient ||
@@ -506,7 +506,7 @@ function buildServiceContextState(
  * Mocks the `ServiceContext` singleton for testing — spies `get`,
  * `initialize`, `isInitialized`, and `createCallerContext` so code that resolves
  * the service principal or an on-behalf-of user context gets test doubles.
- * Also supplies the app-level warehouse binding through AppResources.
+ * Also supplies the app-level warehouse binding through WarehouseResource.
  * Call in `beforeEach`; call the returned `restore()` in `afterEach`.
  *
  * @returns The mock context plus the spies and a `restore()` helper.
@@ -517,7 +517,9 @@ export function mockServiceContext(options: TestContextOptions = {}) {
   });
   const serviceContext = buildServiceContextState(options, resources);
 
-  const resourcesSpy = vi.spyOn(AppResources, "get").mockReturnValue(resources);
+  const resourcesSpy = vi
+    .spyOn(WarehouseResource, "get")
+    .mockReturnValue(resources);
 
   const getSpy = vi
     .spyOn(ServiceContext, "get")
