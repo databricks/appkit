@@ -32,6 +32,8 @@ import {
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+import { parseDocument } from "yaml";
+
 const ROOT = process.cwd();
 
 const { values } = parseArgs({
@@ -118,6 +120,14 @@ pkg.dependencies["@databricks/appkit-ui"] = `file:./${APPKIT_UI_TARBALL}`;
 if (lakebaseSrc && existsSync(lakebaseSrc) && LAKEBASE_TARBALL) {
   pkg.overrides = pkg.overrides ?? {};
   pkg.overrides["@databricks/lakebase"] = `file:./${LAKEBASE_TARBALL}`;
+  const workspacePath = join(STAGING_DIR, "pnpm-workspace.yaml");
+  const workspace = parseDocument(readFileSync(workspacePath, "utf-8"));
+  if (workspace.errors.length) throw workspace.errors[0];
+  workspace.setIn(
+    ["overrides", "@databricks/lakebase"],
+    pkg.overrides["@databricks/lakebase"],
+  );
+  writeFileSync(workspacePath, workspace.toString());
 }
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log(

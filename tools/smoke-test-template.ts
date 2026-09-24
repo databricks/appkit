@@ -3,9 +3,8 @@
  * Smoke test for the committed template.
  *
  * Scaffolds the template into a scratch directory with rendered placeholders,
- * then validates that pnpm install --frozen-lockfile materializes the native
- * optional dependency (@ast-grep/napi-{platform}-{arch}-{libc}) and that the
- * build succeeds.
+ * then optionally installs with the selected package manager, exercises the
+ * native parser, builds, and checks HTTP startup.
  *
  * Go template placeholders are rendered with simple values:
  * - {{.projectName}} → smoke-test-app
@@ -13,11 +12,14 @@
  * - {{.appEnv}} → (empty, which means the conditional block is omitted)
  *
  * Usage:
- *   tsx tools/smoke-test-template.ts [--output-dir <path>]
+ *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>] [--run]
  *
  * Options:
- *   --output-dir   Optional. Scratch directory for the scaffolded app.
- *                  Defaults to ".smoke-test/app".
+ *   --output-dir        Optional. Scratch directory for the scaffolded app.
+ *                       Must be under .smoke-test. Defaults to ".smoke-test/app".
+ *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
+ *                       Defaults to "pnpm". (short: -p)
+ *   --run              Install, build with prebuild, and check HTTP startup.
  */
 
 import {
@@ -32,18 +34,34 @@ import {
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import {
+  runTemplateSmoke,
+  selectSmokePackageManager,
+} from "./template-smoke-runner";
+
 const ROOT = process.cwd();
 
 const { values } = parseArgs({
   options: {
     "output-dir": { type: "string", default: ".smoke-test/app" },
+    "package-manager": { type: "string", default: "pnpm", short: "p" },
+    run: { type: "boolean", default: false },
   },
   strict: true,
 });
 
 // oxlint-disable-next-line typescript/no-non-null-assertion -- default value guarantees this is defined
 const outputDir = values["output-dir"]!;
+// oxlint-disable-next-line typescript/no-non-null-assertion -- default value guarantees this is defined
+const packageManager = values["package-manager"]!;
 const SCRATCH_DIR = resolve(ROOT, outputDir);
+
+if (packageManager !== "npm" && packageManager !== "pnpm") {
+  throw new Error(`Unsupported package manager: ${packageManager}`);
+}
+if (!SCRATCH_DIR.startsWith(`${join(ROOT, ".smoke-test")}/`)) {
+  throw new Error("Smoke output must be a subdirectory of .smoke-test");
+}
 
 // Clean up any prior run
 if (existsSync(SCRATCH_DIR)) {
@@ -56,10 +74,13 @@ const templateSrc = join(ROOT, "template");
 cpSync(templateSrc, SCRATCH_DIR, { recursive: true });
 console.log(`✓ Copied template → ${outputDir}`);
 
+selectSmokePackageManager(SCRATCH_DIR, packageManager);
+
 // Render placeholders in key files
 const placeholders = {
   "{{.projectName}}": "smoke-test-app",
   "{{.appDescription}}": "Smoke test app",
+  '{{or .packageManager "pnpm"}}': packageManager,
 };
 
 /**
@@ -89,6 +110,7 @@ function processAllFiles(dir: string): void {
       (fullPath.endsWith(".tsx") ||
         fullPath.endsWith(".ts") ||
         fullPath.endsWith(".json") ||
+        fullPath.endsWith(".html") ||
         fullPath.endsWith(".tmpl") ||
         fullPath.endsWith(".yaml") ||
         fullPath.endsWith(".yml"))
@@ -129,7 +151,8 @@ function processAllFiles(dir: string): void {
       }
 
       if (modified) {
-        writeFileSync(fullPath, content);
+        if (content.trim()) writeFileSync(fullPath, content);
+        else rmSync(fullPath);
       }
     }
   }
@@ -141,11 +164,12 @@ processAllFiles(SCRATCH_DIR);
 // For the smoke test, replace it with a minimal valid server that compiles without needing plugin configuration.
 const serverTsPath = join(SCRATCH_DIR, "server/server.ts");
 if (existsSync(serverTsPath)) {
-  const minimalServer = `import { createApp } from '@databricks/appkit';
+  const minimalServer = `import { createApp, server } from '@databricks/appkit';
 
 createApp({
-  plugins: [],
-}).catch(console.error);
+  plugins: [server()],
+  disableInternalTelemetry: true,
+}).catch((error) => { console.error(error); process.exitCode = 1; });
 `;
   writeFileSync(serverTsPath, minimalServer);
 }
@@ -168,6 +192,9 @@ for (const [src, dst] of tmplRenames) {
   }
 }
 
+// The server-only fixture has no workspace resources or local credentials.
+writeFileSync(join(SCRATCH_DIR, ".env"), "");
+
 // Rename _gitignore to .gitignore
 const gitignoreSrc = join(SCRATCH_DIR, "_gitignore");
 const gitignoreDst = join(SCRATCH_DIR, ".gitignore");
@@ -180,4 +207,10 @@ console.log(
   "✓ Rendered placeholders, stripped Go template conditionals, and renamed .tmpl files",
 );
 console.log(`\nTemplate scaffolded to ${SCRATCH_DIR}`);
-console.log("Next step: pnpm install --frozen-lockfile in that directory");
+if (values.run) {
+  await runTemplateSmoke(SCRATCH_DIR, packageManager);
+} else if (packageManager === "pnpm") {
+  console.log("Next step: pnpm install --frozen-lockfile in that directory");
+} else if (packageManager === "npm") {
+  console.log("Next step: npm install in that directory");
+}

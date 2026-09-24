@@ -18,7 +18,7 @@
     "format:fix": "prettier --write .",
     "test": "vitest run",
     "clean": "rm -rf client/dist dist build node_modules",
-    "prebuild": "pnpm run sync && pnpm run typegen --wait",
+    "prebuild": "pnpm run sync && appkit generate-types --wait",
     "predev": "pnpm run sync && pnpm run typegen",
     "sync": "appkit plugin sync --write --silent",
     "typegen": "appkit generate-types",
@@ -72,5 +72,17 @@
     "typescript-eslint": "8.48.0",
     "vite": "npm:rolldown-vite@7.1.14",
     "vitest": "4.1.9"
+  },
+  "optionalDependencies": {
+    "@ast-grep/napi-linux-x64-gnu": "0.37.0"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.1.14",
+    "@opentelemetry/core": "2.8.0",
+    "systeminformation": "5.31.7",
+    "fast-uri": "3.1.0",
+    "socks": "2.8.7",
+    "bare-path": "3.1.1",
+    "bare-url": "2.5.2"
   }
 }

@@ -141,6 +141,10 @@ importers:
       vitest:
         specifier: 4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2))
+    optionalDependencies:
+      '@ast-grep/napi-linux-x64-gnu':
+        specifier: 0.37.0
+        version: 0.37.0
 
 packages:
 

@@ -24,6 +24,7 @@ Files named with a `_` prefix are renamed to `.` prefix (e.g. `_gitignore` → `
 | `.workspaceHost` | Databricks workspace URL |
 | `.profile` | Databricks CLI profile name (empty if using host-based auth) |
 | `.appDescription` | App description |
+| `.packageManager` | Selected package manager (`npm` or `pnpm`). Use `{{or .packageManager "pnpm"}}` to default to pnpm when an older CLI omits this variable. |
 | `.plugins.<name>` | Non-nil for each selected plugin, enabling conditionals |
 | `.dotEnv.content` | Generated `.env` content from plugin resources |
 | `.dotEnv.example` | Generated `.env.example` content with placeholders |
