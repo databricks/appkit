@@ -10,13 +10,13 @@ import type { DatabaseExports } from "../entity-types";
 import type { EntityHooks } from "../types";
 
 const mocks = vi.hoisted(() => ({
-  createLakebasePool: vi.fn(),
+  initializeLakebasePool: vi.fn(),
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
 }));
 
 vi.mock("../../../connectors/lakebase", () => ({
-  createLakebasePool: mocks.createLakebasePool,
+  initializeLakebasePool: mocks.initializeLakebasePool,
 }));
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDb: mocks.createDrizzleDb,
@@ -108,7 +108,7 @@ function fakeResponse() {
 async function mount(hooks?: Record<string, EntityHooks>) {
   const database = recordingDataPath();
   const end = vi.fn(async () => undefined);
-  mocks.createLakebasePool.mockReturnValue({ end });
+  mocks.initializeLakebasePool.mockResolvedValue({ end });
   mocks.createDrizzleDb.mockReturnValue({});
   mocks.createDrizzleDataPath.mockReturnValue(database.path);
 
@@ -167,9 +167,9 @@ const exportsOf = (plugin: DatabasePlugin<typeof schema>) =>
 let context: Awaited<ReturnType<typeof mockServiceContext>>;
 
 beforeEach(async () => {
-  mocks.createLakebasePool.mockReset();
   mocks.createDrizzleDb.mockReset();
   mocks.createDrizzleDataPath.mockReset();
+  mocks.initializeLakebasePool.mockReset();
   // A read runs through Plugin.execute(), which keys on the current identity.
   context = await mockServiceContext();
 });
