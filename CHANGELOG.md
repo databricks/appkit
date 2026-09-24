@@ -162,6 +162,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.78.0](https://github.com/databricks/appkit/compare/v0.77.0...v0.78.0) (2026-09-24)
+
+### playground
+
+* **playground:** add a DatabasePlugin example ([#529](https://github.com/databricks/appkit/issues/529)) ([af7a8c0](https://github.com/databricks/appkit/commit/af7a8c032598c3c9c2cea585cb60b822267f0df7))
+
+
 ## [0.77.0](https://github.com/databricks/appkit/compare/v0.76.1...v0.77.0) (2026-09-24)
 
 * deprecate serving plugin in favor of agents ([#596](https://github.com/databricks/appkit/issues/596)) ([cbabb4a](https://github.com/databricks/appkit/commit/cbabb4a43f219de2ed530a66ae77cd7189e7be54))
