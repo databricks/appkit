@@ -16,7 +16,7 @@
  *   tsx tools/check-template-lock-registry.ts [lockfile] [--rewrite] [--allow-file]
  *
  *   lockfile      Optional path (relative to repo root or absolute). Defaults to
- *                 template/pnpm-lock.yaml (the committed pnpm lock). Format is
+ *                 both committed template locks. Format is
  *                 detected by filename (.yaml/.yml = pnpm; .json = npm).
  *   --rewrite     Rewrite JFrog/Artifactory URLs back to the public npm registry
  *                 before validating. The release pipeline builds the template
@@ -96,6 +96,7 @@ for (const {
   npmrcPath,
   npmrcLabel,
 } of lockPaths) {
+  const errorCountBefore = errors.length;
   // Detect format by filename
   const isPnpmLock = lockPath.endsWith(".yaml") || lockPath.endsWith(".yml");
   const isNpmLock = lockPath.endsWith(".json");
@@ -175,7 +176,9 @@ for (const {
     }
   }
 
-  console.log(`✓ ${lockLabel} references only the public npm registry`);
+  if (errors.length === errorCountBefore) {
+    console.log(`✓ ${lockLabel} references only the public npm registry`);
+  }
 }
 
 if (errors.length) {
@@ -183,27 +186,73 @@ if (errors.length) {
   process.exit(1);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getPackages(
+  lock: unknown,
+  label: string,
+): Record<string, unknown> | undefined {
+  if (!isRecord(lock)) {
+    errors.push(`Invalid lockfile in ${label}: expected an object document.`);
+    return;
+  }
+  if (!isRecord(lock.packages)) {
+    errors.push(`Invalid lockfile in ${label}: packages must be an object.`);
+    return;
+  }
+  return lock.packages;
+}
+
+/** Lockfile integrity values use SRI hashes with base64-encoded digests. */
+function isIntegrity(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  return value
+    .trim()
+    .split(/\s+/)
+    .every((hash) => {
+      const match = /^sha(1|256|384|512)-([A-Za-z0-9+/]+={0,2})$/.exec(hash);
+      if (!match) return false;
+      const digest = Buffer.from(match[2], "base64");
+      const expectedBytes = match[1] === "1" ? 20 : Number(match[1]) / 8;
+      const base64 = digest.toString("base64");
+      return (
+        digest.length === expectedBytes &&
+        (base64 === match[2] || base64.replace(/=+$/, "") === match[2])
+      );
+    });
+}
+
 // --- npm package-lock.json format handler ---
 function validateNpmLock(path: string, label: string): void {
   // lockfileVersion 3: dependencies live only in the `packages` map. Entries
   // without a `resolved` field are the root (""), link entries, or workspaces —
   // they are not registry fetches. Link entries have link: true. Root is "".
-  const lock = JSON.parse(readFileSync(path, "utf-8"));
-
-  const packages: Record<
-    string,
-    { resolved?: string; link?: boolean; inBundle?: boolean }
-  > = lock.packages ?? {};
+  const packages = getPackages(JSON.parse(readFileSync(path, "utf-8")), label);
+  if (!packages) return;
   for (const [pkgKey, entry] of Object.entries(packages)) {
+    if (!isRecord(entry)) {
+      errors.push(`Invalid entry in ${label}: "${pkgKey}" must be an object.`);
+      continue;
+    }
     // Skip root, link entries, and bundled entries (these are not registry fetches)
-    if (!entry.resolved) {
+    if (!("resolved" in entry)) {
       // Entries without resolved should be root, link, or workspace entries.
       // Fail closed: if it's not one of those special cases, it's an error.
-      if (pkgKey === "" || entry.link || entry.inBundle) continue;
+      if (pkgKey === "" || entry.link === true || entry.inBundle === true)
+        continue;
       // Non-link, non-root, non-bundled entry with no resolved → error
       errors.push(
         `Invalid entry in ${label}: "${pkgKey}" has no resolved field ` +
           `and is not a link, root, or bundled entry.`,
+      );
+      continue;
+    }
+
+    if (typeof entry.resolved !== "string" || !entry.resolved) {
+      errors.push(
+        `Invalid entry in ${label}: "${pkgKey}" must have a non-empty resolved string.`,
       );
       continue;
     }
@@ -236,49 +285,24 @@ function validatePnpmLock(path: string, label: string): void {
   //   - { tarball: "..." } - must be https://registry.npmjs.org/... or file:
   //   - { type: "git", ... } or { type: "directory", ... } - error (fail closed)
   //   - missing entirely - error (fail closed)
-  const yamlStr = readFileSync(path, "utf-8");
-  const lockfile = parseYaml(yamlStr) as Record<string, unknown>;
-
-  const packages: Record<
-    string,
-    { resolution?: Record<string, unknown> | string }
-  > = (lockfile.packages ?? {}) as Record<
-    string,
-    { resolution?: Record<string, unknown> | string }
-  >;
+  const packages = getPackages(parseYaml(readFileSync(path, "utf-8")), label);
+  if (!packages) return;
 
   for (const [pkgKey, entry] of Object.entries(packages)) {
-    const resolution = entry.resolution;
-
-    // Resolution must be an object. Missing or string resolutions are errors.
-    if (!resolution) {
-      // Missing resolution — fail closed (required in pnpm v9)
+    if (!isRecord(entry)) {
+      errors.push(`Invalid entry in ${label}: "${pkgKey}" must be an object.`);
+      continue;
+    }
+    const res = entry.resolution;
+    if (!isRecord(res)) {
       errors.push(
-        `Missing resolution in ${label}: "${pkgKey}" has no resolution field.`,
+        `Invalid resolution in ${label}: "${pkgKey}" must have an object resolution.`,
       );
       continue;
     }
-
-    if (typeof resolution === "string") {
-      // String resolutions are snapshot references; they don't resolve to direct URLs
-      errors.push(
-        `Invalid resolution in ${label}: "${pkgKey}" has string resolution (expected object).`,
-      );
-      continue;
-    }
-
-    if (typeof resolution !== "object") {
-      // Unexpected resolution type
-      errors.push(
-        `Invalid resolution in ${label}: "${pkgKey}" has unexpected resolution type.`,
-      );
-      continue;
-    }
-
-    const res = resolution as Record<string, unknown>;
 
     // Check for non-registry types (git, directory, or unknown). Fail closed.
-    if (res.type) {
+    if ("type" in res) {
       errors.push(
         `Non-registry resolution in ${label}: "${pkgKey}" has type "${res.type}" ` +
           `(expected registry-derived or file: tarball).`,
@@ -286,17 +310,21 @@ function validatePnpmLock(path: string, label: string): void {
       continue;
     }
 
-    // If there's no type and no tarball, it must be registry-derived (integrity only)
-    if (!res.tarball) {
-      // Registry-derived resolutions have only integrity, which is OK
+    // An integrity-only registry resolution still needs a valid SRI digest.
+    if (!("tarball" in res)) {
+      if (!isIntegrity(res.integrity)) {
+        errors.push(
+          `Invalid integrity in ${label}: "${pkgKey}" requires a valid SRI hash when tarball is absent.`,
+        );
+      }
       continue;
     }
 
     // Validate tarball URL
-    const tarball = res.tarball as unknown;
-    if (typeof tarball !== "string") {
+    const tarball = res.tarball;
+    if (typeof tarball !== "string" || !tarball) {
       errors.push(
-        `Invalid tarball in ${label}: "${pkgKey}" has non-string tarball value.`,
+        `Invalid tarball in ${label}: "${pkgKey}" must have a non-empty tarball string.`,
       );
       continue;
     }
