@@ -6,6 +6,7 @@ import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
 
+import { detectPackageManager } from "../../package-manager";
 import {
   fetchRegistryItem,
   fetchVerifiedNames,
@@ -156,13 +157,6 @@ export function pluginExportName(item: RegistryItem): string | null {
   return chosen && JS_IDENTIFIER.test(chosen) ? chosen : null;
 }
 
-function detectPackageManager(cwd: string): "pnpm" | "yarn" | "bun" | "npm" {
-  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
-  if (fs.existsSync(path.join(cwd, "bun.lockb"))) return "bun";
-  return "npm";
-}
-
 /**
  * A safe npm dependency spec: `[@scope/]name` with an optional `@version`
  * range. Registry `dependencies` are untrusted remote data passed to the
@@ -301,7 +295,7 @@ async function installDependencies(deps: string[], cwd: string): Promise<void> {
   }
   if (install.length === 0) return;
 
-  const pm = detectPackageManager(cwd);
+  const pm = detectPackageManager(cwd, "npm");
   const subcommand = pm === "npm" ? "install" : "add";
   console.log(`\nInstalling dependencies with ${pm}: ${install.join(" ")}`);
   // `--` stops the PM from parsing any dep as a flag (defense in depth).
