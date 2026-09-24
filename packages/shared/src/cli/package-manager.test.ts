@@ -2,135 +2,96 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { detectPackageManager, PM_COMMANDS } from "./package-manager";
 
 describe("package-manager", () => {
-  const originalEnv = process.env.npm_config_user_agent;
-
-  beforeEach(() => {
-    delete process.env.npm_config_user_agent;
-  });
-
-  afterEach(() => {
-    if (originalEnv) {
-      process.env.npm_config_user_agent = originalEnv;
-    } else {
-      delete process.env.npm_config_user_agent;
-    }
-  });
-
   describe("detectPackageManager", () => {
-    it("detects pnpm from npm_config_user_agent", () => {
-      process.env.npm_config_user_agent = "pnpm/8.6.0 npm/? node/18.0.0";
-      const cwd = path.join(os.tmpdir(), "test-pnpm");
-      expect(detectPackageManager(cwd)).toBe("pnpm");
+    let cwd: string;
+
+    beforeEach(() => {
+      cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
+      vi.stubEnv("npm_config_user_agent", undefined);
     });
 
-    it("detects npm from npm_config_user_agent", () => {
-      process.env.npm_config_user_agent = "npm/9.8.1 node/18.0.0";
-      const cwd = path.join(os.tmpdir(), "test-npm");
+    afterEach(() => {
+      fs.rmSync(cwd, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    });
+
+    it.each(["pnpm", "npm", "yarn", "bun"] as const)(
+      "uses %s from the launcher when there is no project metadata",
+      (pm) => {
+        vi.stubEnv("npm_config_user_agent", `${pm}/1.0.0 node/24.0.0`);
+        expect(detectPackageManager(cwd)).toBe(pm);
+      },
+    );
+
+    it.each(["pnpm", "npm", "yarn", "bun"] as const)(
+      "prefers declared %s over conflicting lockfiles and launcher",
+      (pm) => {
+        fs.writeFileSync(
+          path.join(cwd, "package.json"),
+          JSON.stringify({ packageManager: `${pm}@1.0.0` }),
+        );
+        fs.writeFileSync(path.join(cwd, "pnpm-lock.yaml"), "");
+        fs.writeFileSync(path.join(cwd, "package-lock.json"), "{}");
+        vi.stubEnv(
+          "npm_config_user_agent",
+          pm === "npm" ? "pnpm/11.0.8" : "npm/11.8.0",
+        );
+        expect(detectPackageManager(cwd)).toBe(pm);
+      },
+    );
+
+    it.each([
+      ["pnpm-lock.yaml", "pnpm"],
+      ["yarn.lock", "yarn"],
+      ["bun.lock", "bun"],
+      ["bun.lockb", "bun"],
+      ["package-lock.json", "npm"],
+      ["npm-shrinkwrap.json", "npm"],
+    ] as const)(
+      "detects %s with an absent or conflicting launcher",
+      (lockfile, pm) => {
+        fs.writeFileSync(path.join(cwd, lockfile), "");
+        expect(detectPackageManager(cwd)).toBe(pm);
+
+        vi.stubEnv(
+          "npm_config_user_agent",
+          pm === "npm" ? "pnpm/11.0.8" : "npm/11.8.0",
+        );
+        expect(detectPackageManager(cwd)).toBe(pm);
+      },
+    );
+
+    it.each([
+      "invalid json",
+      "null",
+      "{}",
+      '{"packageManager":null}',
+      '{"packageManager":42}',
+      '{"packageManager":"unknown@1.0.0"}',
+    ])("falls back to lockfiles for unusable package.json: %s", (content) => {
+      fs.writeFileSync(path.join(cwd, "package.json"), content);
+      fs.writeFileSync(path.join(cwd, "package-lock.json"), "{}");
+      vi.stubEnv("npm_config_user_agent", "pnpm/11.0.8");
       expect(detectPackageManager(cwd)).toBe("npm");
     });
 
-    it("detects yarn from npm_config_user_agent", () => {
-      process.env.npm_config_user_agent = "yarn/3.6.0 npm/? node/18.0.0";
-      const cwd = path.join(os.tmpdir(), "test-yarn");
-      expect(detectPackageManager(cwd)).toBe("yarn");
+    it("defaults to pnpm without project or launcher metadata", () => {
+      expect(detectPackageManager(cwd)).toBe("pnpm");
     });
 
-    it("detects bun from npm_config_user_agent", () => {
-      process.env.npm_config_user_agent = "bun/1.0.0 npm/? node/18.0.0";
-      const cwd = path.join(os.tmpdir(), "test-bun");
-      expect(detectPackageManager(cwd)).toBe("bun");
+    it("allows callers to retain an npm fallback", () => {
+      expect(detectPackageManager(cwd, "npm")).toBe("npm");
     });
 
-    it("falls back to lockfile detection when npm_config_user_agent is absent", () => {
-      delete process.env.npm_config_user_agent;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "pnpm-lock.yaml"), "");
-        expect(detectPackageManager(tmpDir)).toBe("pnpm");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("detects yarn from yarn.lock when env var is absent", () => {
-      delete process.env.npm_config_user_agent;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "yarn.lock"), "");
-        expect(detectPackageManager(tmpDir)).toBe("yarn");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("detects bun from bun.lockb when env var is absent", () => {
-      delete process.env.npm_config_user_agent;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "bun.lockb"), "");
-        expect(detectPackageManager(tmpDir)).toBe("bun");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("detects npm from package-lock.json when env var is absent", () => {
-      delete process.env.npm_config_user_agent;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "package-lock.json"), "");
-        expect(detectPackageManager(tmpDir)).toBe("npm");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("defaults to pnpm when neither env var nor lockfile is present", () => {
-      delete process.env.npm_config_user_agent;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        expect(detectPackageManager(tmpDir)).toBe("pnpm");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("prefers npm_config_user_agent over lockfile", () => {
-      process.env.npm_config_user_agent = "npm/9.8.1 node/18.0.0";
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "pnpm-lock.yaml"), "");
-        expect(detectPackageManager(tmpDir)).toBe("npm");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("prefers npm_config_user_agent over package-lock.json", () => {
-      process.env.npm_config_user_agent = "pnpm/8.6.0 npm/? node/18.0.0";
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "package-lock.json"), "");
-        expect(detectPackageManager(tmpDir)).toBe("pnpm");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
-    });
-
-    it("ignores invalid npm_config_user_agent and falls back to lockfile", () => {
-      process.env.npm_config_user_agent = "unknown/1.0.0 node/18.0.0";
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-detect-"));
-      try {
-        fs.writeFileSync(path.join(tmpDir, "yarn.lock"), "");
-        expect(detectPackageManager(tmpDir)).toBe("yarn");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
+    it("ignores unknown launchers", () => {
+      vi.stubEnv("npm_config_user_agent", "unknown/1.0.0 node/24.0.0");
+      expect(detectPackageManager(cwd)).toBe("pnpm");
+      expect(detectPackageManager(cwd, "npm")).toBe("npm");
     });
   });
 
