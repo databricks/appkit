@@ -18,11 +18,11 @@ import {
   TelemetryReporter,
 } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
-import { isPlainObject } from "../plugin/plugin";
 import { uiVariants } from "../plugins/ui-variants";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import { isPlainObject } from "../utils/is-plain-object";
 import type { WorkspaceClient } from "../workspace-client";
 import { LifecycleManager } from "./lifecycle-manager";
 import { isToolProvider, PluginContext } from "./plugin-context";

@@ -1,4 +1,7 @@
+import { isPlainObject } from "../utils/is-plain-object";
 import type { RequestScope } from "./request-scope";
+
+export { isPlainObject } from "../utils/is-plain-object";
 
 const EXCLUDED_FROM_PROXY = new Set([
   "setup",
@@ -9,19 +12,8 @@ const EXCLUDED_FROM_PROXY = new Set([
   "getSkipBodyParsingPaths",
   "abortActiveOperations",
   "clientConfig",
-  "asUser",
-  "asApp",
-  "asGroup",
   "constructor",
 ]);
-
-export function isPlainObject(
-  value: unknown,
-): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function isIdentityMethod(key: PropertyKey): boolean {
   return typeof key === "string" && /^as[A-Z]/.test(key);

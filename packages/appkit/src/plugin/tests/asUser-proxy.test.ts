@@ -269,6 +269,13 @@ describe("Plugin.asUser proxy", () => {
   // ── Real OBO: method-call proxy ────────────────────────────────────
 
   describe("real OBO — method calls", () => {
+    test("blocks identity chaining on the legacy proxy", () => {
+      const plugin = new ProbePlugin(config);
+      const proxied = plugin.asUser(createReqWithObo());
+
+      expect(proxied.asUser).toBeUndefined();
+    });
+
     test("async method runs inside the user's AsyncLocalStorage scope", async () => {
       const plugin = new ProbePlugin(config);
       const proxied = plugin.asUser(createReqWithObo());

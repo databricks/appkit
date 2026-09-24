@@ -231,7 +231,7 @@ export class PluginContext {
     const tracer = this.telemetry.getTracer();
     const operationName = `executeTool:${pluginName}.${toolName}`;
 
-    const execute = () =>
+    const executeInCurrentScope = () =>
       tracer.startActiveSpan(operationName, async (span) => {
         const timeoutSignal = AbortSignal.timeout(timeoutMs);
         const combinedSignal = signal
@@ -261,11 +261,12 @@ export class PluginContext {
         }
       });
 
-    // Direct request dispatch retains the original fail-closed OBO default.
-    // An existing caller wins, even when request credentials differ or are absent.
+    // Inherit the caller or establish request user scope before the span and tool run.
     return getCallerContext()
-      ? execute()
-      : createRequestScope(req, this.createCallerContext).run(execute);
+      ? executeInCurrentScope()
+      : createRequestScope(req, this.createCallerContext).run(
+          executeInCurrentScope,
+        );
   }
 
   /**
