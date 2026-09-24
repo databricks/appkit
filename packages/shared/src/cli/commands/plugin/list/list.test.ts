@@ -164,6 +164,49 @@ describe("list", () => {
       expect(betaRow?.stability).toBe("beta");
       expect(gaRow?.stability).toBe("ga");
     });
+
+    it("defaults deprecated to false when absent", () => {
+      const tmp = makeTempDir("list-deprecated-default");
+      tempDirs.push(tmp);
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(TEMPLATE_MANIFEST_JSON, null, 2),
+      );
+
+      const rows = listFromManifestFile(manifestPath);
+      for (const row of rows) {
+        expect(row.deprecated).toBe(false);
+      }
+    });
+
+    it("reads deprecated field from template manifest", () => {
+      const tmp = makeTempDir("list-deprecated-read");
+      tempDirs.push(tmp);
+      const manifest = {
+        ...TEMPLATE_MANIFEST_JSON,
+        version: "1.1",
+        plugins: {
+          ...TEMPLATE_MANIFEST_JSON.plugins,
+          legacy: {
+            name: "legacyPlugin",
+            displayName: "Legacy Plugin",
+            package: "@databricks/appkit",
+            deprecated: true,
+            resources: { required: [], optional: [] },
+          },
+        },
+      };
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+      const rows = listFromManifestFile(manifestPath);
+      const legacyRow = rows.find((r) => r.name === "legacyPlugin");
+      const activeRow = rows.find((r) => r.name === "server");
+
+      expect(legacyRow?.deprecated).toBe(true);
+      expect(activeRow?.deprecated).toBe(false);
+    });
   });
 
   describe("listFromDirectory", () => {

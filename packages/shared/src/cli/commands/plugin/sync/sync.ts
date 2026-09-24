@@ -437,6 +437,7 @@ async function scanForPlugins(
           manifest.stability !== "ga" && {
             stability: manifest.stability,
           }),
+        ...(manifest.deprecated && { deprecated: manifest.deprecated }),
         ...(manifest.scaffolding && {
           scaffolding: manifest.scaffolding,
         }),
@@ -759,6 +760,7 @@ async function runPluginsSync(options: {
   // For npm imports, match by package name + plugin name.
   // For local imports, resolve both paths to absolute and compare.
   const serverFileDir = serverFile ? path.dirname(serverFile) : cwd;
+  const usedDeprecated: string[] = [];
 
   for (const imp of serverImports) {
     if (!pluginUsages.has(imp.name)) continue;
@@ -785,6 +787,7 @@ async function runPluginsSync(options: {
 
     if (plugin) {
       plugin.requiredByTemplate = true;
+      if (plugin.deprecated) usedDeprecated.push(plugin.name);
     }
   }
 
@@ -824,8 +827,18 @@ async function runPluginsSync(options: {
       const resourceInfo =
         resourceCount > 0 ? ` [${resourceCount} resource(s)]` : "";
       const mandatoryTag = manifest.requiredByTemplate ? " (mandatory)" : "";
+      const deprecatedTag = manifest.deprecated ? " (deprecated)" : "";
       console.log(
-        `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
+        `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}${deprecatedTag}`,
+      );
+    }
+  }
+
+  // Warn about deprecated plugins that are actually used in the app.
+  if (!options.silent && usedDeprecated.length > 0) {
+    for (const name of usedDeprecated) {
+      console.warn(
+        `Warning: plugin "${name}" is deprecated. See its description for the recommended replacement.`,
       );
     }
   }

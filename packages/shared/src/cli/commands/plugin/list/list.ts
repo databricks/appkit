@@ -19,6 +19,7 @@ export interface PluginRow {
   displayName: string;
   package: string;
   stability: "beta" | "ga";
+  deprecated: boolean;
   required: number;
   optional: number;
 }
@@ -40,6 +41,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
         displayName: string;
         package: string;
         stability?: "beta" | "ga";
+        deprecated?: boolean;
         resources: { required: unknown[]; optional: unknown[] };
       }
     >;
@@ -57,6 +59,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
     displayName: p.displayName ?? p.name,
     package: p.package ?? "",
     stability: p.stability ?? "ga",
+    deprecated: p.deprecated ?? false,
     required: Array.isArray(p.resources?.required)
       ? p.resources.required.length
       : 0,
@@ -110,12 +113,14 @@ async function collectPluginsRecursive(
             : `./${relPath}`;
           const rawManifest = manifest as typeof manifest & {
             stability?: "beta" | "ga";
+            deprecated?: boolean;
           };
           rows.push({
             name: manifest.name,
             displayName: manifest.displayName ?? manifest.name,
             package: packagePath,
             stability: rawManifest.stability ?? "ga",
+            deprecated: rawManifest.deprecated ?? false,
             required: Array.isArray(manifest.resources?.required)
               ? manifest.resources.required.length
               : 0,
@@ -154,15 +159,24 @@ export async function listFromDirectory(
   return rows;
 }
 
+/** Status shown in the STABILITY column; deprecation takes priority over tier. */
+function statusLabel(r: PluginRow): string {
+  return r.deprecated ? "deprecated" : r.stability;
+}
+
 function printTable(rows: PluginRow[]): void {
   if (rows.length === 0) {
     console.log("No plugins found.");
     return;
   }
-  const maxName = Math.max(4, ...rows.map((r) => r.name.length));
-  const maxDisplay = Math.max(10, ...rows.map((r) => r.displayName.length));
-  const maxPkg = Math.max(7, ...rows.map((r) => r.package.length));
-  const maxStab = Math.max(9, ...rows.map((r) => r.stability.length));
+  // Deprecated plugins sort last (stable), so active plugins read first.
+  const sorted = [...rows].sort(
+    (a, b) => Number(a.deprecated) - Number(b.deprecated),
+  );
+  const maxName = Math.max(4, ...sorted.map((r) => r.name.length));
+  const maxDisplay = Math.max(10, ...sorted.map((r) => r.displayName.length));
+  const maxPkg = Math.max(7, ...sorted.map((r) => r.package.length));
+  const maxStab = Math.max(9, ...sorted.map((r) => statusLabel(r).length));
   const header = [
     "NAME".padEnd(maxName),
     "DISPLAY NAME".padEnd(maxDisplay),
@@ -173,12 +187,12 @@ function printTable(rows: PluginRow[]): void {
   ].join("  ");
   console.log(header);
   console.log("-".repeat(header.length));
-  for (const r of rows) {
+  for (const r of sorted) {
     console.log(
       [
         r.name.padEnd(maxName),
         r.displayName.padEnd(maxDisplay),
-        r.stability.padEnd(maxStab),
+        statusLabel(r).padEnd(maxStab),
         r.package.padEnd(maxPkg),
         String(r.required).padStart(3),
         String(r.optional).padStart(3),
@@ -192,6 +206,7 @@ async function runPluginList(options: {
   dir?: string;
   json?: boolean;
   allowJsManifest?: boolean;
+  hideDeprecated?: boolean;
 }): Promise<void> {
   const cwd = process.cwd();
   const allowJsManifest = Boolean(options.allowJsManifest);
@@ -230,10 +245,22 @@ async function runPluginList(options: {
     }
   }
 
+  const deprecatedCount = rows.filter((r) => r.deprecated).length;
+  if (options.hideDeprecated) {
+    rows = rows.filter((r) => !r.deprecated);
+  }
+
   if (options.json) {
     console.log(JSON.stringify(rows, null, 2));
   } else {
     printTable(rows);
+    if (deprecatedCount > 0) {
+      console.log(
+        options.hideDeprecated
+          ? `\n${deprecatedCount} deprecated plugin(s) hidden.`
+          : `\n${deprecatedCount} deprecated plugin(s). Pass --hide-deprecated to exclude them.`,
+      );
+    }
   }
 }
 
@@ -253,6 +280,7 @@ export const pluginListCommand = new Command("list")
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
   .option("--json", "Output as JSON")
+  .option("--hide-deprecated", "Exclude deprecated plugins from the output")
   .addHelpText(
     "after",
     `
@@ -260,7 +288,8 @@ Examples:
   $ appkit plugin list
   $ appkit plugin list --json
   $ appkit plugin list --manifest custom-manifest.json
-  $ appkit plugin list --dir plugins/`,
+  $ appkit plugin list --dir plugins/
+  $ appkit plugin list --hide-deprecated`,
   )
   .action((opts) =>
     runPluginList(opts).catch((err) => {
