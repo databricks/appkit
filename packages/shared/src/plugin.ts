@@ -146,6 +146,7 @@ export interface PluginManifest<TName extends string = string> extends Omit<
   | "hidden"
   | "devOnly"
   | "stability"
+  | "deprecated"
 > {
   name: TName;
   resources: {
@@ -177,6 +178,8 @@ export interface PluginManifest<TName extends string = string> extends Omit<
   devOnly?: boolean;
   /** Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly. */
   stability?: "beta" | "ga";
+  /** When true, the plugin is deprecated. It still ships and functions, but tooling (e.g. `appkit plugin list`) may hide or flag it. The recommended replacement is noted in the plugin description. */
+  deprecated?: boolean;
 }
 
 /**

@@ -355,8 +355,8 @@
     },
     "serving": {
       "name": "serving",
-      "displayName": "Model Serving Plugin",
-      "description": "Authenticated proxy to Databricks Model Serving endpoints",
+      "displayName": "Model Serving Plugin (deprecated)",
+      "description": "DEPRECATED: use the agents plugin instead. Authenticated proxy to Databricks Model Serving endpoints",
       "package": "@databricks/appkit",
       "resources": {
         "required": [
@@ -376,7 +376,8 @@
           }
         ],
         "optional": []
-      }
+      },
+      "deprecated": true
     }
   },
   "scaffolding": {

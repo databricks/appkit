@@ -747,6 +747,12 @@ export const pluginManifestSchema = z
       .describe(
         "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly.",
       ),
+    deprecated: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, the plugin is deprecated. It still ships and functions, but tooling (e.g. `appkit plugin list`) may hide or flag it. The recommended replacement is noted in the plugin description.",
+      ),
     scaffolding: z
       .object({
         rules: pluginScaffoldingRulesSchema
@@ -943,6 +949,12 @@ export const templatePluginSchema = z
       .optional()
       .describe(
         "Plugin stability level. Beta is heading to GA; APIs may change between minor releases. GA (general availability) follows semver.",
+      ),
+    deprecated: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, the plugin is deprecated. It still ships and functions, but tooling (e.g. `appkit plugin list`) may hide or flag it. The recommended replacement is noted in the plugin description.",
       ),
     scaffolding: z
       .object({
