@@ -44,7 +44,7 @@ import type {
 
 const logger = createLogger("plugin");
 
-export { isPlainObject } from "../context/scoped-api";
+export { isPlainObject } from "../utils/is-plain-object";
 export { isDevOboFallback } from "../context/request-scope";
 
 /**

@@ -1,6 +1,7 @@
 import pc from "picocolors";
 
 import { createLogger } from "../../logging/logger";
+import { isPlainObject } from "../../utils/is-plain-object";
 
 const logger = createLogger("server:config");
 
@@ -76,11 +77,6 @@ function isSecretCoveredByPublicValue(
         publicStart <= secretStart && publicEnd >= secretEnd,
     ),
   );
-}
-
-function isPlainObject(value: object): boolean {
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
 }
 
 function invalidClientConfig(
