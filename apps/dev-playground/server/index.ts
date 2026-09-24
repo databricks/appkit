@@ -12,8 +12,9 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch } from "@databricks/appkit/beta";
+import { agents, aiSearch, database, runAgent } from "@databricks/appkit/beta";
 
+import redactor from "./agents/redactor/agent";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -69,6 +70,67 @@ createApp({
     }),
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
+    // Setup queries the database before publishing anything, so the plugin
+    // only joins the app once an instance is actually configured.
+    ...(process.env.LAKEBASE_ENDPOINT
+      ? [
+          // The schema is loaded from config/database/schema.ts.
+          database({
+            // Reads are generated for all three tables. Only boards and notes
+            // accept HTTP writes; the audit trail is written by the hook.
+            api: { writes: { tables: ["boards", "notes"] } },
+            // Example of Hooks integration between Database and Agents
+            hooks: {
+              // Hook per entity
+              notes: {
+                // Before a new Note is created, receive the values to be insert
+                // You can use this moment to do another operation like call a LLM and add the value in the values to be inserted
+                async beforeCreate(values) {
+                  // Cancel the model call before the 30-second transaction deadline.
+                  const signal = AbortSignal.timeout(10_000);
+                  const answer = await runAgent(redactor, {
+                    messages: String(values.body),
+                    signal,
+                  });
+                  // A cancelled stream can return accumulated text instead of throwing.
+                  signal.throwIfAborted();
+                  if (
+                    answer.events.some(
+                      (event) =>
+                        event.type === "status" && event.status === "error",
+                    )
+                  ) {
+                    throw new Error("Note redaction failed");
+                  }
+                  const body = answer.text.trim();
+                  if (!body) throw new Error("Note redaction returned no text");
+
+                  return {
+                    ...values,
+                    body,
+                    // Demo only; production apps should use the authenticated session.
+                    author_email: `${values.author}@example.com`,
+                  };
+                },
+                // After a note is created, receiving the inserted value.
+                // You can use this moment to trigger a new operation immediately that relies on the insert
+                async afterCreate(row, ctx) {
+                  // The audit write joins the note's transaction, not the HTTP API.
+                  await ctx.app.database.note_events.create({
+                    note_id: row.id,
+                    action: "created",
+                  });
+                },
+                // Utility callback to allow you to change the payload from a list operation if necessary.
+                serialize: (row, { operation }) =>
+                  operation === "list"
+                    ? { ...row, body: String(row.body).slice(0, 120) }
+                    : row,
+              },
+            },
+          }),
+        ]
+      : []),
     files({
       volumes: {
         // Smart Dashboard saved views land here. Backed by
@@ -107,7 +169,7 @@ createApp({
     serving(),
     agents({
       // Every agent lives under server/agents/<id>/ — code agents as agent.ts
-      // (helper, supervisor, sql_analyst, dashboard_pilot), markdown agents as
+      // (helper, supervisor, sql_analyst, dashboard_pilot, redactor), markdown agents as
       // agent.md (query, insights, anomaly, autocomplete). `query` (markdown
       // dispatcher) delegates to the code `sql_analyst` + `dashboard_pilot` to
       // wire the /smart-dashboard route. `insights` and `anomaly` are ephemeral
