@@ -48,6 +48,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:` (object or function form in code, `plugin:NAME` entries in markdown frontmatter). |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
+| [CallerContext](Interface.CallerContext.md) | Caller identity and workspace for one immutable execution scope. |
 | [CustomJudgeSpec](Interface.CustomJudgeSpec.md) | A custom LLM-judge definition: a prompt template and choice→score mapping. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [DatabaseRegistry](Interface.DatabaseRegistry.md) | CANONICAL augmentation target. Empty by default; the generated `database.d.ts` augments it via `declare module "@databricks/appkit" { interface DatabaseRegistry { ... } }`. |
@@ -140,6 +141,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
+| [CallerPrincipal](TypeAlias.CallerPrincipal.md) | The caller identity whose permissions authorize execution, not its resources. |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [DatabaseApiConfig](TypeAlias.DatabaseApiConfig.md) | Full generated CRUD for every declared table by default. Set false to disable all generated routes, or use an object to restrict tables and writes. Keyed routes require a public primary key; upsert stays programmatic. Route names must start with a letter, contain only letters, digits, `_`, or `-`, be at most 64 characters, and be unique ignoring case. Invalid names fail setup; exclude internal tables with `api.tables` or use `api: false`. |
 | [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
@@ -147,6 +149,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
 | [EntityHooks](TypeAlias.EntityHooks.md) | Response shaping and mutation lifecycle declared for one table. |
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |
+| [ExecutionContext](TypeAlias.ExecutionContext.md) | - |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
 | [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
@@ -157,6 +160,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
+| [~~Principal~~](TypeAlias.Principal.md) | - |
 | [ReadSerializer](TypeAlias.ReadSerializer.md) | Shape one already private-safe row before it reaches the wire. A `Promise` is not assignable to the return type, so an async callback fails to compile: serializers run inside the response path and must not add latency there. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
@@ -224,12 +228,15 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [fromSupervisorApi](Function.fromSupervisorApi.md) | Creates an [AgentAdapter](Interface.AgentAdapter.md) backed by the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
+| [getCurrentActorId](Function.getCurrentActorId.md) | The initiating user in a caller scope; no user actor exists in service scope. |
+| [getCurrentPrincipalKey](Function.getCurrentPrincipalKey.md) | Get the principal key for future cache keying: `app` or `user:<id>`. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
 | [getLakebasePgConfig](Function.getLakebasePgConfig.md) | Get Lakebase connection configuration for PostgreSQL clients. |
 | [getPluginManifest](Function.getPluginManifest.md) | Loads and validates the manifest from a plugin constructor. Normalizes string type/permission to strict ResourceType/ResourcePermission. |
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
+| [getWarehouseId](Function.getWarehouseId.md) | Get the configured SQL warehouse ID after app initialization. The warehouse is an app resource; SP and caller executions use the same binding. Deprecated user-context scopes retain support for explicit warehouse overrides. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
 | [id](Function.id.md) | - |
 | [includes](Function.includes.md) | Passes when the value contains `substring`. |
