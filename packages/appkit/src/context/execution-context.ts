@@ -144,6 +144,11 @@ export function getCurrentActorId(): string | undefined {
   return getCallerContext()?.principal.userId;
 }
 
+/** @internal Bare ID of the effective caller or service principal. */
+export function getCurrentPrincipalId(): string {
+  return getCurrentActorId() ?? ServiceContext.get().serviceUserId;
+}
+
 /**
  * @deprecated Use getCurrentPrincipalKey for new cache keys or getCurrentActorId
  * for audit. Preserves the bare user or service ID for existing callers.
@@ -153,7 +158,7 @@ export function getCurrentUserId(): string {
     "getCurrentUserId",
     "getCurrentPrincipalKey (cache) or getCurrentActorId (audit)",
   );
-  return getCurrentActorId() ?? ServiceContext.get().serviceUserId;
+  return getCurrentPrincipalId();
 }
 
 /**

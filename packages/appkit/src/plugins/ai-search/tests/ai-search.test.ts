@@ -11,8 +11,8 @@ import { Context } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
-  getCurrentUserId: vi.fn(() => "test-user"),
-  // OBO plumbing so asUser() runs its non-dev path. getCurrentUserId stays
+  getCurrentPrincipalId: vi.fn(() => "test-user"),
+  // OBO plumbing so asUser() runs its non-dev path. getCurrentPrincipalId stays
   // constant, so per-user scoping is driven by executorKey in the cacheKey.
   runInCallerContext: <T>(_ctx: unknown, fn: () => T): T => fn(),
   ServiceContext: {

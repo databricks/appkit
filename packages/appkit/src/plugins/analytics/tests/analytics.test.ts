@@ -100,6 +100,10 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as service principal for .sql files (isAsUser: false)", async () => {
+      const warnings: string[] = [];
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation((...args) => warnings.push(args.join(" ")));
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -162,6 +166,10 @@ describe("Analytics Plugin", () => {
       );
 
       expect(mockRes.end).toHaveBeenCalled();
+      expect(warnings).not.toContainEqual(
+        expect.stringContaining("getCurrentUserId is deprecated"),
+      );
+      warn.mockRestore();
     });
 
     test("/query/:query_key should execute as user for .obo.sql files (isAsUser: true)", async () => {
