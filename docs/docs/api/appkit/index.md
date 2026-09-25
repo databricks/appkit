@@ -28,6 +28,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
+| [ServiceContext](Class.ServiceContext.md) | ServiceContext is a singleton that manages the service principal's WorkspaceClient and workspace ID. WarehouseResource owns warehouse bindings. |
 | [SupervisorApiAdapter](Class.SupervisorApiAdapter.md) | Adapter that calls the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |
@@ -140,6 +141,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
+| [AppKitApi](TypeAlias.AppKitApi.md) | App instance with plugin exports and an explicit caller-scoped entry point. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [CallerPrincipal](TypeAlias.CallerPrincipal.md) | The caller identity whose permissions authorize execution, not its resources. |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
@@ -165,6 +167,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
+| [ScopedPluginMap](TypeAlias.ScopedPluginMap.md) | - |
 | [SearchFilters](TypeAlias.SearchFilters.md) | - |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
 | [Severity](TypeAlias.Severity.md) | Whether an assertion fails the eval (`gate`) or is tracked only (`soft`). |
@@ -172,6 +175,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolRegistry](TypeAlias.ToolRegistry.md) | - |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |
 | [TransactionClient](TypeAlias.TransactionClient.md) | Entity and SQL capabilities bound to one transaction. |
+| [~~UserContext~~](TypeAlias.UserContext.md) | - |
+| [UserScopedApp](TypeAlias.UserScopedApp.md) | - |
 
 ## Variables
 
@@ -228,13 +233,16 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [fromSupervisorApi](Function.fromSupervisorApi.md) | Creates an [AgentAdapter](Interface.AgentAdapter.md) backed by the Databricks AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`). |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
+| [getCallerContext](Function.getCallerContext.md) | Get the caller context if one is active, otherwise `undefined`. Unlike `getExecutionContext()`, this does not require `ServiceContext` to be initialized and never throws. |
 | [getCurrentActorId](Function.getCurrentActorId.md) | The initiating user in a caller scope; no user actor exists in service scope. |
 | [getCurrentPrincipalKey](Function.getCurrentPrincipalKey.md) | Get the principal key for future cache keying: `app` or `user:<id>`. |
+| [~~getCurrentUserId~~](Function.getCurrentUserId.md) | - |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
 | [getLakebasePgConfig](Function.getLakebasePgConfig.md) | Get Lakebase connection configuration for PostgreSQL clients. |
 | [getPluginManifest](Function.getPluginManifest.md) | Loads and validates the manifest from a plugin constructor. Normalizes string type/permission to strict ResourceType/ResourcePermission. |
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
+| [~~getUserContext~~](Function.getUserContext.md) | - |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWarehouseId](Function.getWarehouseId.md) | Get the configured SQL warehouse ID after app initialization. The warehouse is an app resource; SP and caller executions use the same binding. Deprecated user-context scopes retain support for explicit warehouse overrides. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
@@ -243,10 +251,12 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [integer](Function.integer.md) | - |
 | [isFunctionTool](Function.isFunctionTool.md) | - |
 | [isHostedTool](Function.isHostedTool.md) | - |
+| [isInUserContext](Function.isInUserContext.md) | Check if currently running in a user context. |
 | [isJudgeConfigured](Function.isJudgeConfigured.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |
 | [isSupervisorTool](Function.isSupervisorTool.md) | Type guard for [HostedSupervisorTool](Interface.HostedSupervisorTool.md). Used by the agents plugin (`buildToolIndex`) and standalone `runAgent` (`classifyTool`) to route supervisor-hosted tools to the extensions payload rather than the adapter's `tools` array. |
 | [isToolkitEntry](Function.isToolkitEntry.md) | Type guard for `ToolkitEntry` — used by the agents plugin to differentiate toolkit references from inline tools in a mixed `tools` record. |
+| [~~isUserContext~~](Function.isUserContext.md) | - |
 | [jsonb](Function.jsonb.md) | - |
 | [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
 | [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for one subdirectory per agent, each containing `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed by agent id (folder name). Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |
@@ -263,6 +273,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [runAgent](Function.runAgent.md) | Standalone agent execution without `createApp`. Resolves the adapter, binds inline tools, and drives the adapter's `run()` loop to completion. |
 | [runEval](Function.runEval.md) | Run a single eval against a driver. Never throws for assertion or agent failures — those become a non-passing [EvalResult](Interface.EvalResult.md). Only a malformed eval definition surfaces as `result.error`. |
 | [runEvalsInDir](Function.runEvalsInDir.md) | Discover, load, and run every eval under each agent's `evals/` dir, driving the agents on a running app. Never throws for an individual eval — load/run failures become non-passing [EvalResult](Interface.EvalResult.md)s. |
+| [runInCallerContext](Function.runInCallerContext.md) | Run a function with an immutable snapshot of the caller context. Nested and concurrent scopes keep their own identities. |
+| [~~runInUserContext~~](Function.runInUserContext.md) | - |
 | [runWithRetries](Function.runWithRetries.md) | Run `attempt` up to `1 + retries` times, stopping as soon as it returns a result that is neither a thrown error / per-eval timeout (`error`) nor a transport/agent turn failure (`infraFailure`). Assertion failures set neither, so a failed-but-completed eval is returned on the first try and never retried. Returns the last result when every attempt failed on infra. |
 | [summarize](Function.summarize.md) | - |
 | [text](Function.text.md) | - |

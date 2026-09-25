@@ -1,5 +1,8 @@
 # Type Alias: ExecutionContext
 
 ```ts
-type ExecutionContext = ServiceContextState | CallerContext;
+type ExecutionContext = 
+  | ServiceContextState
+  | CallerContext
+  | UserContext;
 ```
