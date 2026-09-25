@@ -120,3 +120,26 @@ export async function stream(
     signal,
   );
 }
+
+/**
+ * Returns the raw SSE byte stream from the Databricks AI Gateway Chat
+ * Completions endpoint. Thin wrapper over {@link streamPath} that hard-codes
+ * the gateway path and forces `stream: true`.
+ *
+ * Unlike a serving endpoint, the target model is named in the request body
+ * (`body.model`, e.g. `"system.ai.claude-opus-5-5"`) — the gateway is a single
+ * fixed path that routes by the body's `model`, so the caller sets it there.
+ */
+export async function streamAiGateway(
+  client: ApiClientLike,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  const { stream: _stream, ...cleanBody } = body;
+  return streamPath(
+    client,
+    "/ai-gateway/mlflow/v1/chat/completions",
+    { ...cleanBody, stream: true },
+    signal,
+  );
+}
