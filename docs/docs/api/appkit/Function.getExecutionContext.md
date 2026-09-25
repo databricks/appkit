@@ -1,17 +1,20 @@
 # Function: getExecutionContext()
 
 ```ts
-function getExecutionContext(): ExecutionContext;
+function getExecutionContext(): 
+  | ServiceContextState
+  | CallerContext & UserContext;
 ```
 
 Get the current execution context.
 
-- If running inside a user context (via asUser), returns the user context
+- If running inside a caller context (via asUser), returns the caller context
 - Otherwise, returns the service context
 
 ## Returns
 
-`ExecutionContext`
+  \| `ServiceContextState`
+  \| [`CallerContext`](Interface.CallerContext.md) & `UserContext`
 
 ## Throws
 

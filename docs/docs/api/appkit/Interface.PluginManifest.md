@@ -277,6 +277,27 @@ Omit.scaffolding
 
 ***
 
+### scopes?
+
+```ts
+optional scopes: (
+  | "ai-gateway"
+  | "mcp.external"
+  | "mcp.functions"
+  | "workspace.workspace"
+  | "catalog.catalogs:read"
+  | "catalog.schemas:read"
+  | "catalog.tables:read")[];
+```
+
+#### Inherited from
+
+```ts
+Omit.scopes
+```
+
+***
+
 ### stability?
 
 ```ts
