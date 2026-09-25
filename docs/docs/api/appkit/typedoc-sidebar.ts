@@ -63,6 +63,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.IdentityExpiredError",
+          label: "IdentityExpiredError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.InitializationError",
           label: "InitializationError"
         },

@@ -22,6 +22,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabaseValidationError](Class.DatabaseValidationError.md) | Deliberate validation failure raised by a database mutation hook. Generated routes answer `422` and echo only the issues naming a public column; every other failure raised inside a hook stays an opaque server error. |
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
+| [IdentityExpiredError](Class.IdentityExpiredError.md) | The downstream service rejected the active caller's credentials. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [MlflowClient](Class.MlflowClient.md) | A thin client over the Databricks workspace REST API, owning the host + bearer token so callers (eval-run creation, assessment writes, the judge's serving endpoint) don't each re-derive URLs or re-attach auth. The host is normalized once at construction. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
