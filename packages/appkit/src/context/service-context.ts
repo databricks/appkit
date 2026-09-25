@@ -111,7 +111,12 @@ export class ServiceContext {
       throw AuthenticationError.missingToken("user token");
     }
 
-    const host = process.env.DATABRICKS_HOST;
+    // Local templates can configure only a profile, whose host the SDK resolved.
+    const host =
+      process.env.DATABRICKS_HOST ||
+      (process.env.NODE_ENV === "development" && ServiceContext.isInitialized()
+        ? ServiceContext.get().client.config?.host
+        : undefined);
     if (!host) {
       throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
     }

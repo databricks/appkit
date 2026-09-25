@@ -17,6 +17,7 @@ import {
 } from "../../agents/supervisor-api";
 import { type Principal, runInCallerContext } from "../../context";
 import { getClientOptions } from "../../context/client-options";
+import { assertPluginExecution } from "../../context/resource-capabilities";
 import { AuthenticationError, ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { createWorkspaceClient } from "../../workspace-client";
@@ -181,6 +182,7 @@ async function runAgentInternal(
       return entry.tool.execute(args as Record<string, unknown>);
     }
     if (entry.kind === "toolkit") {
+      assertPluginExecution(entry.provider);
       return entry.provider.executeAgentTool(
         entry.localName,
         args as Record<string, unknown>,

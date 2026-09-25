@@ -1,11 +1,20 @@
 export * from "./agent";
 export * from "./cache";
+export {
+  createDevOboIdentityProvider,
+  loadDevOboIdentity,
+  loadDevOboIdentityFromEnvironment,
+} from "./dev-obo";
 export * from "./execute";
 export * from "./genie";
 export * from "./metric-filter";
 export * from "./metric-metadata";
 export * from "./plugin";
-export { pluginManifestSchema } from "./schemas/manifest";
+export {
+  pluginManifestSchema,
+  APP_ONLY_RESOURCE_TYPES,
+  SCOPE_BY_TYPE,
+} from "./schemas/manifest";
 export * from "./sql";
 export * from "./sse/analytics";
 export * from "./tunnel";

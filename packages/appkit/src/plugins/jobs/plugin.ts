@@ -9,7 +9,7 @@ import type {
 import { toJSONSchema } from "zod";
 
 import { JobsConnector } from "../../connectors/jobs";
-import { getCurrentUserId, getWorkspaceClient } from "../../context";
+import { getCurrentPrincipalId, getWorkspaceClient } from "../../context";
 import { ExecutionError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { ExecutionResult } from "../../plugin";
@@ -258,7 +258,7 @@ class JobsPlugin extends Plugin {
     const self = this;
     // Capture client and userId eagerly: the closures below run later, after the ALS context may have exited.
     const client = this.client;
-    const userKey = getCurrentUserId();
+    const userKey = getCurrentPrincipalId();
 
     /**
      * Verify that `runId` belongs to this job's configured `jobId`. Returns

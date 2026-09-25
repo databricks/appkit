@@ -1,7 +1,7 @@
 import type { TelemetryConfig } from "shared";
 
 import {
-  getCurrentUserId,
+  getCurrentPrincipalId,
   isInUserContext,
   normalizeIdentityError,
 } from "../../context/execution-context";
@@ -56,7 +56,7 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
             "execution.context",
             isInUserContext() ? "user" : "service",
           );
-          span.setAttribute("caller.id", getCurrentUserId());
+          span.setAttribute("caller.id", getCurrentPrincipalId());
           if (isDevOboFallback()) {
             span.setAttribute("execution.obo_dev_fallback", true);
           }

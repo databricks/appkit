@@ -21,6 +21,7 @@ import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
 import { normalizeIdentityError } from "../../context/execution-context";
 import { createRequestScope } from "../../context/request-scope";
+import { getPluginResourceTypes } from "../../context/resource-capabilities";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { CODE_AGENTS_SOURCE_DIR } from "../../core/agent/load-code-agents";
@@ -913,7 +914,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     // Return the promise so the forwardAsyncErrors wrapper applied by
     // PluginContext.addRoute can forward rejections to the error middleware.
     const handler = (req: express.Request, res: express.Response) =>
-      createRequestScope(req).run(() => this._handleInvoke(req, res));
+      createRequestScope(req, getPluginResourceTypes(this), {
+        legacy: true,
+      }).run(() => this._handleInvoke(req, res));
     this.context.addRoute("post", "/invocations", handler);
     this.context.addRoute("post", "/responses", handler);
   }
@@ -924,7 +927,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       method: "post",
       path: "/chat",
       handler: async (req, res) =>
-        createRequestScope(req).run(() => this._handleChat(req, res)),
+        createRequestScope(req, getPluginResourceTypes(this), {
+          legacy: true,
+        }).run(() => this._handleChat(req, res)),
     });
     this.route(router, {
       name: "cancel",

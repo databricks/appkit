@@ -1,58 +1,25 @@
-import { execFile } from "node:child_process";
 import {
   createServer,
   request,
   type Server,
   type OutgoingHttpHeaders,
 } from "node:http";
-import { promisify } from "node:util";
 
 import { Command } from "commander";
 
-const execute = promisify(execFile);
-interface DevIdentity {
-  token: string;
-  userId: string;
-  email?: string;
-}
+import {
+  createDevOboIdentityProvider,
+  type DevOboIdentity,
+  loadDevOboIdentity,
+} from "../../dev-obo.js";
 
-/** CLI output is credential-bearing. Never include it in an error or log. */
-export async function loadDevOboIdentity(
-  profile: string,
-  run: (args: string[]) => Promise<{ stdout: string }> = (args) =>
-    execute("databricks", args, { timeout: 30_000 }),
-): Promise<DevIdentity> {
-  try {
-    const [tokenOutput, userOutput] = await Promise.all([
-      run(["auth", "token", "--profile", profile]),
-      run(["current-user", "me", "--profile", profile, "--output", "json"]),
-    ]);
-    const token = JSON.parse(tokenOutput.stdout).access_token;
-    const user = JSON.parse(userOutput.stdout);
-    if (
-      typeof token !== "string" ||
-      !token.trim() ||
-      typeof user.id !== "string" ||
-      !user.id.trim()
-    )
-      throw new Error();
-    return {
-      token,
-      userId: user.id,
-      email: typeof user.userName === "string" ? user.userName : undefined,
-    };
-  } catch {
-    throw new Error(
-      "Unable to obtain local OBO credentials. Authenticate the explicitly selected Databricks user profile and retry.",
-    );
-  }
-}
+export { loadDevOboIdentity } from "../../dev-obo.js";
 
 /** A development-only HTTP proxy. Credentials travel only to a loopback target. */
 export async function startDevOboProxy(options: {
   target: string;
   port: number;
-  loadIdentity: () => Promise<DevIdentity>;
+  loadIdentity: () => Promise<DevOboIdentity>;
 }): Promise<Server> {
   const target = new URL(options.target);
   if (
@@ -83,9 +50,8 @@ export async function startDevOboProxy(options: {
     );
   }
   // Revalidate credentials periodically; never save them to disk or environment.
-  let identity = await options.loadIdentity();
-  let loadedAt = Date.now();
-  let refresh: Promise<void> | undefined;
+  const getIdentity = createDevOboIdentityProvider(options.loadIdentity);
+  await getIdentity();
   const server = createServer(async (req, res) => {
     const address = server.address();
     if (!address || typeof address === "string") {
@@ -113,18 +79,7 @@ export async function startDevOboProxy(options: {
       return;
     }
     try {
-      if (Date.now() - loadedAt >= 30_000) {
-        refresh ??= options
-          .loadIdentity()
-          .then((next) => {
-            identity = next;
-            loadedAt = Date.now();
-          })
-          .finally(() => {
-            refresh = undefined;
-          });
-        await refresh;
-      }
+      const identity = await getIdentity();
       const headers: OutgoingHttpHeaders = {
         ...req.headers,
         host: target.host,

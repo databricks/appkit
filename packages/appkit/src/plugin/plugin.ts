@@ -16,10 +16,14 @@ import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
-import { getCurrentUserId } from "../context";
+import { getCurrentPrincipalId } from "../context";
 import { warnContextDeprecation } from "../context/deprecation";
 import { normalizeIdentityError } from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
+import {
+  assertPluginExecution,
+  getPluginResourceTypes,
+} from "../context/resource-capabilities";
 import { scopePlugin } from "../context/scoped-api";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
@@ -344,14 +348,18 @@ export abstract class Plugin<
   protected resolveUserId(req: express.Request): string {
     const userId = req.header("x-forwarded-user")?.trim();
     if (userId) return userId;
-    if (process.env.NODE_ENV === "development") return getCurrentUserId();
+    if (process.env.NODE_ENV === "development") return getCurrentPrincipalId();
     throw AuthenticationError.missingUserId();
   }
 
   /** @deprecated Use appkit.asUser(req) to scope the whole app. */
   asUser(req: express.Request): this {
     warnContextDeprecation("Plugin.asUser", "appkit.asUser(req)");
-    return scopePlugin(this, createRequestScope(req));
+    assertPluginExecution(this);
+    return scopePlugin(
+      this,
+      createRequestScope(req, getPluginResourceTypes(this), { legacy: true }),
+    );
   }
 
   // streaming execution with interceptors
@@ -361,6 +369,7 @@ export abstract class Plugin<
     options: StreamExecutionSettings,
     userKey?: string,
   ) {
+    assertPluginExecution(this);
     // destructure options
     const {
       stream: streamConfig,
@@ -375,7 +384,7 @@ export abstract class Plugin<
     });
 
     // get user key from context if not provided
-    const effectiveUserKey = userKey ?? getCurrentUserId();
+    const effectiveUserKey = userKey ?? getCurrentPrincipalId();
 
     const self = this;
     // capture the active OTel context (HTTP span) before entering the async generator,
@@ -449,12 +458,13 @@ export abstract class Plugin<
     options: PluginExecutionSettings,
     userKey?: string,
   ): Promise<ExecutionResult<T>> {
+    assertPluginExecution(this);
     const executeConfig = this._buildExecutionConfig(options);
 
     const interceptors = this._buildInterceptors(executeConfig);
 
     // get user key from context if not provided
-    const effectiveUserKey = userKey ?? getCurrentUserId();
+    const effectiveUserKey = userKey ?? getCurrentPrincipalId();
 
     const context: InterceptorContext = {
       metadata: new Map(),
