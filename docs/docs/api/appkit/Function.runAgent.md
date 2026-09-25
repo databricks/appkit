@@ -8,12 +8,12 @@ Standalone agent execution without `createApp`. Resolves the adapter, binds
 inline tools, and drives the adapter's `run()` loop to completion.
 
 Limitations vs. running through the agents() plugin:
-- **No OBO and no approval gate** — there is no HTTP request, so plugin
-  tools run as the service principal. The agents-plugin approval gate
+- **No approval gate**: tools inherit the run's principal, SP by default.
+  Explicit caller credentials enable user execution. The agents-plugin gate
   that prompts for human confirmation on `effect: "write" | "update" |
   "destructive"` tools is also absent. LLM-controlled tool arguments
-  flow straight through to the SP. Treat standalone runAgent as a
-  trusted-prompt environment (CI, batch eval, internal scripts) — not
+  flow straight through to the tools. Treat standalone runAgent as a
+  trusted-prompt environment (CI, batch eval, internal scripts), not
   as an exposed user-facing surface.
 - **Hosted tools (MCP) are not supported** — they require a live MCP
   client that only exists inside the agents plugin's lifecycle.
