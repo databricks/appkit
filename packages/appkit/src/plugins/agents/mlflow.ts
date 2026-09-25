@@ -2,6 +2,7 @@ import type { UnityCatalogLocation } from "@mlflow/core";
 import { SpanKind } from "@opentelemetry/api";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 
+import { normalizeIdentityError } from "../../context/execution-context";
 import { createLogger } from "../../logging/logger";
 import { TelemetryManager } from "../../telemetry";
 
@@ -480,15 +481,22 @@ async function trace<T>(
   inputs: unknown,
   fn: (span: SpanRecorder) => Promise<T>,
 ): Promise<T> {
-  if (!enabled || !mlflow) return fn(noopRecorder);
+  const execute = async (span: SpanRecorder): Promise<T> => {
+    try {
+      return await fn(span);
+    } catch (error) {
+      throw normalizeIdentityError(error);
+    }
+  };
+  if (!enabled || !mlflow) return execute(noopRecorder);
   const m = mlflow;
-  if (!ensureConfigured()) return fn(noopRecorder);
+  if (!ensureConfigured()) return execute(noopRecorder);
   const type = spanType === "AGENT" ? m.SpanType.AGENT : m.SpanType.TOOL;
   return await m.withSpan<T>(
     async (span) => {
       if (inputs !== undefined) span.setInputs(inputs);
       let outputsSet = false;
-      const result = await fn({
+      const result = await execute({
         setOutputs(outputs) {
           outputsSet = true;
           span.setOutputs(outputs);

@@ -1,7 +1,10 @@
 import type express from "express";
 import type { BasePlugin, ToolProvider } from "shared";
 
-import { getCallerContext } from "../context/execution-context";
+import {
+  getCallerContext,
+  normalizeIdentityError,
+} from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
 import { ServiceContext } from "../context/service-context";
 import { createLogger } from "../logging/logger";
@@ -246,7 +249,8 @@ export class PluginContext {
           );
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
-        } catch (error) {
+        } catch (caught) {
+          const error = normalizeIdentityError(caught);
           span.setStatus({
             code: SpanStatusCode.ERROR,
             message:

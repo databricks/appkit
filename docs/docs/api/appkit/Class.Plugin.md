@@ -364,7 +364,8 @@ Returns an [ExecutionResult](TypeAlias.ExecutionResult.md) discriminated union:
 - `{ ok: true, data: T }` on success
 - `{ ok: false, status: number, message: string }` on failure
 
-Errors are never thrown — the method is production-safe.
+Caller credential expiration retains the failure result and additionally
+exposes a typed error, preserving existing result-based callers.
 
 #### Type Parameters
 

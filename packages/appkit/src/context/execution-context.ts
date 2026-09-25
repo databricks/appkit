@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import {
+  IdentityExpiredError,
+  isUnauthorized,
+} from "../errors/identity-expired";
+import {
   captureWarehouseId,
   getWarehouseId as getResourceWarehouseId,
   runWithResourceBindings,
@@ -24,8 +28,32 @@ function runInCallerScope<T>(
 ): T {
   const caller = snapshotCallerContext(callerContext);
   return runWithResourceBindings(legacyResources, () =>
-    executionContextStorage.run(caller, fn),
+    executionContextStorage.run(caller, () => {
+      try {
+        const result = fn();
+        if (result instanceof Promise) {
+          return result.catch((error) => {
+            throw normalizeIdentityError(error);
+          }) as T;
+        }
+        return result;
+      } catch (error) {
+        throw normalizeIdentityError(error);
+      }
+    }),
   );
+}
+
+/** Convert downstream 401s before recording or surfacing caller failures. */
+export function normalizeIdentityError(error: unknown): unknown {
+  const caller = getCallerContext();
+  if (
+    !caller ||
+    error instanceof IdentityExpiredError ||
+    !isUnauthorized(error)
+  )
+    return error;
+  return new IdentityExpiredError(caller.tokenFingerprint);
 }
 
 /**
