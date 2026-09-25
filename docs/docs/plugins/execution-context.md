@@ -136,7 +136,54 @@ are never attached to these attributes.
 
 ## Real user execution locally
 
-Run the app locally, then open a separate terminal for an opt-in OBO proxy:
+Set `DATABRICKS_TOKEN` and `DATABRICKS_HOST` in the app's `.env` to use a user
+token directly:
+
+```dotenv
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your-user-token
+```
+
+When `DATABRICKS_TOKEN` is present, it takes precedence. AppKit uses it directly
+and resolves the user ID from the configured host. Otherwise, set
+`DATABRICKS_CONFIG_PROFILE` to an authenticated user profile for the same
+workspace as the app. The generated template already sets the profile when you
+choose one during scaffolding:
+
+```dotenv
+DATABRICKS_CONFIG_PROFILE=your-user-profile
+```
+
+Then run your usual command:
+
+```sh
+npm run dev
+```
+
+Open the app's normal localhost URL. In development, the server automatically
+adds `x-forwarded-access-token`, `x-forwarded-user`, and optional email headers
+before plugin routes and custom routes run. No separate proxy, target, or port
+is needed. `asUser(req)` uses that user identity. Unscoped operations still use
+the app's configured credentials; injecting headers does not open a caller scope.
+For a genuine SP-versus-user comparison, the app credentials must belong to an
+SP, not the same user profile.
+
+Credentials stay in memory and refresh after 30 seconds of use. Initial auth and
+refresh failures return 401, never a silent SP fallback. Existing forwarded user
+tokens are preserved. Automatic injection runs only in `NODE_ENV=development`
+and only for same-origin loopback requests, including `localhost`. Use it only
+with a trusted local app. It emulates user credentials, not platform consent,
+scope enforcement, or resource provisioning.
+
+Set `APPKIT_DEV_OBO=false` in `.env` to disable automatic injection. Without a
+configured token or profile, injection is also disabled. Tokenless
+`asUser(req)` then keeps the existing `DEV_OBO_FALLBACK` behavior in
+development.
+
+### Optional standalone proxy
+
+The separate proxy remains available for custom servers that do not use the
+AppKit server plugin:
 
 ```sh
 NODE_ENV=development npx appkit dev-obo \
@@ -156,5 +203,4 @@ The proxy accepts only loopback HTTP targets and same-origin browser requests.
 It is disabled in production and deployed Apps. Use it only with a trusted local
 app and do not publish it through a tunnel. WebSocket upgrades are not proxied;
 HTTP and SSE requests work. This emulates user credentials, not the platform's
-consent flow or resource provisioning. Without this proxy, the existing marked
-development fallback still applies.
+consent flow or resource provisioning.

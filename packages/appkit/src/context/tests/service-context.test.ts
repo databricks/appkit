@@ -308,6 +308,26 @@ describe("ServiceContext", () => {
       );
     });
 
+    test("uses the initialized profile host for local callers without DATABRICKS_HOST", () => {
+      delete process.env.DATABRICKS_HOST;
+      process.env.NODE_ENV = "development";
+      process.env.DATABRICKS_CONFIG_PROFILE = "selected-user";
+      Object.defineProperty(ServiceContext.get().client, "config", {
+        value: { host: "https://profile-workspace.databricks.com" },
+      });
+
+      const caller = ServiceContext.createCallerContext("user-token", "alice");
+
+      expect(caller.principal).toMatchObject({ type: "user", userId: "alice" });
+      expect(MockWorkspaceClient).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          host: "https://profile-workspace.databricks.com",
+          token: "user-token",
+          authType: "pat",
+        }),
+      );
+    });
+
     test("should throw InitializationError when service context is not initialized", () => {
       ServiceContext.reset();
 

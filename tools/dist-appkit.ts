@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import { assertPackageImportsResolve } from "./validate-package-imports";
+
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const { values } = parseArgs({
   options: {
@@ -90,15 +92,13 @@ if (fs.existsSync(sharedBin)) {
     fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
   }
 
-  // The CLI imports leaf modules that live outside dist/cli (e.g.
-  // `naming.ts`, referenced by the `plugin promote` command). Copy them to
-  // tmp/dist so the CLI's relative imports resolve in the published tarball.
-  const sharedNaming = path.join(
-    __dirname,
-    "../packages/shared/dist/naming.js",
-  );
-  if (fs.existsSync(sharedNaming)) {
-    fs.copyFileSync(sharedNaming, "tmp/dist/naming.js");
+  // The CLI imports leaf modules that live outside dist/cli. Copy them to
+  // tmp/dist so their relative imports resolve in the published tarball.
+  for (const file of ["naming.js", "dev-obo.js"]) {
+    const source = path.join(__dirname, "../packages/shared/dist", file);
+    if (fs.existsSync(source)) {
+      fs.copyFileSync(source, path.join("tmp/dist", file));
+    }
   }
 
   // The doctor command reaches the SDK through the shared workspace-client
@@ -139,6 +139,8 @@ if (fs.existsSync(sharedPostinstall)) {
   fs.mkdirSync("tmp/scripts", { recursive: true });
   fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
 }
+
+assertPackageImportsResolve("tmp/dist/cli");
 
 // Copy documentation from docs/build into tmp/docs/
 const docsBuildPath = path.join(__dirname, "../docs/build");
