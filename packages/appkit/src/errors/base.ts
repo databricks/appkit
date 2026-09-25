@@ -48,8 +48,8 @@ export abstract class AppKitError extends Error {
 
   /**
    * Client-safe error message. When set, callers serializing the error to
-   * a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`
-   * — `message` may contain raw upstream / SDK text including statement
+   * a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`.
+   * `message` may contain raw upstream / SDK text including statement
    * fragments, internal object names, and correlation IDs.
    *
    * Subclasses can set this in their constructor for a fixed sanitized

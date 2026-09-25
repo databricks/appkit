@@ -1,13 +1,6 @@
-# Class: ServerError
+# Class: IdentityExpiredError
 
-Error thrown when server lifecycle operations fail.
-Use for server start/stop issues, configuration conflicts, etc.
-
-## Example
-
-```typescript
-throw new ServerError("Server not started");
-```
+The downstream service rejected the active caller's credentials.
 
 ## Extends
 
@@ -18,28 +11,20 @@ throw new ServerError("Server not started");
 ### Constructor
 
 ```ts
-new ServerError(message: string, options?: {
-  cause?: Error;
-  clientMessage?: string;
-  context?: Record<string, unknown>;
-}): ServerError;
+new IdentityExpiredError(tokenFingerprint?: string): IdentityExpiredError;
 ```
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `message` | `string` |
-| `options?` | \{ `cause?`: `Error`; `clientMessage?`: `string`; `context?`: `Record`\<`string`, `unknown`\>; \} |
-| `options.cause?` | `Error` |
-| `options.clientMessage?` | `string` |
-| `options.context?` | `Record`\<`string`, `unknown`\> |
+| `tokenFingerprint?` | `string` |
 
 #### Returns
 
-`ServerError`
+`IdentityExpiredError`
 
-#### Inherited from
+#### Overrides
 
 [`AppKitError`](Class.AppKitError.md).[`constructor`](Class.AppKitError.md#constructor)
 
@@ -84,7 +69,7 @@ Optional cause of the error
 ### code
 
 ```ts
-readonly code: "SERVER_ERROR" = "SERVER_ERROR";
+readonly code: "IDENTITY_EXPIRED" = "IDENTITY_EXPIRED";
 ```
 
 Error code for programmatic error handling
@@ -126,7 +111,7 @@ Whether this error type is generally safe to retry
 ### statusCode
 
 ```ts
-readonly statusCode: 500 = 500;
+readonly statusCode: 401 = 401;
 ```
 
 HTTP status code suggestion (can be overridden)
@@ -134,6 +119,14 @@ HTTP status code suggestion (can be overridden)
 #### Overrides
 
 [`AppKitError`](Class.AppKitError.md).[`statusCode`](Class.AppKitError.md#statuscode)
+
+***
+
+### tokenFingerprint?
+
+```ts
+readonly optional tokenFingerprint: string;
+```
 
 ## Accessors
 
@@ -192,51 +185,3 @@ Create a human-readable string representation
 #### Inherited from
 
 [`AppKitError`](Class.AppKitError.md).[`toString`](Class.AppKitError.md#tostring)
-
-***
-
-### clientDirectoryNotFound()
-
-```ts
-static clientDirectoryNotFound(searchedPaths: string[]): ServerError;
-```
-
-Create a server error for missing client directory
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `searchedPaths` | `string`[] |
-
-#### Returns
-
-`ServerError`
-
-***
-
-### notStarted()
-
-```ts
-static notStarted(): ServerError;
-```
-
-Create a server error for server not started
-
-#### Returns
-
-`ServerError`
-
-***
-
-### viteNotInitialized()
-
-```ts
-static viteNotInitialized(): ServerError;
-```
-
-Create a server error for Vite dev server not initialized
-
-#### Returns
-
-`ServerError`

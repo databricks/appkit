@@ -7,6 +7,7 @@ type ExecutionResult<T> =
   ok: true;
 }
   | {
+  error?: IdentityExpiredError;
   message: string;
   ok: false;
   status: number;
@@ -31,3 +32,59 @@ In production, error messages from non-AppKitError sources are handled as:
 | Type Parameter |
 | ------ |
 | `T` |
+
+## Type Declaration
+
+```ts
+{
+  data: T;
+  ok: true;
+}
+```
+
+### data
+
+```ts
+data: T;
+```
+
+### ok
+
+```ts
+ok: true;
+```
+
+```ts
+{
+  error?: IdentityExpiredError;
+  message: string;
+  ok: false;
+  status: number;
+}
+```
+
+### error?
+
+```ts
+optional error: IdentityExpiredError;
+```
+
+Typed credential expiry without changing the existing failure envelope.
+
+### message
+
+```ts
+message: string;
+```
+
+### ok
+
+```ts
+ok: false;
+```
+
+### status
+
+```ts
+status: number;
+```
