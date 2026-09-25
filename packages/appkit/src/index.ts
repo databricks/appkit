@@ -36,8 +36,17 @@ export {
   getWorkspaceClient,
   RequestedClaimsPermissionSet,
 } from "./connectors/lakebase";
-export { getExecutionContext } from "./context";
+export {
+  type CallerContext,
+  type CallerPrincipal,
+  type ExecutionContext,
+  type Principal,
+  getCurrentActorId,
+  getCurrentPrincipalKey,
+  getExecutionContext,
+} from "./context";
 export { createApp } from "./core";
+export { getWarehouseId } from "./resources";
 export type { DatabaseRegistry } from "./database/contract";
 // Errors
 export {

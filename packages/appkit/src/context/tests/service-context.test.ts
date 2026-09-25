@@ -6,6 +6,8 @@ import {
   ConfigurationError,
   InitializationError,
 } from "../../errors";
+import { getWarehouseId } from "../../resources";
+import { WarehouseResource } from "../../resources/warehouse";
 import { ServiceContext } from "../service-context";
 
 // ── Mock the workspace-client wrapper ──────────────────────────────
@@ -76,6 +78,8 @@ describe("ServiceContext", () => {
       expect(state.client).toBe(client);
       expect(state.serviceUserId).toBe("service-user-123");
       expect(await state.workspaceId).toBe("ws-456");
+      expect(Object.isFrozen(state)).toBe(true);
+      expect(Reflect.set(state, "serviceUserId", "another-user")).toBe(false);
     });
 
     test("should create a WorkspaceClient when none is provided", async () => {
@@ -85,25 +89,41 @@ describe("ServiceContext", () => {
       expect(MockWorkspaceClient).toHaveBeenCalled();
     });
 
-    test("should resolve warehouseId when options.warehouseId is true", async () => {
+    test("the deprecated warehouse getter forwards the binding and warns once", async () => {
       process.env.DATABRICKS_WAREHOUSE_ID = "wh-789";
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
+      try {
+        const state = await ServiceContext.initialize({ warehouseId: true });
 
-      expect(state.warehouseId).toBeDefined();
-      expect(await state.warehouseId).toBe("wh-789");
+        expect(await getWarehouseId()).toBe("wh-789");
+        expect(warn).not.toHaveBeenCalled();
+        expect(state.warehouseId).toBeDefined();
+        expect(await state.warehouseId).toBe("wh-789");
+        expect(getWarehouseId()).toBe(state.warehouseId);
+        expect(
+          Object.getOwnPropertyDescriptor(state, "warehouseId")?.get,
+        ).toBeTypeOf("function");
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+          expect.any(String),
+          "ServiceContextState.warehouseId is deprecated. Use getWarehouseId() from @databricks/appkit instead.",
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     test("should not set warehouseId when options.warehouseId is false", async () => {
-      const state = await ServiceContext.initialize({ warehouseId: false });
+      await ServiceContext.initialize({ warehouseId: false });
 
-      expect(state.warehouseId).toBeUndefined();
+      expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
     });
 
     test("should not set warehouseId when options are omitted", async () => {
-      const state = await ServiceContext.initialize();
+      await ServiceContext.initialize();
 
-      expect(state.warehouseId).toBeUndefined();
+      expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
     });
 
     test("should throw when currentUser.me() returns no id", async () => {
@@ -112,6 +132,37 @@ describe("ServiceContext", () => {
       await expect(ServiceContext.initialize()).rejects.toThrow(
         ConfigurationError,
       );
+    });
+
+    test("does not publish resources when service identity initialization fails", async () => {
+      mockMe.mockResolvedValue({});
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
+      expect(WarehouseResource.get()).toBeUndefined();
+    });
+
+    test("shares one warehouse discovery across concurrent initialization calls", async () => {
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.NODE_ENV = "development";
+      mockApiRequest.mockImplementation(({ path }: { path: string }) =>
+        Promise.resolve(
+          path === "/api/2.0/sql/warehouses"
+            ? { warehouses: [{ id: "wh-shared", state: "RUNNING" }] }
+            : { "x-databricks-org-id": "ws-456" },
+        ),
+      );
+      const [first, second] = await Promise.all([
+        ServiceContext.initialize({ warehouseId: true }),
+        ServiceContext.initialize({ warehouseId: true }),
+      ]);
+      expect(first).toBe(second);
+      expect(await getWarehouseId()).toBe("wh-shared");
+      expect(
+        mockApiRequest.mock.calls.filter(
+          ([request]) => request.path === "/api/2.0/sql/warehouses",
+        ),
+      ).toHaveLength(1);
     });
 
     test("should be idempotent - calling twice returns same instance", async () => {
@@ -192,7 +243,7 @@ describe("ServiceContext", () => {
       expect(userCtx.client).toBeDefined();
     });
 
-    test("should share warehouseId and workspaceId from service context", async () => {
+    test("legacy callers share app resources and the service workspace", async () => {
       process.env.DATABRICKS_WAREHOUSE_ID = "wh-shared";
 
       // Re-initialize with the new env
@@ -203,7 +254,7 @@ describe("ServiceContext", () => {
       const userCtx = ServiceContext.createUserContext("user-token", "user-1");
 
       const serviceCtx = ServiceContext.get();
-      expect(userCtx.warehouseId).toBe(serviceCtx.warehouseId);
+      expect(userCtx.warehouseId).toBe(getWarehouseId());
       expect(userCtx.workspaceId).toBe(serviceCtx.workspaceId);
     });
 
@@ -288,6 +339,19 @@ describe("ServiceContext", () => {
 
       expect(state.serviceUserId).toBe("new-service-user");
     });
+
+    test("clears app resources while preserving previously returned legacy snapshots", async () => {
+      process.env.DATABRICKS_WAREHOUSE_ID = "wh-before-reset";
+      const previous = await ServiceContext.initialize({ warehouseId: true });
+      const previousWarehouse = getWarehouseId();
+      ServiceContext.reset();
+      expect(getWarehouseId).toThrow(InitializationError);
+      process.env.DATABRICKS_WAREHOUSE_ID = "wh-after-reset";
+      await ServiceContext.initialize({ warehouseId: true });
+      expect(await getWarehouseId()).toBe("wh-after-reset");
+      expect(previous.warehouseId).toBe(previousWarehouse);
+      expect(await previous.warehouseId).toBe("wh-before-reset");
+    });
   });
 
   // ── getWorkspaceId() (private, tested via initialize) ─────────
@@ -333,15 +397,15 @@ describe("ServiceContext", () => {
     });
   });
 
-  // ── getWarehouseId() (private, tested via initialize) ─────────
+  // Warehouse discovery remains covered through the compatible startup API.
 
-  describe("getWarehouseId()", () => {
+  describe("warehouse resource initialization", () => {
     test("should use DATABRICKS_WAREHOUSE_ID env var when set", async () => {
       process.env.DATABRICKS_WAREHOUSE_ID = "env-wh-abc";
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
+      await ServiceContext.initialize({ warehouseId: true });
 
-      expect(await state.warehouseId).toBe("env-wh-abc");
+      expect(await getWarehouseId()).toBe("env-wh-abc");
     });
 
     test("should skip auto-resolve in dev mode when agentic mode is enabled", async () => {
@@ -376,10 +440,10 @@ describe("ServiceContext", () => {
         return Promise.resolve({ "x-databricks-org-id": "ws-dev" });
       });
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
+      await ServiceContext.initialize({ warehouseId: true });
 
       // Should pick RUNNING warehouse (highest priority)
-      expect(await state.warehouseId).toBe("wh-running");
+      expect(await getWarehouseId()).toBe("wh-running");
     });
 
     test("should sort warehouses by state priority in dev mode", async () => {
@@ -399,10 +463,10 @@ describe("ServiceContext", () => {
         return Promise.resolve({ "x-databricks-org-id": "ws-dev" });
       });
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
+      await ServiceContext.initialize({ warehouseId: true });
 
       // STOPPED (priority 1) < STARTING (priority 2) < STOPPING (priority 3)
-      expect(await state.warehouseId).toBe("wh-stopped");
+      expect(await getWarehouseId()).toBe("wh-stopped");
     });
 
     test("should throw in dev mode when no warehouses are available", async () => {

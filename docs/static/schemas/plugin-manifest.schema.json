@@ -4,6 +4,22 @@
   "title": "AppKit Plugin Manifest",
   "type": "object",
   "properties": {
+    "scopes": {
+      "description": "Capability-only user_api_scopes with no resource ID.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ai-gateway",
+          "mcp.external",
+          "mcp.functions",
+          "workspace.workspace",
+          "catalog.catalogs:read",
+          "catalog.schemas:read",
+          "catalog.tables:read"
+        ]
+      }
+    },
     "$schema": {
       "description": "Reference to the JSON Schema for validation",
       "type": "string"

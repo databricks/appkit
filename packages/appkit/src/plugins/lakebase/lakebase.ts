@@ -13,7 +13,7 @@ import {
   RoutingPool,
 } from "../../connectors/lakebase";
 import { getClientOptions } from "../../context/client-options";
-import { getUserContext } from "../../context/execution-context";
+import { getCallerContext } from "../../context/execution-context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -104,7 +104,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     this.pool = new RoutingPool(spPool, (ctx) => {
       if (!oboManager) throw new Error("OBO pool manager not initialized");
       // Lakebase OAuth roles use email as the postgres role when available
-      const userKey = ctx.userEmail ?? ctx.userId;
+      const userKey = ctx.principal.userEmail ?? ctx.principal.userId;
       const isNew = !oboManager.hasPool(userKey);
       const pool = oboManager.getPool(
         userKey,
@@ -299,9 +299,9 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
    * Inside `asUser(req)`, returns user-scoped config; otherwise SP config.
    */
   private activePoolConfig() {
-    const ctx = getUserContext();
+    const ctx = getCallerContext();
     if (ctx) {
-      const user = ctx.userEmail ?? ctx.userId;
+      const user = ctx.principal.userEmail ?? ctx.principal.userId;
       return {
         ...this.config.pool,
         workspaceClient: ctx.client.toLegacyWorkspaceClient(),

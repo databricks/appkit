@@ -16,7 +16,7 @@ import {
   DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
   type WarehouseStatusUpdate,
 } from "../../connectors/sql-warehouse/client";
-import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -28,6 +28,7 @@ import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
+import { getWarehouseId } from "../../resources";
 import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";

@@ -555,7 +555,7 @@ Resolve the effective user ID from a request.
 
 Returns the `x-forwarded-user` header when present. In development mode
 (`NODE_ENV=development`) falls back to the current context user ID so
-that callers outside an active `runInUserContext` scope still get a
+that callers outside an active `runInCallerContext` scope still get a
 consistent value.
 
 #### Parameters

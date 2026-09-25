@@ -5,34 +5,39 @@ import {
   ConfigurationError,
   InitializationError,
 } from "../errors";
+import { WarehouseResource } from "../resources/warehouse";
 import {
   type ClientOptions,
   ConfigError,
   createWorkspaceClient,
-  type sql,
   type WorkspaceClient,
 } from "../workspace-client";
+import { type CallerContext, snapshotCallerContext } from "./caller-context";
 import { getClientOptions } from "./client-options";
-import type { UserContext } from "./user-context";
+import { warnContextDeprecation } from "./deprecation";
+import { legacyUserContext, type UserContext } from "./user-context";
 
 /**
- * Service context holds the service principal client and shared resources.
+ * Service context holds the service principal identity and workspace client.
  * This is initialized once at app startup and shared across all requests.
  */
 export interface ServiceContextState {
   /** WorkspaceClient authenticated as the service principal */
-  client: WorkspaceClient;
+  readonly client: WorkspaceClient;
   /** The service principal's user ID */
-  serviceUserId: string;
-  /** Promise that resolves to the warehouse ID (only present when a plugin requires `SQL_WAREHOUSE` resource) */
-  warehouseId?: Promise<string>;
+  readonly serviceUserId: string;
+  /**
+   * @deprecated Use getWarehouseId() from @databricks/appkit.
+   * Retained for backward compatibility.
+   */
+  readonly warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
-  workspaceId: Promise<string>;
+  readonly workspaceId: Promise<string>;
 }
 
 /**
  * ServiceContext is a singleton that manages the service principal's
- * WorkspaceClient and shared resources like warehouse/workspace IDs.
+ * WorkspaceClient and workspace ID. WarehouseResource owns warehouse bindings.
  *
  * It's initialized once at app startup and provides the foundation
  * for both service principal and user context execution.
@@ -88,19 +93,20 @@ export class ServiceContext {
   }
 
   /**
-   * Create a user context from request headers.
+   * Create an immutable caller context from the existing user request headers.
    *
    * @param token - The user's access token from x-forwarded-access-token header
    * @param userId - The user's ID from x-forwarded-user header
    * @param userName - Optional user name
+   * @param userEmail - Optional email from x-forwarded-email
    * @throws Error if token is not provided
    */
-  static createUserContext(
+  static createCallerContext(
     token: string,
     userId: string,
     userName?: string,
     userEmail?: string,
-  ): UserContext {
+  ): CallerContext {
     if (!token) {
       throw AuthenticationError.missingToken("user token");
     }
@@ -127,16 +133,33 @@ export class ServiceContext {
       .digest("hex")
       .slice(0, 16);
 
-    return {
+    return snapshotCallerContext({
       client: userClient,
+      principal: { type: "user", userId, userName, userEmail },
+      tokenFingerprint,
+      workspaceId: serviceCtx.workspaceId,
+    });
+  }
+
+  /** @deprecated Use ServiceContext.createCallerContext. */
+  static createUserContext(
+    token: string,
+    userId: string,
+    userName?: string,
+    userEmail?: string,
+  ): CallerContext & UserContext {
+    warnContextDeprecation(
+      "ServiceContext.createUserContext",
+      "ServiceContext.createCallerContext",
+    );
+    const caller = ServiceContext.createCallerContext(
+      token,
       userId,
       userName,
       userEmail,
-      tokenFingerprint,
-      warehouseId: serviceCtx.warehouseId,
-      workspaceId: serviceCtx.workspaceId,
-      isUserContext: true,
-    };
+    );
+    const warehouseId = WarehouseResource.get()?.warehouseId;
+    return legacyUserContext(caller, () => warehouseId);
   }
 
   /**
@@ -155,30 +178,31 @@ export class ServiceContext {
       const wsClient =
         client ?? createWorkspaceClient({ clientOptions: getClientOptions() });
 
-      const [resolvedWorkspaceId, currentUser, resolvedWarehouseId] =
+      const [resolvedWorkspaceId, currentUser, resolvedResources] =
         await Promise.all([
           ServiceContext.getWorkspaceId(wsClient),
           wsClient.currentUser.me(),
-          options?.warehouseId
-            ? ServiceContext.getWarehouseId(wsClient)
-            : Promise.resolve(undefined as string | undefined),
+          WarehouseResource.resolve(wsClient, options?.warehouseId),
         ]);
 
       if (!currentUser.id) {
         throw ConfigurationError.resourceNotFound("Service user ID");
       }
 
-      const warehouseId =
-        options?.warehouseId && resolvedWarehouseId !== undefined
-          ? Promise.resolve(resolvedWarehouseId)
-          : undefined;
+      const resources = WarehouseResource.bind(resolvedResources);
 
-      return {
+      return Object.freeze({
         client: wsClient,
         serviceUserId: currentUser.id,
-        warehouseId,
+        get warehouseId() {
+          warnContextDeprecation(
+            "ServiceContextState.warehouseId",
+            "getWarehouseId() from @databricks/appkit",
+          );
+          return resources.warehouseId;
+        },
         workspaceId: Promise.resolve(resolvedWorkspaceId),
-      };
+      });
     } catch (e) {
       if (e instanceof ConfigError) {
         throw ConfigurationError.databricksAuthenticationSetupFailed(
@@ -213,76 +237,12 @@ export class ServiceContext {
     return response["x-databricks-org-id"];
   }
 
-  private static async getWarehouseId(
-    client: WorkspaceClient,
-  ): Promise<string> {
-    if (process.env.DATABRICKS_WAREHOUSE_ID) {
-      return process.env.DATABRICKS_WAREHOUSE_ID;
-    }
-
-    const agenticMode =
-      process.env.DATABRICKS_APPS_AGENTIC_MODE === "true" ||
-      process.env.DATABRICKS_APPS_AGENTIC_MODE === "1";
-
-    if (process.env.NODE_ENV === "development" && !agenticMode) {
-      const response = (await client.apiClient.request({
-        path: "/api/2.0/sql/warehouses",
-        method: "GET",
-        headers: new Headers(),
-        raw: false,
-        query: {
-          skip_cannot_use: "true",
-        },
-      })) as { warehouses: sql.EndpointInfo[] };
-
-      const priorities: Record<sql.State, number> = {
-        RUNNING: 0,
-        STOPPED: 1,
-        STARTING: 2,
-        STOPPING: 3,
-        DELETED: 99,
-        DELETING: 99,
-      };
-
-      const warehouses = (response.warehouses || []).sort((a, b) => {
-        return (
-          priorities[a.state as sql.State] - priorities[b.state as sql.State]
-        );
-      });
-
-      if (response.warehouses.length === 0) {
-        throw ConfigurationError.resourceNotFound(
-          "Warehouse ID",
-          "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
-        );
-      }
-
-      const firstWarehouse = warehouses[0];
-      if (
-        firstWarehouse.state === "DELETED" ||
-        firstWarehouse.state === "DELETING" ||
-        !firstWarehouse.id
-      ) {
-        throw ConfigurationError.resourceNotFound(
-          "Warehouse ID",
-          "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
-        );
-      }
-
-      return firstWarehouse.id;
-    }
-
-    throw ConfigurationError.resourceNotFound(
-      "Warehouse ID",
-      "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
-    );
-  }
-
   /**
    * Reset the service context. Only for testing purposes.
    */
   static reset(): void {
     ServiceContext.instance = null;
     ServiceContext.initPromise = null;
+    WarehouseResource.reset();
   }
 }
