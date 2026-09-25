@@ -5,10 +5,10 @@ function createApp<T>(config: {
   cache?: CacheConfig;
   client?: WorkspaceClient;
   disableInternalTelemetry?: boolean;
-  onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+  onPluginsReady?: (appkit: AppKitApi<T>) => void | Promise<void>;
   plugins?: T;
   telemetry?: TelemetryConfig;
-}): Promise<PluginMap<T>>;
+}): Promise<AppKitApi<T>>;
 ```
 
 Bootstraps AppKit with the provided configuration.
@@ -31,17 +31,17 @@ with an `asUser(req)` method for user-scoped execution.
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: [`WorkspaceClient`](Interface.WorkspaceClient.md); `disableInternalTelemetry?`: `boolean`; `onPluginsReady?`: (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\>; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} | - |
+| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: [`WorkspaceClient`](Interface.WorkspaceClient.md); `disableInternalTelemetry?`: `boolean`; `onPluginsReady?`: (`appkit`: [`AppKitApi`](TypeAlias.AppKitApi.md)\<`T`\>) => `void` \| `Promise`\<`void`\>; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} | - |
 | `config.cache?` | [`CacheConfig`](Interface.CacheConfig.md) | - |
 | `config.client?` | [`WorkspaceClient`](Interface.WorkspaceClient.md) | - |
 | `config.disableInternalTelemetry?` | `boolean` | - |
-| `config.onPluginsReady?` | (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\> | Runs after plugin setup but **before** the server starts. |
+| `config.onPluginsReady?` | (`appkit`: [`AppKitApi`](TypeAlias.AppKitApi.md)\<`T`\>) => `void` \| `Promise`\<`void`\> | Runs after plugin setup but **before** the server starts. |
 | `config.plugins?` | `T` | - |
 | `config.telemetry?` | [`TelemetryConfig`](Interface.TelemetryConfig.md) | - |
 
 ## Returns
 
-`Promise`\<`PluginMap`\<`T`\>\>
+`Promise`\<[`AppKitApi`](TypeAlias.AppKitApi.md)\<`T`\>\>
 
 A `PluginMap` keyed by plugin name with typed exports
 

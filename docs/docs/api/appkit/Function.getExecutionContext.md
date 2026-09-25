@@ -14,7 +14,7 @@ Get the current execution context.
 ## Returns
 
   \| `ServiceContextState`
-  \| [`CallerContext`](Interface.CallerContext.md) & `UserContext`
+  \| [`CallerContext`](Interface.CallerContext.md) & [`UserContext`](TypeAlias.UserContext.md)
 
 ## Throws
 
