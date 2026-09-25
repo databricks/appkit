@@ -16,7 +16,7 @@ import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
-import { getCurrentUserId } from "../context";
+import { getCurrentPrincipalId } from "../context";
 import { warnContextDeprecation } from "../context/deprecation";
 import { normalizeIdentityError } from "../context/execution-context";
 import { createRequestScope } from "../context/request-scope";
@@ -348,7 +348,7 @@ export abstract class Plugin<
   protected resolveUserId(req: express.Request): string {
     const userId = req.header("x-forwarded-user")?.trim();
     if (userId) return userId;
-    if (process.env.NODE_ENV === "development") return getCurrentUserId();
+    if (process.env.NODE_ENV === "development") return getCurrentPrincipalId();
     throw AuthenticationError.missingUserId();
   }
 
@@ -384,7 +384,7 @@ export abstract class Plugin<
     });
 
     // get user key from context if not provided
-    const effectiveUserKey = userKey ?? getCurrentUserId();
+    const effectiveUserKey = userKey ?? getCurrentPrincipalId();
 
     const self = this;
     // capture the active OTel context (HTTP span) before entering the async generator,
@@ -464,7 +464,7 @@ export abstract class Plugin<
     const interceptors = this._buildInterceptors(executeConfig);
 
     // get user key from context if not provided
-    const effectiveUserKey = userKey ?? getCurrentUserId();
+    const effectiveUserKey = userKey ?? getCurrentPrincipalId();
 
     const context: InterceptorContext = {
       metadata: new Map(),

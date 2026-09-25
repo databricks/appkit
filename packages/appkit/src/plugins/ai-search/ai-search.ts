@@ -8,7 +8,7 @@ import type {
   VsQueryParams,
   VsRawResponse,
 } from "../../connectors/ai-search/types";
-import { getCurrentUserId, getWorkspaceClient } from "../../context";
+import { getCurrentPrincipalId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -316,7 +316,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
     // execute so a cache hit skips the embedding and the VS call.
     const { queryType } = this._resolveQueryParams(request, indexConfig);
 
-    // getCurrentUserId() is the user's id under asUser(), the service id
+    // getCurrentPrincipalId() is the user's id under asUser(), the service id
     // otherwise — keying per caller like the route's executorKey.
     const result = await this.execute(
       async (signal) => {
@@ -327,7 +327,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
           signal,
         );
       },
-      this._executeSettings(request, indexConfig, getCurrentUserId()),
+      this._executeSettings(request, indexConfig, getCurrentPrincipalId()),
     );
 
     if (!result.ok) {

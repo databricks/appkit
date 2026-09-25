@@ -1,6 +1,7 @@
 export {
   getCallerContext,
   getCurrentActorId,
+  getCurrentPrincipalId,
   getCurrentPrincipalKey,
   getCurrentUserId,
   getExecutionContext,

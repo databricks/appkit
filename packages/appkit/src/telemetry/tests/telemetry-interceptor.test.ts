@@ -40,7 +40,9 @@ describe("TelemetryInterceptor", () => {
       userKey: "test",
     };
 
-    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("test-user");
+    vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
+      "test-user",
+    );
   });
 
   test("should execute function and set span status to OK on success", async () => {
@@ -139,7 +141,9 @@ describe("TelemetryInterceptor", () => {
 
   test("should set execution context as 'service' when not in user context", async () => {
     vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
-    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("sp-123");
+    vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
+      "sp-123",
+    );
     const interceptor = new TelemetryInterceptor(mockTelemetry);
     const fn = vi.fn().mockResolvedValue("result");
 
@@ -154,7 +158,9 @@ describe("TelemetryInterceptor", () => {
 
   test("should set execution context as 'user' when in user context", async () => {
     vi.spyOn(executionContext, "isInUserContext").mockReturnValue(true);
-    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("user-123");
+    vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
+      "user-123",
+    );
     const interceptor = new TelemetryInterceptor(mockTelemetry);
     const fn = vi.fn().mockResolvedValue("result");
 
