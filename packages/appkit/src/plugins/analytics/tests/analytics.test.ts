@@ -21,7 +21,9 @@ import type express from "express";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { runInCallerContext } from "../../../context";
 import { ServiceContext } from "../../../context/service-context";
+import { createMockWorkspaceClient } from "../../../testing";
 import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
@@ -1893,7 +1895,7 @@ describe("Analytics Plugin", () => {
 describe("analytics as a cross-plugin tool provider", () => {
   // A consumer plugin (e.g. agents) resolves analytics' tools through the
   // shared PluginContext. These drive that dispatch and assert the on-behalf-of
-  // identity the real executeTool resolves — coverage a bare stub can't give.
+  // identity inherited from the caller scope.
   test("dispatches analytics.query on behalf of the user", async () => {
     const rows = [{ customer: "Acme", revenue: 1_000_000 }];
     const mock = createTestPluginContext({
@@ -1903,9 +1905,17 @@ describe("analytics as a cross-plugin tool provider", () => {
     const req = createMockRequest({
       obo: { userId: "analyst@example.com" },
     }) as unknown as express.Request;
-    const result = await mock.ctx.executeTool(req, "analytics", "query", {
-      sql: "SELECT * FROM top_customers",
-    });
+    const result = await runInCallerContext(
+      {
+        principal: { type: "user", userId: "analyst@example.com" },
+        client: createMockWorkspaceClient(),
+        workspaceId: Promise.resolve("workspace"),
+      },
+      () =>
+        mock.ctx.executeTool(req, "analytics", "query", {
+          sql: "SELECT * FROM top_customers",
+        }),
+    );
 
     expect(result).toEqual({
       rows,
@@ -1920,7 +1930,7 @@ describe("analytics as a cross-plugin tool provider", () => {
     });
   });
 
-  test("rejects a token-less request before the tool runs", async () => {
+  test("rejects token-less direct dispatch without an ambient caller", async () => {
     const mock = createTestPluginContext({
       analytics: { query: () => ({ rows: [] }) },
     });
@@ -1928,8 +1938,8 @@ describe("analytics as a cross-plugin tool provider", () => {
 
     await expect(
       mock.ctx.executeTool(req, "analytics", "query", {}),
-    ).rejects.toThrow(/Missing user token/);
-    expect(mock.toolCalls).toHaveLength(0);
+    ).rejects.toThrow(/token/i);
+    expect(mock.toolCalls).toEqual([]);
   });
 
   test("forwards the per-call timeout so a slow tool is aborted", async () => {

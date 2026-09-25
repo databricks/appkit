@@ -1,4 +1,4 @@
-import { createContextKey, context as otelContext } from "@opentelemetry/api";
+import { context as otelContext } from "@opentelemetry/api";
 import type express from "express";
 import type {
   BasePlugin,
@@ -16,11 +16,10 @@ import { camelToKebab } from "shared";
 
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
-import {
-  getCurrentUserId,
-  runInCallerContext,
-  ServiceContext,
-} from "../context";
+import { getCurrentUserId } from "../context";
+import { warnContextDeprecation } from "../context/deprecation";
+import { createRequestScope } from "../context/request-scope";
+import { scopePlugin } from "../context/scoped-api";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -45,62 +44,8 @@ import type {
 
 const logger = createLogger("plugin");
 
-/**
- * OTel context key for marking OBO dev mode fallback.
- * Set when asUser() is called in development mode without a user token.
- */
-const DEV_OBO_FALLBACK_KEY = createContextKey("appkit.devOboFallback");
-
-/**
- * Returns true if `value` is a plain object literal (not an array, Date,
- * class instance, etc.). Used to decide whether to recurse into nested
- * export shapes when wrapping functions.
- *
- * @internal exported so the AppKit core can reuse the same predicate for
- * its `bindExportMethods` walk; not part of the public package surface.
- */
-export function isPlainObject(
-  value: unknown,
-): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-/**
- * Returns a deep copy of `exports` where every function has been replaced
- * with `wrap(fn)`, walking into nested plain objects.
- *
- * Used by the asUser proxy to make the user context follow function
- * references that escape the proxy via `exports()`. The original input is
- * not mutated, so plugins that memoize `exports()` are safe — each call
- * through the proxy yields an independent, freshly wrapped view.
- */
-function wrapExportFunctions(
-  exports: Record<string, unknown>,
-  wrap: (fn: (...a: unknown[]) => unknown) => (...a: unknown[]) => unknown,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(exports)) {
-    const val = exports[key];
-    if (typeof val === "function") {
-      result[key] = wrap(val as (...a: unknown[]) => unknown);
-    } else if (isPlainObject(val)) {
-      result[key] = wrapExportFunctions(val, wrap);
-    } else {
-      result[key] = val;
-    }
-  }
-  return result;
-}
-
-/**
- * Returns true if the current execution is an OBO dev mode fallback
- * (asUser() was called but fell back to service principal due to missing token).
- */
-export function isDevOboFallback(): boolean {
-  return otelContext.active().getValue(DEV_OBO_FALLBACK_KEY) === true;
-}
+export { isPlainObject } from "../utils/is-plain-object";
+export { isDevOboFallback } from "../context/request-scope";
 
 /**
  * Narrow an unknown thrown value to an Error that carries a numeric
@@ -115,27 +60,6 @@ function hasHttpStatusCode(
     typeof (error as Record<string, unknown>).statusCode === "number"
   );
 }
-
-/**
- * Methods that should not be proxied by asUser().
- * These are lifecycle/internal methods that don't make sense
- * to execute in a user context.
- */
-const EXCLUDED_FROM_PROXY = new Set([
-  // Lifecycle methods
-  "setup",
-  "shutdown",
-  "attachContext",
-  "injectRoutes",
-  "getEndpoints",
-  "getSkipBodyParsingPaths",
-  "abortActiveOperations",
-  "clientConfig",
-  // asUser itself - prevent chaining like .asUser().asUser()
-  "asUser",
-  // Internal methods
-  "constructor",
-]);
 
 /**
  * Base abstract class for creating AppKit plugins.
@@ -422,106 +346,10 @@ export abstract class Plugin<
     throw AuthenticationError.missingUserId();
   }
 
-  /**
-   * Execute operations using the user's identity from the request.
-   * Returns a proxy of this plugin where all method calls execute
-   * with the user's Databricks credentials instead of the service principal.
-   *
-   * @param req - The Express request containing the user token in headers
-   * @returns A proxied plugin instance that executes as the user
-   * @throws AuthenticationError if user token is not available in request headers (production only).
-   *   In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
-   */
+  /** @deprecated Use appkit.asUser(req) to scope the whole app. */
   asUser(req: express.Request): this {
-    const token = req.header("x-forwarded-access-token")?.trim();
-    const userId = req.header("x-forwarded-user")?.trim();
-    const userEmail = req.header("x-forwarded-email");
-    const isDev = process.env.NODE_ENV === "development";
-
-    // In local development, skip user impersonation since there's no user
-    // token available. Mark execution as OBO dev fallback via OTel context
-    // so telemetry can distinguish intended OBO calls from regular SP calls.
-    if (!token && isDev) {
-      logger.warn(
-        "asUser() called without user token in development mode. Skipping user impersonation.",
-      );
-
-      return this._createAsUserProxy((fn) => (...args) => {
-        const ctx = otelContext.active().setValue(DEV_OBO_FALLBACK_KEY, true);
-        return otelContext.with(ctx, () => fn(...args));
-      });
-    }
-
-    if (!token) {
-      throw AuthenticationError.missingToken("user token");
-    }
-
-    if (!userId && !isDev) {
-      throw AuthenticationError.missingUserId();
-    }
-
-    const effectiveUserId = userId || "dev-user";
-
-    const userContext = ServiceContext.createCallerContext(
-      token,
-      effectiveUserId,
-      undefined,
-      userEmail ?? undefined,
-    );
-
-    return this._createAsUserProxy(
-      (fn) =>
-        (...args) =>
-          runInCallerContext(userContext, () => fn(...args)),
-    );
-  }
-
-  /**
-   * Creates a proxy of `this` where every method call — and every function
-   * in the result of `exports()` — runs inside `wrapCall`.
-   *
-   * `wrapCall` decides the per-call scope. Two strategies are used today:
-   *   - real OBO:     fn => (...args) => runInCallerContext(userContext, () => fn(...args))
-   *   - dev fallback: fn => (...args) => otelContext.with(DEV_OBO_FALLBACK_KEY=true, () => fn(...args))
-   *
-   * `exports` is intercepted because methods captured in the returned
-   * exports object never re-enter the proxy's `get` trap. Wrapping them
-   * here is the only way to make the user context follow function
-   * references back out of the plugin.
-   */
-  private _createAsUserProxy(
-    wrapCall: (
-      fn: (...a: unknown[]) => unknown,
-    ) => (...a: unknown[]) => unknown,
-  ): this {
-    return new Proxy(this, {
-      get: (target, prop, receiver) => {
-        const value = Reflect.get(target, prop, receiver);
-
-        if (typeof value !== "function") return value;
-        if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop))
-          return value;
-
-        if (prop === "exports") {
-          return () => {
-            const raw = (value as () => unknown).call(target);
-            if (raw == null) return {};
-            // Callable exports (e.g. files, jobs) manage per-call asUser
-            // themselves; leave them untouched.
-            if (typeof raw === "function") return raw;
-            if (isPlainObject(raw)) {
-              return wrapExportFunctions(raw, (fn) =>
-                wrapCall(fn.bind(target)),
-              );
-            }
-            return raw;
-          };
-        }
-
-        const fn = (value as (...a: unknown[]) => unknown).bind(target);
-        return wrapCall(fn);
-      },
-    }) as this;
+    warnContextDeprecation("Plugin.asUser", "appkit.asUser(req)");
+    return scopePlugin(this, createRequestScope(req));
   }
 
   // streaming execution with interceptors

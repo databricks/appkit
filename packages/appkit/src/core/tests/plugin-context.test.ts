@@ -1,6 +1,8 @@
 import type { AgentToolDefinition } from "shared";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { getCurrentPrincipalKey, runInCallerContext } from "../../context";
+import { createMockRequest, mockServiceContext } from "../../testing/fixtures";
 import { isToolProvider, PluginContext } from "../plugin-context";
 
 /**
@@ -63,10 +65,13 @@ function createMockToolProvider(tools: AgentToolDefinition[] = []) {
 
 describe("PluginContext", () => {
   let ctx: PluginContext;
+  let service: ReturnType<typeof mockServiceContext>;
 
   beforeEach(() => {
+    service = mockServiceContext();
     ctx = new PluginContext();
   });
+  afterEach(() => service.restore());
 
   describe("route buffering", () => {
     test("addRoute buffers when no route target exists", () => {
@@ -259,14 +264,19 @@ describe("PluginContext", () => {
   });
 
   describe("executeTool", () => {
-    test("calls asUser(req).executeAgentTool on the correct plugin", async () => {
+    test("defaults direct dispatch to the forwarded user", async () => {
       const provider = createMockToolProvider();
+      provider.executeAgentTool.mockImplementation(async () =>
+        getCurrentPrincipalKey(),
+      );
       ctx.registerToolProvider("analytics", provider);
 
-      const mockReq = { headers: {} } as any;
-      await ctx.executeTool(mockReq, "analytics", "query", { sql: "SELECT 1" });
+      const mockReq = createMockRequest({ obo: { userId: "alice" } });
+      await expect(
+        ctx.executeTool(mockReq, "analytics", "query", { sql: "SELECT 1" }),
+      ).resolves.toBe("user:alice");
 
-      expect(provider.asUser).toHaveBeenCalledWith(mockReq);
+      expect(provider.asUser).not.toHaveBeenCalled();
       expect(provider.executeAgentTool).toHaveBeenCalledWith(
         "query",
         { sql: "SELECT 1" },
@@ -274,8 +284,36 @@ describe("PluginContext", () => {
       );
     });
 
+    test("rejects missing credentials before executing the provider", async () => {
+      const provider = createMockToolProvider();
+      ctx.registerToolProvider("analytics", provider);
+      await expect(
+        ctx.executeTool(createMockRequest(), "analytics", "query", {}),
+      ).rejects.toThrow(/token/i);
+      expect(provider.executeAgentTool).not.toHaveBeenCalled();
+    });
+
+    test("inherits an ambient caller without reconstructing credentials", async () => {
+      const provider = createMockToolProvider();
+      provider.executeAgentTool.mockImplementation(async () =>
+        getCurrentPrincipalKey(),
+      );
+      ctx.registerToolProvider("analytics", provider);
+      await expect(
+        runInCallerContext(
+          {
+            principal: { type: "user", userId: "injected" },
+            client: service.serviceContext.client,
+            workspaceId: service.serviceContext.workspaceId,
+          },
+          () => ctx.executeTool(createMockRequest(), "analytics", "query", {}),
+        ),
+      ).resolves.toBe("user:injected");
+      expect(service.createUserContextSpy).not.toHaveBeenCalled();
+    });
+
     test("throws for unknown plugin name", async () => {
-      const mockReq = { headers: {} } as any;
+      const mockReq = createMockRequest({ obo: true });
 
       await expect(
         ctx.executeTool(mockReq, "nonexistent", "query", {}),
@@ -289,7 +327,7 @@ describe("PluginContext", () => {
       );
       ctx.registerToolProvider("analytics", provider);
 
-      const mockReq = { headers: {} } as any;
+      const mockReq = createMockRequest({ obo: true });
 
       await expect(
         ctx.executeTool(mockReq, "analytics", "query", {}),
@@ -301,7 +339,12 @@ describe("PluginContext", () => {
       const provider = createMockToolProvider();
       ctx.registerToolProvider("analytics", provider);
 
-      await ctx.executeTool({ headers: {} } as any, "analytics", "query", {});
+      await ctx.executeTool(
+        createMockRequest({ obo: true }),
+        "analytics",
+        "query",
+        {},
+      );
 
       expect(lastSpan.setStatus).toHaveBeenCalledWith({
         code: SpanStatusCode.OK,
@@ -318,7 +361,12 @@ describe("PluginContext", () => {
       ctx.registerToolProvider("analytics", provider);
 
       await expect(
-        ctx.executeTool({ headers: {} } as any, "analytics", "query", {}),
+        ctx.executeTool(
+          createMockRequest({ obo: true }),
+          "analytics",
+          "query",
+          {},
+        ),
       ).rejects.toThrow("Query failed");
 
       expect(lastSpan.setStatus).toHaveBeenCalledWith({
@@ -334,7 +382,7 @@ describe("PluginContext", () => {
       ctx.registerToolProvider("analytics", provider);
 
       const controller = new AbortController();
-      const mockReq = { headers: {} } as any;
+      const mockReq = createMockRequest({ obo: true });
 
       await ctx.executeTool(
         mockReq,
@@ -369,7 +417,7 @@ describe("PluginContext", () => {
         ctx.registerToolProvider("analytics", provider);
 
         const pending = ctx.executeTool(
-          { headers: {} } as any,
+          createMockRequest({ obo: true }),
           "analytics",
           "query",
           {},
@@ -520,14 +568,12 @@ describe("isToolProvider", () => {
     expect(isToolProvider(undefined)).toBe(false);
   });
 
-  test("returns false for objects missing asUser", () => {
-    // ToolProvider plugins must also expose user-scoped execution; the
-    // guard ensures executeTool can call asUser without an unsafe cast.
+  test("does not require the deprecated asUser method", () => {
     expect(
       isToolProvider({
         getAgentTools: vi.fn(),
         executeAgentTool: vi.fn(),
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

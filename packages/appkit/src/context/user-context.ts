@@ -9,11 +9,13 @@ import type { ServiceContextState } from "./service-context";
 
 export type { ExecutionContext } from "./caller-context";
 
+const immutableCallers = new WeakSet<object>();
+
 /**
  * @deprecated Use CallerContext and its principal field. Kept for callers
  * that construct the legacy shape or read its flat identity fields.
  */
-export interface UserContext {
+export type UserContext = {
   /** WorkspaceClient authenticated as the user */
   client: ServiceContextState["client"];
   /** The user's ID (from request headers) */
@@ -30,7 +32,7 @@ export interface UserContext {
   workspaceId: Promise<string>;
   /** Flag indicating this is a user context */
   isUserContext: true;
-}
+};
 
 /**
  * @deprecated Use snapshotCallerContext for identity-only snapshots.
@@ -46,9 +48,10 @@ export function immutableCallerContext(
 function legacyIdentityContext(
   ctx: CallerContext,
 ): CallerContext & UserContext {
+  if (immutableCallers.has(ctx)) return ctx as CallerContext & UserContext;
   const caller = snapshotCallerContext(ctx);
   const { principal } = caller;
-  return Object.freeze({
+  const snapshot = Object.freeze({
     ...caller,
     get userId() {
       warnContextDeprecation(
@@ -79,6 +82,8 @@ function legacyIdentityContext(
       return true;
     },
   });
+  immutableCallers.add(snapshot);
+  return snapshot;
 }
 
 /** Expose the old resource field only through the deprecated context APIs. */

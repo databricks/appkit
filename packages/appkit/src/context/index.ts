@@ -4,6 +4,8 @@ export {
   getCurrentPrincipalKey,
   getCurrentUserId,
   getExecutionContext,
+  getUserContext,
+  isInUserContext,
   getWarehouseId,
   getWorkspaceClient,
   getWorkspaceId,
@@ -18,4 +20,4 @@ export {
   isCallerContext,
 } from "./caller-context";
 export { ServiceContext } from "./service-context";
-export type { UserContext } from "./user-context";
+export { type UserContext, isUserContext } from "./user-context";
