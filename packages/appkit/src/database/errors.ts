@@ -1,25 +1,17 @@
+import {
+  type DatabaseErrorCategory,
+  type DatabaseErrorDetail,
+  databaseErrorCategoryForStatus,
+} from "shared";
+
 import { AppKitError } from "../errors";
 import { createLogger } from "../logging/logger";
 
+// The category vocabulary is shared with the browser client, which reads the
+// same statuses back into the same categories.
+export type { DatabaseErrorCategory, DatabaseErrorDetail } from "shared";
+
 const logger = createLogger("database");
-
-export type DatabaseErrorCategory =
-  | "INVALID_REQUEST"
-  | "VALIDATION_FAILED"
-  | "NOT_FOUND"
-  | "CONFLICT"
-  | "FORBIDDEN"
-  | "TRANSIENT"
-  | "UNSUPPORTED_MEDIA_TYPE"
-  | "PAYLOAD_TOO_LARGE"
-  | "INTERNAL"
-  | "SETUP_FAILED";
-
-/** Which request field a rejection concerns; it never carries caller values. */
-export interface DatabaseErrorDetail {
-  readonly path: readonly string[];
-  readonly message: string;
-}
 
 type DatabaseErrorPhase =
   | "setup"
@@ -55,17 +47,6 @@ const definitions: Record<
   },
   INTERNAL: { message: "Database operation failed", statusCode: 500 },
   SETUP_FAILED: { message: "Database setup failed", statusCode: 500 },
-};
-
-const categoryByStatus: Readonly<Record<number, DatabaseErrorCategory>> = {
-  400: "INVALID_REQUEST",
-  403: "FORBIDDEN",
-  404: "NOT_FOUND",
-  409: "CONFLICT",
-  413: "PAYLOAD_TOO_LARGE",
-  415: "UNSUPPORTED_MEDIA_TYPE",
-  422: "VALIDATION_FAILED",
-  503: "TRANSIENT",
 };
 
 /** AppKit-facing database failure with stable metadata and no driver details. */
@@ -167,6 +148,5 @@ export function databaseErrorFromStatus(
   status: number,
   phase: DatabaseErrorPhase,
 ): DatabasePluginError {
-  const category = categoryByStatus[status] ?? "INTERNAL";
-  return new DatabasePluginError(category, phase);
+  return new DatabasePluginError(databaseErrorCategoryForStatus(status), phase);
 }
