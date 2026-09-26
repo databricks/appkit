@@ -23,6 +23,7 @@ import type {
   SqlTag,
   TransactionClient,
 } from "./entity-types";
+import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createMutationScope, type MutationScope } from "./scope";
 import type { DatabaseHooks } from "./types";
 
@@ -161,7 +162,10 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
   return result;
 }
 
-/** Validate the schema, create one pool-backed API, and verify connectivity. */
+/**
+ * Validate the schema, create one pool-backed API, and verify connectivity and
+ * that every declared table and column exists.
+ */
 export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
   execute: EntityExecute,
@@ -200,6 +204,7 @@ export async function createDatabaseState<TSchema extends Schema>(
     });
     // Do not publish exports until an authenticated statement succeeds.
     await dataPath.raw`select 1`;
+    await assertSchemaMatchesDatabase(dataPath, schema);
     return {
       pool,
       exports,
@@ -208,9 +213,15 @@ export async function createDatabaseState<TSchema extends Schema>(
       },
     };
   } catch (error) {
-    logger.error("Database setup failed: %O", error);
     active = false;
     await pool?.end().catch(() => undefined);
+    // A setup failure names its own reason from schema metadata; anything
+    // else may carry connector or driver details and is replaced.
+    if (error instanceof DatabasePluginError && error.phase === "setup") {
+      logger.error("%s", error.message);
+      throw error;
+    }
+    logger.error("Database setup failed: %O", error);
     throw new DatabasePluginError("SETUP_FAILED", "setup");
   }
 }
