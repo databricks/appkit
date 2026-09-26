@@ -235,6 +235,152 @@ The callback deadline does not cancel arbitrary JavaScript, HTTP requests, or
 other external side effects. Avoid putting external side effects in hooks that
 need database rollback semantics.
 
+## Frontend hooks (beta)
+
+`@databricks/appkit-ui/react/beta` provides React hooks that call the generated
+routes, and `@databricks/appkit-ui/js/beta` provides the client they use. Entity
+names, parameters, and rows are typed from the same generated registry as the
+server-side client, restricted to what the generated routes accept. The hooks
+add no authorization. Anyone who can load the page can call the same routes.
+
+### Setup
+
+Run `appkit generate-types` or use the AppKit Vite plugin to write
+`shared/appkit-types/database.d.ts`, and include it in the client's TypeScript
+project. The file binds one set of table entries to both `@databricks/appkit`
+and `@databricks/appkit-ui/js/beta`. Until it exists, every entity name is a
+type error.
+
+The hooks find routes in the endpoint map the server embeds in the page. When
+the `api` configuration does not expose an operation, a call to it fails with
+`NOT_EXPOSED` and sends no request.
+
+### Read a list
+
+```tsx
+import { useDatabaseList } from "@databricks/appkit-ui/react/beta";
+
+function Notes({ boardId }: { boardId: number }) {
+  const notes = useDatabaseList("notes", {
+    where: { board_id: boardId },
+    order: { created_at: "desc" },
+    limit: 20,
+  });
+
+  if (notes.error) return <p>{notes.error.message}</p>;
+  return (
+    <ul>
+      {notes.data?.items.map((note) => (
+        <li key={note.id}>{note.body}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`data` is the list envelope `{ items, limit, offset }`, or `null` until the
+first response arrives. Pass `{ enabled: false }` as the third argument to hold
+the request, for example until a value it depends on is known.
+
+### Read one record
+
+```tsx
+import { useDatabaseRecord } from "@databricks/appkit-ui/react/beta";
+
+const board = useDatabaseRecord("boards", boardId, {
+  include: { notes: { limit: 20, include: { note_events: { limit: 5 } } } },
+});
+board.data?.notes[0]?.note_events;
+```
+
+Only tables with a public primary key have a detail route, so a keyless table or
+a table with a private key is a type error here. A `null` or `undefined` id
+holds the hook without a request. A missing row reports `NOT_FOUND`.
+
+### Parameters
+
+| Parameter | List | Record | Accepts |
+| --- | --- | --- | --- |
+| `where` | Yes | No | Public, queryable columns. A value, or an operator object (`eq`, `neq`, `in`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte` by column kind, `is: null` for nullable columns), combined with `and` and `or` |
+| `order` | Yes | No | Public, queryable columns mapped to `"asc"` or `"desc"` |
+| `select` | Yes | Yes | Public columns. The row type narrows to them |
+| `include` | Yes | Yes | Exposed relations, `true` or options, at most two edges deep. Only a to-many relation takes a `limit` |
+| `limit`, `offset` | Yes | No | Integers, 0 to 500 and 0 to 10,000 |
+
+Private columns, JSON columns in `where` or `order`, and unknown parameters are
+compile errors. A to-many include adds an array to each row and a to-one include
+adds a row or `null`. JSON carries bigint columns as decimal strings, so rows
+type them as `string`, and filters accept a string or a safe integer.
+
+### Request lifecycle
+
+- Hooks that request the same entity with parameters that encode to the same
+  query share one request while any of them is mounted. An inline parameter
+  object does not refetch on every render.
+- New parameters start a new request, and `data` is `null` until it answers.
+- `refetch()` aborts the in-flight request and sends it again. The last `data`
+  stays visible while it loads and if it fails.
+- The request is aborted once the last hook using it unmounts. Nothing is cached
+  after that. A React Strict Mode remount reuses the in-flight request.
+
+### Serializer-shaped reads
+
+A read serializer can change the rows a list or detail route returns. Pass
+`shape: serialized<T>()` to type the result as `T`. The entity, id, and
+parameters are still checked against the generated registry.
+
+```tsx
+import { serialized, useDatabaseList } from "@databricks/appkit-ui/react/beta";
+
+// server: serialize: (row) => ({ ...row, excerpt: String(row.body).slice(0, 80) })
+interface NoteView {
+  id: number;
+  author: string;
+  excerpt: string;
+}
+
+const notes = useDatabaseList(
+  "notes",
+  { limit: 20 },
+  { shape: serialized<NoteView>() },
+);
+```
+
+`serialized<T>()` is not checked at runtime. Keep `T` in step with the
+serializer.
+
+### Errors
+
+`error` is a `DatabaseApiError` with a stable `code`, the HTTP `status`, a
+`message`, and `details`. Each detail is a `{ path, message }` pair that names a
+public request field. Branch on `code` rather than `message`.
+
+| `code` | `status` | Meaning |
+| --- | --- | --- |
+| `NOT_EXPOSED` | `null` | No published route for the operation. Nothing was sent |
+| `INVALID_REQUEST` | 400 | Malformed or unsupported parameters |
+| `FORBIDDEN` | 403 | The database refused the operation |
+| `NOT_FOUND` | 404 | No row has this id |
+| `CONFLICT` | 409 | A constraint rejected the change |
+| `PAYLOAD_TOO_LARGE` | 413 | The response exceeded the size limit |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | The request body was not JSON |
+| `VALIDATION_FAILED` | 422 | A value failed validation |
+| `TRANSIENT` | 503 or `null` | Temporarily unavailable, or the request did not reach the server |
+| `INTERNAL` | 500 or other | Any other failure |
+
+### Without React
+
+`databaseApi.list` and `databaseApi.get` in `@databricks/appkit-ui/js/beta` take
+the same entity, id, and parameters as the hooks and return a promise. An
+optional last argument, `{ signal }`, cancels the request. They reject with
+`DatabaseApiError`, or with the abort reason after a cancel.
+
+```ts
+import { databaseApi } from "@databricks/appkit-ui/js/beta";
+
+const board = await databaseApi.get("boards", 7, { select: ["id", "title"] });
+```
+
 ## API reference
 
 - [`database`](../api/appkit/Function.database.md)

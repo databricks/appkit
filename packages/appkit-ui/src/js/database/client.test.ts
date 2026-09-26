@@ -13,6 +13,12 @@ const databaseApi = typedApi as unknown as {
     params?: object,
     init?: DatabaseRequestOptions,
   ): Promise<{ items: unknown[]; limit: number; offset: number }>;
+  get(
+    entity: string,
+    id: string | number | bigint,
+    params?: object,
+    init?: DatabaseRequestOptions,
+  ): Promise<Record<string, unknown>>;
 };
 
 const PAGE = { items: [{ id: 1, body: "hi" }], limit: 5, offset: 0 };
@@ -225,5 +231,89 @@ describe("databaseApi.list", () => {
     });
     expect(error).not.toBeInstanceOf(DatabaseApiError);
     expect(error).toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("databaseApi.get", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => json({ id: 7, title: "Roadmap" }));
+    vi.stubGlobal("fetch", fetchMock);
+    publish({
+      "boards.list": "/api/database/boards",
+      "boards.detail": "/api/database/boards/:id",
+      "events.list": "/api/database/events",
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete window.__appkit__;
+    _resetConfigCache();
+  });
+
+  test("calls the published detail route with the id and the encoded query", async () => {
+    const row = await databaseApi.get("boards", 7, {
+      include: { notes: { limit: 20 } },
+      select: ["id", "title"],
+    });
+
+    expect(row).toEqual({ id: 7, title: "Roadmap" });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [path, query] = url.split("?");
+    expect(path).toBe("/api/database/boards/7");
+    expect([...new URLSearchParams(query)]).toEqual([
+      ["select", '["id","title"]'],
+      ["include", '{"notes":{"limit":20}}'],
+    ]);
+    expect(init.method).toBe("GET");
+  });
+
+  test("encodes the id as one path segment", async () => {
+    await databaseApi.get("boards", "a/b c?d");
+    await databaseApi.get("boards", 9007199254740993n);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/database/boards/a%2Fb%20c%3Fd",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/database/boards/9007199254740993",
+    );
+  });
+
+  test("maps a missing row to NOT_FOUND", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ error: "Database record not found" }, 404),
+    );
+
+    await expect(databaseApi.get("boards", 404)).rejects.toMatchObject({
+      name: "DatabaseApiError",
+      code: "NOT_FOUND",
+      status: 404,
+      message: "Database record not found",
+    });
+  });
+
+  test("refuses a keyless table locally, since it has no detail route", async () => {
+    const error = await rejection(databaseApi.get("events", 1));
+
+    expect(error).toBeInstanceOf(DatabaseApiError);
+    expect(error).toMatchObject({
+      code: "NOT_EXPOSED",
+      status: null,
+      message: 'Database operation "events.detail" is not exposed',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("rejects a success body that is not one row", async () => {
+    fetchMock.mockResolvedValueOnce(json([{ id: 7 }]));
+
+    await expect(databaseApi.get("boards", 7)).rejects.toMatchObject({
+      code: "INTERNAL",
+      status: 200,
+      message: "Database response has an unexpected shape",
+    });
   });
 });

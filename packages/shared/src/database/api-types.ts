@@ -67,6 +67,31 @@ type SelectableOf<R, K> = keyof PublicRowOf<R, K> & string;
 type OrderFor<R, K> = Partial<Record<ApiOf<R, K>["orderable"], "asc" | "desc">>;
 
 /**
+ * Entities in `R` with a public primary key. Only these have detail, update,
+ * and delete routes; `never` while the registry is empty.
+ */
+export type KeyedEntityFor<R> = {
+  [K in DatabaseApiEntityFor<R>]: [ApiOf<R, K>["key"]] extends [never]
+    ? never
+    : K;
+}[DatabaseApiEntityFor<R>];
+
+type KeyValueOf<R, K> = PublicRowOf<R, K>[ApiOf<R, K>["key"] &
+  keyof PublicRowOf<R, K>];
+
+/**
+ * An id as a keyed route's path carries it. A bigint key reads back as its
+ * decimal string, so that string, a safe integer, or a `bigint` all address it.
+ * `Extract` keeps it a path segment even where `K` is still generic.
+ */
+export type IdFor<R, K> = Extract<
+  KeyValueOf<R, K> extends bigint
+    ? bigint | WireInput<bigint>
+    : KeyValueOf<R, K>,
+  string | number | bigint
+>;
+
+/**
  * Options for one included relation, checked against the target's own public
  * facets. Only a to-many edge takes a limit, and only the first edge nests.
  */

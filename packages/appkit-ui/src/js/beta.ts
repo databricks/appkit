@@ -17,6 +17,10 @@ export { DatabaseApiError, type DatabaseApiErrorCode } from "./database/errors";
 export type { DatabaseRegistry } from "./database/registry";
 export type {
   DatabaseEntity,
+  DatabaseId,
+  DatabaseKeyedEntity,
   DatabaseListParams,
   DatabaseListRow,
+  DatabaseRecordParams,
+  DatabaseRecordRow,
 } from "./database/types";

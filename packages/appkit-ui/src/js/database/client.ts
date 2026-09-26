@@ -3,6 +3,7 @@ import {
   type DatabaseListPage,
   databaseErrorCategoryForStatus,
   encodeDatabaseListQuery,
+  encodeDatabaseRecordQuery,
   type ExactDatabaseParams,
 } from "shared";
 
@@ -10,15 +11,24 @@ import { getClientConfig } from "../config";
 import { DatabaseApiError } from "./errors";
 import type {
   DatabaseEntity,
+  DatabaseId,
+  DatabaseKeyedEntity,
   DatabaseListParams,
   DatabaseListRow,
+  DatabaseRecordParams,
+  DatabaseRecordRow,
 } from "./types";
 
 /** Suffix of the endpoint names `DatabasePlugin` publishes for each table. */
-type DatabaseOperation = "list" | "detail" | "create" | "update" | "delete";
+export type DatabaseOperation =
+  | "list"
+  | "detail"
+  | "create"
+  | "update"
+  | "delete";
 
 /** An id as a keyed route addresses it in its path. */
-type IdLike = string | number | bigint;
+export type IdLike = string | number | bigint;
 
 /** Per-call options for a database request. */
 export interface DatabaseRequestOptions {
@@ -50,6 +60,29 @@ export interface DatabaseApi {
     params?: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
     init?: DatabaseRequestOptions,
   ): Promise<DatabaseListPage<DatabaseListRow<K, P>>>;
+
+  /**
+   * Read one row from `GET /api/database/<entity>/:id`. Only entities with a
+   * public primary key have this route; a missing row rejects with
+   * `NOT_FOUND`.
+   *
+   * @example
+   * ```typescript
+   * const board = await databaseApi.get("boards", 7, {
+   *   include: { notes: { limit: 20 } },
+   * });
+   * board.notes.length;
+   * ```
+   */
+  get<
+    K extends DatabaseKeyedEntity,
+    const P extends DatabaseRecordParams<K> = Record<never, never>,
+  >(
+    entity: K,
+    id: DatabaseId<K>,
+    params?: P & ExactDatabaseParams<P, DatabaseRecordParams<K>>,
+    init?: DatabaseRequestOptions,
+  ): Promise<DatabaseRecordRow<K, P>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,7 +94,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * only what its `api` configuration exposes, so a missing entry is refused
  * here with `NOT_EXPOSED` and no request is sent.
  */
-function resolveDatabaseUrl(
+export function resolveDatabaseUrl(
   entity: string,
   operation: DatabaseOperation,
   id?: IdLike,
@@ -119,7 +152,7 @@ async function failure(response: Response): Promise<DatabaseApiError> {
  * anything but the shape `accept` expects. An abort rejects with the signal's
  * own reason, so a caller can tell cancellation from failure.
  */
-async function requestDatabase<T>(
+export async function requestDatabase<T>(
   url: string,
   init: RequestInit,
   accept: (body: unknown) => body is T,
@@ -164,13 +197,21 @@ async function requestDatabase<T>(
   return body;
 }
 
-function isListPage(body: unknown): body is DatabaseListPage<unknown> {
+/** The `{ items, limit, offset }` envelope a list route answers with. */
+export function isDatabaseListPage(
+  body: unknown,
+): body is DatabaseListPage<unknown> {
   return (
     isRecord(body) &&
     Array.isArray(body.items) &&
     typeof body.limit === "number" &&
     typeof body.offset === "number"
   );
+}
+
+/** A detail route answers one bare row; a serializer returns an object too. */
+export function isDatabaseRow(body: unknown): body is Record<string, unknown> {
+  return isRecord(body);
 }
 
 async function list<
@@ -190,10 +231,33 @@ async function list<
   const page = await requestDatabase(
     url,
     { method: "GET", signal: init.signal },
-    isListPage,
+    isDatabaseListPage,
   );
   // The server projected and encoded every row; the types describe that wire.
   return page as DatabaseListPage<DatabaseListRow<K, P>>;
+}
+
+async function get<
+  K extends DatabaseKeyedEntity,
+  const P extends DatabaseRecordParams<K> = Record<never, never>,
+>(
+  entity: K,
+  id: DatabaseId<K>,
+  params?: P & ExactDatabaseParams<P, DatabaseRecordParams<K>>,
+  init: DatabaseRequestOptions = {},
+): Promise<DatabaseRecordRow<K, P>> {
+  const url = resolveDatabaseUrl(
+    entity,
+    "detail",
+    id,
+    encodeDatabaseRecordQuery(params ?? {}),
+  );
+  const row = await requestDatabase(
+    url,
+    { method: "GET", signal: init.signal },
+    isDatabaseRow,
+  );
+  return row as DatabaseRecordRow<K, P>;
 }
 
 /**
@@ -201,4 +265,4 @@ async function list<
  * params, and rows come from the generated `database.d.ts`; routes come from
  * the endpoints the server published in the boot payload.
  */
-export const databaseApi: DatabaseApi = { list };
+export const databaseApi: DatabaseApi = { list, get };
