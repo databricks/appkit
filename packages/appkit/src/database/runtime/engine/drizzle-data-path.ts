@@ -159,27 +159,81 @@ function upsertUpdateValues(
 // nested `cause` rather than the thrown error. Walk a bounded chain to find it.
 const MAX_CAUSE_DEPTH = 5;
 
-function sqlStateOf(error: unknown): string | undefined {
+// These SQLSTATE classes describe the connection, the credentials, or schema
+// objects, so the server's text names identifiers rather than row values:
+// 08 connection, 28 authorization, 3D catalog, 3F schema, 42 undefined objects
+// and privileges, 53 resources, 57 operator intervention. Data (22),
+// constraint (23), and PL/pgSQL (P0) text can echo values and is never logged.
+const DESCRIBED_SQLSTATE_CLASSES = new Set([
+  "08",
+  "28",
+  "3D",
+  "3F",
+  "42",
+  "53",
+  "57",
+]);
+const MAX_DIAGNOSTIC_LENGTH = 500;
+
+interface DriverFailure {
+  readonly sqlState?: string;
+  /** Server-log-only driver text; it never reaches the thrown error. */
+  readonly diagnostic?: string;
+}
+
+/** Read the driver's own message, detail, and hint, never a wrapper's. */
+function driverText(carrier: object): string | undefined {
+  try {
+    const parts = ["message", "detail", "hint"]
+      .map((key) => Reflect.get(carrier, key))
+      .filter(
+        (part): part is string => typeof part === "string" && part !== "",
+      );
+    return parts.length > 0
+      ? parts.join(" ").slice(0, MAX_DIAGNOSTIC_LENGTH)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function driverFailureOf(error: unknown): DriverFailure {
   let current = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
-    if (!current || typeof current !== "object") return undefined;
+    if (!current || typeof current !== "object") return {};
     try {
       const candidate = Reflect.get(current, "code");
+      // Node system errors (ECONNREFUSED, ENOTFOUND) name the host, not data.
+      if (
+        typeof candidate === "string" &&
+        /^E[A-Z]+$/.test(candidate) &&
+        typeof Reflect.get(current, "syscall") === "string"
+      ) {
+        return { diagnostic: driverText(current) };
+      }
       // SQLSTATE is always a five-character alphanumeric class code.
       if (typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate)) {
-        return candidate;
+        return {
+          sqlState: candidate,
+          diagnostic: DESCRIBED_SQLSTATE_CLASSES.has(candidate.slice(0, 2))
+            ? driverText(current)
+            : undefined,
+        };
       }
       current = Reflect.get(current, "cause");
     } catch {
-      return undefined;
+      return {};
     }
   }
-  return undefined;
+  return {};
 }
 
-/** Classify SQLSTATE without retaining the driver error or its properties. */
+/**
+ * Classify SQLSTATE without retaining the driver error or its properties.
+ * Described classes add the driver's text to the server log only.
+ */
 function classifyDriverError(error: unknown): DatabasePluginError {
-  const code = sqlStateOf(error);
+  const { sqlState: code, diagnostic } = driverFailureOf(error);
   const category: DatabaseErrorCategory =
     code === "40001" || code === "40P01" || code === "57014"
       ? "TRANSIENT"
@@ -189,9 +243,10 @@ function classifyDriverError(error: unknown): DatabasePluginError {
           ? "CONFLICT"
           : "INTERNAL";
   logger.error(
-    "Database driver error classified as %s (SQLSTATE %s)",
+    "Database driver error classified as %s (SQLSTATE %s)%s",
     category,
     code ?? "unknown",
+    diagnostic ? `: ${diagnostic}` : "",
   );
   return new DatabasePluginError(category, "runtime");
 }

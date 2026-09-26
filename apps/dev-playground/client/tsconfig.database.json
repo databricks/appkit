@@ -1,0 +1,15 @@
+{
+  // Type-check the database components against the built appkit-ui
+  // declarations, where the Vite alias points, so the generated registry is
+  // proven to reach `@databricks/appkit-ui/js/beta` through `dist`. Run
+  // `pnpm build` first.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.database.tsbuildinfo",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@databricks/appkit-ui/*": ["../../../packages/appkit-ui/dist/*"]
+    }
+  },
+  "include": ["src/components/database", "../shared/appkit-types/database.d.ts"]
+}

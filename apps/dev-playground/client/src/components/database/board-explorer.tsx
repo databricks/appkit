@@ -8,8 +8,14 @@ import {
   CardTitle,
   Input,
 } from "@databricks/appkit-ui/react";
+import {
+  type DatabaseApiError,
+  useDatabaseCreate,
+  useDatabaseList,
+  useDatabaseRecord,
+} from "@databricks/appkit-ui/react/beta";
 import { Loader2, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 
 /**
  * Everything on this panel comes from routes the app never wrote: the note list
@@ -17,76 +23,9 @@ import { useCallback, useEffect, useId, useState } from "react";
  * is the row an `afterCreate` hook commits alongside each note.
  */
 
-interface Note {
-  id: number;
-  board_id: number;
-  author: string;
-  body: string;
-  created_at: string;
-}
-
-interface Board {
-  id: number;
-  slug: string;
-  title: string;
-  created_at: string;
-  notes?: Note[];
-}
-
-interface NoteEvent {
-  id: number;
-  note_id: number;
-  action: string;
-  created_at: string;
-}
-
-interface TimelineNote extends Note {
-  note_events?: NoteEvent[];
-}
-
-interface Timeline extends Board {
-  notes?: TimelineNote[];
-}
-
-/** Only a short note preview is needed for the board picker. */
-const BOARDS_URL = `/api/database/boards?include=${encodeURIComponent(
-  JSON.stringify({ notes: { limit: 5 } }),
-)}`;
-
-/** Listing notes directly is what puts them through the entity's serializer. */
-const notesUrl = (boardId: number) =>
-  `/api/database/notes?where=${encodeURIComponent(
-    JSON.stringify({ board_id: boardId }),
-  )}&order=${encodeURIComponent(
-    JSON.stringify({ created_at: "desc" }),
-  )}&limit=5`;
-
-/** The audit trail is a read-only include on the generated board detail route. */
-const timelineUrl = (boardId: number) =>
-  `/api/database/boards/${boardId}?include=${encodeURIComponent(
-    JSON.stringify({
-      notes: { limit: 20, include: { note_events: { limit: 5 } } },
-    }),
-  )}`;
-
-/** Generated routes answer failures as `{ error, details? }`. */
-function failureMessage(body: unknown, fallback: string): string {
-  const payload = body as {
-    error?: unknown;
-    details?: Array<{ message?: string }>;
-  } | null;
-  const detail = payload?.details?.[0]?.message;
-  if (typeof detail === "string") return detail;
-  return typeof payload?.error === "string" ? payload.error : fallback;
-}
-
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  const body: unknown = await response.json();
-  if (!response.ok) {
-    throw new Error(failureMessage(body, `HTTP ${response.status}`));
-  }
-  return body as T;
+/** Generated routes answer `{ error, details? }`; a field detail reads first. */
+function errorText(err: DatabaseApiError): string {
+  return err.details[0]?.message ?? err.message;
 }
 
 export function BoardExplorer() {
@@ -94,109 +33,95 @@ export function BoardExplorer() {
   const bodyFieldId = useId();
   const boardFieldId = useId();
 
-  const [boards, setBoards] = useState<Board[]>([]);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [fullBody, setFullBody] = useState<Record<number, string>>({});
+  const [revealedId, setRevealedId] = useState<number | null>(null);
   const [author, setAuthor] = useState("reviewer");
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (slug?: string | null) => {
-    setError(null);
-    try {
-      const page = await getJson<{ items: Board[] }>(BOARDS_URL);
-      setBoards(page.items);
-      const active =
-        page.items.find((entry) => entry.slug === slug) ?? page.items[0];
-      setSelected(active?.slug ?? null);
-      setFullBody({});
-      if (!active) {
-        setNotes([]);
-        setTimeline(null);
-        return;
-      }
-      const [listed, board] = await Promise.all([
-        getJson<{ items: Note[] }>(notesUrl(active.id)),
-        getJson<Timeline>(timelineUrl(active.id)),
-      ]);
-      setNotes(listed.items);
-      setTimeline(board);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
+  // A write restarts every mounted read, so the lists, the board previews, and
+  // the audit trail `afterCreate` writes refresh on their own once it commits.
+  const createBoard = useDatabaseCreate("boards");
+  const createNote = useDatabaseCreate("notes");
+  const busy = createBoard.loading || createNote.loading;
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Only a short note preview is needed for the board picker.
+  const boards = useDatabaseList("boards", {
+    include: { notes: { limit: 5 } },
+  });
+  const boardItems = boards.data?.items ?? [];
+  const board =
+    boardItems.find((entry) => entry.slug === selected) ?? boardItems[0];
 
-  const board = boards.find((entry) => entry.slug === selected) ?? null;
+  // Listing notes directly is what puts them through the entity's serializer.
+  const notes = useDatabaseList(
+    "notes",
+    {
+      where: { board_id: board?.id ?? 0 },
+      order: { created_at: "desc" },
+      limit: 5,
+    },
+    { enabled: board !== undefined },
+  );
+  const noteItems = notes.data?.items ?? [];
 
-  const post = async (url: string, payload: unknown) => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const created: unknown = await response.json();
-    if (!response.ok) throw new Error(failureMessage(created, "Create failed"));
-    return created;
+  // The audit trail is a read-only include on the generated board detail route.
+  const timeline = useDatabaseRecord("boards", board?.id, {
+    include: { notes: { limit: 20, include: { note_events: { limit: 5 } } } },
+  });
+  const timelineNotes = timeline.data?.notes ?? [];
+
+  // The list route truncates; the detail route does not. Same serializer.
+  const fullNote = useDatabaseRecord("notes", revealedId);
+
+  const failure =
+    createNote.error ??
+    createBoard.error ??
+    boards.error ??
+    notes.error ??
+    timeline.error ??
+    fullNote.error;
+  const error = failure ? errorText(failure) : null;
+
+  const refresh = () => {
+    boards.refetch();
+    notes.refetch();
+    timeline.refetch();
+    fullNote.refetch();
   };
 
-  const submit = async (run: () => Promise<string | null>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const slug = await run();
-      await load(slug ?? selected);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+  const selectBoard = (slug: string) => {
+    setSelected(slug);
+    setRevealedId(null);
   };
 
-  const addNote = (event: React.FormEvent) => {
+  const addNote = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!board || !body.trim()) return;
-    return submit(async () => {
-      await post("/api/database/notes", {
-        board_id: board.id,
-        author,
-        body,
-      });
-      setBody("");
-      return board.slug;
+    createBoard.reset();
+    // A failure resolves null and lands in createNote.error for the banner.
+    const created = await createNote.create({
+      board_id: board.id,
+      author,
+      body,
     });
+    if (created) setBody("");
   };
 
-  const addBoard = (event: React.FormEvent) => {
+  const addBoard = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
     const slug = title
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-");
-    return submit(async () => {
-      await post("/api/database/boards", { slug, title: title.trim() });
-      setTitle("");
-      return slug;
-    });
+    createNote.reset();
+    // A failure resolves null and lands in createBoard.error for the banner.
+    const created = await createBoard.create({ slug, title: title.trim() });
+    if (!created) return;
+    setTitle("");
+    selectBoard(created.slug);
   };
-
-  /** The list route truncates; the detail route does not. Same serializer. */
-  const revealFullBody = async (id: number) => {
-    const note = await getJson<Note>(`/api/database/notes/${id}`);
-    setFullBody((current) => ({ ...current, [id]: note.body }));
-  };
-
-  const eventsByNote = new Map(
-    (timeline?.notes ?? []).map((note) => [note.id, note.note_events ?? []]),
-  );
 
   return (
     <div className="space-y-4">
@@ -210,28 +135,23 @@ export function BoardExplorer() {
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Board
         </span>
-        {boards.map((entry) => (
+        {boardItems.map((entry) => (
           <Button
             key={entry.slug}
             size="sm"
-            variant={entry.slug === selected ? "default" : "outline"}
-            onClick={() => load(entry.slug)}
+            variant={entry.slug === board?.slug ? "default" : "outline"}
+            onClick={() => selectBoard(entry.slug)}
           >
             {entry.title}
             <Badge
               variant="secondary"
               className="ml-2 tabular-nums font-normal"
             >
-              {entry.notes?.length ?? 0} notes
+              {entry.notes.length} notes
             </Badge>
           </Button>
         ))}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => load(selected)}
-          aria-label="Reload"
-        >
+        <Button size="sm" variant="ghost" onClick={refresh} aria-label="Reload">
           <RefreshCwIcon className="h-4 w-4" />
         </Button>
 
@@ -276,34 +196,39 @@ export function BoardExplorer() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {notes.length === 0 && (
+            {!notes.loading && noteItems.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 No notes yet. Add one and watch the audit trail fill in.
               </p>
             )}
-            {notes.map((note) => (
-              <div key={note.id} className="rounded-md border p-3">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-sm font-medium">{note.author}</span>
-                  <Badge variant="outline" className="tabular-nums">
-                    {(fullBody[note.id] ?? note.body).length} chars
-                  </Badge>
+            {noteItems.map((note) => {
+              const full =
+                note.id === revealedId ? fullNote.data?.body : undefined;
+              return (
+                <div key={note.id} className="rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-sm font-medium">{note.author}</span>
+                    <Badge variant="outline" className="tabular-nums">
+                      {(full ?? note.body).length} chars
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground break-words">
+                    {full ?? note.body}
+                  </p>
+                  {full === undefined && note.body.length === 120 && (
+                    <Button
+                      size="sm"
+                      variant="link"
+                      className="px-0 h-auto text-xs"
+                      onClick={() => setRevealedId(note.id)}
+                    >
+                      Truncated by the serializer — load the detail route
+                      instead
+                    </Button>
+                  )}
                 </div>
-                <p className="text-sm text-muted-foreground break-words">
-                  {fullBody[note.id] ?? note.body}
-                </p>
-                {!fullBody[note.id] && note.body.length === 120 && (
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="px-0 h-auto text-xs"
-                    onClick={() => revealFullBody(note.id)}
-                  >
-                    Truncated by the serializer — load the detail route instead
-                  </Button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 
@@ -323,13 +248,13 @@ export function BoardExplorer() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {(timeline?.notes ?? []).map((note) => (
+            {timelineNotes.map((note) => (
               <div key={note.id} className="rounded-md border p-3">
                 <div className="text-sm font-medium mb-1">
                   note #{note.id} by {note.author}
                 </div>
                 <ul className="space-y-1">
-                  {(eventsByNote.get(note.id) ?? []).map((event) => (
+                  {note.note_events.map((event) => (
                     <li
                       key={event.id}
                       className="text-xs text-muted-foreground flex items-center gap-2"
@@ -343,7 +268,7 @@ export function BoardExplorer() {
                 </ul>
               </div>
             ))}
-            {(timeline?.notes ?? []).length === 0 && (
+            {!timeline.loading && timelineNotes.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 Nothing recorded yet.
               </p>

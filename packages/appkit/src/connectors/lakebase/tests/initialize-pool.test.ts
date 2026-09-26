@@ -8,9 +8,11 @@ import type { UserContext } from "../../../context/user-context";
 
 const mocks = vi.hoisted(() => {
   const me = vi.fn();
-  const client = { currentUser: { me } };
+  const request = vi.fn();
+  const client = { currentUser: { me }, apiClient: { request } };
   return {
     me,
+    request,
     client,
     createPool: vi.fn(),
     createWorkspaceClient: vi.fn(() => ({
@@ -199,5 +201,28 @@ describe("AppKit Lakebase connector initialization", () => {
       ),
     });
     expect(mocks.createPool).not.toHaveBeenCalled();
+  });
+
+  test("warns at startup when PGHOST is not a host of the endpoint", async () => {
+    vi.stubEnv(
+      "LAKEBASE_ENDPOINT",
+      "projects/p/branches/fresh/endpoints/primary",
+    );
+    vi.stubEnv("PGHOST", "ep-stale.database.example.test");
+    mocks.request.mockResolvedValue({
+      status: { hosts: { host: "ep-fresh.database.example.test" } },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(await initializeLakebasePool()).toBe(pool);
+
+    expect(mocks.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/2.0/postgres/projects/p/branches/fresh/endpoints/primary",
+      }),
+    );
+    const output = warn.mock.calls.flat().map(String).join(" ");
+    expect(output).toContain("ep-stale.database.example.test");
+    expect(output).toContain("ep-fresh.database.example.test");
   });
 });
