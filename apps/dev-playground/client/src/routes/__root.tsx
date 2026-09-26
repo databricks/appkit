@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
   TooltipProvider,
 } from "@databricks/appkit-ui/react";
+import { AppAnalytics } from "@databricks/appkit-ui/react/beta";
 import {
   CatchBoundary,
   createRootRoute,
@@ -21,6 +22,7 @@ import { MenuIcon } from "lucide-react";
 
 import { ErrorComponent } from "@/components/error-component";
 import { ThemeSelector } from "@/components/theme-selector";
+import { pushDiagnostic } from "@/lib/app-analytics-diagnostics";
 import { findNavItemForPath, NAV_GROUPS } from "@/lib/nav";
 
 export const Route = createRootRoute({
@@ -36,6 +38,9 @@ function RootComponent() {
 
   return (
     <TooltipProvider>
+      {/* Page views, annotated clicks, and Web Vitals for every page. Posts to
+          the server plugin's built-in /_analytics/v1/logs relay. */}
+      <AppAnalytics webVitals autocapture onDiagnostic={pushDiagnostic} />
       {!isHomePage && (
         <div className="border-b border-gray-200 bg-background px-6 py-4 sticky top-0 z-10 shadow-sm">
           <div className="max-w-7xl mx-auto">

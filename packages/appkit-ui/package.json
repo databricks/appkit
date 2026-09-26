@@ -59,6 +59,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@databricks/app-analytics": "workspace:*",
     "@radix-ui/react-accordion": "1.2.12",
     "@radix-ui/react-alert-dialog": "1.1.15",
     "@radix-ui/react-aspect-ratio": "1.1.8",
@@ -104,7 +105,8 @@
     "shared": "workspace:*",
     "sonner": "2.0.7",
     "tailwind-merge": "3.4.0",
-    "vaul": "1.1.2"
+    "vaul": "1.1.2",
+    "web-vitals": "6.1.1"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
