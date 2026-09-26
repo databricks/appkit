@@ -308,10 +308,10 @@ function jsonWrite(
 }
 
 /**
- * Untyped create behind `databaseApi.create`; its signature carries the
- * checks, while the entity is still a literal.
+ * Untyped create behind `databaseApi.create` and `useDatabaseCreate`; their
+ * signatures carry the checks, while the entity is still a literal.
  */
-async function createDatabaseRow(
+export async function createDatabaseRow(
   entity: string,
   values: object,
   init: DatabaseRequestOptions = {},
@@ -324,8 +324,8 @@ async function createDatabaseRow(
   );
 }
 
-/** Untyped update behind `databaseApi.update`. */
-async function updateDatabaseRow(
+/** Untyped update, shared by the typed client and the write hooks. */
+export async function updateDatabaseRow(
   entity: string,
   id: IdLike,
   values: object,
@@ -339,8 +339,8 @@ async function updateDatabaseRow(
   );
 }
 
-/** Untyped delete behind `databaseApi.remove`. */
-async function deleteDatabaseRow(
+/** Untyped delete, shared by the typed client and the write hooks. */
+export async function deleteDatabaseRow(
   entity: string,
   id: IdLike,
   init: DatabaseRequestOptions = {},

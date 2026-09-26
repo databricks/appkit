@@ -1,7 +1,14 @@
 import { requestDatabase } from "@/js/database/client";
 import { DatabaseApiError } from "@/js/database/errors";
+import type { DatabaseEntity } from "@/js/database/types";
 
 import { createRequestStore, type RequestRunner } from "./request-store";
+
+/**
+ * Which mounted reads to restart after a write: `true` for every database
+ * read, an entity list for reads of those entities only, `false` for none.
+ */
+export type DatabaseInvalidation = boolean | readonly DatabaseEntity[];
 
 /**
  * Shared in-flight read store for the database hooks: an instance of the
@@ -39,8 +46,13 @@ export function databaseReadKey(entity: string, url: string): string {
   return `${entity} ${url}`;
 }
 
+/** The entity a read key is rooted at. */
+function readKeyEntity(key: string): string {
+  return key.slice(0, key.indexOf(" "));
+}
+
 /** Anything a request rejects with other than an abort, as the hooks report it. */
-function readError(error: unknown): DatabaseApiError {
+export function asDatabaseApiError(error: unknown): DatabaseApiError {
   if (error instanceof DatabaseApiError) return error;
   return new DatabaseApiError(
     "INTERNAL",
@@ -67,7 +79,9 @@ function runDatabaseRead(
         if (!signal.aborted) patch({ data, loading: false, error: null });
       },
       (error: unknown) => {
-        if (!signal.aborted) patch({ loading: false, error: readError(error) });
+        if (!signal.aborted) {
+          patch({ loading: false, error: asDatabaseApiError(error) });
+        }
       },
     );
   };
@@ -85,6 +99,34 @@ export function retainDatabaseRead(
   accept: ResponseGuard,
 ): () => void {
   return store.retain(key, runDatabaseRead(url, accept));
+}
+
+/**
+ * Restart mounted database reads after a write the hooks did not make, such
+ * as a `databaseApi` call or a custom route that changes rows. The write hooks
+ * call this on success with their `invalidate` option.
+ *
+ * `true` (the default) restarts every read, an entity list restarts the reads
+ * rooted at those entities, and `false` restarts none. An include is invisible
+ * at runtime, so a `boards` read that includes `notes` is rooted at `boards`;
+ * only `true` is sure to reach it.
+ *
+ * @example
+ * ```ts
+ * await fetch(`/api/cases/${id}/sar`, { method: "POST" });
+ * invalidateDatabaseReads(["str_reports", "activity_log"]);
+ * ```
+ */
+export function invalidateDatabaseReads(
+  scope: DatabaseInvalidation = true,
+): void {
+  if (scope === false) return;
+  if (scope === true) {
+    store.restartStarted();
+    return;
+  }
+  const entities = new Set<string>(scope);
+  store.restartStarted((key) => entities.has(readKeyEntity(key)));
 }
 
 export const startDatabaseRead = store.start;

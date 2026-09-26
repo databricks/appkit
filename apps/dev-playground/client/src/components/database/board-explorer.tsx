@@ -9,7 +9,8 @@ import {
   Input,
 } from "@databricks/appkit-ui/react";
 import {
-  DatabaseApiError,
+  type DatabaseApiError,
+  useDatabaseCreate,
   useDatabaseList,
   useDatabaseRecord,
 } from "@databricks/appkit-ui/react/beta";
@@ -22,23 +23,9 @@ import { useId, useState } from "react";
  * is the row an `afterCreate` hook commits alongside each note.
  */
 
-/** Generated routes answer failures as `{ error, details? }`. */
-function failureMessage(body: unknown, fallback: string): string {
-  const payload = body as {
-    error?: unknown;
-    details?: Array<{ message?: string }>;
-  } | null;
-  const detail = payload?.details?.[0]?.message;
-  if (typeof detail === "string") return detail;
-  return typeof payload?.error === "string" ? payload.error : fallback;
-}
-
-/** The hooks decode the same envelope; a field detail still reads first. */
-function errorText(err: unknown): string {
-  if (err instanceof DatabaseApiError) {
-    return err.details[0]?.message ?? err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
+/** Generated routes answer `{ error, details? }`; a field detail reads first. */
+function errorText(err: DatabaseApiError): string {
+  return err.details[0]?.message ?? err.message;
 }
 
 export function BoardExplorer() {
@@ -51,8 +38,12 @@ export function BoardExplorer() {
   const [author, setAuthor] = useState("reviewer");
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [writeError, setWriteError] = useState<string | null>(null);
+
+  // A write restarts every mounted read, so the lists, the board previews, and
+  // the audit trail `afterCreate` writes refresh on their own once it commits.
+  const createBoard = useDatabaseCreate("boards");
+  const createNote = useDatabaseCreate("notes");
+  const busy = createBoard.loading || createNote.loading;
 
   // Only a short note preview is needed for the board picker.
   const boards = useDatabaseList("boards", {
@@ -83,9 +74,14 @@ export function BoardExplorer() {
   // The list route truncates; the detail route does not. Same serializer.
   const fullNote = useDatabaseRecord("notes", revealedId);
 
-  const readError =
-    boards.error ?? notes.error ?? timeline.error ?? fullNote.error;
-  const error = writeError ?? (readError ? errorText(readError) : null);
+  const failure =
+    createNote.error ??
+    createBoard.error ??
+    boards.error ??
+    notes.error ??
+    timeline.error ??
+    fullNote.error;
+  const error = failure ? errorText(failure) : null;
 
   const refresh = () => {
     boards.refetch();
@@ -99,55 +95,32 @@ export function BoardExplorer() {
     setRevealedId(null);
   };
 
-  const post = async (url: string, payload: unknown) => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const created: unknown = await response.json();
-    if (!response.ok) throw new Error(failureMessage(created, "Create failed"));
-    return created;
-  };
-
-  const submit = async (run: () => Promise<void>) => {
-    setBusy(true);
-    setWriteError(null);
-    try {
-      await run();
-      refresh();
-    } catch (err) {
-      setWriteError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addNote = (event: React.FormEvent) => {
+  const addNote = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!board || !body.trim()) return;
-    return submit(async () => {
-      await post("/api/database/notes", {
-        board_id: board.id,
-        author,
-        body,
-      });
-      setBody("");
+    createBoard.reset();
+    // A failure resolves null and lands in createNote.error for the banner.
+    const created = await createNote.create({
+      board_id: board.id,
+      author,
+      body,
     });
+    if (created) setBody("");
   };
 
-  const addBoard = (event: React.FormEvent) => {
+  const addBoard = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
     const slug = title
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-");
-    return submit(async () => {
-      await post("/api/database/boards", { slug, title: title.trim() });
-      setTitle("");
-      selectBoard(slug);
-    });
+    createNote.reset();
+    // A failure resolves null and lands in createBoard.error for the banner.
+    const created = await createBoard.create({ slug, title: title.trim() });
+    if (!created) return;
+    setTitle("");
+    selectBoard(created.slug);
   };
 
   return (
