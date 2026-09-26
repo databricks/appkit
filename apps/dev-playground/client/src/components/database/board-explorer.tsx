@@ -1,3 +1,4 @@
+import { DatabaseApiError, databaseApi } from "@databricks/appkit-ui/js/beta";
 import {
   Badge,
   Button,
@@ -17,21 +18,21 @@ import { useCallback, useEffect, useId, useState } from "react";
  * is the row an `afterCreate` hook commits alongside each note.
  */
 
-interface Note {
-  id: number;
-  board_id: number;
-  author: string;
-  body: string;
-  created_at: string;
-}
+/** Only a short note preview is needed for the board picker. */
+const listBoards = () =>
+  databaseApi.list("boards", { include: { notes: { limit: 5 } } });
 
-interface Board {
-  id: number;
-  slug: string;
-  title: string;
-  created_at: string;
-  notes?: Note[];
-}
+/** Listing notes directly is what puts them through the entity's serializer. */
+const listNotes = (boardId: number) =>
+  databaseApi.list("notes", {
+    where: { board_id: boardId },
+    order: { created_at: "desc" },
+    limit: 5,
+  });
+
+// Row types come from the generated schema through the calls that read them.
+type Board = Awaited<ReturnType<typeof listBoards>>["items"][number];
+type Note = Awaited<ReturnType<typeof listNotes>>["items"][number];
 
 interface NoteEvent {
   id: number;
@@ -44,22 +45,9 @@ interface TimelineNote extends Note {
   note_events?: NoteEvent[];
 }
 
-interface Timeline extends Board {
+interface Timeline extends Omit<Board, "notes"> {
   notes?: TimelineNote[];
 }
-
-/** Only a short note preview is needed for the board picker. */
-const BOARDS_URL = `/api/database/boards?include=${encodeURIComponent(
-  JSON.stringify({ notes: { limit: 5 } }),
-)}`;
-
-/** Listing notes directly is what puts them through the entity's serializer. */
-const notesUrl = (boardId: number) =>
-  `/api/database/notes?where=${encodeURIComponent(
-    JSON.stringify({ board_id: boardId }),
-  )}&order=${encodeURIComponent(
-    JSON.stringify({ created_at: "desc" }),
-  )}&limit=5`;
 
 /** The audit trail is a read-only include on the generated board detail route. */
 const timelineUrl = (boardId: number) =>
@@ -89,6 +77,14 @@ async function getJson<T>(url: string): Promise<T> {
   return body as T;
 }
 
+/** The client decodes the same envelope; a field detail still reads first. */
+function errorText(err: unknown): string {
+  if (err instanceof DatabaseApiError) {
+    return err.details[0]?.message ?? err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function BoardExplorer() {
   const authorFieldId = useId();
   const bodyFieldId = useId();
@@ -108,7 +104,7 @@ export function BoardExplorer() {
   const load = useCallback(async (slug?: string | null) => {
     setError(null);
     try {
-      const page = await getJson<{ items: Board[] }>(BOARDS_URL);
+      const page = await listBoards();
       setBoards(page.items);
       const active =
         page.items.find((entry) => entry.slug === slug) ?? page.items[0];
@@ -120,13 +116,13 @@ export function BoardExplorer() {
         return;
       }
       const [listed, board] = await Promise.all([
-        getJson<{ items: Note[] }>(notesUrl(active.id)),
+        listNotes(active.id),
         getJson<Timeline>(timelineUrl(active.id)),
       ]);
       setNotes(listed.items);
       setTimeline(board);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     }
   }, []);
 
@@ -222,7 +218,7 @@ export function BoardExplorer() {
               variant="secondary"
               className="ml-2 tabular-nums font-normal"
             >
-              {entry.notes?.length ?? 0} notes
+              {entry.notes.length} notes
             </Badge>
           </Button>
         ))}
