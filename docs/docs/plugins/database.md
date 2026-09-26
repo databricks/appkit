@@ -322,6 +322,8 @@ type them as `string`, and filters accept a string or a safe integer.
   stays visible while it loads and if it fails.
 - The request is aborted once the last hook using it unmounts. Nothing is cached
   after that. A React Strict Mode remount reuses the in-flight request.
+- A successful write through a write hook restarts mounted reads. See
+  [Refresh reads after a write](#refresh-reads-after-a-write).
 
 ### Serializer-shaped reads
 
@@ -349,6 +351,102 @@ const notes = useDatabaseList(
 `serialized<T>()` is not checked at runtime. Keep `T` in step with the
 serializer.
 
+### Write rows
+
+```tsx
+import { useState } from "react";
+import { useDatabaseCreate } from "@databricks/appkit-ui/react/beta";
+
+function AddNote({ boardId }: { boardId: number }) {
+  const notes = useDatabaseCreate("notes");
+  const [body, setBody] = useState("");
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const note = await notes.create({ board_id: boardId, author: "ada", body });
+    if (note) setBody("");
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <input value={body} onChange={(event) => setBody(event.target.value)} />
+      <button disabled={notes.loading}>Add</button>
+      {notes.error && (
+        <p>{notes.error.details[0]?.message ?? notes.error.message}</p>
+      )}
+    </form>
+  );
+}
+```
+
+| Hook | Call | Route | Resolves with |
+| --- | --- | --- | --- |
+| `useDatabaseCreate(entity)` | `create(values)` | `POST /api/database/<entity>` | The created row, or `null` |
+| `useDatabaseUpdate(entity)` | `update(id, values)` | `PATCH /api/database/<entity>/:id` | The updated row, or `null` |
+| `useDatabaseDelete(entity)` | `remove(id)` | `DELETE /api/database/<entity>/:id` | `true`, or `false` |
+
+Each hook also returns `loading`, `error`, and `reset()`. The create and update
+hooks return `data`, the row the latest call answered with. Like
+`useServingInvoke`, a call never rejects: a failure resolves `null` (or `false`
+for `remove`) and the `DatabaseApiError` is in `error`, so a handler needs no
+`try/catch`. To handle failures as exceptions, call `databaseApi` instead.
+
+Values accept only the fields the generated route accepts. Private columns,
+server-generated columns such as `id()`, and unknown fields are compile errors,
+including fields that a spread carries in. Every update field is optional, and
+primary keys and `defaultNow()` or `defaultRandom()` columns cannot be updated.
+Update and delete need a public primary key, like record reads. Bigint columns
+accept a decimal string or a safe integer.
+
+The answered row is the public row the database holds after any `before*` hook
+ran. A read serializer never reshapes a write's response.
+
+### Refresh reads after a write
+
+When a write succeeds, every mounted database read restarts, so lists and
+includes that show the changed row refresh without a manual `refetch()`. Each
+read keeps its last `data` while it reloads. A failed write restarts nothing.
+
+Relations exist only in the generated types, so at runtime the hooks cannot
+tell that a `boards` read includes `notes`. That is why the default restarts
+every mounted read, not only reads of the written table. To restart only reads
+of named tables, or none, pass `invalidate`:
+
+```ts
+// Restart only the reads of notes and boards.
+useDatabaseCreate("notes", { invalidate: ["notes", "boards"] });
+
+// Restart nothing. Call refetch() on the reads that need it.
+useDatabaseCreate("notes", { invalidate: false });
+```
+
+A read of `boards` that includes `notes` belongs to `boards`, so
+`invalidate: ["notes"]` does not restart it.
+
+A write the hooks did not make, such as a `databaseApi` call or one of your own
+routes that changes rows, does not restart reads by itself. Call
+`invalidateDatabaseReads` from `@databricks/appkit-ui/react/beta` afterwards. It
+takes the same scope as `invalidate` and defaults to every mounted read:
+
+```ts
+import { invalidateDatabaseReads } from "@databricks/appkit-ui/react/beta";
+
+await fetch(`/api/cases/${caseId}/sar`, { method: "POST" });
+invalidateDatabaseReads(["str_reports", "activity_log"]);
+```
+
+### Write lifecycle
+
+- A write is never aborted, even when its component unmounts. Aborting the
+  request would not undo a transaction the server already committed.
+- A write that succeeds after its component unmounts still restarts reads,
+  because the rows did change.
+- Only the latest call updates `data`, `loading`, and `error`. An earlier call
+  still resolves for the code that awaits it, with `null` if it failed.
+- `reset()` returns the hook to idle. A call in flight keeps running, but no
+  longer updates the hook.
+- Writes are not queued or deduplicated. Each call sends its own request.
+
 ### Errors
 
 `error` is a `DatabaseApiError` with a stable `code`, the HTTP `status`, a
@@ -370,16 +468,30 @@ public request field. Branch on `code` rather than `message`.
 
 ### Without React
 
-`databaseApi.list` and `databaseApi.get` in `@databricks/appkit-ui/js/beta` take
-the same entity, id, and parameters as the hooks and return a promise. An
-optional last argument, `{ signal }`, cancels the request. They reject with
-`DatabaseApiError`, or with the abort reason after a cancel.
+`databaseApi.list`, `get`, `create`, `update`, and `remove` in
+`@databricks/appkit-ui/js/beta` take the same entity, id, parameters, and
+values as the hooks and return a promise. An optional last argument,
+`{ signal }`, cancels the request. Cancelling a write does not undo it if the
+server already committed it. Unlike the hooks, they reject with
+`DatabaseApiError`, or with the abort reason after a cancel. A write through
+`databaseApi` does not restart hook reads; call `invalidateDatabaseReads` when
+the screen should refresh.
 
 ```ts
 import { databaseApi } from "@databricks/appkit-ui/js/beta";
 
 const board = await databaseApi.get("boards", 7, { select: ["id", "title"] });
+const note = await databaseApi.create("notes", {
+  board_id: board.id,
+  author: "ada",
+  body: "Ship it",
+});
+await databaseApi.update("notes", note.id, { body: "Shipped" });
+await databaseApi.remove("notes", note.id);
 ```
+
+A write through `databaseApi` does not restart hook reads. Call `refetch()` on
+the reads that show the changed rows.
 
 ## API reference
 

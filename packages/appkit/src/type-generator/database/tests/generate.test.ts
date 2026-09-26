@@ -424,6 +424,33 @@ describe("generateDatabaseTypes", () => {
           await databaseApi.list("users", { limit: 1, includeTotal: true });
         }
 
+        async function writes() {
+          const post = await databaseApi.create("posts", {
+            user_slug: "ada",
+            title: "Hi",
+            total: "9007199254740993",
+            active: true,
+            status: "draft",
+            payload: { tags: ["a"] },
+          });
+          const total: string = post.total;
+          await databaseApi.update("posts", post.id, { score: null, status: "live" });
+          await databaseApi.update("users", "ada", { nickname: "ada" });
+          await databaseApi.remove("users", "ada");
+          await databaseApi.create("events", { message: "keyless tables accept creates" });
+          // @ts-expect-error private columns are not HTTP inputs
+          await databaseApi.create("users", { slug: "ada", name: "Ada", secret: "token" });
+          // @ts-expect-error a generated key is not an HTTP input
+          await databaseApi.create("posts", { id: 1, user_slug: "ada", title: "Hi", total: 1, active: true, status: "draft" });
+          // @ts-expect-error default-stamped columns are not updatable
+          await databaseApi.update("users", "ada", { created_at: "2026-01-01" });
+          // @ts-expect-error random-default columns are not updatable
+          await databaseApi.update("posts", 1, { external_id: "00000000-0000-0000-0000-000000000000" });
+          // @ts-expect-error keyless entities have no update route
+          await databaseApi.update("events", "x", { message: "y" });
+          void total;
+        }
+
         function failed(error: unknown) {
           if (error instanceof DatabaseApiError && error.code === "NOT_EXPOSED") {
             const status: number | null = error.status;
@@ -431,7 +458,7 @@ describe("generateDatabaseTypes", () => {
           }
           return error instanceof DatabaseApiError ? error.details[0]?.message : undefined;
         }
-        void [reads, rejected, failed];
+        void [reads, rejected, writes, failed];
       `,
       { ui: true },
     );

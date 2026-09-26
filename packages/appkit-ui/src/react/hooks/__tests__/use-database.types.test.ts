@@ -296,15 +296,119 @@ test("serialized<T>() replaces the row type and keeps entity, id, and params che
   expect(diagnostics).toEqual([]);
 });
 
+test("write hooks type values, ids, and rows from the generated registry", () => {
+  const diagnostics = compileTypeProbe(`
+    import { databaseApi } from "@databricks/appkit-ui/js/beta";
+    import {
+      type DatabaseInsert,
+      type DatabaseRow,
+      useDatabaseCreate,
+      useDatabaseDelete,
+      useDatabaseUpdate,
+    } from "@databricks/appkit-ui/react/beta";
+
+    ${REGISTRY}
+
+    export function Writes(existing: DatabaseRow<"posts">) {
+      const posts = useDatabaseCreate("posts");
+      // A bigint input travels as a decimal string or a safe integer.
+      posts.create({ user_slug: "ada", title: "Hi", total: "9007199254740993" });
+      posts.create({ user_slug: "ada", title: "Hi", total: 1, payload: { tags: ["a"], n: 1 } });
+      const created: Promise<DatabaseRow<"posts"> | null> = posts.create({ user_slug: "ada", title: "Hi", total: 1 });
+      // The answered row carries a bigint as its decimal string.
+      const total: string | undefined = posts.data?.total;
+      const values: DatabaseInsert<"posts"> = { user_slug: "ada", title: "Hi", total: "1" };
+      posts.create(values);
+      useDatabaseCreate("events").create({ message: "keyless tables accept creates" });
+      useDatabaseCreate("sessions").create({ user_slug: "ada" });
+      useDatabaseCreate("posts", { invalidate: ["posts", "users"] });
+      useDatabaseCreate("posts", { invalidate: false });
+
+      const edit = useDatabaseUpdate("posts");
+      const updated: Promise<DatabaseRow<"posts"> | null> = edit.update(7, { title: "New", total: "2" });
+      edit.update(7, { payload: null });
+      useDatabaseUpdate("ledger").update("9007199254740993", { note: "x" });
+      useDatabaseUpdate("ledger").update(10n, { note: "x" });
+      useDatabaseUpdate("users").update("ada", { name: "Ada" });
+
+      const removal = useDatabaseDelete("posts");
+      const removed: Promise<boolean> = removal.remove(7);
+      const loading: boolean = removal.loading;
+      void [created, total, updated, removed, loading, existing];
+    }
+
+    export function RejectedWrites(existing: DatabaseRow<"posts">) {
+      const posts = useDatabaseCreate("posts");
+      // @ts-expect-error entities are generated table names
+      useDatabaseCreate("missing");
+      // @ts-expect-error a field the public insert lacks is refused, even beside valid ones
+      posts.create({ user_slug: "ada", title: "Hi", total: 1, secret: "token" });
+      // @ts-expect-error a generated key is not an HTTP input
+      posts.create({ id: 1, user_slug: "ada", title: "Hi", total: 1 });
+      // @ts-expect-error a spread cannot carry a read-only field along
+      posts.create({ ...existing, title: "Copy" });
+      // @ts-expect-error required insert fields stay required
+      posts.create({ title: "Hi" });
+      // @ts-expect-error values keep their column types
+      posts.create({ user_slug: "ada", title: 1, total: 1 });
+      // @ts-expect-error invalidation names generated tables
+      useDatabaseCreate("posts", { invalidate: ["missing"] });
+
+      // @ts-expect-error keyless entities have no update route
+      useDatabaseUpdate("events");
+      // @ts-expect-error a private key is not addressable over HTTP
+      useDatabaseUpdate("sessions");
+      // @ts-expect-error the id has the public key's type
+      useDatabaseUpdate("posts").update("7", { title: "x" });
+      // @ts-expect-error keys are not updatable
+      useDatabaseUpdate("posts").update(7, { id: 8 });
+      // @ts-expect-error insert-only fields are not updatable
+      useDatabaseUpdate("users").update("ada", { slug: "grace" });
+
+      // @ts-expect-error keyless entities have no delete route
+      useDatabaseDelete("events");
+      // @ts-expect-error the id has the public key's type
+      useDatabaseDelete("posts").remove("7");
+      // @ts-expect-error a delete answers no row
+      useDatabaseDelete("posts").data;
+    }
+
+    export async function client() {
+      const post = await databaseApi.create("posts", { user_slug: "ada", title: "Hi", total: "1" });
+      const id: number = post.id;
+      const total: string = post.total;
+      await databaseApi.update("posts", 7, { title: "New" });
+      const removed: void = await databaseApi.remove("posts", 7);
+      // @ts-expect-error a field the public insert lacks is refused
+      await databaseApi.create("users", { slug: "ada", name: "Ada", secret: "token" });
+      // @ts-expect-error keyless entities have no update route
+      await databaseApi.update("events", "x", { message: "y" });
+      // @ts-expect-error keyless entities have no delete route
+      await databaseApi.remove("events", "x");
+      // @ts-expect-error update values are the public update facet only
+      await databaseApi.update("posts", 7, { title: "New", user_slug: "grace" });
+      void [id, total, removed];
+    }
+  `);
+
+  expect(diagnostics).toEqual([]);
+});
+
 test("no entity exists before typegen binds the registry", () => {
   const diagnostics = compileTypeProbe(`
-    import { useDatabaseList, useDatabaseRecord } from "@databricks/appkit-ui/react/beta";
+    import {
+      useDatabaseCreate,
+      useDatabaseList,
+      useDatabaseRecord,
+    } from "@databricks/appkit-ui/react/beta";
 
     export function Unbound() {
       // @ts-expect-error the empty registry binds no entity
       useDatabaseList("notes");
       // @ts-expect-error the empty registry binds no keyed entity
       useDatabaseRecord("notes", 1);
+      // @ts-expect-error the empty registry binds no entity to write
+      useDatabaseCreate("notes");
     }
   `);
 

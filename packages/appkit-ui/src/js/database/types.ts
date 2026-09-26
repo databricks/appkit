@@ -1,11 +1,14 @@
 import type {
   DatabaseApiEntityFor,
   IdFor,
+  InsertFor,
   KeyedEntityFor,
   ListParamsFor,
   ListRowFor,
+  PublicRowFor,
   RecordParamsFor,
   RecordRowFor,
+  UpdateFor,
 } from "shared";
 
 import type { DatabaseRegistry } from "./registry";
@@ -55,3 +58,27 @@ export type DatabaseRecordRow<
   K extends DatabaseEntity,
   P = Record<never, never>,
 > = RecordRowFor<DatabaseRegistry, K, P>;
+
+/**
+ * The body `POST /api/database/<entity>` accepts: public columns the server
+ * does not generate, with bigint columns as a decimal string or safe integer.
+ */
+export type DatabaseInsert<K extends DatabaseEntity> = InsertFor<
+  DatabaseRegistry,
+  K
+>;
+
+/**
+ * The body `PATCH /api/database/<entity>/:id` accepts: every field optional,
+ * and no key, generated, or default-stamped column.
+ */
+export type DatabaseUpdate<K extends DatabaseEntity> = UpdateFor<
+  DatabaseRegistry,
+  K
+>;
+
+/** The public row a create or update answers with, as JSON carries it. */
+export type DatabaseRow<K extends DatabaseEntity> = PublicRowFor<
+  DatabaseRegistry,
+  K
+>;

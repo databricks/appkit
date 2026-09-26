@@ -19,6 +19,22 @@ const databaseApi = typedApi as unknown as {
     params?: object,
     init?: DatabaseRequestOptions,
   ): Promise<Record<string, unknown>>;
+  create(
+    entity: string,
+    values: object,
+    init?: DatabaseRequestOptions,
+  ): Promise<Record<string, unknown>>;
+  update(
+    entity: string,
+    id: string | number | bigint,
+    values: object,
+    init?: DatabaseRequestOptions,
+  ): Promise<Record<string, unknown>>;
+  remove(
+    entity: string,
+    id: string | number | bigint,
+    init?: DatabaseRequestOptions,
+  ): Promise<void>;
 };
 
 const PAGE = { items: [{ id: 1, body: "hi" }], limit: 5, offset: 0 };
@@ -314,6 +330,191 @@ describe("databaseApi.get", () => {
       code: "INTERNAL",
       status: 200,
       message: "Database response has an unexpected shape",
+    });
+  });
+});
+
+describe("databaseApi writes", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => json({ id: 7, body: "hi" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    publish({
+      "notes.list": "/api/database/notes",
+      "notes.detail": "/api/database/notes/:id",
+      "notes.create": "/api/database/notes",
+      "notes.update": "/api/database/notes/:id",
+      "notes.delete": "/api/database/notes/:id",
+      "ledger.create": "/api/database/ledger",
+      // Read-only: the plugin published reads but no writes.
+      "note_events.list": "/api/database/note_events",
+      "note_events.detail": "/api/database/note_events/:id",
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete window.__appkit__;
+    _resetConfigCache();
+  });
+
+  function sent(index = 0): { url: string; init: RequestInit } {
+    const [url, init] = fetchMock.mock.calls[index] as [string, RequestInit];
+    return { url, init };
+  }
+
+  test("creates with a JSON body on the published route and returns the row", async () => {
+    const row = await databaseApi.create("notes", {
+      board_id: 7,
+      author: "ada",
+      body: "hi",
+    });
+
+    expect(row).toEqual({ id: 7, body: "hi" });
+    const { url, init } = sent();
+    expect(url).toBe("/api/database/notes");
+    expect(init.method).toBe("POST");
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual({
+      board_id: 7,
+      author: "ada",
+      body: "hi",
+    });
+  });
+
+  test("sends a bigint value as its decimal string, which the server reads back exactly", async () => {
+    await databaseApi.create("ledger", {
+      seq: 9007199254740993n,
+      note: "x",
+    });
+
+    expect(sent().init.body).toBe('{"seq":"9007199254740993","note":"x"}');
+  });
+
+  test("updates one row with PATCH on its encoded id", async () => {
+    fetchMock.mockResolvedValueOnce(json({ id: 7, body: "edited" }));
+
+    const row = await databaseApi.update("notes", "a/b", { body: "edited" });
+
+    expect(row).toEqual({ id: 7, body: "edited" });
+    const { url, init } = sent();
+    expect(url).toBe("/api/database/notes/a%2Fb");
+    expect(init.method).toBe("PATCH");
+    expect(new Headers(init.headers).get("Content-Type")).toBe(
+      "application/json",
+    );
+    expect(init.body).toBe('{"body":"edited"}');
+  });
+
+  test("deletes one row and resolves without reading the empty 204 body", async () => {
+    const response = new Response(null, { status: 204 });
+    const readBody = vi.spyOn(response, "json");
+    fetchMock.mockResolvedValueOnce(response);
+
+    await expect(databaseApi.remove("notes", 7)).resolves.toBeUndefined();
+
+    const { url, init } = sent();
+    expect(url).toBe("/api/database/notes/7");
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+    expect(readBody).not.toHaveBeenCalled();
+  });
+
+  test("keeps the server's validation details on a 422", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json(
+        {
+          error: "Database request failed validation",
+          details: [
+            { path: ["body"], message: "Must be at most 5000 characters" },
+          ],
+        },
+        422,
+      ),
+    );
+
+    const error = await rejection(
+      databaseApi.create("notes", { board_id: 7, author: "ada", body: "x" }),
+    );
+
+    expect(error).toBeInstanceOf(DatabaseApiError);
+    expect(error).toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      message: "Database request failed validation",
+      details: [{ path: ["body"], message: "Must be at most 5000 characters" }],
+    });
+  });
+
+  test("maps a 415 to UNSUPPORTED_MEDIA_TYPE", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ error: "Database request body must be JSON" }, 415),
+    );
+
+    await expect(
+      databaseApi.update("notes", 7, { body: "x" }),
+    ).rejects.toMatchObject({
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      status: 415,
+      message: "Database request body must be JSON",
+    });
+  });
+
+  test("maps a missing row on update or delete to NOT_FOUND", async () => {
+    fetchMock.mockResolvedValue(
+      json({ error: "Database record not found" }, 404),
+    );
+
+    await expect(
+      databaseApi.update("notes", 404, { body: "x" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    await expect(databaseApi.remove("notes", 404)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+  });
+
+  test("refuses writes the plugin did not publish without sending a request", async () => {
+    const results = await Promise.all([
+      rejection(databaseApi.create("note_events", { note_id: 1 })),
+      rejection(databaseApi.update("note_events", 1, { action: "x" })),
+      rejection(databaseApi.remove("note_events", 1)),
+    ]);
+
+    expect(results.map((error) => error instanceof DatabaseApiError)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(results).toMatchObject([
+      {
+        code: "NOT_EXPOSED",
+        status: null,
+        message: 'Database operation "note_events.create" is not exposed',
+      },
+      { code: "NOT_EXPOSED", message: expect.stringContaining(".update") },
+      { code: "NOT_EXPOSED", message: expect.stringContaining(".delete") },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("rejects a write answered with something other than one row", async () => {
+    fetchMock.mockResolvedValueOnce(json([{ id: 7 }], 201));
+    await expect(
+      databaseApi.create("notes", { board_id: 7, author: "a", body: "b" }),
+    ).rejects.toMatchObject({
+      code: "INTERNAL",
+      status: 201,
+      message: "Database response has an unexpected shape",
+    });
+
+    fetchMock.mockResolvedValueOnce(json({ id: 7 }, 200));
+    await expect(databaseApi.remove("notes", 7)).rejects.toMatchObject({
+      code: "INTERNAL",
+      status: 200,
     });
   });
 });

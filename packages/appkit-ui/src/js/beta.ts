@@ -18,9 +18,12 @@ export type { DatabaseRegistry } from "./database/registry";
 export type {
   DatabaseEntity,
   DatabaseId,
+  DatabaseInsert,
   DatabaseKeyedEntity,
   DatabaseListParams,
   DatabaseListRow,
   DatabaseRecordParams,
   DatabaseRecordRow,
+  DatabaseRow,
+  DatabaseUpdate,
 } from "./database/types";
