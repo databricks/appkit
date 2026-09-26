@@ -11,6 +11,7 @@ import {
   type LakebasePool,
   type LakebasePoolManager,
   RoutingPool,
+  warnOnEndpointHostMismatch,
 } from "../../connectors/lakebase";
 import { getClientOptions } from "../../context/client-options";
 import { getUserContext } from "../../context/execution-context";
@@ -89,7 +90,10 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
           clientOptions: getClientOptions(),
         }).toLegacyWorkspaceClient(),
     };
-    const user = await getUsernameWithApiLookup(poolConfig);
+    const [user] = await Promise.all([
+      getUsernameWithApiLookup(poolConfig),
+      warnOnEndpointHostMismatch(poolConfig),
+    ]);
 
     const spPool = createLakebasePool({ ...poolConfig, user });
     logger.info("Lakebase SP pool initialized");
