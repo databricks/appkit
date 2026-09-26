@@ -13,6 +13,7 @@ const roots: string[] = [];
 const appkitRoot = path.resolve(import.meta.dirname, "../../../..");
 const sourceRoot = path.join(appkitRoot, "src");
 const builder = path.join(sourceRoot, "database/schema-builder/index.ts");
+const uiRoot = path.resolve(appkitRoot, "../appkit-ui/src/js");
 
 afterEach(async () =>
   Promise.all(
@@ -82,7 +83,7 @@ describe("generateDatabaseTypes", () => {
 
     const users = output.slice(
       output.indexOf('"users": {'),
-      output.indexOf('\n    "posts": {\n      row:'),
+      output.indexOf('\n  "posts": {\n    row:'),
     );
     expect(users.match(/"secret"\??: string;/g)).toHaveLength(3);
     expect(users).toContain("publicRow:");
@@ -92,8 +93,8 @@ describe("generateDatabaseTypes", () => {
     expect(users).not.toContain('update: {\n      "slug"');
 
     const posts = output.slice(
-      output.indexOf('\n    "posts": {\n      row:'),
-      output.indexOf('\n    "events": {\n      row:'),
+      output.indexOf('\n  "posts": {\n    row:'),
+      output.indexOf('\n  "events": {\n    row:'),
     );
     expect(posts).not.toContain('insert: {\n      "id"');
     expect(posts).not.toContain('update: {\n      "id"');
@@ -122,6 +123,68 @@ describe("generateDatabaseTypes", () => {
     expect(output).toContain("filters: DatabaseLogicalFilter<{}>;");
   });
 
+  test("renders HTTP api facets from the route capabilities", async () => {
+    const options = await files(completeSchema);
+    await generateDatabaseTypes(options);
+    const output = await fs.readFile(options.outFile, "utf8");
+    const api = (table: string) => {
+      const entry = output.indexOf(`\n  ${JSON.stringify(table)}: {\n    row:`);
+      const start = output.indexOf("\n    api: {", entry);
+      return output.slice(start, output.indexOf("\n    };", start));
+    };
+
+    // A private column reaches the trusted facets but none of the HTTP ones.
+    const users = api("users");
+    expect(users).not.toContain('"secret"');
+    expect(users).toContain('insert: {\n        "slug": string;');
+    expect(users).toContain('"created_at"?: string;');
+    expect(users).toContain(
+      'update: {\n        "name"?: string;\n        "nickname"?: string | null;\n      };',
+    );
+    expect(users).toContain(
+      'orderable: "slug" | "name" | "nickname" | "created_at";',
+    );
+    expect(users).toContain('key: "slug";');
+
+    // Server identities are never inputs, and a random default is no update.
+    const posts = api("posts");
+    expect(posts).not.toContain('insert: {\n        "id"');
+    expect(posts).toContain('"external_id"?: string;');
+    expect(posts).not.toContain('update: {\n        "id"');
+    expect(
+      posts.slice(posts.indexOf("update:"), posts.indexOf("filters:")),
+    ).not.toContain('"external_id"');
+    // HTTP filters have no bare-array shorthand and no JSON columns.
+    expect(posts).toContain(
+      '"status"?: "draft" | "live" | { eq?: "draft" | "live"; neq?: "draft" | "live"; in?: readonly ("draft" | "live")[]; };',
+    );
+    expect(posts.slice(posts.indexOf("filters:"))).not.toContain('"payload"');
+    expect(posts).toContain('key: "id";');
+
+    expect(api("events")).toContain('orderable: "message";');
+    expect(api("events")).toContain("key: never;");
+    expect(api("blobs")).toContain("filters: DatabaseLogicalFilter<{}>;");
+    expect(api("blobs")).toContain("orderable: never;");
+  });
+
+  test("binds one entries interface into the server and UI registries", async () => {
+    const options = await files(completeSchema);
+    await generateDatabaseTypes(options);
+    const output = await fs.readFile(options.outFile, "utf8");
+
+    expect(output).toContain('import "@databricks/appkit";');
+    expect(output).toContain('import "@databricks/appkit-ui/js/beta";');
+    expect(
+      output.match(/interface GeneratedDatabaseRegistry \{/g),
+    ).toHaveLength(1);
+    expect(output).toContain(
+      'declare module "@databricks/appkit" {\n  interface DatabaseRegistry extends GeneratedDatabaseRegistry {}\n}',
+    );
+    expect(output).toContain(
+      'declare module "@databricks/appkit-ui/js/beta" {\n  interface DatabaseRegistry extends GeneratedDatabaseRegistry {}\n}',
+    );
+  });
+
   test("accepts named valid and explicitly empty schemas", async () => {
     const valid = await files(completeSchema);
     await generateDatabaseTypes(valid);
@@ -133,7 +196,7 @@ describe("generateDatabaseTypes", () => {
     `);
     await generateDatabaseTypes(empty);
     expect(await fs.readFile(empty.outFile, "utf8")).toContain(
-      "interface DatabaseRegistry {\n\n  }",
+      "interface GeneratedDatabaseRegistry {\n\n}",
     );
   });
 
@@ -229,13 +292,12 @@ describe("generateDatabaseTypes", () => {
     expect((await fs.stat(options.outFile)).mtimeMs).toBe(before);
   });
 
-  test("compiles a semantic consumer through the beta subpath", async () => {
+  // No UI package resolves here, so its binding must stay silent under skipLibCheck.
+  test("compiles a server-only semantic consumer through the beta subpath", async () => {
     const options = await files(completeSchema);
     await generateDatabaseTypes(options);
-    const consumer = path.join(options.root, "consumer.ts");
-    const tsconfig = path.join(options.root, "tsconfig.json");
-    await fs.writeFile(
-      consumer,
+    await compileConsumer(
+      options,
       `
         import { database, type DatabaseExports, type IDatabaseConfig } from "@databricks/appkit/beta";
         database();
@@ -279,42 +341,152 @@ describe("generateDatabaseTypes", () => {
         db.users.create({ slug: "ada", name: "Ada", secret: "token", nickname: 1 });
       `,
     );
-    await fs.writeFile(
-      tsconfig,
-      JSON.stringify({
-        compilerOptions: {
-          strict: true,
-          noEmit: true,
-          target: "ES2022",
-          module: "ESNext",
-          moduleResolution: "Bundler",
-          esModuleInterop: true,
-          resolveJsonModule: true,
-          skipLibCheck: true,
-          baseUrl: options.root,
-          paths: {
-            "@databricks/appkit": [
-              path.join(sourceRoot, "database/contract/index.ts"),
-            ],
-            "@databricks/appkit/beta": [
-              path.join(sourceRoot, "plugins/database/index.ts"),
-            ],
-            shared: [path.resolve(appkitRoot, "../shared/src/index.ts")],
-            // CI runs unit tests before build, including imports of shared subpaths.
-            "shared/*": [path.resolve(appkitRoot, "../shared/src/*")],
-            "@databricks/lakebase": [
-              path.resolve(appkitRoot, "../lakebase/src/index.ts"),
-            ],
-          },
-        },
-        files: [options.outFile, consumer],
-      }),
-    );
+  }, 30_000);
 
-    await expect(
-      execFileAsync("pnpm", ["exec", "tsc", "--noEmit", "-p", tsconfig], {
-        cwd: path.resolve(appkitRoot, "../.."),
-      }),
-    ).resolves.toMatchObject({ stderr: "" });
+  test("compiles a browser consumer bound to the same generated entries", async () => {
+    const options = await files(completeSchema);
+    await generateDatabaseTypes(options);
+    await compileConsumer(
+      options,
+      `
+        import { type DatabaseExports } from "@databricks/appkit/beta";
+        import {
+          databaseApi,
+          DatabaseApiError,
+          type DatabaseEntity,
+          type DatabaseListRow,
+        } from "@databricks/appkit-ui/js/beta";
+
+        // The server entities and the browser entities are one registry.
+        declare const db: DatabaseExports;
+        const server: keyof DatabaseExports = "users";
+        const entity: DatabaseEntity = "users";
+        void [db, server, entity];
+        // @ts-expect-error browser entities are generated table names
+        const missing: DatabaseEntity = "missing";
+        void missing;
+
+        async function reads() {
+          const users = await databaseApi.list("users", {
+            where: { name: { ilike: "%ada%" }, or: [{ nickname: { is: null } }] },
+            order: { created_at: "desc" },
+            include: { posts: { limit: 2, select: ["title", "total"] } },
+          });
+          const title: string | undefined = users.items[0]?.posts[0]?.title;
+          // A bigint travels as its decimal string.
+          const total: string | undefined = users.items[0]?.posts[0]?.total;
+          // @ts-expect-error private columns are absent from public rows
+          users.items[0]?.secret;
+          // @ts-expect-error unselected relation columns are absent
+          users.items[0]?.posts[0]?.score;
+
+          const posts = await databaseApi.list("posts", {
+            select: ["id", "title"],
+            include: { users: { include: { posts: { limit: 1 } } } },
+          });
+          const owner: { slug: string; name: string } | null | undefined =
+            posts.items[0]?.users;
+          const nested: number | undefined = posts.items[0]?.users?.posts[0]?.id;
+          // @ts-expect-error unselected columns are absent
+          posts.items[0]?.score;
+          void [title, total, owner, nested];
+
+          type Picked = DatabaseListRow<"posts", { select: readonly ["id"] }>;
+          const picked: Picked = { id: 1 };
+          void picked;
+
+          await databaseApi.list("posts", { where: { total: { gt: "9007199254740993" } } });
+          await databaseApi.list("events", { order: { message: "asc" } });
+        }
+
+        async function rejected() {
+          // @ts-expect-error private columns are not HTTP filters, even beside a valid one
+          await databaseApi.list("users", { where: { name: "Ada", secret: "token" } });
+          // @ts-expect-error private columns are not selectable
+          await databaseApi.list("users", { select: ["slug", "secret"] });
+          // @ts-expect-error private columns cannot order a list
+          await databaseApi.list("users", { order: { name: "asc", secret: "asc" } });
+          // @ts-expect-error JSON columns are not queryable
+          await databaseApi.list("posts", { where: { payload: { eq: 1 } } });
+          // @ts-expect-error HTTP filters have no bare-array shorthand
+          await databaseApi.list("posts", { where: { status: ["draft"] } });
+          // @ts-expect-error unknown operators are rejected inside an operator object
+          await databaseApi.list("posts", { where: { score: { gte: 1, near: 2 } } });
+          // @ts-expect-error a to-one include takes no limit
+          await databaseApi.list("posts", { include: { users: { limit: 1 } } });
+          // @ts-expect-error includes stop at two relation edges
+          await databaseApi.list("users", { include: { posts: { include: { users: { include: { posts: true } } } } } });
+          // @ts-expect-error an include filter checks the target's public facets
+          await databaseApi.list("posts", { include: { users: { where: { name: "Ada", secret: "x" } } } });
+          // @ts-expect-error generated routes decode includes as true or options, never false
+          await databaseApi.list("users", { include: { posts: false } });
+          // @ts-expect-error list params are the generated route's parameters only
+          await databaseApi.list("users", { limit: 1, includeTotal: true });
+        }
+
+        function failed(error: unknown) {
+          if (error instanceof DatabaseApiError && error.code === "NOT_EXPOSED") {
+            const status: number | null = error.status;
+            return status;
+          }
+          return error instanceof DatabaseApiError ? error.details[0]?.message : undefined;
+        }
+        void [reads, rejected, failed];
+      `,
+      { ui: true },
+    );
   }, 30_000);
 });
+
+/** Type-check `source` against the generated declaration, as an app would. */
+async function compileConsumer(
+  options: { root: string; outFile: string },
+  source: string,
+  { ui = false } = {},
+): Promise<void> {
+  const consumer = path.join(options.root, "consumer.ts");
+  const tsconfig = path.join(options.root, "tsconfig.json");
+  await fs.writeFile(consumer, source);
+  await fs.writeFile(
+    tsconfig,
+    JSON.stringify({
+      compilerOptions: {
+        strict: true,
+        noEmit: true,
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        esModuleInterop: true,
+        resolveJsonModule: true,
+        skipLibCheck: true,
+        baseUrl: options.root,
+        paths: {
+          "@databricks/appkit": [
+            path.join(sourceRoot, "database/contract/index.ts"),
+          ],
+          "@databricks/appkit/beta": [
+            path.join(sourceRoot, "plugins/database/index.ts"),
+          ],
+          ...(ui
+            ? {
+                "@databricks/appkit-ui/js/beta": [path.join(uiRoot, "beta.ts")],
+              }
+            : {}),
+          shared: [path.resolve(appkitRoot, "../shared/src/index.ts")],
+          // CI runs unit tests before build, including imports of shared subpaths.
+          "shared/*": [path.resolve(appkitRoot, "../shared/src/*")],
+          "@databricks/lakebase": [
+            path.resolve(appkitRoot, "../lakebase/src/index.ts"),
+          ],
+        },
+      },
+      files: [options.outFile, consumer],
+    }),
+  );
+
+  await expect(
+    execFileAsync("pnpm", ["exec", "tsc", "--noEmit", "-p", tsconfig], {
+      cwd: path.resolve(appkitRoot, "../.."),
+    }),
+  ).resolves.toMatchObject({ stderr: "" });
+}
