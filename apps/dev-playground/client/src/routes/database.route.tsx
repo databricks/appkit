@@ -293,7 +293,7 @@ function DatabaseRoute() {
         <Header
           title="Database"
           description="Declare a Postgres schema once and get typed entities, generated CRUD routes, and transactional hooks — without writing a controller."
-          tooltip="The DatabasePlugin reads an explicit schema. It never creates, migrates, or introspects tables."
+          tooltip="The DatabasePlugin reads an explicit schema. It never creates or migrates tables; at startup it checks that every declared table and column exists."
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
