@@ -24,10 +24,15 @@ import type {
 } from "./types";
 
 /** Suffix of the endpoint names `DatabasePlugin` publishes for each table. */
-type DatabaseOperation = "list" | "detail" | "create" | "update" | "delete";
+export type DatabaseOperation =
+  | "list"
+  | "detail"
+  | "create"
+  | "update"
+  | "delete";
 
 /** An id as a keyed route addresses it in its path. */
-type IdLike = string | number | bigint;
+export type IdLike = string | number | bigint;
 
 /** Per-call options for a database request. */
 export interface DatabaseRequestOptions {
@@ -150,7 +155,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * only what its `api` configuration exposes, so a missing entry is refused
  * here with `NOT_EXPOSED` and no request is sent.
  */
-function resolveDatabaseUrl(
+export function resolveDatabaseUrl(
   entity: string,
   operation: DatabaseOperation,
   id?: IdLike,
@@ -209,7 +214,7 @@ async function failure(response: Response): Promise<DatabaseApiError> {
  * sees `undefined`. An abort rejects with the signal's own reason, so a
  * caller can tell cancellation from failure.
  */
-async function requestDatabase<T>(
+export async function requestDatabase<T>(
   url: string,
   init: RequestInit,
   accept: (body: unknown) => body is T,
@@ -262,7 +267,9 @@ async function requestDatabase<T>(
 }
 
 /** The `{ items, limit, offset }` envelope a list route answers with. */
-function isDatabaseListPage(body: unknown): body is DatabaseListPage<unknown> {
+export function isDatabaseListPage(
+  body: unknown,
+): body is DatabaseListPage<unknown> {
   return (
     isRecord(body) &&
     Array.isArray(body.items) &&
@@ -272,7 +279,7 @@ function isDatabaseListPage(body: unknown): body is DatabaseListPage<unknown> {
 }
 
 /** A detail route answers one bare row; a serializer returns an object too. */
-function isDatabaseRow(body: unknown): body is Record<string, unknown> {
+export function isDatabaseRow(body: unknown): body is Record<string, unknown> {
   return isRecord(body);
 }
 

@@ -339,6 +339,93 @@ field. Branch on `code` rather than `message`.
 | `OUTCOME_UNKNOWN` | `null` or a successful HTTP status | A write received no usable response; it may have committed. Check before retrying |
 | `INTERNAL` | 500 or other | Any other failure |
 
+## React hooks (beta)
+
+`@databricks/appkit-ui/react/beta` provides React hooks over the
+[browser client](#browser-client-beta). They take the same entity, id, and
+[parameters](#parameters) as `databaseApi`, need the same
+[setup](#setup), and report a failure as the same
+[`DatabaseApiError`](#errors) in `error`.
+
+### Read a list
+
+```tsx
+import { useDatabaseList } from "@databricks/appkit-ui/react/beta";
+
+function Notes({ boardId }: { boardId: number }) {
+  const notes = useDatabaseList("notes", {
+    where: { board_id: boardId },
+    order: { created_at: "desc" },
+    limit: 20,
+  });
+
+  if (notes.error) return <p>{notes.error.message}</p>;
+  return (
+    <ul>
+      {notes.data?.items.map((note) => (
+        <li key={note.id}>{note.body}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`data` is the list envelope `{ items, limit, offset }`, or `null` until the
+first response arrives. Pass `{ enabled: false }` as the third argument to hold
+the request, for example until a value it depends on is known.
+
+### Read one record
+
+```tsx
+import { useDatabaseRecord } from "@databricks/appkit-ui/react/beta";
+
+const board = useDatabaseRecord("boards", boardId, {
+  include: { notes: { limit: 20, include: { note_events: { limit: 5 } } } },
+});
+board.data?.notes[0]?.note_events;
+```
+
+Only tables with a public primary key have a detail route, so a keyless table or
+a table with a private key is a type error here. A `null` or `undefined` id
+holds the hook without a request. A missing row reports `NOT_FOUND`.
+
+### Request lifecycle
+
+- Hooks that request the same entity with parameters that encode to the same
+  query share one request while any of them is mounted. An inline parameter
+  object does not refetch on every render.
+- New parameters start a new request, and `data` is `null` until it answers.
+- `refetch()` aborts the in-flight request and sends it again. The last `data`
+  stays visible while it loads and if it fails.
+- The request is aborted once the last hook using it unmounts. Nothing is cached
+  after that. A React Strict Mode remount reuses the in-flight request.
+
+### Serializer-shaped reads
+
+A read serializer can change the rows a list or detail route returns. Pass
+`shape: serialized<T>()` to type the result as `T`. The entity, id, and
+parameters are still checked against the generated registry.
+
+```tsx
+import { serialized, useDatabaseList } from "@databricks/appkit-ui/react/beta";
+
+// server: serialize: (row) => ({ ...row, excerpt: String(row.body).slice(0, 80) })
+interface NoteView {
+  id: number;
+  author: string;
+  excerpt: string;
+}
+
+const notes = useDatabaseList(
+  "notes",
+  { limit: 20 },
+  { shape: serialized<NoteView>() },
+);
+```
+
+`serialized<T>()` is not checked at runtime. Keep `T` in step with the
+serializer.
+
 ## API reference
 
 - [`database`](../api/appkit/Function.database.md)
