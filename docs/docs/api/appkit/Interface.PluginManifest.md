@@ -56,6 +56,22 @@ schema: JSONSchema7;
 
 ***
 
+### deprecated?
+
+```ts
+optional deprecated: boolean;
+```
+
+When true, the plugin is deprecated. It still ships and functions, but tooling (e.g. `appkit plugin list`) may hide or flag it. The recommended replacement is noted in the plugin description.
+
+#### Inherited from
+
+```ts
+Omit.deprecated
+```
+
+***
+
 ### description
 
 ```ts
