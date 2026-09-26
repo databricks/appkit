@@ -39,6 +39,12 @@ interface RequestStore<S> {
   retain(key: string, run: RequestRunner<S>, autoStart?: boolean): () => void;
   /** (Re)start the request for `key`: abort any in-flight run, then re-run. */
   start(key: string): void;
+  /**
+   * `start` every entry that has run at least once and that `match` accepts
+   * (every such entry without one). An entry retained with `autoStart: false`
+   * that never ran stays idle.
+   */
+  restartStarted(match?: (key: string) => boolean): void;
   subscribe(key: string, listener: () => void): () => void;
   getSnapshot(key: string): S;
   /** Test-only: abort every in-flight request and clear the store. */
@@ -134,6 +140,14 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
     },
 
     start,
+
+    restartStarted(match) {
+      // Collect first: a restarted run patches, and a patch notifies.
+      const keys = [...entries]
+        .filter(([key, entry]) => entry.started && (!match || match(key)))
+        .map(([key]) => key);
+      for (const key of keys) start(key);
+    },
 
     subscribe(key, listener) {
       let listeners = listenersByKey.get(key);

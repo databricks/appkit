@@ -74,6 +74,70 @@ describe("createRequestStore", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  test("restartStarted re-runs started entries and leaves never-started ones idle", () => {
+    const deferred = vi.fn((_c: RequestControls<Snap>) => {});
+    store.retain("started", run);
+    store.retain("deferred", deferred, false);
+
+    store.restartStarted();
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(deferred).not.toHaveBeenCalled();
+
+    // Once started by hand, the deferred entry is restarted too.
+    store.start("deferred");
+    store.restartStarted();
+    expect(deferred).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  test("restartStarted restarts only the keys the predicate accepts", () => {
+    const other = vi.fn((_c: RequestControls<Snap>) => {});
+    store.retain("notes /a", run);
+    store.retain("boards /b", other);
+
+    const seen: string[] = [];
+    store.restartStarted((key) => {
+      seen.push(key);
+      return key.startsWith("notes ");
+    });
+
+    expect(seen.sort()).toEqual(["boards /b", "notes /a"]);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(other).toHaveBeenCalledTimes(1);
+  });
+
+  test("restartStarted aborts the prior run before re-running with a fresh signal", () => {
+    const signals: AbortSignal[] = [];
+    store.retain("k", (c) => {
+      signals.push(c.signal);
+    });
+
+    store.restartStarted();
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
+  test("restartStarted keeps the snapshot and notifies through the restarted run", () => {
+    const listener = vi.fn();
+    let runs = 0;
+    store.subscribe("k", listener);
+    store.retain("k", (c) => {
+      runs += 1;
+      if (runs === 1) c.patch({ value: 1 });
+    });
+    listener.mockClear();
+
+    store.restartStarted();
+
+    // The store keeps the last result; only the run decides what to patch.
+    expect(store.getSnapshot("k").value).toBe(1);
+    expect(listener).not.toHaveBeenCalled();
+    expect(runs).toBe(2);
+  });
+
   test("reset aborts in-flight runs and clears entries", () => {
     let captured: AbortSignal | undefined;
     store.retain("k", (c) => {
