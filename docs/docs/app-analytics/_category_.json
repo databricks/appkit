@@ -1,0 +1,10 @@
+{
+  "label": "App Analytics",
+  "position": 7,
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "doc",
+    "id": "app-analytics/getting-started"
+  }
+}
