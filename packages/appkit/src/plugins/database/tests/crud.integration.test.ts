@@ -20,6 +20,10 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDb: mocks.createDrizzleDb,
   createDrizzleDataPath: mocks.createDrizzleDataPath,
 }));
+// The catalog comparison has its own suite; this fake answers no catalog.
+vi.mock("../schema-check", () => ({
+  assertSchemaMatchesDatabase: async () => undefined,
+}));
 
 import { DatabasePlugin } from "../database";
 
