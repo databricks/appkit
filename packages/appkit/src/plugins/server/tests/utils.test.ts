@@ -14,6 +14,7 @@ vi.mock("node:fs", () => ({
 
 import {
   generateTunnelIdFromEmail,
+  getAppAnalyticsScript,
   getConfigScript,
   getQueries,
   getRoutes,
@@ -144,5 +145,46 @@ describe("server/utils", () => {
       expect(script).not.toContain("</script><script>alert('xss')</script>");
       expect(script).toContain("window.__appkit__ = JSON.parse");
     });
+
+    test("carries App Analytics options only when they are given", () => {
+      mockExistsSync.mockReturnValue(false);
+
+      expect(readRuntimeConfig(getConfigScript())).not.toHaveProperty(
+        "appAnalytics",
+      );
+      expect(
+        readRuntimeConfig(
+          getConfigScript({}, {}, { webVitals: true, sampleRate: 0.5 }),
+        ).appAnalytics,
+      ).toEqual({ webVitals: true, sampleRate: 0.5 });
+    });
+
+    test("never includes the App Analytics script tag", () => {
+      mockExistsSync.mockReturnValue(false);
+      const script = getConfigScript({}, {}, { webVitals: true });
+
+      expect(script).not.toContain("/_analytics/v1/sdk.js");
+    });
+  });
+
+  describe("getAppAnalyticsScript", () => {
+    test("loads the auto-starting build as a module when injected", () => {
+      expect(getAppAnalyticsScript({})).toBe(
+        '<script type="module" src="/_analytics/v1/sdk.js"></script>',
+      );
+    });
+
+    test("is empty when not injected", () => {
+      expect(getAppAnalyticsScript()).toBe("");
+    });
   });
 });
+
+/** The JSON inside the `<script id="__appkit__">` tag of a config script. */
+function readRuntimeConfig(script: string): Record<string, unknown> {
+  const json = script.match(
+    /<script id="__appkit__" type="application\/json">([\s\S]*?)<\/script>/,
+  )?.[1];
+  if (json === undefined) throw new Error("Expected a runtime config script");
+  return JSON.parse(json);
+}

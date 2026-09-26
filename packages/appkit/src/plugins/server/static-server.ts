@@ -5,6 +5,7 @@ import type express from "express";
 import expressStatic from "express";
 
 import { BaseServer } from "./base-server";
+import type { AppAnalyticsBrowserOptions } from "./types";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 /**
@@ -27,8 +28,9 @@ export class StaticServer extends BaseServer {
     staticPath: string,
     endpoints: PluginEndpoints = {},
     pluginConfigs: PluginClientConfigs = {},
+    appAnalytics?: AppAnalyticsBrowserOptions,
   ) {
-    super(app, endpoints, pluginConfigs);
+    super(app, endpoints, pluginConfigs, appAnalytics);
     this.staticPath = staticPath;
   }
 
@@ -58,7 +60,10 @@ export class StaticServer extends BaseServer {
     }
 
     let html = fs.readFileSync(indexPath, "utf-8");
-    html = html.replace("<body>", `<body>${this.getConfigScript()}`);
+    html = html.replace(
+      "<body>",
+      `<body>${this.getConfigScript()}${this.getAppAnalyticsScript()}`,
+    );
     res.send(html);
   }
 }

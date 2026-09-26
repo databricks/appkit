@@ -17,14 +17,18 @@ import { instrumentations } from "../../telemetry";
 import { isAppAnalyticsPath } from "../../utils/app-analytics-paths";
 import {
   APP_ANALYTICS_PATH,
+  APP_ANALYTICS_SDK_PATH,
   type AppAnalyticsRelay,
+  appAnalyticsBrowserOptions,
   createAppAnalyticsRelay,
+  serveSdk,
+  shouldInjectSdk,
 } from "./app-analytics-relay";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
-import type { ServerConfig } from "./types";
+import type { AppAnalyticsBrowserOptions, ServerConfig } from "./types";
 import { getRoutes, type PluginEndpoints, printRoutes } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
@@ -278,6 +282,8 @@ export class ServerPlugin extends Plugin {
     // the Databricks Apps OTel Collector, which listens only on localhost, so
     // the server relays their OTLP/HTTP JSON to it. The relay reads the body
     // with its own, smaller limit, so the global JSON parser skips the path.
+    // The self-contained build next to it is what the frontend servers add to
+    // index.html when App telemetry is on.
     if (this.config.appAnalytics !== false) {
       this.appAnalyticsRelay = createAppAnalyticsRelay({
         telemetry: this.telemetry,
@@ -287,6 +293,7 @@ export class ServerPlugin extends Plugin {
         APP_ANALYTICS_PATH,
         ...this.appAnalyticsRelay.handlers,
       );
+      this.serverApplication.get(APP_ANALYTICS_SDK_PATH, serveSdk());
     }
 
     for (const plugin of plugins.values()) {
@@ -347,6 +354,7 @@ export class ServerPlugin extends Plugin {
   ) {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
+    const appAnalytics = this.getInjectedAppAnalytics();
 
     // explict static path provided
     if (hasExplicitStaticPath) {
@@ -355,6 +363,7 @@ export class ServerPlugin extends Plugin {
         this.config.staticPath as string,
         endpoints,
         pluginConfigs,
+        appAnalytics,
       );
       staticServer.setup();
       return;
@@ -366,6 +375,7 @@ export class ServerPlugin extends Plugin {
         this.serverApplication,
         endpoints,
         pluginConfigs,
+        appAnalytics,
       );
       await this.viteDevServer.setup();
       return;
@@ -379,10 +389,21 @@ export class ServerPlugin extends Plugin {
         staticPath,
         endpoints,
         pluginConfigs,
+        appAnalytics,
       );
 
       staticServer.setup();
     }
+  }
+
+  /**
+   * Browser options for the App Analytics build the frontend servers add to
+   * `index.html`, or `undefined` when they add none because App Analytics is
+   * turned off or App telemetry is off.
+   */
+  private getInjectedAppAnalytics(): AppAnalyticsBrowserOptions | undefined {
+    if (!shouldInjectSdk(this.config)) return undefined;
+    return appAnalyticsBrowserOptions(this.config.appAnalytics);
   }
 
   private static findStaticPath() {

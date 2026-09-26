@@ -43,6 +43,14 @@ export default defineConfig([
         to: "dist/plugins/server/remote-tunnel",
         flatten: true,
       },
+      {
+        // Self-contained App Analytics build served at /_analytics/v1/sdk.js.
+        // Built first because @databricks/app-analytics is a devDependency;
+        // the build fails if the file is missing.
+        from: "../app-analytics/dist/browser/sdk.js",
+        to: "dist/plugins/server/app-analytics",
+        flatten: true,
+      },
     ],
   },
 ]);

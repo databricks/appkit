@@ -11,6 +11,7 @@ import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { mergeConfigDedup } from "../../utils";
 import { BaseServer } from "./base-server";
 import { reactSourceLocPlugin } from "./react-source-loc-vite-plugin";
+import type { AppAnalyticsBrowserOptions } from "./types";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 const logger = createLogger("server:vite");
@@ -34,8 +35,9 @@ export class ViteDevServer extends BaseServer {
     app: express.Application,
     endpoints: PluginEndpoints = {},
     pluginConfigs: PluginClientConfigs = {},
+    appAnalytics?: AppAnalyticsBrowserOptions,
   ) {
-    super(app, endpoints, pluginConfigs);
+    super(app, endpoints, pluginConfigs, appAnalytics);
     this.vite = null;
   }
 
@@ -112,6 +114,10 @@ export class ViteDevServer extends BaseServer {
         let html = fs.readFileSync(indexPath, "utf-8");
         html = html.replace("<body>", `<body>${this.getConfigScript()}`);
         html = await vite.transformIndexHtml(req.originalUrl, html);
+        // Added after the transform: Vite would prefix the App Analytics
+        // script's src with its `base` and try, and fail, to pre-transform
+        // it as a client module. The server serves that file itself.
+        html = html.replace("<body>", `<body>${this.getAppAnalyticsScript()}`);
         res.status(200).set({ "Content-Type": "text/html" }).end(html);
       } catch (e) {
         vite.ssrFixStacktrace(e as Error);

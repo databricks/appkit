@@ -6,6 +6,9 @@ import path from "node:path";
 import pc from "picocolors";
 import type { PluginClientConfigs, PluginEndpoints } from "shared";
 
+import { APP_ANALYTICS_SDK_PATH } from "./app-analytics-relay";
+import type { AppAnalyticsBrowserOptions } from "./types";
+
 export function parseCookies(
   req: http.IncomingMessage,
 ): Record<string, string> {
@@ -141,6 +144,8 @@ interface RuntimeConfig {
   queries: Record<string, string>;
   endpoints: PluginEndpoints;
   plugins: PluginClientConfigs;
+  /** Present only when the App Analytics script tag is injected. */
+  appAnalytics?: AppAnalyticsBrowserOptions;
 }
 
 const APPKIT_CONFIG_SCRIPT_ID = "__appkit__";
@@ -162,6 +167,7 @@ const JSON_SCRIPT_ESCAPE_MAP: Record<string, string> = {
 export function getRuntimeConfig(
   endpoints: PluginEndpoints = {},
   pluginConfigs: PluginClientConfigs = {},
+  appAnalytics?: AppAnalyticsBrowserOptions,
 ): RuntimeConfig {
   const configFolder = path.join(process.cwd(), "config");
 
@@ -170,14 +176,22 @@ export function getRuntimeConfig(
     queries: getQueries(configFolder),
     endpoints,
     plugins: pluginConfigs,
+    ...(appAnalytics && { appAnalytics }),
   };
 }
 
+/**
+ * The `window.__appkit__` runtime config script for `index.html`.
+ *
+ * @param appAnalytics - Options for the auto-started App Analytics library.
+ * Pass them only when {@link getAppAnalyticsScript} adds its script tag.
+ */
 export function getConfigScript(
   endpoints: PluginEndpoints = {},
   pluginConfigs: PluginClientConfigs = {},
+  appAnalytics?: AppAnalyticsBrowserOptions,
 ): string {
-  const config = getRuntimeConfig(endpoints, pluginConfigs);
+  const config = getRuntimeConfig(endpoints, pluginConfigs, appAnalytics);
 
   return `
     <script id="${APPKIT_CONFIG_SCRIPT_ID}" type="application/json">
@@ -190,6 +204,20 @@ export function getConfigScript(
       );
     </script>
   `;
+}
+
+/**
+ * The script tag that loads the auto-starting App Analytics build, or an empty
+ * string when it isn't injected (`appAnalytics` is undefined). The build reads
+ * its options from `window.__appkit__.appAnalytics`. As a module script it
+ * runs after the document is parsed, so its position in `index.html` doesn't
+ * matter.
+ */
+export function getAppAnalyticsScript(
+  appAnalytics?: AppAnalyticsBrowserOptions,
+): string {
+  if (!appAnalytics) return "";
+  return `<script type="module" src="${APP_ANALYTICS_SDK_PATH}"></script>`;
 }
 
 function serializeRuntimeConfig(config: RuntimeConfig): string {

@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { type Counter, context, type Meter } from "@opentelemetry/api";
 import { suppressTracing } from "@opentelemetry/core";
 import express from "express";
@@ -7,11 +11,26 @@ import {
   type OtlpLogsExport,
   resolveOtlpLogsExport,
 } from "../../telemetry/otlp-logs-export";
-import { APP_ANALYTICS_PATH } from "../../utils/app-analytics-paths";
+import {
+  APP_ANALYTICS_PATH,
+  APP_ANALYTICS_SDK_PATH,
+} from "../../utils/app-analytics-paths";
+import type { AppAnalyticsBrowserOptions, ServerConfig } from "./types";
 
-export { APP_ANALYTICS_PATH };
+export { APP_ANALYTICS_PATH, APP_ANALYTICS_SDK_PATH };
 
 const logger = createLogger("server:app-analytics");
+
+/**
+ * Where the build copies `@databricks/app-analytics`'s `dist/browser/sdk.js`:
+ * next to this module, in `dist/plugins/server/app-analytics/`. The published
+ * package carries the file, so it has no npm dependency on the library.
+ */
+const DEFAULT_SDK_FILE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "app-analytics",
+  "sdk.js",
+);
 
 /**
  * Largest body the relay accepts. The browser SDK never sends more than
@@ -545,6 +564,83 @@ async function readRejectedLogRecords(
     // Only the status and counts are relayed; release the connection.
     await reader.cancel().catch(() => undefined);
   }
+}
+
+/**
+ * Whether the server adds the {@link APP_ANALYTICS_SDK_PATH} script tag to
+ * `index.html`: App Analytics isn't turned off and App telemetry is on. Without
+ * a collector the relay discards every record, so local development without
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` gets no script and no traffic.
+ */
+export function shouldInjectSdk(
+  config: Pick<ServerConfig, "appAnalytics">,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    config.appAnalytics !== false && resolveOtlpLogsEndpoint(env) !== undefined
+  );
+}
+
+/**
+ * The browser-safe part of `server({ appAnalytics })`, as it goes into
+ * `window.__appkit__.appAnalytics`. Only known options with the right type
+ * reach the page.
+ */
+export function appAnalyticsBrowserOptions(
+  appAnalytics: ServerConfig["appAnalytics"],
+): AppAnalyticsBrowserOptions {
+  const options: AppAnalyticsBrowserOptions = {};
+  if (typeof appAnalytics !== "object" || appAnalytics === null) {
+    return options;
+  }
+
+  const { autocapture, sampleRate, webVitals } = appAnalytics;
+  if (typeof webVitals === "boolean") options.webVitals = webVitals;
+  if (typeof autocapture === "boolean") options.autocapture = autocapture;
+  if (typeof sampleRate === "number" && Number.isFinite(sampleRate)) {
+    options.sampleRate = sampleRate;
+  }
+  return options;
+}
+
+/**
+ * Route handler for {@link APP_ANALYTICS_SDK_PATH}. Answers with the
+ * self-contained App Analytics build as `text/javascript`, read once from
+ * `file`, or 404 and one warning when the file is missing. The URL carries no
+ * version, so browsers revalidate it on every load.
+ *
+ * @param file - Path of the build. Defaults to the copy next to the compiled
+ * server plugin.
+ */
+export function serveSdk(
+  file: string = DEFAULT_SDK_FILE,
+): express.RequestHandler {
+  let source: Buffer | undefined;
+  let warnedMissing = false;
+
+  return (_req, res) => {
+    try {
+      source ??= fs.readFileSync(file);
+    } catch (error) {
+      if (!warnedMissing) {
+        warnedMissing = true;
+        logger.warn(
+          "Could not read the App Analytics browser build at %s (%s), so %s answers 404",
+          file,
+          error instanceof Error ? error.message : String(error),
+          APP_ANALYTICS_SDK_PATH,
+        );
+      }
+      res.status(404).end();
+      return;
+    }
+
+    res.set({
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-cache",
+    });
+    res.send(source);
+  };
 }
 
 /** The 4xx status a body-parser error carries, if any. */

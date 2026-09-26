@@ -16,13 +16,43 @@ export interface ServerConfig extends BasePluginConfig {
    */
   bodyLimit?: string;
   /**
-   * Serve the App Analytics relay at `POST /_analytics/v1/logs`, the default
-   * endpoint of the App Analytics browser library. The relay accepts OTLP logs
-   * JSON bodies up to 64 KiB and 100 records, and forwards them unchanged to
-   * the Databricks Apps OTel Collector when App telemetry is on. It counts its
-   * outcomes in the `app_analytics.relay.requests` metric. Defaults to `true`.
-   * Set to `false` to remove the route, for example to mount your own relay at
-   * another path with `server.extend()`.
+   * App Analytics, the browser usage and experience telemetry. Defaults to
+   * `true`, which does two things:
+   *
+   * - Serves the relay at `POST /_analytics/v1/logs`, the default endpoint of
+   *   the App Analytics browser library. It accepts OTLP logs JSON bodies up
+   *   to 64 KiB and 100 records, and forwards them unchanged to the
+   *   Databricks Apps OTel Collector. It counts its outcomes in the
+   *   `app_analytics.relay.requests` metric.
+   * - When App telemetry is on (`OTEL_EXPORTER_OTLP_ENDPOINT` or
+   *   `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` is set), adds a script tag for
+   *   `/_analytics/v1/sdk.js` to every `index.html` the server returns. That
+   *   build of the library starts on its own and records page views with no
+   *   client code.
+   *
+   * Pass an object to set the options of that auto-started library. Options
+   * an app passes to `<AppAnalytics />` or `appAnalytics.init()` merge over
+   * them.
+   *
+   * Set to `false` to remove both the relay and the script tag, for example
+   * to mount your own relay at another path with `server.extend()`.
    */
-  appAnalytics?: boolean;
+  appAnalytics?: boolean | AppAnalyticsBrowserOptions;
+}
+
+/**
+ * Options of the App Analytics library that the server plugin starts in the
+ * page when App telemetry is on. They reach the page through
+ * `window.__appkit__.appAnalytics`.
+ */
+export interface AppAnalyticsBrowserOptions {
+  /** Record LCP, INP, CLS, FCP, and TTFB. Defaults to `false`. */
+  webVitals?: boolean;
+  /**
+   * Record clicks and submits on elements annotated with
+   * `data-app-analytics-event`. Defaults to `false`.
+   */
+  autocapture?: boolean;
+  /** Fraction of browser sessions to collect, from 0 to 1. Defaults to `1`. */
+  sampleRate?: number;
 }
