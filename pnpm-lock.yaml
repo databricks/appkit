@@ -386,6 +386,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@databricks/app-analytics':
+        specifier: workspace:*
+        version: link:../app-analytics
       '@mlflow/core':
         specifier: 0.4.0
         version: 0.4.0

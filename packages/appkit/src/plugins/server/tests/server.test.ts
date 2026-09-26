@@ -22,6 +22,7 @@ const {
   const expressApp = {
     use: vi.fn().mockReturnThis(),
     get: vi.fn().mockReturnThis(),
+    post: vi.fn().mockReturnThis(),
     listen: vi.fn((_port: any, _host: any, cb: any) => {
       cb?.();
       return httpServer;

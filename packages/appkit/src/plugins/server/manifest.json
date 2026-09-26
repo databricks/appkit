@@ -24,6 +24,11 @@
         "staticPath": {
           "type": "string",
           "description": "Path to static files directory (auto-detected if not provided)"
+        },
+        "appAnalytics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Serve the App Analytics relay at POST /_analytics/v1/logs, which forwards browser records to the OTel Collector. Set to false to remove the route"
         }
       }
     }

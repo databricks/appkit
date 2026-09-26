@@ -14,6 +14,12 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
+import {
+  APP_ANALYTICS_PATH,
+  APP_ANALYTICS_PATH_PREFIX,
+  appAnalyticsGuard,
+  appAnalyticsRelay,
+} from "./app-analytics-relay";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
@@ -266,6 +272,19 @@ export class ServerPlugin extends Plugin {
       res.status(200).json({ status: "ok" });
     });
     this.registerEndpoint("health", "/health");
+
+    // Default endpoint of the App Analytics browser SDK. Browsers can't reach
+    // the Databricks Apps OTel Collector, which listens only on localhost, so
+    // the server relays their OTLP/HTTP JSON to it. The guard parses the body
+    // with its own, smaller limit, so the global JSON parser skips the path.
+    if (this.config.appAnalytics !== false) {
+      this.rawBodyPaths.add(APP_ANALYTICS_PATH);
+      this.serverApplication.post(
+        APP_ANALYTICS_PATH,
+        appAnalyticsGuard(),
+        appAnalyticsRelay(),
+      );
+    }
 
     for (const plugin of plugins.values()) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
@@ -541,6 +560,13 @@ export function requestMetricsMiddleware(
   res: express.Response,
   next: express.NextFunction,
 ) {
+  // App Analytics routes carry only the browser's records, so AppKit records
+  // nothing about them (they are also excluded from spans and wide events).
+  if (req.path.startsWith(APP_ANALYTICS_PATH_PREFIX)) {
+    next();
+    return;
+  }
+
   const startMs = Date.now();
   res.on("finish", () => {
     const reporter = TelemetryReporter.getInstance();

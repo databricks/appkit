@@ -21,6 +21,9 @@ const EXCLUDED_PATH_PREFIXES = [
   // Health checks
   "/health",
   "/metrics",
+
+  // App Analytics relay: carries only App Analytics records
+  "/_analytics/",
 ];
 
 /**

@@ -5,6 +5,7 @@ import { requestMetricsMiddleware } from "../index";
 
 interface FakeRequest {
   method: string;
+  path?: string;
   baseUrl?: string;
   route?: { path: string } | undefined;
 }
@@ -16,7 +17,7 @@ interface FakeResponse {
 }
 
 function makeReq(opts: FakeRequest): FakeRequest {
-  return { ...opts };
+  return { path: "/", ...opts };
 }
 
 function makeRes(statusCode = 200): FakeResponse {
@@ -100,6 +101,20 @@ describe("requestMetricsMiddleware", () => {
     res.finish();
     expect(recordSpy).not.toHaveBeenCalled();
   });
+
+  test.each(["/_analytics/v1/logs", "/_analytics/v2/other"])(
+    "does not record App Analytics requests to %s",
+    (path) => {
+      const req = makeReq({ method: "POST", path, route: { path } });
+      const res = makeRes(204);
+      const next = vi.fn();
+      requestMetricsMiddleware(req as any, res as any, next);
+      res.finish();
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(recordSpy).not.toHaveBeenCalled();
+    },
+  );
 
   test("is a no-op when the reporter is not initialized", () => {
     TelemetryReporter._reset();
