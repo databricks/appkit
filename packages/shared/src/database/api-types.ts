@@ -67,6 +67,31 @@ type SelectableOf<R, K> = keyof PublicRowOf<R, K> & string;
 type OrderFor<R, K> = Partial<Record<ApiOf<R, K>["orderable"], "asc" | "desc">>;
 
 /**
+ * Entities in `R` with a public primary key. Only these have detail, update,
+ * and delete routes; `never` while the registry is empty.
+ */
+export type KeyedEntityFor<R> = {
+  [K in DatabaseApiEntityFor<R>]: [ApiOf<R, K>["key"]] extends [never]
+    ? never
+    : K;
+}[DatabaseApiEntityFor<R>];
+
+type KeyValueOf<R, K> = PublicRowOf<R, K>[ApiOf<R, K>["key"] &
+  keyof PublicRowOf<R, K>];
+
+/**
+ * An id as a keyed route's path carries it. A bigint key reads back as its
+ * decimal string, so that string, a safe integer, or a `bigint` all address it.
+ * `Extract` keeps it a path segment even where `K` is still generic.
+ */
+export type IdFor<R, K> = Extract<
+  KeyValueOf<R, K> extends bigint
+    ? bigint | WireInput<bigint>
+    : KeyValueOf<R, K>,
+  string | number | bigint
+>;
+
+/**
  * Options for one included relation, checked against the target's own public
  * facets. Only a to-many edge takes a limit, and only the first edge nests.
  */
@@ -139,6 +164,18 @@ export type ListRowFor<R, K, P> = WireOutput<RowOf<R, K, P>>;
 /** One detail row as JSON carries it; projection follows the list rules. */
 export type RecordRowFor<R, K, P> = ListRowFor<R, K, P>;
 
+/** The body a generated create route accepts for `K`, as JSON carries it. */
+export type InsertFor<R, K> = WireInput<ApiOf<R, K>["insert"]>;
+
+/** The body a generated update route accepts for `K`, as JSON carries it. */
+export type UpdateFor<R, K> = WireInput<ApiOf<R, K>["update"]>;
+
+/**
+ * The public row a generated create or update route answers with. A read
+ * serializer never reshapes a write's response, so this is always the row.
+ */
+export type PublicRowFor<R, K> = WireOutput<PublicRowOf<R, K>>;
+
 /** The envelope a generated list route answers with. */
 export interface DatabaseListPage<Row> {
   items: Row[];
@@ -154,12 +191,17 @@ type PropertyOf<S, K extends PropertyKey> = S extends unknown
   : never;
 type ObjectPartOf<S> = Exclude<S, Primitive | readonly unknown[]>;
 type ElementOf<S> = S extends readonly (infer E)[] ? E : never;
+// A JSON column takes any JSON value, so there is no shape to hold it to.
+type ExactPropertyOf<T, S> = unknown extends S
+  ? T
+  : ExactDatabaseParams<T, NonNullable<S>>;
 
 /**
  * Turn every key `Shape` does not declare into `never`, at every depth.
  * TypeScript skips excess-property checks for an inferred generic argument,
  * so `P & ExactDatabaseParams<P, Shape>` restores them: a private or unknown
- * column beside a valid one is a compile error, not a silent 400.
+ * column beside a valid one is a compile error, not a silent 400. Write
+ * values use it too, so a spread cannot carry a read-only field along.
  */
 export type ExactDatabaseParams<T, Shape> = [Shape] extends [T]
   ? T
@@ -169,9 +211,6 @@ export type ExactDatabaseParams<T, Shape> = [Shape] extends [T]
       ? { readonly [I in keyof T]: ExactDatabaseParams<T[I], ElementOf<Shape>> }
       : {
           [K in keyof T]: K extends KeysOf<ObjectPartOf<Shape>>
-            ? ExactDatabaseParams<
-                T[K],
-                NonNullable<PropertyOf<ObjectPartOf<Shape>, K>>
-              >
+            ? ExactPropertyOf<T[K], PropertyOf<ObjectPartOf<Shape>, K>>
             : never;
         };
