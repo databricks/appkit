@@ -1,12 +1,18 @@
 import {
   type DatabaseListPage,
+  type DatabaseListQuery,
   encodeDatabaseListQuery,
   type ExactDatabaseParams,
 } from "shared";
 
 import { isDatabaseListPage } from "@/js/database/client";
+import {
+  type DatabaseApiError,
+  invalidDatabaseQuery,
+} from "@/js/database/errors";
 import type {
   DatabaseEntity,
+  DatabaseKeyedEntity,
   DatabaseListParams,
   DatabaseListRow,
 } from "@/js/database/types";
@@ -42,22 +48,43 @@ import {
  * ```
  */
 export function useDatabaseList<
+  K extends DatabaseKeyedEntity,
+  Row = DatabaseListRow<K>,
+>(
+  entity: K,
+  params?: undefined,
+  options?: DatabaseReadOptions<Row>,
+): DatabaseReadResult<DatabaseListPage<Row>>;
+export function useDatabaseList<
   K extends DatabaseEntity,
-  const P extends DatabaseListParams<K> = Record<never, never>,
+  const P extends DatabaseListParams<K>,
   Row = DatabaseListRow<K, P>,
 >(
   entity: K,
-  params?: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
-  options: DatabaseReadOptions<Row> = {},
-): DatabaseReadResult<DatabaseListPage<Row>> {
+  params: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
+  options?: DatabaseReadOptions<Row>,
+): DatabaseReadResult<DatabaseListPage<Row>>;
+export function useDatabaseList(
+  entity: string,
+  params?: DatabaseListQuery,
+  options: DatabaseReadOptions<unknown> = {},
+): DatabaseReadResult<DatabaseListPage<unknown>> {
+  const enabled = options.enabled ?? true;
+  let query: string | DatabaseApiError = "";
+  if (enabled) {
+    try {
+      query = encodeDatabaseListQuery(params ?? {});
+    } catch {
+      query = invalidDatabaseQuery();
+    }
+  }
   const read = useDatabaseRead(
     entity,
     "list",
     undefined,
-    encodeDatabaseListQuery(params ?? {}),
-    options.enabled ?? true,
+    query,
+    enabled,
     isDatabaseListPage,
   );
-  // The server projected and encoded every row; the types describe that wire.
-  return read as DatabaseReadResult<DatabaseListPage<Row>>;
+  return read as DatabaseReadResult<DatabaseListPage<unknown>>;
 }

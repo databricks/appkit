@@ -1,6 +1,10 @@
 import { encodeDatabaseRecordQuery, type ExactDatabaseParams } from "shared";
 
 import { isDatabaseRow } from "@/js/database/client";
+import {
+  type DatabaseApiError,
+  invalidDatabaseQuery,
+} from "@/js/database/errors";
 import type {
   DatabaseId,
   DatabaseKeyedEntity,
@@ -46,12 +50,21 @@ export function useDatabaseRecord<
   params?: P & ExactDatabaseParams<P, DatabaseRecordParams<K>>,
   options: DatabaseReadOptions<Row> = {},
 ): DatabaseReadResult<Row> {
+  const enabled = (options.enabled ?? true) && id !== null && id !== undefined;
+  let query: string | DatabaseApiError = "";
+  if (enabled) {
+    try {
+      query = encodeDatabaseRecordQuery(params ?? {});
+    } catch {
+      query = invalidDatabaseQuery();
+    }
+  }
   const read = useDatabaseRead(
     entity,
     "detail",
     id ?? undefined,
-    encodeDatabaseRecordQuery(params ?? {}),
-    (options.enabled ?? true) && id !== null && id !== undefined,
+    query,
+    enabled,
     isDatabaseRow,
   );
   // The server projected and encoded the row; the types describe that wire.

@@ -168,6 +168,10 @@ test("read hooks type entities, params, and rows from the generated registry", (
       const gated = useDatabaseList("posts", { where: { id: 1 } }, { enabled: false });
       const gatedTitle: string | undefined = gated.data?.items[0]?.title;
       useDatabaseList("sessions", { order: { user_slug: "asc" } });
+      // @ts-expect-error a keyless list needs an explicit order
+      useDatabaseList("sessions");
+      // @ts-expect-error keyless lists cannot sort by zero columns
+      useDatabaseList("sessions", { order: {} });
       useDatabaseList("posts", { where: { total: { gt: "9007199254740993" } } });
       void [title, total, failed, owner, bodies, deep, gatedTitle];
     }

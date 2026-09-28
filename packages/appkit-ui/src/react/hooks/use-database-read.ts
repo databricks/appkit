@@ -84,12 +84,13 @@ export function useDatabaseRead(
   entity: string,
   operation: Extract<DatabaseOperation, "list" | "detail">,
   id: IdLike | undefined,
-  query: string,
+  query: string | DatabaseApiError,
   enabled: boolean,
   accept: (body: unknown) => body is object,
 ): DatabaseReadResult<unknown> {
   const route = useMemo((): Route => {
     if (!enabled) return null;
+    if (query instanceof DatabaseApiError) return { error: query };
     try {
       return { url: resolveDatabaseUrl(entity, operation, id, query) };
     } catch (error) {

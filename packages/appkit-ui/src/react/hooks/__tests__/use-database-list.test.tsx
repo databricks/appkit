@@ -163,6 +163,34 @@ describe("useDatabaseList", () => {
     expect(result.current.loading).toBe(true);
   });
 
+  test("does not encode an incomplete filter while disabled", () => {
+    const { rerender } = renderHook(
+      ({ boardId }: { boardId: number | undefined }) =>
+        useDatabaseList(
+          "notes",
+          { where: { board_id: boardId } },
+          { enabled: boardId !== undefined },
+        ),
+      { initialProps: { boardId: undefined as number | undefined } },
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    rerender({ boardId: 7 });
+    expect(requests[0]?.url).toContain("board_id%22%3A7");
+  });
+
+  test("reports an incomplete enabled filter without sending a request", () => {
+    const { result } = renderHook(() =>
+      useDatabaseList("notes", { where: { board_id: undefined } }),
+    );
+
+    expect(result.current.error).toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("refetch aborts the in-flight request, sends it again, and keeps the last page visible", async () => {
     const { result } = renderHook(() => useDatabaseList("notes"));
     await act(async () => requests[0]?.respond(page({ id: 1 })));
