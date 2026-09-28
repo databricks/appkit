@@ -16,7 +16,7 @@
       ]
     },
     "packages/appkit-ui": {
-      "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
+      "ignoreDependencies": ["tailwindcss", "tw-animate-css", "web-vitals"]
     },
     "packages/app-analytics": {
       "entry": ["src/tests/**/*.test.{ts,tsx}"],

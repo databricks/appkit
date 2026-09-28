@@ -11,6 +11,7 @@ import {
   LineChartIcon,
   type LucideIcon,
   MessageCircleIcon,
+  MousePointerClickIcon,
   RadioIcon,
   SearchIcon,
   ServerIcon,
@@ -179,6 +180,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "OpenTelemetry traces and metrics with a drop-in AppKit provider.",
         icon: GaugeIcon,
+      },
+      {
+        to: "/app-analytics",
+        label: "App Analytics",
+        description:
+          "Browser page views, actions, and Web Vitals relayed to the OTel Collector with <AppAnalytics />.",
+        icon: MousePointerClickIcon,
       },
       {
         to: "/reconnect",

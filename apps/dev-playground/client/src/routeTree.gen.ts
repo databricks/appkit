@@ -27,6 +27,7 @@ import { Route as DatabaseRouteRouteImport } from './routes/database.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
+import { Route as AppAnalyticsRouteRouteImport } from './routes/app-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as AiSearchRouteRouteImport } from './routes/ai-search.route'
 import { Route as AgentRouteRouteImport } from './routes/agent.route'
@@ -122,6 +123,11 @@ const ArrowAnalyticsRouteRoute = ArrowAnalyticsRouteRouteImport.update({
   path: '/arrow-analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppAnalyticsRouteRoute = AppAnalyticsRouteRouteImport.update({
+  id: '/app-analytics',
+  path: '/app-analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/agent': typeof AgentRouteRoute
   '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/app-analytics': typeof AppAnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
@@ -172,6 +179,7 @@ export interface FileRoutesByTo {
   '/agent': typeof AgentRouteRoute
   '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/app-analytics': typeof AppAnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
@@ -197,6 +205,7 @@ export interface FileRoutesById {
   '/agent': typeof AgentRouteRoute
   '/ai-search': typeof AiSearchRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/app-analytics': typeof AppAnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
@@ -223,6 +232,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/ai-search'
     | '/analytics'
+    | '/app-analytics'
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
@@ -247,6 +257,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/ai-search'
     | '/analytics'
+    | '/app-analytics'
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
@@ -271,6 +282,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/ai-search'
     | '/analytics'
+    | '/app-analytics'
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
@@ -296,6 +308,7 @@ export interface RootRouteChildren {
   AgentRouteRoute: typeof AgentRouteRoute
   AiSearchRouteRoute: typeof AiSearchRouteRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
+  AppAnalyticsRouteRoute: typeof AppAnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
@@ -444,6 +457,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ArrowAnalyticsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app-analytics': {
+      id: '/app-analytics'
+      path: '/app-analytics'
+      fullPath: '/app-analytics'
+      preLoaderRoute: typeof AppAnalyticsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/analytics': {
       id: '/analytics'
       path: '/analytics'
@@ -480,6 +500,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentRouteRoute: AgentRouteRoute,
   AiSearchRouteRoute: AiSearchRouteRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
+  AppAnalyticsRouteRoute: AppAnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,

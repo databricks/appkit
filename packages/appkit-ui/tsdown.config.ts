@@ -32,10 +32,18 @@ export default defineConfig([
     hash: false,
     unbundle: true,
     format: "esm",
-    noExternal: ["shared"],
+    noExternal: ["shared", /^@databricks\/app-analytics(\/|$)/],
     external: (id) => {
       // Bundle "shared" workspace package and @/ path aliases
       if (id === "shared" || id.startsWith("shared/")) return false;
+      // Carry App Analytics inline until @databricks/app-analytics is
+      // published on its own; dist-appkit.ts drops the workspace dependency.
+      if (
+        id === "@databricks/app-analytics" ||
+        id.startsWith("@databricks/app-analytics/")
+      ) {
+        return false;
+      }
       if (id.startsWith("@/")) return false;
       return /^[^./]/.test(id) || id.includes("/node_modules/");
     },

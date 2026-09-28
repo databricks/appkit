@@ -291,9 +291,14 @@ events, removes browser observers, and drops later events until the next
 
 ## Multiple clients
 
-`appAnalytics` is shared by every copy of the package in the tab, including a
-copy bundled into another package. Create a client when a test or isolated
-runtime needs its own endpoint and lifecycle:
+`appAnalytics` is the tab-wide default client. Importing the package creates
+nothing: the client is built on first use and registered on `globalThis`, so
+every copy of the package loaded in the tab (for example the one bundled into
+`@databricks/appkit-ui` and one installed directly) configures and records
+through the same client.
+
+Create a separate client when a test or isolated runtime needs its own endpoint
+and lifecycle:
 
 ```ts
 import { createAppAnalytics } from "@databricks/app-analytics";
