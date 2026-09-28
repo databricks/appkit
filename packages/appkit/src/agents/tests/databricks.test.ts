@@ -2,6 +2,7 @@ import type { AgentEvent, AgentToolDefinition, Message } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  adapterFromModelString,
   DatabricksAdapter,
   type GenerationParams,
   parseTextToolCalls,
@@ -1208,6 +1209,100 @@ describe("DatabricksAdapter.fromModelServing", () => {
     expect(requestArgs.path).toBe(
       "/serving-endpoints/explicit-model/invocations",
     );
+  });
+});
+
+describe("DatabricksAdapter.fromAiGateway", () => {
+  test("routes to the gateway path with `model` in the request body", async () => {
+    const apiClient = {
+      request: vi.fn().mockResolvedValue({
+        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+      }),
+    };
+
+    const adapter = await DatabricksAdapter.fromAiGateway({
+      model: "system.ai.claude-opus-5-5",
+      workspaceClient: { apiClient },
+    });
+
+    for await (const _ of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [requestArgs] = apiClient.request.mock.calls[0];
+    expect(requestArgs.path).toBe("/ai-gateway/mlflow/v1/chat/completions");
+    expect(requestArgs.method).toBe("POST");
+    expect(requestArgs.raw).toBe(true);
+    expect(requestArgs.payload.model).toBe("system.ai.claude-opus-5-5");
+    expect(requestArgs.payload.stream).toBe(true);
+  });
+
+  test("serving-endpoint path leaves `model` out of the body (non-breaking)", async () => {
+    const apiClient = {
+      request: vi.fn().mockResolvedValue({
+        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+      }),
+    };
+
+    const adapter = await DatabricksAdapter.fromServingEndpoint({
+      workspaceClient: { apiClient },
+      endpointName: "my-model",
+    });
+
+    for await (const _ of adapter.run(
+      { messages: createTestMessages(), tools: [], threadId: "t1" },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [requestArgs] = apiClient.request.mock.calls[0];
+    expect(requestArgs.payload.model).toBeUndefined();
+  });
+});
+
+describe("adapterFromModelString", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("routes `system.*` model names to the AI Gateway", async () => {
+    const gateway = vi
+      .spyOn(DatabricksAdapter, "fromAiGateway")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+    const serving = vi
+      .spyOn(DatabricksAdapter, "fromModelServing")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+
+    await adapterFromModelString("system.ai.claude-opus-5-5", {
+      maxTokens: 128,
+    });
+
+    expect(gateway).toHaveBeenCalledWith({
+      model: "system.ai.claude-opus-5-5",
+      maxTokens: 128,
+    });
+    expect(serving).not.toHaveBeenCalled();
+  });
+
+  test("routes non-`system` names to Model Serving", async () => {
+    const gateway = vi
+      .spyOn(DatabricksAdapter, "fromAiGateway")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+    const serving = vi
+      .spyOn(DatabricksAdapter, "fromModelServing")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+
+    await adapterFromModelString("databricks-claude-sonnet-4-5");
+
+    expect(serving).toHaveBeenCalledWith(
+      "databricks-claude-sonnet-4-5",
+      undefined,
+    );
+    expect(gateway).not.toHaveBeenCalled();
   });
 });
 

@@ -544,7 +544,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     def: AgentDefinition,
     name: string,
   ): Promise<AgentAdapter> {
-    const source = def.model ?? this.config.defaultModel;
+    // Explicit model (adapter or string) wins; otherwise fall back to the
+    // DATABRICKS_SERVING_ENDPOINT_NAME env default. A string from any source
+    // routes by name in `adapterFromModelString` (system.* → AI Gateway,
+    // everything else → Model Serving).
+    const source =
+      def.model ??
+      this.config.defaultModel ??
+      process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
     // Per-agent adapter knobs from `AgentDefinition` / markdown frontmatter.
     // Only applied when AppKit builds the adapter itself (string or omitted
     // model). Users who pass a pre-built `AgentAdapter` own these settings.
@@ -559,22 +566,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       adapterOptions.generationParams = def.generationParams;
 
     if (!source) {
-      const { DatabricksAdapter } = await import("../../agents/databricks");
-      try {
-        return await DatabricksAdapter.fromModelServing(
-          undefined,
-          adapterOptions,
-        );
-      } catch (err) {
-        throw new Error(
-          `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
-          { cause: err instanceof Error ? err : undefined },
-        );
-      }
+      throw new Error(
+        `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
+      );
     }
     if (typeof source === "string") {
-      const { DatabricksAdapter } = await import("../../agents/databricks");
-      return DatabricksAdapter.fromModelServing(source, adapterOptions);
+      const { adapterFromModelString } =
+        await import("../../agents/databricks");
+      return adapterFromModelString(source, adapterOptions);
     }
     return await source;
   }

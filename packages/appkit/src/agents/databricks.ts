@@ -9,6 +9,7 @@ import type {
 import {
   type StreamBody,
   stream as servingStream,
+  streamAiGateway,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
 import { createWorkspaceClient } from "../workspace-client";
@@ -128,6 +129,12 @@ interface RawFetchAdapterOptions {
   authenticate: () => Promise<Record<string, string>>;
   maxSteps?: number;
   maxTokens?: number;
+  /**
+   * When set, sent in the request body as `model`. Required by the AI Gateway,
+   * which routes by the body's `model` (not the URL). Serving-endpoint paths
+   * name the model in the URL and leave this unset.
+   */
+  model?: string;
   /** Optional generation params forwarded to the serving request body. */
   generationParams?: GenerationParams;
   /** Max length of one SSE line (including an incomplete tail in the buffer). */
@@ -148,6 +155,8 @@ interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
   maxSteps?: number;
   maxTokens?: number;
+  /** See {@link RawFetchAdapterOptions.model}. Set by {@link DatabricksAdapter.fromAiGateway}. */
+  model?: string;
   generationParams?: GenerationParams;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
@@ -193,6 +202,27 @@ interface ModelServingOptions {
   maxTokens?: number;
   generationParams?: GenerationParams;
   workspaceClient?: WorkspaceClientLike;
+  maxSseLineChars?: number;
+  maxStreamTextChars?: number;
+  maxToolArgumentsChars?: number;
+}
+
+interface AiGatewayOptions {
+  /**
+   * Model to name in the request body, e.g. `"system.ai.claude-opus-5-5"`.
+   * The gateway routes by this value; there is no per-endpoint URL.
+   */
+  model: string;
+  /**
+   * Pre-built WorkspaceClient (or structural equivalent). When omitted, one
+   * is created from the ambient client options (SDK credential chain). It is
+   * captured once and reused across requests — do not pass a per-request OBO
+   * client (it would leak the first request's identity into later ones).
+   */
+  workspaceClient?: WorkspaceClientLike;
+  maxSteps?: number;
+  maxTokens?: number;
+  generationParams?: GenerationParams;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
   maxToolArgumentsChars?: number;
@@ -286,6 +316,8 @@ export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
   private maxSteps: number;
   private maxTokens: number;
+  /** UC model name sent in the request body (AI Gateway); unset for serving endpoints. */
+  private model?: string;
   private generationParams: GenerationParams;
   private maxSseLineChars: number;
   private maxStreamTextChars: number;
@@ -294,6 +326,7 @@ export class DatabricksAdapter implements AgentAdapter {
   constructor(options: DatabricksAdapterOptions) {
     this.maxSteps = options.maxSteps ?? 10;
     this.maxTokens = options.maxTokens ?? 4096;
+    this.model = options.model;
     this.generationParams = options.generationParams ?? {};
     this.maxSseLineChars =
       options.maxSseLineChars ?? DEFAULT_MAX_SSE_LINE_CHARS;
@@ -424,6 +457,80 @@ export class DatabricksAdapter implements AgentAdapter {
       maxSseLineChars: options?.maxSseLineChars,
       maxStreamTextChars: options?.maxStreamTextChars,
       maxToolArgumentsChars: options?.maxToolArgumentsChars,
+    });
+  }
+
+  /**
+   * Creates a DatabricksAdapter that talks to the Databricks AI Gateway
+   * Chat Completions endpoint (`/ai-gateway/mlflow/v1/chat/completions`).
+   *
+   * Unlike {@link fromModelServing}, the target model is named in the request
+   * body (`model`, e.g. `"system.ai.claude-opus-5-5"`) rather than in the URL:
+   * the gateway is a single fixed path that routes by the body's `model`. Auth
+   * and transport reuse the SDK's `apiClient.request`, same as the serving
+   * path, so no bespoke `fetch()` + token handling. The request/response wire
+   * format and tool-calling loop are identical to the serving path.
+   *
+   * @example
+   * ```ts
+   * import { createApp, createAgent } from "@databricks/appkit";
+   * import { agents, DatabricksAdapter } from "@databricks/appkit/beta";
+   *
+   * const adapter = await DatabricksAdapter.fromAiGateway({
+   *   model: "system.ai.claude-opus-5-5",
+   * });
+   *
+   * await createApp({
+   *   plugins: [
+   *     agents({
+   *       agents: {
+   *         assistant: createAgent({
+   *           instructions: "You are a helpful assistant.",
+   *           model: adapter,
+   *         }),
+   *       },
+   *     }),
+   *   ],
+   * });
+   * ```
+   */
+  static async fromAiGateway(
+    options: AiGatewayOptions,
+  ): Promise<DatabricksAdapter> {
+    const {
+      model,
+      workspaceClient,
+      maxSteps,
+      maxTokens,
+      generationParams,
+      maxSseLineChars,
+      maxStreamTextChars,
+      maxToolArgumentsChars,
+    } = options;
+
+    const client =
+      workspaceClient ??
+      (createWorkspaceClient({
+        clientOptions: getClientOptions(),
+      }) as unknown as WorkspaceClientLike);
+
+    return new DatabricksAdapter({
+      streamBody: (body, signal) =>
+        // Same structural cast as `fromServingEndpoint`: the connector types
+        // the client as the SDK's `WorkspaceClient`, but we only need
+        // `apiClient.request`.
+        streamAiGateway(
+          client as unknown as Parameters<typeof streamAiGateway>[0],
+          body,
+          signal,
+        ),
+      model,
+      maxSteps,
+      maxTokens,
+      generationParams,
+      maxSseLineChars,
+      maxStreamTextChars,
+      maxToolArgumentsChars,
     });
   }
 
@@ -573,6 +680,10 @@ export class DatabricksAdapter implements AgentAdapter {
       stream: true,
       max_tokens: this.maxTokens,
     };
+
+    // AI Gateway routes by the body's `model`; serving endpoints name it in
+    // the URL and leave this unset.
+    if (this.model) body.model = this.model;
 
     applyGenerationParams(body, this.generationParams);
 
@@ -841,6 +952,42 @@ export class DatabricksAdapter implements AgentAdapter {
       },
     }));
   }
+}
+
+/**
+ * Adapter knobs an agent definition contributes to string-model resolution.
+ * A subset of {@link AiGatewayOptions} / {@link ModelServingOptions} — the two
+ * factories accept the same fields, so one object routes to either.
+ */
+type ModelStringOptions = Pick<
+  AiGatewayOptions,
+  "maxSteps" | "maxTokens" | "generationParams"
+>;
+
+/**
+ * Resolves a string `model` to a {@link DatabricksAdapter}, routing by name:
+ *
+ * - UC model names (`system.*`, e.g. `"system.ai.claude-opus-5-5"`) → AI
+ *   Gateway ({@link DatabricksAdapter.fromAiGateway}); the model is named in
+ *   the request body.
+ * - Everything else — serving-endpoint names like
+ *   `"databricks-claude-sonnet-4-5"` or a custom endpoint → Model Serving
+ *   ({@link DatabricksAdapter.fromModelServing}); the name goes in the URL.
+ *
+ * Serving-endpoint names are `[a-zA-Z0-9_-]` (no dots), so the `system.`
+ * prefix cleanly separates the two namespaces and no existing endpoint name
+ * changes routing. This is the single decision point shared by the agents
+ * plugin and standalone `runAgent`, so the two never drift. To force a
+ * `system.*` name onto a serving endpoint instead, pass a pre-built adapter
+ * (`DatabricksAdapter.fromServingEndpoint(...)`) as the agent's `model`.
+ */
+export function adapterFromModelString(
+  model: string,
+  options?: ModelStringOptions,
+): Promise<DatabricksAdapter> {
+  return model.startsWith("system.")
+    ? DatabricksAdapter.fromAiGateway({ model, ...options })
+    : DatabricksAdapter.fromModelServing(model, options);
 }
 
 // ---------------------------------------------------------------------------

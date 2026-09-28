@@ -1,5 +1,5 @@
 ---
-endpoint: databricks-gemini-3-1-flash-lite
+endpoint:  system.ai.gemini-3-5-flash-lite
 maxSteps: 1
 ephemeral: true
 ---

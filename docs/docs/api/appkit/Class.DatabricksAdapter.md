@@ -88,6 +88,58 @@ run(input: AgentInput, context: AgentRunContext): AsyncGenerator<AgentEvent, voi
 
 ***
 
+### fromAiGateway()
+
+```ts
+static fromAiGateway(options: AiGatewayOptions): Promise<DatabricksAdapter>;
+```
+
+Creates a DatabricksAdapter that talks to the Databricks AI Gateway
+Chat Completions endpoint (`/ai-gateway/mlflow/v1/chat/completions`).
+
+Unlike [fromModelServing](#frommodelserving), the target model is named in the request
+body (`model`, e.g. `"system.ai.claude-opus-5-5"`) rather than in the URL:
+the gateway is a single fixed path that routes by the body's `model`. Auth
+and transport reuse the SDK's `apiClient.request`, same as the serving
+path, so no bespoke `fetch()` + token handling. The request/response wire
+format and tool-calling loop are identical to the serving path.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | `AiGatewayOptions` |
+
+#### Returns
+
+`Promise`\<`DatabricksAdapter`\>
+
+#### Example
+
+```ts
+import { createApp, createAgent } from "@databricks/appkit";
+import { agents, DatabricksAdapter } from "@databricks/appkit/beta";
+
+const adapter = await DatabricksAdapter.fromAiGateway({
+  model: "system.ai.claude-opus-5-5",
+});
+
+await createApp({
+  plugins: [
+    agents({
+      agents: {
+        assistant: createAgent({
+          instructions: "You are a helpful assistant.",
+          model: adapter,
+        }),
+      },
+    }),
+  ],
+});
+```
+
+***
+
 ### fromModelServing()
 
 ```ts
