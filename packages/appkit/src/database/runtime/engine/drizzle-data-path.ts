@@ -159,21 +159,23 @@ function upsertUpdateValues(
 // nested `cause` rather than the thrown error. Walk a bounded chain to find it.
 const MAX_CAUSE_DEPTH = 5;
 
-// These SQLSTATE classes describe the connection, the credentials, or schema
-// objects, so the server's text names identifiers rather than row values:
-// 08 connection, 28 authorization, 3D catalog, 3F schema, 42 undefined objects
-// and privileges, 53 resources, 57 operator intervention. Data (22),
-// constraint (23), and PL/pgSQL (P0) text can echo values and is never logged.
-const DESCRIBED_SQLSTATE_CLASSES = new Set([
-  "08",
-  "28",
-  "3D",
-  "3F",
-  "42",
-  "53",
-  "57",
+// Even schema and authorization errors can carry values in message/detail/hint.
+// Admit only the exact identifier-only forms needed to diagnose schema drift.
+const SAFE_COLUMN_ERROR =
+  /^column (?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]* does not exist$/;
+const SAFE_RELATION_ERROR =
+  /^relation "[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?" does not exist$/;
+const SAFE_DNS_ERROR = /^getaddrinfo ENOTFOUND [A-Za-z0-9.-]+$/;
+const MAX_DIAGNOSTIC_LENGTH = 200;
+const SYSTEM_ERROR_CODES = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
 ]);
-const MAX_DIAGNOSTIC_LENGTH = 500;
 
 interface DriverFailure {
   readonly sqlState?: string;
@@ -181,17 +183,21 @@ interface DriverFailure {
   readonly diagnostic?: string;
 }
 
-/** Read the driver's own message, detail, and hint, never a wrapper's. */
-function driverText(carrier: object): string | undefined {
+/** Never log unvalidated driver text, even for an otherwise known SQLSTATE. */
+function safeDriverText(carrier: object, code: string): string | undefined {
   try {
-    const parts = ["message", "detail", "hint"]
-      .map((key) => Reflect.get(carrier, key))
-      .filter(
-        (part): part is string => typeof part === "string" && part !== "",
-      );
-    return parts.length > 0
-      ? parts.join(" ").slice(0, MAX_DIAGNOSTIC_LENGTH)
-      : undefined;
+    const message = Reflect.get(carrier, "message");
+    if (typeof message !== "string" || message.length > MAX_DIAGNOSTIC_LENGTH)
+      return undefined;
+    if (code === "42703" && SAFE_COLUMN_ERROR.test(message)) return message;
+    if (code === "42P01" && SAFE_RELATION_ERROR.test(message)) return message;
+    if (
+      code === "ENOTFOUND" &&
+      Reflect.get(carrier, "syscall") === "getaddrinfo" &&
+      SAFE_DNS_ERROR.test(message)
+    )
+      return message;
+    return undefined;
   } catch {
     return undefined;
   }
@@ -203,21 +209,19 @@ function driverFailureOf(error: unknown): DriverFailure {
     if (!current || typeof current !== "object") return {};
     try {
       const candidate = Reflect.get(current, "code");
-      // Node system errors (ECONNREFUSED, ENOTFOUND) name the host, not data.
+      // Node system errors are untrusted too; only a well-formed DNS host is safe.
       if (
         typeof candidate === "string" &&
-        /^E[A-Z]+$/.test(candidate) &&
+        SYSTEM_ERROR_CODES.has(candidate) &&
         typeof Reflect.get(current, "syscall") === "string"
       ) {
-        return { diagnostic: driverText(current) };
+        return { diagnostic: safeDriverText(current, candidate) ?? candidate };
       }
       // SQLSTATE is always a five-character alphanumeric class code.
       if (typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate)) {
         return {
           sqlState: candidate,
-          diagnostic: DESCRIBED_SQLSTATE_CLASSES.has(candidate.slice(0, 2))
-            ? driverText(current)
-            : undefined,
+          diagnostic: safeDriverText(current, candidate),
         };
       }
       current = Reflect.get(current, "cause");
@@ -230,7 +234,7 @@ function driverFailureOf(error: unknown): DriverFailure {
 
 /**
  * Classify SQLSTATE without retaining the driver error or its properties.
- * Described classes add the driver's text to the server log only.
+ * Only allowlisted identifier-only messages enter the server log.
  */
 function classifyDriverError(error: unknown): DatabasePluginError {
   const { sqlState: code, diagnostic } = driverFailureOf(error);

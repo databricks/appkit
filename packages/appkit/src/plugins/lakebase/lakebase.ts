@@ -11,7 +11,7 @@ import {
   type LakebasePool,
   type LakebasePoolManager,
   RoutingPool,
-  warnOnEndpointHostMismatch,
+  assertEndpointHostMatches,
 } from "../../connectors/lakebase";
 import { getClientOptions } from "../../context/client-options";
 import { getUserContext } from "../../context/execution-context";
@@ -92,7 +92,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     };
     const [user] = await Promise.all([
       getUsernameWithApiLookup(poolConfig),
-      warnOnEndpointHostMismatch(poolConfig),
+      assertEndpointHostMatches(poolConfig),
     ]);
 
     const spPool = createLakebasePool({ ...poolConfig, user });

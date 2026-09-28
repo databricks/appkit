@@ -15,15 +15,32 @@ const schema = defineSchema(({ table }) => {
   return { boards, notes };
 });
 
-type CatalogRow = { table_name: string; column_name: string | null };
+type CatalogRow = {
+  table_name: string;
+  column_name: string | null;
+  relation_kind: string;
+};
 
 /** Answer the catalog query with the given tables and columns. */
-function catalog(tables: Record<string, string[]>) {
+function catalog(
+  tables: Record<string, string[]>,
+  kinds: Record<string, string> = {},
+) {
   const rows: CatalogRow[] = Object.entries(tables).flatMap(
     ([name, columns]): CatalogRow[] =>
       columns.length === 0
-        ? [{ table_name: name, column_name: null }]
-        : columns.map((column) => ({ table_name: name, column_name: column })),
+        ? [
+            {
+              table_name: name,
+              column_name: null,
+              relation_kind: kinds[name] ?? "r",
+            },
+          ]
+        : columns.map((column) => ({
+            table_name: name,
+            column_name: column,
+            relation_kind: kinds[name] ?? "r",
+          })),
   );
   const raw = vi.fn(async () => rows);
   return { raw, path: { raw } as unknown as DataPath };
@@ -77,6 +94,27 @@ describe("assertSchemaMatchesDatabase", () => {
     );
   });
 
+  test.each([
+    ["v", "view"],
+    ["m", "materialized view"],
+    ["f", "foreign table"],
+  ])(
+    "rejects %s as a CRUD table even when all columns exist",
+    async (kind, description) => {
+      const { path } = catalog(
+        {
+          boards: ["id", "title"],
+          notes: ["id", "board_id", "author_email", "body"],
+        },
+        { boards: kind },
+      );
+
+      await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
+        `public.boards is a ${description}, not a table`,
+      );
+    },
+  );
+
   test("passes the schema and table names as parameter values", async () => {
     const scoped = defineSchema(
       ({ table }) => ({ tags: table("tags", { id: id() }) }),
@@ -92,6 +130,7 @@ describe("assertSchemaMatchesDatabase", () => {
       ...unknown[],
     ];
     expect(strings.join("?")).toContain("pg_catalog.pg_attribute");
+    expect(strings.join("?")).toContain("c.relkind::text as relation_kind");
     expect(values).toEqual(["playground", ["tags"]]);
   });
 

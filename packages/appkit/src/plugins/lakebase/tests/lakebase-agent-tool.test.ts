@@ -1,3 +1,4 @@
+import type { LakebasePoolConfig } from "@databricks/lakebase";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 /**
  * Tests the agent-tool surface of the Lakebase plugin.
@@ -104,6 +105,55 @@ describe("LakebasePlugin — agent tool opt-in", () => {
       requiresUserContext: true,
     });
   });
+});
+
+test("LakebasePlugin rejects a confirmed host mismatch before creating either pool", async () => {
+  const { createLakebasePool, createLakebasePoolManager } =
+    await import("../../../connectors/lakebase");
+  vi.mocked(createLakebasePool).mockClear();
+  vi.mocked(createLakebasePoolManager).mockClear();
+  const request = vi.fn(async () => ({
+    status: { hosts: { host: "ep-expected.database.example.com" } },
+  }));
+  const workspaceClient = { apiClient: { request } } as unknown as NonNullable<
+    LakebasePoolConfig["workspaceClient"]
+  >;
+  const plugin = makePlugin({
+    pool: {
+      endpoint: "projects/plugin/branches/test/endpoints/primary",
+      host: "ep-other.database.example.com",
+      workspaceClient,
+    },
+  });
+
+  await expect(plugin.setup()).rejects.toThrow(
+    "ep-expected.database.example.com",
+  );
+  expect(createLakebasePool).not.toHaveBeenCalled();
+  expect(createLakebasePoolManager).not.toHaveBeenCalled();
+});
+
+test("LakebasePlugin permits a separate host when using native password authentication", async () => {
+  const { createLakebasePool } = await import("../../../connectors/lakebase");
+  const request = vi.fn(async () => ({
+    status: { hosts: { host: "ep-expected.database.example.com" } },
+  }));
+  const workspaceClient = { apiClient: { request } } as unknown as NonNullable<
+    LakebasePoolConfig["workspaceClient"]
+  >;
+  const plugin = makePlugin({
+    pool: {
+      user: "native-user",
+      password: "test-only-password",
+      endpoint: "projects/native/branches/test/endpoints/primary",
+      host: "ep-native.database.example.com",
+      workspaceClient,
+    },
+  });
+
+  await expect(plugin.setup()).resolves.toBeUndefined();
+  expect(request).not.toHaveBeenCalled();
+  expect(createLakebasePool).toHaveBeenCalled();
 });
 
 describe("LakebasePlugin — readOnly enforcement", () => {

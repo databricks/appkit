@@ -221,7 +221,8 @@ export async function createDatabaseState<TSchema extends Schema>(
       logger.error("%s", error.message);
       throw error;
     }
-    logger.error("Database setup failed: %O", error);
+    // Unknown driver and SDK errors may carry SQL, parameters, and credentials.
+    logger.error("Database setup failed (connector or driver error)");
     throw new DatabasePluginError("SETUP_FAILED", "setup");
   }
 }
