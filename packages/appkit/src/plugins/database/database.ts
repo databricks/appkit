@@ -129,12 +129,14 @@ export class DatabasePlugin<
         runRouteSpan: (operation, route, run) =>
           this.runRouteSpan(table.name, operation, route, run),
       };
-      this.route(router, {
-        name: `${table.name}.list`,
-        method: "get",
-        path: `/${table.name}`,
-        handler: createListHandler(deps),
-      });
+      if (table.primaryKey || table.queryable.size > 0) {
+        this.route(router, {
+          name: `${table.name}.list`,
+          method: "get",
+          path: `/${table.name}`,
+          handler: createListHandler(deps),
+        });
+      }
       const writes = this.exposure.writes.get(table.name);
       if (writes?.has("create")) {
         this.route(router, {

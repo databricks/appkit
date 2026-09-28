@@ -1,8 +1,8 @@
 import { DatabasePluginError } from "../../../database/errors";
 import type { Row } from "../../../database/runtime";
 import type { AppKitTable } from "../../../database/schema-builder";
-import { filterOperatorsForKind } from "../../../database/schema-builder/types";
 import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../defaults";
+import { columnHttpCapabilities } from "./capabilities";
 import { type CompiledColumn, compileColumn, type JsonValue } from "./codecs";
 
 /** One relation edge wired to the contract of its target table. */
@@ -191,23 +191,13 @@ function compileTable(table: AppKitTable): MutableCrudTable {
   for (const meta of Object.values(table.$columns)) {
     const column = compileColumn(meta);
     columns.set(meta.columnName, column);
-    // A private key must not power `GET /:table/:id`: per-id probing would
-    // answer 200 or 404 on an identifier the schema hides, so over HTTP the
-    // table is keyless — no detail route, and lists must name their own order.
-    if (meta.primaryKey && !meta.isPrivate) primaryKey = column;
-    if (meta.isPrivate) continue;
-    selectable.add(meta.columnName);
-    if (filterOperatorsForKind(meta.kind).length > 0) {
-      queryable.add(meta.columnName);
-    }
-    // Database-generated identities belong to the server, never the caller.
-    if (meta.serverGenerated || (meta.primaryKey && meta.defaultRandom))
-      continue;
-    creatable.add(meta.columnName);
-    // Rewriting a key would move a row out from under every existing reference,
-    // and rewriting a database-materialized stamp would rewrite history.
-    if (meta.primaryKey || meta.defaultNow || meta.defaultRandom) continue;
-    updatable.add(meta.columnName);
+    // Type generation reads the same predicates for the browser's types.
+    const can = columnHttpCapabilities(meta);
+    if (can.publicKey) primaryKey = column;
+    if (can.selectable) selectable.add(meta.columnName);
+    if (can.queryable) queryable.add(meta.columnName);
+    if (can.creatable) creatable.add(meta.columnName);
+    if (can.updatable) updatable.add(meta.columnName);
   }
 
   const compiled: MutableCrudTable = {
