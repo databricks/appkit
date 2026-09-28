@@ -75,8 +75,10 @@ With the server plugin enabled, this registers:
 | PATCH | `/api/database/notes/:id` | Update a row |
 | DELETE | `/api/database/notes/:id` | Delete a row |
 
-A table without a public primary key supports list and create only. `upsert` is
-available to server code but has no generated HTTP route.
+A table without a public primary key supports create and, if it has a sortable
+public column, list with an explicit non-empty `order`. A keyless table with no
+sortable columns has no list route. `upsert` is available to server code but has
+no generated HTTP route.
 
 ## Schema discovery and overrides
 
@@ -238,9 +240,9 @@ the page can call the same routes.
 
 Run `appkit generate-types` or use the AppKit Vite plugin to write
 `shared/appkit-types/database.d.ts`, and include it in the client's TypeScript
-project. The file binds one set of table entries to both `@databricks/appkit`
-and `@databricks/appkit-ui/js/beta`. Until it exists, every entity name is a
-type error.
+project. It binds the server registry and a shared global interface used by
+`@databricks/appkit-ui/js/beta`; server-only apps do not need the UI package or
+`skipLibCheck`. Until the file exists, every entity name is a type error.
 
 The client finds routes in the endpoint map the server embeds in the page. When
 the `api` configuration does not expose an operation, a call to it fails with
@@ -288,15 +290,23 @@ A missing row rejects with `NOT_FOUND`.
 | Parameter | `list` | `get` | Accepts |
 | --- | --- | --- | --- |
 | `where` | Yes | No | Public, queryable columns. A value, or an operator object (`eq`, `neq`, `in`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte` by column kind, `is: null` for nullable columns), combined with `and` and `or` |
-| `order` | Yes | No | Public, queryable columns mapped to `"asc"` or `"desc"` |
+| `order` | Yes | No | Public, queryable columns mapped to `"asc"` or `"desc"`; required and non-empty for keyless lists |
 | `select` | Yes | Yes | Public columns. The row type narrows to them |
 | `include` | Yes | Yes | Exposed relations, `true` or options, at most two edges deep. Only a to-many relation takes a `limit` |
 | `limit`, `offset` | Yes | No | Integers, 0 to 500 and 0 to 10,000 |
 
 Private columns, JSON columns in `where` or `order`, and unknown parameters are
-compile errors. A to-many include adds an array to each row and a to-one include
+compile errors. An explicit `where` must not be empty, and an undefined nested
+filter value fails rather than broadening the read; omit `where` entirely to
+list all rows. A to-many include adds an array to each row and a to-one include
 adds a row or `null`. JSON carries bigint columns as decimal strings, so rows
-type them as `string`, and filters accept a string or a safe integer.
+type them as `string`, and filters accept a string or a safe integer. For params
+typed broadly with an optional `select`, row fields may be absent; use a literal
+selection for precise projected row types.
+
+If a server-side read serializer changes a list or detail row, the schema-based
+return type cannot describe that custom response. Validate or narrow custom
+read results in the caller; the client does not infer serializer output.
 
 ### Values
 
@@ -325,7 +335,8 @@ field. Branch on `code` rather than `message`.
 | `PAYLOAD_TOO_LARGE` | 413 | The response exceeded the size limit |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | The request body was not JSON |
 | `VALIDATION_FAILED` | 422 | A value failed validation |
-| `TRANSIENT` | 503 or `null` | Temporarily unavailable, or the request did not reach the server |
+| `TRANSIENT` | 503 or `null` | Temporarily unavailable, or a read received no response |
+| `OUTCOME_UNKNOWN` | `null` or a successful HTTP status | A write received no usable response; it may have committed. Check before retrying |
 | `INTERNAL` | 500 or other | Any other failure |
 
 ## API reference

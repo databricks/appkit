@@ -132,6 +132,17 @@ describe("databaseApi.list", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/database/notes");
   });
 
+  test("rejects an incomplete filter locally without widening the request", async () => {
+    await expect(
+      databaseApi.list("notes", { where: { board_id: undefined } }),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message: "Database query contains an unsupported value",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("uses the route path the server published, not a local convention", async () => {
     _resetConfigCache();
     publish({ "notes.list": "/custom/base/notes" });
@@ -213,7 +224,7 @@ describe("databaseApi.list", () => {
     });
   });
 
-  test("reports a request that never reached the server as TRANSIENT", async () => {
+  test("reports an unanswered read as TRANSIENT without claiming the server never saw it", async () => {
     const cause = new TypeError("Failed to fetch");
     fetchMock.mockRejectedValueOnce(cause);
 
@@ -221,6 +232,7 @@ describe("databaseApi.list", () => {
 
     expect(error).toBeInstanceOf(DatabaseApiError);
     expect(error).toMatchObject({ code: "TRANSIENT", status: null, cause });
+    expect((error as Error).message).not.toContain("did not reach the server");
   });
 
   test("passes the caller's signal and rejects with its abort, not a database error", async () => {
@@ -394,6 +406,25 @@ describe("databaseApi writes", () => {
     expect(sent().init.body).toBe('{"seq":"9007199254740993","note":"x"}');
   });
 
+  test("reports an unanswered write as unknown because it may have committed", async () => {
+    const cause = new TypeError("Connection lost after sending the request");
+    fetchMock.mockRejectedValue(cause);
+
+    for (const request of [
+      () =>
+        databaseApi.create("notes", { board_id: 7, author: "ada", body: "hi" }),
+      () => databaseApi.update("notes", 7, { body: "edited" }),
+      () => databaseApi.remove("notes", 7),
+    ]) {
+      await expect(request()).rejects.toMatchObject({
+        code: "OUTCOME_UNKNOWN",
+        status: null,
+        cause,
+        message: expect.stringContaining("may have completed"),
+      });
+    }
+  });
+
   test("updates one row with PATCH on its encoded id", async () => {
     fetchMock.mockResolvedValueOnce(json({ id: 7, body: "edited" }));
 
@@ -501,20 +532,27 @@ describe("databaseApi writes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("rejects a write answered with something other than one row", async () => {
+  test("reports a successful write with an invalid response as outcome unknown", async () => {
     fetchMock.mockResolvedValueOnce(json([{ id: 7 }], 201));
     await expect(
       databaseApi.create("notes", { board_id: 7, author: "a", body: "b" }),
     ).rejects.toMatchObject({
-      code: "INTERNAL",
+      code: "OUTCOME_UNKNOWN",
       status: 201,
-      message: "Database response has an unexpected shape",
+      message: expect.stringContaining("may have completed"),
     });
 
     fetchMock.mockResolvedValueOnce(json({ id: 7 }, 200));
     await expect(databaseApi.remove("notes", 7)).rejects.toMatchObject({
-      code: "INTERNAL",
+      code: "OUTCOME_UNKNOWN",
       status: 200,
     });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response("broken JSON", { status: 200 }),
+    );
+    await expect(
+      databaseApi.update("notes", 7, { body: "edited" }),
+    ).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN", status: 200 });
   });
 });

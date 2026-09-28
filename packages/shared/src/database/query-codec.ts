@@ -29,6 +29,9 @@ const INTEGER_PARAMS: ReadonlySet<string> = new Set(["limit", "offset"]);
 
 /** JSON has no bigint; the server reads a bigint operand from its decimal string. */
 function bigintAsDecimal(_key: string, value: unknown): unknown {
+  if (value === undefined) {
+    throw new TypeError("Database query cannot contain undefined values");
+  }
   return typeof value === "bigint" ? value.toString() : value;
 }
 

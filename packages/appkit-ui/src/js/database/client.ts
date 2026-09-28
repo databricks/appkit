@@ -1,6 +1,7 @@
 import {
   type DatabaseErrorDetail,
   type DatabaseListPage,
+  type DatabaseListQuery,
   databaseErrorCategoryForStatus,
   encodeDatabaseListQuery,
   encodeDatabaseRecordQuery,
@@ -8,7 +9,7 @@ import {
 } from "shared";
 
 import { getClientConfig } from "../config";
-import { DatabaseApiError } from "./errors";
+import { DatabaseApiError, invalidDatabaseQuery } from "./errors";
 import type {
   DatabaseEntity,
   DatabaseId,
@@ -53,12 +54,14 @@ export interface DatabaseApi {
    * page.items[0]?.body;
    * ```
    */
-  list<
-    K extends DatabaseEntity,
-    const P extends DatabaseListParams<K> = Record<never, never>,
-  >(
+  list<K extends DatabaseKeyedEntity>(
     entity: K,
-    params?: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
+    params?: undefined,
+    init?: DatabaseRequestOptions,
+  ): Promise<DatabaseListPage<DatabaseListRow<K>>>;
+  list<K extends DatabaseEntity, const P extends DatabaseListParams<K>>(
+    entity: K,
+    params: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
     init?: DatabaseRequestOptions,
   ): Promise<DatabaseListPage<DatabaseListRow<K, P>>>;
 
@@ -213,15 +216,18 @@ async function requestDatabase<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
+  const write = init.method !== "GET";
   let response: Response;
   try {
     response = await fetch(url, { ...init, headers });
   } catch (error) {
     if (init.signal?.aborted) throw error;
     throw new DatabaseApiError(
-      "TRANSIENT",
+      write ? "OUTCOME_UNKNOWN" : "TRANSIENT",
       null,
-      "Database request did not reach the server",
+      write
+        ? "Database write may have completed; check its result before retrying"
+        : "Database read failed before receiving a response",
       [],
       { cause: error },
     );
@@ -234,18 +240,22 @@ async function requestDatabase<T>(
   } catch (error) {
     if (init.signal?.aborted) throw error;
     throw new DatabaseApiError(
-      "INTERNAL",
+      write ? "OUTCOME_UNKNOWN" : "INTERNAL",
       response.status,
-      "Database response is not JSON",
+      write
+        ? "Database write may have completed; response is not JSON"
+        : "Database response is not JSON",
       [],
       { cause: error },
     );
   }
   if (!accept(body)) {
     throw new DatabaseApiError(
-      "INTERNAL",
+      write ? "OUTCOME_UNKNOWN" : "INTERNAL",
       response.status,
-      "Database response has an unexpected shape",
+      write
+        ? "Database write may have completed; response has an unexpected shape"
+        : "Database response has an unexpected shape",
     );
   }
   return body;
@@ -336,27 +346,34 @@ async function deleteDatabaseRow(
   );
 }
 
-async function list<
-  K extends DatabaseEntity,
-  const P extends DatabaseListParams<K> = Record<never, never>,
->(
+function list<K extends DatabaseKeyedEntity>(
   entity: K,
-  params?: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
+  params?: undefined,
+  init?: DatabaseRequestOptions,
+): Promise<DatabaseListPage<DatabaseListRow<K>>>;
+function list<K extends DatabaseEntity, const P extends DatabaseListParams<K>>(
+  entity: K,
+  params: P & ExactDatabaseParams<P, DatabaseListParams<K>>,
+  init?: DatabaseRequestOptions,
+): Promise<DatabaseListPage<DatabaseListRow<K, P>>>;
+async function list(
+  entity: string,
+  params?: DatabaseListQuery,
   init: DatabaseRequestOptions = {},
-): Promise<DatabaseListPage<DatabaseListRow<K, P>>> {
-  const url = resolveDatabaseUrl(
-    entity,
-    "list",
-    undefined,
-    encodeDatabaseListQuery(params ?? {}),
-  );
+): Promise<DatabaseListPage<unknown>> {
+  let query: string;
+  try {
+    query = encodeDatabaseListQuery(params ?? {});
+  } catch {
+    throw invalidDatabaseQuery();
+  }
+  const url = resolveDatabaseUrl(entity, "list", undefined, query);
   const page = await requestDatabase(
     url,
     { method: "GET", signal: init.signal },
     isDatabaseListPage,
   );
-  // The server projected and encoded every row; the types describe that wire.
-  return page as DatabaseListPage<DatabaseListRow<K, P>>;
+  return page;
 }
 
 async function get<
@@ -368,12 +385,13 @@ async function get<
   params?: P & ExactDatabaseParams<P, DatabaseRecordParams<K>>,
   init: DatabaseRequestOptions = {},
 ): Promise<DatabaseRecordRow<K, P>> {
-  const url = resolveDatabaseUrl(
-    entity,
-    "detail",
-    id,
-    encodeDatabaseRecordQuery(params ?? {}),
-  );
+  let query: string;
+  try {
+    query = encodeDatabaseRecordQuery(params ?? {});
+  } catch {
+    throw invalidDatabaseQuery();
+  }
+  const url = resolveDatabaseUrl(entity, "detail", id, query);
   const row = await requestDatabase(
     url,
     { method: "GET", signal: init.signal },

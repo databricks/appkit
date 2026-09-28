@@ -65,6 +65,10 @@ type ToManyOf<R, K, Relation> =
 
 type SelectableOf<R, K> = keyof PublicRowOf<R, K> & string;
 type OrderFor<R, K> = Partial<Record<ApiOf<R, K>["orderable"], "asc" | "desc">>;
+type NonEmptyOrder<Keys extends string> = {
+  [Key in Keys]: Record<Key, "asc" | "desc"> &
+    Partial<Record<Exclude<Keys, Key>, "asc" | "desc">>;
+}[Keys];
 
 /**
  * Entities in `R` with a public primary key. Only these have detail, update,
@@ -124,12 +128,13 @@ export type HttpIncludeArgFor<R, K, Nested extends boolean = true> = {
 /** The public query a generated list route accepts for `K`. */
 export type ListParamsFor<R, K> = {
   readonly where?: WireInput<ApiOf<R, K>["filters"]>;
-  readonly order?: OrderFor<R, K>;
   readonly select?: readonly SelectableOf<R, K>[];
   readonly include?: HttpIncludeArgFor<R, K>;
   readonly limit?: number;
   readonly offset?: number;
-};
+} & ([ApiOf<R, K>["key"]] extends [never]
+  ? { readonly order: NonEmptyOrder<ApiOf<R, K>["orderable"]> }
+  : { readonly order?: OrderFor<R, K> });
 
 /** The public query a generated detail route accepts for `K`. */
 export type RecordParamsFor<R, K> = Pick<
@@ -142,7 +147,9 @@ type SelectedOf<R, K, P> = P extends {
   readonly select: infer Columns extends readonly PropertyKey[];
 }
   ? Pick<PublicRowOf<R, K>, Columns[number] & keyof PublicRowOf<R, K>>
-  : PublicRowOf<R, K>;
+  : "select" extends keyof P
+    ? Partial<PublicRowOf<R, K>>
+    : PublicRowOf<R, K>;
 
 type IncludedOf<R, K, P> = P extends { readonly include: infer I }
   ? {
@@ -203,14 +210,12 @@ type ExactPropertyOf<T, S> = unknown extends S
  * column beside a valid one is a compile error, not a silent 400. Write
  * values use it too, so a spread cannot carry a read-only field along.
  */
-export type ExactDatabaseParams<T, Shape> = [Shape] extends [T]
+export type ExactDatabaseParams<T, Shape> = T extends Primitive
   ? T
-  : T extends Primitive
-    ? T
-    : T extends readonly unknown[]
-      ? { readonly [I in keyof T]: ExactDatabaseParams<T[I], ElementOf<Shape>> }
-      : {
-          [K in keyof T]: K extends KeysOf<ObjectPartOf<Shape>>
-            ? ExactPropertyOf<T[K], PropertyOf<ObjectPartOf<Shape>, K>>
-            : never;
-        };
+  : T extends readonly unknown[]
+    ? { readonly [I in keyof T]: ExactDatabaseParams<T[I], ElementOf<Shape>> }
+    : {
+        [K in keyof T]: K extends KeysOf<ObjectPartOf<Shape>>
+          ? ExactPropertyOf<T[K], PropertyOf<ObjectPartOf<Shape>, K>>
+          : never;
+      };
