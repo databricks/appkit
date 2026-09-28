@@ -6,6 +6,8 @@ sidebar_position: 3
 
 Enables SQL query execution against Databricks SQL Warehouses.
 
+This plugin is SQL analytics. For browser usage and experience telemetry, see [App Analytics](../app-analytics/getting-started.md).
+
 **Key features:**
 
 - File-based SQL queries with automatic type generation

@@ -19,6 +19,8 @@ The Server plugin uses the deferred initialization phase to access routes from o
 - Starts an Express server (default `host=0.0.0.0`, `port=8000`)
 - Mounts plugin routes under `/api/<pluginName>/...`
 - Adds `/health` endpoint (returns `{ status: "ok" }`)
+- Adds `POST /_analytics/v1/logs`, which relays [App Analytics](../app-analytics/using-with-appkit.md) records from the browser to the Databricks Apps OTel Collector
+- When App telemetry is on, starts App Analytics in every page: adds a `/_analytics/v1/sdk.js` script tag to `index.html` and serves that file. Turn App Analytics off with `appAnalytics: false`.
 - Serves frontend:
   - **Development** (`NODE_ENV=development`): runs a Vite dev server in middleware mode
   - **Production**: auto-detects static frontend directory (checks `dist`, `client/dist`, `build`, `public`, `out`)
@@ -81,7 +83,21 @@ await createApp({
       port: 8000,          // default: Number(process.env.DATABRICKS_APP_PORT) || 8000
       host: "0.0.0.0",     // default: process.env.FLASK_RUN_HOST || "0.0.0.0"
       staticPath: "dist",  // optional: force a specific static directory
+      bodyLimit: "1mb",    // default: "1mb", the limit of the built-in JSON parser
+      appAnalytics: true,  // default: true; false removes the App Analytics relay and script tag
     }),
   ],
 });
 ```
+
+The App Analytics relay reads its own requests, with a 64 KiB and 100-record limit, so `bodyLimit` doesn't apply to it. See [Using App Analytics with AppKit](../app-analytics/using-with-appkit.md#the-server-side) for how it answers.
+
+`appAnalytics` also accepts the options of the library the server starts in the page when App telemetry is on:
+
+```ts
+server({
+  appAnalytics: { webVitals: true, autocapture: true, sampleRate: 0.5 },
+});
+```
+
+See [Automatic start](../app-analytics/using-with-appkit.md#automatic-start).
