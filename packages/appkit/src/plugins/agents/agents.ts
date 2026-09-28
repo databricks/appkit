@@ -573,8 +573,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       }
     }
     if (typeof source === "string") {
-      const { DatabricksAdapter } = await import("../../agents/databricks");
-      return DatabricksAdapter.fromModelServing(source, adapterOptions);
+      const { adapterFromModelString } =
+        await import("../../agents/databricks");
+      return adapterFromModelString(source, adapterOptions);
     }
     return await source;
   }

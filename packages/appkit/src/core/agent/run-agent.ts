@@ -270,8 +270,8 @@ async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
     return DatabricksAdapter.fromModelServing();
   }
   if (typeof model === "string") {
-    const { DatabricksAdapter } = await import("../../agents/databricks");
-    return DatabricksAdapter.fromModelServing(model);
+    const { adapterFromModelString } = await import("../../agents/databricks");
+    return adapterFromModelString(model);
   }
   return await model;
 }
