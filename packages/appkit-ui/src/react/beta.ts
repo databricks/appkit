@@ -39,27 +39,39 @@ export {
 } from "@/js/beta";
 export { invalidateDatabaseReads } from "./hooks/database-request-store";
 export {
-  type DatabaseCreateResult,
+  type UseDatabaseCreateOptions,
+  type UseDatabaseCreateResult,
   useDatabaseCreate,
 } from "./hooks/use-database-create";
 export {
-  type DatabaseDeleteResult,
+  type UseDatabaseDeleteOptions,
+  type UseDatabaseDeleteResult,
   useDatabaseDelete,
 } from "./hooks/use-database-delete";
-export { useDatabaseList } from "./hooks/use-database-list";
 export {
-  type DatabaseReadOptions,
-  type DatabaseReadResult,
+  type UseDatabaseListOptions,
+  type UseDatabaseListResult,
+  useDatabaseList,
+} from "./hooks/use-database-list";
+export {
+  type DatabaseRowShape,
   type DatabaseShape,
   serialized,
+  type UseDatabaseReadOptions,
+  type UseDatabaseReadResult,
 } from "./hooks/use-database-read";
-export { useDatabaseRecord } from "./hooks/use-database-record";
 export {
-  type DatabaseUpdateResult,
+  type UseDatabaseRecordOptions,
+  type UseDatabaseRecordResult,
+  useDatabaseRecord,
+} from "./hooks/use-database-record";
+export {
+  type UseDatabaseUpdateOptions,
+  type UseDatabaseUpdateResult,
   useDatabaseUpdate,
 } from "./hooks/use-database-update";
 export type {
   DatabaseInvalidation,
-  DatabaseWriteOptions,
-  DatabaseWriteState,
+  UseDatabaseWriteOptions,
+  UseDatabaseWriteState,
 } from "./hooks/use-database-write";

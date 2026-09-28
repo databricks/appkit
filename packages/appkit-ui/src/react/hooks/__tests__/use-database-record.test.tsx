@@ -1,58 +1,36 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { _resetConfigCache } from "@/js/config";
 import { DatabaseApiError } from "@/js/database/errors";
 
-import { resetDatabaseRequestStore } from "../database-request-store";
-import type { DatabaseReadResult } from "../use-database-read";
-import { useDatabaseRecord as typedUseDatabaseRecord } from "../use-database-record";
-
-// This package has no generated registry, so every entity name is `never`
-// here. The typed surface is compiled in use-database.types.test.ts.
-const useDatabaseRecord = typedUseDatabaseRecord as unknown as (
-  entity: string,
-  id: string | number | bigint | null | undefined,
-  params?: object,
-  options?: { enabled?: boolean },
-) => DatabaseReadResult<Record<string, unknown>>;
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+import {
+  invalidateDatabaseReads,
+  nextTick,
+  publishDatabase,
+  reply,
+  resetDatabaseTestEnvironment,
+  useDatabaseRecord,
+} from "./database-test-utils";
 
 describe("useDatabaseRecord", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    // Answers every detail read at once with a row named after its id.
     fetchMock = vi.fn(async (url: string) => {
       const id = decodeURIComponent(url.split("?")[0]?.split("/").pop() ?? "");
-      return json({ id, body: `note ${id}` });
+      return reply({ id, body: `note ${id}` });
     });
     vi.stubGlobal("fetch", fetchMock);
-    window.__appkit__ = {
-      appName: "test",
-      queries: {},
-      endpoints: {
-        database: {
-          "notes.list": "/api/database/notes",
-          "notes.detail": "/api/database/notes/:id",
-          "events.list": "/api/database/events",
-        },
-      },
-      plugins: {},
-    };
-    resetDatabaseRequestStore();
+    publishDatabase({
+      "notes.list": "/api/database/notes",
+      "notes.detail": "/api/database/notes/:id",
+      "events.list": "/api/database/events",
+    });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
+  afterEach(resetDatabaseTestEnvironment);
 
   test("reads the detail route with the id as one path segment and the encoded query", async () => {
     const { result } = renderHook(() =>
@@ -91,6 +69,22 @@ describe("useDatabaseRecord", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/database/notes/7");
   });
 
+  test.each(["", ".", ".."])(
+    "refuses the id %j, which would resolve to another route, without a request",
+    (id) => {
+      const { result, rerender } = renderHook(() =>
+        useDatabaseRecord("notes", id),
+      );
+      const first = result.current.error;
+
+      expect(first).toMatchObject({ code: "INVALID_REQUEST", status: null });
+      expect(result.current).toMatchObject({ data: null, loading: false });
+      expect(fetchMock).not.toHaveBeenCalled();
+      rerender();
+      expect(result.current.error).toBe(first);
+    },
+  );
+
   test("does not encode incomplete includes while the record is disabled", () => {
     const { result, rerender } = renderHook(
       ({ id, author }: { id: number | null; author: string | undefined }) =>
@@ -124,9 +118,25 @@ describe("useDatabaseRecord", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test("keepPreviousData shows the previous record while the next id loads", async () => {
+    const { result, rerender } = renderHook(
+      ({ id }: { id: number }) =>
+        useDatabaseRecord("notes", id, {}, { keepPreviousData: true }),
+      { initialProps: { id: 1 } },
+    );
+    await waitFor(() => expect(result.current.data).toMatchObject({ id: "1" }));
+
+    rerender({ id: 2 });
+    expect(result.current).toMatchObject({
+      data: { id: "1" },
+      loading: true,
+    });
+    await waitFor(() => expect(result.current.data).toMatchObject({ id: "2" }));
+  });
+
   test("reports a missing row as NOT_FOUND", async () => {
     fetchMock.mockResolvedValueOnce(
-      json({ error: "Database record not found" }, 404),
+      reply({ error: "Database record not found" }, 404),
     );
 
     const { result } = renderHook(() => useDatabaseRecord("notes", 404));
@@ -139,6 +149,51 @@ describe("useDatabaseRecord", () => {
       status: 404,
       message: "Database record not found",
     });
+  });
+
+  test("clears the row when a refetch finds it deleted, but keeps it through other failures", async () => {
+    const { result } = renderHook(() => useDatabaseRecord("notes", 1));
+    await waitFor(() => expect(result.current.data).toMatchObject({ id: "1" }));
+
+    fetchMock.mockResolvedValueOnce(reply({ error: "Unavailable" }, 503));
+    act(() => result.current.refetch());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toMatchObject({ id: "1" });
+    expect(result.current.error).toMatchObject({ status: 503 });
+
+    // The row was deleted elsewhere; the restart after that write finds it gone.
+    fetchMock.mockResolvedValueOnce(
+      reply({ error: "Database record not found" }, 404),
+    );
+    await act(() => invalidateDatabaseReads());
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  test("applies a shape function to the record", async () => {
+    const { result } = renderHook(() =>
+      useDatabaseRecord(
+        "notes",
+        7,
+        {},
+        {
+          shape: (row) => ({ title: String((row as { body: string }).body) }),
+        },
+      ),
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toEqual({ title: "note 7" });
+  });
+
+  test("reads once under StrictMode and keeps the request across the remount", async () => {
+    const { result } = renderHook(() => useDatabaseRecord("notes", 3), {
+      wrapper: StrictMode,
+    });
+
+    await nextTick();
+    await waitFor(() => expect(result.current.data).toMatchObject({ id: "3" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("reports NOT_EXPOSED for a table with no detail route, without a request", () => {

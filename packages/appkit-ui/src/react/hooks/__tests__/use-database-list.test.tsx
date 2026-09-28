@@ -1,81 +1,32 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { _resetConfigCache } from "@/js/config";
 import { DatabaseApiError } from "@/js/database/errors";
 
-import { resetDatabaseRequestStore } from "../database-request-store";
-import { useDatabaseList as typedUseDatabaseList } from "../use-database-list";
-import type { DatabaseReadResult } from "../use-database-read";
-
-// This package has no generated registry, so every entity name is `never`
-// here. The typed surface is compiled in use-database.types.test.ts; these
-// cover the request lifecycle.
-const useDatabaseList = typedUseDatabaseList as unknown as (
-  entity: string,
-  params?: object,
-  options?: { enabled?: boolean },
-) => DatabaseReadResult<{ items: unknown[]; limit: number; offset: number }>;
-
-interface PendingRequest {
-  url: string;
-  signal: AbortSignal | undefined;
-  respond(body: unknown, status?: number): void;
-}
-
-function page(...items: unknown[]) {
-  return { items, limit: 50, offset: 0 };
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-/** Let the deferred teardown of a released entry run. */
-const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+import {
+  mockDatabaseFetch,
+  nextTick,
+  type PendingRequest,
+  page,
+  publishDatabase,
+  resetDatabaseTestEnvironment,
+  useDatabaseList,
+} from "./database-test-utils";
 
 describe("useDatabaseList", () => {
   let requests: PendingRequest[];
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof mockDatabaseFetch>["fetchMock"];
 
   beforeEach(() => {
-    requests = [];
-    // Each request stays open until the test answers it, and ignores aborts,
-    // so a test can deliver a completion after it was superseded.
-    fetchMock = vi.fn(
-      (url: string, init: RequestInit) =>
-        new Promise<Response>((resolve) => {
-          requests.push({
-            url,
-            signal: init.signal ?? undefined,
-            respond: (body, status) => resolve(json(body, status)),
-          });
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    window.__appkit__ = {
-      appName: "test",
-      queries: {},
-      endpoints: {
-        database: {
-          "notes.list": "/api/database/notes",
-          "boards.list": "/api/database/boards",
-        },
-      },
-      plugins: {},
-    };
-    resetDatabaseRequestStore();
+    ({ requests, fetchMock } = mockDatabaseFetch());
+    publishDatabase({
+      "notes.list": "/api/database/notes",
+      "boards.list": "/api/database/boards",
+    });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
+  afterEach(resetDatabaseTestEnvironment);
 
   test("reads the published route with the encoded query", async () => {
     const { result } = renderHook(() =>
@@ -163,6 +114,28 @@ describe("useDatabaseList", () => {
     expect(result.current.loading).toBe(true);
   });
 
+  test("null params hold the read idle until the params they depend on exist", () => {
+    const { result, rerender } = renderHook(
+      ({ boardId }: { boardId: number | undefined }) =>
+        useDatabaseList(
+          "notes",
+          boardId === undefined ? null : { where: { board_id: boardId } },
+        ),
+      { initialProps: { boardId: undefined as number | undefined } },
+    );
+
+    expect(result.current).toMatchObject({
+      data: null,
+      loading: false,
+      error: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ boardId: 7 });
+    expect(requests[0]?.url).toContain("board_id%22%3A7");
+    expect(result.current.loading).toBe(true);
+  });
+
   test("does not encode an incomplete filter while disabled", () => {
     const { rerender } = renderHook(
       ({ boardId }: { boardId: number | undefined }) =>
@@ -188,7 +161,26 @@ describe("useDatabaseList", () => {
       code: "INVALID_REQUEST",
       status: null,
     });
+    expect(result.current.loading).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("keeps an INVALID_REQUEST error stable, so an effect keyed on it runs once", () => {
+    const seen: unknown[] = [];
+    const { result, rerender } = renderHook(() => {
+      const read = useDatabaseList("notes", { where: { board_id: undefined } });
+      useEffect(() => {
+        seen.push(read.error);
+      }, [read.error]);
+      return read;
+    });
+    const first = result.current.error;
+
+    rerender();
+    rerender();
+
+    expect(result.current.error).toBe(first);
+    expect(seen).toEqual([first]);
   });
 
   test("refetch aborts the in-flight request, sends it again, and keeps the last page visible", async () => {
@@ -225,6 +217,109 @@ describe("useDatabaseList", () => {
     expect(result.current.data).toEqual(page({ id: "fresh" }));
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
+  });
+
+  test("new params show null while they load, unless keepPreviousData holds the last page", async () => {
+    const { result, rerender } = renderHook(
+      ({ offset, keep }: { offset: number; keep: boolean }) =>
+        useDatabaseList(
+          "notes",
+          { limit: 1, offset },
+          { keepPreviousData: keep },
+        ),
+      { initialProps: { offset: 0, keep: false } },
+    );
+    await act(async () => requests[0]?.respond(page({ id: 0 })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ offset: 1, keep: false });
+    expect(result.current).toMatchObject({ data: null, loading: true });
+    await act(async () => requests[1]?.respond(page({ id: 1 })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ offset: 2, keep: true });
+    expect(result.current).toMatchObject({
+      data: page({ id: 1 }),
+      loading: true,
+      error: null,
+    });
+    await act(async () => requests[2]?.respond(page({ id: 2 })));
+    await waitFor(() => expect(result.current.data).toEqual(page({ id: 2 })));
+  });
+
+  test("keepPreviousData does not show the last page beside a failure for the new params", async () => {
+    const { result, rerender } = renderHook(
+      ({ offset }: { offset: number }) =>
+        useDatabaseList(
+          "notes",
+          { limit: 1, offset },
+          { keepPreviousData: true },
+        ),
+      { initialProps: { offset: 0 } },
+    );
+    await act(async () => requests[0]?.respond(page({ id: 0 })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ offset: 1 });
+    await act(async () => requests[1]?.respond({ error: "boom" }, 500));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toMatchObject({ code: "INTERNAL" });
+  });
+
+  test("a shape function checks each row once per response and types the result", async () => {
+    const parse = vi.fn((row: unknown) => {
+      const { id } = row as { id: unknown };
+      if (typeof id !== "number") throw new TypeError(`bad id ${String(id)}`);
+      return { id, label: `#${id}` };
+    });
+    const { result, rerender } = renderHook(() =>
+      // An inline arrow: a new function on every render.
+      useDatabaseList("notes", {}, { shape: (row) => parse(row) }),
+    );
+    await act(async () => requests[0]?.respond(page({ id: 1 }, { id: 2 })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.data).toEqual({
+      items: [
+        { id: 1, label: "#1" },
+        { id: 2, label: "#2" },
+      ],
+      limit: 50,
+      offset: 0,
+    });
+    const shaped = result.current.data;
+    rerender();
+    rerender();
+    expect(result.current.data).toBe(shaped);
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
+
+  test("a row that fails its shape fails the read with INTERNAL, without echoing the row", async () => {
+    const { result } = renderHook(() =>
+      useDatabaseList(
+        "notes",
+        {},
+        {
+          shape: (row) => {
+            throw new TypeError(`secret ${JSON.stringify(row)}`);
+          },
+        },
+      ),
+    );
+    await act(async () => requests[0]?.respond(page({ id: "token" })));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeInstanceOf(DatabaseApiError);
+    expect(result.current.error).toMatchObject({
+      code: "INTERNAL",
+      status: null,
+      message: "Database response does not match the read's shape",
+    });
+    expect(result.current.error?.message).not.toContain("token");
+    expect(result.current.error?.cause).toBeInstanceOf(TypeError);
   });
 
   test("aborts the request once the last subscriber unmounts", async () => {

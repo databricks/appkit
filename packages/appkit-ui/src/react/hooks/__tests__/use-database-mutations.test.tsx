@@ -2,125 +2,58 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { _resetConfigCache } from "@/js/config";
 import { DatabaseApiError } from "@/js/database/errors";
 
 import {
-  invalidateDatabaseReads as typedInvalidateDatabaseReads,
-  resetDatabaseRequestStore,
-} from "../database-request-store";
-import { useDatabaseCreate as typedUseDatabaseCreate } from "../use-database-create";
-import { useDatabaseDelete as typedUseDatabaseDelete } from "../use-database-delete";
-import { useDatabaseList as typedUseDatabaseList } from "../use-database-list";
-import type { DatabaseReadResult } from "../use-database-read";
-import { useDatabaseUpdate as typedUseDatabaseUpdate } from "../use-database-update";
-import type { DatabaseWriteState } from "../use-database-write";
+  invalidateDatabaseReads,
+  mockDatabaseFetch,
+  page,
+  publishDatabase,
+  resetDatabaseTestEnvironment,
+  type Row,
+  useDatabaseCreate,
+  useDatabaseDelete,
+  useDatabaseList,
+  useDatabaseUpdate,
+} from "./database-test-utils";
 
-// This package has no generated registry, so every entity name is `never`
-// here. The typed surface is compiled in use-database.types.test.ts; these
-// cover the write lifecycle.
-type Row = Record<string, unknown>;
-type Options = { invalidate?: boolean | readonly string[] };
-const useDatabaseCreate = typedUseDatabaseCreate as unknown as (
-  entity: string,
-  options?: Options,
-) => DatabaseWriteState<Row> & {
-  create(values: object): Promise<Row | null>;
-  reset(): void;
+const ENDPOINTS = {
+  "notes.list": "/api/database/notes",
+  "notes.create": "/api/database/notes",
+  "notes.update": "/api/database/notes/:id",
+  "notes.delete": "/api/database/notes/:id",
+  "boards.list": "/api/database/boards",
+  "note_events.list": "/api/database/note_events",
 };
-const useDatabaseUpdate = typedUseDatabaseUpdate as unknown as (
-  entity: string,
-  options?: Options,
-) => DatabaseWriteState<Row> & {
-  update(id: string | number, values: object): Promise<Row | null>;
-  reset(): void;
+
+// As `DatabasePlugin` publishes them: board → notes → note_events.
+const RELATIONS = {
+  boards: { notes: "notes" },
+  notes: { boards: "boards", note_events: "note_events" },
+  note_events: { notes: "notes" },
 };
-const useDatabaseDelete = typedUseDatabaseDelete as unknown as (
-  entity: string,
-  options?: Options,
-) => {
-  remove(id: string | number): Promise<boolean>;
-  loading: boolean;
-  error: DatabaseApiError | null;
-  reset(): void;
-};
-const invalidateDatabaseReads = typedInvalidateDatabaseReads as (
-  scope?: boolean | readonly string[],
-) => void;
-const useDatabaseList = typedUseDatabaseList as unknown as (
-  entity: string,
-  params?: object,
-  options?: { enabled?: boolean },
-) => DatabaseReadResult<{ items: unknown[]; limit: number; offset: number }>;
-
-interface PendingRequest {
-  url: string;
-  method: string;
-  body: unknown;
-  signal: AbortSignal | undefined;
-  respond(body: unknown, status?: number): void;
-}
-
-function page(...items: unknown[]) {
-  return { items, limit: 50, offset: 0 };
-}
-
-function reply(body: unknown, status: number): Response {
-  if (status === 204) return new Response(null, { status });
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 describe("database write hooks", () => {
-  let requests: PendingRequest[];
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof mockDatabaseFetch>["fetchMock"];
+  let sent: ReturnType<typeof mockDatabaseFetch>["sent"];
 
-  /** Requests to `method`, in the order they were sent. */
-  const sent = (method: string) =>
-    requests.filter((request) => request.method === method);
+  /** URLs of the reads sent after the first `after`. */
+  const readsAfter = (after: number) =>
+    sent("GET")
+      .slice(after)
+      .map((request) => request.url);
+
+  /** Answer every read still open, as the server would. */
+  const answerReads = (from: number, body: unknown = page({ id: 1 })) => {
+    for (const request of sent("GET").slice(from)) request.respond(body);
+  };
 
   beforeEach(() => {
-    requests = [];
-    // Each request stays open until the test answers it, so a test controls
-    // the order completions arrive in.
-    fetchMock = vi.fn(
-      (url: string, init: RequestInit) =>
-        new Promise<Response>((resolve) => {
-          requests.push({
-            url,
-            method: init.method ?? "GET",
-            body: typeof init.body === "string" ? JSON.parse(init.body) : null,
-            signal: init.signal ?? undefined,
-            respond: (body, status = 200) => resolve(reply(body, status)),
-          });
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    window.__appkit__ = {
-      appName: "test",
-      queries: {},
-      endpoints: {
-        database: {
-          "notes.list": "/api/database/notes",
-          "notes.create": "/api/database/notes",
-          "notes.update": "/api/database/notes/:id",
-          "notes.delete": "/api/database/notes/:id",
-          "boards.list": "/api/database/boards",
-          "note_events.list": "/api/database/note_events",
-        },
-      },
-      plugins: {},
-    };
-    resetDatabaseRequestStore();
+    ({ fetchMock, sent } = mockDatabaseFetch());
+    publishDatabase(ENDPOINTS, RELATIONS);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
+  afterEach(resetDatabaseTestEnvironment);
 
   /** Mount a notes read and a boards read, and answer both. */
   async function mountReads() {
@@ -128,9 +61,7 @@ describe("database write hooks", () => {
       notes: useDatabaseList("notes"),
       boards: useDatabaseList("boards"),
     }));
-    await act(async () => {
-      for (const request of sent("GET")) request.respond(page({ id: 1 }));
-    });
+    await act(async () => answerReads(0));
     await waitFor(() =>
       expect(reads.result.current.boards.loading).toBe(false),
     );
@@ -266,41 +197,75 @@ describe("database write hooks", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("a successful write restarts every mounted read by default, keeping their data while they load", async () => {
+  test("refuses a write addressed by an unaddressable id, without a request", async () => {
+    const { result } = renderHook(() => useDatabaseDelete("notes"));
+
+    let removed!: Promise<boolean>;
+    await act(async () => {
+      removed = result.current.remove("..");
+      await removed;
+    });
+
+    await expect(removed).resolves.toBe(false);
+    expect(result.current.error).toMatchObject({ code: "INVALID_REQUEST" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("a successful write restarts every mounted read by default and resolves once they reload", async () => {
     const reads = await mountReads();
     const writer = renderHook(() => useDatabaseCreate("notes"));
     expect(sent("GET")).toHaveLength(2);
+
+    let created!: Promise<Row | null>;
+    let settled = false;
+    act(() => {
+      created = writer.result.current.create({ body: "new" });
+      void created.then(() => {
+        settled = true;
+      });
+    });
+    await act(async () => sent("POST")[0]?.respond({ id: 2 }, 201));
+
+    expect(readsAfter(2)).toEqual([
+      "/api/database/notes",
+      "/api/database/boards",
+    ]);
+    // Reads keep their data while they reload; the write waits for them.
+    expect(reads.result.current.notes).toMatchObject({
+      data: page({ id: 1 }),
+      loading: true,
+    });
+    expect(writer.result.current).toMatchObject({ loading: true, data: null });
+    expect(settled).toBe(false);
+
+    await act(async () => {
+      sent("GET")[2]?.respond(page({ id: 1 }, { id: 2 }));
+      sent("GET")[3]?.respond(page({ id: 1 }));
+    });
+    await expect(created).resolves.toEqual({ id: 2 });
+    expect(reads.result.current.notes.data).toEqual(page({ id: 1 }, { id: 2 }));
+    expect(writer.result.current).toMatchObject({
+      loading: false,
+      data: { id: 2 },
+    });
+  });
+
+  test("a restarted read that fails still lets the write resolve", async () => {
+    await mountReads();
+    const writer = renderHook(() => useDatabaseCreate("notes"));
 
     let created!: Promise<Row | null>;
     act(() => {
       created = writer.result.current.create({ body: "new" });
     });
     await act(async () => sent("POST")[0]?.respond({ id: 2 }, 201));
-    await created;
+    await act(async () => answerReads(2, { error: "down" }));
 
-    expect(sent("GET").map((request) => request.url)).toEqual([
-      "/api/database/notes",
-      "/api/database/boards",
-      "/api/database/notes",
-      "/api/database/boards",
-    ]);
-    expect(reads.result.current.notes).toMatchObject({
-      data: page({ id: 1 }),
-      loading: true,
-    });
-
-    await act(async () => {
-      sent("GET")[2]?.respond(page({ id: 1 }, { id: 2 }));
-      sent("GET")[3]?.respond(page({ id: 1 }));
-    });
-    await waitFor(() =>
-      expect(reads.result.current.notes.data).toEqual(
-        page({ id: 1 }, { id: 2 }),
-      ),
-    );
+    await expect(created).resolves.toEqual({ id: 2 });
+    expect(writer.result.current.error).toBeNull();
   });
 
-  test("invalidate narrows the restart to reads of the named entities, or turns it off", async () => {
+  test("invalidate narrows the restart to reads of the named tables, or turns it off", async () => {
     await mountReads();
     const writers = renderHook(() => ({
       narrow: useDatabaseCreate("notes", { invalidate: ["notes"] }),
@@ -312,12 +277,9 @@ describe("database write hooks", () => {
       created = writers.result.current.narrow.create({ body: "a" });
     });
     await act(async () => sent("POST")[0]?.respond({ id: 2 }, 201));
+    expect(readsAfter(2)).toEqual(["/api/database/notes"]);
+    await act(async () => answerReads(2));
     await created;
-    expect(
-      sent("GET")
-        .slice(2)
-        .map((request) => request.url),
-    ).toEqual(["/api/database/notes"]);
 
     act(() => {
       created = writers.result.current.none.create({ body: "b" });
@@ -327,26 +289,79 @@ describe("database write hooks", () => {
     expect(sent("GET")).toHaveLength(3);
   });
 
+  test("a narrowed invalidate reaches the reads whose includes show the written table", async () => {
+    renderHook(() => ({
+      // boards → notes, and boards → notes → note_events.
+      boards: useDatabaseList("boards", { include: { notes: { limit: 5 } } }),
+      timeline: useDatabaseList("boards", {
+        include: { notes: { include: { note_events: { limit: 5 } } } },
+      }),
+      plain: useDatabaseList("boards"),
+      events: useDatabaseList("note_events"),
+    }));
+    await act(async () => answerReads(0));
+
+    act(() => {
+      void invalidateDatabaseReads(["notes"]);
+    });
+    expect(readsAfter(4)).toEqual([
+      "/api/database/boards?include=%7B%22notes%22%3A%7B%22limit%22%3A5%7D%7D",
+      expect.stringContaining("note_events"),
+    ]);
+
+    act(() => {
+      void invalidateDatabaseReads(["note_events"]);
+    });
+    expect(readsAfter(6)).toEqual([
+      expect.stringContaining("note_events"),
+      "/api/database/note_events",
+    ]);
+  });
+
+  test("a read with an include the server did not describe restarts on any scoped invalidate", async () => {
+    renderHook(() => ({
+      unknown: useDatabaseList("boards", { include: { archived: true } }),
+      plain: useDatabaseList("boards"),
+    }));
+    await act(async () => answerReads(0));
+
+    act(() => {
+      void invalidateDatabaseReads(["note_events"]);
+    });
+    expect(readsAfter(2)).toEqual([
+      "/api/database/boards?include=%7B%22archived%22%3Atrue%7D",
+    ]);
+  });
+
   test("invalidateDatabaseReads refreshes reads after a write the hooks did not make", async () => {
     await mountReads();
 
     // A custom route or a databaseApi call changed boards rows.
-    act(() => invalidateDatabaseReads(["boards"]));
-    expect(
-      sent("GET")
-        .slice(2)
-        .map((request) => request.url),
-    ).toEqual(["/api/database/boards"]);
+    let refreshed!: Promise<void>;
+    let done = false;
+    act(() => {
+      refreshed = invalidateDatabaseReads(["boards"]).then(() => {
+        done = true;
+      });
+    });
+    expect(readsAfter(2)).toEqual(["/api/database/boards"]);
+    await Promise.resolve();
+    expect(done).toBe(false);
+    await act(async () => answerReads(2));
+    await refreshed;
+    expect(done).toBe(true);
 
     // With no scope, every mounted read restarts.
-    act(() => invalidateDatabaseReads());
-    expect(
-      sent("GET")
-        .slice(3)
-        .map((request) => request.url),
-    ).toEqual(["/api/database/notes", "/api/database/boards"]);
+    act(() => {
+      void invalidateDatabaseReads();
+    });
+    expect(readsAfter(3)).toEqual([
+      "/api/database/notes",
+      "/api/database/boards",
+    ]);
 
-    act(() => invalidateDatabaseReads(false));
+    await expect(invalidateDatabaseReads(false)).resolves.toBeUndefined();
+    await expect(invalidateDatabaseReads([])).resolves.toBeUndefined();
     expect(sent("GET")).toHaveLength(5);
   });
 
@@ -369,8 +384,8 @@ describe("database write hooks", () => {
 
   test("unmounting keeps the write in flight, and its success still restarts reads", async () => {
     await mountReads();
-    const writer = renderHook(() => useDatabaseCreate("notes"));
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onSuccess = vi.fn();
+    const writer = renderHook(() => useDatabaseCreate("notes", { onSuccess }));
 
     let created!: Promise<Row | null>;
     act(() => {
@@ -381,11 +396,85 @@ describe("database write hooks", () => {
     // The write carries no abort signal: cancelling it would not undo it.
     expect(sent("POST")[0]?.signal).toBeUndefined();
     await act(async () => sent("POST")[0]?.respond({ id: 9 }, 201));
+    expect(sent("GET")).toHaveLength(4);
+    await act(async () => answerReads(2));
 
     await expect(created).resolves.toEqual({ id: 9 });
-    expect(sent("GET")).toHaveLength(4);
-    expect(errors).not.toHaveBeenCalled();
-    errors.mockRestore();
+    // The rows changed, so the callback runs even though the hook is gone.
+    expect(onSuccess).toHaveBeenCalledWith({ id: 9 }, { body: "late" });
+  });
+
+  test("onSuccess and onError run for every call with its arguments, after the state settles", async () => {
+    const events: string[] = [];
+    const { result } = renderHook(() => {
+      const hook = useDatabaseUpdate("notes", {
+        onSuccess: (row, id, values) =>
+          events.push(`ok ${JSON.stringify([row, id, values])}`),
+        onError: (error, id) =>
+          events.push(`fail ${error.code} ${String(id)} ${hook.loading}`),
+      });
+      return hook;
+    });
+
+    let first!: Promise<Row | null>;
+    let second!: Promise<Row | null>;
+    act(() => {
+      first = result.current.update(1, { body: "a" });
+      second = result.current.update(2, { body: "b" });
+    });
+    await act(async () => {
+      sent("PATCH")[0]?.respond({ id: 1 });
+      sent("PATCH")[1]?.respond({ error: "Database conflict" }, 409);
+    });
+    await Promise.all([first, second]);
+
+    // The stale first call does not update the state, but is still reported.
+    expect(events).toHaveLength(2);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^fail CONFLICT 2 /),
+        `ok ${JSON.stringify([{ id: 1 }, 1, { body: "a" }])}`,
+      ]),
+    );
+    expect(result.current.error).toMatchObject({ code: "CONFLICT" });
+  });
+
+  test("a delete reports the removed id to onSuccess", async () => {
+    const onSuccess = vi.fn();
+    const { result } = renderHook(() =>
+      useDatabaseDelete("notes", { onSuccess }),
+    );
+
+    let removed!: Promise<boolean>;
+    act(() => {
+      removed = result.current.remove(7);
+    });
+    await act(async () => sent("DELETE")[0]?.respond(null, 204));
+
+    await expect(removed).resolves.toBe(true);
+    expect(onSuccess).toHaveBeenCalledWith(7);
+  });
+
+  test("a throwing callback is reported as uncaught without breaking the call", async () => {
+    const reported = vi.fn();
+    vi.stubGlobal("reportError", reported);
+    const { result } = renderHook(() =>
+      useDatabaseCreate("notes", {
+        onSuccess: () => {
+          throw new Error("callback bug");
+        },
+      }),
+    );
+
+    let created!: Promise<Row | null>;
+    act(() => {
+      created = result.current.create({ body: "x" });
+    });
+    await act(async () => sent("POST")[0]?.respond({ id: 1 }, 201));
+
+    await expect(created).resolves.toEqual({ id: 1 });
+    expect(reported).toHaveBeenCalledWith(new Error("callback bug"));
+    expect(result.current).toMatchObject({ data: { id: 1 }, error: null });
   });
 
   test("only the latest call reports its state; an earlier call still resolves", async () => {
@@ -445,10 +534,13 @@ describe("database write hooks", () => {
     expect(result.current).toMatchObject({ data: null, loading: false });
   });
 
-  test("keeps its write functions stable across renders with an inline entity list", () => {
+  test("keeps its write functions stable across renders with inline options", () => {
     const { result, rerender } = renderHook(() => ({
-      create: useDatabaseCreate("notes", { invalidate: ["notes", "boards"] }),
-      remove: useDatabaseDelete("notes"),
+      create: useDatabaseCreate("notes", {
+        invalidate: ["notes", "boards"],
+        onSuccess: () => {},
+      }),
+      remove: useDatabaseDelete("notes", { onError: () => {} }),
     }));
     const { create } = result.current.create;
     const { remove, reset } = result.current.remove;
@@ -458,6 +550,26 @@ describe("database write hooks", () => {
     expect(result.current.create.create).toBe(create);
     expect(result.current.remove.remove).toBe(remove);
     expect(result.current.remove.reset).toBe(reset);
+  });
+
+  test("uses the options of the latest render when a call settles", async () => {
+    await mountReads();
+    const { result, rerender } = renderHook(
+      ({ scope }: { scope: readonly string[] }) =>
+        useDatabaseCreate("notes", { invalidate: scope }),
+      { initialProps: { scope: ["notes"] as readonly string[] } },
+    );
+
+    let created!: Promise<Row | null>;
+    act(() => {
+      created = result.current.create({ body: "x" });
+    });
+    rerender({ scope: ["boards"] });
+    await act(async () => sent("POST")[0]?.respond({ id: 1 }, 201));
+
+    expect(readsAfter(2)).toEqual(["/api/database/boards"]);
+    await act(async () => answerReads(2));
+    await created;
   });
 
   test("reports its state under StrictMode", async () => {

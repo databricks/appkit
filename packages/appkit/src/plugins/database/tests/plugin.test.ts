@@ -654,6 +654,43 @@ describe("DatabasePlugin", () => {
     );
   });
 
+  test("publishes the relations between exposed tables for the client", async () => {
+    const { plugin } = await registerRoutes({ schema: routedSchema });
+
+    expect(plugin.clientConfig()).toEqual({
+      relations: {
+        users: { notes: "notes" },
+        notes: { users: "users" },
+      },
+    });
+  });
+
+  test("publishes no edge to a table the API does not expose", async () => {
+    const { plugin } = await registerRoutes({
+      schema: routedSchema,
+      api: { tables: ["notes", "events"] },
+    });
+
+    // notes → users exists in the schema, but users has no routes.
+    expect(plugin.clientConfig()).toEqual({});
+  });
+
+  test.each([false, { tables: [] }] as const)(
+    "publishes no client config with api=%j",
+    async (api) => {
+      const { plugin } = await registerRoutes({ schema: routedSchema, api });
+      expect(plugin.clientConfig()).toEqual({});
+    },
+  );
+
+  test("publishes no client config when setup failed", async () => {
+    mocks.createDatabaseState.mockRejectedValue(new Error("boom"));
+    const plugin = new DatabasePlugin({ schema: routedSchema });
+    await expect(plugin.setup()).rejects.toThrow();
+
+    expect(plugin.clientConfig()).toEqual({});
+  });
+
   test("isolates plugin instances and drains their exports independently", async () => {
     const one = candidate("one");
     const two = candidate("two");

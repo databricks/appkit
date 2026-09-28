@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import type { ExactDatabaseParams } from "shared";
 
-import { type IdLike, updateDatabaseRow } from "@/js/database/client";
+import { updateDatabaseRow } from "@/js/database/client";
+import type { DatabaseApiError } from "@/js/database/errors";
 import type {
   DatabaseId,
   DatabaseKeyedEntity,
@@ -10,15 +11,36 @@ import type {
 } from "@/js/database/types";
 
 import {
-  type DatabaseWriteOptions,
-  type DatabaseWriteState,
+  type UseDatabaseWriteOptions,
+  type UseDatabaseWriteState,
   useDatabaseWrite,
 } from "./use-database-write";
 
-/** What {@link useDatabaseUpdate} returns. */
-export interface DatabaseUpdateResult<
+/** Options for {@link useDatabaseUpdate}. */
+export interface UseDatabaseUpdateOptions<
   K extends DatabaseKeyedEntity,
-> extends DatabaseWriteState<DatabaseRow<K>> {
+> extends UseDatabaseWriteOptions {
+  /**
+   * Called for every successful update, once the restarted reads reloaded,
+   * even if the component unmounted meanwhile.
+   */
+  onSuccess?: (
+    row: DatabaseRow<K>,
+    id: DatabaseId<K>,
+    values: DatabaseUpdate<K>,
+  ) => void;
+  /** Called for every failed update, with the error `error` also reports. */
+  onError?: (
+    error: DatabaseApiError,
+    id: DatabaseId<K>,
+    values: DatabaseUpdate<K>,
+  ) => void;
+}
+
+/** What {@link useDatabaseUpdate} returns. */
+export interface UseDatabaseUpdateResult<
+  K extends DatabaseKeyedEntity,
+> extends UseDatabaseWriteState<DatabaseRow<K>> {
   /**
    * Send `PATCH /api/database/<entity>/:id` and resolve with the updated row,
    * or with `null` when the write failed; the reason is in `error`, and a
@@ -39,7 +61,8 @@ export interface DatabaseUpdateResult<
  * database reads restart.
  *
  * @param entity - A table the generated registry exposes with a public key
- * @param options - `invalidate` to narrow or turn off the read restart
+ * @param options - `invalidate` to narrow the read restart; `onSuccess` and
+ *   `onError` to observe every call
  * @returns `update`, the latest call's row, loading and error state, and `reset`
  *
  * @example
@@ -53,16 +76,21 @@ export interface DatabaseUpdateResult<
  */
 export function useDatabaseUpdate<K extends DatabaseKeyedEntity>(
   entity: K,
-  options: DatabaseWriteOptions = {},
-): DatabaseUpdateResult<K> {
+  options: UseDatabaseUpdateOptions<K> = {},
+): UseDatabaseUpdateResult<K> {
   const send = useCallback(
-    (id: IdLike, values: object) => updateDatabaseRow(entity, id, values),
+    (id: DatabaseId<K>, values: DatabaseUpdate<K>) =>
+      updateDatabaseRow(entity, id, values as object),
     [entity],
   );
-  const { mutate, ...write } = useDatabaseWrite(
-    send,
-    options.invalidate ?? true,
-  );
-  // The server projected the row it holds; the types describe that wire.
-  return { ...write, update: mutate } as DatabaseUpdateResult<K>;
+  const { onSuccess, onError } = options;
+  const { mutate, ...write } = useDatabaseWrite(send, {
+    invalidate: options.invalidate,
+    // The server projected the row it holds; the types describe that wire.
+    onSuccess:
+      onSuccess &&
+      ((row, [id, values]) => onSuccess(row as DatabaseRow<K>, id, values)),
+    onError: onError && ((error, [id, values]) => onError(error, id, values)),
+  });
+  return { ...write, update: mutate } as UseDatabaseUpdateResult<K>;
 }

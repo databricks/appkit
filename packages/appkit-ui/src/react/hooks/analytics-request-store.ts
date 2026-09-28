@@ -215,7 +215,7 @@ export function retain(
   options: AnalyticsRequestOptions,
   autoStart = true,
 ): () => void {
-  return store.retain(key, runAnalyticsRequest(options), autoStart);
+  return store.retain(key, runAnalyticsRequest(options), { autoStart });
 }
 
 export const start = store.start;
