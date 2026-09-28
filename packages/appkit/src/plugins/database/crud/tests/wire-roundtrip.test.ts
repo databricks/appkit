@@ -96,6 +96,17 @@ describe("shared encoder against decodeListQuery", () => {
     ).toMatchObject({ include: { notes: { limit: DEFAULT_LIMIT } } });
   });
 
+  it("rejects empty filters instead of querying every row", () => {
+    expect(() => decodeListQuery(notes, "where=%7B%7D")).toThrow();
+    expect(() =>
+      decodeListQuery(
+        notes,
+        encodeDatabaseListQuery({ include: { boards: { where: {} } } }),
+      ),
+    ).toThrow();
+    expect(decodeListQuery(notes, "").where).toBeUndefined();
+  });
+
   it("carries reserved and non-ASCII characters through unchanged", () => {
     const text = "a+b & c=d %25 # ? / é 🚀";
     expect(

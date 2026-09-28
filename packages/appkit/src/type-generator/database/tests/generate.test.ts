@@ -167,13 +167,13 @@ describe("generateDatabaseTypes", () => {
     expect(api("blobs")).toContain("orderable: never;");
   });
 
-  test("binds one entries interface into the server and UI registries", async () => {
+  test("binds one registry without importing an optional UI package", async () => {
     const options = await files(completeSchema);
     await generateDatabaseTypes(options);
     const output = await fs.readFile(options.outFile, "utf8");
 
     expect(output).toContain('import "@databricks/appkit";');
-    expect(output).toContain('import "@databricks/appkit-ui/js/beta";');
+    expect(output).not.toContain('import "@databricks/appkit-ui/js/beta";');
     expect(
       output.match(/interface GeneratedDatabaseRegistry \{/g),
     ).toHaveLength(1);
@@ -181,7 +181,7 @@ describe("generateDatabaseTypes", () => {
       'declare module "@databricks/appkit" {\n  interface DatabaseRegistry extends GeneratedDatabaseRegistry {}\n}',
     );
     expect(output).toContain(
-      'declare module "@databricks/appkit-ui/js/beta" {\n  interface DatabaseRegistry extends GeneratedDatabaseRegistry {}\n}',
+      "declare global {\n  interface DatabricksAppKitDatabaseRegistry extends GeneratedDatabaseRegistry {}\n}",
     );
   });
 
@@ -292,7 +292,6 @@ describe("generateDatabaseTypes", () => {
     expect((await fs.stat(options.outFile)).mtimeMs).toBe(before);
   });
 
-  // No UI package resolves here, so its binding must stay silent under skipLibCheck.
   test("compiles a server-only semantic consumer through the beta subpath", async () => {
     const options = await files(completeSchema);
     await generateDatabaseTypes(options);
@@ -340,6 +339,22 @@ describe("generateDatabaseTypes", () => {
         // @ts-expect-error defaulted fields remain typed when explicitly supplied
         db.users.create({ slug: "ada", name: "Ada", secret: "token", nickname: 1 });
       `,
+    );
+  }, 30_000);
+
+  test("typechecks the generated server declaration without UI or skipLibCheck", async () => {
+    const options = await files(completeSchema);
+    await generateDatabaseTypes(options);
+    await fs.writeFile(
+      path.join(options.root, "appkit.d.ts"),
+      "export interface DatabaseRegistry {}",
+    );
+    await compileConsumer(
+      options,
+      `import type { DatabaseRegistry } from "@databricks/appkit";
+       const slug: string = ({} as DatabaseRegistry["users"]["publicRow"]).slug;
+       void slug;`,
+      { skipLibCheck: false, isolated: true },
     );
   }, 30_000);
 
@@ -397,6 +412,11 @@ describe("generateDatabaseTypes", () => {
 
           await databaseApi.list("posts", { where: { total: { gt: "9007199254740993" } } });
           await databaseApi.list("events", { order: { message: "asc" } });
+          const params: import("@databricks/appkit-ui/js/beta").DatabaseListParams<"posts"> = { select: ["id"] };
+          const dynamic = await databaseApi.list("posts", params);
+          // @ts-expect-error a broad optional selection may omit title
+          const unsafeTitle: string = dynamic.items[0].title;
+          void unsafeTitle;
         }
 
         async function rejected() {
@@ -422,6 +442,15 @@ describe("generateDatabaseTypes", () => {
           await databaseApi.list("users", { include: { posts: false } });
           // @ts-expect-error list params are the generated route's parameters only
           await databaseApi.list("users", { limit: 1, includeTotal: true });
+          // @ts-expect-error keyless lists require an explicit order
+          await databaseApi.list("events");
+          // @ts-expect-error an empty order is not a usable keyless sort
+          await databaseApi.list("events", { order: {} });
+          // @ts-expect-error a keyless table without sortable columns cannot list
+          await databaseApi.list("blobs", { order: { payload: "asc" } });
+          const filter: { name?: string; secret?: string } = { name: "Ada", secret: "token" };
+          // @ts-expect-error optional private fields remain forbidden in filters
+          await databaseApi.list("users", { where: filter });
         }
 
         async function writes() {
@@ -440,6 +469,9 @@ describe("generateDatabaseTypes", () => {
           await databaseApi.create("events", { message: "keyless tables accept creates" });
           // @ts-expect-error private columns are not HTTP inputs
           await databaseApi.create("users", { slug: "ada", name: "Ada", secret: "token" });
+          const values: { slug: string; name: string; secret?: string } = { slug: "ada", name: "Ada", secret: "token" };
+          // @ts-expect-error an optional private field is still forbidden when spread
+          await databaseApi.create("users", values);
           // @ts-expect-error a generated key is not an HTTP input
           await databaseApi.create("posts", { id: 1, user_slug: "ada", title: "Hi", total: 1, active: true, status: "draft" });
           // @ts-expect-error default-stamped columns are not updatable
@@ -469,7 +501,7 @@ describe("generateDatabaseTypes", () => {
 async function compileConsumer(
   options: { root: string; outFile: string },
   source: string,
-  { ui = false } = {},
+  { ui = false, skipLibCheck = true, isolated = false } = {},
 ): Promise<void> {
   const consumer = path.join(options.root, "consumer.ts");
   const tsconfig = path.join(options.root, "tsconfig.json");
@@ -485,11 +517,14 @@ async function compileConsumer(
         moduleResolution: "Bundler",
         esModuleInterop: true,
         resolveJsonModule: true,
-        skipLibCheck: true,
+        skipLibCheck,
+        ...(isolated ? { types: [] } : {}),
         baseUrl: options.root,
         paths: {
           "@databricks/appkit": [
-            path.join(sourceRoot, "database/contract/index.ts"),
+            isolated
+              ? path.join(options.root, "appkit.d.ts")
+              : path.join(sourceRoot, "database/contract/index.ts"),
           ],
           "@databricks/appkit/beta": [
             path.join(sourceRoot, "plugins/database/index.ts"),

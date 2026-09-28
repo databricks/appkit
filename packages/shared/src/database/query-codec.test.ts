@@ -71,12 +71,27 @@ describe("encodeDatabaseListQuery", () => {
     expect(decoded(query).order).toBe('{"title":"asc","created_at":"desc"}');
   });
 
-  it("omits undefined nested values and escapes reserved characters", () => {
+  it("escapes reserved characters without dropping filters", () => {
     const query = encodeDatabaseListQuery({
-      where: { body: { like: "a+b&c=%" }, author: undefined },
+      where: { body: { like: "a+b&c=%" } },
     });
     expect(query).not.toContain("&c=");
     expect(decoded(query).where).toBe('{"body":{"like":"a+b&c=%"}}');
+  });
+
+  it("rejects undefined filter values instead of silently broadening reads", () => {
+    expect(() =>
+      encodeDatabaseListQuery({ where: { board_id: undefined } }),
+    ).toThrow(/undefined/);
+    expect(() =>
+      encodeDatabaseListQuery({
+        where: { board_id: 7 },
+        include: { notes: { where: { author: undefined } } },
+      }),
+    ).toThrow(/undefined/);
+    expect(() =>
+      encodeDatabaseListQuery({ where: { or: [{ board_id: undefined }] } }),
+    ).toThrow(/undefined/);
   });
 
   it("encodes a bigint operand as its decimal string", () => {
