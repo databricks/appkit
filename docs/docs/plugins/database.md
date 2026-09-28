@@ -31,17 +31,12 @@ server routes. App admission alone does not provide row-level isolation.
 
 Configure a Lakebase `postgres` resource and its connection environment variables
 as described in [Lakebase configuration](./lakebase.md#environment-variables).
-The database tables must already exist and match the declared schema. This plugin
-does not create or migrate tables. During setup it checks connectivity and that
-every declared table and column exists, and it fails with the missing names
-(for example `table public.notes is missing columns board_id, body`) instead of
-publishing routes that would fail on every request.
 
 When a query fails at runtime, the client receives only a stable message such as
-`Database operation failed`. The server log adds the Postgres text for errors
-that name connections, credentials, or schema objects (for example
-`column notes.board_id does not exist`), and never for errors that can echo row
-values.
+`Database operation failed`. The server log records the SQLSTATE and only
+identifier-only messages for known missing-column or missing-table errors
+(for example `column notes.board_id does not exist`). Other driver messages,
+details, and hints are omitted because they may contain row values.
 
 Apps scaffolded with the Database plugin selected include an empty
 `config/database/schema.ts`, so `database()` can start without requiring sample

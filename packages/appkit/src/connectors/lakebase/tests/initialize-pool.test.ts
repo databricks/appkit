@@ -192,6 +192,23 @@ describe("AppKit Lakebase connector initialization", () => {
     expect(mocks.me).not.toHaveBeenCalled();
   });
 
+  test("does not validate a Lakebase endpoint for native password authentication", async () => {
+    mocks.request.mockResolvedValue({
+      status: { hosts: { host: "ep-other.database.example.com" } },
+    });
+
+    expect(
+      await initializeLakebasePool({
+        user: "native-user",
+        password: "test-only-password",
+        endpoint: "projects/native/branches/test/endpoints/primary",
+        host: "ep-native.database.example.com",
+        workspaceClient: mocks.client as unknown as Client,
+      }),
+    ).toBe(pool);
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
+
   test("does not allocate a pool when identity cannot be resolved", async () => {
     mocks.me.mockRejectedValueOnce(new Error("Private auth detail"));
     await expect(initializeLakebasePool()).rejects.toMatchObject({
@@ -203,7 +220,7 @@ describe("AppKit Lakebase connector initialization", () => {
     expect(mocks.createPool).not.toHaveBeenCalled();
   });
 
-  test("warns at startup when PGHOST is not a host of the endpoint", async () => {
+  test("refuses a pool when PGHOST is not a host of the endpoint", async () => {
     vi.stubEnv(
       "LAKEBASE_ENDPOINT",
       "projects/p/branches/fresh/endpoints/primary",
@@ -212,17 +229,15 @@ describe("AppKit Lakebase connector initialization", () => {
     mocks.request.mockResolvedValue({
       status: { hosts: { host: "ep-fresh.database.example.test" } },
     });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(initializeLakebasePool()).rejects.toThrow(
+      "ep-fresh.database.example.test",
+    );
 
-    expect(await initializeLakebasePool()).toBe(pool);
-
-    expect(mocks.request).toHaveBeenCalledWith(
+    expect(mocks.request.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         path: "/api/2.0/postgres/projects/p/branches/fresh/endpoints/primary",
       }),
     );
-    const output = warn.mock.calls.flat().map(String).join(" ");
-    expect(output).toContain("ep-stale.database.example.test");
-    expect(output).toContain("ep-fresh.database.example.test");
+    expect(mocks.createPool).not.toHaveBeenCalled();
   });
 });

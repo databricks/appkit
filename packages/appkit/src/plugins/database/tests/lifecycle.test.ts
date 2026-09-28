@@ -161,6 +161,9 @@ describe("createDatabaseState", () => {
     async (stage) => {
       const { pool, execute } = arrange();
       const raw = new Error("secret constraint detail");
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
       if (stage === "drizzle")
         mocks.createDrizzleDb.mockImplementationOnce(() => {
           throw raw;
@@ -184,6 +187,9 @@ describe("createDatabaseState", () => {
       expect(error.message).toBe("Database setup failed");
       expect(error.cause).toBeUndefined();
       expect(pool.end).toHaveBeenCalledTimes(1);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        raw.message,
+      );
     },
   );
 
@@ -212,6 +218,9 @@ describe("createDatabaseState", () => {
 
   test("sanitizes connector initialization failures", async () => {
     const { execute } = arrange();
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     mocks.initializeLakebasePool.mockRejectedValueOnce(
       new Error("secret host and credential details"),
     );
@@ -223,6 +232,9 @@ describe("createDatabaseState", () => {
     expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
     expect(error.message).toBe("Database setup failed");
     expect(error.cause).toBeUndefined();
+    expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+      "secret host and credential details",
+    );
   });
 
   test("runs root SQL directly, maps failures safely, and rejects after deactivation", async () => {

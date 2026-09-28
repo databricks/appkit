@@ -815,6 +815,91 @@ describe("database failures", () => {
     }
   });
 
+  it.each(["42501", "57014", "42601", "42703", "42P01", "28000"])(
+    "does not log arbitrary driver text for SQLSTATE %s",
+    async (code) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        throw {
+          code,
+          message: "patient@example.test must not reach the log",
+          detail: "private row value patient@example.test",
+          hint: "try patient@example.test",
+        };
+      };
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        await createDrizzleDataPath(fake.db, schema)
+          .select(users, {})
+          .catch(() => undefined);
+
+        const output = errorLog.mock.calls.flat().map(String).join(" ");
+        expect(output).toContain(code);
+        expect(output).not.toContain("patient@example.test");
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("does not admit trailing newlines in otherwise allowed diagnostics", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      throw { code: "42703", message: "column notes.body does not exist\n" };
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch(() => undefined);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        "\n",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("bounds untrusted system error codes in server logs", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    const oversizedCode = `E${"A".repeat(500)}`;
+    query.users.findMany = async () => {
+      throw { code: oversizedCode, syscall: "connect", message: "sensitive" };
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch(() => undefined);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        oversizedCode,
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   // Schema drift used to surface as a bare SQLSTATE, with no object named.
   it.each([
     [
@@ -823,23 +908,15 @@ describe("database failures", () => {
         message: "column notes.board_id does not exist",
         hint: 'Perhaps you meant to reference the column "notes.body".',
       },
-      ["column notes.board_id does not exist", '"notes.body"'],
+      ["column notes.board_id does not exist"],
     ],
     [
       "42P01",
       { message: 'relation "public.boards" does not exist' },
       ['relation "public.boards" does not exist'],
     ],
-    [
-      "28000",
-      {
-        message: "External authorization failed.",
-        detail: "This could be due to paused instances.",
-      },
-      ["External authorization failed.", "paused instances"],
-    ],
   ] as const)(
-    "logs the driver's own text for described SQLSTATE %s, never the wrapper's",
+    "logs safe schema identifiers for SQLSTATE %s, never free-form text",
     async (code, fields, expected) => {
       const fake = makeFakeDb();
       const query = fake.db.query as unknown as Record<
@@ -867,6 +944,7 @@ describe("database failures", () => {
 
         const output = errorLog.mock.calls.flat().map(String).join(" ");
         for (const text of expected) expect(output).toContain(text);
+        expect(output).not.toContain("Perhaps you meant");
         expect(output).not.toContain("Failed query");
         expect(output).not.toContain("alice@x.com");
         // The diagnostic stays in the log; callers still get the stable error.

@@ -10,7 +10,7 @@ import { ServiceContext } from "../../context/service-context";
 import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { createWorkspaceClient } from "../../workspace-client";
-import { warnOnEndpointHostMismatch } from "./endpoint-host";
+import { assertEndpointHostMatches } from "./endpoint-host";
 
 /**
  * Create a Lakebase pool with appkit's logger integration.
@@ -50,7 +50,7 @@ export async function initializeLakebasePool(
   }
   const [user] = await Promise.all([
     getUsernameWithApiLookup(resolved),
-    warnOnEndpointHostMismatch(resolved),
+    assertEndpointHostMatches(resolved),
   ]);
   if (!user) {
     throw ConfigurationError.invalidConnection(
@@ -76,7 +76,7 @@ export {
   type RequestedResource,
 } from "@databricks/lakebase";
 
-export { warnOnEndpointHostMismatch } from "./endpoint-host";
+export { assertEndpointHostMatches } from "./endpoint-host";
 export {
   createLakebasePoolManager,
   type LakebasePoolManager,
