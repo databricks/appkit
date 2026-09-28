@@ -4,11 +4,18 @@ export {
   type AppAnalyticsClient,
   type AppAnalyticsOptions,
 } from "./client";
+export type { BeforeSendResult } from "./core/before-send";
 export type {
-  EventProperties,
-  EventPropertyValue,
   AppAnalyticsDiagnostic,
   AppAnalyticsDiagnosticCode,
   AppAnalyticsDiagnosticReason,
   AppAnalyticsEvent,
+  AppAnalyticsEventType,
+  EventContext,
+  EventProperties,
+  EventPropertyValue,
+  WebVitalEventData,
+  WebVitalName,
+  WebVitalNavigationType,
+  WebVitalRating,
 } from "./core/event";

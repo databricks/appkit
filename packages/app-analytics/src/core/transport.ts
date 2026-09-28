@@ -31,6 +31,8 @@ export type DeliveryResult =
       readonly outcome: "retryable";
       readonly reason: "network" | "timeout" | "http";
       readonly status?: number;
+      /** Delay requested by a `Retry-After` response header. */
+      readonly retryAfterMs?: number;
     }
   | {
       readonly outcome: "rejected";
@@ -149,7 +151,7 @@ export async function sendBatch(
       return { outcome: "retryable", reason: "timeout" };
     }
 
-    return classifyHttpStatus(response.status);
+    return classifyResponse(response);
   } catch {
     return didTimeout
       ? { outcome: "retryable", reason: "timeout" }
@@ -227,7 +229,8 @@ function createAbortController(): AbortController | undefined {
   }
 }
 
-function classifyHttpStatus(status: number): DeliveryResult {
+function classifyResponse(response: Response): DeliveryResult {
+  const status = response.status;
   if (status >= 200 && status < 300) {
     return { outcome: "accepted", status };
   }
@@ -237,7 +240,29 @@ function classifyHttpStatus(status: number): DeliveryResult {
     status === 429 ||
     (status >= 500 && status < 600)
   ) {
-    return { outcome: "retryable", reason: "http", status };
+    const retryAfterMs = readRetryAfterMs(response);
+    return retryAfterMs === undefined
+      ? { outcome: "retryable", reason: "http", status }
+      : { outcome: "retryable", reason: "http", status, retryAfterMs };
   }
   return { outcome: "rejected", reason: "http", status };
+}
+
+/** Parses `Retry-After` as delay-seconds or an HTTP date. */
+function readRetryAfterMs(response: Response): number | undefined {
+  let header: string | null | undefined;
+  try {
+    header = response.headers?.get("retry-after");
+  } catch {
+    return undefined;
+  }
+  if (typeof header !== "string" || header.trim().length === 0) {
+    return undefined;
+  }
+
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) * 1_000;
+
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }

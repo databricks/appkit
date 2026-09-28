@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { appAnalytics } from "../index";
+import { appAnalytics, type AppAnalyticsEvent } from "../index";
 import { AppAnalytics } from "../react";
 import {
   installFetchMock,
@@ -86,8 +86,63 @@ describe("AppAnalytics", () => {
       automaticPageViews: false,
       webVitals: true,
       sampleRate: 0.25,
-      beforeSend,
-      onDiagnostic,
+      beforeSend: expect.any(Function),
+      onDiagnostic: expect.any(Function),
     });
+    const options = init.mock.calls[0]?.[0];
+    const snapshot = { name: "e" } as unknown as AppAnalyticsEvent;
+    expect(options?.beforeSend?.(snapshot)).toBe(true);
+    expect(beforeSend).toHaveBeenCalledWith(snapshot);
+    options?.onDiagnostic?.({ code: "queue_overflow", eventCount: 1 });
+    expect(onDiagnostic).toHaveBeenCalledWith({
+      code: "queue_overflow",
+      eventCount: 1,
+    });
+  });
+
+  it("does not reconfigure the client when inline callbacks change", () => {
+    const init = vi.spyOn(appAnalytics, "init");
+    const seen: string[] = [];
+
+    const view = render(
+      <AppAnalytics
+        automaticPageViews={false}
+        onDiagnostic={() => seen.push("first")}
+      />,
+    );
+    view.rerender(
+      <AppAnalytics
+        automaticPageViews={false}
+        onDiagnostic={() => seen.push("second")}
+      />,
+    );
+    view.rerender(
+      <AppAnalytics
+        automaticPageViews={false}
+        onDiagnostic={() => seen.push("third")}
+      />,
+    );
+
+    expect(init).toHaveBeenCalledOnce();
+    init.mock.calls[0]?.[0]?.onDiagnostic?.({
+      code: "queue_overflow",
+      eventCount: 1,
+    });
+    expect(seen).toEqual(["third"]);
+    view.unmount();
+  });
+
+  it("does not undo configuration that a prop leaves unset", async () => {
+    const fetchMock = installFetchMock();
+    appAnalytics.init({ automaticPageViews: false, endpoint: "/configured" });
+
+    const view = render(<AppAnalytics sampleRate={1} />);
+    appAnalytics.track("after_mount");
+    await appAnalytics.flush();
+    view.unmount();
+
+    expect(fetchMock.mock.calls.map(([endpoint]) => endpoint)).toEqual([
+      new URL("/configured", window.location.href).href,
+    ]);
   });
 });

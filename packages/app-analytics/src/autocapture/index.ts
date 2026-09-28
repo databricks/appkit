@@ -1,3 +1,9 @@
+import {
+  deleteGlobal,
+  getOrCreateGlobal,
+  readGlobal,
+} from "../core/global-registry";
+
 export const MAX_AUTOCAPTURE_EVENTS_PER_SESSION = 100;
 
 const EVENT_ATTRIBUTE = "data-app-analytics-event";
@@ -23,13 +29,16 @@ const CLICKABLE_SELECTOR = [
   "[role='tab']",
 ].join(",");
 
-export interface AutocaptureInteraction {
-  readonly eventName: string;
-  readonly type: "click" | "submit";
-  readonly element: string;
-}
+/**
+ * What an annotated element produced: an Action name, or an annotation that
+ * cannot fire because it is not on an interactive element (clicks) or a form
+ * (submits). An ignored annotation is reported once per element.
+ */
+export type AutocaptureSignal =
+  | { readonly kind: "interaction"; readonly eventName: string }
+  | { readonly kind: "ignored"; readonly reason: "not_interactive" };
 
-type AutocaptureListener = (interaction: AutocaptureInteraction) => void;
+type AutocaptureListener = (signal: AutocaptureSignal) => void;
 
 interface AutocaptureSubscription {
   isTrusted: (event: Event) => boolean;
@@ -44,7 +53,14 @@ interface AutocaptureHooks {
 
 interface AutocaptureState {
   hooks: AutocaptureHooks | undefined;
+  /** Annotated elements already reported as ignored. */
+  ignoredElements?: WeakSet<Element>;
   subscriptions: Map<unknown, AutocaptureSubscription>;
+}
+
+interface ReadSignal {
+  readonly annotated: Element;
+  readonly signal: AutocaptureSignal;
 }
 
 interface AutocaptureObserverOptions {
@@ -115,26 +131,46 @@ function installHooks(state: AutocaptureState, target: Document): boolean {
 }
 
 function notify(state: AutocaptureState, event: Event): void {
-  let interaction: AutocaptureInteraction | undefined;
+  let read: ReadSignal | undefined;
   try {
-    interaction = readInteraction(event);
+    read = readSignal(event);
   } catch {
     return;
   }
-  if (interaction === undefined) return;
+  if (read === undefined) return;
 
-  for (const subscription of [...state.subscriptions.values()]) {
+  const trusted = [...state.subscriptions.values()].filter((subscription) =>
+    safelyIsTrusted(subscription, event),
+  );
+  if (trusted.length === 0) return;
+
+  if (read.signal.kind === "ignored") {
+    state.ignoredElements ??= new WeakSet();
+    if (state.ignoredElements.has(read.annotated)) return;
+    state.ignoredElements.add(read.annotated);
+  }
+
+  for (const subscription of trusted) {
     try {
-      if (subscription.isTrusted(event)) {
-        subscription.listener(interaction);
-      }
+      subscription.listener(read.signal);
     } catch {
       // Interaction instrumentation must not affect application behavior.
     }
   }
 }
 
-function readInteraction(event: Event): AutocaptureInteraction | undefined {
+function safelyIsTrusted(
+  subscription: AutocaptureSubscription,
+  event: Event,
+): boolean {
+  try {
+    return subscription.isTrusted(event);
+  } catch {
+    return false;
+  }
+}
+
+function readSignal(event: Event): ReadSignal | undefined {
   const target = event.target;
   if (!(target instanceof Element)) return undefined;
   if (target.closest(`[${IGNORE_ATTRIBUTE}]`) !== null) return undefined;
@@ -146,14 +182,23 @@ function readInteraction(event: Event): AutocaptureInteraction | undefined {
   if (eventName === null) return undefined;
 
   if (event.type === "click") {
-    if (!annotated.matches(CLICKABLE_SELECTOR) || isNonPrimaryClick(event)) {
-      return undefined;
-    }
-    return { eventName, type: "click", element: annotated.localName };
+    if (isNonPrimaryClick(event)) return undefined;
+    return {
+      annotated,
+      signal: annotated.matches(CLICKABLE_SELECTOR)
+        ? { kind: "interaction", eventName }
+        : { kind: "ignored", reason: "not_interactive" },
+    };
   }
 
-  if (event.type === "submit" && annotated.localName === "form") {
-    return { eventName, type: "submit", element: "form" };
+  if (event.type === "submit") {
+    return {
+      annotated,
+      signal:
+        annotated.localName === "form"
+          ? { kind: "interaction", eventName }
+          : { kind: "ignored", reason: "not_interactive" },
+    };
   }
 
   return undefined;
@@ -171,16 +216,10 @@ function isNonPrimaryClick(event: Event): boolean {
 }
 
 function getAutocaptureState(): AutocaptureState {
-  const registry = getRegistry();
-  const existing = registry[AUTOCAPTURE_STATE_KEY];
-  if (isAutocaptureState(existing)) return existing;
-
-  const state: AutocaptureState = {
+  return getOrCreateGlobal(AUTOCAPTURE_STATE_KEY, isAutocaptureState, () => ({
     hooks: undefined,
     subscriptions: new Map(),
-  };
-  registry[AUTOCAPTURE_STATE_KEY] = state;
-  return state;
+  }));
 }
 
 function releaseState(state: AutocaptureState): void {
@@ -193,9 +232,8 @@ function releaseState(state: AutocaptureState): void {
     safelyRemoveListener(hooks.document, "submit", hooks.submitListener);
   }
 
-  const registry = getRegistry();
-  if (registry[AUTOCAPTURE_STATE_KEY] === state) {
-    Reflect.deleteProperty(registry, AUTOCAPTURE_STATE_KEY);
+  if (readGlobal(AUTOCAPTURE_STATE_KEY) === state) {
+    deleteGlobal(AUTOCAPTURE_STATE_KEY);
   }
 }
 
@@ -209,10 +247,6 @@ function safelyRemoveListener(
   } catch {
     // Host cleanup errors must not escape into the application.
   }
-}
-
-function getRegistry(): Record<symbol, unknown> {
-  return globalThis as unknown as Record<symbol, unknown>;
 }
 
 function isAutocaptureState(value: unknown): value is AutocaptureState {

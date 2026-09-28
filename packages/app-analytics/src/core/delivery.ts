@@ -12,6 +12,8 @@ import {
 
 const MAX_DELIVERY_ATTEMPTS = 2;
 const RETRY_BASE_DELAY_MS = 1_000;
+/** A longer `Retry-After` gives up the retry instead of holding the queue. */
+const MAX_RETRY_AFTER_MS = 10_000;
 
 interface QueuedEvent {
   attempts: number;
@@ -31,7 +33,34 @@ interface ActiveDelivery {
 type DrainMode = "all" | "single" | "unload";
 type DiagnosticListener = (diagnostic: AppAnalyticsDiagnostic) => void;
 
-/** Coordinates batching and delivery while keeping tracking calls synchronous. */
+/**
+ * Drain work requested while the queue is being delivered. Requests coalesce
+ * and are served in this order:
+ *
+ * 1. `through` — `flush()`/`shutdown()`: deliver every event queued up to a
+ *    sequence number, with keepalive when the page is hidden;
+ * 2. `unload` — page hidden: one keepalive batch per lifecycle signal, so
+ *    the browser's shared keepalive quota is not exhausted;
+ * 3. `single` — the 5 s timer or a full batch: one normal batch.
+ */
+interface PendingDrains {
+  single: boolean;
+  unload: boolean;
+  through: { sequence: number; useUnload: boolean } | undefined;
+}
+
+function noPendingDrains(): PendingDrains {
+  return { single: false, unload: false, through: undefined };
+}
+
+/**
+ * Coordinates batching and delivery while keeping tracking calls synchronous.
+ *
+ * One drain loop serves {@link PendingDrains}, so at most one request is in
+ * flight. If the page is hidden while that request is pending, the same batch
+ * is replayed with keepalive (`replayActiveDelivery`) because navigation can
+ * cancel the original; the replay counts as the batch's retry.
+ */
 export class DeliveryPipeline {
   private readonly queue = new BoundedQueue<QueuedEvent>();
   private readonly scheduler = new DeliveryScheduler((reason) => {
@@ -45,10 +74,7 @@ export class DeliveryPipeline {
   private active = false;
   private activeDelivery: ActiveDelivery | undefined;
   private drainPromise: Promise<void> | undefined;
-  private drainSingleRequested = false;
-  private drainThroughSequence: number | undefined;
-  private drainThroughUsesUnload = false;
-  private drainUnloadRequested = false;
+  private pending: PendingDrains = noPendingDrains();
   private nextSequence = 1;
   private postponeRemaining = false;
   private shutdownPromise: Promise<void> | undefined;
@@ -180,7 +206,7 @@ export class DeliveryPipeline {
   private async executeDrainRequests(): Promise<void> {
     do {
       await this.runNextDrainRequest();
-    } while (this.drainThroughSequence !== undefined);
+    } while (this.pending.through !== undefined);
   }
 
   private async runNextDrainRequest(): Promise<void> {
@@ -189,27 +215,25 @@ export class DeliveryPipeline {
       return;
     }
 
-    if (this.drainThroughSequence !== undefined) {
-      const throughSequence = this.drainThroughSequence;
-      const useUnload = this.drainThroughUsesUnload;
-      this.drainThroughSequence = undefined;
-      this.drainThroughUsesUnload = false;
-      await this.drainThrough(throughSequence, useUnload);
+    const through = this.pending.through;
+    if (through !== undefined) {
+      this.pending.through = undefined;
+      await this.drainThrough(through.sequence, through.useUnload);
       return;
     }
 
-    if (this.drainUnloadRequested) {
-      this.drainUnloadRequested = false;
+    if (this.pending.unload) {
+      this.pending.unload = false;
       await this.deliverNextBatch("unload");
       // One bounded keepalive batch per lifecycle callback avoids exhausting
       // the browser's shared keepalive allowance.
-      this.drainSingleRequested = false;
+      this.pending.single = false;
       this.postponeRemaining = true;
       return;
     }
 
-    if (this.drainSingleRequested) {
-      this.drainSingleRequested = false;
+    if (this.pending.single) {
+      this.pending.single = false;
       await this.deliverNextBatch("single");
     }
   }
@@ -221,8 +245,11 @@ export class DeliveryPipeline {
     for (;;) {
       const next = this.queue.peek();
       if (next === undefined || next.sequence > throughSequence) return;
+      // A flush requested while this one runs may have asked for keepalive.
       const mode =
-        useUnload || this.drainThroughUsesUnload || this.scheduler.isPageHidden
+        useUnload ||
+        this.pending.through?.useUnload === true ||
+        this.scheduler.isPageHidden
           ? "unload"
           : "all";
       await this.deliverNextBatch(mode, throughSequence);
@@ -237,10 +264,11 @@ export class DeliveryPipeline {
     if (selected.length === 0) return;
 
     const prepared = prepareBatch(selected.map(({ event }) => event));
-    if (prepared.kind !== "batch") {
-      this.handleUnpreparedBatch(selected, prepared);
+    if (prepared.kind === "oversized" || prepared.kind === "encoding_error") {
+      this.dropHeadEvent(selected, prepared.kind);
       return;
     }
+    if (prepared.kind !== "batch") return;
 
     const batchItems = selected.slice(0, prepared.events.length);
     this.requeue(selected.slice(prepared.events.length));
@@ -275,32 +303,17 @@ export class DeliveryPipeline {
     return selected.slice(0, boundary);
   }
 
-  private handleUnpreparedBatch(
+  /** `prepareBatch` rejects only the head event; the rest go back in order. */
+  private dropHeadEvent(
     selected: readonly QueuedEvent[],
-    prepared: Exclude<ReturnType<typeof prepareBatch>, PreparedEventBatch>,
+    kind: "encoding_error" | "oversized",
   ): void {
-    if (prepared.kind === "empty") {
-      this.emit({
-        code: "delivery_failed",
-        eventCount: selected.length,
-        reason: "encoding",
-      });
-      return;
-    }
-
-    const rejectedIndex = selected.findIndex(
-      ({ event }) => event === prepared.event,
+    this.requeue(selected.slice(1));
+    this.emit(
+      kind === "oversized"
+        ? { code: "event_too_large", eventCount: 1 }
+        : { code: "delivery_failed", eventCount: 1, reason: "encoding" },
     );
-    const index = rejectedIndex === -1 ? 0 : rejectedIndex;
-    this.requeue(selected.filter((_, itemIndex) => itemIndex !== index));
-    this.emit({
-      code:
-        prepared.kind === "oversized" ? "event_too_large" : "delivery_failed",
-      eventCount: 1,
-      ...(prepared.kind === "encoding_error"
-        ? { reason: "encoding" as const }
-        : {}),
-    });
   }
 
   private async deliverWithRetry(
@@ -345,8 +358,12 @@ export class DeliveryPipeline {
           return;
         }
 
+        const retryAfterMs =
+          result.outcome === "retryable" ? result.retryAfterMs : undefined;
         const canRetry =
-          result.outcome === "retryable" && attempt < MAX_DELIVERY_ATTEMPTS;
+          result.outcome === "retryable" &&
+          attempt < MAX_DELIVERY_ATTEMPTS &&
+          (retryAfterMs === undefined || retryAfterMs <= MAX_RETRY_AFTER_MS);
         if (canRetry) {
           this.emit({
             code: "delivery_retry",
@@ -367,7 +384,7 @@ export class DeliveryPipeline {
           return;
         }
 
-        if (delayRetry) await waitForRetry();
+        if (delayRetry) await waitForRetry(retryAfterMs);
       }
     } finally {
       if (this.activeDelivery === delivery) this.activeDelivery = undefined;
@@ -452,11 +469,11 @@ export class DeliveryPipeline {
       return;
     }
 
-    if (this.drainUnloadRequested) {
+    if (this.pending.unload) {
       void this.requestDrain("unload");
     } else if (
       !this.postponeRemaining &&
-      (this.drainSingleRequested || this.queue.size >= MAX_EVENTS_PER_BATCH)
+      (this.pending.single || this.queue.size >= MAX_EVENTS_PER_BATCH)
     ) {
       void this.requestDrain("single");
     } else {
@@ -471,21 +488,18 @@ export class DeliveryPipeline {
     useUnload = false,
   ): void {
     if (mode === "all" && throughSequence !== undefined) {
-      this.drainThroughSequence = Math.max(
-        this.drainThroughSequence ?? 0,
-        throughSequence,
-      );
-      this.drainThroughUsesUnload ||= useUnload;
+      const current = this.pending.through;
+      this.pending.through = {
+        sequence: Math.max(current?.sequence ?? 0, throughSequence),
+        useUnload: (current?.useUnload ?? false) || useUnload,
+      };
     }
-    if (mode === "single") this.drainSingleRequested = true;
-    if (mode === "unload") this.drainUnloadRequested = true;
+    if (mode === "single") this.pending.single = true;
+    if (mode === "unload") this.pending.unload = true;
   }
 
   private resetDrainRequests(): void {
-    this.drainSingleRequested = false;
-    this.drainThroughSequence = undefined;
-    this.drainThroughUsesUnload = false;
-    this.drainUnloadRequested = false;
+    this.pending = noPendingDrains();
   }
 
   private emit(diagnostic: AppAnalyticsDiagnostic): void {
@@ -497,8 +511,10 @@ export class DeliveryPipeline {
   }
 }
 
-async function waitForRetry(): Promise<void> {
-  const delay = Math.floor(Math.random() * RETRY_BASE_DELAY_MS);
+/** Full jitter, or the server's `Retry-After` when it asks for longer. */
+async function waitForRetry(retryAfterMs = 0): Promise<void> {
+  const jitter = Math.floor(Math.random() * RETRY_BASE_DELAY_MS);
+  const delay = Math.max(jitter, retryAfterMs);
   if (delay === 0) return;
   await new Promise<void>((resolve) => setTimeout(resolve, delay));
 }

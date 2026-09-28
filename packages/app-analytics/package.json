@@ -1,5 +1,6 @@
 {
   "name": "@databricks/app-analytics",
+  "private": true,
   "type": "module",
   "version": "0.1.0",
   "description": "Browser experience telemetry for Databricks Apps, encoded as OpenTelemetry.",
@@ -23,12 +24,12 @@
     "apps"
   ],
   "license": "Apache-2.0",
+  "sideEffects": false,
   "files": [
     "dist",
     "README.md",
     "LICENSE",
-    "DCO",
-    "sbom.cdx.json"
+    "DCO"
   ],
   "exports": {
     ".": {
@@ -60,7 +61,7 @@
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "dist": "tsx ../../tools/dist-lakebase.ts",
+    "dist": "tsx ../../tools/dist-standalone-package.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },

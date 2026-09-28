@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_AUTOCAPTURE_EVENTS_PER_SESSION,
   observeAutocapture,
-  type AutocaptureInteraction,
+  type AutocaptureSignal,
 } from "../autocapture";
-import { createAppAnalytics } from "../index";
+import { createAppAnalytics, type AppAnalyticsDiagnostic } from "../index";
 import {
   installFetchMock,
   readFirstLogRecord,
@@ -14,7 +14,13 @@ import {
   readStringAttribute,
 } from "./test-utils";
 
+const AUTOCAPTURE_STATE_KEY = Symbol.for(
+  "@databricks/app-analytics/autocapture-state",
+);
+
 afterEach(() => {
+  // A failed assertion must not leave shared listeners for the next test.
+  Reflect.deleteProperty(globalThis, AUTOCAPTURE_STATE_KEY);
   document.body.replaceChildren();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -22,7 +28,7 @@ afterEach(() => {
 
 describe("annotated autocapture", () => {
   it("observes annotated interactive clicks and form submissions", () => {
-    const interactions: AutocaptureInteraction[] = [];
+    const interactions: AutocaptureSignal[] = [];
     const stop = observeAutocapture(
       (interaction) => interactions.push(interaction),
       {},
@@ -46,28 +52,18 @@ describe("annotated autocapture", () => {
     );
 
     expect(interactions).toEqual([
-      {
-        eventName: "export_clicked",
-        type: "click",
-        element: "button",
-      },
-      {
-        eventName: "search_submitted",
-        type: "submit",
-        element: "form",
-      },
+      { kind: "interaction", eventName: "export_clicked" },
+      { kind: "interaction", eventName: "search_submitted" },
     ]);
 
     stop?.();
   });
 
-  it("ignores unannotated, non-interactive, disabled, and excluded elements", () => {
+  it("ignores unannotated, disabled, and excluded elements", () => {
     const listener = vi.fn();
     const stop = observeAutocapture(listener, {}, { isTrusted: () => true });
 
     const unannotated = document.createElement("button");
-    const nonInteractive = document.createElement("div");
-    nonInteractive.dataset.appAnalyticsEvent = "decorative_clicked";
 
     const disabled = document.createElement("button");
     disabled.dataset.appAnalyticsEvent = "disabled_clicked";
@@ -79,13 +75,41 @@ describe("annotated autocapture", () => {
     excludedButton.dataset.appAnalyticsEvent = "secret_clicked";
     excluded.append(excludedButton);
 
-    document.body.append(unannotated, nonInteractive, disabled, excluded);
+    document.body.append(unannotated, disabled, excluded);
     unannotated.click();
-    nonInteractive.click();
     disabled.click();
     excludedButton.click();
 
     expect(listener).not.toHaveBeenCalled();
+    stop?.();
+  });
+
+  it("reports an annotation that cannot fire once per element", () => {
+    const signals: AutocaptureSignal[] = [];
+    const stop = observeAutocapture(
+      (signal) => signals.push(signal),
+      {},
+      { isTrusted: () => true },
+    );
+
+    const nonInteractive = document.createElement("div");
+    nonInteractive.dataset.appAnalyticsEvent = "decorative_clicked";
+    const annotatedWrapper = document.createElement("section");
+    annotatedWrapper.dataset.appAnalyticsEvent = "search_submitted";
+    const form = document.createElement("form");
+    annotatedWrapper.append(form);
+    document.body.append(nonInteractive, annotatedWrapper);
+
+    nonInteractive.click();
+    nonInteractive.click();
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
+
+    expect(signals).toEqual([
+      { kind: "ignored", reason: "not_interactive" },
+      { kind: "ignored", reason: "not_interactive" },
+    ]);
     stop?.();
   });
 
@@ -149,6 +173,36 @@ describe("annotated autocapture", () => {
       const payload = JSON.stringify(record);
       expect(payload).not.toContain("victor@example.com");
       expect(payload).not.toContain("private-value");
+    } finally {
+      await client.shutdown();
+    }
+  });
+
+  it("is on by default and reports ignored annotations to the client", async () => {
+    const diagnostics: AppAnalyticsDiagnostic[] = [];
+    const fetchMock = installFetchMock();
+    const addEventListener = vi.spyOn(document, "addEventListener");
+    const client = createAppAnalytics();
+    const decorative = document.createElement("div");
+    decorative.dataset.appAnalyticsEvent = "decorative_clicked";
+    document.body.append(decorative);
+
+    try {
+      client.init({
+        automaticPageViews: false,
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      });
+      invokeInstalledListener(addEventListener.mock.calls, "click", decorative);
+      await client.flush();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(diagnostics).toEqual([
+        {
+          code: "autocapture_ignored",
+          eventCount: 1,
+          reason: "not_interactive",
+        },
+      ]);
     } finally {
       await client.shutdown();
     }

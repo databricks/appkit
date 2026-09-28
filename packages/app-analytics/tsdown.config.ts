@@ -28,12 +28,8 @@ export default defineConfig([
     outExtensions: ({ format }) => ({
       js: format === "cjs" ? ".cjs" : ".js",
     }),
-    external: (id) => {
-      // Bundle all internal modules
-      if (id.startsWith("@/")) return false;
-      // Externalize all npm packages
-      return /^[^./]/.test(id) || id.includes("/node_modules/");
-    },
+    // Externalize npm packages; relative imports are bundled.
+    external: (id) => /^[^./]/.test(id) || id.includes("/node_modules/"),
     tsconfig: "./tsconfig.json",
   },
 ]);

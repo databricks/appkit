@@ -1,7 +1,14 @@
 import { SDK_NAME, SDK_VERSION, type EventContext } from "./event";
+import { readGlobal, writeGlobal } from "./global-registry";
 
 export const MAX_PAGE_PATH_BYTES = 2 * 1_024;
 export const SESSION_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1_000;
+/**
+ * Activity marks closer together than this are not written again. It bounds
+ * storage writes during bursts of events; a session can end up to this much
+ * earlier than the inactivity timeout implies.
+ */
+const SESSION_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const SESSION_STORAGE_KEY = "databricks.app.analytics.session.v1";
 
 const IN_MEMORY_SESSION_KEY = Symbol.for(
@@ -22,43 +29,45 @@ export function createEventId(): string {
   return createRandomId();
 }
 
+/** Returns the tab's active session, starting a new one after inactivity. */
 export function getOrCreateSessionId(now = Date.now()): string {
-  const storage = readSessionStorage();
-  const previous = newestSession(
-    readInMemorySession(),
-    storage === undefined ? undefined : readStoredSession(storage),
-  );
+  const { storage, memory, stored } = readSessionStates();
+  const previous = newestSession(memory, stored);
   const state = isActiveSession(previous, now)
     ? previous
     : { id: createRandomId(), lastActivityAt: now };
 
-  writeInMemorySession(state);
-  if (storage !== undefined) writeStoredSession(storage, state);
+  persistSessionState(state, { storage, memory, stored });
   return state.id;
 }
 
+/** Extends the session named by `sessionId` if it is still the tab's session. */
 export function markSessionActivity(sessionId: string, now: number): void {
   if (!Number.isFinite(now)) return;
 
-  const storage = readSessionStorage();
-  const current = newestSession(
-    readInMemorySession(),
-    storage === undefined ? undefined : readStoredSession(storage),
-  );
+  const states = readSessionStates();
+  const current = newestSession(states.memory, states.stored);
   if (current?.id !== sessionId) return;
+  if (now - current.lastActivityAt < SESSION_ACTIVITY_WRITE_INTERVAL_MS) return;
 
-  const state = { id: sessionId, lastActivityAt: now };
-  writeInMemorySession(state);
-  if (storage !== undefined) writeStoredSession(storage, state);
+  persistSessionState({ id: sessionId, lastActivityAt: now }, states);
 }
 
-export function createEventContext(sessionId: string): EventContext {
+export function createEventContext(
+  sessionId: string,
+  path: string = readPageLocation().path,
+): EventContext {
   return {
     sessionId,
-    path: readPageLocation().path,
+    path,
     sdkName: SDK_NAME,
     sdkVersion: SDK_VERSION,
   };
+}
+
+/** Whether `path` fits the page-path byte limit. */
+export function isValidPagePath(path: unknown): path is string {
+  return typeof path === "string" && fitsWithinBytes(path, MAX_PAGE_PATH_BYTES);
 }
 
 export function readPageLocation(): Pick<EventContext, "path"> {
@@ -72,12 +81,14 @@ export function sanitizePageLocation(
 
   try {
     const url = new URL(location.href);
-    return { path: keepWithinByteLimit(url.pathname, MAX_PAGE_PATH_BYTES) };
+    return { path: withinPathLimit(url.pathname) };
   } catch {
-    return {
-      path: keepWithinByteLimit(location.pathname, MAX_PAGE_PATH_BYTES),
-    };
+    return { path: withinPathLimit(location.pathname) };
   }
+}
+
+function withinPathLimit(path: string): string {
+  return fitsWithinBytes(path, MAX_PAGE_PATH_BYTES) ? path : "";
 }
 
 function readBrowserLocation(): BrowserLocation | undefined {
@@ -92,6 +103,39 @@ function readSessionStorage(): Storage | undefined {
   } catch {
     return undefined;
   }
+}
+
+interface SessionStates {
+  storage: Storage | undefined;
+  memory: SessionState | undefined;
+  stored: SessionState | undefined;
+}
+
+function readSessionStates(): SessionStates {
+  const storage = readSessionStorage();
+  return {
+    storage,
+    memory: readInMemorySession(),
+    stored: storage === undefined ? undefined : readStoredSession(storage),
+  };
+}
+
+/** Writes `state` only to the copies that do not already hold it. */
+function persistSessionState(
+  state: SessionState,
+  { storage, memory, stored }: SessionStates,
+): void {
+  if (!isSameSession(memory, state)) writeInMemorySession(state);
+  if (storage !== undefined && !isSameSession(stored, state)) {
+    writeStoredSession(storage, state);
+  }
+}
+
+function isSameSession(
+  left: SessionState | undefined,
+  right: SessionState,
+): boolean {
+  return left?.id === right.id && left.lastActivityAt === right.lastActivityAt;
 }
 
 function readStoredSession(storage: Storage): SessionState | undefined {
@@ -113,13 +157,11 @@ function writeStoredSession(storage: Storage, state: SessionState): void {
 }
 
 function readInMemorySession(): SessionState | undefined {
-  const registry = globalThis as unknown as Record<symbol, unknown>;
-  return parseSessionState(registry[IN_MEMORY_SESSION_KEY]);
+  return parseSessionState(readGlobal(IN_MEMORY_SESSION_KEY));
 }
 
 function writeInMemorySession(state: SessionState): void {
-  const registry = globalThis as unknown as Record<symbol, unknown>;
-  registry[IN_MEMORY_SESSION_KEY] = state;
+  writeGlobal(IN_MEMORY_SESSION_KEY, state);
 }
 
 function parseSessionState(value: unknown): SessionState | undefined {
@@ -167,16 +209,14 @@ function createRandomId(): string {
   throw new Error("Web Crypto is required to create App Analytics IDs");
 }
 
-function keepWithinByteLimit(value: string, byteLimit: number): string {
+function fitsWithinBytes(value: string, byteLimit: number): boolean {
   try {
     if (typeof globalThis.TextEncoder === "function") {
-      return new TextEncoder().encode(value).byteLength <= byteLimit
-        ? value
-        : "";
+      return new TextEncoder().encode(value).byteLength <= byteLimit;
     }
   } catch {
     // Fall through to a conservative bound for older browser runtimes.
   }
 
-  return value.length * 3 <= byteLimit ? value : "";
+  return value.length * 3 <= byteLimit;
 }

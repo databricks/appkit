@@ -9,7 +9,11 @@ import {
   MAX_STRING_VALUE_LENGTH,
   normalizeProperties,
 } from "../core/properties";
-import { createAppAnalytics, type EventProperties } from "../index";
+import {
+  createAppAnalytics,
+  type AppAnalyticsDiagnostic,
+  type EventProperties,
+} from "../index";
 import {
   installFetchMock,
   readFirstLogRecord,
@@ -86,9 +90,18 @@ describe("action tracking", () => {
       omitted_undefined: undefined,
       not_finite: Number.POSITIVE_INFINITY,
       nested: { secret: "value" },
-      "not valid": "hidden",
-      UPPERCASE: "hidden",
-      consecutive__delimiter: "hidden",
+      "not valid": "kept",
+      UPPERCASE: "kept",
+      consecutive__delimiter: "kept",
+      " padded": "hidden",
+      "line\nbreak": "hidden",
+      userEmail: "hidden@example.com",
+      "User Email": "hidden@example.com",
+      "user-email": "hidden@example.com",
+      authToken: "hidden",
+      XAuthToken: "hidden",
+      userName: "hidden",
+      user_name: "hidden",
       "user.email": "hidden@example.com",
       email: "hidden@example.com",
       customer_email: "hidden@example.com",
@@ -121,6 +134,9 @@ describe("action tracking", () => {
       valid_string: "value",
       valid_number: 1.5,
       valid_boolean: false,
+      "not valid": "kept",
+      UPPERCASE: "kept",
+      consecutive__delimiter: "kept",
     });
   });
 
@@ -134,19 +150,39 @@ describe("action tracking", () => {
       ]),
     );
 
-    client.init({ endpoint: "/analytics", automaticPageViews: false });
+    const diagnostics: AppAnalyticsDiagnostic[] = [];
+    client.init({
+      endpoint: "/analytics",
+      automaticPageViews: false,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
     client.track("x".repeat(MAX_EVENT_NAME_LENGTH + 1), properties);
-    client.track("invalid event name", properties);
+    client.track("", properties);
+    client.track("   ", properties);
     client.track(" padded_event ", properties);
-    client.track("UPPERCASE", properties);
-    client.track("browser.web_vital", properties);
-    client.track("databricks.web.page_view", properties);
-    client.track("session.started", properties);
-    client.track("distinct_id", properties);
+    client.track("line\nbreak", properties);
+    client.track("bidi\u202eoverride", properties);
+    client.track(42 as unknown as string, properties);
+    expect(diagnostics).toEqual(
+      Array.from({ length: 7 }, () => ({
+        code: "invalid_event_name",
+        eventCount: 1,
+      })),
+    );
+    await client.flush();
     expect(fetchMock).not.toHaveBeenCalled();
 
+    diagnostics.length = 0;
     client.track("bounded_event", properties);
     await client.flush();
+    expect(diagnostics).toEqual([
+      {
+        code: "property_dropped",
+        eventCount: 1,
+        propertyCount: 10,
+        reason: "limit_exceeded",
+      },
+    ]);
 
     const payload = readPayload(fetchMock.mock.calls[0]?.[1]);
     const record = readFirstLogRecord(payload);
@@ -156,7 +192,87 @@ describe("action tracking", () => {
     expect(customAttributes).toHaveLength(MAX_PROPERTY_COUNT);
   });
 
-  it("does not send before initialization or after shutdown", async () => {
+  it("accepts names and property keys in the application's own convention", async () => {
+    const fetchMock = installFetchMock();
+    const diagnostics: AppAnalyticsDiagnostic[] = [];
+    const client = createAppAnalytics();
+    client.init({
+      endpoint: "/analytics",
+      automaticPageViews: false,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    client.track("orderExported", { orderId: "o-1", "Row Count": 3 });
+    client.track("Order Exported", { format: "csv" });
+    client.track("order-exported");
+    client.track("session.started");
+    client.track("Exportação concluída");
+    await client.flush();
+
+    const records = readLogRecords(readPayload(fetchMock.mock.calls[0]?.[1]));
+    expect(records.map(({ eventName }) => eventName)).toEqual([
+      "orderExported",
+      "Order Exported",
+      "order-exported",
+      "session.started",
+      "Exportação concluída",
+    ]);
+    const keys = records[0]?.attributes
+      .map(({ key }) => key)
+      .filter((key) => key.startsWith("databricks.app.analytics.properties."));
+    expect(keys).toEqual([
+      "databricks.app.analytics.properties.Row Count",
+      "databricks.app.analytics.properties.orderId",
+    ]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("drops sensitive property keys in any casing style and reports them", async () => {
+    const fetchMock = installFetchMock();
+    const diagnostics: AppAnalyticsDiagnostic[] = [];
+    const client = createAppAnalytics();
+    client.init({
+      endpoint: "/analytics",
+      automaticPageViews: false,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    client.track("profile_saved", {
+      userEmail: "hidden@example.com",
+      authToken: "hidden",
+      "Client IP": "127.0.0.1",
+      emailVerified: true,
+      userRole: "admin",
+      tooltipText: "kept",
+      nested: { hidden: true } as unknown as string,
+    });
+    await client.flush();
+
+    const record = readFirstLogRecord(
+      readPayload(fetchMock.mock.calls[0]?.[1]),
+    );
+    const serialized = JSON.stringify(record);
+    expect(serialized).toContain("userRole");
+    expect(serialized).toContain("tooltipText");
+    expect(serialized).not.toContain("hidden");
+    expect(serialized).not.toContain("127.0.0.1");
+    expect(diagnostics).toEqual([
+      {
+        code: "property_dropped",
+        eventCount: 1,
+        propertyCount: 4,
+        reason: "sensitive_name",
+      },
+      {
+        code: "property_dropped",
+        eventCount: 1,
+        propertyCount: 1,
+        reason: "invalid_value",
+      },
+    ]);
+  });
+
+  it("sends calls made before initialization and drops calls after shutdown", async () => {
     const fetchMock = installFetchMock();
     const client = createAppAnalytics();
 
@@ -164,8 +280,14 @@ describe("action tracking", () => {
     client.init({ endpoint: "/analytics", automaticPageViews: false });
     await client.shutdown();
     client.track("after_shutdown");
+    await client.flush();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(
+      readLogRecords(readPayload(fetchMock.mock.calls[0]?.[1])).map(
+        ({ eventName }) => eventName,
+      ),
+    ).toEqual(["before_init"]);
   });
 
   it("contains network failures and lets flush resolve", async () => {

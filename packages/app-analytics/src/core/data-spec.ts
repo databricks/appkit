@@ -1,24 +1,40 @@
 /** App Analytics v1 fields encoded as OTLP log attributes. */
 export const APP_ANALYTICS_SCHEMA_VERSION = 1;
 
-const DATA_SPEC_NAME_PATTERN = /^[a-z][a-z0-9]*(?:[._][a-z0-9]+)*$/;
+/** Maximum length of an Action name or a property key, in UTF-16 units. */
+export const MAX_NAME_LENGTH = 128;
 
-const RESERVED_APPLICATION_NAMES = new Set([
+/**
+ * Property-key namespaces that describe identity, sessions, URLs, or SDK and
+ * platform fields. Property keys are always nested under
+ * `databricks.app.analytics.properties.`, so these cannot collide with real
+ * attributes; they are rejected to keep identity and platform data out of
+ * application properties.
+ */
+const RESERVED_PROPERTY_NAMESPACES = [
   "browser",
   "databricks",
-  "distinctid",
-  "distinct_id",
   "enduser",
   "event",
   "session",
   "telemetry",
   "url",
   "user",
-]);
+];
 
-const SENSITIVE_PROPERTY_SEGMENTS = new Set([
+/**
+ * Words that mark a property key as likely to carry credentials or personal
+ * data. Keys are split into words in any casing style (`user_email`,
+ * `userEmail`, `User Email`, `user-email`), and a key is rejected when one
+ * word, or two adjacent words joined (`user` + `name`), is in this set.
+ *
+ * This is a guard rail for obvious mistakes, not a privacy boundary: it
+ * inspects keys, never values.
+ */
+const SENSITIVE_PROPERTY_WORDS = new Set([
   "authorization",
   "cookie",
+  "distinctid",
   "email",
   "ip",
   "password",
@@ -26,17 +42,6 @@ const SENSITIVE_PROPERTY_SEGMENTS = new Set([
   "token",
   "username",
 ]);
-
-const RESERVED_APPLICATION_PREFIXES = [
-  "browser.",
-  "databricks.",
-  "enduser.",
-  "event.",
-  "session.",
-  "telemetry.",
-  "url.",
-  "user.",
-];
 
 export const APP_ANALYTICS_EVENT_NAMES = {
   pageView: "page_view",
@@ -62,28 +67,66 @@ export function applicationPropertyAttributeName(key: string): string {
   return `${APP_ANALYTICS_ATTRIBUTE_NAMES.propertyPrefix}${key}`;
 }
 
-/** Restricts application-defined names to the App Analytics v1 grammar. */
-function isValidDataSpecName(value: string): boolean {
-  return DATA_SPEC_NAME_PATTERN.test(value);
-}
-
-/** Prevents application data from impersonating reserved fields. */
-export function isValidApplicationName(value: string): boolean {
-  if (!isValidDataSpecName(value)) return false;
-
-  const normalized = value.toLowerCase();
+/**
+ * Accepts any naming convention the application chooses (`order_exported`,
+ * `orderExported`, `Order Exported`). Only hygiene is enforced: 1 to 128
+ * characters, not blank, no leading or trailing whitespace, and no control or
+ * bidirectional-override characters.
+ */
+export function isValidName(value: unknown): value is string {
   return (
-    !RESERVED_APPLICATION_NAMES.has(normalized) &&
-    !RESERVED_APPLICATION_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    )
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_NAME_LENGTH &&
+    value.trim() === value &&
+    !hasControlCharacter(value)
   );
 }
 
-export function isValidPropertyName(value: string): boolean {
-  if (!isValidApplicationName(value)) return false;
-  return !value
+type PropertyNameIssue = "invalid_name" | "sensitive_name";
+
+/** Returns why a property key is rejected, or undefined when it is accepted. */
+export function propertyNameIssue(key: string): PropertyNameIssue | undefined {
+  if (!isValidName(key)) return "invalid_name";
+
+  const normalized = key.toLowerCase();
+  const isReserved = RESERVED_PROPERTY_NAMESPACES.some(
+    (namespace) =>
+      normalized === namespace || normalized.startsWith(`${namespace}.`),
+  );
+  return isReserved || hasSensitiveWord(key) ? "sensitive_name" : undefined;
+}
+
+function hasSensitiveWord(key: string): boolean {
+  const words = splitWords(key);
+  return words.some(
+    (word, index) =>
+      SENSITIVE_PROPERTY_WORDS.has(word) ||
+      SENSITIVE_PROPERTY_WORDS.has(`${word}${words[index + 1] ?? ""}`),
+  );
+}
+
+/** Splits a key into lowercase words across snake, kebab, camel, and Pascal case. */
+function splitWords(key: string): string[] {
+  return key
+    .replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
+    .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
     .toLowerCase()
-    .split(/[._]/)
-    .some((segment) => SENSITIVE_PROPERTY_SEGMENTS.has(segment));
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0);
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2066 && code <= 0x2069)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

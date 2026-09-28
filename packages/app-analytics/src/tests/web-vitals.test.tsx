@@ -307,7 +307,7 @@ describe("Web Vitals", () => {
     ).toHaveLength(1);
   });
 
-  it("replaces the public singleton subscriber after module re-evaluation", async () => {
+  it("keeps one public singleton subscriber after module re-evaluation", async () => {
     const fetchMock = installFetchMock();
     const firstClient = (await import("../client")).appAnalytics;
     firstClient.init({
@@ -319,7 +319,6 @@ describe("Web Vitals", () => {
 
     vi.resetModules();
     const reloadedClient = (await import("../client")).appAnalytics;
-    clients.add(reloadedClient);
     reloadedClient.init({
       endpoint: "/analytics",
       automaticPageViews: false,
@@ -331,10 +330,11 @@ describe("Web Vitals", () => {
     await Promise.all([firstClient.flush(), reloadedClient.flush()]);
     expect(fetchMock).toHaveBeenCalledOnce();
 
+    // Both module copies drive the same shared client.
     await firstClient.shutdown();
     report(createMetric("LCP"));
     await reloadedClient.flush();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("preserves metric IDs while assigning an event ID to every report", async () => {
@@ -384,16 +384,19 @@ describe("Web Vitals", () => {
       webVitals: true,
     });
 
-    expectObserverRegistrations(0);
+    // Observers run in unsampled sessions too, so a later sampled session is
+    // collected; the records themselves are dropped.
+    expectObserverRegistrations(1);
     sampledOut.init({
       endpoint: "/analytics",
       automaticPageViews: false,
       sampleRate: 1,
       webVitals: true,
     });
-    expectObserverRegistrations(0);
+    report(createMetric("LCP", { id: "sampled-out" }));
     await sampledOut.flush();
     expect(fetchMock).not.toHaveBeenCalled();
+    await sampledOut.shutdown();
 
     const snapshots: AppAnalyticsEvent[] = [];
     const filtered = createTestClient();

@@ -16,6 +16,7 @@ import type {
   WebVitalNavigationType,
   WebVitalRating,
 } from "../core/event";
+import { getOrCreateGlobal } from "../core/global-registry";
 import { MAX_STRING_VALUE_LENGTH } from "../core/properties";
 
 const WEB_VITALS_STATE_KEY = Symbol.for(
@@ -227,17 +228,11 @@ function isBoundedString(value: unknown): value is string {
 }
 
 function getWebVitalsState(): WebVitalsState {
-  const registry = globalThis as unknown as Record<symbol, unknown>;
-  const existing = registry[WEB_VITALS_STATE_KEY];
-  if (isWebVitalsState(existing)) return existing;
-
-  const state: WebVitalsState = {
+  return getOrCreateGlobal(WEB_VITALS_STATE_KEY, isWebVitalsState, () => ({
     observersRegistered: false,
     listeners: new Map(),
     documentLocation: readPageLocation(),
-  };
-  registry[WEB_VITALS_STATE_KEY] = state;
-  return state;
+  }));
 }
 
 function isWebVitalsState(value: unknown): value is WebVitalsState {

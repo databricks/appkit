@@ -1,3 +1,9 @@
+import {
+  deleteGlobal,
+  getOrCreateGlobal,
+  readGlobal,
+} from "../core/global-registry";
+
 type NavigationListener = () => void;
 type HistoryMethodName = "pushState" | "replaceState";
 
@@ -43,16 +49,10 @@ export function observePageChanges(
 }
 
 function getNavigationState(): NavigationState {
-  const registry = getNavigationRegistry();
-  const existing = registry[NAVIGATION_STATE_KEY];
-  if (isNavigationState(existing)) return existing;
-
-  const state: NavigationState = {
+  return getOrCreateGlobal(NAVIGATION_STATE_KEY, isNavigationState, () => ({
     hooks: undefined,
     listeners: new Set(),
-  };
-  registry[NAVIGATION_STATE_KEY] = state;
-  return state;
+  }));
 }
 
 function installNavigationHooks(state: NavigationState): boolean {
@@ -138,9 +138,8 @@ function releaseNavigationState(state: NavigationState): void {
   if (state.listeners.size > 0) return;
 
   uninstallNavigationHooks(state);
-  const registry = getNavigationRegistry();
-  if (registry[NAVIGATION_STATE_KEY] === state) {
-    Reflect.deleteProperty(registry, NAVIGATION_STATE_KEY);
+  if (readGlobal(NAVIGATION_STATE_KEY) === state) {
+    deleteGlobal(NAVIGATION_STATE_KEY);
   }
 }
 
@@ -197,10 +196,6 @@ function notifyNavigation(state: NavigationState): void {
       // Navigation APIs must preserve host behavior when instrumentation fails.
     }
   }
-}
-
-function getNavigationRegistry(): Record<symbol, unknown> {
-  return globalThis as unknown as Record<symbol, unknown>;
 }
 
 function isNavigationState(value: unknown): value is NavigationState {

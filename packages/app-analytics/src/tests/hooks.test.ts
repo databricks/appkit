@@ -87,16 +87,24 @@ describe("client lifecycle", () => {
     expect(sessionIds[1]).not.toBe(sessionIds[0]);
   });
 
-  it("does not extend a session for a discarded event", async () => {
+  it("does not extend a session for an invalid event", async () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const diagnostics: AppAnalyticsDiagnostic[] = [];
     const fetchMock = installFetchMock();
     const client = createTestClient();
-    client.init({ endpoint: "/analytics", automaticPageViews: false });
+    client.init({
+      endpoint: "/analytics",
+      automaticPageViews: false,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
 
     client.track("first_event");
     await client.flush();
     vi.advanceTimersByTime(SESSION_INACTIVITY_TIMEOUT_MS - 1);
-    client.track("invalid event name");
+    client.track("invalid\nevent name");
+    expect(diagnostics).toEqual([
+      { code: "invalid_event_name", eventCount: 1 },
+    ]);
     vi.advanceTimersByTime(1);
     client.track("after_inactivity");
     await client.flush();
@@ -271,8 +279,14 @@ describe("delivery hooks", () => {
     ).not.toThrow();
     await expect(client.flush()).resolves.toBeUndefined();
 
-    expect(onDiagnostic).toHaveBeenCalledOnce();
+    expect(onDiagnostic).toHaveBeenCalledTimes(2);
     expect(observed).toEqual([
+      {
+        code: "property_dropped",
+        eventCount: 1,
+        propertyCount: 1,
+        reason: "sensitive_name",
+      },
       {
         code: "delivery_failed",
         eventCount: 1,

@@ -4,7 +4,8 @@ A browser library that implements the App Analytics data contract for Databricks
 Apps. The package collects Actions, Page Views, and Web Vitals, encodes them as
 OTLP/HTTP JSON, and sends them to a configurable same-origin endpoint.
 
-> **Status:** under active development.
+> **Status:** under active development. The package is not published to npm
+> yet; AppKit apps get it through `@databricks/appkit-ui`.
 
 [App Analytics](../../docs/docs/app-analytics/getting-started.md) defines the
 product, and its [data specification](../../docs/docs/app-analytics/api-reference.md)
@@ -15,12 +16,6 @@ conforming data through the OTel Collector to the Unity Catalog `otel_logs` tabl
 See the product [architecture](../../docs/docs/app-analytics/architecture.md) and
 [event guide](../../docs/docs/app-analytics/events.md) for the producer-independent
 contract. This README documents the currently implemented library API.
-
-## Install
-
-```bash
-pnpm add @databricks/app-analytics
-```
 
 ## Endpoint
 
@@ -51,10 +46,12 @@ appAnalytics.track("order_exported", {
 });
 ```
 
-Action names and property keys use lowercase letters, numbers, dots, and
-underscores. They must start with a letter, end with a letter or number, and
-cannot contain consecutive delimiters or reserved prefixes. Names are limited
-to 128 characters.
+Action names and property keys follow your naming convention:
+`report_exported`, `reportExported`, and `Report Exported` are all accepted.
+A name or key has 1 to 128 characters, no control characters, and no leading
+or trailing whitespace. The SDK does not rename anything, so choose one
+convention and use it consistently: `Report Exported` and `report_exported`
+are different Actions.
 
 Use low-cardinality names that describe a reusable event kind. Put details in
 properties:
@@ -66,16 +63,24 @@ appAnalytics.track("report_exported", { format: "csv" });
 Do not create names such as `report_exported_csv` or include IDs, credentials,
 email addresses, or free text.
 
+Properties are strings of up to 1,024 characters, finite numbers, or booleans,
+at most 50 per event. Nullish values are omitted. The SDK also omits keys that
+look like credentials or personal data, in any casing style: keys containing
+the words `email`, `password`, `secret`, `token`, `authorization`, `cookie`,
+`ip`, or `username` (`userEmail`, `auth_token`, and `Client IP` are omitted),
+and keys in the `user.`, `enduser.`, `session.`, `url.`, `event.`, `browser.`,
+`telemetry.`, and `databricks.` namespaces. This is a guard rail, not a privacy
+boundary: it checks keys, never values.
+
+Input that is not accepted is dropped and reported through `onDiagnostic` as
+`invalid_event_name` or `property_dropped`. Calls made before `init()` are kept,
+up to 100, and sent once it runs.
+
 ## Track annotated interactions
 
-Annotated interaction tracking is opt-in and observes only interactive elements
-that the application explicitly names:
-
-```ts
-appAnalytics.init({
-  autocapture: true,
-});
-```
+Annotated interaction tracking is on by default and observes only interactive
+elements that the application explicitly names. Nothing is captured until an
+element carries an annotation:
 
 ```html
 <button data-app-analytics-event="export_clicked">Export</button>
@@ -89,9 +94,11 @@ The annotation value becomes an Action name. The package does not read text
 content, form values, arbitrary attributes, CSS classes, or DOM hierarchy. Add
 `data-app-analytics-ignore` to exclude a subtree.
 
-Synthetic events, disabled controls, unannotated elements, and non-interactive
-elements are ignored. At most 100 annotated interactions are collected per
-analytics session.
+Synthetic events, disabled controls, and unannotated elements are ignored. An
+annotation on a non-interactive element (clicks) or on an element other than a
+form (submits) cannot fire; it is reported once per element as an
+`autocapture_ignored` diagnostic. At most 100 annotated interactions are
+collected per analytics session. Pass `autocapture: false` to turn it off.
 
 ## Track Page Views
 
@@ -129,7 +136,8 @@ appAnalytics.init({
 
 ## Collect Web Vitals
 
-Enable Web Vitals during initialization:
+Web Vitals are off by default because they add about five records per page
+load. Enable them during initialization:
 
 ```ts
 appAnalytics.init({
@@ -214,8 +222,9 @@ Use `databricks.app.analytics.event.id` to deduplicate retries. Use
 - rotates after 30 minutes without an analytics event;
 - does not identify a user.
 
-Sampling is decided once per session and shared by Actions, Page Views, and
-Web Vitals:
+Sampling is decided once per session, when the session starts, and shared by
+Actions, Page Views, and Web Vitals. Activity extends a session whether or not
+it is sampled, so sampling never shortens a session:
 
 ```ts
 appAnalytics.init({
@@ -235,8 +244,9 @@ in the body can reduce batch capacity; individually oversized events are dropped
 with an `event_too_large` diagnostic, not truncated.
 
 Delivery is best effort: records can be lost or duplicated. Transient failures
-are retried once with the same event IDs. Page-hide delivery uses one bounded
-keepalive request. Network, encoding, and lifecycle failures do not throw into
+are retried once with the same event IDs, after the server's `Retry-After` when
+it sends one (a delay over 10 seconds gives up the retry). Page-hide delivery
+uses one bounded keepalive request. Network, encoding, and lifecycle failures do not throw into
 application code. A resolved `flush()` does not confirm persistence in
 `otel_logs`.
 
@@ -246,27 +256,50 @@ Use `flush()` for deterministic tests and lifecycle integrations:
 await appAnalytics.flush();
 ```
 
-Use `beforeSend` to discard an event before it enters the queue:
+Use `beforeSend` to discard or rewrite an event before it enters the queue.
+Return `false` to drop it, nothing to keep it, or a copy with a changed `name`
+(Actions only), `properties`, or `context.path`. Returned values are validated
+like application input, and an invalid name or path drops the event:
 
 ```ts
 appAnalytics.init({
-  beforeSend: (event) => event.name !== "local_preview_opened",
+  beforeSend: (event) => {
+    if (event.name === "local_preview_opened") return false;
+    // Group /orders/42 and /orders/43 as /orders/:id.
+    return {
+      ...event,
+      context: {
+        ...event.context,
+        path: event.context.path.replace(/\/\d+/g, "/:id"),
+      },
+    };
+  },
 });
 ```
 
-`onDiagnostic` receives sanitized operational metadata. Diagnostics never
+`onDiagnostic` receives sanitized metadata about dropped input, delivery
+outcomes, and contained SDK failures (`internal_error`). Diagnostics never
 contain event names, properties, URLs, endpoints, headers, or error messages.
+
+## Configuration
+
+`init()` merges options into the current configuration: an omitted option keeps
+its current value, so a second `init()` changes only what it passes. Defaults
+apply on the first `init()` and after `shutdown()`. `shutdown()` delivers queued
+events, removes browser observers, and drops later events until the next
+`init()`.
 
 ## Multiple clients
 
-Create a client when a test or isolated runtime needs its own endpoint and
-lifecycle:
+`appAnalytics` is shared by every copy of the package in the tab, including a
+copy bundled into another package. Create a client when a test or isolated
+runtime needs its own endpoint and lifecycle:
 
 ```ts
 import { createAppAnalytics } from "@databricks/app-analytics";
 
-const insights = createAppAnalytics();
-insights.init({ endpoint: "/custom-insights" });
+const analytics = createAppAnalytics();
+analytics.init({ endpoint: "/custom-analytics" });
 ```
 
 Clients in the same browser tab share the App Analytics session ID.
@@ -277,11 +310,13 @@ Clients in the same browser tab share the App Analytics session ID.
 import { AppAnalytics } from "@databricks/app-analytics/react";
 
 export function App() {
-  return <AppAnalytics autocapture webVitals />;
+  return <AppAnalytics webVitals />;
 }
 ```
 
-Mount the component once at the application root. Set
+Mount the component once at the application root. Props merge like `init()`
+options, so an omitted prop does not undo configuration made elsewhere.
+`beforeSend` and `onDiagnostic` can be inline functions. Set
 `automaticPageViews={false}` when Page Views are managed explicitly.
 
 ## Privacy
@@ -292,5 +327,5 @@ values, raw DOM data, or raw browser performance entries.
 
 Values passed to `track()` and `page()` are application data. Applications must
 not pass credentials, tokens, email addresses, usernames, or other personal
-data. Path segments are preserved, so applications must not place sensitive
-values in URLs.
+data. Path segments are preserved; when a path can contain a sensitive or
+high-cardinality value, rewrite `context.path` in `beforeSend`.
