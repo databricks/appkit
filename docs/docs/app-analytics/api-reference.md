@@ -198,7 +198,7 @@ This is an ingestion diagnostic, not the full validation and deduplication query
 
 `properties` is an object with application-defined keys and scalar values.
 
-Property keys follow the same lowercase dot-and-underscore grammar as Action names. They must not use reserved analytics, identity, session, telemetry, URL, or user namespaces. Keys containing sensitive segments such as `email`, `password`, `secret`, `token`, `authorization`, `cookie`, `username`, or `ip` are rejected.
+Property keys follow the same character rules as Action names; the naming convention (`order_id`, `orderId`, `Order ID`) is the application's choice. Keys are case-sensitive. They must not use the reserved `browser`, `databricks`, `enduser`, `event`, `session`, `telemetry`, `url`, or `user` namespaces, compared case-insensitively. Keys containing a sensitive word such as `email`, `password`, `secret`, `token`, `authorization`, `cookie`, `username`, `distinctid`, or `ip` are rejected, with words split on case changes, digits, `.`, `_`, `-`, and spaces, so `userEmail`, `auth_token`, and `Client IP` are all rejected.
 
 Allowed value types:
 
@@ -231,10 +231,8 @@ An Action records a named product fact.
 Action names:
 
 - contain between 1 and 128 characters;
-- use lowercase letters, numbers, dots, and underscores;
-- begin with a letter;
-- do not contain consecutive delimiters;
-- do not use reserved analytics, identity, session, telemetry, URL, or user namespaces;
+- contain no control or bidirectional-override characters, and no leading or trailing whitespace;
+- are case-sensitive and follow the application's naming convention, such as `report_exported` or `Report Exported`;
 - describe a reusable event kind rather than one occurrence;
 - do not contain IDs, email addresses, or free text.
 

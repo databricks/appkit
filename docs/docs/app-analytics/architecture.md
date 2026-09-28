@@ -149,7 +149,7 @@ The current browser library uses **best-effort delivery with bounded retries**. 
 | Queue capacity | 100 events, memory only |
 | Request body cap | 48 KiB encoded |
 | Request timeout | 10 seconds |
-| Retry | Once for transient failures, preserving event IDs and content |
+| Retry | Once for transient failures, preserving event IDs and content, after the server's `Retry-After` when it is at most 10 seconds |
 | Page hide | One bounded keepalive request |
 
 A different producer can use another delivery strategy. It must retain the contract's event identity and deduplication semantics.
@@ -160,7 +160,7 @@ A resolved `flush()` means the library finished its bounded drain attempt. It do
 
 ## Sessions and sampling
 
-For the browser library, a session belongs to one top-level browser context. Its random ID starts at the first event, survives reloads through `sessionStorage`, and rotates after 30 minutes without a recorded event. It is not derived from identity or a request ID.
+For the browser library, a session belongs to one top-level browser context. Its random ID starts when the client starts, survives reloads through `sessionStorage`, and rotates after 30 minutes without application activity. Activity extends a session whether or not the session is sampled. It is not derived from identity or a request ID.
 
 The Action, Page View, and Web Vital producers share one sampling decision per session:
 

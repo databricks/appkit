@@ -201,7 +201,7 @@ This diagnostic query shows received rows, including ones that might not pass fu
 
 The specification forbids user emails, usernames, IP addresses, credentials, cookies, raw DOM, element text, form values, full query strings, and fragments in event payloads. V1 has no authoritative user identity.
 
-This is a producer obligation. The browser library rejects reserved keys, but arbitrary application property values and concrete URL paths still need care. See [Trusted context and privacy](./api-reference.md#trusted-context-and-privacy).
+This is a producer obligation. The browser library rejects reserved and sensitive-looking property keys, but it never inspects property values or concrete URL paths; rewrite paths that can carry sensitive values in `beforeSend`. See [Trusted context and privacy](./api-reference.md#trusted-context-and-privacy).
 
 ## Where to next
 

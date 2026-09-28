@@ -48,7 +48,7 @@ await createApp({
 | Option | Default | Effect |
 | --- | --- | --- |
 | `webVitals` | `false` | Records LCP, INP, CLS, FCP, and TTFB. |
-| `autocapture` | `false` | Records clicks and submits on elements annotated with `data-app-analytics-event`. |
+| `autocapture` | `true` | Records clicks and submits on elements annotated with `data-app-analytics-event`. |
 | `sampleRate` | `1` | Fraction of browser sessions to collect, from 0 to 1. |
 
 The options reach the page as `window.__appkit__.appAnalytics`. `beforeSend` and `onDiagnostic` are functions, so only browser code can set them, with `<AppAnalytics />` or `appAnalytics.init()`.
@@ -84,15 +84,15 @@ Mount `<AppAnalytics />` once, near the root of the app. It renders nothing. It 
 | --- | --- | --- |
 | `automaticPageViews` | `true` | Records the initial page and every History API navigation. |
 | `webVitals` | `false` | Records LCP, INP, CLS, FCP, and TTFB. |
-| `autocapture` | `false` | Records clicks and submits on elements annotated with `data-app-analytics-event`. |
+| `autocapture` | `true` | Records clicks and submits on elements annotated with `data-app-analytics-event`. |
 | `sampleRate` | `1` | Fraction of browser sessions to collect, from 0 to 1. |
-| `beforeSend` | none | Return `false` to discard an event before it enters the queue. |
-| `onDiagnostic` | none | Receives sanitized delivery diagnostics that never include event content. |
+| `beforeSend` | none | Return `false` to discard an event, or a copy with a changed `name` (Actions only), `properties`, or `context.path` to rewrite it. |
+| `onDiagnostic` | none | Receives sanitized diagnostics about dropped input and delivery that never include event content. |
 | `endpoint` | `/_analytics/v1/logs` | Same-origin path the library posts to. Leave it unset in AppKit apps. |
 
-The component re-initializes the client whenever a prop changes, so pass `beforeSend` and `onDiagnostic` with a stable identity, such as a module-level function or a `useCallback` result.
+`beforeSend` and `onDiagnostic` can be inline functions: the component calls the latest ones and reconfigures the client only when another prop changes. Props merge into the client's configuration like `init()` options, so an omitted prop keeps its current value.
 
-The automatically started build and `<AppAnalytics />` configure the same client, so a tab still records one Page View per navigation. The app's options win in either order. If the app configures the client before the build loads, the build leaves the client alone. If the app configures it afterwards, its options replace the ones set on the server. The app's options replace the server's as a whole, so pass every option you want, for example `webVitals` again.
+The automatically started build and `<AppAnalytics />` configure the same client, so a tab still records one Page View per navigation. The app's options win in either order. If the app configures the client before the build loads, the build leaves the client alone. If the app configures it afterwards, its options merge over the ones set on the server: an option the app sets wins, and an option it leaves unset keeps the server's value. A session's sampling decision is made when the client starts, so a `sampleRate` the app sets afterwards applies from the next session.
 
 ## Track Actions
 
@@ -103,7 +103,7 @@ appAnalytics.track("report_exported", { format: "csv", rows: 1240 });
 appAnalytics.page({ section: "reports" });
 ```
 
-Actions need the client to be started, either automatically or by the app. Before that, `track()` and `page()` record nothing.
+`track()` and `page()` calls made before the client starts, up to 100, are kept and sent once it starts, automatically or by the app.
 
 Outside React, import from `@databricks/appkit-ui/js/beta`. It exports `appAnalytics`, `createAppAnalytics`, and the option, event, and diagnostic types:
 

@@ -54,7 +54,7 @@ This represents one logical event. The IDs are illustrative; generate fresh even
 
 ### Naming
 
-Names use lowercase letters, numbers, dots, and underscores, starting with a letter, with no consecutive delimiters. They contain 1 to 128 characters. Reserved namespaces such as `event.`, `session.`, `user.`, `url.`, `databricks.`, `telemetry.`, `browser.`, and `enduser.` are rejected.
+Names follow the application's naming convention: `report_exported`, `reportExported`, and `Report Exported` are all valid. They contain 1 to 128 characters, with no control characters and no leading or trailing whitespace. Names are case-sensitive and never rewritten, so `Report Exported` and `report_exported` are different Actions: pick one convention and keep it.
 
 A name describes a reusable event kind, not one occurrence:
 
@@ -68,11 +68,7 @@ Names containing IDs, email addresses, or free text create unbounded cardinality
 
 ### Annotated autocapture
 
-Autocapture is a browser library convenience, not a separate data type. Its rows are ordinary Actions. It observes only interactive elements that the app explicitly names:
-
-```typescript
-appAnalytics.init({ autocapture: true });
-```
+Autocapture is a browser library convenience, not a separate data type. Its rows are ordinary Actions. It is on by default and observes only interactive elements that the app explicitly names, so nothing is recorded until an element carries an annotation. Pass `autocapture: false` to turn it off.
 
 ```html
 <button data-app-analytics-event="export_clicked">Export</button>
@@ -82,7 +78,7 @@ appAnalytics.init({ autocapture: true });
 </form>
 ```
 
-The annotation becomes the Action name and follows the same grammar. Add `data-app-analytics-ignore` to exclude a subtree. Synthetic events, disabled controls, unannotated elements, and non-interactive elements are ignored. The library caps annotated interactions at 100 per analytics session.
+The annotation becomes the Action name and follows the same rules. Add `data-app-analytics-ignore` to exclude a subtree. Synthetic events, disabled controls, and unannotated elements are ignored. An annotation that cannot fire, on a non-interactive element or a submit annotation outside a form, is reported once per element as an `autocapture_ignored` diagnostic. The library caps annotated interactions at 100 per analytics session.
 
 A captured click is not proof that an operation succeeded. Emit an explicit completion Action after the work finishes if that is what the metric should count.
 
@@ -189,7 +185,7 @@ A client-side route change produces a Page View but does not start a new Web Vit
 
 ## Properties
 
-Properties carry varying application details for an event. Keys follow the Action grammar and reserved namespaces. Sensitive segments such as `email`, `password`, `secret`, `token`, `authorization`, `cookie`, `username`, and `ip` are rejected.
+Properties carry varying application details for an event. Keys follow the Action naming rules, in the application's convention, and cannot use reserved namespaces such as `user.` or `session.`. Keys containing a sensitive word such as `email`, `password`, `secret`, `token`, `authorization`, `cookie`, `username`, or `ip` are rejected in any casing style: `userEmail`, `auth_token`, and `Client IP` are all rejected. The check reads keys, never values. The browser library reports every omitted key as a `property_dropped` diagnostic.
 
 <Tabs groupId="analytics-producer">
 <TabItem value="sdk" label="Using the browser library" default>
