@@ -164,6 +164,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.79.0](https://github.com/databricks/appkit/compare/v0.78.0...v0.79.0) (2026-09-28)
+
+### appkit
+
+* **appkit:** add DatabricksAdapter.fromAiGateway for gateway chat completions ([#605](https://github.com/databricks/appkit/issues/605)) ([c49beb3](https://github.com/databricks/appkit/commit/c49beb3f274acdbc0ca3259d362729fc6b420259))
+
+
 ## [0.78.0](https://github.com/databricks/appkit/compare/v0.77.0...v0.78.0) (2026-09-24)
 
 ### playground
