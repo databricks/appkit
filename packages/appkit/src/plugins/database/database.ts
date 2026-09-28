@@ -10,7 +10,7 @@ import { assertFinalizedSchema } from "../../database/schema-builder/define-sche
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { assertDatabaseConfig } from "./config";
-import { compileCrudTables } from "./crud/contract";
+import { compileCrudTables, type CrudTable } from "./crud/contract";
 import { type CrudExposure, resolveCrudExposure } from "./crud/exposure";
 import { routeOutcome } from "./crud/response";
 import {
@@ -46,6 +46,7 @@ export class DatabasePlugin<
   private shutdownPromise: Promise<void> | null = null;
   private exposure: CrudExposure = { tables: [], writes: new Map() };
   private resolvedSchema: Schema | null = null;
+  private crudTables: Map<string, CrudTable> | null = null;
 
   constructor(config: IDatabaseConfig<TSchema> = {}) {
     assertDatabaseConfig(config);
@@ -106,16 +107,23 @@ export class DatabasePlugin<
     return this.setupPromise;
   }
 
-  /** Register generated CRUD, subject to the configured table and write restrictions. */
-  injectRoutes(router: express.Router): void {
-    if (this.exposure.tables.length === 0) return;
+  /** The HTTP contract of every exposed table, compiled once after setup. */
+  private exposedTables(): Map<string, CrudTable> {
+    if (this.crudTables) return this.crudTables;
     const schema = this.resolvedSchema;
     if (!schema) throw databaseSetupFailed();
-    const tables = compileCrudTables(
+    this.crudTables = compileCrudTables(
       Object.fromEntries(
         this.exposure.tables.map((name) => [name, schema.$tables[name]]),
       ),
     );
+    return this.crudTables;
+  }
+
+  /** Register generated CRUD, subject to the configured table and write restrictions. */
+  injectRoutes(router: express.Router): void {
+    if (this.exposure.tables.length === 0) return;
+    const tables = this.exposedTables();
     const hooks = this.hooks();
     // Every exposed name is a declared table, so its export is an entity client.
     const entities = () =>
@@ -171,6 +179,32 @@ export class DatabasePlugin<
         });
       }
     }
+  }
+
+  /**
+   * Publish `{ relations: { table: { relation: targetTable } } }` so the React
+   * hooks can tell which reads a write affects: a `boards` read that includes
+   * `notes` shows notes rows. Only edges between exposed tables exist, and
+   * they are the names `include` already accepts, so this reveals nothing the
+   * routes and the generated types do not.
+   */
+  clientConfig(): Record<string, unknown> {
+    if (!this.resolvedSchema || this.exposure.tables.length === 0) return {};
+    // Built as own entries, so no table or relation name reaches a prototype.
+    const relations = Object.fromEntries(
+      [...this.exposedTables().values()]
+        .filter((table) => table.relations.size > 0)
+        .map((table) => [
+          table.name,
+          Object.fromEntries(
+            [...table.relations].map(([name, edge]) => [
+              name,
+              edge.target.name,
+            ]),
+          ),
+        ]),
+    );
+    return Object.keys(relations).length > 0 ? { relations } : {};
   }
 
   /** Typed hook keys are schema table names, which routing addresses at runtime. */

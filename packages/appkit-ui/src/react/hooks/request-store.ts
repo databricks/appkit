@@ -24,29 +24,57 @@ export interface RequestControls<S> {
   patch(next: Partial<S>): void;
 }
 
-/** Starts a request and reports state through `controls`. */
-export type RequestRunner<S> = (controls: RequestControls<S>) => void;
+/**
+ * Starts a request and reports state through `controls`. It may return a
+ * promise that settles once the run has reported its outcome or was aborted;
+ * `restartStarted` waits on it. It must not reject.
+ */
+export type RequestRunner<S> = (
+  controls: RequestControls<S>,
+) => void | Promise<void>;
 
-interface RequestStore<S> {
+/** How `retain` creates an entry; ignored when the entry already exists. */
+export interface RetainOptions<M> {
+  /** Start the request on creation. Default true. */
+  autoStart?: boolean;
+  /** Caller data kept with the entry and handed to `restartStarted`'s match. */
+  meta?: M;
+}
+
+interface RequestStore<S, M> {
   /**
    * Register a subscriber for `key`, creating and starting the shared request
    * on first use. Returns a `release` function to call on unmount.
    *
-   * @param run       Runs the request; stored on the entry and re-invoked by
+   * @param run     Runs the request; stored on the entry and re-invoked by
    *   `start`. Only the first caller's `run` is used (later joiners share it).
-   * @param autoStart Start the request on creation. Default true.
+   * @param options `autoStart` and `meta`, both taken from the first caller.
    */
-  retain(key: string, run: RequestRunner<S>, autoStart?: boolean): () => void;
+  retain(
+    key: string,
+    run: RequestRunner<S>,
+    options?: RetainOptions<M>,
+  ): () => void;
   /** (Re)start the request for `key`: abort any in-flight run, then re-run. */
   start(key: string): void;
+  /**
+   * `start` every subscribed entry that has run at least once and that
+   * `match` accepts (every such entry without one), then resolve once each
+   * restarted run settles. An entry retained with `autoStart: false` that
+   * never ran stays idle, and one whose last subscriber left is not restarted.
+   */
+  restartStarted(
+    match?: (key: string, meta: M | undefined) => boolean,
+  ): Promise<void>;
   subscribe(key: string, listener: () => void): () => void;
   getSnapshot(key: string): S;
   /** Test-only: abort every in-flight request and clear the store. */
   reset(): void;
 }
 
-interface Entry<S> {
+interface Entry<S, M> {
   snapshot: S;
+  meta: M | undefined;
   refCount: number;
   abortController: AbortController | null;
   teardownTimer: ReturnType<typeof setTimeout> | null;
@@ -55,8 +83,8 @@ interface Entry<S> {
   run: RequestRunner<S>;
 }
 
-export function createRequestStore<S>(idle: S): RequestStore<S> {
-  const entries = new Map<string, Entry<S>>();
+export function createRequestStore<S, M = never>(idle: S): RequestStore<S, M> {
+  const entries = new Map<string, Entry<S, M>>();
 
   // Keyed separately from `entries`: `subscribe` can run before `retain`
   // creates the entry, so listeners must survive independently of entry life.
@@ -68,9 +96,10 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
     for (const listener of listeners) listener();
   }
 
-  function start(key: string): void {
+  /** Run `key` again; resolves when that run settles (at once for a void run). */
+  function run(key: string): Promise<void> {
     const entry = entries.get(key);
-    if (!entry) return;
+    if (!entry) return Promise.resolve();
 
     entry.abortController?.abort();
     entry.started = true;
@@ -78,7 +107,7 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
     const abortController = new AbortController();
     entry.abortController = abortController;
 
-    entry.run({
+    const settled = entry.run({
       signal: abortController.signal,
       abort: () => abortController.abort(),
       patch(next) {
@@ -86,6 +115,12 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
         notify(key);
       },
     });
+    // A runner must not reject; guard anyway so a restart never does.
+    return Promise.resolve(settled).catch(() => {});
+  }
+
+  function start(key: string): void {
+    void run(key);
   }
 
   function release(key: string): void {
@@ -105,16 +140,17 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
   }
 
   return {
-    retain(key, run, autoStart = true) {
+    retain(key, runner, { autoStart = true, meta } = {}) {
       let entry = entries.get(key);
       if (!entry) {
         entry = {
           snapshot: idle,
+          meta,
           refCount: 0,
           abortController: null,
           teardownTimer: null,
           started: false,
-          run,
+          run: runner,
         };
         entries.set(key, entry);
       }
@@ -134,6 +170,21 @@ export function createRequestStore<S>(idle: S): RequestStore<S> {
     },
 
     start,
+
+    async restartStarted(match) {
+      // Collect first: a restarted run patches, and a patch notifies. An entry
+      // with no subscriber is waiting for teardown; restarting it would only
+      // send a request that teardown aborts a tick later.
+      const keys = [...entries]
+        .filter(
+          ([key, entry]) =>
+            entry.started &&
+            entry.refCount > 0 &&
+            (!match || match(key, entry.meta)),
+        )
+        .map(([key]) => key);
+      await Promise.all(keys.map(run));
+    },
 
     subscribe(key, listener) {
       let listeners = listenersByKey.get(key);
