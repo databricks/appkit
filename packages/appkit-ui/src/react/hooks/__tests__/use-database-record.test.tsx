@@ -91,6 +91,26 @@ describe("useDatabaseRecord", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/database/notes/7");
   });
 
+  test("does not encode incomplete includes while the record is disabled", () => {
+    const { result, rerender } = renderHook(
+      ({ id, author }: { id: number | null; author: string | undefined }) =>
+        useDatabaseRecord("notes", id, {
+          include: { note_events: { where: { author } } },
+        }),
+      {
+        initialProps: {
+          id: null as number | null,
+          author: undefined as string | undefined,
+        },
+      },
+    );
+
+    expect(result.current.error).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    rerender({ id: 7, author: "ada" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("reads the new record when the id changes", async () => {
     const { result, rerender } = renderHook(
       ({ id }: { id: number }) => useDatabaseRecord("notes", id),
