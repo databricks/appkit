@@ -1,5 +1,7 @@
 import type { IncomingMessage } from "node:http";
 
+import { isAppAnalyticsPath } from "./app-analytics-paths";
+
 /**
  * Paths and patterns to exclude from tracing and logging.
  * Requests matching these will not create spans or WideEvents.
@@ -21,9 +23,6 @@ const EXCLUDED_PATH_PREFIXES = [
   // Health checks
   "/health",
   "/metrics",
-
-  // App Analytics relay: carries only App Analytics records
-  "/_analytics/",
 ];
 
 /**
@@ -71,6 +70,10 @@ export function shouldExcludePath(path: string | undefined): boolean {
   // Remove query string
   const cleanPath = path.split("?")[0];
   const lowerPath = cleanPath.toLowerCase();
+
+  // App Analytics carries only the browser's records. Matched at the start of
+  // the path, unlike the prefixes below.
+  if (isAppAnalyticsPath(cleanPath)) return true;
 
   // Check path prefixes
   for (const prefix of EXCLUDED_PATH_PREFIXES) {

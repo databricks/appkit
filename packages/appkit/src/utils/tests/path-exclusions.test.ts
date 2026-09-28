@@ -19,12 +19,18 @@ describe("shouldExcludePath", () => {
     },
   );
 
-  test.each(["/api/analytics/query/spend", "/analytics", "/"])(
-    "keeps %s",
-    (path) => {
-      expect(shouldExcludePath(path)).toBe(false);
-    },
-  );
+  test.each([
+    "/api/analytics/query/spend",
+    "/analytics",
+    "/",
+    // App routes that merely contain the App Analytics prefix keep telemetry.
+    "/api/reports/_analytics/v1/summary",
+    "/reports/_analytics/v1/logs",
+    // Only the versioned paths App Analytics serves are excluded.
+    "/_analytics/admin",
+  ])("keeps %s", (path) => {
+    expect(shouldExcludePath(path)).toBe(false);
+  });
 
   test("keeps a missing path", () => {
     expect(shouldExcludePath(undefined)).toBe(false);

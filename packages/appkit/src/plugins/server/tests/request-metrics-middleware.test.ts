@@ -102,7 +102,7 @@ describe("requestMetricsMiddleware", () => {
     expect(recordSpy).not.toHaveBeenCalled();
   });
 
-  test.each(["/_analytics/v1/logs", "/_analytics/v2/other"])(
+  test.each(["/_analytics/v1/logs", "/_analytics/v1/sdk.js"])(
     "does not record App Analytics requests to %s",
     (path) => {
       const req = makeReq({ method: "POST", path, route: { path } });
@@ -113,6 +113,18 @@ describe("requestMetricsMiddleware", () => {
 
       expect(next).toHaveBeenCalledOnce();
       expect(recordSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["/api/reports/_analytics/v1/logs", "/_analytics/admin"])(
+    "records app routes that only resemble App Analytics paths: %s",
+    (path) => {
+      const req = makeReq({ method: "POST", path, route: { path } });
+      const res = makeRes(200);
+      requestMetricsMiddleware(req as any, res as any, vi.fn());
+      res.finish();
+
+      expect(recordSpy).toHaveBeenCalledOnce();
     },
   );
 

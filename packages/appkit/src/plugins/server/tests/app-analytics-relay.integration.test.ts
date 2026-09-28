@@ -95,7 +95,9 @@ describe("App Analytics relay (integration)", () => {
   });
 
   test("relays an SDK batch to the collector unchanged", async () => {
-    const browser = await sendSdkEvent(baseUrl);
+    const [browser] = await sendSdkEvents(baseUrl, (client) => {
+      client.track("report_exported", { format: "csv", rows: 1240 });
+    });
 
     expect(browser.status).toBe(200);
     expect(collector.requests).toHaveLength(1);
@@ -122,6 +124,31 @@ describe("App Analytics relay (integration)", () => {
       session_id: expect.any(String),
       properties: { format: "csv", rows: 1240 },
     });
+  });
+
+  test("accepts the largest batches the SDK builds", async () => {
+    // Each event is about 4 KiB once encoded, so the SDK splits these into
+    // batches close to its byte cap. If that cap ever grows past the relay's
+    // limit, the relay answers 413 here.
+    const requests = await sendSdkEvents(baseUrl, (client) => {
+      for (let index = 0; index < 30; index += 1) {
+        client.track("report_exported", {
+          first: "x".repeat(1_000),
+          second: "y".repeat(1_000),
+        });
+      }
+    });
+
+    expect(requests.length).toBeGreaterThan(1);
+    expect(requests.map(({ status }) => status)).toEqual(
+      requests.map(() => 200),
+    );
+    expect(
+      Math.max(...requests.map(({ body }) => Buffer.byteLength(body))),
+    ).toBeGreaterThan(40 * 1024);
+    expect(collector.requests.map(({ body }) => body)).toEqual(
+      requests.map(({ body }) => body),
+    );
   });
 
   test("answers with the collector's status and an empty body", async () => {
@@ -235,26 +262,23 @@ function postLogs(baseUrl: string, body: unknown): Promise<Response> {
 }
 
 /**
- * Drives a real App Analytics client. Outside a browser the SDK posts to its
- * default relative endpoint, so `fetch` is stubbed to send that request to the
- * app server; every other request, including the relay's own forward to the
- * collector, goes through the native `fetch`.
+ * Drives a real App Analytics client and returns every request it made.
+ * Outside a browser the SDK posts to its default relative endpoint, so
+ * `fetch` is stubbed to send those requests to the app server; every other
+ * request, including the relay's own forward to the collector, goes through
+ * the native `fetch`.
  */
-async function sendSdkEvent(
+async function sendSdkEvents(
   baseUrl: string,
-): Promise<{ body: string; status: number }> {
+  record: (client: ReturnType<typeof createAppAnalytics>) => void,
+): Promise<Array<{ body: string; status: number }>> {
   const nativeFetch = globalThis.fetch;
-  let body: string | undefined;
-  let status: number | undefined;
+  const requests: Array<{ body: string; status: number }> = [];
   const routeFetch: typeof globalThis.fetch = async (input, init) => {
-    const isBrowserRequest = input === APP_ANALYTICS_PATH;
-    if (isBrowserRequest && typeof init?.body === "string") body = init.body;
+    if (input !== APP_ANALYTICS_PATH) return nativeFetch(input, init);
 
-    const response = await nativeFetch(
-      isBrowserRequest ? `${baseUrl}${APP_ANALYTICS_PATH}` : input,
-      init,
-    );
-    if (isBrowserRequest) status = response.status;
+    const response = await nativeFetch(`${baseUrl}${APP_ANALYTICS_PATH}`, init);
+    requests.push({ body: String(init?.body), status: response.status });
     return response;
   };
   vi.stubGlobal("fetch", routeFetch);
@@ -262,16 +286,15 @@ async function sendSdkEvent(
   try {
     const client = createAppAnalytics();
     client.init({ automaticPageViews: false });
-    client.track("report_exported", { format: "csv", rows: 1240 });
+    record(client);
     await client.flush();
     await client.shutdown();
   } finally {
     vi.unstubAllGlobals();
   }
 
-  if (body === undefined) throw new Error("SDK did not emit an OTLP body");
-  if (status === undefined) throw new Error("SDK request did not complete");
-  return { body, status };
+  if (requests.length === 0) throw new Error("SDK did not send a request");
+  return requests;
 }
 
 async function startFakeCollector(): Promise<FakeCollector> {

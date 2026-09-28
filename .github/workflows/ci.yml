@@ -100,6 +100,12 @@ jobs:
           fi
       - name: Run Biome Check
         run: pnpm run check
+      - name: Build App Analytics package dist (for typecheck)
+        # @databricks/appkit's relay integration test imports the App Analytics
+        # browser SDK, which tsc resolves to its built declarations. The SDK
+        # uses DOM types that the Node-only appkit program doesn't load, so
+        # its dist is built here rather than mapped to src with tsconfig paths.
+        run: pnpm --filter @databricks/app-analytics exec tsdown --config tsdown.config.ts
       - name: Run Types Check
         run: pnpm run typecheck
       - name: Run Knip Check

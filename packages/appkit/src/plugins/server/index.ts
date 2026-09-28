@@ -14,11 +14,11 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
+import { isAppAnalyticsPath } from "../../utils/app-analytics-paths";
 import {
   APP_ANALYTICS_PATH,
-  APP_ANALYTICS_PATH_PREFIX,
-  appAnalyticsGuard,
-  appAnalyticsRelay,
+  type AppAnalyticsRelay,
+  createAppAnalyticsRelay,
 } from "./app-analytics-relay";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
@@ -82,6 +82,7 @@ export class ServerPlugin extends Plugin {
   declare protected config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
+  private appAnalyticsRelay?: AppAnalyticsRelay;
   /**
    * Resolves when `server.close()` completes. Created in
    * {@link abortActiveOperations} (which initiates the close) and awaited in
@@ -275,14 +276,16 @@ export class ServerPlugin extends Plugin {
 
     // Default endpoint of the App Analytics browser SDK. Browsers can't reach
     // the Databricks Apps OTel Collector, which listens only on localhost, so
-    // the server relays their OTLP/HTTP JSON to it. The guard parses the body
+    // the server relays their OTLP/HTTP JSON to it. The relay reads the body
     // with its own, smaller limit, so the global JSON parser skips the path.
     if (this.config.appAnalytics !== false) {
+      this.appAnalyticsRelay = createAppAnalyticsRelay({
+        telemetry: this.telemetry,
+      });
       this.rawBodyPaths.add(APP_ANALYTICS_PATH);
       this.serverApplication.post(
         APP_ANALYTICS_PATH,
-        appAnalyticsGuard(),
-        appAnalyticsRelay(),
+        ...this.appAnalyticsRelay.handlers,
       );
     }
 
@@ -466,6 +469,7 @@ export class ServerPlugin extends Plugin {
    */
   abortActiveOperations(): void {
     super.abortActiveOperations();
+    this.appAnalyticsRelay?.abort();
 
     if (this.server) {
       const server = this.server;
@@ -562,7 +566,8 @@ export function requestMetricsMiddleware(
 ) {
   // App Analytics routes carry only the browser's records, so AppKit records
   // nothing about them (they are also excluded from spans and wide events).
-  if (req.path.startsWith(APP_ANALYTICS_PATH_PREFIX)) {
+  // The relay counts its own outcomes as app_analytics.relay.requests.
+  if (isAppAnalyticsPath(req.path)) {
     next();
     return;
   }
