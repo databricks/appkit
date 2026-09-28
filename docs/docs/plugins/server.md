@@ -90,7 +90,7 @@ await createApp({
 });
 ```
 
-The App Analytics relay parses its own requests, with a 64 KiB limit, so `bodyLimit` doesn't apply to it. See [Using App Analytics with AppKit](../app-analytics/using-with-appkit.md#the-server-side) for how it answers.
+The App Analytics relay reads its own requests, with a 64 KiB and 100-record limit, so `bodyLimit` doesn't apply to it. See [Using App Analytics with AppKit](../app-analytics/using-with-appkit.md#the-server-side) for how it answers.
 
 `appAnalytics` also accepts the options of the library the server starts in the page when App telemetry is on:
 

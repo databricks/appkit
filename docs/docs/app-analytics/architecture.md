@@ -62,7 +62,7 @@ The OTel Collector of a Databricks App listens only on `localhost` inside the ap
 
 The library resolves `endpoint` against `window.location`. It defaults to `/_analytics/v1/logs`. A cross-origin URL or a URL containing credentials falls back to the default.
 
-The relay forwards OTLP JSON and returns the upstream status. It does not interpret the App Analytics schema, clean properties, or add authoritative user identity. Normal app authentication still applies to requests. Neither the browser nor a URL parameter chooses the Collector credentials.
+The relay forwards the OTLP JSON bytes it receives and returns the upstream status. It checks only the OTLP envelope; it does not interpret the App Analytics schema, clean properties, or add authoritative user identity. Normal app authentication still applies to requests. Neither the browser nor a URL parameter chooses the Collector credentials.
 
 ### In an AppKit app
 
@@ -77,6 +77,8 @@ import express from "express";
 
 const APP_ANALYTICS_PATH = "/_analytics/v1/logs";
 const FORWARD_TIMEOUT_MS = 5_000;
+// The library sends at most 25 records and 48 KiB per request.
+const MAX_RECORDS = 100;
 
 // Databricks Apps sets these only when App telemetry is enabled.
 function resolveOtlpLogsEndpoint(): string | undefined {
@@ -89,19 +91,70 @@ function resolveOtlpLogsEndpoint(): string | undefined {
   return `${baseEndpoint.replace(/\/$/, "")}/v1/logs`;
 }
 
+type Json = Record<string, unknown>;
+
+function isObject(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Objects in `value[key]`, or undefined when it isn't an array of objects. */
+function objectsIn(value: Json, key: string): Json[] | undefined {
+  const items = value[key] ?? [];
+  return Array.isArray(items) && items.every(isObject) ? items : undefined;
+}
+
+/** Log records in an OTLP logs body, or undefined when it isn't one. */
+function countLogRecords(body: unknown): number | undefined {
+  if (!isObject(body) || !Array.isArray(body.resourceLogs)) return undefined;
+  const resourceLogs = objectsIn(body, "resourceLogs");
+  if (resourceLogs === undefined) return undefined;
+
+  let count = 0;
+  for (const resourceLog of resourceLogs) {
+    const scopeLogs = objectsIn(resourceLog, "scopeLogs");
+    if (scopeLogs === undefined) return undefined;
+    for (const scopeLog of scopeLogs) {
+      const logRecords = objectsIn(scopeLog, "logRecords");
+      if (logRecords === undefined) return undefined;
+      count += logRecords.length;
+    }
+  }
+  return count;
+}
+
+/** Collector statuses the browser can act on; others mean a misconfigured relay. */
+function isForBrowser(status: number): boolean {
+  return (
+    (status >= 200 && status < 300) ||
+    [400, 408, 413, 429].includes(status) ||
+    status >= 500
+  );
+}
+
 const app = express();
 
 app.post(
   APP_ANALYTICS_PATH,
-  // The library never sends more than 48 KiB per request.
-  express.json({ limit: "64kb" }),
+  // Raw bytes, so the Collector receives exactly what the browser sent.
+  express.raw({ type: "application/json", limit: "64kb" }),
   async (req, res) => {
-    if (!req.is("application/json")) {
+    if (!Buffer.isBuffer(req.body)) {
       res.status(415).end();
       return;
     }
-    if (!Array.isArray(req.body?.resourceLogs)) {
+
+    let records: number | undefined;
+    try {
+      records = countLogRecords(JSON.parse(req.body.toString("utf8")));
+    } catch {
+      records = undefined;
+    }
+    if (records === undefined) {
       res.status(400).end();
+      return;
+    }
+    if (records > MAX_RECORDS) {
+      res.status(413).end();
       return;
     }
 
@@ -116,13 +169,24 @@ app.post(
       const upstream = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(req.body),
+        body: req.body,
         redirect: "manual",
         signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
       });
       await upstream.body?.cancel();
+
+      if (!isForBrowser(upstream.status)) {
+        console.warn(`OTel Collector answered ${upstream.status}`);
+        res.status(502).end();
+        return;
+      }
+      const retryAfter = upstream.headers.get("retry-after");
+      if (retryAfter && [429, 503].includes(upstream.status)) {
+        res.set("Retry-After", retryAfter);
+      }
       res.status(upstream.status).end();
-    } catch {
+    } catch (error) {
+      console.warn("OTel Collector unreachable", error);
       res.status(502).end();
     }
   },
@@ -131,11 +195,12 @@ app.post(
 
 Keep these properties in any relay:
 
-- **Forward the body unchanged.** The Analytics UI reads the exact records the producer built. Don't add, rename, or re-encode attributes.
+- **Forward the bytes you received.** The Analytics UI reads the exact records the producer built. Don't add, rename, or re-encode attributes. Re-serializing a parsed body can change it, and it fails on deeply nested JSON.
 - **Forward no incoming headers.** Cookies and access tokens must not reach the Collector.
-- **Return the Collector's status.** The browser library retries `408`, `425`, `429`, `5xx`, and network failures once, and gives up on other statuses.
+- **Return the Collector's status, with its `Retry-After`.** The browser library retries `408`, `425`, `429`, `5xx`, and network failures once, honoring a `Retry-After` of up to 10 seconds, and gives up on other statuses. Answer `502` to statuses the browser can't fix, such as `3xx`, `401`, `403`, and `404`.
 - **Answer `204` when there is no Collector.** Otherwise every batch fails and is retried.
-- **Bound the work.** Limit the body size and the upstream wait.
+- **Bound the work.** Limit the body size, the records per request, the upstream wait, and the forwards in flight.
+- **Make failures visible.** A relay that fails quietly loses every record. Log Collector failures, rate-limited, and count outcomes.
 
 The route can live at another same-origin path. Pass that path as `endpoint` when you initialize the library.
 

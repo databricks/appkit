@@ -132,22 +132,25 @@ The server plugin answers `POST /_analytics/v1/logs` as follows. Every response 
 
 | Situation | Response |
 | --- | --- |
-| The body is over 64 KiB | `413` |
-| The body isn't `application/json` | `415` |
-| The body isn't valid JSON, or its `resourceLogs` isn't an array | `400` |
+| The body is over 64 KiB, or carries over 100 log records | `413` |
+| The body isn't UTF-8 `application/json` | `415` |
+| The body isn't valid JSON, or isn't shaped like OTLP logs (`resourceLogs[].scopeLogs[].logRecords[]`) | `400` |
 | App telemetry is off | `204`. The records are discarded, and the server logs one warning. |
-| App telemetry is on | Forwards the JSON body unchanged to the Collector and answers with the Collector's status. |
-| The Collector can't be reached or doesn't answer within 5 seconds | `502`. The server logs one warning on the first failure. |
+| App telemetry is on | Forwards the body byte for byte to the Collector. |
+| The Collector answers `2xx`, `400`, `408`, `413`, `429`, or `5xx` | The Collector's status, with its `Retry-After` on `429` and `503`. |
+| The Collector answers another status, such as `3xx`, `401`, `403`, or `404` | `502`. The relay is misconfigured, so the browser can't fix it. |
+| The Collector can't be reached or doesn't answer within 5 seconds | `502` |
+| 16 forwards are already in flight, or the server is shutting down | `503` with `Retry-After: 1` |
 
-The browser library never sends more than 48 KiB per request, so the 64 KiB limit only stops other clients. The relay parses its own requests, so the server's `bodyLimit` doesn't apply to it.
+The browser library never sends more than 25 records and 48 KiB per request, so the limits only stop other clients. The relay reads its own requests, so the server's `bodyLimit` doesn't apply to it.
 
-The relay resolves the Collector endpoint the way the OTLP exporters do. It uses `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` as-is, and otherwise appends `/v1/logs` to `OTEL_EXPORTER_OTLP_ENDPOINT`. It forwards none of the incoming request headers and doesn't follow redirects. The relay checks only the outer shape of the payload. The Collector decides what to accept, and the relay passes its answer back. For example, the Databricks Apps Collector answers `400` to `{"resourceLogs":[]}`, a batch the browser library never sends.
+The relay resolves the Collector endpoint the way the OTLP exporters do. It uses `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` as-is, and otherwise appends `/v1/logs` to `OTEL_EXPORTER_OTLP_ENDPOINT`. It sends the headers in `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_LOGS_HEADERS`, forwards none of the incoming request headers, and doesn't follow redirects. The relay checks only the OTLP envelope, never the App Analytics schema. The Collector decides what to accept, and the relay passes its answer back. For example, the Databricks Apps Collector answers `400` to `{"resourceLogs":[]}`, a batch the browser library never sends.
 
 Answering `204` when telemetry is off keeps local development quiet: the browser library neither retries nor reports a failure.
 
 `GET /_analytics/v1/sdk.js` answers with the browser build as `text/javascript`. Its URL carries no version, so browsers revalidate it on every page load and pick up a new build right after an upgrade.
 
-The relay carries only App Analytics records. AppKit creates no spans, wide-event logs, or request metrics for incoming requests under `/_analytics/`. Apart from the two one-time warnings above, the relay logs nothing.
+The relay carries only App Analytics records. AppKit creates no spans, wide-event logs, or request metrics for requests under `/_analytics/v1/`, and the forward to the Collector creates no span. Instead, the relay counts every request in the `app_analytics.relay.requests` metric, by `outcome` (`forwarded`, `partially_rejected`, `rejected`, `throttled`, `collector_error`, `misconfigured`, `unreachable`, `overloaded`, `aborted`, `discarded`, or `invalid`) and `http.response.status_code`. It logs Collector problems, including records the Collector rejects from an accepted request, at most once a minute per kind, and logs again as soon as the Collector recovers and fails again.
 
 ### Turn App Analytics off
 
@@ -159,7 +162,7 @@ await createApp({
 });
 ```
 
-To serve App Analytics from another path, or to add your own checks, turn the built-in relay off and mount your own route with `server.extend()`. The [reference relay](./architecture.md#reference-relay-for-apps-built-without-appkit) is a starting point. Nothing starts the library for you then, so mount it and pass the route's path as `endpoint`:
+To serve App Analytics from another path, or to add your own checks, turn the built-in relay off and mount your own route with `server.extend()`. The [reference relay](./architecture.md#reference-relay-for-apps-built-without-appkit) is a starting point. Behind `server()`, the server's JSON parser reads bodies before routes added with `server.extend()`, so such a route receives `req.body` already parsed, up to `bodyLimit`, rather than the raw bytes. Nothing starts the library for you then, so mount it and pass the route's path as `endpoint`:
 
 ```ts
 // server
