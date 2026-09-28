@@ -218,6 +218,10 @@ describe("ServerPlugin", () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
+    // App telemetry off unless a test turns it on: it decides whether the
+    // frontend servers get App Analytics options.
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    delete process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT;
     vi.clearAllMocks();
 
     // Reset mock router stack for health endpoint test
@@ -519,6 +523,7 @@ describe("ServerPlugin", () => {
         expect.any(String),
         expect.any(Object),
         expect.objectContaining({ "plugin-a": { featureX: true } }),
+        undefined,
       );
     });
 
@@ -546,6 +551,7 @@ describe("ServerPlugin", () => {
         expect.any(String),
         expect.any(Object),
         {},
+        undefined,
       );
     });
 
@@ -590,6 +596,53 @@ describe("ServerPlugin", () => {
       expect(StaticServer).toHaveBeenCalled();
       const staticInstance = vi.mocked(StaticServer).mock.results[0].value;
       expect(staticInstance.setup).toHaveBeenCalled();
+    });
+
+    test("passes App Analytics browser options to the static server when App telemetry is on", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4314";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const plugin = new ServerPlugin({
+        appAnalytics: { webVitals: true, sampleRate: 0.5 },
+      });
+      await plugin.start();
+
+      expect(StaticServer).toHaveBeenCalledWith(
+        mockExpressApp,
+        expect.any(String),
+        {},
+        {},
+        { webVitals: true, sampleRate: 0.5 },
+      );
+    });
+
+    test("passes App Analytics browser options to the Vite dev server when App telemetry is on", async () => {
+      process.env.NODE_ENV = "development";
+      process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT =
+        "http://localhost:4318/v1/logs";
+
+      const plugin = new ServerPlugin({});
+      await plugin.start();
+
+      expect(ViteDevServer).toHaveBeenCalledWith(mockExpressApp, {}, {}, {});
+    });
+
+    test("passes no App Analytics options with appAnalytics: false", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4314";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const plugin = new ServerPlugin({ appAnalytics: false });
+      await plugin.start();
+
+      expect(StaticServer).toHaveBeenCalledWith(
+        mockExpressApp,
+        expect.any(String),
+        {},
+        {},
+        undefined,
+      );
     });
 
     test("should not setup StaticServer when no static path found", async () => {

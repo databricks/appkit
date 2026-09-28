@@ -192,6 +192,44 @@ describe("ViteDevServer", () => {
       expect(mockRes.end).toHaveBeenCalled();
     });
 
+    test("adds the App Analytics script tag after Vite's transform when injected", async () => {
+      const server = new ViteDevServer(mockApp, {}, {}, { webVitals: true });
+      await server.setup();
+
+      const fallbackHandler = mockApp.use.mock.calls.find(
+        (call: any[]) => call[0] === "*",
+      )[1];
+
+      await fallbackHandler({ originalUrl: "/some/page" }, mockRes, mockNext);
+
+      // Vite would prefix the src with its base and try to pre-transform it
+      // as a client module, so it never sees the tag.
+      const [, transformedHtml] = mockTransformIndexHtml.mock.calls[0];
+      expect(transformedHtml).toContain('id="__appkit__"');
+      expect(transformedHtml).toContain('"appAnalytics":{"webVitals":true}');
+      expect(transformedHtml).not.toContain("sdk.js");
+      expect(mockRes.end).toHaveBeenCalledWith(
+        '<html><body><script type="module" src="/_analytics/v1/sdk.js"></script>transformed</body></html>',
+      );
+    });
+
+    test("adds no App Analytics script tag when not injected", async () => {
+      const server = new ViteDevServer(mockApp);
+      await server.setup();
+
+      const fallbackHandler = mockApp.use.mock.calls.find(
+        (call: any[]) => call[0] === "*",
+      )[1];
+
+      await fallbackHandler({ originalUrl: "/some/page" }, mockRes, mockNext);
+
+      const [, transformedHtml] = mockTransformIndexHtml.mock.calls[0];
+      expect(transformedHtml).not.toContain("appAnalytics");
+      expect(mockRes.end).toHaveBeenCalledWith(
+        "<html><body>transformed</body></html>",
+      );
+    });
+
     test("should handle errors with ssrFixStacktrace", async () => {
       const error = new Error("Transform error");
       mockTransformIndexHtml.mockRejectedValueOnce(error);

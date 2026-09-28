@@ -33,6 +33,15 @@ appAnalytics.init({ endpoint: "/custom/logs" });
 Cross-origin endpoints and endpoints with URL credentials fall back to the
 default.
 
+## Self-starting build
+
+The build also emits `dist/browser/sdk.js`, a single minified ES module with
+`web-vitals` bundled in. Loading it starts the default client with the options
+in `window.__appkit__.appAnalytics`, unless the app has already called
+`appAnalytics.init()`. The AppKit `server()` plugin ships this file, serves it
+at `/_analytics/v1/sdk.js`, and adds it to every page when App telemetry is on.
+It isn't a package export.
+
 ## Track Actions
 
 ```ts

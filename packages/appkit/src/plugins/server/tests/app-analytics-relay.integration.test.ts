@@ -1,9 +1,12 @@
+import fs from "node:fs";
 import {
   createServer,
   type IncomingHttpHeaders,
   type IncomingMessage,
   type Server,
 } from "node:http";
+import os from "node:os";
+import path from "node:path";
 
 import { createAppAnalytics } from "@databricks/app-analytics";
 import {
@@ -23,8 +26,46 @@ import {
 
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
-import { APP_ANALYTICS_PATH } from "../app-analytics-relay";
+import {
+  APP_ANALYTICS_PATH,
+  APP_ANALYTICS_SDK_PATH,
+} from "../app-analytics-relay";
 import { server as serverPlugin } from "../index";
+
+/**
+ * Stand-in for the browser build. Tests run from source, where the build that
+ * `pnpm build` copies next to the compiled server plugin doesn't exist, so the
+ * route serves this file instead.
+ */
+const sdkFixture = vi.hoisted(() => ({
+  file: "",
+  source: "/*! app-analytics */console.log('auto-start');",
+}));
+
+vi.mock("../app-analytics-relay", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../app-analytics-relay")>();
+  return { ...actual, serveSdk: () => actual.serveSdk(sdkFixture.file) };
+});
+
+const SDK_SCRIPT_TAG = `<script type="module" src="${APP_ANALYTICS_SDK_PATH}"></script>`;
+
+let fixtureDir: string;
+
+beforeAll(() => {
+  fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-app-analytics-"));
+  sdkFixture.file = path.join(fixtureDir, "sdk.js");
+  fs.writeFileSync(sdkFixture.file, sdkFixture.source);
+  fs.mkdirSync(path.join(fixtureDir, "client"));
+  fs.writeFileSync(
+    path.join(fixtureDir, "client", "index.html"),
+    '<!doctype html><html><head></head><body><div id="root"></div></body></html>',
+  );
+});
+
+afterAll(() => {
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
+});
 
 interface CollectorRequest {
   body: string;
@@ -218,12 +259,20 @@ describe("App Analytics relay (integration)", () => {
   });
 });
 
-describe("App Analytics relay turned off (integration)", () => {
+describe("App Analytics auto-start (integration)", () => {
+  const originalEnv = Object.fromEntries(
+    OTEL_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
   let appServer: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
   beforeAll(async () => {
+    // App telemetry on, with a collector that is never reached: only the
+    // logs-specific endpoint, so AppKit's own TelemetryManager stays off.
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "http://127.0.0.1:1/v1/logs";
+
     setupDatabricksEnv();
     ServiceContext.reset();
     serviceContextMock = await mockServiceContext();
@@ -231,7 +280,12 @@ describe("App Analytics relay turned off (integration)", () => {
     const app = await createApp({
       disableInternalTelemetry: true,
       plugins: [
-        serverPlugin({ port: 0, host: "127.0.0.1", appAnalytics: false }),
+        serverPlugin({
+          port: 0,
+          host: "127.0.0.1",
+          staticPath: path.join(fixtureDir, "client"),
+          appAnalytics: { webVitals: true, sampleRate: 0.5 },
+        }),
       ],
     });
     appServer = app.server.getServer();
@@ -244,6 +298,79 @@ describe("App Analytics relay turned off (integration)", () => {
       await closeServer(appServer);
     }
     serviceContextMock?.restore();
+    for (const key of OTEL_ENV_KEYS) {
+      const value = originalEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("serves the browser build as text/javascript", async () => {
+    const response = await fetch(`${baseUrl}${APP_ANALYTICS_SDK_PATH}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(await response.text()).toBe(sdkFixture.source);
+  });
+
+  test("adds the script tag and the browser options to index.html", async () => {
+    const response = await fetch(`${baseUrl}/some/page`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain(SDK_SCRIPT_TAG);
+    expect(readRuntimeConfig(html).appAnalytics).toEqual({
+      webVitals: true,
+      sampleRate: 0.5,
+    });
+  });
+});
+
+describe("App Analytics relay turned off (integration)", () => {
+  const originalEnv = Object.fromEntries(
+    OTEL_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  let appServer: Server;
+  let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeAll(async () => {
+    // App telemetry on, so only appAnalytics: false keeps the script out.
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "http://127.0.0.1:1/v1/logs";
+
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
+    const app = await createApp({
+      disableInternalTelemetry: true,
+      plugins: [
+        serverPlugin({
+          port: 0,
+          host: "127.0.0.1",
+          staticPath: path.join(fixtureDir, "client"),
+          appAnalytics: false,
+        }),
+      ],
+    });
+    appServer = app.server.getServer();
+    baseUrl = `http://127.0.0.1:${await getListeningPort(appServer)}`;
+  });
+
+  afterAll(async () => {
+    if (appServer) {
+      appServer.closeAllConnections();
+      await closeServer(appServer);
+    }
+    serviceContextMock?.restore();
+    for (const key of OTEL_ENV_KEYS) {
+      const value = originalEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   test("server({ appAnalytics: false }) removes the route", async () => {
@@ -251,7 +378,27 @@ describe("App Analytics relay turned off (integration)", () => {
 
     expect(response.status).toBe(404);
   });
+
+  test("server({ appAnalytics: false }) adds no script tag and serves no build", async () => {
+    const page = await fetch(`${baseUrl}/some/page`);
+    const html = await page.text();
+    expect(html).not.toContain(APP_ANALYTICS_SDK_PATH);
+    expect(readRuntimeConfig(html)).not.toHaveProperty("appAnalytics");
+
+    // The SPA fallback answers instead, with index.html.
+    const sdk = await fetch(`${baseUrl}${APP_ANALYTICS_SDK_PATH}`);
+    expect(sdk.headers.get("content-type")).toMatch(/^text\/html/);
+  });
 });
+
+/** The JSON inside the `<script id="__appkit__">` tag of a served page. */
+function readRuntimeConfig(html: string): Record<string, unknown> {
+  const json = html.match(
+    /<script id="__appkit__" type="application\/json">([\s\S]*?)<\/script>/,
+  )?.[1];
+  if (json === undefined) throw new Error("Expected a runtime config script");
+  return JSON.parse(json);
+}
 
 function postLogs(baseUrl: string, body: unknown): Promise<Response> {
   return fetch(`${baseUrl}${APP_ANALYTICS_PATH}`, {

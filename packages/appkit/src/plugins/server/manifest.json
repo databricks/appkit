@@ -28,7 +28,7 @@
         "appAnalytics": {
           "type": "boolean",
           "default": true,
-          "description": "Serve the App Analytics relay at POST /_analytics/v1/logs, which forwards browser OTLP log records (up to 64 KiB and 100 records per request) to the OTel Collector. Set to false to remove the route"
+          "description": "Serve the App Analytics relay at POST /_analytics/v1/logs, which forwards browser OTLP log records (up to 64 KiB and 100 records per request) to the OTel Collector, and, when App telemetry is on, add the self-starting /_analytics/v1/sdk.js script to index.html. Also accepts an object with the browser options webVitals, autocapture, and sampleRate. Set to false to turn both off"
         }
       }
     }

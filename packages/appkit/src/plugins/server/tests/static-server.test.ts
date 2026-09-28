@@ -25,7 +25,9 @@ vi.mock("express", () => ({
 }));
 
 // Mock getQueries and getConfigScript
-vi.mock("../utils", () => ({
+vi.mock("../utils", async (importOriginal) => ({
+  getAppAnalyticsScript: (await importOriginal<typeof import("../utils")>())
+    .getAppAnalyticsScript,
   getQueries: vi.fn().mockReturnValue({ query1: "SELECT 1" }),
   getConfigScript: vi.fn().mockReturnValue(`
     <script id="__appkit__" type="application/json">
@@ -184,6 +186,37 @@ describe("StaticServer", () => {
       expect(sentHtml).toContain("my-test-app");
 
       delete process.env.DATABRICKS_APP_NAME;
+    });
+
+    test("adds the App Analytics script tag after the config script when injected", () => {
+      const appAnalytics = { webVitals: true };
+      const server = new StaticServer(mockApp, "/static", {}, {}, appAnalytics);
+
+      server.setup();
+
+      const handler = mockApp.get.mock.calls[0][1];
+      handler({ path: "/" }, mockRes, mockNext);
+
+      expect(getConfigScript).toHaveBeenCalledWith({}, {}, appAnalytics);
+      const sentHtml: string = mockRes.send.mock.calls[0][0];
+      const sdkTag =
+        '<script type="module" src="/_analytics/v1/sdk.js"></script>';
+      expect(sentHtml).toContain(sdkTag);
+      expect(sentHtml.indexOf(sdkTag)).toBeGreaterThan(
+        sentHtml.indexOf('id="__appkit__"'),
+      );
+    });
+
+    test("adds no App Analytics script tag when not injected", () => {
+      const server = new StaticServer(mockApp, "/static");
+
+      server.setup();
+
+      const handler = mockApp.get.mock.calls[0][1];
+      handler({ path: "/" }, mockRes, mockNext);
+
+      expect(getConfigScript).toHaveBeenCalledWith({}, {}, undefined);
+      expect(mockRes.send.mock.calls[0][0]).not.toContain("sdk.js");
     });
 
     test("should include queries in config", () => {

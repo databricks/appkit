@@ -29,7 +29,9 @@ if (prerelease) {
 
 delete pkg.dependencies.shared;
 // Bundled inline into appkit-ui via noExternal until it is published on its own.
+// appkit only builds against it and ships its browser build as a file.
 delete pkg.dependencies["@databricks/app-analytics"];
+delete pkg.devDependencies?.["@databricks/app-analytics"];
 
 for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
   if (pkg.dependencies?.[depName] === "workspace:*") {

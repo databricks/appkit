@@ -1,6 +1,8 @@
 import type express from "express";
 
+import type { AppAnalyticsBrowserOptions } from "./types";
 import {
+  getAppAnalyticsScript,
   getConfigScript,
   type PluginClientConfigs,
   type PluginEndpoints,
@@ -17,15 +19,22 @@ export abstract class BaseServer {
   protected app: express.Application;
   protected endpoints: PluginEndpoints;
   protected pluginConfigs: PluginClientConfigs;
+  /**
+   * Options for the auto-started App Analytics library, or `undefined` when
+   * its script tag isn't injected.
+   */
+  protected appAnalytics?: AppAnalyticsBrowserOptions;
 
   constructor(
     app: express.Application,
     endpoints: PluginEndpoints = {},
     pluginConfigs: PluginClientConfigs = {},
+    appAnalytics?: AppAnalyticsBrowserOptions,
   ) {
     this.app = app;
     this.endpoints = endpoints;
     this.pluginConfigs = pluginConfigs;
+    this.appAnalytics = appAnalytics;
   }
 
   abstract setup(): void | Promise<void>;
@@ -33,6 +42,15 @@ export abstract class BaseServer {
   async close(): Promise<void> {}
 
   protected getConfigScript(): string {
-    return getConfigScript(this.endpoints, this.pluginConfigs);
+    return getConfigScript(
+      this.endpoints,
+      this.pluginConfigs,
+      this.appAnalytics,
+    );
+  }
+
+  /** The App Analytics script tag, or an empty string when it isn't injected. */
+  protected getAppAnalyticsScript(): string {
+    return getAppAnalyticsScript(this.appAnalytics);
   }
 }

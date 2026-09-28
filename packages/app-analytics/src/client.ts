@@ -24,7 +24,11 @@ import type {
   BrowserEventMetadata,
   EventProperties,
 } from "./core/event";
-import { getOrCreateGlobal } from "./core/global-registry";
+import {
+  getOrCreateGlobal,
+  readGlobal,
+  writeGlobal,
+} from "./core/global-registry";
 import { Instrumentation } from "./core/instrumentation";
 import {
   DEFAULT_SAMPLE_RATE,
@@ -45,6 +49,9 @@ export const DEFAULT_ENDPOINT = "/_analytics/v1/logs";
 export const MAX_PENDING_CALLS = 100;
 
 const DEFAULT_CLIENT_KEY = Symbol.for("@databricks/app-analytics/client-v1");
+const DEFAULT_CLIENT_CONFIGURED_KEY = Symbol.for(
+  "@databricks/app-analytics/client-configured-v1",
+);
 const DEFAULT_WEB_VITALS_SUBSCRIBER_KEY = Symbol.for(
   "@databricks/app-analytics/default-web-vitals-client",
 );
@@ -607,6 +614,16 @@ function isClient(value: unknown): value is AppAnalyticsClient {
 }
 
 /**
+ * Whether anything in the tab has called `appAnalytics.init()`, through any
+ * copy of this module. Kept on `globalThis` next to the shared client, so a
+ * build that starts the client on its own can leave an app's configuration
+ * alone.
+ */
+export function isDefaultClientConfigured(): boolean {
+  return readGlobal(DEFAULT_CLIENT_CONFIGURED_KEY) === true;
+}
+
+/**
  * The tab-wide client behind {@link appAnalytics}. It lives on `globalThis`,
  * so every copy of this package on the page (ESM and CJS builds, or a copy
  * bundled into another package) records through one queue and one set of
@@ -626,7 +643,10 @@ function defaultClient(): AppAnalyticsClient {
 
 /** The default client, shared by every copy of this package in the tab. */
 export const appAnalytics: AppAnalyticsClient = {
-  init: (options) => defaultClient().init(options),
+  init: (options) => {
+    writeGlobal(DEFAULT_CLIENT_CONFIGURED_KEY, true);
+    defaultClient().init(options);
+  },
   track: (name, properties) => defaultClient().track(name, properties),
   page: (properties) => defaultClient().page(properties),
   flush: () => defaultClient().flush(),

@@ -1,4 +1,11 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import fs from "node:fs";
+import http, {
+  createServer,
+  type IncomingMessage,
+  type Server,
+} from "node:http";
+import os from "node:os";
+import path from "node:path";
 
 import { getListeningPort } from "@databricks/appkit/testing";
 import { context } from "@opentelemetry/api";
@@ -19,10 +26,14 @@ import {
 import { resolveOtlpLogsExport } from "../../../telemetry/otlp-logs-export";
 import {
   APP_ANALYTICS_PATH,
+  APP_ANALYTICS_SDK_PATH,
   type AppAnalyticsRelayOptions,
+  appAnalyticsBrowserOptions,
   createAppAnalyticsRelay,
   forwardOtlpLogs,
   resolveOtlpLogsEndpoint,
+  serveSdk,
+  shouldInjectSdk,
 } from "../app-analytics-relay";
 
 const loggerSpies = vi.hoisted(() => ({
@@ -781,5 +792,142 @@ describe("createAppAnalyticsRelay", () => {
       expect(loggerSpies.warn).not.toHaveBeenCalled();
       release();
     });
+  });
+});
+
+describe("shouldInjectSdk", () => {
+  const telemetryOn = { OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4314" };
+
+  test.each([
+    ["by default", {}],
+    ["with appAnalytics: true", { appAnalytics: true }],
+    ["with browser options", { appAnalytics: { webVitals: true } }],
+  ])("injects when App telemetry is on %s", (_label, config) => {
+    expect(shouldInjectSdk(config, telemetryOn)).toBe(true);
+  });
+
+  test("injects with only the logs-specific endpoint", () => {
+    expect(
+      shouldInjectSdk(
+        {},
+        { OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://localhost:4318/v1/logs" },
+      ),
+    ).toBe(true);
+  });
+
+  test("doesn't inject when App telemetry is off", () => {
+    expect(shouldInjectSdk({ appAnalytics: { webVitals: true } }, {})).toBe(
+      false,
+    );
+  });
+
+  test("doesn't inject with appAnalytics: false", () => {
+    expect(shouldInjectSdk({ appAnalytics: false }, telemetryOn)).toBe(false);
+  });
+});
+
+describe("appAnalyticsBrowserOptions", () => {
+  test.each([undefined, true, false])(
+    "has no options for appAnalytics: %s",
+    (appAnalytics) => {
+      expect(appAnalyticsBrowserOptions(appAnalytics)).toEqual({});
+    },
+  );
+
+  test("keeps the browser options", () => {
+    expect(
+      appAnalyticsBrowserOptions({
+        webVitals: true,
+        autocapture: false,
+        sampleRate: 0.25,
+      }),
+    ).toEqual({ webVitals: true, autocapture: false, sampleRate: 0.25 });
+  });
+
+  test("drops unknown options and values of the wrong type", () => {
+    expect(
+      appAnalyticsBrowserOptions({
+        webVitals: "yes",
+        sampleRate: Number.NaN,
+        endpoint: "/elsewhere",
+      } as never),
+    ).toEqual({});
+  });
+});
+
+describe("serveSdk", () => {
+  const source = "/*! sdk */console.log('app analytics');";
+  let dir: string;
+  let sdkServer: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-sdk-"));
+    fs.writeFileSync(path.join(dir, "sdk.js"), source);
+
+    const app = express();
+    app.get(APP_ANALYTICS_SDK_PATH, serveSdk(path.join(dir, "sdk.js")));
+    app.get("/missing.js", serveSdk(path.join(dir, "missing.js")));
+    sdkServer = app.listen(0, "127.0.0.1");
+    baseUrl = `http://127.0.0.1:${await getListeningPort(sdkServer)}`;
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterAll(async () => {
+    sdkServer.closeAllConnections();
+    await new Promise<void>((resolve) => sdkServer.close(() => resolve()));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("serves the build as JavaScript that browsers revalidate", async () => {
+    const response = await fetch(`${baseUrl}${APP_ANALYTICS_SDK_PATH}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-cache");
+    expect(await response.text()).toBe(source);
+  });
+
+  test("answers 304 to a request with the current ETag", async () => {
+    const first = await fetch(`${baseUrl}${APP_ANALYTICS_SDK_PATH}`);
+    const etag = first.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    // node:http, because fetch adds `cache-control: no-cache` to conditional
+    // requests, which makes Express answer 200.
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      http
+        .get(
+          `${baseUrl}${APP_ANALYTICS_SDK_PATH}`,
+          { headers: { "if-none-match": etag ?? "" } },
+          (response) => {
+            response.resume();
+            resolve(response.statusCode);
+          },
+        )
+        .on("error", reject);
+    });
+
+    expect(status).toBe(304);
+  });
+
+  test("answers 404 and warns once when the build is missing", async () => {
+    const first = await fetch(`${baseUrl}/missing.js`);
+    const second = await fetch(`${baseUrl}/missing.js`);
+
+    expect(first.status).toBe(404);
+    expect(second.status).toBe(404);
+    expect(loggerSpies.warn).toHaveBeenCalledTimes(1);
+    expect(loggerSpies.warn.mock.calls[0]).toEqual([
+      expect.stringContaining("Could not read the App Analytics browser build"),
+      path.join(dir, "missing.js"),
+      expect.any(String),
+      APP_ANALYTICS_SDK_PATH,
+    ]);
   });
 });

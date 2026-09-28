@@ -11,6 +11,13 @@
 export const APP_ANALYTICS_PATH = "/_analytics/v1/logs";
 
 /**
+ * Path of the self-contained App Analytics build that starts the library on
+ * its own. The server adds a script tag for it to `index.html` when App
+ * telemetry is on.
+ */
+export const APP_ANALYTICS_SDK_PATH = "/_analytics/v1/sdk.js";
+
+/**
  * Prefix of the versioned paths App Analytics serves. AppKit keeps requests
  * under it out of its own spans, wide events, and request metrics, because they
  * carry only the browser's records. It is matched at the start of the path
