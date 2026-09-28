@@ -17,6 +17,10 @@
     },
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
+    },
+    "packages/app-analytics": {
+      "entry": ["src/tests/**/*.test.{ts,tsx}"],
+      "ignoreDependencies": ["react"]
     }
   },
   "ignoreDependencies": ["react-docgen-typescript"],

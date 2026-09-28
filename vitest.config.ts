@@ -46,6 +46,23 @@ export default defineConfig({
         },
       },
       {
+        plugins: [react()],
+        test: {
+          name: "app-analytics",
+          root: "./packages/app-analytics",
+          environment: "jsdom",
+          include: ["src/**/*.test.{ts,tsx}"],
+          // Clears the sessionStorage and globalThis session state that the
+          // SDK shares across clients, so each test starts a fresh session.
+          setupFiles: [
+            path.resolve(
+              __dirname,
+              "./packages/app-analytics/src/tests/setup.ts",
+            ),
+          ],
+        },
+      },
+      {
         plugins: [tsconfigPaths()],
         test: {
           name: "appkit",
