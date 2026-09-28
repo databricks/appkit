@@ -50,7 +50,8 @@ export interface AppAnalyticsBrowserOptions {
   webVitals?: boolean;
   /**
    * Record clicks and submits on elements annotated with
-   * `data-app-analytics-event`. Defaults to `false`.
+   * `data-app-analytics-event`. Defaults to `true`; nothing is recorded until
+   * an element carries the annotation.
    */
   autocapture?: boolean;
   /** Fraction of browser sessions to collect, from 0 to 1. Defaults to `1`. */
