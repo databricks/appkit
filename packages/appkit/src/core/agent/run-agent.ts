@@ -264,16 +264,21 @@ async function initStandalonePlugins(
 }
 
 async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
-  const { model } = def;
-  if (!model) {
+  // Explicit model wins; otherwise fall back to the
+  // DATABRICKS_SERVING_ENDPOINT_NAME env default. A string from either source
+  // routes by name (system.* → AI Gateway, else Model Serving).
+  const source = def.model ?? process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
+  if (!source) {
+    // No model and no env default: let fromModelServing() surface the
+    // canonical "set DATABRICKS_SERVING_ENDPOINT_NAME" error.
     const { DatabricksAdapter } = await import("../../agents/databricks");
     return DatabricksAdapter.fromModelServing();
   }
-  if (typeof model === "string") {
+  if (typeof source === "string") {
     const { adapterFromModelString } = await import("../../agents/databricks");
-    return adapterFromModelString(model);
+    return adapterFromModelString(source);
   }
-  return await model;
+  return await source;
 }
 
 function normalizeMessages(
