@@ -1,4 +1,5 @@
 import type express from "express";
+import pc from "picocolors";
 import type { BasePluginConfig, PluginConstructor } from "shared";
 
 import {
@@ -100,6 +101,7 @@ export class DatabasePlugin<
         this.resolvedSchema = schema;
         this.exposure = exposure;
         this.state = candidate;
+        this.printTables(schema);
       })();
       this.setupPromise = attempt;
     }
@@ -169,6 +171,42 @@ export class DatabasePlugin<
         });
       }
     }
+  }
+
+  /** Name every declared table once at boot, beside what reaches it over HTTP. */
+  private printTables(schema: Schema): void {
+    const names = Object.keys(schema.$tables).sort();
+    if (names.length === 0) return;
+    const exposed = new Set(this.exposure.tables);
+    const separator = pc.dim("─".repeat(60));
+    const rows = names.map((name) => {
+      const table = schema.$tables[name];
+      const columns = Object.keys(table.$columns).length;
+      const relations = table.$relations.length;
+      return {
+        name,
+        columns: `${columns} ${columns === 1 ? "column" : "columns"}`,
+        relations: `${relations} ${relations === 1 ? "relation" : "relations"}`,
+        serverOnly: !exposed.has(name),
+      };
+    });
+    const nameWidth = Math.max(...rows.map((r) => r.name.length));
+    const columnsWidth = Math.max(...rows.map((r) => r.columns.length));
+    const relationsWidth = Math.max(...rows.map((r) => r.relations.length));
+
+    console.log("");
+    console.log(`  ${pc.bold("Tables")} ${pc.dim(`(${names.length})`)}`);
+    console.log(`  ${separator}`);
+    for (const row of rows) {
+      const name = pc.bold(row.name.padEnd(nameWidth));
+      const columns = pc.dim(row.columns.padEnd(columnsWidth));
+      const line = row.serverOnly
+        ? `${pc.dim(row.relations.padEnd(relationsWidth))}   ${pc.yellow("server-only")}`
+        : pc.dim(row.relations);
+      console.log(`  ${name}   ${columns}   ${line}`);
+    }
+    console.log(`  ${separator}`);
+    console.log("");
   }
 
   /** Typed hook keys are schema table names, which routing addresses at runtime. */

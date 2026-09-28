@@ -13,6 +13,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import {
+  collapseRoutes,
   generateTunnelIdFromEmail,
   getConfigScript,
   getQueries,
@@ -78,6 +79,45 @@ describe("server/utils", () => {
     expect(getRoutes(stack)).toEqual([
       { path: "/health", methods: ["GET"] },
       { path: "/api/echo", methods: ["POST"] },
+    ]);
+  });
+
+  test("collapseRoutes folds routes that differ in one static segment", () => {
+    const lines = (paths: string[], method = "GET") =>
+      paths.map((path) => ({ method, path }));
+
+    expect(
+      collapseRoutes([
+        ...lines([
+          "/api/database/cases",
+          "/api/database/alerts",
+          "/api/database/cases/:id",
+          "/api/database/alerts/:id",
+          "/api/agents/:threadId",
+          "/api/agents/info",
+          "/api/demo/run",
+        ]),
+        // The larger sibling set wins over the `agent`/`agents` pair.
+        ...lines(
+          [
+            "/api/agent/chat",
+            "/api/agents/chat",
+            "/api/agents/cancel",
+            "/api/agents/approve",
+            "/api/database/cases",
+          ],
+          "POST",
+        ),
+      ]),
+    ).toEqual([
+      { method: "GET", path: "/api/agents/:threadId" },
+      { method: "GET", path: "/api/agents/info" },
+      { method: "GET", path: "/api/database/{alerts,cases}" },
+      { method: "GET", path: "/api/database/{alerts,cases}/:id" },
+      { method: "GET", path: "/api/demo/run" },
+      { method: "POST", path: "/api/agent/chat" },
+      { method: "POST", path: "/api/agents/{approve,cancel,chat}" },
+      { method: "POST", path: "/api/database/cases" },
     ]);
   });
 
