@@ -344,6 +344,32 @@ describe("databaseApi.get", () => {
     );
   });
 
+  test.each(["", ".", ".."])(
+    "refuses the id %j, which URL resolution would move off the detail route",
+    async (id) => {
+      // "" and "." resolve to the list route, ".." to the plugin root.
+      const error = await rejection(databaseApi.get("boards", id));
+
+      expect(error).toBeInstanceOf(DatabaseApiError);
+      expect(error).toMatchObject({
+        code: "INVALID_REQUEST",
+        status: null,
+        message: "Database id must be a non-empty path segment",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test("keeps an id that only contains dots among other characters", async () => {
+    await databaseApi.get("boards", "...");
+    await databaseApi.get("boards", "v1.2");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/database/boards/...",
+      "/api/database/boards/v1.2",
+    ]);
+  });
+
   test("maps a missing row to NOT_FOUND", async () => {
     fetchMock.mockResolvedValueOnce(
       json({ error: "Database record not found" }, 404),
@@ -586,6 +612,21 @@ describe("databaseApi writes", () => {
       code: "NOT_FOUND",
       status: 404,
     });
+  });
+
+  test("refuses a write addressed by an id that is not one path segment", async () => {
+    const results = await Promise.all([
+      rejection(databaseApi.update("notes", "..", { body: "x" })),
+      rejection(databaseApi.remove("notes", ".")),
+      rejection(databaseApi.remove("notes", "")),
+    ]);
+
+    expect(results).toMatchObject([
+      { code: "INVALID_REQUEST", status: null },
+      { code: "INVALID_REQUEST", status: null },
+      { code: "INVALID_REQUEST", status: null },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("refuses writes the plugin did not publish without sending a request", async () => {

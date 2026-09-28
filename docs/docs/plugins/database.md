@@ -250,7 +250,10 @@ project. It binds the server registry and a shared global interface used by
 
 The client finds routes in the endpoint map the server embeds in the page. When
 the `api` configuration does not expose an operation, a call to it fails with
-`NOT_EXPOSED` and sends no request.
+`NOT_EXPOSED` and sends no request. The page also carries the relations between
+exposed tables, as relation and table names only, so the
+[React hooks](#refresh-reads-after-a-write) can tell which reads a write
+affects. These are the names `include` already accepts.
 
 ### Calls
 
@@ -353,7 +356,7 @@ field. Branch on `code` rather than `message`.
 | `code` | `status` | Meaning |
 | --- | --- | --- |
 | `NOT_EXPOSED` | `null` | No published route for the operation. Nothing was sent |
-| `INVALID_REQUEST` | 400 or `null` | Malformed or unsupported parameters; `null` means local validation rejected the call before sending it |
+| `INVALID_REQUEST` | 400 or `null` | Malformed or unsupported parameters. `null` when the client refused them before sending: params that cannot be encoded, or an id of `""`, `"."`, or `".."`, which would resolve to another route |
 | `FORBIDDEN` | 403 | The database refused the operation |
 | `NOT_FOUND` | 404 | No row has this id |
 | `CONFLICT` | 409 | A constraint rejected the change |
@@ -396,8 +399,37 @@ function Notes({ boardId }: { boardId: number }) {
 ```
 
 `data` is the list envelope `{ items, limit, offset }`, or `null` until the
-first response arrives. Pass `{ enabled: false }` as the third argument to hold
-the request, for example until a value it depends on is known.
+first response arrives. To wait for a value the params depend on, pass `null`
+as the params; the hook stays idle and sends nothing:
+
+```tsx
+const notes = useDatabaseList(
+  "notes",
+  board ? { where: { board_id: board.id }, limit: 20 } : null,
+);
+```
+
+`{ enabled: false }` in the third argument also holds the request.
+
+### Paginate
+
+New params start a new request, and `data` is `null` until it answers. For a
+paginated list, pass `keepPreviousData: true` to keep showing the previous page
+while the next one loads. `loading` stays `true` until it arrives, and a failure
+for the new page shows no stale rows.
+
+```tsx
+const [offset, setOffset] = useState(0);
+const notes = useDatabaseList(
+  "notes",
+  { order: { id: "desc" }, limit: 20, offset },
+  { keepPreviousData: true },
+);
+
+<button disabled={notes.loading} onClick={() => setOffset(offset + 20)}>
+  Next
+</button>;
+```
 
 ### Read one record
 
@@ -412,46 +444,73 @@ board.data?.notes[0]?.note_events;
 
 Only tables with a public primary key have a detail route, so a keyless table or
 a table with a private key is a type error here. A `null` or `undefined` id
-holds the hook without a request. A missing row reports `NOT_FOUND`.
+holds the hook without a request. A missing row reports `NOT_FOUND`, and a
+refetch that finds the row deleted clears `data` rather than showing it beside
+the error. An id of `""`, `"."`, or `".."` reports `INVALID_REQUEST` without a
+request. To pass options without params, use `{}` for the params:
+`useDatabaseRecord("boards", boardId, {}, { keepPreviousData: true })`.
 
 ### Request lifecycle
 
 - Hooks that request the same entity with parameters that encode to the same
   query share one request while any of them is mounted. An inline parameter
   object does not refetch on every render.
-- New parameters start a new request, and `data` is `null` until it answers.
 - `refetch()` aborts the in-flight request and sends it again. The last `data`
-  stays visible while it loads and if it fails.
+  stays visible while it loads and if it fails, except for `NOT_FOUND`.
 - The request is aborted once the last hook using it unmounts. Nothing is cached
   after that. A React Strict Mode remount reuses the in-flight request.
+- `error` keeps its identity across renders until it changes, so an effect that
+  depends on it, such as a toast, runs once per failure.
 - A successful write through a write hook restarts mounted reads. See
   [Refresh reads after a write](#refresh-reads-after-a-write).
 
 ### Serializer-shaped reads
 
-A read serializer can change the rows a list or detail route returns. Pass
-`shape: serialized<T>()` to type the result as `T`. The entity, id, and
-parameters are still checked against the generated registry.
+A read serializer can change the rows a list or detail route returns. The
+`shape` option types the result, and can check it. The entity, id, and
+parameters are still checked against the generated registry either way.
+
+To check each row at runtime, pass a function that takes one decoded row and
+returns it typed, such as a zod schema's `parse`. It runs once per response, on
+each list item or on the record, and its return value becomes the row. If it
+throws, the read fails with `INTERNAL`; the thrown error is in `error.cause`,
+not in the message, since it may quote row values.
+
+```tsx
+import { useDatabaseList } from "@databricks/appkit-ui/react/beta";
+import { z } from "zod";
+
+// server: serialize: (row) => ({ id: row.id, excerpt: String(row.body).slice(0, 80) })
+const NoteCard = z.object({ id: z.number(), excerpt: z.string() });
+
+const notes = useDatabaseList(
+  "notes",
+  { limit: 20 },
+  { shape: NoteCard.parse },
+);
+notes.data?.items[0]?.excerpt;
+```
+
+Zod 4's `parse` works unbound. For a library whose parse method needs its
+schema as `this`, pass an arrow: `shape: (row) => schema.parse(row)`.
+
+To only declare the type, pass `serialized<T>()`. Nothing checks it at runtime,
+so keep `T` in step with the serializer.
 
 ```tsx
 import { serialized, useDatabaseList } from "@databricks/appkit-ui/react/beta";
 
-// server: serialize: (row) => ({ ...row, excerpt: String(row.body).slice(0, 80) })
-interface NoteView {
+interface NoteCard {
   id: number;
-  author: string;
   excerpt: string;
 }
 
 const notes = useDatabaseList(
   "notes",
   { limit: 20 },
-  { shape: serialized<NoteView>() },
+  { shape: serialized<NoteCard>() },
 );
 ```
-
-`serialized<T>()` is not checked at runtime. Keep `T` in step with the
-serializer.
 
 ### Write rows
 
@@ -493,8 +552,38 @@ hooks return `data`, the row the latest call answered with. Like
 for `remove`) and the `DatabaseApiError` is in `error`, so a handler needs no
 `try/catch`. To handle failures as exceptions, call `databaseApi` instead.
 
+A successful call resolves once the reads it restarts have reloaded, and
+`loading` stays `true` until then. A handler that clears its form after
+`await create(...)` therefore sees the new row already in the lists. A read
+that fails to reload does not fail the write.
+
 Values follow the same [rules](#values) as `databaseApi.create` and `update`.
 Update and delete need a public primary key, like record reads.
+
+### Observe every write
+
+`error` only shows the latest call, and only while a component renders it. To
+report every outcome, for example to a toast or an error tracker, pass
+`onSuccess` and `onError`:
+
+```tsx
+const notes = useDatabaseCreate("notes", {
+  onSuccess: (note) => toast(`Added note #${note.id}`),
+  onError: (error, values) => report(error, { board: values.board_id }),
+});
+```
+
+| Hook | `onSuccess` | `onError` |
+| --- | --- | --- |
+| `useDatabaseCreate` | `(row, values)` | `(error, values)` |
+| `useDatabaseUpdate` | `(row, id, values)` | `(error, id, values)` |
+| `useDatabaseDelete` | `(id)` | `(error, id)` |
+
+The callbacks run for every call, including one a later call superseded and one
+that finishes after the component unmounted, once the hook's state has settled.
+`onSuccess` runs after the restarted reads reload. A callback that throws does
+not change what the call resolves with; its error is reported as uncaught.
+Inline callbacks do not change the identity of `create`, `update`, or `remove`.
 
 ### Refresh reads after a write
 
@@ -502,45 +591,52 @@ When a write succeeds, every mounted database read restarts, so lists and
 includes that show the changed row refresh without a manual `refetch()`. Each
 read keeps its last `data` while it reloads. A failed write restarts nothing.
 
-Relations exist only in the generated types, so at runtime the hooks cannot
-tell that a `boards` read includes `notes`. That is why the default restarts
-every mounted read, not only reads of the written table. To restart only reads
-of named tables, or none, pass `invalidate`:
+The default restarts every read because a [mutation hook](#mutation-hooks) on
+the server may write other tables in the same transaction, and the browser
+cannot see that. When a page mounts many reads, pass `invalidate` to restart
+only the reads that show the tables you name, or none:
 
 ```ts
-// Restart only the reads of notes and boards.
-useDatabaseCreate("notes", { invalidate: ["notes", "boards"] });
+// A board's title changes only boards rows.
+useDatabaseUpdate("boards", { invalidate: ["boards"] });
 
 // Restart nothing. Call refetch() on the reads that need it.
 useDatabaseCreate("notes", { invalidate: false });
 ```
 
-A read of `boards` that includes `notes` belongs to `boards`, so
-`invalidate: ["notes"]` does not restart it.
+A read shows a table when it is rooted at it or when its `include` reaches it.
+The server publishes the relations between exposed tables, so
+`invalidate: ["notes"]` also restarts a `boards` read that includes `notes`,
+and a `boards` read that includes `notes` and then `note_events`. A read whose
+include the server did not describe is restarted by any table list.
 
 A write the hooks did not make, such as a `databaseApi` call or one of your own
 routes that changes rows, does not restart reads by itself. Call
 `invalidateDatabaseReads` from `@databricks/appkit-ui/react/beta` afterwards. It
-takes the same scope as `invalidate` and defaults to every mounted read:
+takes the same scope as `invalidate`, defaults to every mounted read, and
+resolves once the restarted reads have reloaded:
 
 ```ts
 import { invalidateDatabaseReads } from "@databricks/appkit-ui/react/beta";
 
-await fetch(`/api/cases/${caseId}/sar`, { method: "POST" });
-invalidateDatabaseReads(["str_reports", "activity_log"]);
+await fetch(`/api/boards/${boardId}/archive`, { method: "POST" });
+await invalidateDatabaseReads(["boards", "notes"]);
 ```
 
 ### Write lifecycle
 
 - A write is never aborted, even when its component unmounts. Aborting the
   request would not undo a transaction the server already committed.
-- A write that succeeds after its component unmounts still restarts reads,
-  because the rows did change.
+- A write that succeeds after its component unmounts still restarts reads and
+  runs `onSuccess`, because the rows did change.
 - Only the latest call updates `data`, `loading`, and `error`. An earlier call
   still resolves for the code that awaits it, with `null` if it failed.
+- `invalidate`, `onSuccess`, and `onError` are read when a call settles, so the
+  options of the latest render apply.
 - `reset()` returns the hook to idle. A call in flight keeps running, but no
   longer updates the hook.
-- Writes are not queued or deduplicated. Each call sends its own request.
+- Writes are not queued or deduplicated. Each call sends its own request, so
+  disable the submit control while `loading`.
 
 ## API reference
 

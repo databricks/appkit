@@ -248,7 +248,7 @@ test("serialized<T>() replaces the row type and keeps entity, id, and params che
   const diagnostics = compileTypeProbe(`
     import {
       type DatabaseListPage,
-      type DatabaseReadResult,
+      type UseDatabaseListResult,
       serialized,
       useDatabaseList,
       useDatabaseRecord,
@@ -264,7 +264,8 @@ test("serialized<T>() replaces the row type and keeps entity, id, and params che
         { order: { id: "desc" }, limit: 5 },
         { shape: serialized<PostCard>() },
       );
-      const typed: DatabaseReadResult<DatabaseListPage<PostCard>> = cards;
+      const typed: UseDatabaseListResult<PostCard> = cards;
+      const page: DatabaseListPage<PostCard> | null = cards.data;
       const headline: string | undefined = cards.data?.items[0]?.headline;
       // @ts-expect-error the shaped row replaces the inferred one
       cards.data?.items[0]?.title;
@@ -274,7 +275,7 @@ test("serialized<T>() replaces the row type and keeps entity, id, and params che
         enabled: false,
       });
       const count: number | undefined = card.data?.comment_count;
-      void [typed, headline, count];
+      void [typed, page, headline, count];
     }
 
     export function StillChecked() {
@@ -294,6 +295,56 @@ test("serialized<T>() replaces the row type and keeps entity, id, and params che
       useDatabaseRecord("users", "ada", { select: ["secret"] }, { shape: serialized<PostCard>() });
       // @ts-expect-error a shape is only built by serialized<T>()
       useDatabaseList("posts", {}, { shape: { headline: "x" } });
+    }
+  `);
+
+  expect(diagnostics).toEqual([]);
+});
+
+test("read hooks take null params, keepPreviousData, and a parse shape", () => {
+  const diagnostics = compileTypeProbe(`
+    import {
+      type DatabaseListPage,
+      type UseDatabaseListResult,
+      type UseDatabaseRecordResult,
+      useDatabaseList,
+      useDatabaseRecord,
+    } from "@databricks/appkit-ui/react/beta";
+
+    ${REGISTRY}
+
+    interface PostCard { id: number; headline: string }
+    declare function parsePostCard(row: unknown): PostCard;
+
+    export function Dependent(userSlug: string | undefined, offset: number) {
+      // Null params hold the read; the non-null branch keeps its exact type.
+      const posts = useDatabaseList(
+        "posts",
+        userSlug === undefined ? null : { where: { user_slug: userSlug }, limit: 20, offset },
+        { keepPreviousData: true },
+      );
+      const title: string | undefined = posts.data?.items[0]?.title;
+      const typed: UseDatabaseListResult<{ id: number; user_slug: string; title: string; total: string; payload: unknown }> = posts;
+      // @ts-expect-error the non-null branch is still checked exactly
+      useDatabaseList("posts", userSlug ? { where: { secret: userSlug } } : null);
+      void [title, typed];
+    }
+
+    export function Parsed() {
+      const cards = useDatabaseList("posts", { limit: 5 }, { shape: parsePostCard });
+      const page: DatabaseListPage<PostCard> | null = cards.data;
+      const inline = useDatabaseList("posts", { limit: 5 }, {
+        shape: (row) => ({ id: Number((row as { id: unknown }).id), headline: "x" }),
+      });
+      const headline: string | undefined = inline.data?.items[0]?.headline;
+      // @ts-expect-error the parsed row replaces the inferred one
+      cards.data?.items[0]?.title;
+
+      const card = useDatabaseRecord("posts", 7, {}, { shape: parsePostCard, keepPreviousData: true });
+      const record: UseDatabaseRecordResult<PostCard> = card;
+      // @ts-expect-error a shape is a parse function or serialized<T>(), not a value
+      useDatabaseList("posts", {}, { shape: parsePostCard(null) });
+      void [page, headline, record];
     }
   `);
 
@@ -327,6 +378,32 @@ test("write hooks type values, ids, and rows from the generated registry", () =>
       useDatabaseCreate("sessions").create({ user_slug: "ada" });
       useDatabaseCreate("posts", { invalidate: ["posts", "users"] });
       useDatabaseCreate("posts", { invalidate: false });
+      useDatabaseCreate("posts", {
+        onSuccess: (row, values) => {
+          const id: number = row.id;
+          const title: string = values.title;
+          void [id, title];
+        },
+        onError: (error, values) => {
+          const code: string = error.code;
+          void [code, values.user_slug];
+        },
+      });
+      useDatabaseUpdate("posts", {
+        onSuccess: (row, id, values) => {
+          const title: string = row.title;
+          const key: number = id;
+          const next: string | undefined = values.title;
+          void [title, key, next];
+        },
+      });
+      useDatabaseDelete("ledger", {
+        onSuccess: (id) => {
+          const seq: string | number | bigint = id;
+          void seq;
+        },
+        onError: (error, id) => void [error.status, id],
+      });
 
       const edit = useDatabaseUpdate("posts");
       const updated: Promise<DatabaseRow<"posts"> | null> = edit.update(7, { title: "New", total: "2" });
@@ -357,6 +434,10 @@ test("write hooks type values, ids, and rows from the generated registry", () =>
       posts.create({ user_slug: "ada", title: 1, total: 1 });
       // @ts-expect-error invalidation names generated tables
       useDatabaseCreate("posts", { invalidate: ["missing"] });
+      // @ts-expect-error a create answers the public row, which has no private column
+      useDatabaseCreate("users", { onSuccess: (row) => row.secret });
+      // @ts-expect-error a delete reports the id, not a row
+      useDatabaseDelete("posts", { onSuccess: (id) => id.title });
 
       // @ts-expect-error keyless entities have no update route
       useDatabaseUpdate("events");

@@ -27,7 +27,10 @@ import type {
   DatabaseUpdate,
 } from "./types";
 
-/** Suffix of the endpoint names `DatabasePlugin` publishes for each table. */
+/**
+ * Suffix of the endpoint names `DatabasePlugin` publishes for each table.
+ * @internal Shared with the React hooks; not part of the public surface.
+ */
 export type DatabaseOperation =
   | "list"
   | "detail"
@@ -35,7 +38,10 @@ export type DatabaseOperation =
   | "update"
   | "delete";
 
-/** An id as a keyed route addresses it in its path. */
+/**
+ * An id as a keyed route addresses it in its path.
+ * @internal Shared with the React hooks; not part of the public surface.
+ */
 export type IdLike = string | number | bigint;
 
 /** Per-call options for a database request. */
@@ -155,9 +161,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * An id that URL resolution would not keep as one path segment: `""` and
+ * `"."` collapse onto the list route and `".."` climbs above the table, so a
+ * keyed request would silently reach another route.
+ */
+function isUnaddressableId(segment: string): boolean {
+  return segment === "" || segment === "." || segment === "..";
+}
+
+/**
  * Find the route the server published for one operation. The plugin publishes
  * only what its `api` configuration exposes, so a missing entry is refused
- * here with `NOT_EXPOSED` and no request is sent.
+ * here with `NOT_EXPOSED` and no request is sent. An id that is not one path
+ * segment is refused with `INVALID_REQUEST`, also without a request.
+ *
+ * @internal Shared with the React hooks; not part of the public surface.
  */
 export function resolveDatabaseUrl(
   entity: string,
@@ -178,10 +196,19 @@ export function resolveDatabaseUrl(
       `Database operation "${name}" is not exposed`,
     );
   }
-  const url =
-    id === undefined
-      ? path
-      : path.replace(":id", encodeURIComponent(String(id)));
+  let url = path;
+  if (id !== undefined) {
+    const segment = String(id);
+    if (isUnaddressableId(segment)) {
+      // The id may be user input from a route param; do not echo it.
+      throw new DatabaseApiError(
+        "INVALID_REQUEST",
+        null,
+        "Database id must be a non-empty path segment",
+      );
+    }
+    url = path.replace(":id", encodeURIComponent(segment));
+  }
   return query ? `${url}?${query}` : url;
 }
 
@@ -217,6 +244,8 @@ async function failure(response: Response): Promise<DatabaseApiError> {
  * anything but the shape `accept` expects. A `204` has no body, so `accept`
  * sees `undefined`. An abort rejects with the signal's own reason, so a
  * caller can tell cancellation from failure.
+ *
+ * @internal Shared with the React hooks; not part of the public surface.
  */
 export async function requestDatabase<T>(
   url: string,
@@ -270,7 +299,10 @@ export async function requestDatabase<T>(
   return body;
 }
 
-/** The `{ items, limit, offset }` envelope a list route answers with. */
+/**
+ * The `{ items, limit, offset }` envelope a list route answers with.
+ * @internal Shared with the React hooks; not part of the public surface.
+ */
 export function isDatabaseListPage(
   body: unknown,
 ): body is DatabaseListPage<unknown> {
@@ -282,7 +314,10 @@ export function isDatabaseListPage(
   );
 }
 
-/** A detail route answers one bare row; a serializer returns an object too. */
+/**
+ * A detail route answers one bare row; a serializer returns an object too.
+ * @internal Shared with the React hooks; not part of the public surface.
+ */
 export function isDatabaseRow(body: unknown): body is Record<string, unknown> {
   return isRecord(body);
 }
@@ -324,6 +359,8 @@ function jsonWrite(
 /**
  * Untyped create behind `databaseApi.create` and `useDatabaseCreate`; their
  * signatures carry the checks, while the entity is still a literal.
+ *
+ * @internal Shared with the React hooks; not part of the public surface.
  */
 export async function createDatabaseRow(
   entity: string,
@@ -338,7 +375,10 @@ export async function createDatabaseRow(
   );
 }
 
-/** Untyped update, shared by the typed client and the write hooks. */
+/**
+ * Untyped update, shared by the typed client and the write hooks.
+ * @internal Not part of the public surface.
+ */
 export async function updateDatabaseRow(
   entity: string,
   id: IdLike,
@@ -353,7 +393,10 @@ export async function updateDatabaseRow(
   );
 }
 
-/** Untyped delete, shared by the typed client and the write hooks. */
+/**
+ * Untyped delete, shared by the typed client and the write hooks.
+ * @internal Not part of the public surface.
+ */
 export async function deleteDatabaseRow(
   entity: string,
   id: IdLike,

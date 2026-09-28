@@ -54,14 +54,16 @@ export function BoardExplorer() {
     boardItems.find((entry) => entry.slug === selected) ?? boardItems[0];
 
   // Listing notes directly is what puts them through the entity's serializer.
+  // Null params hold the read until the boards answer.
   const notes = useDatabaseList(
     "notes",
-    {
-      where: { board_id: board?.id ?? 0 },
-      order: { created_at: "desc" },
-      limit: 5,
-    },
-    { enabled: board !== undefined },
+    board
+      ? {
+          where: { board_id: board.id },
+          order: { created_at: "desc" },
+          limit: 5,
+        }
+      : null,
   );
   const noteItems = notes.data?.items ?? [];
 
