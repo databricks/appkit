@@ -96,6 +96,40 @@ All routes are under `/api/omnigent` and scoped to the signed-in user.
 | `POST /sessions/:id/elicitations/:eid` | Resolve a pending approval |
 | `GET /status` | Runtime health: sandbox, hosts, gateway counters |
 
+## React
+
+`@databricks/appkit-ui/react/beta` has three headless hooks for building the UI:
+
+```tsx
+import {
+  useOmnigentHarnesses,
+  useOmnigentSession,
+  useOmnigentSessions,
+} from "@databricks/appkit-ui/react/beta";
+
+function Thread({ sessionId }: { sessionId: string | null }) {
+  const s = useOmnigentSession({ sessionId });
+  return (
+    <>
+      {s.items.map((item, i) => <Item key={item.id ?? i} item={item} />)}
+      {s.draft && <p>{s.draft}</p>}
+      {s.approvals.map((a) => (
+        <button key={a.elicitation_id} onClick={() => s.approve(a.elicitation_id)}>
+          Allow: {a.params?.message}
+        </button>
+      ))}
+      <Composer onSend={(text) => (s.sessionId ? s.send(text) : s.start({ message: text }))} />
+    </>
+  );
+}
+```
+
+- **`useOmnigentSession`** loads a session and keeps its stream open. The live text of the running turn is in `draft`, and `items`, `status`, `session.mode` and `approvals` refresh as events arrive. Its actions are `start`, `send`, `interrupt`, `approve`, `decline`, `setMode`, `refresh` and `reset`.
+- **`useOmnigentHarnesses`** lists the harnesses the user can pick, each with its gateway models.
+- **`useOmnigentSessions`** lists the user's threads and can delete them.
+
+The dev playground's `/omnigent` page (`OMNIGENT_ENABLED=1`) is a complete example.
+
 ## How it works
 
 - **One Omnigent server, one host per user.** The server listens on loopback in Omnigent's header-auth mode, under a random header name only the plugin knows. Each active user gets their own host process, registered as that user; Omnigent only runs a session on its owner's host. An idle host stops after `runtime.hostIdleMs`.
