@@ -100,8 +100,9 @@ missing.
 The manifest capability contract keeps `secret`, `database`, and `postgres`
 app-only for the new `appkit.asUser` and `runInCallerContext` APIs. Accessing
 those resources through these caller-scoped plugin APIs or tools
-raises a clear error, such as "Lakebase does not support OBO
-(on-behalf-of-user) execution; it runs as the service principal."
+raises a clear error identifying the resource by its manifest alias, or its type
+when no alias is available. The message states that the resource is app-only in
+this version of AppKit and does not support OBO execution through these APIs.
 The check applies when using cached handles inside a later user scope too.
 It does not reject unrelated plugins merely because an app-only plugin is
 installed. Required resources, runtime requirements, and configured optional

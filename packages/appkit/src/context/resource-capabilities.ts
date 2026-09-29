@@ -13,17 +13,14 @@ class AppOnlyResourceError extends AppKitError {
   readonly code = "APP_ONLY_RESOURCE";
   readonly statusCode = 400;
   readonly isRetryable = false;
-  constructor(
-    type: string,
-    name = type === "postgres" || type === "database" ? "Lakebase" : "Secret",
-  ) {
-    const message = `${name} does not support OBO (on-behalf-of-user) execution; it runs as the service principal. Resource type: ${type}.`;
+  constructor(type: string, name = type) {
+    const message = `Resource "${name}" is app-only in this version of AppKit and does not support OBO (on-behalf-of-user) execution. It runs as the service principal. Resource type: ${type}.`;
     super(message, { clientMessage: message, context: { resourceType: type } });
   }
 }
 
 /** Read the same required/bound resource metadata used by provisioning. */
-export function getPluginResourceTypes(plugin: object): string[] {
+function getPluginResources(plugin: object) {
   const ctor = plugin.constructor as Partial<PluginConstructor>;
   const config = (plugin as { config?: BasePluginConfig }).config;
   const resources = ctor.manifest?.resources;
@@ -38,13 +35,15 @@ export function getPluginResourceTypes(plugin: object): string[] {
       ? ctor.getResourceRequirements(config)
       : [];
   return [
-    ...new Set(
-      [
-        ...(resources?.required ?? []),
-        ...optional,
-        ...runtime.filter((resource) => resource.required),
-      ].map((resource) => resource.type),
-    ),
+    ...(resources?.required ?? []),
+    ...optional,
+    ...runtime.filter((resource) => resource.required),
+  ];
+}
+
+export function getPluginResourceTypes(plugin: object): string[] {
+  return [
+    ...new Set(getPluginResources(plugin).map((resource) => resource.type)),
   ];
 }
 
@@ -69,8 +68,13 @@ export function assertPluginExecution(
 ): void {
   if (!callerRequested && (!getCallerContext() || isLegacyCallerScope()))
     return;
-  for (const type of getPluginResourceTypes(plugin)) {
-    if (isAppOnly(type)) throw new AppOnlyResourceError(type);
+  for (const resource of getPluginResources(plugin)) {
+    if (isAppOnly(resource.type)) {
+      throw new AppOnlyResourceError(
+        resource.type,
+        resource.alias?.trim() || resource.type,
+      );
+    }
   }
 }
 

@@ -15,10 +15,13 @@ import {
   runInCallerContext,
   runInUserContext,
 } from "../execution-context";
-import { assertPluginExecution } from "../resource-capabilities";
+import {
+  assertPluginExecution,
+  assertResourceExecution,
+} from "../resource-capabilities";
 import { guardPluginApi } from "../resource-capabilities";
 
-function probe(name: string, type?: string) {
+function probe(name: string, type?: string, alias = "resource") {
   class ResourceProbe extends Plugin {
     static manifest = defineManifest({
       name,
@@ -29,7 +32,7 @@ function probe(name: string, type?: string) {
           ? [
               {
                 type,
-                alias: "resource",
+                alias,
                 resourceKey: "resource",
                 description: "probe",
                 permission:
@@ -67,6 +70,31 @@ const caller = {
 };
 
 describe("resource identity contract", () => {
+  test.each(["secret", "database", "postgres"])(
+    "labels %s errors from the manifest and preserves the error contract",
+    (type) => {
+      const AppOnly = probe("appOnly", type, "Orders storage");
+      expect(() => assertPluginExecution(new AppOnly({}), true)).toThrow(
+        expect.objectContaining({
+          message: `Resource "Orders storage" is app-only in this version of AppKit and does not support OBO (on-behalf-of-user) execution. It runs as the service principal. Resource type: ${type}.`,
+          code: "APP_ONLY_RESOURCE",
+          statusCode: 400,
+          isRetryable: false,
+          context: { resourceType: type },
+        }),
+      );
+    },
+  );
+
+  test.each(["secret", "database", "postgres"])(
+    "uses the %s type as the label when no manifest is available",
+    (type) => {
+      expect(() =>
+        runInCallerContext(caller, () => assertResourceExecution(type)),
+      ).toThrow(`Resource "${type}" is app-only in this version of AppKit`);
+    },
+  );
+
   test("resource guards preserve SP result identity", async () => {
     const AppOnly = probe("appOnly", "postgres");
     const plugin = new AppOnly({});
@@ -119,7 +147,7 @@ describe("resource identity contract", () => {
     });
     const missing = createMockRequest();
     expect(() => app.plugins.asUser(request()).appOnly).toThrow(
-      "Lakebase does not support OBO",
+      'Resource "resource" is app-only in this version of AppKit',
     );
     expect(() => app.plugins.appOnly.asUser(missing)).toThrow(
       "Missing user token in request headers",
@@ -222,7 +250,7 @@ describe("resource identity contract", () => {
       expect(() => assertPluginExecution(plugin, true)).not.toThrow();
       vi.stubEnv("APPKIT_TEST_OPTIONAL_SECRET", "configured");
       expect(() => assertPluginExecution(plugin, true)).toThrow(
-        /Secret does not support OBO/,
+        'Resource "secret" is app-only in this version of AppKit',
       );
     } finally {
       vi.unstubAllEnvs();

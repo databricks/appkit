@@ -116,10 +116,11 @@ await createApp({
 ## On-Behalf-Of (OBO) {#on-behalf-of-obo--per-user-connections}
 
 Lakebase is app-only through the new `appkit.asUser` and `runInCallerContext`
-APIs. Operations in those scopes fail with a clear error:
+APIs. Operations in those scopes fail with a clear error. For a connector call
+without a manifest alias:
 
 ```text
-Lakebase does not support OBO (on-behalf-of-user) execution; it runs as the service principal.
+Resource "postgres" is app-only in this version of AppKit and does not support OBO (on-behalf-of-user) execution. It runs as the service principal. Resource type: postgres.
 ```
 
 Use a plain Lakebase call outside a caller scope for SP execution. There is no

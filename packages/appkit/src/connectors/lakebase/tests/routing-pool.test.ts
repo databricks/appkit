@@ -35,7 +35,7 @@ describe("RoutingPool", () => {
     ]) {
       expect(() =>
         runInCallerContext<Promise<unknown>>(caller, operation),
-      ).toThrow(/Lakebase does not support OBO/);
+      ).toThrow('Resource "postgres" is app-only in this version of AppKit');
     }
     expect(resolveUserPool).not.toHaveBeenCalled();
     expect(spPool.query).not.toHaveBeenCalled();
