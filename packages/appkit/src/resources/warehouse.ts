@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { ConfigurationError, InitializationError } from "../errors";
+import type { ResourceEntry } from "../registry/types";
 import type { sql, WorkspaceClient } from "../workspace-client";
 
 /** The SQL warehouse selected for the app lifecycle, separate from identity. */
@@ -15,11 +16,14 @@ export class WarehouseResource {
   /** Resolve candidates without publishing resources from a failed app startup. */
   static async resolve(
     client: WorkspaceClient,
-    required = false,
+    selection: boolean | string = false,
   ): Promise<WarehouseBinding> {
-    const warehouseId = required
-      ? await discoverWarehouseId(client)
-      : undefined;
+    const warehouseId =
+      typeof selection === "string"
+        ? selection
+        : selection
+          ? await discoverWarehouseId(client)
+          : undefined;
     return Object.freeze({
       warehouseId:
         warehouseId === undefined ? undefined : Promise.resolve(warehouseId),
@@ -40,6 +44,28 @@ export class WarehouseResource {
   static reset(): void {
     appBinding = undefined;
   }
+}
+
+/** Select the app warehouse from resource values resolved by the registry. */
+export function getConfiguredWarehouseId(
+  resources: readonly ResourceEntry[],
+): string | undefined {
+  const ids = new Set(
+    resources
+      .filter(
+        (resource) => resource.type === "sql_warehouse" && resource.required,
+      )
+      .flatMap((resource) => (resource.values?.id ? [resource.values.id] : [])),
+  );
+  if (ids.size <= 1) return ids.values().next().value;
+
+  // The shared accessor needs an explicit default when bindings differ.
+  if (process.env.DATABRICKS_WAREHOUSE_ID) {
+    return process.env.DATABRICKS_WAREHOUSE_ID;
+  }
+  throw new ConfigurationError(
+    "Multiple SQL warehouses are configured. Set DATABRICKS_WAREHOUSE_ID to select the app's default warehouse.",
+  );
 }
 
 async function discoverWarehouseId(client: WorkspaceClient): Promise<string> {

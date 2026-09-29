@@ -120,6 +120,15 @@ describe("ServiceContext", () => {
       expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
     });
 
+    test("publishes an explicitly resolved warehouse without discovering another", async () => {
+      process.env.DATABRICKS_WAREHOUSE_ID = "unrelated-warehouse";
+      await ServiceContext.initialize({ warehouseId: "manifest-warehouse" });
+      expect(await getWarehouseId()).toBe("manifest-warehouse");
+      expect(mockApiRequest).not.toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/2.0/sql/warehouses" }),
+      );
+    });
+
     test("should not set warehouseId when options are omitted", async () => {
       await ServiceContext.initialize();
 

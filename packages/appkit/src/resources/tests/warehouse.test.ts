@@ -3,9 +3,27 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../context/service-context";
 import { ConfigurationError, InitializationError } from "../../errors";
 import { getWarehouseId } from "../../index";
+import { ResourceRegistry, ResourceType } from "../../registry";
 import { createMockWorkspaceClient } from "../../testing/mock-workspace-client";
 import { AppResources, type AppResourceBindings } from "../app-resources";
-import { WarehouseResource } from "../warehouse";
+import { getConfiguredWarehouseId, WarehouseResource } from "../warehouse";
+
+function warehouseRegistry(bindings: { env: string; required?: boolean }[]) {
+  const registry = new ResourceRegistry();
+  for (const { env, required = true } of bindings) {
+    registry.register("custom", {
+      type: ResourceType.SQL_WAREHOUSE,
+      resourceKey: env,
+      alias: "Query warehouse",
+      description: "Test warehouse",
+      permission: "CAN_USE",
+      required,
+      fields: { id: { env } },
+    });
+  }
+  registry.validate();
+  return registry;
+}
 
 describe("warehouse resource bindings", () => {
   beforeEach(() => {
@@ -64,6 +82,59 @@ describe("warehouse resource bindings", () => {
     WarehouseResource.bind(bindings);
     expect(getWarehouseId).toThrow(ConfigurationError);
     expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
+  });
+
+  test("uses the manifest binding instead of an unrelated default environment variable", async () => {
+    vi.stubEnv("APPKIT_TEST_WAREHOUSE", "plugin-warehouse");
+    vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "unrelated-warehouse");
+    const registry = warehouseRegistry([{ env: "APPKIT_TEST_WAREHOUSE" }]);
+    const client = createMockWorkspaceClient();
+    const binding = await WarehouseResource.resolve(
+      client,
+      getConfiguredWarehouseId(registry.getAll()),
+    );
+    WarehouseResource.bind(binding);
+    expect(await getWarehouseId()).toBe("plugin-warehouse");
+    expect(client.apiClient.request).not.toHaveBeenCalled();
+  });
+
+  test("shares one ID across declarations with different environment variables", () => {
+    vi.stubEnv("APPKIT_TEST_WAREHOUSE", "shared-warehouse");
+    vi.stubEnv("APPKIT_TEST_OTHER_WAREHOUSE", "shared-warehouse");
+    const registry = warehouseRegistry([
+      { env: "APPKIT_TEST_WAREHOUSE" },
+      { env: "APPKIT_TEST_OTHER_WAREHOUSE" },
+    ]);
+    expect(getConfiguredWarehouseId(registry.getAll())).toBe(
+      "shared-warehouse",
+    );
+  });
+
+  test("requires an explicit app default when manifest bindings differ", () => {
+    vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "");
+    vi.stubEnv("APPKIT_TEST_WAREHOUSE", "first-warehouse");
+    vi.stubEnv("APPKIT_TEST_OTHER_WAREHOUSE", "second-warehouse");
+    const registry = warehouseRegistry([
+      { env: "APPKIT_TEST_WAREHOUSE" },
+      { env: "APPKIT_TEST_OTHER_WAREHOUSE" },
+    ]);
+    expect(() => getConfiguredWarehouseId(registry.getAll())).toThrow(
+      "Multiple SQL warehouses are configured. Set DATABRICKS_WAREHOUSE_ID",
+    );
+    vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "second-warehouse");
+    expect(getConfiguredWarehouseId(registry.getAll())).toBe(
+      "second-warehouse",
+    );
+  });
+
+  test("leaves missing bindings to discovery and does not activate optional warehouses", () => {
+    vi.stubEnv("APPKIT_TEST_WAREHOUSE", "");
+    vi.stubEnv("APPKIT_TEST_OTHER_WAREHOUSE", "optional-warehouse");
+    const registry = warehouseRegistry([
+      { env: "APPKIT_TEST_WAREHOUSE" },
+      { env: "APPKIT_TEST_OTHER_WAREHOUSE", required: false },
+    ]);
+    expect(getConfiguredWarehouseId(registry.getAll())).toBeUndefined();
   });
 
   test("deprecated resource names delegate to the warehouse module and warn once", async () => {

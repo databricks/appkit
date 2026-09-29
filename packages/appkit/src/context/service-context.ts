@@ -50,12 +50,12 @@ export class ServiceContext {
    * Initialize the service context. Should be called once at app startup.
    * Safe to call multiple times - will return the same instance.
    *
-   * @param options - Which shared resources to resolve (derived from plugin manifests).
+   * @param options - A resolved warehouse ID, or a boolean enabling discovery.
    * @param client - Optional pre-configured WorkspaceClient to use instead
    *   of creating one from environment credentials.
    */
   static async initialize(
-    options?: { warehouseId?: boolean },
+    options?: { warehouseId?: boolean | string },
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     if (ServiceContext.instance) {
@@ -171,7 +171,7 @@ export class ServiceContext {
   }
 
   private static async createContext(
-    options?: { warehouseId?: boolean },
+    options?: { warehouseId?: boolean | string },
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     try {
