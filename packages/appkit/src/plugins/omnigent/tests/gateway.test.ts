@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import https from "node:https";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,12 +10,11 @@ import { ensureGatewayTls } from "../runtime/tls";
 
 function get(
   url: string,
-  ca: Buffer,
   headers: Record<string, string> = {},
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    https
-      .get(url, { headers, ca }, (res) => {
+    http
+      .get(url, { headers }, (res) => {
         let body = "";
         res.on("data", (c) => (body += c));
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
@@ -27,7 +26,6 @@ function get(
 describe("ModelGateway", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omni-gw-"));
   let gw: ModelGateway;
-  let cert: Buffer;
   let tokenCalls = 0;
 
   beforeAll(async () => {
@@ -35,7 +33,6 @@ describe("ModelGateway", () => {
       path.join(root, "tls"),
       path.join(root, "bin"),
     );
-    cert = tls.cert;
     gw = new ModelGateway({
       upstream: "https://127.0.0.1:9", // never reached in these tests
       token: async () => {
@@ -85,7 +82,7 @@ describe("ModelGateway", () => {
 
   test("refuses non-model paths with 403 and never mints a token for them", async () => {
     const before = tokenCalls;
-    const r = await get(`${gw.httpsUrl}/api/2.0/clusters/list`, cert, {
+    const r = await get(`${gw.httpUrl}/api/2.0/clusters/list`, {
       authorization: `Bearer ${gw.placeholder}`,
     });
     expect(r.status).toBe(403);
@@ -94,11 +91,12 @@ describe("ModelGateway", () => {
   });
 
   test("answers host metadata with 404 so SDKs stay on token auth", async () => {
-    const r = await get(`${gw.httpsUrl}/.well-known/databricks-config`, cert);
+    const r = await get(`${gw.httpUrl}/.well-known/databricks-config`);
     expect(r.status).toBe(404);
   });
 
   test("listens on loopback only", () => {
     expect(gw.httpsUrl).toMatch(/^https:\/\/127\.0\.0\.1:\d+$/);
+    expect(gw.httpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 });

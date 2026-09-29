@@ -24,6 +24,8 @@ export interface IOmnigentConfig extends BasePluginConfig {
 export interface OmnigentHarness {
   id: string;
   label: string;
+  /** Has its own shell, so runs sandboxed. */
+  shell: boolean;
   ready: boolean | string;
 }
 
@@ -40,6 +42,8 @@ export interface OmnigentStatus {
   error?: string;
   /** Omnigent server version. */
   version?: string;
+  /** Harnesses with their own shell run in bubblewrap. */
+  sandbox: boolean;
   /** Running per-user hosts. */
   hosts: number;
   /** Model gateway counters. */

@@ -7,7 +7,8 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { buildBundle } from "../bundle";
 import { offerHarnesses } from "../harnesses";
-import { childEnv, GATEWAY_PROFILE, writeUserConfig } from "../runtime/env";
+import { childEnv, profileFor, writeUserConfig } from "../runtime/env";
+import { HarnessSandbox } from "../runtime/sandbox";
 
 function untar(buf: Buffer): Record<string, string> {
   const out: Record<string, string> = {};
@@ -37,9 +38,9 @@ describe("buildBundle", () => {
       gunzipSync(
         buildBundle({
           name: "appkit",
-          harness: "pi",
+          harness: "codex",
           model: "system.ai.gpt-5-5",
-          profile: GATEWAY_PROFILE,
+          profile: profileFor("codex"),
           instructions: "Be terse.",
         }),
       ),
@@ -48,11 +49,17 @@ describe("buildBundle", () => {
     const cfg = JSON.parse(files["config.yaml"]);
     expect(cfg.executor).toMatchObject({
       model: "system.ai.gpt-5-5",
-      profile: "appkit-omnigent",
-      config: { harness: "pi" },
-      auth: { type: "databricks", profile: "appkit-omnigent" },
+      profile: "appkit-omnigent-http",
+      config: { harness: "codex" },
+      auth: { type: "databricks", profile: "appkit-omnigent-http" },
     });
     expect(files["AGENTS.md"]).toBe("Be terse.");
+  });
+
+  test("Claude and Pi use the https profile, Codex the http one", () => {
+    expect(profileFor("claude-sdk")).toBe("appkit-omnigent");
+    expect(profileFor("pi")).toBe("appkit-omnigent");
+    expect(profileFor("codex")).toBe("appkit-omnigent-http");
   });
 });
 
@@ -65,6 +72,7 @@ describe("child environment", () => {
 
   const gw = {
     httpsUrl: "https://127.0.0.1:1",
+    httpUrl: "http://127.0.0.1:2",
     placeholder: "appkit-omnigent-ph",
   };
 
@@ -132,7 +140,11 @@ describe("child environment", () => {
     writeUserConfig(home, gw);
     const cfg = fs.readFileSync(path.join(home, ".databrickscfg"), "utf8");
     expect(cfg).toContain(`host = ${gw.httpsUrl}`);
-    expect(cfg.match(/token = (.*)/g)).toEqual([`token = ${gw.placeholder}`]);
+    expect(cfg).toContain(`host = ${gw.httpUrl}`);
+    expect(cfg.match(/token = (.*)/g)).toEqual([
+      `token = ${gw.placeholder}`,
+      `token = ${gw.placeholder}`,
+    ]);
     expect(
       (fs.statSync(path.join(home, ".databrickscfg")).mode & 0o777).toString(8),
     ).toBe("600");
@@ -140,7 +152,7 @@ describe("child environment", () => {
       path.join(home, ".config", "omnigent", "config.yaml"),
       "utf8",
     );
-    expect(omni).toContain(`profile: ${GATEWAY_PROFILE}`);
+    expect(omni).toContain("profile: appkit-omnigent");
   });
 });
 
@@ -177,6 +189,7 @@ describe("offerHarnesses", () => {
   ];
   const all = {
     "claude-sdk": true,
+    codex: true,
     pi: "needs-auth",
     "openai-agents": true,
   } as const;
@@ -185,6 +198,7 @@ describe("offerHarnesses", () => {
     const offers = offerHarnesses({
       allowed: Object.keys(all),
       configured: all,
+      shellAllowed: true,
       models: catalog,
     });
     const by = Object.fromEntries(offers.map((o) => [o.id, o]));
@@ -192,6 +206,7 @@ describe("offerHarnesses", () => {
       "system.ai.claude-sonnet-5",
       "system.ai.glm-5-3",
     ]);
+    expect(by.codex.models).toEqual(["system.ai.gpt-5-5", "system.ai.glm-5-3"]);
     expect(by["openai-agents"].models).toEqual([
       "system.ai.gpt-5-5",
       "system.ai.grok-4-7",
@@ -199,24 +214,50 @@ describe("offerHarnesses", () => {
     // Pi: the Codex responses API only, and never Claude
     expect(by.pi.models).toEqual(["system.ai.gpt-5-5", "system.ai.glm-5-3"]);
     expect(by["claude-sdk"].defaultModel).toBe("system.ai.claude-sonnet-5");
-    expect(by.pi.defaultModel).toBe("system.ai.gpt-5-5");
+    expect(by.codex.defaultModel).toBe("system.ai.gpt-5-5");
   });
 
   test("offers only gateway harnesses", () => {
     const offers = offerHarnesses({
       allowed: ["claude-sdk", "cursor"],
       configured: { "claude-sdk": true, cursor: true },
+      shellAllowed: true,
       models: catalog,
     });
     expect(offers.map((o) => o.id)).toEqual(["claude-sdk"]);
   });
 
-  test("drops harnesses whose binary is missing", () => {
+  test("drops missing binaries and, without a sandbox, shell harnesses", () => {
     const offers = offerHarnesses({
-      allowed: ["claude-sdk", "pi"],
-      configured: { "claude-sdk": true, pi: "binary-missing" },
+      allowed: ["claude-sdk", "codex", "pi"],
+      configured: { "claude-sdk": true, codex: true, pi: "binary-missing" },
+      shellAllowed: false,
       models: catalog,
     });
     expect(offers.map((o) => o.id)).toEqual(["claude-sdk"]);
+  });
+});
+
+describe("HarnessSandbox", () => {
+  test("wrapper masks the runtime root and protected pids, and binds only the user's dirs", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omni-sbx-"));
+    try {
+      const sbx = new HarnessSandbox(root, "/usr/bin/bwrap");
+      sbx.protect([1234, undefined, 1234, 99]);
+      expect(fs.readFileSync(path.join(root, "protected.pids"), "utf8")).toBe(
+        "1234\n99\n",
+      );
+      const wrapper = sbx.wrap("codex", "/app/node_modules/codex");
+      // named like the CLI, in the shim dir that goes first on PATH
+      expect(wrapper).toBe(path.join(sbx.shimDir, "codex"));
+      const script = fs.readFileSync(wrapper, "utf8");
+      expect(script).toContain(`--tmpfs '${root}'`);
+      expect(script).toContain("--unshare-pid");
+      expect(script).toContain("--tmpfs /proc/$p");
+      expect(script).toContain('--bind "$U" "$U" --bind "$W" "$W"');
+      expect(script).toContain("-- '/app/node_modules/codex' \"$@\"");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

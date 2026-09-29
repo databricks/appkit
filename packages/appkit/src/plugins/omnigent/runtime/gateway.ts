@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type http from "node:http";
+import http from "node:http";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
 
@@ -26,8 +26,9 @@ interface GatewayOptions {
   token: () => Promise<string>;
   /** TLS material for the https listener (Omnigent's token helper only serves https hosts). */
   tls: { key: Buffer; cert: Buffer };
-  /** Loopback port; 0 picks a free one. */
-  port?: number;
+  /** Loopback ports; 0 picks a free one. */
+  httpsPort?: number;
+  httpPort?: number;
   allow?: readonly RegExp[];
 }
 
@@ -47,36 +48,47 @@ export class ModelGateway {
   readonly stats: GatewayStats = { forwarded: 0, denied: 0 };
   private readonly allow: readonly RegExp[];
   private readonly upstream: URL;
-  private server?: https.Server;
-  private port = 0;
+  private servers: Array<http.Server | https.Server> = [];
+  private ports = { https: 0, http: 0 };
 
   constructor(private readonly opts: GatewayOptions) {
     this.allow = opts.allow ?? DEFAULT_GATEWAY_ALLOW;
     this.upstream = new URL(opts.upstream);
   }
 
-  /** The gateway's URL (https: Omnigent's token helper only serves https hosts). */
+  /** https host for harnesses whose token helper requires https. */
   get httpsUrl(): string {
-    return `https://127.0.0.1:${this.port}`;
+    return `https://127.0.0.1:${this.ports.https}`;
+  }
+
+  /** http host for harnesses that only trust public roots (Codex). */
+  get httpUrl(): string {
+    return `http://127.0.0.1:${this.ports.http}`;
   }
 
   async start(): Promise<void> {
     const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
       void this.handle(req, res);
     };
-    this.server = https.createServer(this.opts.tls, handler);
-    this.port = await listen(this.server, this.opts.port ?? 0);
-    logger.debug("model gateway on %s", this.httpsUrl);
+    const tlsServer = https.createServer(this.opts.tls, handler);
+    const plainServer = http.createServer(handler);
+    this.ports.https = await listen(tlsServer, this.opts.httpsPort ?? 0);
+    this.ports.http = await listen(plainServer, this.opts.httpPort ?? 0);
+    this.servers = [tlsServer, plainServer];
+    logger.debug("model gateway on %s and %s", this.httpsUrl, this.httpUrl);
   }
 
   async stop(): Promise<void> {
-    const s = this.server;
-    if (!s) return;
-    await new Promise<void>((resolve) => {
-      s.close(() => resolve());
-      s.closeAllConnections();
-    });
-    this.server = undefined;
+    await Promise.all(
+      this.servers.map(
+        (s) =>
+          new Promise<void>((resolve) => {
+            s.close(() => resolve());
+            if ("closeAllConnections" in s) s.closeAllConnections();
+          }),
+      ),
+    );
+    this.servers = [];
   }
 
   /** Whether a request may be forwarded. Exposed for tests. */
@@ -142,7 +154,10 @@ export class ModelGateway {
   }
 }
 
-function listen(server: https.Server, port: number): Promise<number> {
+function listen(
+  server: http.Server | https.Server,
+  port: number,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => {

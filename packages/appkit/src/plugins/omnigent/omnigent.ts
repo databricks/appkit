@@ -17,7 +17,7 @@ import {
   type HarnessOffer,
 } from "./harnesses";
 import manifest from "./manifest.json";
-import { GATEWAY_PROFILE } from "./runtime/env";
+import { profileFor } from "./runtime/env";
 import { OmnigentRuntime } from "./runtime/runtime";
 import type { CreateSessionRequest, IOmnigentConfig } from "./types";
 
@@ -37,7 +37,7 @@ export class OmnigentPlugin extends Plugin {
   static manifest = defineManifest<"omnigent">(manifest);
 
   protected static description =
-    "Embedded Omnigent: Claude Agent SDK, Pi and OpenAI Agents SDK, through Unity AI Gateway";
+    "Embedded Omnigent: Claude Agent SDK, Codex, Pi and more, through Unity AI Gateway";
   declare protected config: IOmnigentConfig;
 
   private runtime?: OmnigentRuntime;
@@ -163,6 +163,7 @@ export class OmnigentPlugin extends Plugin {
     return offerHarnesses({
       allowed: this.allowedHarnesses(),
       configured: mine?.configured_harnesses ?? {},
+      shellAllowed: rt.shellHarnessesAllowed,
       models: await this.servedModels(),
     });
   }
@@ -184,7 +185,7 @@ export class OmnigentPlugin extends Plugin {
       description: "AppKit app agent",
       harness,
       model,
-      profile: GATEWAY_PROFILE,
+      profile: profileFor(harness),
       instructions: this.instructions(email),
     });
   }
@@ -521,7 +522,7 @@ export class OmnigentPlugin extends Plugin {
 
   exports() {
     return {
-      /** Runtime health: server, hosts, gateway counters. */
+      /** Runtime health: server, sandbox, hosts, gateway counters. */
       status: () => this.rt().status(),
     };
   }

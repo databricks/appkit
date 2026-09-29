@@ -2,18 +2,24 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-/** The Databricks profile the children use; it points at the model gateway. */
-export const GATEWAY_PROFILE = "appkit-omnigent";
+/** Databricks profile names the children use; both point at the model gateway. */
+const PROFILE_HTTPS = "appkit-omnigent";
+const PROFILE_HTTP = "appkit-omnigent-http";
+
+/** Harnesses whose TLS stack only trusts public roots use the plain-http listener. */
+export function profileFor(harness: string): string {
+  return harness.startsWith("codex") ? PROFILE_HTTP : PROFILE_HTTPS;
+}
 
 /**
  * Directory layout under the runtime root:
  *
- *   server/            Omnigent server data
+ *   server/            Omnigent server data (masked from harnesses)
  *   users/<id>/home    one user's $HOME: Databricks profile, Omnigent config
  *   users/<id>/data    that user's host data
  *   work/<id>          that user's workspace (sessions' cwd)
- *   bin/               public: CA bundle
- *   tls/               gateway key
+ *   bin/               public: sandbox wrappers, CA bundle
+ *   tls/               gateway key (masked)
  *   logs/
  */
 export class RuntimeLayout {
@@ -57,19 +63,25 @@ export class RuntimeLayout {
 
 interface GatewayEndpoints {
   httpsUrl: string;
+  httpUrl: string;
   placeholder: string;
 }
 
 /**
- * Writes a user's `$HOME` config: a `.databrickscfg` whose profile points at
- * the gateway with the placeholder token (no real credential), and an
- * Omnigent `config.yaml` that authenticates through that profile.
+ * Writes a user's `$HOME` config: a `.databrickscfg` whose two profiles point
+ * at the gateway with the placeholder token (no real credential), and an
+ * Omnigent `config.yaml` that authenticates through the https one.
  */
 export function writeUserConfig(home: string, gw: GatewayEndpoints): void {
   fs.mkdirSync(path.join(home, ".config", "omnigent"), { recursive: true });
   const cfg = [
-    `[${GATEWAY_PROFILE}]`,
+    `[${PROFILE_HTTPS}]`,
     `host = ${gw.httpsUrl}`,
+    `token = ${gw.placeholder}`,
+    "auth_type = pat",
+    "",
+    `[${PROFILE_HTTP}]`,
+    `host = ${gw.httpUrl}`,
     `token = ${gw.placeholder}`,
     "auth_type = pat",
     "",
@@ -78,7 +90,7 @@ export function writeUserConfig(home: string, gw: GatewayEndpoints): void {
   const omnigentConfig = [
     "auth:",
     "  type: databricks",
-    `  profile: ${GATEWAY_PROFILE}`,
+    `  profile: ${PROFILE_HTTPS}`,
     "",
   ].join("\n");
   fs.writeFileSync(

@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import { createLogger } from "../../../logging";
 import type { OmnigentStatus } from "../types";
+import { findCodex } from "./codex";
 import { RuntimeLayout, childEnv, writeUserConfig } from "./env";
 import { ModelGateway } from "./gateway";
+import { HarnessSandbox } from "./sandbox";
 import { ensureGatewayTls, type GatewayTls } from "./tls";
 
 const logger = createLogger("omnigent:runtime");
@@ -50,6 +52,9 @@ export class OmnigentRuntime {
   readonly authHeader = `x-appkit-omnigent-user-${randomBytes(12).toString("hex")}`;
   private tls!: GatewayTls;
   private gateway!: ModelGateway;
+  private sandbox?: HarnessSandbox;
+  /** Points Omnigent at the sandboxed Codex wrapper. */
+  private harnessEnv: Record<string, string> = {};
   private server?: ChildProcess;
   private serverReady?: Promise<void>;
   private readonly hosts = new Map<string, HostEntry>();
@@ -68,6 +73,11 @@ export class OmnigentRuntime {
     return `http://127.0.0.1:${this.port}`;
   }
 
+  /** Harnesses with their own shell (Codex) run only inside the sandbox. */
+  get shellHarnessesAllowed(): boolean {
+    return Boolean(this.sandbox);
+  }
+
   async start(): Promise<void> {
     this.layout.create();
     this.tls = ensureGatewayTls(this.layout.tls, this.layout.bin);
@@ -77,6 +87,20 @@ export class OmnigentRuntime {
       tls: { key: this.tls.key, cert: this.tls.cert },
     });
     await this.gateway.start();
+
+    const codex = findCodex(this.opts.appDir);
+    if (codex.bin && codex.bwrap) {
+      this.sandbox = new HarnessSandbox(this.layout.root, codex.bwrap);
+      this.harnessEnv = {
+        OMNIGENT_CODEX_PATH: this.sandbox.wrap("codex", codex.bin),
+      };
+      // Omnigent's own REPL terminal sandbox looks for `bwrap` on PATH.
+      const shimBwrap = path.join(this.sandbox.shimDir, "bwrap");
+      fs.copyFileSync(codex.bwrap, shimBwrap);
+      fs.chmodSync(shimBwrap, 0o755);
+    } else if (codex.bin) {
+      logger.warn("bubblewrap not found: Codex is not offered");
+    }
 
     this.port = await freePort();
     this.startServer();
@@ -120,6 +144,7 @@ export class OmnigentRuntime {
       },
     });
     this.server = this.spawn("server", args, env, this.layout.serverDir);
+    this.protect();
     this.server.once("exit", (code, signal) => {
       if (this.stopping) return;
       this.lastError = `Omnigent server exited (${code ?? signal}); restarting`;
@@ -184,10 +209,13 @@ export class OmnigentRuntime {
       caBundle: this.tls.bundleFile,
       caCert: this.tls.certFile,
       pathPrepend: [
+        // Sandbox wrappers first: Omnigent may resolve a harness CLI by name from PATH.
+        ...(this.sandbox ? [this.sandbox.shimDir] : []),
         path.dirname(this.opts.python),
         path.join(this.opts.appDir, "node_modules", ".bin"),
       ],
       extra: {
+        ...this.harnessEnv,
         OMNIGENT_HOST_ID: hostId,
         OMNIGENT_HOST_NAME: `appkit-${userId}`,
         OMNIGENT_DATABRICKS_EXTRA_HEADERS: JSON.stringify({
@@ -231,6 +259,7 @@ export class OmnigentRuntime {
       entry.failed = true;
     });
     this.hosts.set(email, entry);
+    this.protect();
     proc.once("exit", (code, signal) => {
       if (!this.stopping && code !== 0 && signal !== "SIGTERM") {
         logger.warn(
@@ -241,6 +270,7 @@ export class OmnigentRuntime {
         );
       }
       if (this.hosts.get(email) === entry) this.hosts.delete(email);
+      this.protect();
     });
     return entry.ready;
   }
@@ -278,6 +308,7 @@ export class OmnigentRuntime {
       ),
       error: this.lastError,
       version: this.version,
+      sandbox: Boolean(this.sandbox),
       hosts: this.hosts.size,
       gateway: this.gateway?.stats ?? { forwarded: 0, denied: 0 },
     };
@@ -312,6 +343,14 @@ export class OmnigentRuntime {
 
   private logFile(name: string): string {
     return path.join(this.layout.logs, `${name}.log`);
+  }
+
+  private protect(): void {
+    this.sandbox?.protect([
+      process.pid,
+      this.server?.pid,
+      ...[...this.hosts.values()].map((h) => h.proc.pid),
+    ]);
   }
 
   private spawn(

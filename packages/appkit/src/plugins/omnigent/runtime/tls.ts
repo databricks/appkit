@@ -20,8 +20,8 @@ const SYSTEM_ROOTS = [
 /**
  * A self-signed certificate for `127.0.0.1`, made once per runtime directory
  * with the system `openssl`, and a CA bundle that trusts it alongside the
- * system roots. The key stays in `privateDir`; the certificate and
- * bundle go to `publicDir`, which the harnesses read.
+ * system roots. The key stays in `privateDir` (masked from sandboxed
+ * harnesses); the certificate and bundle go to `publicDir`, which they read.
  */
 export function ensureGatewayTls(
   privateDir: string,
