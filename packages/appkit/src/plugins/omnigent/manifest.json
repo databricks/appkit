@@ -2,7 +2,7 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "omnigent",
   "displayName": "Omnigent Plugin",
-  "description": "Embedded Omnigent agent runtime: Claude Agent SDK, Codex, Pi and OpenAI Agents SDK harnesses through Unity AI Gateway",
+  "description": "Embedded Omnigent agent runtime: Claude Agent SDK, Codex, Pi and OpenAI Agents SDK harnesses through Unity AI Gateway, with the app's tools run as the signed-in user",
   "stability": "beta",
   "resources": {
     "required": [],
@@ -13,7 +13,8 @@
       "must": [
         "Add pyproject.toml (python >=3.12,<3.13) with omnigent[databricks] and a uv.lock that uses public PyPI",
         "Add harness CLIs to package.json: @anthropic-ai/claude-code, @openai/codex, @earendil-works/pi-coding-agent",
-        "Start the app with node, not npm run, so SIGTERM reaches the plugin and it can stop its child processes"
+        "Start the app with node, not npm run, so SIGTERM reaches the plugin and it can stop its child processes",
+        "Grant the user API scopes the app's tools need (e.g. sql) so tools run as the signed-in user"
       ]
     }
   },
@@ -24,6 +25,11 @@
         "instructions": {
           "type": "string",
           "description": "System instructions for every session"
+        },
+        "defaultMode": {
+          "type": "string",
+          "enum": ["auto", "ask", "read"],
+          "default": "ask"
         },
         "harnesses": {
           "type": "array",

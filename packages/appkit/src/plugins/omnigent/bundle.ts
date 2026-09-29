@@ -1,5 +1,14 @@
 import { gzipSync } from "node:zlib";
 
+interface McpServerSpec {
+  name: string;
+  description?: string;
+  url: string;
+  headers?: Record<string, string>;
+  /** Seconds. */
+  timeout?: number;
+}
+
 interface BundleSpec {
   name: string;
   description?: string;
@@ -8,12 +17,13 @@ interface BundleSpec {
   /** Databricks profile the harness uses for model calls. */
   profile: string;
   instructions: string;
+  mcpServers: McpServerSpec[];
 }
 
 /**
- * An Omnigent agent bundle: `config.yaml` (the agent spec) and `AGENTS.md`
- * (the instructions), as a tar.gz. The YAML is written as JSON, which is
- * valid YAML.
+ * An Omnigent agent bundle: `config.yaml` (the agent spec), `AGENTS.md` (the
+ * instructions) and one `tools/mcp/<name>.yaml` per MCP server, as a tar.gz.
+ * The YAML files are written as JSON, which is valid YAML.
  */
 export function buildBundle(spec: BundleSpec): Buffer {
   const config = {
@@ -33,6 +43,23 @@ export function buildBundle(spec: BundleSpec): Buffer {
     "config.yaml": `${JSON.stringify(config, null, 2)}\n`,
     "AGENTS.md": spec.instructions,
   };
+  for (const s of spec.mcpServers) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(s.name)) {
+      throw new Error(`Invalid MCP server name: ${s.name}`);
+    }
+    files[`tools/mcp/${s.name}.yaml`] = `${JSON.stringify(
+      {
+        name: s.name,
+        description: s.description ?? s.name,
+        transport: "http",
+        url: s.url,
+        timeout: s.timeout ?? 600,
+        headers: s.headers ?? {},
+      },
+      null,
+      2,
+    )}\n`;
+  }
   return gzipSync(tar(files));
 }
 

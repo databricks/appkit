@@ -5,7 +5,11 @@ import { Readable } from "node:stream";
 import type express from "express";
 import type { IAppRouter } from "shared";
 
-import { ServiceContext } from "../../context";
+import { runInUserContext, ServiceContext } from "../../context";
+import {
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -16,13 +20,29 @@ import {
   offerHarnesses,
   type HarnessOffer,
 } from "./harnesses";
+import { SessionKeys } from "./keys";
 import manifest from "./manifest.json";
+import {
+  isWriteTool,
+  type McpTool,
+  McpToolServer,
+  mcpToolName,
+} from "./mcp-server";
+import {
+  MODE_POLICY_PREFIX,
+  modeFromPolicies,
+  modePolicies,
+  OMNIGENT_MODES,
+  type OmnigentMode,
+} from "./policies";
 import { profileFor } from "./runtime/env";
 import { OmnigentRuntime } from "./runtime/runtime";
+import { UserTokens } from "./tokens";
 import type { CreateSessionRequest, IOmnigentConfig } from "./types";
 
 const logger = createLogger("omnigent");
 
+const ELICITATION_ACTIONS = new Set(["accept", "decline", "cancel"]);
 const MODELS_TTL_MS = 5 * 60_000;
 
 /**
@@ -31,7 +51,8 @@ const MODELS_TTL_MS = 5 * 60_000;
  * Runs an Omnigent server and one host per active user as supervised child
  * processes, so every harness Omnigent can route through Unity AI Gateway is
  * available to the app's users. Model calls are billed to the app's service
- * principal through a loopback gateway (no child holds a real credential).
+ * principal through a loopback gateway (no child holds a real credential);
+ * the app's tools reach the harnesses over MCP and run as the session's user.
  */
 export class OmnigentPlugin extends Plugin {
   static manifest = defineManifest<"omnigent">(manifest);
@@ -41,6 +62,11 @@ export class OmnigentPlugin extends Plugin {
   declare protected config: IOmnigentConfig;
 
   private runtime?: OmnigentRuntime;
+  private readonly tokens = new UserTokens();
+  private readonly keys = new SessionKeys(
+    process.env.DATABRICKS_CLIENT_SECRET || process.env.OMNIGENT_KEY_SECRET,
+  );
+  private readonly mcp = new McpToolServer(() => this.mcpTools());
   private models?: { at: number; list: GatewayModel[] };
 
   async setup(): Promise<void> {
@@ -168,18 +194,77 @@ export class OmnigentPlugin extends Plugin {
     });
   }
 
+  /** The app's tools plus opted-in plugins' tools, under MCP-safe names. */
+  private mcpTools(): McpTool[] {
+    const tools: McpTool[] = [];
+    const registry = this.config.tools ?? {};
+    for (const def of toolsFromRegistry(registry)) {
+      tools.push({
+        name: mcpToolName(def.name),
+        definition: def,
+        run: (args, signal) =>
+          executeFromRegistry(registry, def.name, args, signal),
+      });
+    }
+    const wanted = this.config.pluginTools;
+    if (wanted && this.context) {
+      for (const { name, provider } of this.context.getToolProviders()) {
+        if (
+          name === this.name ||
+          (Array.isArray(wanted) && !wanted.includes(name))
+        )
+          continue;
+        for (const def of provider.getAgentTools()) {
+          tools.push({
+            name: mcpToolName(def.name, name),
+            definition: def,
+            run: (args, signal) =>
+              provider.executeAgentTool(def.name, args, signal),
+          });
+        }
+      }
+    }
+    return tools;
+  }
+
+  private writeToolNames(): string[] {
+    return this.mcpTools()
+      .filter((t) => isWriteTool(t.definition))
+      .map((t) => t.name);
+  }
+
+  /** The port the app actually listens on (dev servers fall back to a free one). */
+  private appPort(): number {
+    const server = this.context?.getPlugins().get("server") as
+      | { getServer?: () => { address(): unknown } | null }
+      | undefined;
+    try {
+      const addr = server?.getServer?.()?.address();
+      if (addr && typeof addr === "object" && "port" in addr)
+        return Number((addr as { port: number }).port);
+    } catch {
+      // server not listening yet
+    }
+    return Number(process.env.DATABRICKS_APP_PORT || process.env.PORT || 8000);
+  }
+
   private instructions(email: string | undefined): string {
     const base =
       this.config.instructions ??
-      "You are an assistant inside this Databricks app.";
-    return email ? `${base}\n\nThe signed-in user is ${email}.` : base;
+      "You are an assistant inside this Databricks app. Use the app's tools to answer from its data.";
+    return email
+      ? `${base}\n\nThe signed-in user is ${email}. Tool calls run with their permissions.`
+      : base;
   }
 
   private bundle(
+    user: string,
     email: string | undefined,
     harness: string,
     model: string,
   ): Buffer {
+    const key = this.keys.mint(user);
+    const port = this.appPort();
     return buildBundle({
       name: "appkit",
       description: "AppKit app agent",
@@ -187,7 +272,47 @@ export class OmnigentPlugin extends Plugin {
       model,
       profile: profileFor(harness),
       instructions: this.instructions(email),
+      mcpServers: [
+        {
+          name: "app",
+          description: "This app's tools, run as the signed-in user",
+          url: `http://127.0.0.1:${port}/api/${this.name}/mcp`,
+          headers: this.keys.headers(key),
+          timeout: 600,
+        },
+      ],
     });
+  }
+
+  private async setMode(
+    user: string,
+    sid: string,
+    mode: OmnigentMode,
+  ): Promise<void> {
+    const rt = this.rt();
+    const have = (await (
+      await rt.request("GET", `/v1/sessions/${sid}/policies`, user)
+    ).json()) as {
+      data?: Array<{ id: string; name?: string }>;
+    };
+    for (const p of have.data ?? []) {
+      if (String(p.name ?? "").startsWith(MODE_POLICY_PREFIX)) {
+        await rt.request(
+          "DELETE",
+          `/v1/sessions/${sid}/policies/${p.id}`,
+          user,
+        );
+      }
+    }
+    for (const p of modePolicies(mode, this.writeToolNames())) {
+      const r = await rt.request("POST", `/v1/sessions/${sid}/policies`, user, {
+        json: p,
+      });
+      if (!r.ok)
+        throw new Error(
+          `Could not set ${mode} mode: ${r.status} ${await r.text()}`,
+        );
+    }
   }
 
   /**
@@ -267,6 +392,7 @@ export class OmnigentPlugin extends Plugin {
       let user: string;
       try {
         user = this.resolveUserId(req);
+        this.tokens.remember(req, user);
       } catch {
         res.status(401).json({ error: "Sign in to the app to use its agent." });
         return;
@@ -304,6 +430,8 @@ export class OmnigentPlugin extends Plugin {
         const harnesses = await this.offers(user);
         res.json({
           harnesses,
+          modes: OMNIGENT_MODES,
+          defaultMode: this.config.defaultMode ?? "ask",
           defaultHarness:
             harnesses.find((h) => h.id === this.config.defaultHarness)?.id ??
             harnesses[0]?.id,
@@ -354,6 +482,11 @@ export class OmnigentPlugin extends Plugin {
           });
           return;
         }
+        const mode = body.mode ?? this.config.defaultMode ?? "ask";
+        if (!OMNIGENT_MODES.includes(mode)) {
+          res.status(400).json({ error: `Unknown mode: ${mode}` });
+          return;
+        }
         const rt = this.rt();
         const host = await rt.ensureHost(user);
         const form = new FormData();
@@ -364,7 +497,7 @@ export class OmnigentPlugin extends Plugin {
               body.title ??
               body.message?.split("\n")[0]?.slice(0, 80) ??
               "New session",
-            labels: { app: this.name },
+            labels: { app: this.name, mode },
             host_type: "external",
             host_id: host.hostId,
             workspace: rt.layout.userWork(host.userId),
@@ -375,7 +508,12 @@ export class OmnigentPlugin extends Plugin {
           new Blob(
             [
               new Uint8Array(
-                this.bundle(req.header("x-forwarded-email"), harness.id, model),
+                this.bundle(
+                  user,
+                  req.header("x-forwarded-email"),
+                  harness.id,
+                  model,
+                ),
               ),
             ],
             {
@@ -394,6 +532,7 @@ export class OmnigentPlugin extends Plugin {
         const { session_id: sid } = (await created.json()) as {
           session_id: string;
         };
+        await this.setMode(user, sid, mode);
         if (body.message) {
           // A turn delivered before the session's runner is up can be rejected (HTTP 204); wait briefly.
           await this.runnerReady(user, sid, 5_000);
@@ -410,7 +549,9 @@ export class OmnigentPlugin extends Plugin {
             return;
           }
         }
-        res.status(201).json({ session_id: sid, harness: harness.id, model });
+        res
+          .status(201)
+          .json({ session_id: sid, harness: harness.id, model, mode });
       }),
     });
 
@@ -421,7 +562,17 @@ export class OmnigentPlugin extends Plugin {
       handler: this.handler(async (req, res, user) => {
         const snap = await this.owned(user, req.params.id, res);
         if (!snap) return;
-        res.json(snap);
+        const pol = (await (
+          await this.rt().request(
+            "GET",
+            `/v1/sessions/${req.params.id}/policies`,
+            user,
+          )
+        ).json()) as { data?: Array<{ name?: string }> };
+        res.json({
+          ...snap,
+          mode: modeFromPolicies((pol.data ?? []).map((p) => String(p.name))),
+        });
       }),
     });
 
@@ -486,6 +637,47 @@ export class OmnigentPlugin extends Plugin {
     });
 
     this.route(router, {
+      name: "resolveElicitation",
+      method: "post",
+      path: "/sessions/:id/elicitations/:eid",
+      handler: this.handler(async (req, res, user) => {
+        const action = (req.body as { action?: string })?.action ?? "";
+        if (!ELICITATION_ACTIONS.has(action)) {
+          res
+            .status(400)
+            .json({ error: "action must be accept, decline or cancel" });
+          return;
+        }
+        await this.rt().ensureHost(user);
+        await OmnigentPlugin.relay(
+          res,
+          await this.rt().request(
+            "POST",
+            `/v1/sessions/${encodeURIComponent(req.params.id)}/elicitations/${encodeURIComponent(req.params.eid)}/resolve`,
+            user,
+            { json: { action } },
+          ),
+        );
+      }),
+    });
+
+    this.route(router, {
+      name: "setMode",
+      method: "put",
+      path: "/sessions/:id/mode",
+      handler: this.handler(async (req, res, user) => {
+        const mode = (req.body as { mode?: OmnigentMode })?.mode;
+        if (!mode || !OMNIGENT_MODES.includes(mode)) {
+          res.status(400).json({ error: "mode must be auto, ask or read" });
+          return;
+        }
+        if (!(await this.owned(user, req.params.id, res))) return;
+        await this.setMode(user, req.params.id, mode);
+        res.json({ mode });
+      }),
+    });
+
+    this.route(router, {
       name: "stream",
       method: "get",
       path: "/sessions/:id/stream",
@@ -517,6 +709,49 @@ export class OmnigentPlugin extends Plugin {
           .on("error", () => res.end())
           .pipe(res);
       }),
+    });
+
+    // Tool calls from the harnesses (loopback). The session key is the only guard:
+    // Apps proxy traffic also arrives from 127.0.0.1.
+    this.route(router, {
+      name: "mcp",
+      method: "post",
+      path: "/mcp",
+      handler: async (req: express.Request, res: express.Response) => {
+        const user = this.keys.verify(req.headers);
+        if (!user) {
+          res.status(401).json({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32001, message: "Invalid session key" },
+          });
+          return;
+        }
+        const ac = new AbortController();
+        res.on("close", () => ac.abort());
+        let reply: unknown;
+        try {
+          const userContext = this.tokens.userContext(user);
+          const run = () => this.mcp.handle(req.body, ac.signal);
+          reply = userContext
+            ? await runInUserContext(userContext, run)
+            : await run();
+        } catch (err) {
+          reply = {
+            jsonrpc: "2.0",
+            id: (req.body as { id?: unknown })?.id ?? null,
+            error: {
+              code: -32002,
+              message: err instanceof Error ? err.message : String(err),
+            },
+          };
+        }
+        if (reply === null) {
+          res.status(202).end();
+          return;
+        }
+        res.json(reply);
+      },
     });
   }
 

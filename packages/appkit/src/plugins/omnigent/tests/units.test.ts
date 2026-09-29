@@ -4,9 +4,17 @@ import path from "node:path";
 import { gunzipSync } from "node:zlib";
 
 import { afterEach, describe, expect, test } from "vitest";
+import { z } from "zod";
 
+import {
+  defineTool,
+  toolsFromRegistry,
+} from "../../../core/agent/tools/define-tool";
 import { buildBundle } from "../bundle";
 import { offerHarnesses } from "../harnesses";
+import { MCP_KEY_HEADER, MCP_USER_HEADER, SessionKeys } from "../keys";
+import { isWriteTool, McpToolServer, mcpToolName } from "../mcp-server";
+import { modeFromPolicies, modePolicies } from "../policies";
 import { childEnv, profileFor, writeUserConfig } from "../runtime/env";
 import { HarnessSandbox } from "../runtime/sandbox";
 
@@ -32,8 +40,65 @@ function untar(buf: Buffer): Record<string, string> {
   return out;
 }
 
+describe("SessionKeys", () => {
+  test("a minted key verifies for its user only", () => {
+    const keys = new SessionKeys("secret");
+    const k = keys.mint("Alice@Example.com");
+    expect(keys.verify(keys.headers(k))).toBe("Alice@Example.com");
+    expect(
+      keys.verify({ ...keys.headers(k), [MCP_USER_HEADER]: "bob@example.com" }),
+    ).toBeNull();
+    expect(
+      keys.verify({ ...keys.headers(k), [MCP_KEY_HEADER]: "x".repeat(43) }),
+    ).toBeNull();
+    expect(keys.verify({})).toBeNull();
+  });
+
+  test("keys survive a restart when the secret is stable", () => {
+    const k = new SessionKeys("stable").mint("a@b.c");
+    expect(
+      new SessionKeys("stable").verify(new SessionKeys("stable").headers(k)),
+    ).toBe("a@b.c");
+    expect(
+      new SessionKeys("other").verify(new SessionKeys("stable").headers(k)),
+    ).toBeNull();
+  });
+});
+
+describe("policies", () => {
+  test("ask gates write tools and OS tools", () => {
+    const p = modePolicies("ask", ["save_note"]);
+    expect(p.map((x) => x.name)).toEqual(["appkit-mode-ask", "appkit-mode-os"]);
+    expect(String(p[0].factory_params?.expression)).toContain(
+      'endsWith("save_note")',
+    );
+    expect(String(p[0].factory_params?.expression)).toContain('"ASK"');
+  });
+
+  test("read denies writes; auto has no policies", () => {
+    expect(
+      String(modePolicies("read", ["w"])[0].factory_params?.expression),
+    ).toContain('"DENY"');
+    expect(modePolicies("auto", ["w"])).toEqual([]);
+  });
+
+  test("no write tools means the gate allows everything", () => {
+    expect(modePolicies("ask", [])[0].factory_params?.expression).toBe(
+      '{"result": "ALLOW"}',
+    );
+  });
+
+  test("mode round-trips through policy names", () => {
+    for (const m of ["ask", "read", "auto"] as const) {
+      expect(modeFromPolicies(modePolicies(m, ["w"]).map((p) => p.name))).toBe(
+        m,
+      );
+    }
+  });
+});
+
 describe("buildBundle", () => {
-  test("writes the spec and the instructions", () => {
+  test("writes spec, instructions and one file per MCP server", () => {
     const files = untar(
       gunzipSync(
         buildBundle({
@@ -42,10 +107,21 @@ describe("buildBundle", () => {
           model: "system.ai.gpt-5-5",
           profile: profileFor("codex"),
           instructions: "Be terse.",
+          mcpServers: [
+            {
+              name: "app",
+              url: "http://127.0.0.1:8000/api/omnigent/mcp",
+              headers: { a: "b" },
+            },
+          ],
         }),
       ),
     );
-    expect(Object.keys(files).sort()).toEqual(["AGENTS.md", "config.yaml"]);
+    expect(Object.keys(files).sort()).toEqual([
+      "AGENTS.md",
+      "config.yaml",
+      "tools/mcp/app.yaml",
+    ]);
     const cfg = JSON.parse(files["config.yaml"]);
     expect(cfg.executor).toMatchObject({
       model: "system.ai.gpt-5-5",
@@ -53,13 +129,145 @@ describe("buildBundle", () => {
       config: { harness: "codex" },
       auth: { type: "databricks", profile: "appkit-omnigent-http" },
     });
+    expect(JSON.parse(files["tools/mcp/app.yaml"])).toMatchObject({
+      transport: "http",
+      headers: { a: "b" },
+    });
     expect(files["AGENTS.md"]).toBe("Be terse.");
+  });
+
+  test("rejects unsafe MCP server names", () => {
+    expect(() =>
+      buildBundle({
+        name: "a",
+        harness: "pi",
+        model: "m",
+        profile: "p",
+        instructions: "",
+        mcpServers: [{ name: "../x", url: "u" }],
+      }),
+    ).toThrow(/Invalid MCP server name/);
   });
 
   test("Claude and Pi use the https profile, Codex the http one", () => {
     expect(profileFor("claude-sdk")).toBe("appkit-omnigent");
     expect(profileFor("pi")).toBe("appkit-omnigent");
     expect(profileFor("codex")).toBe("appkit-omnigent-http");
+  });
+});
+
+describe("McpToolServer", () => {
+  const registry = {
+    "notes.save": defineTool({
+      description: "Save a note",
+      schema: z.object({ text: z.string() }),
+      annotations: { effect: "write" },
+      execute: async ({ text }) => ({ saved: text }),
+    }),
+    boom: defineTool({
+      description: "Fails",
+      schema: z.object({}),
+      execute: async () => {
+        throw new Error("nope");
+      },
+    }),
+  };
+  const server = new McpToolServer(() =>
+    toolsFromRegistry(registry).map((definition) => ({
+      name: mcpToolName(definition.name),
+      definition,
+      run: async (args) =>
+        (registry as Record<string, { execute: (a: never) => unknown }>)[
+          definition.name
+        ].execute(args as never),
+    })),
+  );
+
+  test("initialize echoes the client's protocol version", async () => {
+    const r = (await server.handle({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25" },
+    })) as any;
+    expect(r.result.protocolVersion).toBe("2025-11-25");
+    expect(r.result.capabilities.tools).toBeDefined();
+  });
+
+  test("tools/list uses MCP-safe names and marks writes", async () => {
+    const r = (await server.handle({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+    })) as any;
+    const names = r.result.tools.map((t: { name: string }) => t.name);
+    expect(names).toEqual(["notes_save", "boom"]);
+    expect(r.result.tools[0].annotations.readOnlyHint).toBe(false);
+    expect(r.result.tools[1].annotations.readOnlyHint).toBe(true);
+  });
+
+  test("tools/call returns results and tool errors as isError", async () => {
+    const ok = (await server.handle({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "notes_save", arguments: { text: "hi" } },
+    })) as any;
+    expect(JSON.parse(ok.result.content[0].text)).toEqual({ saved: "hi" });
+    const bad = (await server.handle({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "boom" },
+    })) as any;
+    expect(bad.result.isError).toBe(true);
+    expect(bad.result.content[0].text).toBe("nope");
+  });
+
+  test("notifications get no reply; unknown methods and tools are errors", async () => {
+    expect(
+      await server.handle({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      }),
+    ).toBeNull();
+    expect(
+      ((await server.handle({ jsonrpc: "2.0", id: 5, method: "nope" })) as any)
+        .error.code,
+    ).toBe(-32601);
+    expect(
+      (
+        (await server.handle({
+          jsonrpc: "2.0",
+          id: 6,
+          method: "tools/call",
+          params: { name: "x" },
+        })) as any
+      ).error.code,
+    ).toBe(-32602);
+  });
+
+  test("rejects JSON-RPC batches (not part of MCP)", async () => {
+    const r = (await server.handle([
+      { jsonrpc: "2.0", id: 7, method: "ping" },
+    ])) as any;
+    expect(r.error.code).toBe(-32600);
+  });
+
+  test("isWriteTool honours effect and the deprecated flags", () => {
+    const def = (annotations: object) =>
+      ({ name: "t", description: "", parameters: {}, annotations }) as any;
+    expect(isWriteTool(def({ effect: "destructive" }))).toBe(true);
+    expect(isWriteTool(def({ effect: "read" }))).toBe(false);
+    expect(isWriteTool(def({ destructive: true }))).toBe(true);
+    expect(isWriteTool(def({}))).toBe(false);
+  });
+
+  test("mcpToolName prefixes plugin tools and stays within 64 chars", () => {
+    expect(mcpToolName("default.sendMessage", "genie")).toBe(
+      "genie__default_sendMessage",
+    );
+    expect(mcpToolName("x".repeat(100))).toHaveLength(64);
   });
 });
 
