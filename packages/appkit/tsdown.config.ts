@@ -39,6 +39,11 @@ export default defineConfig([
     tsconfig: "./tsconfig.json",
     copy: [
       {
+        from: "src/plugins/omnigent/runtime/python/*.py",
+        to: "dist/plugins/omnigent/runtime/python",
+        flatten: true,
+      },
+      {
         from: "src/plugins/server/remote-tunnel/*.html",
         to: "dist/plugins/server/remote-tunnel",
         flatten: true,
