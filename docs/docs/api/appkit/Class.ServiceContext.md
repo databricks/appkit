@@ -117,7 +117,7 @@ Exposed for testing purposes.
 
 ```ts
 static initialize(options?: {
-  warehouseId?: boolean;
+  warehouseId?: string | boolean;
 }, client?: WorkspaceClient): Promise<ServiceContextState>;
 ```
 
@@ -128,8 +128,8 @@ Safe to call multiple times - will return the same instance.
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `options?` | \{ `warehouseId?`: `boolean`; \} | Which shared resources to resolve (derived from plugin manifests). |
-| `options.warehouseId?` | `boolean` | - |
+| `options?` | \{ `warehouseId?`: `string` \| `boolean`; \} | A resolved warehouse ID, or a boolean enabling discovery. |
+| `options.warehouseId?` | `string` \| `boolean` | - |
 | `client?` | [`WorkspaceClient`](Interface.WorkspaceClient.md) | Optional pre-configured WorkspaceClient to use instead of creating one from environment credentials. |
 
 #### Returns
