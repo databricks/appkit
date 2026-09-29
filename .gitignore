@@ -22,3 +22,4 @@ internal
 .isaac/
 
 .codex-tmp/
+__pycache__/
