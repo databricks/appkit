@@ -5,15 +5,13 @@ import pc from "picocolors";
 
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
-import {
-  createWorkspaceClient,
-  type WorkspaceClient,
-} from "../../workspace-client";
+import type { WorkspaceClient } from "../../workspace-client";
 import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
   resolveProjectRoot,
 } from "../migration";
+import { createTypegenWorkspaceClient } from "../typegen-client";
 import {
   CACHE_VERSION,
   hashSchema,
@@ -86,7 +84,7 @@ export async function generateServingTypes(
   }> = [];
 
   for (const [alias, config] of Object.entries(endpoints)) {
-    client ??= createWorkspaceClient();
+    client ??= createTypegenWorkspaceClient();
     const result = await processEndpoint(alias, config, client, cache);
     if (result.cacheUpdated) updated = true;
     registryEntries.push(result.entry);

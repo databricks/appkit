@@ -5,7 +5,6 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 
 import { createLogger } from "../logging/logger";
-import { createWorkspaceClient } from "../workspace-client";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import {
   classifyBlockingFailure,
@@ -16,6 +15,7 @@ import {
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { Spinner } from "./spinner";
 import { type DescribeFormatMemo, describeAdaptive } from "./statement-result";
+import { createTypegenWorkspaceClient } from "./typegen-client";
 import {
   type DatabricksStatementExecutionResponse,
   type QueryFatalError,
@@ -574,7 +574,7 @@ export async function generateQueriesFromDescribe(
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
   logger.debug("Found %d SQL queries", queryFiles.length);
 
-  const client = createWorkspaceClient();
+  const client = createTypegenWorkspaceClient();
   const spinner = new Spinner();
 
   // Read all SQL files in parallel
