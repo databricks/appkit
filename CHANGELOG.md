@@ -168,6 +168,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.81.0](https://github.com/databricks/appkit/compare/v0.80.0...v0.81.0) (2026-09-29)
+
+### appkit
+
+* **appkit:** let APPKIT_DEV_PROFILE select the typegen workspace profile ([#621](https://github.com/databricks/appkit/issues/621)) ([07afdb2](https://github.com/databricks/appkit/commit/07afdb223aab97be9c887de38ab60d94f17dfafe))
+
+
 ## [0.80.0](https://github.com/databricks/appkit/compare/v0.79.0...v0.80.0) (2026-09-28)
 
 ### appkit
