@@ -7,10 +7,7 @@ import pc from "picocolors";
 
 import { METRIC_METADATA_FILE } from "../../../shared/src/schemas/metric-metadata-bundle";
 import { createLogger } from "../logging/logger";
-import {
-  createWorkspaceClient,
-  type WorkspaceClient,
-} from "../workspace-client";
+import type { WorkspaceClient } from "../workspace-client";
 import {
   isRevivableMetricCacheEntry,
   loadCache,
@@ -47,6 +44,7 @@ import type {
 import { decidePreflight, type PreflightMode } from "./preflight";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
+import { createTypegenWorkspaceClient } from "./typegen-client";
 import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 import {
   getWarehouseState,
@@ -633,7 +631,7 @@ export async function syncMetricViewsTypes(options: {
 
   let mvClient: WorkspaceClient | undefined;
   const getMvClient = (): WorkspaceClient => {
-    mvClient ??= createWorkspaceClient();
+    mvClient ??= createTypegenWorkspaceClient();
     return mvClient;
   };
 

@@ -5,7 +5,6 @@ import type { Plugin } from "vite";
 
 import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
-import { createWorkspaceClient } from "../workspace-client";
 import {
   DATABASE_TYPES_FILE,
   DatabaseTypegenError,
@@ -19,6 +18,7 @@ import {
   TypegenSyntaxError,
 } from "./index";
 import type { PreflightMode } from "./preflight";
+import { createTypegenWorkspaceClient } from "./typegen-client";
 import {
   getWarehouseState,
   startWarehouse,
@@ -265,7 +265,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     void (async () => {
       try {
-        const client = createWorkspaceClient();
+        const client = createTypegenWorkspaceClient();
         const state = await getWarehouseState(client, warehouseId);
 
         // A deleted/deleting warehouse can't be started and blocking typegen
