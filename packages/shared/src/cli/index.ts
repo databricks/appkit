@@ -8,7 +8,6 @@ import { Command } from "commander";
 
 import { agentCommand } from "./commands/agent/index.js";
 import { codemodCommand } from "./commands/codemod/index.js";
-import { devOboCommand } from "./commands/dev-obo.js";
 import { docsCommand } from "./commands/docs.js";
 import { doctorCommand } from "./commands/doctor/index.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
@@ -33,7 +32,6 @@ cmd.addCommand(setupCommand);
 cmd.addCommand(generateTypesCommand);
 cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
-cmd.addCommand(devOboCommand);
 cmd.addCommand(pluginCommand);
 cmd.addCommand(codemodCommand);
 cmd.addCommand(doctorCommand);

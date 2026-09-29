@@ -15,6 +15,7 @@ import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
+import { createDevOboMiddleware } from "./dev-obo-middleware";
 import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
@@ -128,6 +129,8 @@ export class ServerPlugin extends Plugin {
    */
   async start(): Promise<express.Application> {
     this.serverApplication.use(requestMetricsMiddleware);
+    const devObo = createDevOboMiddleware();
+    if (devObo) this.serverApplication.use(devObo);
     this.serverApplication.use(
       express.json({
         // Express's stock 100kb default is too tight for modern apps —

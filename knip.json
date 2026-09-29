@@ -7,6 +7,9 @@
     "docs"
   ],
   "workspaces": {
+    ".": {
+      "entry": ["tools/validate-package-imports.ts"]
+    },
     "packages/appkit": {
       "ignoreDependencies": [
         "vitest",
