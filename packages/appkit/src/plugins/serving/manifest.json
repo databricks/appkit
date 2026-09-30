@@ -4,6 +4,7 @@
   "displayName": "Model Serving Plugin (deprecated)",
   "description": "DEPRECATED: use the agents plugin instead. Authenticated proxy to Databricks Model Serving endpoints",
   "deprecated": true,
+  "scopes": ["model-serving"],
   "resources": {
     "required": [
       {

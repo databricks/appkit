@@ -297,13 +297,21 @@ Omit.scaffolding
 
 ```ts
 optional scopes: (
+  | "postgres"
+  | "sql"
+  | "model-serving"
+  | "genie"
+  | "files"
+  | "vector-search"
+  | "catalog.connections"
   | "ai-gateway"
   | "mcp.external"
   | "mcp.functions"
   | "workspace.workspace"
   | "catalog.catalogs:read"
   | "catalog.schemas:read"
-  | "catalog.tables:read")[];
+  | "catalog.tables:read"
+  | "sql:restricted-query")[];
 ```
 
 #### Inherited from

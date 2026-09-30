@@ -97,4 +97,19 @@ describe("sync execution capabilities", () => {
       expect(plugins.plain).not.toHaveProperty("scopes");
     },
   );
+
+  it("core plugins declare the scopes they always use on behalf of the user", async () => {
+    const plugins = await scanPluginsDir(
+      path.resolve(__dirname, "../../../../../../appkit/src/plugins"),
+      "@databricks/appkit",
+      false,
+    );
+    // genie and serving routes always run as the user, whatever the resource binding.
+    expect(plugins.genie.scopes).toEqual(["genie"]);
+    expect(plugins.serving.scopes).toEqual(["model-serving"]);
+    // These only act as the user when a resource or config opts in, so they stay unscoped.
+    for (const name of ["analytics", "files", "aiSearch", "agents"]) {
+      expect(plugins[name]).not.toHaveProperty("scopes");
+    }
+  });
 });

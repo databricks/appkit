@@ -210,6 +210,9 @@
         ],
         "optional": []
       },
+      "scopes": [
+        "genie"
+      ],
       "scaffolding": {
         "rules": {
           "must": [
@@ -385,6 +388,9 @@
         ],
         "optional": []
       },
+      "scopes": [
+        "model-serving"
+      ],
       "deprecated": true
     }
   },

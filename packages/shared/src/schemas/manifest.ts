@@ -85,6 +85,26 @@ export const capabilityScopeSchema = z.enum([
 
 export type CapabilityScope = z.infer<typeof capabilityScopeSchema>;
 
+/**
+ * Every Apps user_api_scope (short names; the long forms such as
+ * `dashboards.genie` are deprecated aliases). A plugin declares one in its
+ * `scopes` when it always calls on behalf of the user, or when the capability
+ * has no resource ID.
+ */
+export const userApiScopeSchema = z.enum([
+  "sql",
+  "sql:restricted-query",
+  "genie",
+  "postgres",
+  "model-serving",
+  "files",
+  "vector-search",
+  "catalog.connections",
+  ...capabilityScopeSchema.options,
+]);
+
+export type UserApiScope = z.infer<typeof userApiScopeSchema>;
+
 export const secretPermissionSchema = z
   .enum(["READ", "WRITE", "MANAGE"])
   .describe("Permission for secret resources (order: weakest to strongest)");
@@ -702,9 +722,11 @@ export const pluginScaffoldingRulesSchema = z
 export const pluginManifestSchema = z
   .object({
     scopes: z
-      .array(capabilityScopeSchema)
+      .array(userApiScopeSchema)
       .optional()
-      .describe("Capability-only user_api_scopes with no resource ID."),
+      .describe(
+        "user_api_scopes the plugin always needs, whatever its resources are bound as: calls it makes on behalf of the user unconditionally, or capabilities with no resource ID.",
+      ),
     $schema: z
       .string()
       .optional()
@@ -1035,11 +1057,11 @@ export const templatePluginSchema = z
       .strict()
       .describe("Databricks resource requirements for this plugin"),
     scopes: z
-      .array(capabilityScopeSchema)
+      .array(userApiScopeSchema)
       .min(1)
       .optional()
       .describe(
-        "Capability-only user_api_scopes with no resource ID, copied from the plugin manifest. Omitted when empty.",
+        "user_api_scopes the plugin always needs, copied from the plugin manifest. Omitted when empty.",
       ),
   })
   .strict()
