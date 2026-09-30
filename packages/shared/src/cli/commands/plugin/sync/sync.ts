@@ -6,6 +6,8 @@ import type { SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 
 import {
+  APP_ONLY_RESOURCE_TYPES,
+  SCOPE_BY_TYPE,
   TEMPLATE_SCAFFOLDING,
   templateFieldEntrySchema,
 } from "../../../../schemas/manifest";
@@ -80,32 +82,57 @@ async function loadPluginEntry(
   const manifest = validateManifestWithSchema(parsed, resolved.path);
   if (!manifest || manifest.hidden) return null;
 
-  return [
-    manifest.name,
-    {
-      name: manifest.name,
-      displayName: manifest.displayName,
-      description: manifest.description,
-      package: pkg,
-      resources: manifest.resources,
-      ...(manifest.onSetupMessage && {
-        onSetupMessage: manifest.onSetupMessage,
-      }),
-      // Narrowing on `!== "ga"` removes "ga"; the truthy check
-      // removes `undefined`. What's left is the non-GA tier set,
-      // which TypeScript already knows is assignable to TemplatePlugin's
-      // `stability` field — so no cast is needed and adding a future
-      // tier (e.g. "alpha") flows through type-correctly.
-      ...(manifest.stability &&
-        manifest.stability !== "ga" && {
-          stability: manifest.stability,
-        }),
-      ...(manifest.deprecated && { deprecated: manifest.deprecated }),
-      ...(manifest.scaffolding && {
-        scaffolding: manifest.scaffolding,
-      }),
+  return [manifest.name, toTemplatePlugin(manifest, pkg)];
+}
+
+type ManifestResource = PluginManifest["resources"]["required"][number];
+
+/** Bake the type-level execution facts into the resource so the CLI reads plain data. */
+function withExecutionCapabilities(resource: ManifestResource) {
+  const scope = Object.hasOwn(SCOPE_BY_TYPE, resource.type)
+    ? SCOPE_BY_TYPE[resource.type as keyof typeof SCOPE_BY_TYPE]
+    : undefined;
+  return {
+    ...resource,
+    ...(scope && { scope }),
+    ...(APP_ONLY_RESOURCE_TYPES.has(resource.type) && {
+      appOnly: true as const,
+    }),
+  };
+}
+
+/** Build a TemplatePlugin entry. Every discovery path goes through here. */
+function toTemplatePlugin(
+  manifest: PluginManifest,
+  pkg: string,
+): TemplatePlugin {
+  return {
+    name: manifest.name,
+    displayName: manifest.displayName,
+    description: manifest.description,
+    package: pkg,
+    resources: {
+      required: manifest.resources.required.map(withExecutionCapabilities),
+      optional: manifest.resources.optional.map(withExecutionCapabilities),
     },
-  ];
+    ...(manifest.scopes?.length && { scopes: manifest.scopes }),
+    ...(manifest.onSetupMessage && {
+      onSetupMessage: manifest.onSetupMessage,
+    }),
+    // Narrowing on `!== "ga"` removes "ga"; the truthy check
+    // removes `undefined`. What's left is the non-GA tier set,
+    // which TypeScript already knows is assignable to TemplatePlugin's
+    // `stability` field — so no cast is needed and adding a future
+    // tier (e.g. "alpha") flows through type-correctly.
+    ...(manifest.stability &&
+      manifest.stability !== "ga" && {
+        stability: manifest.stability,
+      }),
+    ...(manifest.deprecated && { deprecated: manifest.deprecated }),
+    ...(manifest.scaffolding && {
+      scaffolding: manifest.scaffolding,
+    }),
+  };
 }
 
 /**
@@ -424,24 +451,7 @@ async function scanForPlugins(
     );
     for (const manifest of manifests) {
       if (manifest.hidden) continue;
-      plugins[manifest.name] = {
-        name: manifest.name,
-        displayName: manifest.displayName,
-        description: manifest.description,
-        package: packageName,
-        resources: manifest.resources,
-        ...(manifest.onSetupMessage && {
-          onSetupMessage: manifest.onSetupMessage,
-        }),
-        ...(manifest.stability &&
-          manifest.stability !== "ga" && {
-            stability: manifest.stability,
-          }),
-        ...(manifest.deprecated && { deprecated: manifest.deprecated }),
-        ...(manifest.scaffolding && {
-          scaffolding: manifest.scaffolding,
-        }),
-      } satisfies TemplatePlugin;
+      plugins[manifest.name] = toTemplatePlugin(manifest, packageName);
     }
   }
 
@@ -879,11 +889,13 @@ async function runPluginsSync(options: {
   writeManifest(outputPath, { plugins }, options);
 }
 
-/** Exported for testing: path boundary check, AST parsing, trust checks. */
+/** Exported for testing: path boundary check, AST parsing, trust checks, discovery paths. */
 export {
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
+  scanForPlugins,
+  scanPluginsDir,
   shouldAllowJsManifestForPackage,
 };
 

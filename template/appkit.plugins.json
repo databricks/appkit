@@ -22,7 +22,8 @@
                 "description": "Default LLM serving endpoint name",
                 "origin": "user"
               }
-            }
+            },
+            "scope": "model-serving"
           },
           {
             "type": "experiment",
@@ -55,7 +56,8 @@
                 },
                 "origin": "user"
               }
-            }
+            },
+            "scope": "files"
           }
         ]
       },
@@ -80,7 +82,8 @@
                 "description": "Three-level UC name of the default index (catalog.schema.index_name)",
                 "origin": "user"
               }
-            }
+            },
+            "scope": "vector-search"
           }
         ],
         "optional": []
@@ -119,7 +122,8 @@
                 },
                 "origin": "user"
               }
-            }
+            },
+            "scope": "sql"
           }
         ],
         "optional": []
@@ -159,7 +163,8 @@
                 },
                 "origin": "user"
               }
-            }
+            },
+            "scope": "files"
           }
         ],
         "optional": []
@@ -199,7 +204,8 @@
                 "description": "Genie Space display name",
                 "origin": "user"
               }
-            }
+            },
+            "scope": "genie"
           }
         ],
         "optional": []
@@ -328,7 +334,8 @@
                 "value": "require",
                 "origin": "platform"
               }
-            }
+            },
+            "appOnly": true
           }
         ],
         "optional": []
@@ -372,7 +379,8 @@
                 "description": "Serving endpoint name",
                 "origin": "user"
               }
-            }
+            },
+            "scope": "model-serving"
           }
         ],
         "optional": []

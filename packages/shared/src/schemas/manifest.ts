@@ -882,6 +882,19 @@ const templateResourceRequirementBaseShape = {
     })
     .optional()
     .describe("Map of field name to field entry with computed origin."),
+  scope: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+    ),
+  appOnly: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+    ),
 };
 
 function makeTemplateResourceVariant<
@@ -1021,6 +1034,13 @@ export const templatePluginSchema = z
       })
       .strict()
       .describe("Databricks resource requirements for this plugin"),
+    scopes: z
+      .array(capabilityScopeSchema)
+      .min(1)
+      .optional()
+      .describe(
+        "Capability-only user_api_scopes with no resource ID, copied from the plugin manifest. Omitted when empty.",
+      ),
   })
   .strict()
   .describe("Plugin manifest with package source information");

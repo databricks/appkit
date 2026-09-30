@@ -262,6 +262,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ", "WRITE", "MANAGE"],
@@ -432,6 +442,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -604,6 +624,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_USE", "CAN_MANAGE"],
@@ -774,6 +804,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -946,6 +986,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ_VOLUME", "WRITE_VOLUME"],
@@ -1116,6 +1166,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -1288,6 +1348,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["EXECUTE"],
@@ -1458,6 +1528,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -1630,6 +1710,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -1801,6 +1891,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -1971,6 +2071,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -2148,6 +2258,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
@@ -2318,6 +2438,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -2499,6 +2629,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ", "WRITE", "MANAGE"],
@@ -2669,6 +2809,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -2841,6 +2991,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_USE", "CAN_MANAGE"],
@@ -3011,6 +3171,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -3183,6 +3353,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ_VOLUME", "WRITE_VOLUME"],
@@ -3353,6 +3533,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -3525,6 +3715,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["EXECUTE"],
@@ -3695,6 +3895,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -3867,6 +4077,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -4038,6 +4258,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -4208,6 +4438,16 @@
                             },
                             "additionalProperties": false
                           }
+                        },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
                         },
                         "permission": {
                           "type": "string",
@@ -4385,6 +4625,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
@@ -4556,6 +4806,16 @@
                             "additionalProperties": false
                           }
                         },
+                        "scope": {
+                          "description": "Apps user_api_scope for this resource type. Present only when the type can run on behalf of the user. Resolved by sync from SCOPE_BY_TYPE.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "appOnly": {
+                          "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+                          "type": "boolean",
+                          "const": true
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_USE"],
@@ -4580,6 +4840,23 @@
             "required": ["required", "optional"],
             "additionalProperties": false,
             "description": "Databricks resource requirements for this plugin"
+          },
+          "scopes": {
+            "description": "Capability-only user_api_scopes with no resource ID, copied from the plugin manifest. Omitted when empty.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "ai-gateway",
+                "mcp.external",
+                "mcp.functions",
+                "workspace.workspace",
+                "catalog.catalogs:read",
+                "catalog.schemas:read",
+                "catalog.tables:read"
+              ]
+            }
           }
         },
         "required": [
