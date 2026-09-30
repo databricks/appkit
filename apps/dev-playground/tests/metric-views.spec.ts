@@ -427,14 +427,18 @@ test.describe("Metric Views playground", () => {
   });
 
   test("renders empty and user-safe network error states", async ({ page }) => {
+    test.setTimeout(45000);
     let empty = true;
     let fail = false;
+    const failedAttempts = new Map<string, number>();
     await page.route(METRIC_ROUTE, async (route) => {
+      const body = route.request().postDataJSON() as MetricRequest;
       if (fail) {
+        const key = JSON.stringify(body);
+        failedAttempts.set(key, (failedAttempts.get(key) ?? 0) + 1);
         await route.abort("failed");
         return;
       }
-      const body = route.request().postDataJSON() as MetricRequest;
       await fulfillMetric(route, body, empty ? [] : baselineRows(body));
     });
 
@@ -448,9 +452,18 @@ test.describe("Metric Views playground", () => {
     await expect(page.getByRole("button", { name: "AMER" })).toBeVisible();
     fail = true;
     await selectFilter(page, 0, "AMER");
-    await expect(page.getByRole("alert").first()).toContainText(
-      "Network error. Please check your connection.",
-    );
+    // Region selection re-queries the segment and trend visuals. Transient
+    // failures remain loading until each request exhausts its three retries.
+    await expect.poll(() => failedAttempts.size).toBe(2);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("alert")).toHaveText(
+      [
+        "Network error. Please check your connection.",
+        "Network error. Please check your connection.",
+      ],
+      { timeout: 20000 },
+    ); // 2s + 4s + 8s backoff, plus up to 20% jitter.
+    expect([...failedAttempts.values()]).toEqual([4, 4]);
 
     fail = false;
     await page.reload();

@@ -16,16 +16,20 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
       timeout_ms: this.timeoutMs,
     });
 
-    // create timeout signal
-    const timeoutController = new AbortController();
+    // Latch the first cancellation eagerly, even if the operation never
+    // listens to the signal. Unobserved AbortSignal.any() composites can
+    // resolve lazily in Node and choose source order instead of abort order.
+    const executionController = new AbortController();
+    const callerSignal = context.signal;
+    const onCallerAbort = () => executionController.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) onCallerAbort();
+    else callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+
     const timeoutError = new ExecutionTimeoutError(this.timeoutMs);
     const timeoutId = setTimeout(() => {
-      timeoutController.abort(timeoutError);
+      executionController.abort(timeoutError);
     }, this.timeoutMs);
-
-    const combinedSignal = context.signal
-      ? AbortSignal.any([context.signal, timeoutController.signal])
-      : timeoutController.signal;
+    const combinedSignal = executionController.signal;
 
     try {
       // execute function with combined signal
@@ -44,6 +48,7 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
     } finally {
       // cleanup timeout
       clearTimeout(timeoutId);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
     }
   }
 }

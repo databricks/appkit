@@ -20,6 +20,75 @@ afterEach(() => {
 });
 
 test.each(["query", "metric"])(
+  "transient network failure keeps the %s hook loading until retry succeeds",
+  async (kind) => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response('data: {"type":"result","data":[{"value":1}]}\n\n'),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const useRequest =
+      kind === "query"
+        ? () =>
+            useAnalyticsQuery("retry-success", null, { format: "JSON_ARRAY" })
+        : () => useMetricView("retry-success", { measures: ["value"] });
+    const { result } = renderHook(useRequest);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.error).toBe(null);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe(null);
+    expect(result.current.data).toEqual([{ value: 1 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  },
+);
+
+test.each(["query", "metric"])(
+  "persistent network failure settles the %s hook only after retry exhaustion",
+  async (kind) => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    const useRequest =
+      kind === "query"
+        ? () =>
+            useAnalyticsQuery("retry-exhaustion", null, {
+              format: "JSON_ARRAY",
+            })
+        : () => useMetricView("retry-exhaustion", { measures: ["value"] });
+    const { result } = renderHook(useRequest);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.error).toBe(null);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe(
+      "Network error. Please check your connection.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  },
+);
+
+test.each(["query", "metric"])(
   "a stalled body hits the client deadline without retrying the mounted %s hook",
   async (kind) => {
     vi.useFakeTimers();

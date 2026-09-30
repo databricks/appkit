@@ -55,6 +55,8 @@ describe("TimeoutInterceptor", () => {
       const promise = new TimeoutInterceptor(100).intercept(
         () =>
           new Promise((_, reject) => {
+            // Intentionally do not observe the signal until both sources
+            // cancel: classification must not depend on SDK listeners.
             rejectOperation = reject;
           }),
         context,
@@ -68,6 +70,38 @@ describe("TimeoutInterceptor", () => {
           : expect(promise).rejects.toBe(sdkError);
       rejectOperation(sdkError);
       await checked;
+    },
+  );
+
+  test.each(["success", "failure"])(
+    "removes the caller listener after %s",
+    async (outcome) => {
+      const caller = new AbortController();
+      context.signal = caller.signal;
+      const add = vi.spyOn(caller.signal, "addEventListener");
+      const remove = vi.spyOn(caller.signal, "removeEventListener");
+      const failure = new Error("operation failed");
+      const promise = new TimeoutInterceptor(100).intercept(
+        () =>
+          outcome === "success"
+            ? Promise.resolve("ok")
+            : Promise.reject(failure),
+        context,
+      );
+      if (outcome === "success") await expect(promise).resolves.toBe("ok");
+      else await expect(promise).rejects.toBe(failure);
+      expect(add).toHaveBeenCalledExactlyOnceWith(
+        "abort",
+        expect.any(Function),
+        { once: true },
+      );
+      expect(remove).toHaveBeenCalledExactlyOnceWith(
+        "abort",
+        add.mock.calls[0][1],
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      caller.abort();
+      expect(context.signal?.aborted).toBe(false);
     },
   );
 
