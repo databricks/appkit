@@ -95,6 +95,27 @@ describe("analytics SSE parsing", () => {
 });
 
 describe("analytics SSE handling", () => {
+  test("allows transient retries but settles exhausted failures and deadlines", () => {
+    const { context, abort } = createContext();
+    const networkError = new TypeError("Failed to fetch");
+    handleAnalyticsSseError(networkError, context, true);
+    expect(context.setLoading).not.toHaveBeenCalled();
+    expect(abort).not.toHaveBeenCalled();
+    handleAnalyticsSseError(networkError, context, false);
+    expect(context.setLoading).toHaveBeenCalledWith(false);
+    expect(abort).toHaveBeenCalledOnce();
+
+    const deadline = createContext();
+    handleAnalyticsSseError(
+      new DOMException("Timed out", "AbortError"),
+      deadline.context,
+      true,
+    );
+    expect(deadline.context.setError).toHaveBeenCalledWith(
+      "Request timed out, please try again",
+    );
+    expect(deadline.abort).toHaveBeenCalledOnce();
+  });
   test("applies common success state and delegates result-specific fields", async () => {
     const { context } = createContext();
 
@@ -118,7 +139,7 @@ describe("analytics SSE handling", () => {
       },
     });
     expect(context.unpublishWarehouseStatus).toHaveBeenCalledOnce();
-    expect(context.setError).not.toHaveBeenCalled();
+    expect(context.setError).toHaveBeenCalledWith(null);
   });
 
   test("surfaces server errors and their structured code", async () => {
@@ -139,7 +160,7 @@ describe("analytics SSE handling", () => {
     expect(context.setError).toHaveBeenCalledWith("Server is at capacity");
     expect(context.setErrorCode).toHaveBeenCalledWith("WAREHOUSE_CAPACITY");
     expect(context.unpublishWarehouseStatus).toHaveBeenCalledOnce();
-    expect(abort).not.toHaveBeenCalled();
+    expect(abort).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith(
       "[useAnalyticsQuery] Code: UPSTREAM_ERROR, Message: Server is at capacity",
     );

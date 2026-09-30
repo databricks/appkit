@@ -7,6 +7,7 @@ type ExecutionResult<T> =
   ok: true;
 }
   | {
+  error?: unknown;
   message: string;
   ok: false;
   status: number;

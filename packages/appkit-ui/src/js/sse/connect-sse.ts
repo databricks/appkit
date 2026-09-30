@@ -25,6 +25,8 @@ export async function connectSSE<Payload = unknown>(
     onError,
   } = options;
 
+  if (signal?.aborted) return;
+
   if (!url || url.trim().length <= 0) {
     throw new Error("connectSSE: 'url' must be a non-empty string.");
   }
@@ -61,19 +63,19 @@ export async function connectSSE<Payload = unknown>(
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeout);
 
-  const combinedSignal = signal
+  const combined = signal
     ? createCombinedSignal(signal, timeoutController.signal)
-    : timeoutController.signal;
+    : { signal: timeoutController.signal, cleanup: () => {} };
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let retry = false;
 
   try {
     const response = await fetch(url, {
       headers,
       method,
       body,
-      signal: combinedSignal,
+      signal: combined.signal,
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -83,7 +85,7 @@ export async function connectSSE<Payload = unknown>(
       throw new Error("No response body");
     }
 
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
 
     let buffer = "";
@@ -108,15 +110,16 @@ export async function connectSSE<Payload = unknown>(
 
         if (message.id) lastEventId = message.id;
 
-        onMessage({
+        await onMessage({
           id: lastEventId ?? "",
           data: message.data,
         });
+        if (signal?.aborted) return;
       }
     }
   } catch (error) {
-    clearTimeout(timeoutId);
-    if (onError) onError(error);
+    if (signal?.aborted) return;
+    if (onError) onError(error, attempt < maxRetries);
     if (signal?.aborted) return;
 
     if (attempt >= maxRetries) {
@@ -126,16 +129,27 @@ export async function connectSSE<Payload = unknown>(
       return;
     }
 
+    retry = true;
+  } finally {
+    clearTimeout(timeoutId);
+    combined.cleanup();
+    // Release the current response before reconnecting or settling. A parse
+    // failure can leave unread bytes even if fetch itself did not fail.
+    if (reader) {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+
+  if (retry && !signal?.aborted) {
     const nextAttempt = attempt + 1;
-    const delayMs = computeExponentialDelay(nextAttempt, retryDelay);
-
-    if (delayMs <= 0) return;
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        connectSSE({ ...options, lastEventId }, nextAttempt).finally(resolve);
-      }, delayMs);
-    });
+    await waitForRetry(
+      computeExponentialDelay(nextAttempt, retryDelay),
+      signal,
+    );
+    if (!signal?.aborted) {
+      await connectSSE({ ...options, lastEventId }, nextAttempt);
+    }
   }
 }
 
@@ -200,11 +214,35 @@ function computeExponentialDelay(attempt: number, baseDelayMs: number): number {
 function createCombinedSignal(
   signal1: AbortSignal,
   signal2: AbortSignal,
-): AbortSignal {
+): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal1.addEventListener("abort", abort);
-  signal2.addEventListener("abort", abort);
+  const abort1 = () => controller.abort(signal1.reason);
+  const abort2 = () => controller.abort(signal2.reason);
+  if (signal1.aborted) abort1();
+  else if (signal2.aborted) abort2();
+  else {
+    signal1.addEventListener("abort", abort1, { once: true });
+    signal2.addEventListener("abort", abort2, { once: true });
+  }
 
-  return controller.signal;
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      signal1.removeEventListener("abort", abort1);
+      signal2.removeEventListener("abort", abort2);
+    },
+  };
+}
+
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener("abort", finish, { once: true });
+    if (signal?.aborted) finish();
+  });
 }
