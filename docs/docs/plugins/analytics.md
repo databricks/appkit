@@ -333,8 +333,6 @@ For both hooks, `warehouseStatus` resets to `null` when a request starts and rem
 
 If the warehouse is `DELETED`/`DELETING` or fails to reach `RUNNING` within the configured timeout, the route emits an `error` event (surfaced via the `error` field).
 
-SQL execution has a separate deadline: 18 seconds by default, overridden by the analytics plugin's `timeout` setting in milliseconds. If it expires, the server sends a terminal SSE error with `code: "TIMEOUT"` and `errorCode: "TIMEOUT"`. The HTTP response remains 200 because the SSE connection is already open. Both hooks clear `loading` and expose the timeout message. A stream that ends without a result or error also clears `loading` and reports an interrupted response; the client connection deadline remains active while reading the body.
-
 #### Global readiness indicator
 
 For dashboards with many charts a per-component spinner isn't enough — wiring the same "warehouse warming up" UI into every skeleton is repetitive. AppKit ships a small generic context (`ResourceStatusProvider`) + drop-in indicator (`ResourceStatusIndicator`) that any plugin can publish into; analytics warehouses are wired up automatically.
@@ -445,6 +443,7 @@ function useLakebaseReadiness() {
 
 | Option                      | Type      | Default          | Description                                                                                                                                                                                                                                               |
 | --------------------------- | --------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`                   | `number`  | `18000` (18 s)   | SQL execution timeout in milliseconds. |
 | `warehouseStartupTimeoutMs` | `number`  | `300000` (5 min) | Maximum time to wait for the warehouse to reach `RUNNING` before failing the request                                                                                                                                                                      |
 | `autoStartWarehouse`        | `boolean` | `true`           | When `true`, a `STOPPED` warehouse is auto-started on the first request. Set to `false` for cost-controlled deployments where billable warehouse starts must not be triggered by user requests; in that case `STOPPED` surfaces as a `ConfigurationError` |
 
