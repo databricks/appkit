@@ -15,6 +15,8 @@ This page covers the full lifecycle. For the hand-written primitives (`tool()`, 
 :::info Streaming-capable serving endpoints only
 The agents plugin drives the LLM over Server-Sent Events. Foundation Model APIs (Claude, Llama, GPT, etc.) and other chat-style endpoints support streaming and work out of the box. Custom model endpoints that return a single JSON response (e.g. typical `sklearn` or MLflow `pyfunc` deployments) do **not** stream — pointing an agent at one will fail with "Response body is null — streaming not supported" on the first turn. If you list a serving endpoint in `apps init`, pick one whose model implements the chat-completions streaming protocol; the agents plugin reads its name from `DATABRICKS_SERVING_ENDPOINT_NAME` whenever an agent doesn't pin `model:` itself.
 
+`fromModelServing` (the serving-endpoint adapter) uses the OpenAI **chat-completions** streaming protocol, so it drives chat-completions serving endpoints (task type `agent/*/chat`) and Databricks foundation models. An endpoint on the Responses API (task type `agent/*/responses`, e.g. a `ResponsesAgent`) rejects a chat-completions request, so `fromModelServing` can't drive it.
+
 For the non-streaming path against a custom endpoint, use the `serving` plugin's `/invoke` route with `useServingInvoke` instead.
 
 Or skip serving-endpoint setup entirely with the managed [Supervisor API adapter](#managed-agents-the-supervisor-api-adapter) (beta).
@@ -158,7 +160,7 @@ Inline `tool({...})` calls live in the same record. Their `name` is optional —
 Auto-inherit is **off for both origins by default** — a markdown or code agent with no declared `tools:` gets an empty tool index. Opt an origin in explicitly with `agents({ autoInheritTools: { file: true } })` (or `{ code: true }`, or `true` for both).
 
 :::warning Deprecated: the `agents({ agents: { ... } })` map
-Passing a hand-built agent map still works and is honored for backward compatibility, but it emits a one-time deprecation warning and will be removed in a future minor. It restates each agent's id (once in `createAgent`, once as the map key); discovery from `server/agents/` removes both the map and the restatement. Migrate by moving each `createAgent(...)` into its own `server/agents/<id>/agent.ts` (default or single named export) and dropping the map. If a discovered agent and a map entry share an id, discovery wins and the map entry is ignored (with a one-time warning). (Inline sub-agents — `createAgent({ agents: { ... } })` on a definition — are unaffected; only the plugin-level map is deprecated.)
+Passing a hand-built agent map still works and is honored for backward compatibility, but it is deprecated as of 0.64.0: it emits a one-time deprecation warning and will be removed in a future minor. It restates each agent's id (once in `createAgent`, once as the map key); discovery from `server/agents/` removes both the map and the restatement. Migrate by moving each `createAgent(...)` into its own `server/agents/<id>/agent.ts` (default or single named export) and dropping the map. If a discovered agent and a map entry share an id, discovery wins and the map entry is ignored (with a one-time warning). (Inline sub-agents — `createAgent({ agents: { ... } })` on a definition — are unaffected; only the plugin-level map is deprecated.)
 
 Some examples further down still pass agents inline via this map for snippet brevity — in a real app each of those `createAgent(...)` definitions lives in its own `server/agents/<id>/agent.ts` and needs no map.
 :::
