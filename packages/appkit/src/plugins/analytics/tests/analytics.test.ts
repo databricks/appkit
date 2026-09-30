@@ -835,10 +835,12 @@ describe("Analytics Plugin", () => {
       // Warehouse readiness must run through the user-context executor too, so
       // `getWorkspaceClient()` resolves to the user (not the SP) for `.obo.sql`.
       const ensureReadyMock = vi.fn().mockResolvedValue(undefined);
-      const asUserSpy = vi.spyOn(plugin as any, "asUser").mockReturnValue({
-        query: userExecutorQuery,
-        _ensureArrowWarehouseReady: ensureReadyMock,
-      });
+      const asUserSpy = vi
+        .spyOn(plugin as any, "_asUserScoped")
+        .mockReturnValue({
+          query: userExecutorQuery,
+          _ensureArrowWarehouseReady: ensureReadyMock,
+        });
 
       const streamExternalLinksMock = vi.fn(function* (_chunks: unknown) {
         yield new Uint8Array([1, 2, 3]);
@@ -988,7 +990,7 @@ describe("Analytics Plugin", () => {
         .fn()
         .mockRejectedValue(new Error("RESOURCE_DOES_NOT_EXIST"));
       const asUserSpy = vi
-        .spyOn(plugin as any, "asUser")
+        .spyOn(plugin as any, "_asUserScoped")
         .mockReturnValue({ _getColumnNames: userGetColumnNames });
 
       plugin.injectRoutes(router);

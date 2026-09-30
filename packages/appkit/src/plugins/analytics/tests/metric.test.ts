@@ -2954,7 +2954,7 @@ describe("metric route — lane dispatch", () => {
     );
     const { router, getHandler } = createMockRouter();
 
-    const asUserSpy = vi.spyOn(plugin, "asUser");
+    const asUserSpy = vi.spyOn(plugin as any, "_asUserScoped");
     const executeMock = vi
       .fn()
       .mockResolvedValue({ result: { data: [{ arr: 1 }] } });
@@ -2994,7 +2994,7 @@ describe("metric route — lane dispatch", () => {
     );
     const { router, getHandler } = createMockRouter();
 
-    const asUserSpy = vi.spyOn(plugin, "asUser");
+    const asUserSpy = vi.spyOn(plugin as any, "_asUserScoped");
     const executeMock = vi
       .fn()
       .mockResolvedValue({ result: { data: [{ arr: 1 }] } });

@@ -362,6 +362,26 @@ export abstract class Plugin<
     );
   }
 
+  /**
+   * User-scoped executor for the plugin's own on-behalf-of routing (for
+   * example `.obo.sql` lanes), using the same caller context as the
+   * app-level `appkit.asUser(req)`.
+   *
+   * Unlike the deprecated public `asUser(req)`, this does not emit a
+   * deprecation warning and does not opt out of the app-only resource
+   * guards, so internal routing matches current on-behalf-of semantics
+   * rather than the retained legacy behavior.
+   *
+   * @internal
+   */
+  protected _asUserScoped(req: express.Request): this {
+    assertPluginExecution(this);
+    return scopePlugin(
+      this,
+      createRequestScope(req, getPluginResourceTypes(this)),
+    );
+  }
+
   // streaming execution with interceptors
   protected async executeStream<T>(
     res: IAppResponse,

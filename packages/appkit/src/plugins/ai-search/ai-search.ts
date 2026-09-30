@@ -170,7 +170,7 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
         // trusted and keep the override.)
         const { columns: _clientColumns, ...safeBody } = body;
         const isAsUser = indexConfig.auth === "on-behalf-of-user";
-        const plugin = isAsUser ? this.asUser(req) : this;
+        const plugin = isAsUser ? this._asUserScoped(req) : this;
         const queryType =
           safeBody.queryType ?? indexConfig.queryType ?? "hybrid";
 
@@ -237,7 +237,9 @@ export class AiSearchPlugin extends Plugin<IAiSearchConfig> {
 
         try {
           const plugin =
-            indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+            indexConfig.auth === "on-behalf-of-user"
+              ? this._asUserScoped(req)
+              : this;
 
           // Uncached: a page token is a single-use cursor. `querySettings` has
           // no `cacheKey`, so caching stays off.
