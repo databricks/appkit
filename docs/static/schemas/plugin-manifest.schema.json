@@ -5,11 +5,19 @@
   "type": "object",
   "properties": {
     "scopes": {
-      "description": "Capability-only user_api_scopes with no resource ID.",
+      "description": "user_api_scopes the plugin always needs, whatever its resources are bound as: calls it makes on behalf of the user unconditionally, or capabilities with no resource ID.",
       "type": "array",
       "items": {
         "type": "string",
         "enum": [
+          "sql",
+          "sql:restricted-query",
+          "genie",
+          "postgres",
+          "model-serving",
+          "files",
+          "vector-search",
+          "catalog.connections",
           "ai-gateway",
           "mcp.external",
           "mcp.functions",

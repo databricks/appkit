@@ -37,8 +37,16 @@ describe("manifest execution capabilities", () => {
     ).toEqual([]);
   });
 
-  test("accepts every capability-only scope without resource IDs", () => {
+  test("accepts every user_api_scope as an authored plugin scope", () => {
     const scopes = [
+      "sql",
+      "sql:restricted-query",
+      "genie",
+      "postgres",
+      "model-serving",
+      "files",
+      "vector-search",
+      "catalog.connections",
       "ai-gateway",
       "mcp.external",
       "mcp.functions",
@@ -53,14 +61,6 @@ describe("manifest execution capabilities", () => {
   });
 
   test.each([
-    "sql",
-    "sql:restricted-query",
-    "postgres",
-    "genie",
-    "model-serving",
-    "files",
-    "vector-search",
-    "catalog.connections",
     "mlflow",
     "jobs",
     "apps",
@@ -68,7 +68,7 @@ describe("manifest execution capabilities", () => {
     "files.files",
     "serving.serving-endpoints",
     "unknown",
-  ])("rejects %s as an authored capability-only scope", (scope) => {
+  ])("rejects %s as an authored plugin scope", (scope) => {
     expect(
       pluginManifestSchema.safeParse({ ...manifest, scopes: [scope] }).success,
     ).toBe(false);

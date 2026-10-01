@@ -6,6 +6,10 @@ import type { SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
 
 import {
+  APP_ONLY_RESOURCE_TYPES,
+  DABS_BINDING_BY_TYPE,
+  type ResourceBinding,
+  SCOPE_BY_TYPE,
   TEMPLATE_SCAFFOLDING,
   templateFieldEntrySchema,
 } from "../../../../schemas/manifest";
@@ -80,32 +84,105 @@ async function loadPluginEntry(
   const manifest = validateManifestWithSchema(parsed, resolved.path);
   if (!manifest || manifest.hidden) return null;
 
-  return [
-    manifest.name,
-    {
-      name: manifest.name,
-      displayName: manifest.displayName,
-      description: manifest.description,
-      package: pkg,
-      resources: manifest.resources,
-      ...(manifest.onSetupMessage && {
-        onSetupMessage: manifest.onSetupMessage,
-      }),
-      // Narrowing on `!== "ga"` removes "ga"; the truthy check
-      // removes `undefined`. What's left is the non-GA tier set,
-      // which TypeScript already knows is assignable to TemplatePlugin's
-      // `stability` field — so no cast is needed and adding a future
-      // tier (e.g. "alpha") flows through type-correctly.
-      ...(manifest.stability &&
-        manifest.stability !== "ga" && {
-          stability: manifest.stability,
+  return [manifest.name, toTemplatePlugin(manifest, pkg)];
+}
+
+type ManifestResource = PluginManifest["resources"]["required"][number];
+
+/**
+ * A binding spec references a manifest field the resource does not declare.
+ * Distinct class so discovery can re-throw it instead of swallowing it as a
+ * generic "failed to load manifest" warning.
+ */
+export class BindingFieldError extends Error {}
+
+/** Bake the type-level execution facts into the resource so the CLI reads plain data. */
+function withExecutionCapabilities(
+  resource: ManifestResource,
+  pluginName: string,
+) {
+  const scope = Object.hasOwn(SCOPE_BY_TYPE, resource.type)
+    ? SCOPE_BY_TYPE[resource.type as keyof typeof SCOPE_BY_TYPE]
+    : undefined;
+  const binding: ResourceBinding | undefined = Object.hasOwn(
+    DABS_BINDING_BY_TYPE,
+    resource.type,
+  )
+    ? DABS_BINDING_BY_TYPE[resource.type as keyof typeof DABS_BINDING_BY_TYPE]
+    : undefined;
+  if (binding) {
+    // Guard: every binding manifestField must be a declared field on the
+    // resource, otherwise the generator emits ${var.<res>_<field>} against a
+    // variable nothing sets. This is the appkit analog of the CLI SDK anchor.
+    const declared = new Set(Object.keys(resource.fields ?? {}));
+    for (const [manifestField] of binding.varFields) {
+      if (!declared.has(manifestField)) {
+        throw new BindingFieldError(
+          `Plugin "${pluginName}" resource "${resource.resourceKey}" (${resource.type}): binding references manifest field "${manifestField}", which the resource does not declare. Declared fields: ${[...declared].join(", ") || "(none)"}. Fix DABS_BINDING_BY_TYPE or the resource fields.`,
+        );
+      }
+    }
+  }
+  return {
+    ...resource,
+    ...(scope && { scope }),
+    ...(APP_ONLY_RESOURCE_TYPES.has(resource.type) && {
+      appOnly: true as const,
+    }),
+    ...(binding && {
+      // Materialize mutable tuples so the baked entry matches the template
+      // schema and never shares a reference with the source const table.
+      binding: {
+        yamlKey: binding.yamlKey,
+        varFields: binding.varFields.map(
+          (pair) => [pair[0], pair[1]] as [string, string],
+        ),
+        ...(binding.staticFields && {
+          staticFields: binding.staticFields.map(
+            (pair) => [pair[0], pair[1]] as [string, string],
+          ),
         }),
-      ...(manifest.deprecated && { deprecated: manifest.deprecated }),
-      ...(manifest.scaffolding && {
-        scaffolding: manifest.scaffolding,
-      }),
+      },
+    }),
+  };
+}
+
+/** Build a TemplatePlugin entry. Every discovery path goes through here. */
+function toTemplatePlugin(
+  manifest: PluginManifest,
+  pkg: string,
+): TemplatePlugin {
+  return {
+    name: manifest.name,
+    displayName: manifest.displayName,
+    description: manifest.description,
+    package: pkg,
+    resources: {
+      required: manifest.resources.required.map((resource) =>
+        withExecutionCapabilities(resource, manifest.name),
+      ),
+      optional: manifest.resources.optional.map((resource) =>
+        withExecutionCapabilities(resource, manifest.name),
+      ),
     },
-  ];
+    ...(manifest.scopes?.length && { scopes: manifest.scopes }),
+    ...(manifest.onSetupMessage && {
+      onSetupMessage: manifest.onSetupMessage,
+    }),
+    // Narrowing on `!== "ga"` removes "ga"; the truthy check
+    // removes `undefined`. What's left is the non-GA tier set,
+    // which TypeScript already knows is assignable to TemplatePlugin's
+    // `stability` field — so no cast is needed and adding a future
+    // tier (e.g. "alpha") flows through type-correctly.
+    ...(manifest.stability &&
+      manifest.stability !== "ga" && {
+        stability: manifest.stability,
+      }),
+    ...(manifest.deprecated && { deprecated: manifest.deprecated }),
+    ...(manifest.scaffolding && {
+      scaffolding: manifest.scaffolding,
+    }),
+  };
 }
 
 /**
@@ -424,24 +501,7 @@ async function scanForPlugins(
     );
     for (const manifest of manifests) {
       if (manifest.hidden) continue;
-      plugins[manifest.name] = {
-        name: manifest.name,
-        displayName: manifest.displayName,
-        description: manifest.description,
-        package: packageName,
-        resources: manifest.resources,
-        ...(manifest.onSetupMessage && {
-          onSetupMessage: manifest.onSetupMessage,
-        }),
-        ...(manifest.stability &&
-          manifest.stability !== "ga" && {
-            stability: manifest.stability,
-          }),
-        ...(manifest.deprecated && { deprecated: manifest.deprecated }),
-        ...(manifest.scaffolding && {
-          scaffolding: manifest.scaffolding,
-        }),
-      } satisfies TemplatePlugin;
+      plugins[manifest.name] = toTemplatePlugin(manifest, packageName);
     }
   }
 
@@ -532,6 +592,9 @@ async function scanPluginsDir(
       const pluginEntry = await loadPluginEntry(resolved, pkg, allowJsManifest);
       if (pluginEntry) plugins[pluginEntry[0]] = pluginEntry[1];
     } catch (error) {
+      // A binding/field misconfig is a developer error, not a flaky manifest
+      // load; fail hard instead of warning and dropping the plugin.
+      if (error instanceof BindingFieldError) throw error;
       console.warn(
         `Warning: Failed to load manifest at ${resolved.path}:`,
         error instanceof Error ? error.message : error,
@@ -879,11 +942,13 @@ async function runPluginsSync(options: {
   writeManifest(outputPath, { plugins }, options);
 }
 
-/** Exported for testing: path boundary check, AST parsing, trust checks. */
+/** Exported for testing: path boundary check, AST parsing, trust checks, discovery paths. */
 export {
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
+  scanForPlugins,
+  scanPluginsDir,
   shouldAllowJsManifestForPackage,
 };
 
