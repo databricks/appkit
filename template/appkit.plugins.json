@@ -51,7 +51,7 @@
               "yamlKey": "experiment",
               "varFields": [
                 [
-                  "id",
+                  "experimentId",
                   "experiment_id"
                 ]
               ]
@@ -80,7 +80,7 @@
               "yamlKey": "uc_securable",
               "varFields": [
                 [
-                  "id",
+                  "path",
                   "securable_full_name"
                 ]
               ],
@@ -226,7 +226,7 @@
               "yamlKey": "uc_securable",
               "varFields": [
                 [
-                  "id",
+                  "path",
                   "securable_full_name"
                 ]
               ],

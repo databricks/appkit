@@ -113,7 +113,10 @@ export const DABS_BINDING_BY_TYPE = {
     yamlKey: "serving_endpoint",
     varFields: [["name", "name"]],
   },
-  experiment: { yamlKey: "experiment", varFields: [["id", "experiment_id"]] },
+  experiment: {
+    yamlKey: "experiment",
+    varFields: [["experimentId", "experiment_id"]],
+  },
   secret: {
     yamlKey: "secret",
     varFields: [
@@ -144,7 +147,7 @@ export const DABS_BINDING_BY_TYPE = {
   },
   volume: {
     yamlKey: "uc_securable",
-    varFields: [["id", "securable_full_name"]],
+    varFields: [["path", "securable_full_name"]],
     staticFields: [["securable_type", "VOLUME"]],
   },
   uc_function: {

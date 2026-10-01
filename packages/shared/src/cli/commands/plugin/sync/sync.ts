@@ -89,8 +89,18 @@ async function loadPluginEntry(
 
 type ManifestResource = PluginManifest["resources"]["required"][number];
 
+/**
+ * A binding spec references a manifest field the resource does not declare.
+ * Distinct class so discovery can re-throw it instead of swallowing it as a
+ * generic "failed to load manifest" warning.
+ */
+export class BindingFieldError extends Error {}
+
 /** Bake the type-level execution facts into the resource so the CLI reads plain data. */
-function withExecutionCapabilities(resource: ManifestResource) {
+function withExecutionCapabilities(
+  resource: ManifestResource,
+  pluginName: string,
+) {
   const scope = Object.hasOwn(SCOPE_BY_TYPE, resource.type)
     ? SCOPE_BY_TYPE[resource.type as keyof typeof SCOPE_BY_TYPE]
     : undefined;
@@ -100,6 +110,19 @@ function withExecutionCapabilities(resource: ManifestResource) {
   )
     ? DABS_BINDING_BY_TYPE[resource.type as keyof typeof DABS_BINDING_BY_TYPE]
     : undefined;
+  if (binding) {
+    // Guard: every binding manifestField must be a declared field on the
+    // resource, otherwise the generator emits ${var.<res>_<field>} against a
+    // variable nothing sets. This is the appkit analog of the CLI SDK anchor.
+    const declared = new Set(Object.keys(resource.fields ?? {}));
+    for (const [manifestField] of binding.varFields) {
+      if (!declared.has(manifestField)) {
+        throw new BindingFieldError(
+          `Plugin "${pluginName}" resource "${resource.resourceKey}" (${resource.type}): binding references manifest field "${manifestField}", which the resource does not declare. Declared fields: ${[...declared].join(", ") || "(none)"}. Fix DABS_BINDING_BY_TYPE or the resource fields.`,
+        );
+      }
+    }
+  }
   return {
     ...resource,
     ...(scope && { scope }),
@@ -135,8 +158,12 @@ function toTemplatePlugin(
     description: manifest.description,
     package: pkg,
     resources: {
-      required: manifest.resources.required.map(withExecutionCapabilities),
-      optional: manifest.resources.optional.map(withExecutionCapabilities),
+      required: manifest.resources.required.map((resource) =>
+        withExecutionCapabilities(resource, manifest.name),
+      ),
+      optional: manifest.resources.optional.map((resource) =>
+        withExecutionCapabilities(resource, manifest.name),
+      ),
     },
     ...(manifest.scopes?.length && { scopes: manifest.scopes }),
     ...(manifest.onSetupMessage && {
@@ -565,6 +592,9 @@ async function scanPluginsDir(
       const pluginEntry = await loadPluginEntry(resolved, pkg, allowJsManifest);
       if (pluginEntry) plugins[pluginEntry[0]] = pluginEntry[1];
     } catch (error) {
+      // A binding/field misconfig is a developer error, not a flaky manifest
+      // load; fail hard instead of warning and dropping the plugin.
+      if (error instanceof BindingFieldError) throw error;
       console.warn(
         `Warning: Failed to load manifest at ${resolved.path}:`,
         error instanceof Error ? error.message : error,

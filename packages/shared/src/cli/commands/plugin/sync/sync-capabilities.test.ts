@@ -146,8 +146,36 @@ describe("sync execution capabilities", () => {
     );
     expect(volume?.binding).toEqual({
       yamlKey: "uc_securable",
-      varFields: [["id", "securable_full_name"]],
+      // volume declares `path`, not `id`.
+      varFields: [["path", "securable_full_name"]],
       staticFields: [["securable_type", "VOLUME"]],
     });
+  });
+
+  it("fails sync when a binding references a field the resource does not declare", async () => {
+    const bad = {
+      name: "badbind",
+      displayName: "Bad binding",
+      description: "Binding references an undeclared field",
+      resources: {
+        required: [
+          {
+            type: "sql_warehouse",
+            alias: "Warehouse",
+            resourceKey: "sql-warehouse",
+            description: "sql_warehouse binding expects field `id`",
+            permission: "CAN_USE",
+            // Declares `region`, not `id`, so the baked binding varField `id`
+            // would reference an unset variable.
+            fields: { region: { env: "DATABRICKS_REGION" } },
+          },
+        ],
+        optional: [],
+      },
+    };
+    writeManifest(path.join(tmp, "plugins", "badbind"), bad);
+    await expect(
+      scanPluginsDir(path.join(tmp, "plugins"), "@x/pkg", false),
+    ).rejects.toThrow(/binding references manifest field "id"/);
   });
 });
