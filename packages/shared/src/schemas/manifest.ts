@@ -91,6 +91,41 @@ export interface ResourceBinding {
   readonly staticFields?: ReadonlyArray<readonly [string, string]>;
 }
 
+// ── SDK coupling seam (the only SDK-version-dependent bit) ───────────────
+//
+// TODO(sdk-migration): once @databricks/sdk-experimental exports the apps
+// AppResource model, finish the anchor here, in this one spot:
+//   1. replace the local `AppResource` shim below with
+//      `import type { AppResource } from "@databricks/sdk-experimental"`
+//      (the apis/apps model);
+//   2. drop the "postgres" | "experiment" | "app" skew exceptions from
+//      `AppResourceKind` (the new SDK models those kinds);
+//   3. tighten `AppResourceKind` to a bare `keyof AppResource`.
+// Nothing else needs to change: the drift assertion below already checks every
+// `DABS_BINDING_BY_TYPE` yamlKey against `AppResourceKind`.
+//
+// The installed sdk-experimental (0.17) does not export the apps AppResource
+// types, so this shim mirrors the DABs resource kinds the SDK models. The
+// values are unused; only the keys anchor the yamlKeys.
+interface AppResource {
+  sql_warehouse?: unknown;
+  serving_endpoint?: unknown;
+  genie_space?: unknown;
+  job?: unknown;
+  secret?: unknown;
+  database?: unknown;
+  uc_securable?: unknown;
+}
+
+/**
+ * DABs app-resource YAML keys. `keyof AppResource` is the SDK-anchored set;
+ * `postgres`/`experiment`/`app` are kinds AppKit supports that the installed
+ * SDK does not model yet (see the TODO above).
+ */
+type AppResourceKind = keyof AppResource | "postgres" | "experiment" | "app";
+
+// ── end seam ─────────────────────────────────────────────────────────────
+
 /**
  * DABs binding spec per resource type. Faithful port of the CLI's
  * `appResourceSpecs`. App-only types still bind (as the service principal). The
@@ -154,6 +189,17 @@ export const DABS_BINDING_BY_TYPE = {
     staticFields: [["securable_type", "TABLE"]],
   },
 } as const satisfies Partial<Record<ResourceType, ResourceBinding>>;
+
+// Compile-time drift anchor (type-only, no runtime effect): every binding
+// yamlKey must be a known AppResource kind. If the SDK renames a kind after
+// the seam above is wired, or a new entry uses an unknown yamlKey, the failing
+// entry resolves to `false` and this fails to satisfy the all-true constraint.
+type AssertAllTrue<T extends Record<keyof T, true>> = T;
+type _DabsYamlKeysAnchored = AssertAllTrue<{
+  [K in keyof typeof DABS_BINDING_BY_TYPE]: (typeof DABS_BINDING_BY_TYPE)[K]["yamlKey"] extends AppResourceKind
+    ? true
+    : false;
+}>;
 
 /** Capabilities that need a user_api_scope but have no resource ID. */
 export const capabilityScopeSchema = z.enum([
