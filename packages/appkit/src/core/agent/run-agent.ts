@@ -15,7 +15,7 @@ import {
   SUPERVISOR_EXTENSION_KEY,
   type SupervisorTool,
 } from "../../agents/supervisor-api";
-import { type Principal, runInCallerContext } from "../../context";
+import { type CallerPrincipal, runInCallerContext } from "../../context";
 import { getClientOptions } from "../../context/client-options";
 import { AuthenticationError, ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -53,7 +53,7 @@ export interface RunAgentInput {
    */
   caller?: {
     readonly token: string;
-    readonly principal: Principal;
+    readonly principal: CallerPrincipal;
     readonly host: string;
     readonly workspaceId: string;
   };
