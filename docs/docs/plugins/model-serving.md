@@ -4,6 +4,10 @@ sidebar_position: 7
 
 # Model Serving plugin
 
+:::warning Deprecated in favor of the agents plugin
+`serving()` (`useServingStream` / `useServingInvoke`) is deprecated as of AppKit 0.77.0; for chat and streaming, use the [agents plugin](./agents.md) (`DatabricksAdapter.fromModelServing` + `useAgentChat`). The agents plugin drives only streaming chat-completions endpoints, so non-streaming custom model endpoints (`sklearn`/`pyfunc`) have no agents equivalent; `/invoke` still serves them until the plugin is removed.
+:::
+
 Provides an authenticated proxy to [Databricks Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving) endpoints, with invoke and streaming support.
 
 **Key features:**
