@@ -95,6 +95,23 @@ describe("sync execution capabilities", () => {
       expect(job).not.toHaveProperty("appOnly");
       expect(plugins.probe.scopes).toEqual(["ai-gateway"]);
       expect(plugins.plain).not.toHaveProperty("scopes");
+
+      // DABs binding is baked per resource from DABS_BINDING_BY_TYPE.
+      expect(warehouse.binding).toEqual({
+        yamlKey: "sql_warehouse",
+        varFields: [["id", "id"]],
+      });
+      expect(secret.binding).toEqual({
+        yamlKey: "secret",
+        varFields: [
+          ["scope", "scope"],
+          ["key", "key"],
+        ],
+      });
+      expect(job.binding).toEqual({
+        yamlKey: "job",
+        varFields: [["id", "id"]],
+      });
     },
   );
 
@@ -111,5 +128,26 @@ describe("sync execution capabilities", () => {
     for (const name of ["analytics", "files", "aiSearch", "agents"]) {
       expect(plugins[name]).not.toHaveProperty("scopes");
     }
+
+    // DABs binding is baked from the real core manifests, including the
+    // uc_securable static field for volumes.
+    const genieSpace = plugins.genie.resources.required.find(
+      (r: { type: string }) => r.type === "genie_space",
+    );
+    expect(genieSpace?.binding).toEqual({
+      yamlKey: "genie_space",
+      varFields: [
+        ["name", "name"],
+        ["id", "space_id"],
+      ],
+    });
+    const volume = plugins.files.resources.required.find(
+      (r: { type: string }) => r.type === "volume",
+    );
+    expect(volume?.binding).toEqual({
+      yamlKey: "uc_securable",
+      varFields: [["id", "securable_full_name"]],
+      staticFields: [["securable_type", "VOLUME"]],
+    });
   });
 });

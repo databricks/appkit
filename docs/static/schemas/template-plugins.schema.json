@@ -272,6 +272,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ", "WRITE", "MANAGE"],
@@ -452,6 +495,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -634,6 +720,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_USE", "CAN_MANAGE"],
@@ -814,6 +943,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -996,6 +1168,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ_VOLUME", "WRITE_VOLUME"],
@@ -1176,6 +1391,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -1358,6 +1616,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["EXECUTE"],
@@ -1538,6 +1839,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -1720,6 +2064,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -1901,6 +2288,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -2081,6 +2511,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -2268,6 +2741,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
@@ -2448,6 +2964,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -2639,6 +3198,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ", "WRITE", "MANAGE"],
@@ -2819,6 +3421,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -3001,6 +3646,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_USE", "CAN_MANAGE"],
@@ -3181,6 +3869,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -3363,6 +4094,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["READ_VOLUME", "WRITE_VOLUME"],
@@ -3543,6 +4317,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -3725,6 +4542,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["EXECUTE"],
@@ -3905,6 +4765,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -4087,6 +4990,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -4268,6 +5214,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_CONNECT_AND_CREATE"],
@@ -4448,6 +5437,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",
@@ -4635,6 +5667,49 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
+                        },
                         "permission": {
                           "type": "string",
                           "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
@@ -4815,6 +5890,49 @@
                           "description": "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
                           "type": "boolean",
                           "const": true
+                        },
+                        "binding": {
+                          "description": "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
+                          "type": "object",
+                          "properties": {
+                            "yamlKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "DABs YAML key under the resource entry."
+                            },
+                            "varFields": {
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
+                            },
+                            "staticFields": {
+                              "description": "[dabsField, value] constant pairs.",
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["yamlKey", "varFields"],
+                          "additionalProperties": false
                         },
                         "permission": {
                           "type": "string",

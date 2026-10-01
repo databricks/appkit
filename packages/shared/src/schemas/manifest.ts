@@ -72,6 +72,89 @@ export const APP_ONLY_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
   "postgres",
 ]);
 
+/**
+ * How a resource type binds in `databricks.yml` as a DABs app resource. Owned
+ * here so the CLI consumes it as data instead of hardcoding a per-type map.
+ *
+ * - `yamlKey`: the DABs YAML key under the resource entry (e.g. `sql_warehouse`,
+ *   `uc_securable`).
+ * - `varFields`: `[manifestField, dabsField]` pairs. Each becomes a
+ *   `${var.<resourceKey>_<manifestField>}` reference written to `dabsField`.
+ * - `staticFields`: `[dabsField, value]` constant pairs (e.g.
+ *   `securable_type` = `VOLUME`).
+ *
+ * Permission is not here; it stays the per-resource `permission` field.
+ */
+export interface ResourceBinding {
+  readonly yamlKey: string;
+  readonly varFields: ReadonlyArray<readonly [string, string]>;
+  readonly staticFields?: ReadonlyArray<readonly [string, string]>;
+}
+
+/**
+ * DABs binding spec per resource type. Faithful port of the CLI's
+ * `appResourceSpecs`. App-only types still bind (as the service principal). The
+ * `app` type is intentionally absent: bundles do not yet support it as an app
+ * resource, matching the commented-out CLI entry.
+ */
+export const DABS_BINDING_BY_TYPE = {
+  sql_warehouse: { yamlKey: "sql_warehouse", varFields: [["id", "id"]] },
+  job: { yamlKey: "job", varFields: [["id", "id"]] },
+  serving_endpoint: {
+    yamlKey: "serving_endpoint",
+    varFields: [["name", "name"]],
+  },
+  experiment: { yamlKey: "experiment", varFields: [["id", "experiment_id"]] },
+  secret: {
+    yamlKey: "secret",
+    varFields: [
+      ["scope", "scope"],
+      ["key", "key"],
+    ],
+  },
+  database: {
+    yamlKey: "database",
+    varFields: [
+      ["instance_name", "instance_name"],
+      ["database_name", "database_name"],
+    ],
+  },
+  postgres: {
+    yamlKey: "postgres",
+    varFields: [
+      ["branch", "branch"],
+      ["database", "database"],
+    ],
+  },
+  genie_space: {
+    yamlKey: "genie_space",
+    varFields: [
+      ["name", "name"],
+      ["id", "space_id"],
+    ],
+  },
+  volume: {
+    yamlKey: "uc_securable",
+    varFields: [["id", "securable_full_name"]],
+    staticFields: [["securable_type", "VOLUME"]],
+  },
+  uc_function: {
+    yamlKey: "uc_securable",
+    varFields: [["id", "securable_full_name"]],
+    staticFields: [["securable_type", "FUNCTION"]],
+  },
+  uc_connection: {
+    yamlKey: "uc_securable",
+    varFields: [["id", "securable_full_name"]],
+    staticFields: [["securable_type", "CONNECTION"]],
+  },
+  vector_search_index: {
+    yamlKey: "uc_securable",
+    varFields: [["id", "securable_full_name"]],
+    staticFields: [["securable_type", "TABLE"]],
+  },
+} as const satisfies Partial<Record<ResourceType, ResourceBinding>>;
+
 /** Capabilities that need a user_api_scope but have no resource ID. */
 export const capabilityScopeSchema = z.enum([
   "ai-gateway",
@@ -914,6 +997,27 @@ const templateResourceRequirementBaseShape = {
     .optional()
     .describe(
       "Present only when the type always runs as the app service principal and must be bound (secret, database, postgres). Resolved by sync from APP_ONLY_RESOURCE_TYPES.",
+    ),
+  binding: z
+    .object({
+      yamlKey: z
+        .string()
+        .min(1)
+        .describe("DABs YAML key under the resource entry."),
+      varFields: z
+        .array(z.tuple([z.string(), z.string()]))
+        .describe(
+          "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField.",
+        ),
+      staticFields: z
+        .array(z.tuple([z.string(), z.string()]))
+        .optional()
+        .describe("[dabsField, value] constant pairs."),
+    })
+    .strict()
+    .optional()
+    .describe(
+      "How this resource type binds in databricks.yml as a DABs app resource. Resolved by sync from DABS_BINDING_BY_TYPE.",
     ),
 };
 

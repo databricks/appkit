@@ -7,6 +7,8 @@ import { Command } from "commander";
 
 import {
   APP_ONLY_RESOURCE_TYPES,
+  DABS_BINDING_BY_TYPE,
+  type ResourceBinding,
   SCOPE_BY_TYPE,
   TEMPLATE_SCAFFOLDING,
   templateFieldEntrySchema,
@@ -92,11 +94,32 @@ function withExecutionCapabilities(resource: ManifestResource) {
   const scope = Object.hasOwn(SCOPE_BY_TYPE, resource.type)
     ? SCOPE_BY_TYPE[resource.type as keyof typeof SCOPE_BY_TYPE]
     : undefined;
+  const binding: ResourceBinding | undefined = Object.hasOwn(
+    DABS_BINDING_BY_TYPE,
+    resource.type,
+  )
+    ? DABS_BINDING_BY_TYPE[resource.type as keyof typeof DABS_BINDING_BY_TYPE]
+    : undefined;
   return {
     ...resource,
     ...(scope && { scope }),
     ...(APP_ONLY_RESOURCE_TYPES.has(resource.type) && {
       appOnly: true as const,
+    }),
+    ...(binding && {
+      // Materialize mutable tuples so the baked entry matches the template
+      // schema and never shares a reference with the source const table.
+      binding: {
+        yamlKey: binding.yamlKey,
+        varFields: binding.varFields.map(
+          (pair) => [pair[0], pair[1]] as [string, string],
+        ),
+        ...(binding.staticFields && {
+          staticFields: binding.staticFields.map(
+            (pair) => [pair[0], pair[1]] as [string, string],
+          ),
+        }),
+      },
     }),
   };
 }
