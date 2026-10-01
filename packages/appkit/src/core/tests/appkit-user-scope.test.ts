@@ -2,6 +2,7 @@ import { context as otelContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import type { AgentAdapter, AgentToolDefinition, ToolProvider } from "shared";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
+import { z } from "zod";
 
 import { CacheManager } from "../../cache";
 import {
@@ -13,6 +14,8 @@ import { isDevOboFallback } from "../../context/request-scope";
 import { Plugin, toPlugin } from "../../plugin";
 import { agents } from "../../plugins/agents";
 import { createMockRequest, createTestApp } from "../../testing";
+import { tool } from "../agent/tools/tool";
+import type { AgentDefinition } from "../agent/types";
 
 class IdentityPlugin extends Plugin implements ToolProvider {
   static manifest = {
@@ -238,18 +241,111 @@ describe("app-level caller scope", () => {
 });
 
 describe("agents HTTP identity boundary", () => {
+  const paths = ["/invocations", "/responses", "/api/agents/chat"];
+  const body = (path: string) =>
+    path.endsWith("chat") ? { message: "hello" } : { input: "hello" };
+
+  // The model call and hand-rolled tools see the ambient principal; plugin
+  // tools get user scope per call from executeTool.
   const adapter: AgentAdapter = {
     async *run(_input, ctx) {
-      const principal = getCurrentPrincipalKey();
-      const toolPrincipal = await ctx.executeTool("identity.read", {});
-      yield { type: "message_delta", content: `${principal}/${toolPrincipal}` };
+      const model = getCurrentPrincipalKey();
+      const plugin = await ctx.executeTool("identity.read", {});
+      const handRolled = await ctx.executeTool("whoami", {});
+      yield {
+        type: "message_delta",
+        content: `model=${model} plugin=${plugin} handRolled=${handRolled}`,
+      };
       yield { type: "status", status: "complete" };
     },
   };
+  const whoami = tool({
+    description: "Report the principal seen by a hand-rolled tool",
+    schema: z.object({}),
+    execute: () => getCurrentPrincipalKey(),
+  });
 
-  test.each(["/invocations", "/responses", "/api/agents/chat"])(
-    "%s defaults to user identity, including tool dispatch",
+  test.each(paths)(
+    "%s runs plugin tools as the user and the model and hand-rolled tools as the app",
     async (path) => {
+      await using app = await createTestApp({
+        plugins: [
+          identity(),
+          agents({
+            agents: {
+              probe: {
+                instructions: "Identify the caller",
+                model: adapter,
+                tools: (plugins) => ({
+                  ...plugins.identity.toolkit(),
+                  whoami,
+                }),
+              },
+            },
+          }),
+        ],
+      });
+      const response = await app.post(path, {
+        body: body(path),
+        obo: { userId: "alice" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(
+        "model=app plugin=user:alice handRolled=app",
+      );
+      expect(getCurrentPrincipalKey()).toBe("app");
+    },
+  );
+
+  test("sub-agents follow the same split", async () => {
+    const parent: AgentAdapter = {
+      async *run(_input, ctx) {
+        const child = await ctx.executeTool("agent-child", { input: "go" });
+        yield { type: "message_delta", content: `child[${child}]` };
+        yield { type: "status", status: "complete" };
+      },
+    };
+    const child: AgentDefinition = {
+      instructions: "Identify the caller",
+      model: adapter,
+      tools: (plugins) => ({
+        ...plugins.identity.toolkit(),
+        whoami,
+      }),
+    };
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          agents: {
+            probe: {
+              default: true,
+              instructions: "Delegate",
+              model: parent,
+              agents: { child },
+            },
+            child,
+          },
+        }),
+      ],
+    });
+    const response = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(
+      "model=app plugin=user:alice handRolled=app",
+    );
+  });
+
+  test.each(paths)(
+    "%s rejects a plugin tool call without a user token and never runs it as the app",
+    async (path) => {
+      const executeAgentTool = vi.spyOn(
+        IdentityPlugin.prototype,
+        "executeAgentTool",
+      );
       await using app = await createTestApp({
         plugins: [
           identity(),
@@ -265,35 +361,13 @@ describe("agents HTTP identity boundary", () => {
         ],
       });
       const response = await app.post(path, {
-        body: path.endsWith("chat") ? { message: "hello" } : { input: "hello" },
-        obo: { userId: "alice" },
-      });
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain("user:alice/user:alice");
-      expect(getCurrentPrincipalKey()).toBe("app");
-    },
-  );
-
-  test.each(["/invocations", "/responses", "/api/agents/chat"])(
-    "%s cannot execute as SP by omitting the token",
-    async (path) => {
-      const run = vi.fn(adapter.run);
-      await using app = await createTestApp({
-        plugins: [
-          identity(),
-          agents({
-            agents: {
-              probe: { instructions: "Identify the caller", model: { run } },
-            },
-          }),
-        ],
-      });
-      const response = await app.post(path, {
-        body: path.endsWith("chat") ? { message: "hello" } : { input: "hello" },
+        body: body(path),
         headers: { "x-forwarded-user": "alice" },
       });
-      expect(response.status).toBe(401);
-      expect(run).not.toHaveBeenCalled();
+      const text = await response.text();
+      expect(executeAgentTool).not.toHaveBeenCalled();
+      expect(text).not.toContain("plugin=app");
+      executeAgentTool.mockRestore();
     },
   );
 });

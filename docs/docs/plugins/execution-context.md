@@ -44,10 +44,12 @@ establishes user scope from the request, preserving the original fail-closed OBO
 default. Missing credentials reject before the provider executes. An existing
 caller takes precedence over conflicting or absent request credentials.
 
-The agents HTTP execution routes (`/invocations`, `/responses`, and
-`/api/agents/chat`) establish user scope at entry by default, including all nested
-tool calls. Missing credentials reject the request before the agent runs.
-The marked development fallback below is the only missing-token exception.
+On the agents HTTP execution routes (`/invocations`, `/responses`, and
+`/api/agents/chat`), each plugin-toolkit tool call runs in user scope through
+`executeTool`, including tool calls made by sub-agents. A plugin tool call without
+usable user credentials rejects; it never runs as the service principal. The
+marked development fallback below is the only missing-token exception. The agent's
+model call and hand-rolled tools are not wrapped in user scope.
 
 ## Which built-in surfaces run as the user
 
@@ -59,9 +61,9 @@ The default is the **service principal**. Work runs on behalf of the user only i
 | Serving plugin (deprecated) routes | signed-in user (OBO) | the built-in route runs every call in user scope; prefer the agents plugin |
 | Analytics `.obo.sql` queries | signed-in user (OBO) | the `.obo.sql` file name selects the user lane |
 | Analytics `.sql` queries, Files, and other plugin calls | app service principal | user only inside `appkit.asUser(req)`, or for Files volumes configured with `auth: "on-behalf-of-user"` |
-| Agents HTTP routes: the model (LLM) call | app service principal | the routes open user scope, but the model adapter builds its own service-principal client, so the model call does not use the user token |
-| Agents HTTP routes: plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO) | `executeTool` inherits the route's user scope |
-| Agents HTTP routes: hand-rolled `tool({ execute })` | signed-in user (OBO), for AppKit calls inside `execute` | `execute` runs inside the route's user scope, so plugin handles and `getWorkspaceClient()` resolve to the user |
+| Agents HTTP routes: the model (LLM) call | app service principal | the model adapter builds its own service-principal client, and the route does not open user scope |
+| Agents HTTP routes: plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO) | `executeTool` opens user scope for each call; without user credentials the call rejects |
+| Agents HTTP routes: hand-rolled `tool({ execute })` | app service principal | `execute` receives only the validated arguments and runs in the app context, as before |
 | Standalone `runAgent` (no HTTP request) | app service principal by default | there is no request, so no user scope unless you pass `caller` (see [Standalone agents](#standalone-agents)) |
 
 So an agent's **model inference runs as the service principal**, while the tools it calls over the built-in HTTP routes run on behalf of the user. See the [agents plugin](./agents.md) for the tool-level detail.
