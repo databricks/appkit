@@ -1,8 +1,6 @@
 import { isPlainObject } from "../utils/is-plain-object";
 import type { RequestScope } from "./request-scope";
 
-export { isPlainObject } from "../utils/is-plain-object";
-
 const EXCLUDED_FROM_PROXY = new Set([
   "setup",
   "shutdown",

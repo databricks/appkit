@@ -1,13 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { isPlainObject as scopedIsPlainObject } from "../../context/scoped-api";
 import { isPlainObject as pluginIsPlainObject } from "../../plugin/plugin";
 import { isPlainObject as crudIsPlainObject } from "../../plugins/database/crud/contract";
 import { isPlainObject } from "../is-plain-object";
 
 describe.each([
   { name: "utility", check: isPlainObject },
-  { name: "scoped API export", check: scopedIsPlainObject },
   { name: "plugin export", check: pluginIsPlainObject },
   { name: "CRUD export", check: crudIsPlainObject },
 ])("$name", ({ check }) => {
@@ -42,7 +40,6 @@ test("CRUD keeps its explicit array rejection regardless of the prototype", () =
   for (const prototype of [Object.prototype, null]) {
     const array = Object.setPrototypeOf([], prototype);
     expect(isPlainObject(array)).toBe(true);
-    expect(scopedIsPlainObject(array)).toBe(true);
     expect(pluginIsPlainObject(array)).toBe(true);
     expect(crudIsPlainObject(array)).toBe(false);
   }
