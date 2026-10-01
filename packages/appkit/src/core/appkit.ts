@@ -57,18 +57,34 @@ export class AppKit<TPlugins extends InputPluginMap> {
       Object.values(this.#pluginInstances).flatMap(getPluginResourceTypes),
     );
     const kit: Record<string, unknown> = Object.create(null);
+    // Memoize each plugin's scoped export for the life of THIS handle only.
+    // The map is created per asUser(req) call and captured solely by this
+    // handle's getters, so it dies with the request and never crosses
+    // principals. Repeated access (e.g. kit.analytics twice) reuses the same
+    // wrapper instead of rebuilding the proxy on every read.
+    const scopedExports = new Map<string, unknown>();
     for (const [name, plugin] of Object.entries(this.#pluginInstances)) {
       Object.defineProperty(kit, name, {
         enumerable: true,
-        get: () =>
-          scopeApi(
-            scope.run(() => {
-              assertPluginExecution(plugin, true);
-              return plugin.exports?.() ?? {};
-            }),
-            scope,
-            plugin,
-          ),
+        get: () => {
+          if (!scopedExports.has(name)) {
+            // The app-only guard runs on first access; it is deterministic per
+            // (plugin, scope), so caching the result after it passes is safe,
+            // and if it throws nothing is cached (stays fail-closed).
+            scopedExports.set(
+              name,
+              scopeApi(
+                scope.run(() => {
+                  assertPluginExecution(plugin, true);
+                  return plugin.exports?.() ?? {};
+                }),
+                scope,
+                plugin,
+              ),
+            );
+          }
+          return scopedExports.get(name);
+        },
       });
     }
     Object.defineProperty(kit, "run", {
