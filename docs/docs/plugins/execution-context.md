@@ -62,7 +62,7 @@ The default is the **service principal**. Work runs on behalf of the user only i
 | Agents HTTP routes: the model (LLM) call | app service principal | the routes open user scope, but the model adapter builds its own service-principal client, so the model call does not use the user token |
 | Agents HTTP routes: plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO) | `executeTool` inherits the route's user scope |
 | Agents HTTP routes: hand-rolled `tool({ execute })` | signed-in user (OBO), for AppKit calls inside `execute` | `execute` runs inside the route's user scope, so plugin handles and `getWorkspaceClient()` resolve to the user |
-| Standalone `runAgent` (no HTTP request) | app service principal | there is no request, so no user scope |
+| Standalone `runAgent` (no HTTP request) | app service principal by default | there is no request, so no user scope unless you pass `caller` (see [Standalone agents](#standalone-agents)) |
 
 So an agent's **model inference runs as the service principal**, while the tools it calls over the built-in HTTP routes run on behalf of the user. See the [agents plugin](./agents.md) for the tool-level detail.
 
