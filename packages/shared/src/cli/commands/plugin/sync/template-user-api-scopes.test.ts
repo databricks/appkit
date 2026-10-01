@@ -21,7 +21,7 @@ const LEGACY_BLOCK = `{{- else if or .plugins.genie .plugins.files .plugins.serv
         - serving.serving-endpoints
 {{- end}}
 {{- else}}
-      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files, serving.serving-endpoints
+      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, genie, files, model-serving
       # user_api_scopes:
       #   - sql
 {{- end}}`;
