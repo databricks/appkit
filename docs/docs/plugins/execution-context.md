@@ -33,6 +33,22 @@ router.post("/system/data", async (req, res) => {
 });
 ```
 
+## Which built-in surfaces run OBO vs service principal
+
+The default is the **service principal**: an operation runs on behalf of the user only when it goes through `asUser(req)`, which needs the forwarded user token. There is no global "OBO everywhere" mode, so identity is decided per surface:
+
+| Surface | Runs as | Why |
+| --- | --- | --- |
+| Genie routes | signed-in user (OBO) | the built-in route calls `asUser(req)` automatically |
+| Files / Analytics ops via `asUser(req)` | signed-in user (OBO) | service principal by default; OBO only when you wrap the call in `asUser(req)` |
+| Agents plugin `/chat` — the model (LLM) call | app service principal | the chat route does not call `asUser`, and the model adapter is built at startup with the service-principal client |
+| Agents plugin — plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO) | dispatched through `asUser(req)` per call |
+| Agents plugin — hand-rolled `tool({ execute })` | app service principal | receives only tool arguments, no `req`, so it can't opt into OBO |
+| Standalone `runAgent` (no HTTP request) | app service principal | no request context, so neither the model nor any tool runs OBO |
+| Serving plugin (deprecated) routes | signed-in user (OBO) | the built-in route calls `asUser(req)`; prefer the agents plugin |
+
+So an agent's **model inference runs as the service principal**; only the plugin tools it calls over the built-in HTTP routes run on behalf of the user. See the [agents plugin](./agents.md) for the tool-level detail.
+
 ## Context helper functions
 
 Exported from `@databricks/appkit`:
