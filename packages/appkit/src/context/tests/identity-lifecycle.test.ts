@@ -1,3 +1,4 @@
+import type { AgentToolDefinition, ToolProvider } from "shared";
 import { describe, expect, test } from "vitest";
 
 import { IdentityExpiredError } from "../../errors";
@@ -26,6 +27,27 @@ const upstream = Object.assign(new Error("secret-bearer-token"), {
   statusCode: 401,
 });
 
+class ExpiringToolsPlugin extends Plugin implements ToolProvider {
+  static manifest = {
+    name: "expiringTools" as const,
+    displayName: "Expiring tools",
+    description: "probe",
+    resources: { required: [], optional: [] },
+  };
+  getAgentTools(): AgentToolDefinition[] {
+    return [
+      {
+        name: "fail",
+        description: "Fails with an expired user token",
+        parameters: { type: "object", properties: {} },
+      },
+    ];
+  }
+  async executeAgentTool(): Promise<unknown> {
+    throw upstream;
+  }
+}
+const expiringTools = toPlugin(ExpiringToolsPlugin);
 class ExpiringPlugin extends Plugin {
   static manifest = {
     name: "expiring" as const,
@@ -54,16 +76,20 @@ describe("identity expiration", () => {
   test("agent HTTP responses expose a safe identity-expiration code", async () => {
     await using app = await createTestApp({
       plugins: [
+        expiringTools(),
         agents({
           agents: {
             probe: {
               instructions: "probe",
+              // The user token expires during a plugin tool call, which runs
+              // in user scope; the model call itself runs as the app.
               model: {
-                async *run() {
+                async *run(_input, ctx) {
                   yield { type: "message_delta", content: "" };
-                  throw upstream;
+                  await ctx.executeTool("expiringTools.fail", {});
                 },
               },
+              tools: (plugins) => plugins.expiringTools.toolkit(),
             },
           },
         }),
