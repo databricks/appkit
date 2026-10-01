@@ -7,7 +7,7 @@
 ```ts
 optional caller: {
   host: string;
-  principal: Principal;
+  principal: CallerPrincipal;
   token: string;
   workspaceId: string;
 };
@@ -27,7 +27,7 @@ readonly host: string;
 #### principal
 
 ```ts
-readonly principal: Principal;
+readonly principal: CallerPrincipal;
 ```
 
 #### token
