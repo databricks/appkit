@@ -122,6 +122,32 @@ describe("app-level caller scope", () => {
     expect(kit.identity.read()).toBe("bound:app");
   });
 
+  test("memoizes a plugin's scoped export per handle without crossing principals", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const kit = app.plugins;
+    const alice = kit.asUser(request("alice"));
+    const bob = kit.asUser(request("bob"));
+
+    // Same handle: repeated access returns the identical wrapper (memoized,
+    // not rebuilt on every read).
+    expect(alice.identity).toBe(alice.identity);
+
+    // Different handles: different wrappers, so one request's scoped export is
+    // never shared with another principal.
+    expect(alice.identity).not.toBe(bob.identity);
+
+    // Each memoized wrapper still resolves to its own principal.
+    expect(alice.identity.read()).toBe("bound:user:alice");
+    expect(bob.identity.read()).toBe("bound:user:bob");
+    // And again, proving the cached wrapper did not latch the first caller.
+    expect(alice.identity.read()).toBe("bound:user:alice");
+    expect(bob.identity.read()).toBe("bound:user:bob");
+    expect(getCurrentPrincipalKey()).toBe("app");
+  });
+
   test("restores the parent scope after failures and isolates concurrent users", async () => {
     await using app = await createTestApp({
       plugins: [identity()],
