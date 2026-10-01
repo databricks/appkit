@@ -8,9 +8,6 @@ export type CallerPrincipal = Readonly<{
   userEmail?: string;
 }>;
 
-/** @deprecated Use CallerPrincipal. Retained for backward compatibility. */
-export type Principal = CallerPrincipal;
-
 /** Caller identity and workspace for one immutable execution scope. */
 export interface CallerContext {
   readonly client: ServiceContextState["client"];

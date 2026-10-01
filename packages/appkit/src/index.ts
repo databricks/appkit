@@ -40,7 +40,6 @@ export {
   type CallerContext,
   type CallerPrincipal,
   type ExecutionContext,
-  type Principal,
   getCurrentActorId,
   getCurrentPrincipalKey,
   getExecutionContext,
