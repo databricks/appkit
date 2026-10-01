@@ -52,9 +52,7 @@ export function hasOboResource(types: readonly string[]): boolean {
 }
 
 function isAppOnly(type: string): boolean {
-  return [...APP_ONLY_RESOURCE_TYPES].some(
-    (resourceType) => resourceType === type,
-  );
+  return (APP_ONLY_RESOURCE_TYPES as ReadonlySet<string>).has(type);
 }
 
 export function assertResourceExecution(type: string): void {
