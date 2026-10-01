@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { PM_COMMANDS, type PackageManager } from "../../../package-manager";
 import { humanizeResourceType, MANIFEST_SCHEMA_ID } from "./resource-defaults";
 import type { CreateAnswers } from "./types";
 
@@ -100,7 +101,7 @@ function rollback(written: string[], targetDir: string): void {
 export function scaffoldPlugin(
   targetDir: string,
   answers: CreateAnswers,
-  options: { isolated: boolean },
+  options: { isolated: boolean; pm?: PackageManager },
 ): void {
   fs.mkdirSync(targetDir, { recursive: true });
 
@@ -203,6 +204,9 @@ export const ${exportName} = toPlugin(${className});
         written,
       );
 
+      const pm = options.pm ?? "pnpm";
+      const addCmd = PM_COMMANDS[pm].add(`${packageName} @databricks/appkit`);
+
       const readme = `# ${answers.displayName}
 
 ${answers.description}
@@ -210,7 +214,7 @@ ${answers.description}
 ## Installation
 
 \`\`\`bash
-pnpm add ${packageName} @databricks/appkit
+${addCmd}
 \`\`\`
 
 ## Usage

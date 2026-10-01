@@ -8,6 +8,9 @@ node_modules
 pr-template
 appkit-template-*.zip
 
+# Scratch dir and output produced by tools/smoke-test-template.ts
+.smoke-test
+
 coverage
 
 *.tsbuildinfo
