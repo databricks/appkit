@@ -162,7 +162,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
-| [~~Principal~~](TypeAlias.Principal.md) | - |
 | [ReadSerializer](TypeAlias.ReadSerializer.md) | Shape one already private-safe row before it reaches the wire. A `Promise` is not assignable to the return type, so an async callback fails to compile: serializers run inside the response path and must not add latency there. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |

@@ -725,12 +725,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.Principal",
-          label: "Principal",
-          className: "typedoc-sidebar-item-deprecated"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.ReadSerializer",
           label: "ReadSerializer"
         },
