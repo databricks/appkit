@@ -83,8 +83,6 @@ export const capabilityScopeSchema = z.enum([
   "catalog.tables:read",
 ]);
 
-export type CapabilityScope = z.infer<typeof capabilityScopeSchema>;
-
 /**
  * Every Apps user_api_scope (short names; the long forms such as
  * `dashboards.genie` are deprecated aliases). A plugin declares one in its
