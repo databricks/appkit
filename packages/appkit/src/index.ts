@@ -43,7 +43,6 @@ export {
   type CallerContext,
   type CallerPrincipal,
   type ExecutionContext,
-  type Principal,
   type UserContext,
   ServiceContext,
   getCallerContext,
