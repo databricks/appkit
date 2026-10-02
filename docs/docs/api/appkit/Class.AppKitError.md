@@ -32,6 +32,7 @@ console.error(error.toJSON()); // Safe for logging, sensitive values redacted
 - [`ConnectionError`](Class.ConnectionError.md)
 - [`DatabaseValidationError`](Class.DatabaseValidationError.md)
 - [`ExecutionError`](Class.ExecutionError.md)
+- [`IdentityExpiredError`](Class.IdentityExpiredError.md)
 - [`InitializationError`](Class.InitializationError.md)
 - [`ServerError`](Class.ServerError.md)
 - [`TunnelError`](Class.TunnelError.md)
@@ -78,8 +79,8 @@ protected readonly optional _clientMessage: string;
 ```
 
 Client-safe error message. When set, callers serializing the error to
-a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`
-— `message` may contain raw upstream / SDK text including statement
+a client (SSE, HTTP body) MUST prefer `clientMessage` over `message`.
+`message` may contain raw upstream / SDK text including statement
 fragments, internal object names, and correlation IDs.
 
 Subclasses can set this in their constructor for a fixed sanitized

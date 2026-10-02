@@ -1,5 +1,10 @@
 export * from "./agent";
 export * from "./cache";
+export {
+  createDevOboIdentityProvider,
+  loadDevOboIdentity,
+  loadDevOboIdentityFromEnvironment,
+} from "./dev-obo";
 export * from "./execute";
 export * from "./genie";
 export * from "./metric-filter";

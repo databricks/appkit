@@ -18,6 +18,9 @@ importers:
       '@arethetypeswrong/core':
         specifier: 0.18.4
         version: 0.18.4
+      '@ast-grep/napi':
+        specifier: 0.37.0
+        version: 0.37.0
       '@commitlint/cli':
         specifier: 19.8.1
         version: 19.8.1(@types/node@24.7.2)(typescript@5.9.3)
