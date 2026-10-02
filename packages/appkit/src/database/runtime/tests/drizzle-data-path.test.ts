@@ -815,6 +815,209 @@ describe("database failures", () => {
     }
   });
 
+  it.each(["42501", "57014", "42601", "42703", "42P01", "28000"])(
+    "does not log arbitrary driver text for SQLSTATE %s",
+    async (code) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        throw {
+          code,
+          message: "patient@example.test must not reach the log",
+          detail: "private row value patient@example.test",
+          hint: "try patient@example.test",
+        };
+      };
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        await createDrizzleDataPath(fake.db, schema)
+          .select(users, {})
+          .catch(() => undefined);
+
+        const output = errorLog.mock.calls.flat().map(String).join(" ");
+        expect(output).toContain(code);
+        expect(output).not.toContain("patient@example.test");
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("does not admit trailing newlines in otherwise allowed diagnostics", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      throw { code: "42703", message: "column notes.body does not exist\n" };
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch(() => undefined);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        "\n",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("bounds untrusted system error codes in server logs", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    const oversizedCode = `E${"A".repeat(500)}`;
+    query.users.findMany = async () => {
+      throw { code: oversizedCode, syscall: "connect", message: "sensitive" };
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch(() => undefined);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        oversizedCode,
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  // Schema drift used to surface as a bare SQLSTATE, with no object named.
+  it.each([
+    [
+      "42703",
+      {
+        message: "column notes.board_id does not exist",
+        hint: 'Perhaps you meant to reference the column "notes.body".',
+      },
+      ["column notes.board_id does not exist"],
+    ],
+    [
+      "42P01",
+      { message: 'relation "public.boards" does not exist' },
+      ['relation "public.boards" does not exist'],
+    ],
+  ] as const)(
+    "logs safe schema identifiers for SQLSTATE %s, never free-form text",
+    async (code, fields, expected) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        const driver = Object.assign(new Error(fields.message), {
+          code,
+          ...fields,
+        });
+        throw Object.assign(
+          new Error("Failed query: select * from users\nparams: alice@x.com"),
+          { cause: driver },
+        );
+      };
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        const error = await createDrizzleDataPath(fake.db, schema)
+          .select(users, {})
+          .catch((caught) => caught);
+
+        const output = errorLog.mock.calls.flat().map(String).join(" ");
+        for (const text of expected) expect(output).toContain(text);
+        expect(output).not.toContain("Perhaps you meant");
+        expect(output).not.toContain("Failed query");
+        expect(output).not.toContain("alice@x.com");
+        // The diagnostic stays in the log; callers still get the stable error.
+        expect(error.message).toBe("Database operation failed");
+        expect(JSON.stringify(error)).not.toContain(fields.message);
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    ["22P02", 'invalid input syntax for type integer: "alice@x.com"'],
+    ["23502", "null value in column alice@x.com"],
+    ["P0001", "raised for alice@x.com"],
+  ])(
+    "never logs driver text for value-bearing SQLSTATE %s",
+    async (code, message) => {
+      const fake = makeFakeDb();
+      const query = fake.db.query as unknown as Record<
+        string,
+        { findMany: () => Promise<Row[]> }
+      >;
+      query.users.findMany = async () => {
+        throw { code, message, detail: "Key (email)=(alice@x.com)" };
+      };
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        await createDrizzleDataPath(fake.db, schema)
+          .select(users, {})
+          .catch(() => undefined);
+
+        const output = errorLog.mock.calls.flat().map(String).join(" ");
+        expect(output).toContain(code);
+        expect(output).not.toContain("alice@x.com");
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("logs a connection failure's system error text", async () => {
+    const fake = makeFakeDb();
+    const query = fake.db.query as unknown as Record<
+      string,
+      { findMany: () => Promise<Row[]> }
+    >;
+    query.users.findMany = async () => {
+      throw Object.assign(
+        new Error("getaddrinfo ENOTFOUND ep-stale.database.example.com"),
+        { code: "ENOTFOUND", syscall: "getaddrinfo" },
+      );
+    };
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      const error = await createDrizzleDataPath(fake.db, schema)
+        .select(users, {})
+        .catch((caught) => caught);
+
+      const output = errorLog.mock.calls.flat().map(String).join(" ");
+      expect(output).toContain("ENOTFOUND ep-stale.database.example.com");
+      expect(error).toMatchObject({ category: "INTERNAL" });
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("stops walking an error cause cycle", async () => {
     const fake = makeFakeDb();
     const query = fake.db.query as unknown as Record<
