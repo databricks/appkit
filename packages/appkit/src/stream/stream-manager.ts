@@ -5,6 +5,7 @@ import type { IAppResponse, StreamConfig } from "shared";
 
 import { AppKitError } from "../errors/base";
 import { ExecutionError } from "../errors/execution";
+import { ExecutionTimeoutError } from "../errors/timeout";
 import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
@@ -225,6 +226,7 @@ export class StreamManager {
       isCompleted: false,
       lastAccess: Date.now(),
       abortController,
+      signal: combinedSignal,
       traceContext,
       maxEventSize,
     };
@@ -322,9 +324,10 @@ export class StreamManager {
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
 
-        // client cancellation is a normal control-flow signal, not a failure
-        if (errorCode === SSEErrorCode.STREAM_ABORTED) {
-          logger.info("Stream aborted by client (code=%s)", errorCode);
+        // An upstream AbortError is not evidence that the caller canceled.
+        // Only the stream's actual lifecycle signal can justify silence.
+        if (streamEntry.signal?.aborted) {
+          logger.info("Stream canceled (code=%s)", SSEErrorCode.STREAM_ABORTED);
           this._finalizeStream(streamEntry);
           return;
         }
@@ -509,6 +512,7 @@ export class StreamManager {
   }
 
   private _categorizeError(error: unknown): SSEErrorCode {
+    if (error instanceof ExecutionTimeoutError) return SSEErrorCode.TIMEOUT;
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
       if (message.includes("timeout") || message.includes("timed out")) {
@@ -517,20 +521,6 @@ export class StreamManager {
 
       if (message.includes("unavailable") || message.includes("econnrefused")) {
         return SSEErrorCode.TEMPORARY_UNAVAILABLE;
-      }
-
-      if (error.name === "AbortError") {
-        return SSEErrorCode.STREAM_ABORTED;
-      }
-
-      // Defense-in-depth: upstream layers (SQL client, cache) may wrap an
-      // AbortError into ExecutionError, losing `name` but keeping the message.
-      if (
-        message.includes("operation was aborted") ||
-        message.includes("the request was aborted") ||
-        message.includes("statement was canceled")
-      ) {
-        return SSEErrorCode.STREAM_ABORTED;
       }
 
       // Detect upstream API errors (e.g., from Databricks SDK ApiError)

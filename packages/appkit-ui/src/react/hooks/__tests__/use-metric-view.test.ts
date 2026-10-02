@@ -12,7 +12,7 @@ let capturedCallbacks: {
 // Mock connectSSE so the hook does not attempt a real network request.
 // Capture both the full args (used by the payload/refetch tests) and the
 // individual callbacks/signal (used by the result/error and late-envelope
-// tests). The hook ignores the return value.
+// tests). Keep the transport pending until a test sends a terminal event.
 const mockConnectSSE = vi.fn((args: any): unknown => {
   lastConnectArgs = args;
   capturedCallbacks = {
@@ -20,7 +20,7 @@ const mockConnectSSE = vi.fn((args: any): unknown => {
     onError: args?.onError,
     signal: args?.signal,
   };
-  return () => {};
+  return new Promise<void>(() => {});
 });
 
 vi.mock("@/js", () => ({
@@ -307,7 +307,7 @@ describe("useMetricView", () => {
     expect(result.current.metadata).toBeUndefined();
   });
 
-  test("a successful result after a transient error clears the stale error", async () => {
+  test("a late result cannot replace a terminal server error", async () => {
     const { result } = renderHook(() =>
       useMetricView("orders", { measures: ["revenue"] }),
     );
@@ -325,16 +325,15 @@ describe("useMetricView", () => {
     await waitFor(() => expect(result.current.error).toBe("boom"));
     expect(result.current.errorCode).toBe("UPSTREAM_ERROR");
 
-    // Then: a successful result must clear both, so error-first consumers show
-    // the fresh data instead of the stale error.
+    // The error already terminated this run. Ignore any trailing result.
     act(() => {
       lastConnectArgs.onMessage({
         data: JSON.stringify({ type: "result", data: [{ revenue: 7 }] }),
       });
     });
-    await waitFor(() => expect(result.current.data).toEqual([{ revenue: 7 }]));
-    expect(result.current.error).toBeNull();
-    expect(result.current.errorCode).toBeNull();
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBe("boom");
+    expect(result.current.errorCode).toBe("UPSTREAM_ERROR");
   });
 
   test("normalizes an empty result message (no data field) to []", async () => {

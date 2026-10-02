@@ -443,6 +443,7 @@ function useLakebaseReadiness() {
 
 | Option                      | Type      | Default          | Description                                                                                                                                                                                                                                               |
 | --------------------------- | --------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`                   | `number`  | `18000` (18 s)   | SQL execution timeout in milliseconds. |
 | `warehouseStartupTimeoutMs` | `number`  | `300000` (5 min) | Maximum time to wait for the warehouse to reach `RUNNING` before failing the request                                                                                                                                                                      |
 | `autoStartWarehouse`        | `boolean` | `true`           | When `true`, a `STOPPED` warehouse is auto-started on the first request. Set to `false` for cost-controlled deployments where billable warehouse starts must not be triggered by user requests; in that case `STOPPED` surfaces as a `ConfigurationError` |
 

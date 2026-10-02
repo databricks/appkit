@@ -55,6 +55,8 @@ export interface StreamEntry {
   isCompleted: boolean;
   lastAccess: number;
   abortController: AbortController;
+  /** Includes the caller's signal as well as stream lifecycle cancellation. */
+  signal?: AbortSignal;
   traceContext: Context;
   /**
    * UTF-8 bytes. Lives on the entry, not on `StreamManager`: one manager is

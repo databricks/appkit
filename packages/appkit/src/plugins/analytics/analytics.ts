@@ -384,58 +384,31 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           };
         }
 
-        // `execute()` reduces a thrown error to `{ status, message }`,
-        // dropping the rich fields (`errorCode`, `clientMessage`) the
-        // fallback's `ExecutionError`s carry. Capture the original here so
-        // we can re-throw it intact — the SSE error path
-        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
-        let originalError: unknown;
         const sqlResult = await executor.execute(
           async (sig) => {
-            try {
-              const processedParams =
-                await self.queryProcessor.processQueryParams(query, parameters);
-              // JSON_ARRAY path: tries INLINE + JSON_ARRAY and, if the
-              // warehouse only accepts ARROW_STREAM for INLINE, retries as
-              // ARROW_STREAM and decodes server-side — returning the SSE
-              // `result` message with plain rows. (ARROW_STREAM requests are
-              // handled earlier via `_handleArrowStreamQuery`.)
-              return await self._executeJsonArrayPath(
-                executor,
-                query,
-                processedParams,
-                sig,
-              );
-            } catch (err) {
-              originalError = err;
-              throw err;
-            }
+            const processedParams =
+              await self.queryProcessor.processQueryParams(query, parameters);
+            // JSON_ARRAY path: tries INLINE + JSON_ARRAY and, if the
+            // warehouse only accepts ARROW_STREAM for INLINE, retries as
+            // ARROW_STREAM and decodes server-side — returning plain rows.
+            return self._executeJsonArrayPath(
+              executor,
+              query,
+              processedParams,
+              sig,
+            );
           },
           { default: sqlConfig },
           executorKey,
         );
 
         if (!sqlResult.ok) {
+          // Interceptors can classify the failure after the query throws (for
+          // example, recovering a timeout reason lost by the SQL SDK).
+          if (sqlResult.error instanceof AppKitError) {
+            throw sqlResult.error;
+          }
           const msg = sqlResult.message;
-          const lower = msg.toLowerCase();
-          if (
-            lower.includes("operation was aborted") ||
-            lower.includes("the request was aborted") ||
-            lower.includes("statement was canceled")
-          ) {
-            const err = new DOMException(
-              lower.includes("canceled") ? msg : "The operation was aborted.",
-              "AbortError",
-            );
-            throw err;
-          }
-          // Re-throw the original error so its structured `errorCode` (e.g.
-          // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) and sanitized `clientMessage`
-          // survive to the SSE error payload. Fall back to a generic
-          // statement failure only if the original wasn't an AppKitError.
-          if (originalError instanceof AppKitError) {
-            throw originalError;
-          }
           const inner = msg.startsWith("Statement failed: ")
             ? msg.slice("Statement failed: ".length)
             : msg;
@@ -456,7 +429,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * `executeStream` disables cache/retry and streams warehouse-readiness
    * (`warehouse_status`) events, then the inner `execute` builds the metric SQL
    * and delivers rows through {@link deliverJsonResult} as a `result` message.
-   * The `originalError` re-throw discipline preserves each error's structured
+   * The execution failure preserves each error's structured
    * `errorCode`/`clientMessage` for the SSE error payload.
    *
    * Lane dispatch is driven by the registration: an SP-lane metric runs as the
@@ -671,62 +644,36 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           };
         }
 
-        // `execute()` reduces a thrown error to `{ status, message }`,
-        // dropping the rich fields (`errorCode`, `clientMessage`). Capture the
-        // original here so we can re-throw it intact — the SSE error path
-        // (`StreamManager`) reads `errorCode`/`clientMessage` off it.
-        let originalError: unknown;
         const sqlResult = await executor.execute(
           async (sig) => {
-            try {
-              const { statement, parameters } = buildMetricSql(
-                registration,
-                request,
-              );
-              const processedParams =
-                await self.queryProcessor.processQueryParams(
-                  statement,
-                  Object.keys(parameters).length > 0 ? parameters : undefined,
-                );
-              // Reuse the query route's JSON delivery: INLINE JSON_ARRAY with
-              // an ARROW_STREAM-inline fallback, returning plain rows in a
-              // `result` message — byte-identical envelope to `/query`.
-              return await self._executeJsonArrayPath(
-                executor,
+            const { statement, parameters } = buildMetricSql(
+              registration,
+              request,
+            );
+            const processedParams =
+              await self.queryProcessor.processQueryParams(
                 statement,
-                processedParams,
-                sig,
+                Object.keys(parameters).length > 0 ? parameters : undefined,
               );
-            } catch (err) {
-              originalError = err;
-              throw err;
-            }
+            // Reuse the query route's JSON delivery and Arrow fallback.
+            return self._executeJsonArrayPath(
+              executor,
+              statement,
+              processedParams,
+              sig,
+            );
           },
           { default: sqlConfig },
           executorKey,
         );
 
         if (!sqlResult.ok) {
+          // Interceptors can classify the failure after the query throws (for
+          // example, recovering a timeout reason lost by the SQL SDK).
+          if (sqlResult.error instanceof AppKitError) {
+            throw sqlResult.error;
+          }
           const msg = sqlResult.message;
-          const lower = msg.toLowerCase();
-          if (
-            lower.includes("operation was aborted") ||
-            lower.includes("the request was aborted") ||
-            lower.includes("statement was canceled")
-          ) {
-            const err = new DOMException(
-              lower.includes("canceled") ? msg : "The operation was aborted.",
-              "AbortError",
-            );
-            throw err;
-          }
-          // Re-throw the original error so its structured `errorCode` and
-          // sanitized `clientMessage` survive to the SSE error payload. Fall
-          // back to a generic statement failure only if it wasn't an
-          // AppKitError.
-          if (originalError instanceof AppKitError) {
-            throw originalError;
-          }
           const inner = msg.startsWith("Statement failed: ")
             ? msg.slice("Statement failed: ".length)
             : msg;

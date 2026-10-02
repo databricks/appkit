@@ -29,7 +29,7 @@ import {
 import { deepMerge } from "../utils";
 import { forwardAsyncErrors } from "../utils/safe-handler";
 import { DevFileReader } from "./dev-reader";
-import type { ExecutionResult } from "./execution-result";
+import { executionFailure, type ExecutionResult } from "./execution-result";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
 import { TelemetryInterceptor } from "./interceptors/telemetry";
@@ -633,30 +633,25 @@ export abstract class Plugin<
       logger.error("Plugin execution failed", { error, plugin: this.name });
 
       if (error instanceof AppKitError) {
-        return {
-          ok: false,
-          status: error.statusCode,
-          message: error.message,
-        };
+        return executionFailure(error, error.statusCode, error.message);
       }
 
       if (hasHttpStatusCode(error)) {
         const isDev = process.env.NODE_ENV !== "production";
         const isClientError = error.statusCode >= 400 && error.statusCode < 500;
-        return {
-          ok: false,
-          status: error.statusCode,
-          message: isDev || isClientError ? error.message : "Server error",
-        };
+        return executionFailure(
+          error,
+          error.statusCode,
+          isDev || isClientError ? error.message : "Server error",
+        );
       }
 
       const isDev = process.env.NODE_ENV !== "production";
-      return {
-        ok: false,
-        status: 500,
-        message:
-          isDev && error instanceof Error ? error.message : "Server error",
-      };
+      return executionFailure(
+        error,
+        500,
+        isDev && error instanceof Error ? error.message : "Server error",
+      );
     }
   }
 

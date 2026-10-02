@@ -4,6 +4,7 @@ import {
   type AnalyticsSseHandlerContext,
   GENERIC_LOAD_ERROR,
   handleAnalyticsSseError,
+  handleAnalyticsSseEnd,
   handleAnalyticsSseMessage,
   userFacingFetchError,
 } from "./analytics-sse";
@@ -193,14 +194,18 @@ function runAnalyticsRequest(
       unpublishWarehouseStatus: () => {},
     };
 
-    connectSSE({
+    void connectSSE({
       url: options.url,
       payload: options.payload,
       signal: controls.signal,
       onMessage: (message) =>
         handleAnalyticsSseMessage(message.data, sseContext),
-      onError: (error) => handleAnalyticsSseError(error, sseContext),
-    });
+      onError: (error, willRetry) =>
+        handleAnalyticsSseError(error, sseContext, willRetry),
+    }).then(
+      () => handleAnalyticsSseEnd(sseContext),
+      (error) => handleAnalyticsSseError(error, sseContext),
+    );
   };
 }
 

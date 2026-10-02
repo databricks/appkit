@@ -22,10 +22,10 @@ export interface ConnectSSEOptions<Payload = unknown> {
   retryDelay?: number;
   /** Maximum number of retry attempts */
   maxRetries?: number;
-  /** Request timeout in ms */
+  /** Per-connection deadline in ms, including reading the response body. */
   timeout?: number;
   /** Max in-memory buffer size before error. */
   maxBufferSize?: number;
-  /** Called when a connection or parsing error occurs. */
-  onError?: (error: unknown) => void;
+  /** Called on connection/parsing failures; willRetry distinguishes transient failures. */
+  onError?: (error: unknown, willRetry: boolean) => void;
 }

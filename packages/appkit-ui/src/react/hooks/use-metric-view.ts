@@ -14,6 +14,7 @@ import {
   type AnalyticsSseHandlerContext,
   getDevMode,
   handleAnalyticsSseError,
+  handleAnalyticsSseEnd,
   handleAnalyticsSseMessage,
 } from "./analytics-sse";
 import type {
@@ -196,14 +197,18 @@ export function useMetricView<
       unpublishWarehouseStatus,
     };
 
-    connectSSE({
+    void connectSSE({
       url: urlSuffix,
       payload,
       signal: abortController.signal,
       onMessage: (message) =>
         handleAnalyticsSseMessage(message.data, sseContext),
-      onError: (error) => handleAnalyticsSseError(error, sseContext),
-    });
+      onError: (error, willRetry) =>
+        handleAnalyticsSseError(error, sseContext, willRetry),
+    }).then(
+      () => handleAnalyticsSseEnd(sseContext),
+      (error) => handleAnalyticsSseError(error, sseContext),
+    );
   }, [
     key,
     payload,
