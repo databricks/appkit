@@ -5,9 +5,14 @@ import type { IAppRouter } from "shared";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import { CacheManager } from "../cache";
+import { snapshotCallerContext } from "../context/caller-context";
 import type { ServiceContextState } from "../context/service-context";
 import { ServiceContext } from "../context/service-context";
 import { AuthenticationError } from "../errors";
+import {
+  WarehouseResource,
+  type WarehouseBinding,
+} from "../resources/warehouse";
 import type { InstrumentConfig, ITelemetry } from "../telemetry/types";
 import { ApiError } from "../workspace-client";
 import { createMockWorkspaceClient } from "./mock-workspace-client";
@@ -127,7 +132,7 @@ export type OboOption =
     };
 
 /**
- * The one fake of `ServiceContext.createUserContext` this kit uses, shared by
+ * The one fake of `ServiceContext.createCallerContext` this kit uses, shared by
  * `mockServiceContext` and `createTestApp`.
  *
  * Shared rather than duplicated because the two used to disagree, and neither
@@ -138,10 +143,7 @@ export type OboOption =
  *
  * @internal
  */
-export function fakeUserContext(
-  client: Any,
-  ids: { warehouseId?: Any; workspaceId: Any },
-) {
+export function fakeUserContext(client: Any, ids: { workspaceId: Any }) {
   return (
     token: string,
     userId: string,
@@ -151,21 +153,17 @@ export function fakeUserContext(
     // Same rejection as production, so a path that forgets to forward the token
     // fails here instead of only in a deployed app.
     if (!token) throw AuthenticationError.missingToken("user token");
-    return {
+    return snapshotCallerContext({
       client,
-      userId,
-      userName,
-      userEmail,
+      principal: { type: "user", userId, userName, userEmail },
       // Derived from the token exactly as production does. Keyed on the user it
       // would be constant across tokens, and rotation compares this value.
       tokenFingerprint: createHash("sha256")
         .update(token)
         .digest("hex")
         .slice(0, 16),
-      warehouseId: ids.warehouseId,
       workspaceId: ids.workspaceId,
-      isUserContext: true,
-    };
+    });
   };
 }
 
@@ -491,27 +489,37 @@ export interface TestContextOptions {
  * installs the state as spies — that installer is the public entry point.
  */
 function buildServiceContextState(
-  options: TestContextOptions = {},
+  options: TestContextOptions,
+  resources: WarehouseBinding,
 ): ServiceContextState {
   return {
     client: (options.serviceDatabricksClient ||
       createMockWorkspaceClient()) as Any,
     serviceUserId: options.serviceUserId || "test-service-user",
-    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+    // Preserve the deprecated field for external test callers during migration.
+    warehouseId: resources.warehouseId,
     workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
   };
 }
 
 /**
  * Mocks the `ServiceContext` singleton for testing — spies `get`,
- * `initialize`, `isInitialized`, and `createUserContext` so code that resolves
+ * `initialize`, `isInitialized`, and `createCallerContext` so code that resolves
  * the service principal or an on-behalf-of user context gets test doubles.
+ * Also supplies the app-level warehouse binding through WarehouseResource.
  * Call in `beforeEach`; call the returned `restore()` in `afterEach`.
  *
  * @returns The mock context plus the spies and a `restore()` helper.
  */
 export function mockServiceContext(options: TestContextOptions = {}) {
-  const serviceContext = buildServiceContextState(options);
+  const resources = Object.freeze({
+    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+  });
+  const serviceContext = buildServiceContextState(options, resources);
+
+  const resourcesSpy = vi
+    .spyOn(WarehouseResource, "get")
+    .mockReturnValue(resources);
 
   const getSpy = vi
     .spyOn(ServiceContext, "get")
@@ -525,8 +533,10 @@ export function mockServiceContext(options: TestContextOptions = {}) {
     .spyOn(ServiceContext, "isInitialized")
     .mockReturnValue(true);
 
+  // Keep the public spy handle name for existing tests. The deprecated factory
+  // delegates to createCallerContext, so this spy covers both entry points.
   const createUserContextSpy = vi
-    .spyOn(ServiceContext, "createUserContext")
+    .spyOn(ServiceContext, "createCallerContext")
     .mockImplementation(
       fakeUserContext(
         options.userDatabricksClient || createMockWorkspaceClient(),
@@ -545,6 +555,7 @@ export function mockServiceContext(options: TestContextOptions = {}) {
       initSpy.mockRestore();
       isInitializedSpy.mockRestore();
       createUserContextSpy.mockRestore();
+      resourcesSpy.mockRestore();
     },
   };
 }

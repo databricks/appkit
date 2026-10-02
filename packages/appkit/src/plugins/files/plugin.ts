@@ -22,11 +22,11 @@ import {
   getCurrentUserId,
   getExecutionContext,
   getWorkspaceClient,
-  runInUserContext,
+  runInCallerContext,
   ServiceContext,
-  type UserContext,
+  type CallerContext,
+  isCallerContext,
 } from "../../context";
-import { isUserContext } from "../../context/user-context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -163,7 +163,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * return a policy user explicitly marked `isServicePrincipal: true`, so
    * even in dev a `usersOnly`-style policy that gates on
    * `!user.isServicePrincipal` cannot be tricked. The matching SDK execution
-   * path also falls through to the SP client (no `runInUserContext` wrap),
+   * path also falls through to the SP client (no `runInCallerContext` wrap),
    * so the policy user and the SDK identity stay aligned.
    */
   private _extractUser(req: express.Request): FilePolicyUser {
@@ -265,7 +265,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * NOTE: This method only selects which identity the *policy* sees. The
    * matching SDK execution identity is selected separately by
    * `_resolveAuthForRequest` and applied via `_runWithAuth` /
-   * `runInUserContext` in each handler. The two selections are designed to
+   * `runInCallerContext` in each handler. The two selections are designed to
    * converge on the same identity per the policy-user matrix in the docs —
    * see `docs/docs/plugins/files.md#policy-user-matrix`.
    */
@@ -1233,7 +1233,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
         const settings = this._writeSettings(mode);
         // The connector's `upload` resolves `getWorkspaceClient()` and
         // `client.config.authenticate(headers)` synchronously inside this
-        // callback. When `_runWithAuth` wraps us in `runInUserContext`, that
+        // callback. When `_runWithAuth` wraps us in `runInCallerContext`, that
         // chain produces user-token Authorization headers on the outgoing
         // `fetch PUT`. The OBO upload-headers test pins this contract.
         const result = await this.trackWrite(() =>
@@ -1386,7 +1386,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Build a `UserContext` from request headers when both
+   * Build a `CallerContext` from request headers when both
    * `x-forwarded-access-token` and `x-forwarded-user` are present, otherwise
    * return `null`. Used by OBO route handlers to wrap SDK calls in the
    * end-user's identity. A `null` result means "fall back to the service
@@ -1394,17 +1394,17 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * already have responded 401 before we get here, so `null` is reachable
    * only on the dev-fallback path.
    */
-  private _buildUserContextOrNull(req: express.Request): UserContext | null {
+  private _buildUserContextOrNull(req: express.Request): CallerContext | null {
     const token = req.header("x-forwarded-access-token")?.trim();
     const userId = req.header("x-forwarded-user")?.trim();
     if (!token || !userId) return null;
-    return ServiceContext.createUserContext(token, userId);
+    return ServiceContext.createCallerContext(token, userId);
   }
 
   /**
    * Build the telemetry attribute hash for the `files.auth_mode` span
    * attribute. The value reflects what operationally happened — i.e.
-   * whether `runInUserContext` actually wrapped the SDK call:
+   * whether `runInCallerContext` actually wrapped the SDK call:
    * - HTTP route on OBO volume + valid token → `"on-behalf-of-user"`.
    * - HTTP route on OBO volume + dev-fallback (no token) →
    *   `"service-principal"` (the route falls through to the SP client).
@@ -1421,12 +1421,12 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
   /**
    * One-shot resolver for HTTP route handlers. Builds the request's
-   * `UserContext` AT MOST ONCE (when the volume is OBO and the headers are
+   * `CallerContext` AT MOST ONCE (when the volume is OBO and the headers are
    * present) and returns both the operationally-effective auth mode and the
-   * pre-built `UserContext`.
+   * pre-built `CallerContext`.
    *
    * Handlers thread the `userCtx` into `_runWithAuth(userCtx, fn)` to avoid
-   * a second `ServiceContext.createUserContext()` allocation — that call
+   * a second `ServiceContext.createCallerContext()` allocation. That call
    * builds a fresh `WorkspaceClient` per invocation, so doing it twice per
    * request was pure throwaway overhead.
    */
@@ -1435,7 +1435,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     volumeKey: string,
   ): {
     mode: "service-principal" | "on-behalf-of-user";
-    userCtx: UserContext | null;
+    userCtx: CallerContext | null;
   } {
     if (this._resolveAuth(volumeKey) !== "on-behalf-of-user") {
       return { mode: "service-principal", userCtx: null };
@@ -1452,7 +1452,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    *   `WorkspaceClient` and `getCurrentUserId()` are used — identical
    *   behavior to pre-OBO releases. This covers both SP volumes and the
    *   OBO dev-fallback path (where headers were missing).
-   * - `userCtx` is a `UserContext`: wraps `fn` in `runInUserContext(userCtx)`,
+   * - `userCtx` is a `CallerContext`: wraps `fn` in `runInCallerContext(userCtx)`,
    *   so SDK calls execute as the end user and `getCurrentUserId()` (and
    *   therefore cache keys) resolve to the user's ID.
    *
@@ -1461,11 +1461,11 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * NOT take a `req` so it cannot accidentally re-build the context.
    */
   private async _runWithAuth(
-    userCtx: UserContext | null,
+    userCtx: CallerContext | null,
     fn: () => Promise<void>,
   ): Promise<void> {
     if (userCtx) {
-      return runInUserContext(userCtx, fn);
+      return runInCallerContext(userCtx, fn);
     }
     return fn();
   }
@@ -1529,7 +1529,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
   /**
    * Wrap each `VolumeAPI` method so its execution runs inside
-   * `runInUserContext(userCtx, ...)`. Used by `VolumeHandle.asUser(req)` to
+   * `runInCallerContext(userCtx, ...)`. Used by `VolumeHandle.asUser(req)` to
    * force the SDK identity to the end user regardless of the volume's
    * `auth` setting. The policy check baked into each method (via
    * `createVolumeAPI`) runs inside the same scope, so `getCurrentUserId()`
@@ -1541,7 +1541,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    */
   private _wrapVolumeAPIInUserContext(
     api: VolumeAPI,
-    userCtx: UserContext,
+    userCtx: CallerContext,
   ): VolumeAPI {
     const wrap =
       <Args extends unknown[], R>(
@@ -1550,7 +1550,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       ): ((...args: Args) => Promise<R>) =>
       (...args: Args) =>
         this._withAuthModeAttributes(operation, "on-behalf-of-user", () =>
-          runInUserContext(userCtx, () => fn(...args)),
+          runInCallerContext(userCtx, () => fn(...args)),
         );
 
     return {
@@ -1639,8 +1639,8 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   private _defineVolumeTools(volumeKey: string): ToolRegistry {
     const buildUser = (): FilePolicyUser => {
       const ctx = getExecutionContext();
-      return isUserContext(ctx)
-        ? { id: ctx.userId }
+      return isCallerContext(ctx)
+        ? { id: ctx.principal.userId }
         : { id: ctx.serviceUserId, isServicePrincipal: true };
     };
     const api = () => this.createVolumeAPI(volumeKey, buildUser());
@@ -1781,7 +1781,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * through the HTTP routes run as the end user; for programmatic calls
    * outside a route, use `asUser(req)` to opt into per-user execution.
    * `asUser(req)` is a hard override at the SDK level: it forces every
-   * subsequent call to execute as the end user inside `runInUserContext`,
+   * subsequent call to execute as the end user inside `runInCallerContext`,
    * regardless of the volume's `auth` setting. Policies control per-user
    * access in either mode.
    *
@@ -1824,7 +1824,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
           const user = this._extractUser(req);
           const api = this.createVolumeAPI(volumeKey, user);
           // Force OBO at the SDK level regardless of the volume's `auth`
-          // setting: each method runs inside `runInUserContext` so
+          // setting: each method runs inside `runInCallerContext` so
           // `getWorkspaceClient()` returns the user-token client. When no
           // user token is available (only reachable in dev mode after the
           // strict `_extractUser` falls back to the SP identity), we skip

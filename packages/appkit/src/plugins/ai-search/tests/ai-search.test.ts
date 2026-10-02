@@ -14,11 +14,10 @@ vi.mock("../../../context", () => ({
   getCurrentUserId: vi.fn(() => "test-user"),
   // OBO plumbing so asUser() runs its non-dev path. getCurrentUserId stays
   // constant, so per-user scoping is driven by executorKey in the cacheKey.
-  runInUserContext: <T>(_ctx: unknown, fn: () => T): T => fn(),
+  runInCallerContext: <T>(_ctx: unknown, fn: () => T): T => fn(),
   ServiceContext: {
-    createUserContext: (_token: string, userId: string) => ({
-      userId,
-      isUserContext: true,
+    createCallerContext: (_token: string, userId: string) => ({
+      principal: { type: "user", userId },
     }),
   },
 }));

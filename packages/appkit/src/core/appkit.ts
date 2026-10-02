@@ -19,6 +19,7 @@ import { createLogger } from "../logging/logger";
 import { isPlainObject } from "../plugin/plugin";
 import { uiVariants } from "../plugins/ui-variants";
 import { ResourceRegistry, ResourceType } from "../registry";
+import { getConfiguredWarehouseId } from "../resources/warehouse";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 import type { WorkspaceClient } from "../workspace-client";
@@ -219,13 +220,17 @@ export class AppKit<TPlugins extends InputPluginMap> {
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();
     registry.collectResources(rawPlugins);
+    registry.validate();
 
     // Derive ServiceContext needs from what manifests declared
     const needsWarehouse = registry
       .getRequired()
       .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
     await ServiceContext.initialize(
-      { warehouseId: needsWarehouse },
+      {
+        warehouseId:
+          getConfiguredWarehouseId(registry.getRequired()) ?? needsWarehouse,
+      },
       config?.client,
     );
 

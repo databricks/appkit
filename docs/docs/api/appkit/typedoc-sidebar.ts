@@ -174,6 +174,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.CallerContext",
+          label: "CallerContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.CustomJudgeSpec",
           label: "CustomJudgeSpec"
         },
@@ -615,6 +620,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.CallerPrincipal",
+          label: "CallerPrincipal"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ConfigSchema",
           label: "ConfigSchema"
         },
@@ -647,6 +657,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.EvalProgress",
           label: "EvalProgress"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ExecutionContext",
+          label: "ExecutionContext"
         },
         {
           type: "doc",
@@ -997,6 +1012,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.getCurrentActorId",
+          label: "getCurrentActorId"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getCurrentPrincipalKey",
+          label: "getCurrentPrincipalKey"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.getExecutionContext",
           label: "getExecutionContext"
         },
@@ -1024,6 +1049,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getUsernameWithApiLookup",
           label: "getUsernameWithApiLookup"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getWarehouseId",
+          label: "getWarehouseId"
         },
         {
           type: "doc",
