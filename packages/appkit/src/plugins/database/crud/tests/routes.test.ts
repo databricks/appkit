@@ -337,6 +337,49 @@ describe("serialization and response limits", () => {
     expect(response.json()).toEqual({ error: "Database operation failed" });
   });
 
+  it("lets a list serializer replace an include with a summary", async () => {
+    const entity = fakeEntity([
+      {
+        id: 1,
+        name: "Ada",
+        token: "private",
+        notes: [{ id: 2, body: "hello" }],
+      },
+    ]);
+    await createListHandler(
+      deps("users", entity, (row) => {
+        const { notes, ...view } = row;
+        return { ...view, note_count: (notes as unknown[]).length };
+      }),
+    )(request("/users?include=%7B%22notes%22%3Atrue%7D"), response.res);
+
+    expect(response.sent.status).toBe(200);
+    expect(response.json().items).toEqual([
+      { id: 1, name: "Ada", note_count: 1 },
+    ]);
+  });
+
+  it("lets a detail serializer regroup the row into a different view", async () => {
+    const entity = fakeEntity([], {
+      id: 1,
+      name: "Ada",
+      token: "private",
+      notes: [{ id: 2, body: "hello" }],
+    });
+    await createDetailHandler(
+      deps("users", entity, (row) => ({
+        subject: { id: row.id, name: row.name },
+        note_ids: (row.notes as { id: number }[]).map((note) => note.id),
+      })),
+    )(request("/users/1", { id: "1" }), response.res);
+
+    expect(response.sent.status).toBe(200);
+    expect(response.json()).toEqual({
+      subject: { id: 1, name: "Ada" },
+      note_ids: [2],
+    });
+  });
+
   it("rejects a response that exceeds the byte budget", async () => {
     const wide = "x".repeat(1024 * 1024);
     const entity = fakeEntity(
