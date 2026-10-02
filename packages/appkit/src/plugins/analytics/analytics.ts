@@ -210,7 +210,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     statementId: string,
   ): Promise<string[] | undefined> {
     const attempts: Array<() => Promise<string[] | undefined>> = [
-      () => this.asUser(req)._getColumnNames(statementId),
+      () => this._asUserScoped(req)._getColumnNames(statementId),
       () => this._getColumnNames(statementId),
     ];
     for (const attempt of attempts) {
@@ -231,7 +231,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /**
    * Fetch column names in the current execution context. Proxied by `asUser`,
    * so `getWorkspaceClient()` resolves to the user's client when invoked via
-   * `this.asUser(req)` and the service principal's otherwise.
+   * `asUser(req)` and the service principal's otherwise.
    */
   async _getColumnNames(statementId: string): Promise<string[] | undefined> {
     return this.SQLClient.getColumnNames(getWorkspaceClient(), statementId);
@@ -311,7 +311,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }
 
     // get execution context - user-scoped if .obo.sql, otherwise service principal
-    const executor = isAsUser ? this.asUser(req) : this;
+    const executor = isAsUser ? this._asUserScoped(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
@@ -549,7 +549,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     let executorKey: string;
     try {
       const isObo = registration.lane === "obo";
-      executor = isObo ? this.asUser(req) : this;
+      executor = isObo ? this._asUserScoped(req) : this;
       executorKey = deriveMetricExecutorKey({
         lane: registration.lane,
         userIdentity: isObo ? this.resolveUserId(req) : undefined,
@@ -823,7 +823,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     isAsUser: boolean,
     parameters: IAnalyticsQueryRequest["parameters"],
   ): Promise<void> {
-    const executor = isAsUser ? this.asUser(req) : this;
+    const executor = isAsUser ? this._asUserScoped(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
     const abortController = new AbortController();
     const onClose = () => abortController.abort();
@@ -1051,7 +1051,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * const result = await analytics.query("SELECT * FROM table")
    *
    * // User context execution (in route handler)
-   * const result = await this.asUser(req).query("SELECT * FROM table")
+   * const result = await appkit.asUser(req).analytics.query("SELECT * FROM table")
    * ```
    */
   async query(

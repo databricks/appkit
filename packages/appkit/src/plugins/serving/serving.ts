@@ -149,7 +149,7 @@ export class ServingPlugin extends Plugin {
         method: "post",
         path: "/:alias/invoke",
         handler: async (req: express.Request, res: express.Response) => {
-          await this.asUser(req)._handleInvoke(req, res);
+          await this._asUserScoped(req)._handleInvoke(req, res);
         },
       });
 
@@ -158,7 +158,7 @@ export class ServingPlugin extends Plugin {
         method: "post",
         path: "/:alias/stream",
         handler: async (req: express.Request, res: express.Response) => {
-          await this.asUser(req)._handleStream(req, res);
+          await this._asUserScoped(req)._handleStream(req, res);
         },
       });
     } else {
@@ -169,14 +169,14 @@ export class ServingPlugin extends Plugin {
         res: express.Response,
       ) => {
         req.params.alias ??= "default";
-        await this.asUser(req)._handleInvoke(req, res);
+        await this._asUserScoped(req)._handleInvoke(req, res);
       };
       const streamHandler = async (
         req: express.Request,
         res: express.Response,
       ) => {
         req.params.alias ??= "default";
-        await this.asUser(req)._handleStream(req, res);
+        await this._asUserScoped(req)._handleStream(req, res);
       };
 
       this.route(router, {
@@ -341,7 +341,7 @@ export class ServingPlugin extends Plugin {
       return {
         ...spApi,
         asUser: (req: express.Request) => {
-          const userPlugin = this.asUser(req) as ServingPlugin;
+          const userPlugin = this._asUserScoped(req) as ServingPlugin;
           return userPlugin.createEndpointAPI(resolved);
         },
       };

@@ -68,7 +68,7 @@ function makePlugin(
   return new LakebasePlugin(config);
 }
 
-describe("LakebasePlugin — agent tool opt-in", () => {
+describe("LakebasePlugin - agent tool opt-in", () => {
   test("does not register an agent tool by default", () => {
     const plugin = makePlugin({});
     expect(plugin.getAgentTools()).toEqual([]);
@@ -106,7 +106,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
   });
 });
 
-describe("LakebasePlugin — readOnly enforcement", () => {
+describe("LakebasePlugin - readOnly enforcement", () => {
   let plugin: LakebasePlugin;
 
   beforeEach(async () => {
@@ -203,7 +203,7 @@ describe("LakebasePlugin — readOnly enforcement", () => {
   });
 });
 
-describe("LakebasePlugin — shutdown", () => {
+describe("LakebasePlugin - shutdown", () => {
   test("closes the SP pool and all OBO pools via shutdown()", async () => {
     const { createLakebasePool, createLakebasePoolManager } =
       await import("../../../connectors/lakebase");
@@ -242,13 +242,13 @@ describe("LakebasePlugin — shutdown", () => {
     plugin.abortActiveOperations();
 
     // Other plugins' shutdown() hooks may still need database connections
-    // to drain state — the pools must survive the abort phase.
+    // to drain state - the pools must survive the abort phase.
     expect(spPool.end).not.toHaveBeenCalled();
     expect(oboManager.closeAll).not.toHaveBeenCalled();
   });
 });
 
-describe("LakebasePlugin — destructive mode", () => {
+describe("LakebasePlugin - destructive mode", () => {
   test("does NOT wrap in read-only transaction when readOnly: false", async () => {
     const queryMock = vi.fn((_text: string, _values?: unknown[]) =>
       Promise.resolve({ rows: [] }),
@@ -274,7 +274,7 @@ describe("LakebasePlugin — destructive mode", () => {
   });
 });
 
-describe("LakebasePlugin — OBO via RoutingPool", () => {
+describe("LakebasePlugin - OBO via RoutingPool", () => {
   const userPoolQueries: Array<{ text: string; values?: unknown[] }> = [];
   const userClientQueries: Array<{ text: string; values?: unknown[] }> = [];
 
