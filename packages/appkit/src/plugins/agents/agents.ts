@@ -908,6 +908,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     if (!this.context) return;
     // Return the promise so the forwardAsyncErrors wrapper applied by
     // PluginContext.addRoute can forward rejections to the error middleware.
+    // No route-wide user scope: plugin tools get it per call in executeTool,
+    // while the model call and hand-rolled tools stay on the app principal.
     const handler = (req: express.Request, res: express.Response) =>
       this._handleInvoke(req, res);
     this.context.addRoute("post", "/invocations", handler);

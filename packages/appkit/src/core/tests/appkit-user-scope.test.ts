@@ -1,0 +1,399 @@
+import { context as otelContext } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import type { AgentAdapter, AgentToolDefinition, ToolProvider } from "shared";
+import { describe, expect, expectTypeOf, test, vi } from "vitest";
+import { z } from "zod";
+
+import { CacheManager } from "../../cache";
+import {
+  getCallerContext,
+  getCurrentPrincipalKey,
+  ServiceContext,
+} from "../../context";
+import { isDevOboFallback } from "../../context/request-scope";
+import { Plugin, toPlugin } from "../../plugin";
+import { agents } from "../../plugins/agents";
+import { createMockRequest, createTestApp } from "../../testing";
+import { tool } from "../agent/tools/tool";
+import type { AgentDefinition } from "../agent/types";
+
+class IdentityPlugin extends Plugin implements ToolProvider {
+  static manifest = {
+    name: "identity" as const,
+    displayName: "Identity probe",
+    description: "Captures the principal in tests",
+    resources: { required: [], optional: [] },
+  };
+  private marker = "bound";
+  identify() {
+    return `${this.marker}:${getCurrentPrincipalKey()}`;
+  }
+  getAgentTools(): AgentToolDefinition[] {
+    return [
+      {
+        name: "read",
+        description: "Read identity",
+        parameters: { type: "object", properties: {} },
+      },
+    ];
+  }
+  async executeAgentTool() {
+    await Promise.resolve();
+    return getCurrentPrincipalKey();
+  }
+  exports() {
+    return {
+      read: this.identify,
+      nested: { read: () => getCurrentPrincipalKey() },
+      stream: async function* () {
+        await Promise.resolve();
+        yield getCurrentPrincipalKey();
+        await Promise.resolve();
+        yield getCurrentPrincipalKey();
+      },
+      fail: () => {
+        throw new Error("scope failure");
+      },
+      asOther: () => "must not be reachable",
+    };
+  }
+}
+class CallablePlugin extends Plugin {
+  static manifest = { ...IdentityPlugin.manifest, name: "callable" as const };
+  exports() {
+    return (_key: string) => ({ read: () => getCurrentPrincipalKey() });
+  }
+}
+const identity = toPlugin(IdentityPlugin);
+const callable = toPlugin(CallablePlugin);
+const request = (userId: string) =>
+  createMockRequest({ obo: { userId, token: `${userId}-token` } });
+
+describe("app-level caller scope", () => {
+  test("keeps the plugin alias with one deprecation warning", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(app.plugins.identity.asUser(request("alice")).read()).toBe(
+        "bound:user:alice",
+      );
+      expect(app.plugins.identity.asUser(request("bob")).read()).toBe(
+        "bound:user:bob",
+      );
+      expect(
+        warn.mock.calls.filter((args) =>
+          args.some(
+            (arg) =>
+              typeof arg === "string" &&
+              arg.includes("Plugin.asUser is deprecated"),
+          ),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("shares one caller across shorthand, nested exports, callable handles, and run", async () => {
+    await using app = await createTestApp({
+      plugins: [identity(), callable()],
+      server: false,
+    });
+    const kit = app.plugins;
+    const createCaller = vi.mocked(ServiceContext.createCallerContext);
+    createCaller.mockClear();
+    const scoped = kit.asUser(request("alice"));
+    expect(scoped.identity.read()).toBe("bound:user:alice");
+    expect(scoped.identity.nested.read()).toBe("user:alice");
+    expect(scoped.callable("a").read()).toBe("user:alice");
+    const result = scoped.run(async (userKit) => {
+      const caller = getCallerContext();
+      await Promise.resolve();
+      expect(userKit.identity.read()).toBe("bound:user:alice");
+      expect(kit.identity.read()).toBe("bound:user:alice");
+      expect(getCallerContext()).toBe(caller);
+      return 42;
+    });
+    expectTypeOf(result).toEqualTypeOf<Promise<number>>();
+    expect(await result).toBe(42);
+    expect(createCaller).toHaveBeenCalledTimes(1);
+    expect(kit.identity.read()).toBe("bound:app");
+  });
+
+  test("memoizes a plugin's scoped export per handle without crossing principals", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const kit = app.plugins;
+    const alice = kit.asUser(request("alice"));
+    const bob = kit.asUser(request("bob"));
+
+    // Same handle: repeated access returns the identical wrapper (memoized,
+    // not rebuilt on every read).
+    expect(alice.identity).toBe(alice.identity);
+
+    // Different handles: different wrappers, so one request's scoped export is
+    // never shared with another principal.
+    expect(alice.identity).not.toBe(bob.identity);
+
+    // Each memoized wrapper still resolves to its own principal.
+    expect(alice.identity.read()).toBe("bound:user:alice");
+    expect(bob.identity.read()).toBe("bound:user:bob");
+    // And again, proving the cached wrapper did not latch the first caller.
+    expect(alice.identity.read()).toBe("bound:user:alice");
+    expect(bob.identity.read()).toBe("bound:user:bob");
+    expect(getCurrentPrincipalKey()).toBe("app");
+  });
+
+  test("restores the parent scope after failures and isolates concurrent users", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const alice = app.plugins.asUser(request("alice"));
+    const bob = app.plugins.asUser(request("bob"));
+    await alice.run(async () => {
+      await expect(bob.run((kit) => kit.identity.fail())).rejects.toThrow(
+        "scope failure",
+      );
+      expect(getCurrentPrincipalKey()).toBe("user:alice");
+    });
+    const values = await Promise.all(
+      [alice, bob].map((scope) =>
+        scope.run(async (kit) => {
+          await new Promise((resolve) => setImmediate(resolve));
+          return kit.identity.read();
+        }),
+      ),
+    );
+    expect(values).toEqual(["bound:user:alice", "bound:user:bob"]);
+    expect(getCurrentPrincipalKey()).toBe("app");
+  });
+
+  test("keeps shorthand streams scoped when consumed outside the original call", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const stream = app.plugins.asUser(request("alice")).identity.stream();
+    const keys: string[] = [];
+    for await (const key of stream) keys.push(key);
+    expect(keys).toEqual(["user:alice", "user:alice"]);
+    expect(getCurrentPrincipalKey()).toBe("app");
+    const direct = app.plugins.asUser(request("bob")).identity.stream();
+    expect(await direct.next()).toEqual({ done: false, value: "user:bob" });
+    await direct.return();
+    expect(getCurrentPrincipalKey()).toBe("app");
+  });
+
+  test("marks dev fallback without widening an existing caller scope", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    vi.stubEnv("NODE_ENV", "development");
+    const manager = new AsyncLocalStorageContextManager().enable();
+    otelContext.setGlobalContextManager(manager);
+    try {
+      const fallback = app.plugins.asUser(createMockRequest());
+      await fallback.run(() => {
+        expect(getCurrentPrincipalKey()).toBe("app");
+        expect(isDevOboFallback()).toBe(true);
+      });
+      await app.plugins.asUser(request("alice")).run(() =>
+        fallback.run(() => {
+          expect(getCurrentPrincipalKey()).toBe("user:alice");
+          expect(isDevOboFallback()).toBe(true);
+        }),
+      );
+      expect(isDevOboFallback()).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      otelContext.disable();
+      manager.disable();
+    }
+  });
+
+  test("blocks principal chaining and has no public asApp", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const scoped = app.plugins.asUser(request("alice"));
+    expect(scoped).not.toHaveProperty("asUser");
+    expect(scoped).not.toHaveProperty("asApp");
+    expect(scoped.identity).not.toHaveProperty("asUser");
+    expect(scoped.identity).not.toHaveProperty("asOther");
+    expect(app.plugins).not.toHaveProperty("asApp");
+    expectTypeOf(scoped).not.toHaveProperty("asUser");
+    expectTypeOf(scoped.identity).not.toHaveProperty("asUser");
+  });
+
+  test("fails closed for missing token or user identity outside development", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    expect(() => app.plugins.asUser(createMockRequest())).toThrow("token");
+    expect(() =>
+      app.plugins.asUser(
+        createMockRequest({ headers: { "x-forwarded-access-token": "token" } }),
+      ),
+    ).toThrow();
+  });
+
+  test("partitions cache results and in-flight work by principal even with identical legacy keys", async () => {
+    await using app = await createTestApp({
+      plugins: [identity()],
+      server: false,
+    });
+    const cache = CacheManager.getInstanceSync();
+    const execute = vi.fn(async () => getCurrentPrincipalKey());
+    const read = () =>
+      cache.getOrExecute(["identity"], execute, "same-legacy-key");
+    expect(await read()).toBe("app");
+    const results = await Promise.all(
+      ["alice", "bob", "alice"].map((user) =>
+        app.plugins.asUser(request(user)).run(read),
+      ),
+    );
+    expect(results).toEqual(["user:alice", "user:bob", "user:alice"]);
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(await read()).toBe("app");
+  });
+});
+
+describe("agents HTTP identity boundary", () => {
+  const paths = ["/invocations", "/responses", "/api/agents/chat"];
+  const body = (path: string) =>
+    path.endsWith("chat") ? { message: "hello" } : { input: "hello" };
+
+  // The model call and hand-rolled tools see the ambient principal; plugin
+  // tools get user scope per call from executeTool.
+  const adapter: AgentAdapter = {
+    async *run(_input, ctx) {
+      const model = getCurrentPrincipalKey();
+      const plugin = await ctx.executeTool("identity.read", {});
+      const handRolled = await ctx.executeTool("whoami", {});
+      yield {
+        type: "message_delta",
+        content: `model=${model} plugin=${plugin} handRolled=${handRolled}`,
+      };
+      yield { type: "status", status: "complete" };
+    },
+  };
+  const whoami = tool({
+    description: "Report the principal seen by a hand-rolled tool",
+    schema: z.object({}),
+    execute: () => getCurrentPrincipalKey(),
+  });
+
+  test.each(paths)(
+    "%s runs plugin tools as the user and the model and hand-rolled tools as the app",
+    async (path) => {
+      await using app = await createTestApp({
+        plugins: [
+          identity(),
+          agents({
+            agents: {
+              probe: {
+                instructions: "Identify the caller",
+                model: adapter,
+                tools: (plugins) => ({
+                  ...plugins.identity.toolkit(),
+                  whoami,
+                }),
+              },
+            },
+          }),
+        ],
+      });
+      const response = await app.post(path, {
+        body: body(path),
+        obo: { userId: "alice" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(
+        "model=app plugin=user:alice handRolled=app",
+      );
+      expect(getCurrentPrincipalKey()).toBe("app");
+    },
+  );
+
+  test("sub-agents follow the same split", async () => {
+    const parent: AgentAdapter = {
+      async *run(_input, ctx) {
+        const child = await ctx.executeTool("agent-child", { input: "go" });
+        yield { type: "message_delta", content: `child[${child}]` };
+        yield { type: "status", status: "complete" };
+      },
+    };
+    const child: AgentDefinition = {
+      instructions: "Identify the caller",
+      model: adapter,
+      tools: (plugins) => ({
+        ...plugins.identity.toolkit(),
+        whoami,
+      }),
+    };
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          agents: {
+            probe: {
+              default: true,
+              instructions: "Delegate",
+              model: parent,
+              agents: { child },
+            },
+            child,
+          },
+        }),
+      ],
+    });
+    const response = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(
+      "model=app plugin=user:alice handRolled=app",
+    );
+  });
+
+  test.each(paths)(
+    "%s rejects a plugin tool call without a user token and never runs it as the app",
+    async (path) => {
+      const executeAgentTool = vi.spyOn(
+        IdentityPlugin.prototype,
+        "executeAgentTool",
+      );
+      await using app = await createTestApp({
+        plugins: [
+          identity(),
+          agents({
+            agents: {
+              probe: {
+                instructions: "Identify the caller",
+                model: adapter,
+                tools: (plugins) => plugins.identity.toolkit(),
+              },
+            },
+          }),
+        ],
+      });
+      const response = await app.post(path, {
+        body: body(path),
+        headers: { "x-forwarded-user": "alice" },
+      });
+      const text = await response.text();
+      expect(executeAgentTool).not.toHaveBeenCalled();
+      expect(text).not.toContain("plugin=app");
+      executeAgentTool.mockRestore();
+    },
+  );
+});

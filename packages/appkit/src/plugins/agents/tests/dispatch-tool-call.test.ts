@@ -369,8 +369,7 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
     expect(call[2]).toBe("query");
     expect(call[5]).toBe(90_000);
 
-    // The stub could never prove this: the real executeTool routed the call
-    // through the analytics provider's on-behalf-of (asUser) path.
+    // Direct dispatch establishes the forwarded user's scope.
     expect(mock.toolCalls).toHaveLength(1);
     expect(mock.toolCalls[0]).toMatchObject({
       plugin: "analytics",

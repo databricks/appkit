@@ -2,6 +2,7 @@ import { DatabasePluginError } from "../../../database/errors";
 import type { Row } from "../../../database/runtime";
 import type { AppKitTable } from "../../../database/schema-builder";
 import { filterOperatorsForKind } from "../../../database/schema-builder/types";
+import { isPlainObject as hasPlainObjectPrototype } from "../../../utils/is-plain-object";
 import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../defaults";
 import { type CompiledColumn, compileColumn, type JsonValue } from "./codecs";
 
@@ -45,8 +46,7 @@ export function isPlainObject(
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  return hasPlainObjectPrototype(value);
 }
 
 /** A serializer that breaks its contract is trusted code failing, not input. */

@@ -9,7 +9,7 @@ import type {
   CacheConfig,
   PluginConstructor,
   PluginData,
-  PluginMap,
+  AppKitApi,
 } from "shared";
 import { vi } from "vitest";
 
@@ -117,7 +117,7 @@ export interface TestApp<T extends Plugins> {
    * Plugin exports by manifest name. Nested rather than spread because `get` and
    * `delete` are plausible plugin names and would collide with the request methods.
    */
-  plugins: PluginMap<T>;
+  plugins: AppKitApi<T>;
   /** The same object a handler resolves at runtime. */
   client: WorkspaceClient;
   /** e.g. `http://127.0.0.1:54321`. Throws when `server: false`. */
@@ -389,7 +389,7 @@ export async function createTestApp<T extends Plugins>(
     };
 
     return {
-      plugins: bootedApp as unknown as PluginMap<T>,
+      plugins: bootedApp,
       client,
       get baseUrl() {
         if (baseUrl === undefined) {

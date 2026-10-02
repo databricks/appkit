@@ -1,6 +1,9 @@
 import type express from "express";
-import type { BasePlugin, IAppRequest, ToolProvider } from "shared";
+import type { BasePlugin, ToolProvider } from "shared";
 
+import { getCallerContext } from "../context/execution-context";
+import { createRequestScope } from "../context/request-scope";
+import { ServiceContext } from "../context/service-context";
 import { createLogger } from "../logging/logger";
 import {
   type ITelemetry,
@@ -22,13 +25,9 @@ interface RouteTarget {
 }
 
 /**
- * A tool-provider plugin that also exposes user-scoped execution. Plugins
- * derived from {@link Plugin} satisfy this implicitly because `asUser` lives
- * on the base class. {@link isToolProvider} narrows to this shape so
- * `executeTool` can call `asUser` without an unsafe cast.
+ * Tool execution inherits the caller scope established by the entry point.
  */
-type ToolProviderPlugin = BasePlugin &
-  ToolProvider & { asUser: (req: IAppRequest) => ToolProvider };
+type ToolProviderPlugin = BasePlugin & ToolProvider;
 
 /**
  * Lifecycle events emitted through {@link PluginContext.emitLifecycle}.
@@ -68,18 +67,29 @@ export class PluginContext {
     Set<() => void | Promise<void>>
   >();
   private telemetry: ITelemetry;
+  private createCallerContext: typeof ServiceContext.createCallerContext;
 
   /**
    * @param deps.telemetry - Telemetry provider used for `executeTool` spans.
-   *   Defaults to the shared `"plugin-context"` provider — the production
+   *   Defaults to the shared `"plugin-context"` provider, the production
    *   path. Injectable so the testing kit can pass a mock provider and run
-   *   `executeTool` without a live OpenTelemetry pipeline. This is the only
-   *   seam the mock context needs; route buffering and the tool registry are
+   *   `executeTool` without a live OpenTelemetry pipeline.
+   * @param deps.createCallerContext - Offline credential factory for tests.
+   *   Header validation and ALS remain real; route buffering and the registry are
    *   exercised through the existing public API.
    */
-  constructor(deps: { telemetry?: ITelemetry } = {}) {
+  constructor(
+    deps: {
+      telemetry?: ITelemetry;
+      /** @internal Credential factory seam for offline testing. */
+      createCallerContext?: typeof ServiceContext.createCallerContext;
+    } = {},
+  ) {
     this.telemetry =
       deps.telemetry ?? TelemetryManager.getProvider("plugin-context");
+    this.createCallerContext =
+      deps.createCallerContext ??
+      ((...args) => ServiceContext.createCallerContext(...args));
   }
 
   /**
@@ -190,15 +200,15 @@ export class PluginContext {
   }
 
   /**
-   * Execute a tool on a ToolProvider plugin with automatic user scoping
+   * Execute a tool on a ToolProvider plugin with the ambient principal
    * and telemetry.
    *
    * The context:
    * 1. Resolves the plugin by name
-   * 2. Calls `asUser(req)` for user-scoped execution
+   * 2. Inherits the caller, or establishes user scope from the request
    * 3. Wraps the call in a telemetry span with a configurable timeout
    *
-   * @param timeoutMs Per-call timeout. Defaults to 5 minutes — the floor
+   * @param timeoutMs Per-call timeout. Defaults to 5 minutes, the floor
    *   for cold SQL Warehouse round-trips, long Genie conversations, and
    *   busy serverless Lakebase queries. The agents plugin overrides this
    *   per-app via `agents({ limits: { toolCallTimeoutMs } })`.
@@ -221,35 +231,42 @@ export class PluginContext {
     const tracer = this.telemetry.getTracer();
     const operationName = `executeTool:${pluginName}.${toolName}`;
 
-    return tracer.startActiveSpan(operationName, async (span) => {
-      const timeoutSignal = AbortSignal.timeout(timeoutMs);
-      const combinedSignal = signal
-        ? AbortSignal.any([signal, timeoutSignal])
-        : timeoutSignal;
+    const executeInCurrentScope = () =>
+      tracer.startActiveSpan(operationName, async (span) => {
+        const timeoutSignal = AbortSignal.timeout(timeoutMs);
+        const combinedSignal = signal
+          ? AbortSignal.any([signal, timeoutSignal])
+          : timeoutSignal;
 
-      try {
-        const userScoped = provider.asUser(req);
-        const result = await userScoped.executeAgentTool(
-          toolName,
-          args,
-          combinedSignal,
+        try {
+          const result = await provider.executeAgentTool(
+            toolName,
+            args,
+            combinedSignal,
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message:
+              error instanceof Error ? error.message : "Tool execution failed",
+          });
+          span.recordException(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+          throw error;
+        } finally {
+          span.end();
+        }
+      });
+
+    // Inherit the caller or establish request user scope before the span and tool run.
+    return getCallerContext()
+      ? executeInCurrentScope()
+      : createRequestScope(req, this.createCallerContext).run(
+          executeInCurrentScope,
         );
-        span.setStatus({ code: SpanStatusCode.OK });
-        return result;
-      } catch (error) {
-        span.setStatus({
-          code: SpanStatusCode.ERROR,
-          message:
-            error instanceof Error ? error.message : "Tool execution failed",
-        });
-        span.recordException(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
   }
 
   /**
@@ -342,10 +359,7 @@ export class PluginContext {
 }
 
 /**
- * Type guard: checks whether a plugin implements the ToolProvider interface
- * and exposes the user-scoped `asUser` helper that the {@link Plugin} base
- * class provides. Narrowing to {@link ToolProviderPlugin} lets `executeTool`
- * call `asUser` without an unsafe cast.
+ * Type guard for the tool-provider methods. Identity comes from the ALS scope.
  */
 export function isToolProvider(plugin: unknown): plugin is ToolProviderPlugin {
   return (
@@ -354,8 +368,6 @@ export function isToolProvider(plugin: unknown): plugin is ToolProviderPlugin {
     "getAgentTools" in plugin &&
     typeof (plugin as ToolProvider).getAgentTools === "function" &&
     "executeAgentTool" in plugin &&
-    typeof (plugin as ToolProvider).executeAgentTool === "function" &&
-    "asUser" in plugin &&
-    typeof (plugin as { asUser?: unknown }).asUser === "function"
+    typeof (plugin as ToolProvider).executeAgentTool === "function"
   );
 }

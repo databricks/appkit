@@ -93,6 +93,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.ServiceContext",
+          label: "ServiceContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.SupervisorApiAdapter",
           label: "SupervisorApiAdapter"
         },
@@ -615,6 +620,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AppKitApi",
+          label: "AppKitApi"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.BaseSystemPromptOption",
           label: "BaseSystemPromptOption"
         },
@@ -735,6 +745,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ScopedPluginMap",
+          label: "ScopedPluginMap"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.SearchFilters",
           label: "SearchFilters"
         },
@@ -767,6 +782,17 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.TransactionClient",
           label: "TransactionClient"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.UserContext",
+          label: "UserContext",
+          className: "typedoc-sidebar-item-deprecated"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.UserScopedApp",
+          label: "UserScopedApp"
         }
       ]
     },
@@ -1012,6 +1038,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.getCallerContext",
+          label: "getCallerContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.getCurrentActorId",
           label: "getCurrentActorId"
         },
@@ -1019,6 +1050,12 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getCurrentPrincipalKey",
           label: "getCurrentPrincipalKey"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getCurrentUserId",
+          label: "getCurrentUserId",
+          className: "typedoc-sidebar-item-deprecated"
         },
         {
           type: "doc",
@@ -1044,6 +1081,12 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getResourceRequirements",
           label: "getResourceRequirements"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getUserContext",
+          label: "getUserContext",
+          className: "typedoc-sidebar-item-deprecated"
         },
         {
           type: "doc",
@@ -1087,6 +1130,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.isInUserContext",
+          label: "isInUserContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isJudgeConfigured",
           label: "isJudgeConfigured"
         },
@@ -1104,6 +1152,12 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.isToolkitEntry",
           label: "isToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isUserContext",
+          label: "isUserContext",
+          className: "typedoc-sidebar-item-deprecated"
         },
         {
           type: "doc",
@@ -1184,6 +1238,17 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.runEvalsInDir",
           label: "runEvalsInDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runInCallerContext",
+          label: "runInCallerContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runInUserContext",
+          label: "runInUserContext",
+          className: "typedoc-sidebar-item-deprecated"
         },
         {
           type: "doc",
