@@ -26,6 +26,7 @@ Examples:
 
 ```
 /packages/
+  /app-analytics/   - Browser App Analytics SDK (OTLP/HTTP JSON to the server's /_analytics/v1/logs relay)
   /appkit/          - Core SDK with plugin architecture
   /appkit-ui/       - React components and JS utilities
   /lakebase/        - Standalone Lakebase (PostgreSQL) connector package
