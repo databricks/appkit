@@ -88,6 +88,24 @@ class DownloadPlugin extends Plugin {
   }
 }
 const download = toPlugin(DownloadPlugin);
+class DataPlugin extends Plugin {
+  static manifest = { ...IdentityPlugin.manifest, name: "data" as const };
+  exports() {
+    return {
+      query: () => ({ rows: [{ id: 1 }], meta: { total: 1 } }),
+      handle: () => ({ id: "h", read: () => getCurrentPrincipalKey() }),
+      asCsv: () => "id\n1",
+    };
+  }
+}
+const data = toPlugin(DataPlugin);
+const scopedSurfaces: Array<[string, (app: any) => any]> = [
+  ["appkit.asUser(req)", (app) => app.plugins.asUser(request("alice")).data],
+  [
+    "deprecated appkit.<plugin>.asUser(req)",
+    (app) => app.plugins.data.asUser(request("alice")),
+  ],
+];
 const request = (userId: string) =>
   createMockRequest({ obo: { userId, token: `${userId}-token` } });
 
@@ -236,6 +254,48 @@ describe("app-level caller scope", () => {
     expect(Array.from(Buffer.concat(chunks))).toEqual(BYTES);
   });
 
+  test.each(scopedSurfaces)(
+    "returns plain data results unchanged through %s",
+    async (_, scoped) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await using app = await createTestApp({
+        plugins: [data()],
+        server: false,
+      });
+      const result = scoped(app).query();
+      expect(result).toEqual(app.plugins.data.query());
+      expect(result.meta).toBe(result.meta);
+      result.rows = [{ id: 2 }];
+      expect(result.rows).toEqual([{ id: 2 }]);
+    },
+  );
+
+  test.each(scopedSurfaces)(
+    "still runs returned handle methods in the caller scope through %s",
+    async (_, scoped) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await using app = await createTestApp({
+        plugins: [data()],
+        server: false,
+      });
+      expect(scoped(app).handle().read()).toBe("user:alice");
+      expect(app.plugins.data.handle().read()).toBe("app");
+    },
+  );
+
+  test.each(scopedSurfaces)(
+    "keeps non-identity as* exports callable but blocks asUser through %s",
+    async (_, scoped) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await using app = await createTestApp({
+        plugins: [data()],
+        server: false,
+      });
+      expect(scoped(app).asCsv()).toBe("id\n1");
+      expect(scoped(app).asUser).toBeUndefined();
+    },
+  );
+
   test("keeps shorthand streams scoped when consumed outside the original call", async () => {
     await using app = await createTestApp({
       plugins: [identity()],
@@ -289,7 +349,6 @@ describe("app-level caller scope", () => {
     expect(scoped).not.toHaveProperty("asUser");
     expect(scoped).not.toHaveProperty("asApp");
     expect(scoped.identity).not.toHaveProperty("asUser");
-    expect(scoped.identity).not.toHaveProperty("asOther");
     expect(app.plugins).not.toHaveProperty("asApp");
     expectTypeOf(scoped).not.toHaveProperty("asUser");
     expectTypeOf(scoped.identity).not.toHaveProperty("asUser");
