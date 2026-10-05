@@ -15,8 +15,40 @@ const EXCLUDED_FROM_PROXY = new Set([
   "constructor",
 ]);
 
+// Methods that would re-scope a scoped surface to another identity. Only
+// these are hidden; other `as*` names (asCsv, asArrow) are ordinary exports.
+const IDENTITY_METHODS: ReadonlySet<PropertyKey> = new Set(["asUser"]);
+
 function isIdentityMethod(key: PropertyKey): boolean {
-  return typeof key === "string" && /^as[A-Z]/.test(key);
+  return IDENTITY_METHODS.has(key);
+}
+
+function isNativeStream(value: unknown): boolean {
+  return (
+    (typeof ReadableStream !== "undefined" &&
+      value instanceof ReadableStream) ||
+    value instanceof Readable
+  );
+}
+
+/**
+ * Whether a value can run code later and so must run in the caller scope:
+ * a function, a Promise, a non-native async iterable, or a plain object
+ * reaching one of those through its own properties. Getter properties count,
+ * and are not invoked here. Arrays and other objects are plain data, as before.
+ */
+function needsScope(value: unknown, seen = new Set<object>()): boolean {
+  if (typeof value === "function" || value instanceof Promise) return true;
+  if (!value || typeof value !== "object" || isNativeStream(value)) {
+    return false;
+  }
+  if (Symbol.asyncIterator in value) return true;
+  if (!isPlainObject(value) || seen.has(value)) return false;
+  seen.add(value);
+  return Reflect.ownKeys(value).some((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor?.get !== undefined || needsScope(descriptor?.value, seen);
+  });
 }
 
 /** Preserve identity across callable exports, returned handles, and lazy streams. */
@@ -44,11 +76,7 @@ export function scopeApi<T>(
   // Native streams pass through unchanged. The authenticated request already
   // ran inside the caller scope; reading the body is pure data with no
   // deferred identity work, and wrapping would strip getReader/pipe/cancel.
-  if (
-    (typeof ReadableStream !== "undefined" &&
-      value instanceof ReadableStream) ||
-    value instanceof Readable
-  ) {
+  if (isNativeStream(value)) {
     return value;
   }
   if (value && typeof value === "object" && Symbol.asyncIterator in value) {
@@ -81,18 +109,24 @@ export function scopeApi<T>(
     } as T;
   }
   if (isPlainObject(value)) {
+    // Plain data results come back unchanged: mutable and identity-stable.
+    if (!needsScope(value)) return value;
     const result = Object.create(Object.getPrototypeOf(value));
     for (const key of Reflect.ownKeys(value)) {
       if (isIdentityMethod(key)) continue;
       Object.defineProperty(result, key, {
         enumerable: Object.getOwnPropertyDescriptor(value, key)?.enumerable,
         configurable: true,
-        get: () =>
-          scopeApi(
-            scope.run(() => Reflect.get(value, key)),
-            scope,
-            receiver ?? value,
-          ),
+        get: () => {
+          const member = scope.run(() => Reflect.get(value, key));
+          // Data members are returned as-is so repeated reads are identical.
+          return needsScope(member)
+            ? scopeApi(member, scope, receiver ?? value)
+            : member;
+        },
+        set: (next: unknown) => {
+          Reflect.set(value, key, next);
+        },
       });
     }
     return result;
