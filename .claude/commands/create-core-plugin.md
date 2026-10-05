@@ -385,6 +385,7 @@ If the plugin performs operations on behalf of the logged-in user via `this.asUs
 | Scope | When to use |
 |-------|-------------|
 | `sql` | Plugin executes SQL queries on behalf of the user (e.g. analytics `.obo.sql` files) |
+| `ai-functions` | Plugin calls AI Functions on behalf of the user |
 | `dashboards.genie` | Plugin interacts with Genie AI/BI spaces on behalf of the user |
 | `files.files` | Plugin reads/writes files on behalf of the user |
 

@@ -96,6 +96,31 @@
       },
       "stability": "beta"
     },
+    "aiFunctions": {
+      "name": "aiFunctions",
+      "displayName": "AI Functions Plugin",
+      "description": "Call Databricks AI Functions for classification, extraction, and structured decisions",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      },
+      "scopes": [
+        "ai-functions"
+      ],
+      "stability": "beta",
+      "scaffolding": {
+        "rules": {
+          "must": [
+            "Define tasks in a shared file, such as shared/ai-tasks.ts, and pass aiFunctions({ tasks }) in the server file",
+            "Call tasks from the client with useAiFunction from @databricks/appkit-ui/react/beta"
+          ],
+          "should": [
+            "Use auth: \"on-behalf-of-user\" only when calls should be attributed to the signed-in user"
+          ]
+        }
+      }
+    },
     "aiSearch": {
       "name": "aiSearch",
       "displayName": "AI Search Plugin",

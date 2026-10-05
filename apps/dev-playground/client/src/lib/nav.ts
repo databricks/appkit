@@ -16,6 +16,7 @@ import {
   ServerIcon,
   ShieldIcon,
   SigmaIcon,
+  TagsIcon,
   Wand2Icon,
   ZapIcon,
 } from "lucide-react";
@@ -143,6 +144,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Semantic search backed by Databricks vector indexes, wired into AppKit's retrieval API.",
         icon: SearchIcon,
+      },
+      {
+        to: "/ai-functions",
+        label: "AI Functions",
+        description:
+          "Classify, extract, and decide over text, as the signed-in user or the service principal.",
+        icon: TagsIcon,
       },
       {
         to: "/serving",

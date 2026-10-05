@@ -51,12 +51,16 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [CallerContext](Interface.CallerContext.md) | Caller identity and workspace for one immutable execution scope. |
+| [ClassifyRequest](Interface.ClassifyRequest.md) | - |
+| [ClassifyResponse](Interface.ClassifyResponse.md) | - |
 | [CustomJudgeSpec](Interface.CustomJudgeSpec.md) | A custom LLM-judge definition: a prompt template and choice→score mapping. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [DatabaseRegistry](Interface.DatabaseRegistry.md) | CANONICAL augmentation target. Empty by default; the generated `database.d.ts` augments it via `declare module "@databricks/appkit" { interface DatabaseRegistry { ... } }`. |
 | [DatabaseValidationIssue](Interface.DatabaseValidationIssue.md) | One rejected field; `path` names public columns, never their values. |
 | [DatabricksAuth](Interface.DatabricksAuth.md) | Resolved Databricks host + bearer token for the eval runner's REST calls. |
 | [DatasetRow](Interface.DatasetRow.md) | One row of a managed evaluation dataset. `inputs` are the kwargs passed to the agent for the turn; `expectations` (when present) is the row's ground truth / guidelines. Mirrors the `{inputs, expectations}` shape of `mlflow.genai` datasets and of the Unity Catalog table backing a managed eval dataset. |
+| [DecideRequest](Interface.DecideRequest.md) | - |
+| [DecideResponse](Interface.DecideResponse.md) | - |
 | [DiscoveredEval](Interface.DiscoveredEval.md) | An eval file found under `server/agents/<agent>/evals/`. |
 | [DiscoveredEvalConfig](Interface.DiscoveredEvalConfig.md) | A per-agent `evals.config.ts` found under `server/agents/<agent>/evals/`. |
 | [DriveResult](Interface.DriveResult.md) | What a driver returns for a single `t.send`. |
@@ -68,6 +72,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [EvalRunSummary](Interface.EvalRunSummary.md) | - |
 | [EvalSummary](Interface.EvalSummary.md) | - |
 | [EvalWebServer](Interface.EvalWebServer.md) | Auto-start config for the app under test, à la Playwright's `webServer`. When set in a root `evals.config.ts`, the CLI boots the app before running evals and tears it down after — so you don't have to start the server by hand. |
+| [ExtractRequest](Interface.ExtractRequest.md) | - |
+| [ExtractResponse](Interface.ExtractResponse.md) | - |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
 | [FunctionTool](Interface.FunctionTool.md) | - |
@@ -77,6 +83,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [HookContext](Interface.HookContext.md) | Which entity is being mutated, and the surface a hook may write through. |
 | [HostedSupervisorTool](Interface.HostedSupervisorTool.md) | Tagged record returned by every [supervisorTools](Variable.supervisorTools.md) factory. The `__kind` discriminator lets the agents plugin (and standalone `runAgent`) classify these tools without a structural match against the wire format — keeps the SA wire shape free to evolve and avoids namespace collisions with MCP hosted tools (which use `type: "genie-space"` hyphenated, vs SA's `type: "genie_space"` underscored). |
 | [HttpDriverOptions](Interface.HttpDriverOptions.md) | - |
+| [IAiFunctionsConfig](Interface.IAiFunctionsConfig.md) | Base configuration interface for AppKit plugins |
 | [IAiSearchConfig](Interface.IAiSearchConfig.md) | Base configuration interface for AppKit plugins |
 | [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
 | [IndexConfig](Interface.IndexConfig.md) | - |
@@ -143,6 +150,10 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
 | [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
+| [AiFunctionTask](TypeAlias.AiFunctionTask.md) | An AI Functions REST request minus its input, plus `function`. |
+| [AiFunctionTaskInput](TypeAlias.AiFunctionTaskInput.md) | `{ content }` for classify and extract, `{ state }` for decide. |
+| [AiFunctionTaskResult](TypeAlias.AiFunctionTaskResult.md) | The response type a task produces, inferred from its definition. |
+| [AiFunctionTasks](TypeAlias.AiFunctionTasks.md) | A named set of tasks, keyed by task name. |
 | [AppKitApi](TypeAlias.AppKitApi.md) | App instance with plugin exports and an explicit caller-scoped entry point. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [CallerPrincipal](TypeAlias.CallerPrincipal.md) | The caller identity whose permissions authorize execution, not its resources. |
@@ -155,6 +166,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |
 | [ExecutionContext](TypeAlias.ExecutionContext.md) | - |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
+| [ExtractField](TypeAlias.ExtractField.md) | - |
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
 | [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
 | [HostedTool](TypeAlias.HostedTool.md) | - |
@@ -184,6 +196,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | Variable | Description |
 | ------ | ------ |
 | [agents](Variable.agents.md) | Plugin factory for the agents plugin. Discovers agents from `server/agents/<id>/agent.{ts,md}` by default (markdown still in `config/agents/` is read as a deprecated fallback), resolves toolkits/tools from registered plugins, exposes the `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
+| [aiFunctions](Variable.aiFunctions.md) | - |
 | [aiSearch](Variable.aiSearch.md) | - |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
@@ -202,6 +215,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [bigint](Function.bigint.md) | - |
 | [boolean](Function.boolean.md) | - |
 | [buildAssessments](Function.buildAssessments.md) | - |
+| [citedText](Function.citedText.md) | Returns the text each of a field's span citations points to, sliced from the same `content` string sent to extract. Returns `[]` for bounding-box citations, non-string content, or fields without citations. |
 | [configureJudge](Function.configureJudge.md) | Configure the judge once. Sets the OpenAI-compatible client env autoevals reads and the default judge model. No-op-safe: on failure, judging stays disabled and [isJudgeConfigured](Function.isJudgeConfigured.md) returns false. |
 | [createAgent](Function.createAgent.md) | Pure factory for agent definitions: cycle-detects the sub-agent graph and returns the same object, stamped with a non-enumerable AGENT\_BRAND so discovery recognizes it. Safe at module top-level; no adapter is built. Don't `Object.freeze` the definition before passing it in — the brand is written onto the argument. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
@@ -222,6 +236,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [evalGlyph](Function.evalGlyph.md) | Status glyph for a single eval result. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
+| [extractValues](Function.extractValues.md) | Removes the `{ value }` wrappers from an extract response, guided by the schema that produced it. Missing leaves become `null`, missing arrays `[]`. Returns `undefined` when the response has no `response` field. |
 | [findRootEvalConfig](Function.findRootEvalConfig.md) | Path to the root `evals.config.ts` (from [defineEvalConfig](Function.defineEvalConfig.md)) at `<rootDir>/evals.config.ts`, or `undefined` when absent. The root config holds run-wide settings (`baseUrl`, `webServer`); it's distinct from the per-agent configs found by [discoverEvalConfigs](Function.discoverEvalConfigs.md). |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
 | [fk](Function.fk.md) | Declare foreign-key to another column. |
@@ -277,6 +292,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [runInCallerContext](Function.runInCallerContext.md) | Run a function with an immutable snapshot of the caller context. Nested and concurrent scopes keep their own identities. |
 | [~~runInUserContext~~](Function.runInUserContext.md) | - |
 | [runWithRetries](Function.runWithRetries.md) | Run `attempt` up to `1 + retries` times, stopping as soon as it returns a result that is neither a thrown error / per-eval timeout (`error`) nor a transport/agent turn failure (`infraFailure`). Assertion failures set neither, so a failed-but-completed eval is returned on the first try and never retried. Returns the last result when every attempt failed on infra. |
+| [scoreLevel](Function.scoreLevel.md) | Maps a decide score (a probability-weighted average of level indexes) to its nearest level, clamped to the legend's range. |
 | [summarize](Function.summarize.md) | - |
 | [text](Function.text.md) | - |
 | [timestamp](Function.timestamp.md) | - |

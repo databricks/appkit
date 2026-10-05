@@ -304,6 +304,7 @@ optional scopes: (
   | "files"
   | "vector-search"
   | "catalog.connections"
+  | "ai-functions"
   | "ai-gateway"
   | "mcp.external"
   | "mcp.functions"

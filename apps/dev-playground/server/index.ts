@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import {
+  AppKitError,
   analytics,
   createApp,
   createWorkspaceClient,
@@ -12,8 +13,15 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch, database, runAgent } from "@databricks/appkit/beta";
+import {
+  agents,
+  aiFunctions,
+  aiSearch,
+  database,
+  runAgent,
+} from "@databricks/appkit/beta";
 
+import { playgroundTasks } from "../shared/ai-tasks";
 import redactor from "./agents/redactor/agent";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -186,6 +194,7 @@ createApp({
         },
       },
     }),
+    aiFunctions({ tasks: playgroundTasks }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
   async onPluginsReady(appkit) {
@@ -269,6 +278,66 @@ createApp({
             });
           });
       });
+
+      // ── AI Functions examples ──────────
+
+      /**
+       * Reports who the playground's task routes run as (the examples' tasks
+       * use `on-behalf-of-user`). Without a forwarded user token, local dev
+       * falls back to the service principal.
+       */
+      app.get("/api/ai-functions-demo/identity", (req, res) => {
+        res.json({
+          user: req.header("x-forwarded-user") ?? null,
+          userTokenPresent:
+            (req.header("x-forwarded-access-token")?.length ?? 0) > 0,
+        });
+      });
+
+      /**
+       * Demo only: run any request as the service principal or the signed-in
+       * user. Real apps should expose named tasks instead
+       * (POST /api/ai-functions/:task/invoke), so the browser can't send
+       * arbitrary prompts or spend the service principal's access.
+       */
+      // Mounted only when NODE_ENV=development or AIFN_DEMO_ROUTES=1 (matching
+      // core's asUser check). A deployed playground (pnpm deploy:playground)
+      // doesn't set NODE_ENV, and would otherwise let any signed-in user send
+      // arbitrary prompts as the service principal.
+      const demoRoutes =
+        process.env.NODE_ENV === "development" ||
+        process.env.AIFN_DEMO_ROUTES === "1";
+      for (const mode of demoRoutes ? (["as-sp", "as-user"] as const) : []) {
+        app.post(`/api/ai-functions-demo/:fn/${mode}`, async (req, res) => {
+          // asUser throws AuthenticationError (401) without a token in production,
+          // so it's resolved lazily, inside the try below.
+          const api = () =>
+            mode === "as-user"
+              ? appkit.asUser(req).aiFunctions
+              : appkit.aiFunctions;
+          const runners: Record<string, () => Promise<unknown>> = {
+            classify: () => api().classify(req.body),
+            extract: () => api().extract(req.body),
+            decide: () => api().decide(req.body),
+          };
+          const fn = req.params.fn;
+          const run = Object.hasOwn(runners, fn) ? runners[fn] : undefined;
+          if (!run) {
+            res.status(404).json({ error: `Unknown function: ${fn}` });
+            return;
+          }
+          try {
+            res.json(await run());
+          } catch (error) {
+            if (error instanceof AppKitError) {
+              res.status(error.statusCode).json({ error: error.clientMessage });
+              return;
+            }
+            console.error("[ai-functions-demo] failed:", error);
+            res.status(500).json({ error: "AI Functions demo request failed" });
+          }
+        });
+      }
 
       /**
        * Echoes the user identity the server sees. Useful for confirming
