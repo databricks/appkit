@@ -101,7 +101,7 @@ async function discoverWarehouseId(client: WorkspaceClient): Promise<string> {
       );
     });
 
-    if (response.warehouses.length === 0) {
+    if (warehouses.length === 0) {
       throw ConfigurationError.resourceNotFound(
         "Warehouse ID",
         "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
