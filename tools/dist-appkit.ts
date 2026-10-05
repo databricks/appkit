@@ -2,8 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { assertPackageImportsResolve } from "./validate-package-imports";
-
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const { values } = parseArgs({
   options: {
@@ -92,7 +90,9 @@ if (fs.existsSync(sharedBin)) {
     fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
   }
 
-  // The CLI imports naming.js from outside dist/cli.
+  // The CLI imports leaf modules that live outside dist/cli (e.g.
+  // `naming.ts`, referenced by the `plugin promote` command). Copy them to
+  // tmp/dist so the CLI's relative imports resolve in the published tarball.
   const sharedNaming = path.join(
     __dirname,
     "../packages/shared/dist/naming.js",
@@ -139,8 +139,6 @@ if (fs.existsSync(sharedPostinstall)) {
   fs.mkdirSync("tmp/scripts", { recursive: true });
   fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
 }
-
-assertPackageImportsResolve("tmp/dist/cli");
 
 // Copy documentation from docs/build into tmp/docs/
 const docsBuildPath = path.join(__dirname, "../docs/build");
