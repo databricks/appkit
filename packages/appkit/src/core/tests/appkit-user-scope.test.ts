@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { context as otelContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import type { AgentAdapter, AgentToolDefinition, ToolProvider } from "shared";
@@ -66,6 +68,26 @@ class CallablePlugin extends Plugin {
 }
 const identity = toPlugin(IdentityPlugin);
 const callable = toPlugin(CallablePlugin);
+const BYTES = [104, 105];
+class DownloadPlugin extends Plugin {
+  static manifest = { ...IdentityPlugin.manifest, name: "download" as const };
+  exports() {
+    return {
+      // Files-style download: the authenticated request already ran, the
+      // body is a native web stream.
+      download: async () => ({
+        contents: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(BYTES));
+            controller.close();
+          },
+        }),
+      }),
+      nodeStream: () => Readable.from([Buffer.from(BYTES)]),
+    };
+  }
+}
+const download = toPlugin(DownloadPlugin);
 const request = (userId: string) =>
   createMockRequest({ obo: { userId, token: `${userId}-token` } });
 
@@ -171,6 +193,47 @@ describe("app-level caller scope", () => {
     );
     expect(values).toEqual(["bound:user:alice", "bound:user:bob"]);
     expect(getCurrentPrincipalKey()).toBe("app");
+  });
+
+  test.each([
+    [
+      "appkit.asUser(req)",
+      (app: any) => app.plugins.asUser(request("alice")).download,
+    ],
+    [
+      "deprecated plugin.asUser(req)",
+      (app: any) => app.plugins.download.asUser(request("alice")),
+    ],
+  ])(
+    "returns native ReadableStream downloads unchanged through %s",
+    async (_, scoped) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await using app = await createTestApp({
+        plugins: [download()],
+        server: false,
+      });
+      const { contents } = await scoped(app).download();
+      expect(contents).toBeInstanceOf(ReadableStream);
+      const reader = contents.getReader();
+      const { value } = await reader.read();
+      expect(Array.from(value)).toEqual(BYTES);
+      reader.releaseLock();
+
+      const { contents: second } = await scoped(app).download();
+      await expect(second.cancel()).resolves.toBeUndefined();
+    },
+  );
+
+  test("returns a Node Readable unchanged through the scoped API", async () => {
+    await using app = await createTestApp({
+      plugins: [download()],
+      server: false,
+    });
+    const stream = app.plugins.asUser(request("alice")).download.nodeStream();
+    expect(stream).toBeInstanceOf(Readable);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    expect(Array.from(Buffer.concat(chunks))).toEqual(BYTES);
   });
 
   test("keeps shorthand streams scoped when consumed outside the original call", async () => {
