@@ -17,6 +17,12 @@ resources:
       lifecycle:
         started: true
 
+{{- /* The `else if` plugin block below is a legacy fallback. It is still the
+  only scope source for CLIs older than per-resource auth mode (they never set
+  .bundle.userApiScopes) and for the new CLI in pure service-principal mode,
+  where a genie app still needs a user scope because genie routes always run
+  on behalf of the user. Remove it once the minimum supported CLI includes
+  auth mode AND the CLI emits plugin-level scopes in service-principal mode. */}}
 {{- if .bundle.userApiScopes}}
       user_api_scopes:
 {{.bundle.userApiScopes}}
