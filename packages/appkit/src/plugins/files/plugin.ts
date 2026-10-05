@@ -19,6 +19,7 @@ import {
   validateCustomContentTypes,
 } from "../../connectors/files";
 import {
+  getCallerContext,
   getCurrentPrincipalId,
   getExecutionContext,
   getWorkspaceClient,
@@ -1503,6 +1504,37 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * additional parent span is opened, so each call produces exactly one
    * `files.<operation>` span instead of two.
    */
+  /**
+   * Like `_wrapVolumeAPIWithSPSpan`, but picks `files.auth_mode` from the
+   * active scope at call time: "on-behalf-of-user" inside a caller scope
+   * (for example `appkit.asUser(req)`), "service-principal" otherwise.
+   */
+  private _wrapVolumeAPIWithScopeSpan(api: VolumeAPI): VolumeAPI {
+    const wrap =
+      <Args extends unknown[], R>(
+        operation: string,
+        fn: (...args: Args) => Promise<R>,
+      ): ((...args: Args) => Promise<R>) =>
+      (...args: Args) =>
+        this._withAuthModeAttributes(
+          operation,
+          getCallerContext() ? "on-behalf-of-user" : "service-principal",
+          () => fn(...args),
+        );
+
+    return {
+      list: wrap("list", api.list),
+      read: wrap("read", api.read),
+      download: wrap("download", api.download),
+      exists: wrap("exists", api.exists),
+      metadata: wrap("metadata", api.metadata),
+      upload: wrap("upload", api.upload),
+      createDirectory: wrap("createDirectory", api.createDirectory),
+      delete: wrap("delete", api.delete),
+      preview: wrap("preview", api.preview),
+    };
+  }
+
   private _wrapVolumeAPIWithSPSpan(api: VolumeAPI): VolumeAPI {
     const wrap =
       <Args extends unknown[], R>(
@@ -1803,19 +1835,21 @@ export class FilesPlugin extends Plugin implements ToolProvider {
         );
       }
 
-      // Lazy user resolution: getCurrentPrincipalId() is called when a method
-      // is invoked (policy check), not when exports() is called.
-      const spUser: FilePolicyUser = {
+      // Identity is resolved at call time from the active scope, not at
+      // export time: the default surface is also reached inside
+      // appkit.asUser(req), where the SDK call runs as the user, so the
+      // policy must see the user too (not a hardcoded service principal).
+      const policyUser: FilePolicyUser = {
         get id() {
           return getCurrentPrincipalId();
         },
-        isServicePrincipal: true,
+        get isServicePrincipal() {
+          return getCallerContext() === undefined;
+        },
       };
-      // Default (non-asUser) programmatic surface: every call is tagged
-      // with `files.auth_mode = "service-principal"` for telemetry parity
-      // with the HTTP route path.
-      const spApi = this._wrapVolumeAPIWithSPSpan(
-        this.createVolumeAPI(volumeKey, spUser),
+      // Tag `files.auth_mode` from the same scope at call time.
+      const spApi = this._wrapVolumeAPIWithScopeSpan(
+        this.createVolumeAPI(volumeKey, policyUser),
       );
 
       return {
