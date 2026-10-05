@@ -162,4 +162,25 @@ describe("warehouse resource bindings", () => {
       ).toHaveLength(1);
     }
   });
+  // Databricks list APIs omit empty arrays (`warehouses` is `omitempty`), so
+  // dev discovery must treat a missing key like an empty list.
+  test.each([
+    { name: "omitted warehouses key", response: {} },
+    { name: "empty warehouses list", response: { warehouses: [] } },
+  ])(
+    "dev discovery reports a missing warehouse for $name",
+    async ({ response }) => {
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "");
+      vi.stubEnv("DATABRICKS_APPS_AGENTIC_MODE", "");
+      const client = createMockWorkspaceClient();
+      vi.mocked(client.apiClient.request).mockResolvedValue(response);
+      const error = await WarehouseResource.resolve(client, true).catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(ConfigurationError);
+      expect(error).not.toBeInstanceOf(TypeError);
+      expect(client.apiClient.request).toHaveBeenCalledTimes(1);
+    },
+  );
 });
