@@ -3,6 +3,8 @@ import { PassThrough, Readable } from "node:stream";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { createRequestScope } from "../../../context/request-scope";
+import { scopeApi } from "../../../context/scoped-api";
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
@@ -14,7 +16,7 @@ import {
   FILES_WRITE_DEFAULTS,
 } from "../defaults";
 import { FilesPlugin, files } from "../plugin";
-import { PolicyDeniedError, policy } from "../policy";
+import { PolicyDeniedError, policy, type FilePolicyUser } from "../policy";
 
 const { mockClient, MockApiError } = await vi.hoisted(async () => {
   const mockFilesApi = {
@@ -3829,6 +3831,83 @@ describe("FilesPlugin", () => {
         (c) => c.attributes?.["files.auth_mode"] === "service-principal",
       );
       expect(sp).toBeDefined();
+    });
+
+    // appkit.asUser(req) scopes the default surface with these primitives.
+    const oboHeaders = {
+      "x-forwarded-access-token": "alice-token",
+      "x-forwarded-user": "alice@example.com",
+    };
+    const appkitAsUser = <T>(value: T) =>
+      scopeApi(
+        value,
+        createRequestScope(mockReq("uploads", oboHeaders) as any),
+      );
+
+    test("policy user reflects the active scope on the default surface", async () => {
+      const seen: FilePolicyUser[] = [];
+      const recorder = (_a: unknown, _r: unknown, user: FilePolicyUser) => {
+        seen.push({ id: user.id, isServicePrincipal: user.isServicePrincipal });
+        return true;
+      };
+      const plugin = new FilesPlugin({
+        volumes: { uploads: { policy: recorder }, exports: {} },
+      });
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {},
+      );
+      const handle = plugin.exports()("uploads");
+
+      await handle.list("d");
+      await appkitAsUser(handle).list("d");
+      await handle
+        .asUser({
+          header: (n: string) => (oboHeaders as any)[n.toLowerCase()],
+        } as any)
+        .list("d");
+
+      expect(seen[0].isServicePrincipal).toBe(true);
+      expect(seen[1]).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+      expect(seen[2]).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+    });
+
+    test("an SP-only policy denies appkit.asUser(req) but allows the default surface", async () => {
+      const spOnly = (_a: unknown, _r: unknown, user: FilePolicyUser) =>
+        user.isServicePrincipal === true;
+      const plugin = new FilesPlugin({
+        volumes: { uploads: { policy: spOnly }, exports: {} },
+      });
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {},
+      );
+      const handle = plugin.exports()("uploads");
+
+      await expect(handle.list("d")).resolves.toBeDefined();
+      await expect(appkitAsUser(handle).list("d")).rejects.toBeInstanceOf(
+        PolicyDeniedError,
+      );
+    });
+
+    test("appkit.asUser(req) tags files.auth_mode as on-behalf-of-user", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const calls = spyOnTelemetry(plugin);
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {},
+      );
+
+      await appkitAsUser(plugin.exports()("uploads")).list("d");
+
+      const modes = calls
+        .map((c) => c.attributes?.["files.auth_mode"])
+        .filter(Boolean);
+      expect(modes).toContain("on-behalf-of-user");
+      expect(modes).not.toContain("service-principal");
     });
   });
 
