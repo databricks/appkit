@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { isPlainObject } from "../utils/is-plain-object";
 import type { RequestScope } from "./request-scope";
 
@@ -38,6 +40,16 @@ export function scopeApi<T>(
   }
   if (value instanceof Promise) {
     return value.then((result) => scopeApi(result, scope)) as T;
+  }
+  // Native streams pass through unchanged. The authenticated request already
+  // ran inside the caller scope; reading the body is pure data with no
+  // deferred identity work, and wrapping would strip getReader/pipe/cancel.
+  if (
+    (typeof ReadableStream !== "undefined" &&
+      value instanceof ReadableStream) ||
+    value instanceof Readable
+  ) {
+    return value;
   }
   if (value && typeof value === "object" && Symbol.asyncIterator in value) {
     const iterable = value as AsyncIterable<unknown>;
