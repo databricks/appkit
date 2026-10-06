@@ -1670,7 +1670,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     entry: Extract<ResolvedToolEntry, { source: "skill" }>,
     args: unknown,
   ): Promise<string> {
-    return dispatchSkillTool(entry, args, () => this.skillWorkspaceClient());
+    // Catalog skills are a shared, app-owned pool: SP in every agent mode.
+    return runOutsideCallerScope(() =>
+      dispatchSkillTool(entry, args, () => this.skillWorkspaceClient()),
+    );
   }
 
   /**

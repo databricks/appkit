@@ -145,4 +145,33 @@ describe("read_skill_file reads a volume resource", () => {
     expect(result).toBe("the reference");
     expect(h.read).toHaveBeenCalledWith(h.client, `${VOL}/pdf/reference.md`);
   });
+
+  test("stays the service principal inside an on-behalf-of-user run", async () => {
+    const { getCurrentPrincipalKey, runInCallerContext } =
+      await import("../../../context");
+    const plugin = new AgentsPlugin({ dir: false, skillsVolume: VOL });
+    const catalog = resolveSkillCatalog({
+      agentName: "a",
+      perAgentSkills: [],
+      globalSkills: await (plugin as any).loadVolumeSkills(),
+      autoInherit: true,
+    });
+    let reader: string | undefined;
+    h.read.mockImplementationOnce(async () => {
+      reader = getCurrentPrincipalKey();
+      return "the reference";
+    });
+    const caller = {
+      principal: { type: "user" as const, userId: "alice" },
+      client: {} as never,
+      workspaceId: Promise.resolve("workspace"),
+    };
+    await runInCallerContext(caller, () =>
+      (plugin as any).dispatchSkillTool(
+        { source: "skill", builtin: "read_skill_file", catalog },
+        { skill: "pdf", path: "reference.md" },
+      ),
+    );
+    expect(reader).toBe("app");
+  });
 });

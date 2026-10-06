@@ -337,6 +337,7 @@ In markdown, set `auth: on-behalf-of-user` in the frontmatter. A per-agent value
 | Standalone `runAgent` | service principal, or user tools with `caller` | requires `caller` (or an ambient user scope); model and tools as user |
 | MLflow tracing | service principal | service principal (exception) |
 | Thread store | service principal | service principal (exception) |
+| Catalog skills volume | service principal | service principal (exception) |
 | Missing user token | plugin tools reject; the rest runs as the service principal | the request is rejected with 401 before any model or tool call |
 
 An on-behalf-of-user agent fails closed:
@@ -345,7 +346,7 @@ An on-behalf-of-user agent fails closed:
 - A `401` from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
 - A sub-agent never widens: under an on-behalf-of-user parent, a mixed sub-agent also runs as the user.
 
-**Exceptions.** MLflow tracing and the thread store are app-owned and stay service principal in every mode; thread rows are keyed by the user id.
+**Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
 
 **Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). An adapter you build yourself keeps the client you gave it; pass a provider so it resolves per call:
 
