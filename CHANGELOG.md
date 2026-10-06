@@ -172,6 +172,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.83.0](https://github.com/databricks/appkit/compare/v0.82.0...v0.83.0) (2026-10-06)
+
+### appkit
+
+* **appkit:** execution identity and resource provisioning base ([#592](https://github.com/databricks/appkit/issues/592)) ([2ea5835](https://github.com/databricks/appkit/commit/2ea5835240e679184e1b90678b048da9550b3e51))
+
+
 ## [0.82.0](https://github.com/databricks/appkit/compare/v0.81.0...v0.82.0) (2026-10-01)
 
 * make the app template package-manager-aware (pnpm-first + npm artifacts + detection) ([#593](https://github.com/databricks/appkit/issues/593)) ([b319233](https://github.com/databricks/appkit/commit/b319233d5949f0c5697a5fa4712c7de12976c0d2))
