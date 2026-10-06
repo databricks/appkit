@@ -4,6 +4,7 @@ import { CacheManager } from "../../cache";
 import { InMemoryStorage } from "../../cache/storage";
 import { ServiceContext } from "../../context";
 import { AuthenticationError } from "../../errors";
+import { getWarehouseId } from "../../resources";
 import { ApiError } from "../../workspace-client";
 import {
   createApiError,
@@ -153,6 +154,19 @@ describe("mockServiceContext — user context matches production", () => {
 
 describe("useServiceContextMock", () => {
   const ctx = useServiceContextMock({ warehouseId: "wh-1" });
+
+  test("warehouse resources do not depend on the deprecated context field", async () => {
+    const legacyRead = vi.fn(() => {
+      throw new Error("Deprecated context warehouse must not be read");
+    });
+    Object.defineProperty(ctx.current.serviceContext, "warehouseId", {
+      get: legacyRead,
+    });
+
+    expect(await getWarehouseId()).toBe("wh-1");
+    expect(legacyRead).not.toHaveBeenCalled();
+    expect(ctx.current.getSpy).not.toHaveBeenCalled();
+  });
 
   test(".current exposes the active mock, installed for this test", () => {
     // The spy is live: the real singleton getter is replaced.

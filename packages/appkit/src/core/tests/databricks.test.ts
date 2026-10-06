@@ -736,7 +736,7 @@ describe("AppKit", () => {
       initSpy.mockRestore();
     });
 
-    test("should call ServiceContext.initialize with warehouseId: true when a plugin requires sql_warehouse", async () => {
+    test("passes the warehouse ID resolved from the plugin's declared environment variable", async () => {
       const PluginWithRequiredResource = class extends CoreTestPlugin {
         static manifest: PluginManifest = {
           name: "withResource",
@@ -750,15 +750,15 @@ describe("AppKit", () => {
                 resourceKey: "warehouse",
                 description: "Warehouse",
                 permission: "CAN_USE",
-                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+                fields: { id: { env: "APPKIT_TEST_WAREHOUSE_ID" } },
               },
             ],
             optional: [],
           },
         };
       };
-      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
-      process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
+      vi.stubEnv("APPKIT_TEST_WAREHOUSE_ID", "wh-plugin");
+      vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "wh-unrelated");
       try {
         const contextModule = await import("../../context/service-context");
         const initSpy = vi.spyOn(contextModule.ServiceContext, "initialize");
@@ -771,11 +771,13 @@ describe("AppKit", () => {
             },
           ],
         });
-        expect(initSpy).toHaveBeenCalledWith({ warehouseId: true }, undefined);
+        expect(initSpy).toHaveBeenCalledWith(
+          { warehouseId: "wh-plugin" },
+          undefined,
+        );
         initSpy.mockRestore();
       } finally {
-        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
-        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+        vi.unstubAllEnvs();
       }
     });
   });

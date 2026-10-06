@@ -139,14 +139,14 @@ export interface TestApp<T extends Plugins> {
 }
 
 /**
- * Point `ServiceContext.createUserContext` at the harness's mock so an `obo`
+ * Point `ServiceContext.createCallerContext` at the harness's mock so an `obo`
  * request does not construct a real SDK client from `DATABRICKS_HOST`.
  *
  * Mirrors the `createUserContextSpy` in `fixtures.ts`; returns its restore.
  */
 function stubUserContext(client: WorkspaceClient): () => void {
   const spy = vi
-    .spyOn(ServiceContext, "createUserContext")
+    .spyOn(ServiceContext, "createCallerContext")
     .mockImplementation((token, userId, userName, userEmail) =>
       fakeUserContext(client, ServiceContext.get())(
         token,
@@ -284,7 +284,7 @@ export async function createTestApp<T extends Plugins>(
       suppliedClient ?? createMockWorkspaceClient({ responses, strict });
 
     // createApp({ client }) installs only the service-principal client. An `obo`
-    // request reaches ServiceContext.createUserContext, which builds a *real*
+    // request reaches ServiceContext.createCallerContext, which builds a *real*
     // client from process.env.DATABRICKS_HOST — so the user-scoped path is faked
     // here too, or "no network" is false the moment a handler calls asUser.
     restoreUserContext = stubUserContext(client);
