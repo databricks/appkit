@@ -256,6 +256,88 @@ describe("scaffold", () => {
     });
   });
 
+  describe("README.md package manager commands", () => {
+    it("generates README with pnpm commands when pm is pnpm", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: true, pm: "pnpm" });
+
+      const readme = fs.readFileSync(
+        path.join(targetDir, "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "pnpm add appkit-plugin-my-plugin @databricks/appkit",
+      );
+    });
+
+    it("generates README with npm commands when pm is npm", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: true, pm: "npm" });
+
+      const readme = fs.readFileSync(
+        path.join(targetDir, "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "npm install appkit-plugin-my-plugin @databricks/appkit",
+      );
+    });
+
+    it("generates README with yarn commands when pm is yarn", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: true, pm: "yarn" });
+
+      const readme = fs.readFileSync(
+        path.join(targetDir, "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "yarn add appkit-plugin-my-plugin @databricks/appkit",
+      );
+    });
+
+    it("generates README with bun commands when pm is bun", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: true, pm: "bun" });
+
+      const readme = fs.readFileSync(
+        path.join(targetDir, "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "bun add appkit-plugin-my-plugin @databricks/appkit",
+      );
+    });
+
+    it("defaults to pnpm when pm is not provided", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: true });
+
+      const readme = fs.readFileSync(
+        path.join(targetDir, "README.md"),
+        "utf-8",
+      );
+      expect(readme).toContain(
+        "pnpm add appkit-plugin-my-plugin @databricks/appkit",
+      );
+    });
+  });
+
   describe("rollback on failure", () => {
     it("cleans up written files when a write fails partway through", () => {
       const tmp = makeTempDir();
