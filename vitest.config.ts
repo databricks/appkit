@@ -33,6 +33,14 @@ export default defineConfig({
         },
       },
       {
+        test: {
+          name: "tools",
+          root: "./tools",
+          environment: "node",
+          include: ["*.test.ts"],
+        },
+      },
+      {
         plugins: [react()],
         resolve: {
           alias: {
