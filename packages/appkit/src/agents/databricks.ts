@@ -180,14 +180,46 @@ function isStreamBodyOptions(
  * interface rather than importing the SDK type directly. This keeps the adapter
  * free of a hard compile-time dependency on `@databricks/sdk-experimental`.
  */
-interface WorkspaceClientLike {
+export interface WorkspaceClientLike {
   apiClient: {
     request(options: Record<string, unknown>): Promise<unknown>;
   };
 }
 
+/**
+ * A fixed client, or a provider resolved on every model call. A provider lets
+ * one adapter follow the active execution scope (for example
+ * `() => getWorkspaceClient()` for on-behalf-of-user agents).
+ */
+type WorkspaceClientSource = WorkspaceClientLike | (() => WorkspaceClientLike);
+
+function clientResolver(
+  source: WorkspaceClientSource,
+): () => WorkspaceClientLike {
+  return typeof source === "function" ? source : () => source;
+}
+
+const fixedClientAdapters = new WeakSet<AgentAdapter>();
+
+/** Record whether an adapter's client is fixed (not a per-call provider). */
+function withClientSource<T extends AgentAdapter>(
+  source: WorkspaceClientSource | undefined,
+  adapter: T,
+): T {
+  if (typeof source !== "function") fixedClientAdapters.add(adapter);
+  return adapter;
+}
+
+/**
+ * @internal True when a Databricks adapter was built with a fixed workspace
+ * client, so it cannot follow the caller in an on-behalf-of-user agent.
+ */
+export function hasFixedWorkspaceClient(adapter: AgentAdapter): boolean {
+  return fixedClientAdapters.has(adapter);
+}
+
 interface ServingEndpointOptions {
-  workspaceClient: WorkspaceClientLike;
+  workspaceClient: WorkspaceClientSource;
   endpointName: string;
   maxSteps?: number;
   maxTokens?: number;
@@ -201,7 +233,7 @@ interface ModelServingOptions {
   maxSteps?: number;
   maxTokens?: number;
   generationParams?: GenerationParams;
-  workspaceClient?: WorkspaceClientLike;
+  workspaceClient?: WorkspaceClientSource;
   maxSseLineChars?: number;
   maxStreamTextChars?: number;
   maxToolArgumentsChars?: number;
@@ -218,8 +250,10 @@ interface AiGatewayOptions {
    * is created from the ambient client options (SDK credential chain). It is
    * captured once and reused across requests — do not pass a per-request OBO
    * client (it would leak the first request's identity into later ones).
+   * To follow the caller per request, pass a provider such as
+   * `() => getWorkspaceClient()`; it is resolved on every model call.
    */
-  workspaceClient?: WorkspaceClientLike;
+  workspaceClient?: WorkspaceClientSource;
   maxSteps?: number;
   maxTokens?: number;
   generationParams?: GenerationParams;
@@ -386,13 +420,14 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars,
       maxToolArgumentsChars,
     } = options;
-    return new DatabricksAdapter({
+    const resolveClient = clientResolver(workspaceClient);
+    const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
         // Cast through the structural shape: the connector types
         // `workspaceClient` as the SDK's concrete `WorkspaceClient`, but we
         // only need `apiClient.request`.
         servingStream(
-          workspaceClient as unknown as Parameters<typeof servingStream>[0],
+          resolveClient() as unknown as Parameters<typeof servingStream>[0],
           endpointName,
           body,
           signal,
@@ -404,6 +439,7 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars,
       maxToolArgumentsChars,
     });
+    return withClientSource(workspaceClient, adapter);
   }
 
   /**
@@ -440,7 +476,7 @@ export class DatabricksAdapter implements AgentAdapter {
       );
     }
 
-    let workspaceClient: WorkspaceClientLike | undefined =
+    let workspaceClient: WorkspaceClientSource | undefined =
       options?.workspaceClient;
     if (!workspaceClient) {
       workspaceClient = createWorkspaceClient({
@@ -508,19 +544,20 @@ export class DatabricksAdapter implements AgentAdapter {
       maxToolArgumentsChars,
     } = options;
 
-    const client =
+    const resolveClient = clientResolver(
       workspaceClient ??
-      (createWorkspaceClient({
-        clientOptions: getClientOptions(),
-      }) as unknown as WorkspaceClientLike);
+        (createWorkspaceClient({
+          clientOptions: getClientOptions(),
+        }) as unknown as WorkspaceClientLike),
+    );
 
-    return new DatabricksAdapter({
+    const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
         // Same structural cast as `fromServingEndpoint`: the connector types
         // the client as the SDK's `WorkspaceClient`, but we only need
         // `apiClient.request`.
         streamAiGateway(
-          client as unknown as Parameters<typeof streamAiGateway>[0],
+          resolveClient() as unknown as Parameters<typeof streamAiGateway>[0],
           body,
           signal,
         ),
@@ -532,6 +569,7 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars,
       maxToolArgumentsChars,
     });
+    return withClientSource(workspaceClient, adapter);
   }
 
   /**
@@ -961,7 +999,7 @@ export class DatabricksAdapter implements AgentAdapter {
  */
 type ModelStringOptions = Pick<
   AiGatewayOptions,
-  "maxSteps" | "maxTokens" | "generationParams"
+  "maxSteps" | "maxTokens" | "generationParams" | "workspaceClient"
 >;
 
 /**

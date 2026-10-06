@@ -88,6 +88,26 @@ describe("parseFrontmatter", () => {
 });
 
 describe("loadAgentFromFile", () => {
+  test("honors auth: on-behalf-of-user and rejects any other value", async () => {
+    const obo = writeRoot(
+      "obo.md",
+      "---\nendpoint: e-1\nauth: on-behalf-of-user\n---\nHi.",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await loadAgentFromFile(obo, {})).auth).toBe("on-behalf-of-user");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    const mixed = writeRoot("mixed.md", "---\nendpoint: e-1\n---\nHi.");
+    expect((await loadAgentFromFile(mixed, {})).auth).toBeUndefined();
+    const typo = writeRoot(
+      "typo.md",
+      "---\nendpoint: e-1\nauth: obo\n---\nHi.",
+    );
+    await expect(loadAgentFromFile(typo, {})).rejects.toThrow(
+      /invalid 'auth:'/,
+    );
+  });
+
   test("returns AgentDefinition with body as instructions", async () => {
     const p = writeRoot(
       "assistant.md",

@@ -12,6 +12,20 @@ Sub-agents, exposed as `agent-<key>` tools on this agent.
 
 ***
 
+### auth?
+
+```ts
+optional auth: "on-behalf-of-user";
+```
+
+Run this agent on behalf of the signed-in user: the model call, plugin
+tools, hand-rolled tools, and sub-agents all use the user's credentials.
+Overrides `agents({ auth })` for this agent. Omit for the default, where
+the model and hand-rolled tools run as the app service principal and
+plugin tools run as the user.
+
+***
+
 ### baseSystemPrompt?
 
 ```ts

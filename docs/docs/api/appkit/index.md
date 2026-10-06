@@ -138,6 +138,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AgentAuth](TypeAlias.AgentAuth.md) | Identity an agent runs under. The only value is on-behalf-of-user. |
 | [AgentEvent](TypeAlias.AgentEvent.md) | - |
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), toolkit references from plugins (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools (`supervisorTools.*`). |
 | [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |

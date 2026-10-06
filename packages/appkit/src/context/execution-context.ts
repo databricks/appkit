@@ -195,6 +195,15 @@ export function isInUserContext(): boolean {
 }
 
 /**
+ * @internal Run `fn` with no caller scope, so it executes as the app service
+ * principal even inside an on-behalf-of-user run. Used for app-owned
+ * state such as the agents thread store.
+ */
+export function runOutsideCallerScope<T>(fn: () => T): T {
+  return executionContextStorage.exit(fn);
+}
+
+/**
  * Get the caller context if one is active, otherwise `undefined`.
  * Unlike `getExecutionContext()`, this does not require `ServiceContext`
  * to be initialized and never throws.

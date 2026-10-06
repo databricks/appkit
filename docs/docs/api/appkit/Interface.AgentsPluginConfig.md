@@ -69,6 +69,17 @@ Milliseconds to wait before auto-denying. Default: 60_000.
 
 ***
 
+### auth?
+
+```ts
+optional auth: "on-behalf-of-user";
+```
+
+Default identity for agents that don't set their own `auth`.
+`"on-behalf-of-user"` runs the whole agent as the signed-in user.
+
+***
+
 ### autoInheritSkills?
 
 ```ts

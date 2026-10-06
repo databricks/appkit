@@ -10,6 +10,16 @@ adapter: AgentAdapter;
 
 ***
 
+### auth?
+
+```ts
+optional auth: "on-behalf-of-user";
+```
+
+Effective identity: the agent's `auth`, else the plugin default.
+
+***
+
 ### baseSystemPrompt?
 
 ```ts

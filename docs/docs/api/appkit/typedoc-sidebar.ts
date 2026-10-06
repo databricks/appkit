@@ -605,6 +605,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AgentAuth",
+          label: "AgentAuth"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.AgentEvent",
           label: "AgentEvent"
         },

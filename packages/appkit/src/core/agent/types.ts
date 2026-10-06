@@ -202,7 +202,18 @@ export interface AgentDefinition {
    * `InMemoryThreadStore`. Defaults to `false`.
    */
   ephemeral?: boolean;
+  /**
+   * Run this agent on behalf of the signed-in user: the model call, plugin
+   * tools, hand-rolled tools, and sub-agents all use the user's credentials.
+   * Overrides `agents({ auth })` for this agent. Omit for the default, where
+   * the model and hand-rolled tools run as the app service principal and
+   * plugin tools run as the user.
+   */
+  auth?: AgentAuth;
 }
+
+/** Identity an agent runs under. The only value is on-behalf-of-user. */
+export type AgentAuth = "on-behalf-of-user";
 
 /**
  * Auto-inherit configuration. When enabled for a given agent origin, agents
@@ -237,6 +248,11 @@ export interface AgentsPluginConfig extends BasePluginConfig {
   defaultAgent?: string;
   /** Default model for agents that don't specify their own (in code or frontmatter). */
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string;
+  /**
+   * Default identity for agents that don't set their own `auth`.
+   * `"on-behalf-of-user"` runs the whole agent as the signed-in user.
+   */
+  auth?: AgentAuth;
   /** Ambient tool library. Keys may be referenced by markdown frontmatter via `tools: [key1, key2]`. */
   tools?: Record<string, AgentTool>;
   /** Whether to auto-inherit every ToolProvider plugin's toolkit. Accepts a boolean shorthand. */
@@ -399,6 +415,8 @@ export interface RegisteredAgent {
   generationParams?: GenerationParams;
   /** Mirrors `AgentDefinition.ephemeral` — skip thread persistence. */
   ephemeral?: boolean;
+  /** Effective identity: the agent's `auth`, else the plugin default. */
+  auth?: AgentAuth;
   /**
    * Resolved per-agent skill catalog (visibility + collision rules applied).
    * Present when any skill is visible to this agent; drives the always-on

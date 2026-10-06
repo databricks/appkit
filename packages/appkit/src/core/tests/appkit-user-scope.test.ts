@@ -6,6 +6,7 @@ import type { AgentAdapter, AgentToolDefinition, ToolProvider } from "shared";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 
+import { DatabricksAdapter } from "../../agents/databricks";
 import { CacheManager } from "../../cache";
 import {
   getCallerContext,
@@ -15,7 +16,13 @@ import {
 import { isDevOboFallback } from "../../context/request-scope";
 import { Plugin, toPlugin } from "../../plugin";
 import { agents } from "../../plugins/agents";
-import { createMockRequest, createTestApp } from "../../testing";
+import { InMemoryThreadStore } from "../../plugins/agents/thread-store";
+import {
+  createMockRequest,
+  createMockWorkspaceClient,
+  createTestApp,
+} from "../../testing";
+import * as workspace from "../../workspace-client";
 import { tool } from "../agent/tools/tool";
 import type { AgentDefinition } from "../agent/types";
 
@@ -518,4 +525,343 @@ describe("agents HTTP identity boundary", () => {
       executeAgentTool.mockRestore();
     },
   );
+});
+
+describe("agents on-behalf-of-user mode", () => {
+  const paths = ["/invocations", "/responses", "/api/agents/chat"];
+  const body = (path: string) =>
+    path.endsWith("chat") ? { message: "hello" } : { input: "hello" };
+
+  const adapter: AgentAdapter = {
+    async *run(_input, ctx) {
+      const model = getCurrentPrincipalKey();
+      const plugin = await ctx.executeTool("identity.read", {});
+      const handRolled = await ctx.executeTool("whoami", {});
+      yield {
+        type: "message_delta",
+        content: `model=${model} plugin=${plugin} handRolled=${handRolled}`,
+      };
+      yield { type: "status", status: "complete" };
+    },
+  };
+  const whoami = tool({
+    description: "Report the principal seen by a hand-rolled tool",
+    schema: z.object({}),
+    execute: () => getCurrentPrincipalKey(),
+  });
+  const probe = (extra: Partial<AgentDefinition> = {}): AgentDefinition => ({
+    instructions: "Identify the caller",
+    model: adapter,
+    tools: (plugins) => ({ ...plugins.identity.toolkit(), whoami }),
+    ...extra,
+  });
+  const delegate: AgentAdapter = {
+    async *run(_input, ctx) {
+      const model = getCurrentPrincipalKey();
+      const child = await ctx.executeTool("agent-child", { input: "go" });
+      yield {
+        type: "message_delta",
+        content: `parent=${model} child[${child}]`,
+      };
+      yield { type: "status", status: "complete" };
+    },
+  };
+  const userEverywhere =
+    "model=user:alice plugin=user:alice handRolled=user:alice";
+
+  test.each(paths)(
+    "%s runs the model, plugin tools and hand-rolled tools as the user",
+    async (path) => {
+      await using app = await createTestApp({
+        plugins: [
+          identity(),
+          agents({ auth: "on-behalf-of-user", agents: { probe: probe() } }),
+        ],
+      });
+      const response = await app.post(path, {
+        body: body(path),
+        obo: { userId: "alice" },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(userEverywhere);
+      expect(getCurrentPrincipalKey()).toBe("app");
+    },
+  );
+
+  test("a per-agent auth overrides the mixed plugin default", async () => {
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          agents: {
+            probe: probe({ auth: "on-behalf-of-user", default: true }),
+            mixed: probe(),
+          },
+        }),
+      ],
+    });
+    const obo = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(await obo.text()).toContain(userEverywhere);
+    const mixed = await app.post("/api/agents/chat", {
+      body: { message: "hello", agent: "mixed" },
+      obo: { userId: "alice" },
+    });
+    expect(await mixed.text()).toContain(
+      "model=app plugin=user:alice handRolled=app",
+    );
+  });
+
+  test("a mixed sub-agent under an on-behalf-of-user parent never widens to the app", async () => {
+    const child = probe();
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          agents: {
+            probe: {
+              default: true,
+              auth: "on-behalf-of-user",
+              instructions: "Delegate",
+              model: delegate,
+              agents: { child },
+            },
+            child,
+          },
+        }),
+      ],
+    });
+    const response = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(await response.text()).toContain(
+      `parent=user:alice child[${userEverywhere}]`,
+    );
+  });
+
+  test("an on-behalf-of-user sub-agent under a mixed parent runs as the user", async () => {
+    const child = probe({ auth: "on-behalf-of-user" });
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          agents: {
+            probe: {
+              default: true,
+              instructions: "Delegate",
+              model: delegate,
+              agents: { child },
+            },
+            child,
+          },
+        }),
+      ],
+    });
+    const response = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(await response.text()).toContain(
+      `parent=app child[${userEverywhere}]`,
+    );
+  });
+
+  test.each([
+    ["production", "/invocations"],
+    ["production", "/responses"],
+    ["production", "/api/agents/chat"],
+    ["development", "/invocations"],
+    ["development", "/responses"],
+    ["development", "/api/agents/chat"],
+  ])(
+    "%s %s returns 401 without a user token before any model or tool call",
+    async (env, path) => {
+      vi.stubEnv("NODE_ENV", env);
+      const run = vi.fn(adapter.run);
+      try {
+        await using app = await createTestApp({
+          plugins: [
+            identity(),
+            agents({
+              auth: "on-behalf-of-user",
+              agents: { probe: probe({ model: { run } }) },
+            }),
+          ],
+        });
+        const response = await app.post(path, {
+          body: body(path),
+          headers: { "x-forwarded-user": "alice" },
+        });
+        expect(response.status).toBe(401);
+        expect(await response.json()).toMatchObject({
+          code: "AUTHENTICATION_ERROR",
+        });
+        expect(run).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  test("a model 401 mid-run ends the stream with IDENTITY_EXPIRED and is not retried as the app", async () => {
+    const principals: string[] = [];
+    const expiring: AgentAdapter = {
+      async *run() {
+        principals.push(getCurrentPrincipalKey());
+        yield { type: "message_delta", content: "partial" };
+        throw Object.assign(new Error("upstream"), { status: 401 });
+      },
+    };
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          auth: "on-behalf-of-user",
+          agents: { probe: probe({ model: expiring }) },
+        }),
+      ],
+    });
+    const streamed = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(await streamed.text()).toContain("IDENTITY_EXPIRED");
+    const invoked = await app.post("/invocations", {
+      body: { input: "hello", stream: false },
+      obo: { userId: "alice" },
+    });
+    expect(invoked.status).toBe(401);
+    expect(await invoked.json()).toMatchObject({ code: "IDENTITY_EXPIRED" });
+    expect(principals).toEqual(["user:alice", "user:alice"]);
+  });
+
+  test("thread-store writes stay the app under an on-behalf-of-user agent", async () => {
+    const writers: string[] = [];
+    class RecordingStore extends InMemoryThreadStore {
+      override addMessage(
+        ...args: Parameters<InMemoryThreadStore["addMessage"]>
+      ) {
+        writers.push(getCurrentPrincipalKey());
+        return super.addMessage(...args);
+      }
+    }
+    await using app = await createTestApp({
+      plugins: [
+        identity(),
+        agents({
+          auth: "on-behalf-of-user",
+          threadStore: new RecordingStore(),
+          agents: { probe: probe() },
+        }),
+      ],
+    });
+    const response = await app.post("/api/agents/chat", {
+      body: { message: "hello" },
+      obo: { userId: "alice" },
+    });
+    expect(await response.text()).toContain(userEverywhere);
+    expect(writers.length).toBeGreaterThan(0);
+    expect(new Set(writers)).toEqual(new Set(["app"]));
+  });
+
+  test.each([
+    ["serving endpoint", "my-endpoint"],
+    ["AI Gateway", "system.ai.claude"],
+  ])(
+    "a %s model string calls the model with the user client, mixed with the app client",
+    async (_label, model) => {
+      const used: string[] = [];
+      const answer = (caller: string) =>
+        (async () => {
+          used.push(caller);
+          return {
+            contents: new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+                  ),
+                );
+                controller.close();
+              },
+            }),
+          };
+        }) as never;
+      // The harness backs the user scope with `client`; the app's own model
+      // client comes from createWorkspaceClient.
+      const client = createMockWorkspaceClient();
+      client.apiClient.request = answer("user");
+      const real = workspace.createWorkspaceClient;
+      vi.spyOn(workspace, "createWorkspaceClient").mockImplementation(
+        (options) => {
+          const sp = real(options);
+          sp.apiClient.request = answer("app");
+          return sp;
+        },
+      );
+      try {
+        await using app = await createTestApp({
+          client,
+          plugins: [
+            agents({
+              agents: {
+                probe: {
+                  default: true,
+                  auth: "on-behalf-of-user",
+                  instructions: "hi",
+                  model,
+                },
+                mixed: { instructions: "hi", model },
+              },
+            }),
+          ],
+        });
+        for (const agent of ["probe", "mixed"]) {
+          const response = await app.post("/api/agents/chat", {
+            body: { message: "hello", agent },
+            obo: { userId: "alice" },
+          });
+          expect(await response.text()).toContain("ok");
+        }
+        expect(used).toEqual(["user", "app"]);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    },
+  );
+
+  test("an on-behalf-of-user agent with a fixed-client adapter throws at boot", async () => {
+    const fixed = { apiClient: { request: vi.fn() } };
+    const boot = async (
+      auth: "on-behalf-of-user" | undefined,
+      workspaceClient: typeof fixed | (() => typeof fixed),
+    ) => {
+      await using _app = await createTestApp({
+        plugins: [
+          agents({
+            ...(auth && { auth }),
+            agents: {
+              probe: {
+                instructions: "hi",
+                model: DatabricksAdapter.fromServingEndpoint({
+                  workspaceClient,
+                  endpointName: "my-endpoint",
+                }),
+              },
+            },
+          }),
+        ],
+      });
+    };
+    await expect(boot("on-behalf-of-user", fixed)).rejects.toThrow(
+      /Agent 'probe' is on-behalf-of-user, but its model adapter has a fixed workspaceClient/,
+    );
+    await expect(
+      boot("on-behalf-of-user", () => fixed),
+    ).resolves.toBeUndefined();
+    await expect(boot(undefined, fixed)).resolves.toBeUndefined();
+  });
 });
