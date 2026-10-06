@@ -136,7 +136,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       method: "post",
       path: "/:alias/messages",
       handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleSendMessage(req, res);
+        await this._asUserScoped(req)._handleSendMessage(req, res);
       },
     });
 
@@ -145,7 +145,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       method: "get",
       path: "/:alias/conversations/:conversationId",
       handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleGetConversation(req, res);
+        await this._asUserScoped(req)._handleGetConversation(req, res);
       },
     });
 
@@ -154,7 +154,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       method: "get",
       path: "/:alias/conversations/:conversationId/messages/:messageId",
       handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleGetMessage(req, res);
+        await this._asUserScoped(req)._handleGetMessage(req, res);
       },
     });
   }

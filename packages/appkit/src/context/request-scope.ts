@@ -3,7 +3,11 @@ import type { Request } from "express";
 
 import { AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
-import { runInCallerContext } from "./execution-context";
+import {
+  runInCallerContext,
+  runInLegacyCallerContext,
+} from "./execution-context";
+import { hasOboResource } from "./resource-capabilities";
 import { ServiceContext } from "./service-context";
 
 const logger = createLogger("execution-context");
@@ -21,7 +25,11 @@ export function isDevOboFallback(): boolean {
 /** Build the caller once from the trusted Apps proxy headers. */
 export function createRequestScope(
   req: Request,
-  createCaller = ServiceContext.createCallerContext,
+  resourceTypes: readonly string[] = [],
+  options: {
+    createCaller?: typeof ServiceContext.createCallerContext;
+    legacy?: boolean;
+  } = {},
 ): RequestScope {
   const token = req.header("x-forwarded-access-token")?.trim();
   const userId = req.header("x-forwarded-user")?.trim();
@@ -40,14 +48,26 @@ export function createRequestScope(
         ),
     };
   }
-  if (!token) throw AuthenticationError.missingToken("user token");
+  if (!token) {
+    if (hasOboResource(resourceTypes)) {
+      const message =
+        "This resource is OBO-capable but no user token was forwarded. The app is likely deployed service-principal-only. Enable user authorization and forward x-forwarded-access-token.";
+      throw new AuthenticationError(message, { clientMessage: message });
+    }
+    throw AuthenticationError.missingToken("user token");
+  }
   if (!userId && !isDev) throw AuthenticationError.missingUserId();
 
-  const caller = createCaller(
+  const caller = (options.createCaller ?? ServiceContext.createCallerContext)(
     token,
     userId || "dev-user",
     undefined,
     userEmail,
   );
-  return { run: (fn) => runInCallerContext(caller, fn) };
+  return {
+    run: (fn) =>
+      options.legacy
+        ? runInLegacyCallerContext(caller, fn)
+        : runInCallerContext(caller, fn),
+  };
 }

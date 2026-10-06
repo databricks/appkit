@@ -3,6 +3,7 @@ import { PassThrough, Readable } from "node:stream";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { getCurrentPrincipalId } from "../../../context";
 import { createRequestScope } from "../../../context/request-scope";
 import { scopeApi } from "../../../context/scoped-api";
 import { ServiceContext } from "../../../context/service-context";
@@ -63,7 +64,7 @@ vi.mock("../../../context", async (importOriginal) => {
   return {
     ...actual,
     getWorkspaceClient: vi.fn(() => mockClient),
-    getCurrentUserId: vi.fn(() => "test-service-principal"),
+    getCurrentPrincipalId: vi.fn(() => "test-service-principal"),
   };
 });
 
@@ -2272,19 +2273,19 @@ describe("FilesPlugin", () => {
     }
 
     /**
-     * Replace the default `getCurrentUserId` mock with one that delegates to
+     * Replace the default `getCurrentPrincipalId` mock with one that delegates to
      * the real implementation, so that calls inside `runInUserContext` resolve
      * to the wrapped UserContext's `userId` (and the per-user cache key
      * derived from it).
      */
-    async function useRealGetCurrentUserId() {
+    async function useRealGetCurrentPrincipalId() {
       const actual =
         await vi.importActual<typeof import("../../../context")>(
           "../../../context",
         );
       const ctx = await import("../../../context");
-      vi.mocked(ctx.getCurrentUserId).mockImplementation(
-        actual.getCurrentUserId,
+      vi.mocked(ctx.getCurrentPrincipalId).mockImplementation(
+        actual.getCurrentPrincipalId,
       );
     }
 
@@ -2305,7 +2306,7 @@ describe("FilesPlugin", () => {
     });
 
     test("OBO list + valid token wraps SDK call in user context (alice's userId resolves inside the wrapped fn)", async () => {
-      await useRealGetCurrentUserId();
+      await useRealGetCurrentPrincipalId();
       const policySpy = vi.fn().mockReturnValue(true);
       const plugin = new FilesPlugin({
         volumes: {
@@ -2323,9 +2324,9 @@ describe("FilesPlugin", () => {
       const observedUserIds: string[] = [];
       mockClient.files.listDirectoryContents.mockImplementation(
         async function* () {
-          // getCurrentUserId() inside the wrapped fn should resolve to alice.
+          // getCurrentPrincipalId() inside the wrapped fn should resolve to alice.
           const ctx = await import("../../../context");
-          observedUserIds.push(ctx.getCurrentUserId());
+          observedUserIds.push(ctx.getCurrentPrincipalId());
           yield { name: "o.txt", path: "/o.txt", is_directory: false };
         },
       );
@@ -2407,14 +2408,14 @@ describe("FilesPlugin", () => {
     });
 
     test("OBO read cache is DISABLED: cross-user reads do not share cache state", async () => {
-      // Per Fix 3: the read cache is keyed by `getCurrentUserId()`, so user
+      // Per Fix 3: the read cache is keyed by `getCurrentPrincipalId()`, so user
       // A's writes can only invalidate user A's cache entry. Cross-user
       // staleness was the bug. The chosen mitigation (Option B) is to
       // disable the read cache on OBO volumes entirely — this test pins
       // that contract: OBO reads must NOT consult `getOrExecute`. The
       // alternative (Option A: per-(volume, path) generation counters)
       // would re-enable cache here.
-      await useRealGetCurrentUserId();
+      await useRealGetCurrentPrincipalId();
       const policySpy = vi.fn().mockReturnValue(true);
       const plugin = new FilesPlugin({
         volumes: {
@@ -2458,7 +2459,7 @@ describe("FilesPlugin", () => {
     });
 
     test("SP volume reads still use the cache (cache is only disabled for OBO)", async () => {
-      await useRealGetCurrentUserId();
+      await useRealGetCurrentPrincipalId();
       const plugin = new FilesPlugin({
         volumes: {
           obo_vol: {
@@ -2635,18 +2636,18 @@ describe("FilesPlugin", () => {
     }
 
     /**
-     * Replace the default `getCurrentUserId` mock with the real implementation
+     * Replace the default `getCurrentPrincipalId` mock with the real implementation
      * so calls inside `runInUserContext` resolve to the wrapped UserContext's
      * `userId` (mirrors the helper used by the `OBO read routes` block).
      */
-    async function useRealGetCurrentUserId() {
+    async function useRealGetCurrentPrincipalId() {
       const actual =
         await vi.importActual<typeof import("../../../context")>(
           "../../../context",
         );
       const ctx = await import("../../../context");
-      vi.mocked(ctx.getCurrentUserId).mockImplementation(
-        actual.getCurrentUserId,
+      vi.mocked(ctx.getCurrentPrincipalId).mockImplementation(
+        actual.getCurrentPrincipalId,
       );
     }
 
@@ -2706,7 +2707,7 @@ describe("FilesPlugin", () => {
      * this assertion fails. SP-token would silently leak to UC otherwise.
      */
     test("OBO upload: outgoing fetch PUT carries user-token Authorization header (not SP)", async () => {
-      await useRealGetCurrentUserId();
+      await useRealGetCurrentPrincipalId();
       await useRealGetWorkspaceClient();
 
       // SP-token marker — what the existing mockClient would inject if the
@@ -2892,7 +2893,7 @@ describe("FilesPlugin", () => {
     });
 
     test("OBO delete + valid token + UC denies → user-token client invoked, error propagated", async () => {
-      await useRealGetCurrentUserId();
+      await useRealGetCurrentPrincipalId();
       await useRealGetWorkspaceClient();
 
       // Distinct user-token client with a `files.delete` that mimics a UC
@@ -3091,14 +3092,14 @@ describe("FilesPlugin", () => {
      */
     test("SP write awaits cache.delete BEFORE sending the response (no write→read race)", async () => {
       // Restore the default (mocked) `getWorkspaceClient` and
-      // `getCurrentUserId`, since earlier tests in this block install the
+      // `getCurrentPrincipalId`, since earlier tests in this block install the
       // REAL implementations and `vi.clearAllMocks` does NOT reset
       // implementations.
       const ctx = await import("../../../context");
       vi.mocked(ctx.getWorkspaceClient).mockImplementation(
         () => mockClient as any,
       );
-      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+      vi.mocked(ctx.getCurrentPrincipalId).mockImplementation(
         () => "test-service-principal",
       );
 
@@ -3170,22 +3171,22 @@ describe("FilesPlugin", () => {
 
     /**
      * Fix 3 regression: cross-user OBO read freshness. The OBO read cache
-     * is keyed by `getCurrentUserId()`, so user A's writes can only
+     * is keyed by `getCurrentPrincipalId()`, so user A's writes can only
      * invalidate user A's cache entry. With cache disabled on OBO, user B
      * must see fresh data after user A writes.
      */
     test("OBO write by user A → user B's next read sees fresh data (cross-user freshness; cache disabled on OBO)", async () => {
       // This test relies on the DEFAULT mocked `getWorkspaceClient` and
-      // `getCurrentUserId` (always returning the SP fixture's
+      // `getCurrentPrincipalId` (always returning the SP fixture's
       // `mockClient`). Earlier tests in this block install the REAL impls
-      // via `useRealGetWorkspaceClient`/`useRealGetCurrentUserId`, and
+      // via `useRealGetWorkspaceClient`/`useRealGetCurrentPrincipalId`, and
       // Vitest's `vi.clearAllMocks` between tests does NOT reset
       // implementations — so we restore the defaults explicitly.
       const ctx = await import("../../../context");
       vi.mocked(ctx.getWorkspaceClient).mockImplementation(
         () => mockClient as any,
       );
-      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+      vi.mocked(ctx.getCurrentPrincipalId).mockImplementation(
         () => "test-service-principal",
       );
 
@@ -3845,6 +3846,15 @@ describe("FilesPlugin", () => {
       );
 
     test("policy user reflects the active scope on the default surface", async () => {
+      // This file pins getCurrentPrincipalId to the SP id; use the real one so
+      // the default surface reports the caller under appkit.asUser(req).
+      const ctx =
+        await vi.importActual<typeof import("../../../context")>(
+          "../../../context",
+        );
+      vi.mocked(getCurrentPrincipalId).mockImplementation(
+        ctx.getCurrentPrincipalId,
+      );
       const seen: FilePolicyUser[] = [];
       const recorder = (_a: unknown, _r: unknown, user: FilePolicyUser) => {
         seen.push({ id: user.id, isServicePrincipal: user.isServicePrincipal });
@@ -3858,13 +3868,20 @@ describe("FilesPlugin", () => {
       );
       const handle = plugin.exports()("uploads");
 
-      await handle.list("d");
-      await appkitAsUser(handle).list("d");
-      await handle
-        .asUser({
-          header: (n: string) => (oboHeaders as any)[n.toLowerCase()],
-        } as any)
-        .list("d");
+      try {
+        await handle.list("d");
+        await appkitAsUser(handle).list("d");
+        await handle
+          .asUser({
+            header: (n: string) => (oboHeaders as any)[n.toLowerCase()],
+          } as any)
+          .list("d");
+      } finally {
+        // Restore the file-wide pin so later tests are unaffected.
+        vi.mocked(getCurrentPrincipalId).mockImplementation(
+          () => "test-service-principal",
+        );
+      }
 
       expect(seen[0].isServicePrincipal).toBe(true);
       expect(seen[1]).toEqual({

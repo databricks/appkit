@@ -20,8 +20,7 @@ import {
 } from "../../connectors/files";
 import {
   getCallerContext,
-  getCurrentActorId,
-  getCurrentUserId,
+  getCurrentPrincipalId,
   getExecutionContext,
   getWorkspaceClient,
   runInCallerContext,
@@ -178,7 +177,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
           "falling back to service principal identity (dev mode). " +
           "In production this request would 401.",
       );
-      return { id: getCurrentUserId(), isServicePrincipal: true };
+      return { id: getCurrentPrincipalId(), isServicePrincipal: true };
     }
     if (!token) {
       throw AuthenticationError.missingToken(
@@ -211,7 +210,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
         "OBO volume requested without x-forwarded-access-token — falling back to service principal identity (dev mode). " +
           "In production this request would 401.",
       );
-      return { id: getCurrentUserId(), isServicePrincipal: true };
+      return { id: getCurrentPrincipalId(), isServicePrincipal: true };
     }
     throw AuthenticationError.missingToken(
       !token
@@ -292,7 +291,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
           logger.debug(
             "No x-forwarded-user header — proceeding with service principal identity for policy evaluation.",
           );
-          user = { id: getCurrentUserId(), isServicePrincipal: true };
+          user = { id: getCurrentPrincipalId(), isServicePrincipal: true };
         }
       }
     } catch (error) {
@@ -566,7 +565,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     authMode: "service-principal" | "on-behalf-of-user",
   ): PluginExecutionSettings {
     // OBO volumes: disable list/read cache. The cache layer is keyed by
-    // `getCurrentUserId()`, so user A's writes can only invalidate user A's
+    // `getCurrentPrincipalId()`, so user A's writes can only invalidate user A's
     // cache entry — user B would continue to see stale data for the same
     // volume/path until TTL. Disabling caching trades read performance for
     // correctness; the alternative is a per-(volume, path) generation
@@ -633,7 +632,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    *
    * On OBO volumes the read cache is disabled (see `_readSettings`), so
    * invalidation is a no-op here for `mode === "on-behalf-of-user"`. The
-   * cache layer is keyed by `getCurrentUserId()`, so user A's writes can
+   * cache layer is keyed by `getCurrentPrincipalId()`, so user A's writes can
    * only invalidate user A's cache entry — user B would otherwise see stale
    * data for the same volume/path until TTL. Disabling the cache on OBO
    * trades read performance for correctness; the alternative is a
@@ -664,7 +663,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       return;
     }
     const parent = parentDirectory(writtenPath);
-    const userKey = getCurrentUserId();
+    const userKey = getCurrentPrincipalId();
     const tryDelete = async (segment: string): Promise<void> => {
       try {
         await this.cache.delete(
@@ -1451,11 +1450,11 @@ export class FilesPlugin extends Plugin implements ToolProvider {
   /**
    * Run `fn` under the correct execution context.
    * - `userCtx` is `null`: invokes `fn` directly so the service-principal
-   *   `WorkspaceClient` and `getCurrentUserId()` are used — identical
+   *   `WorkspaceClient` and `getCurrentPrincipalId()` are used, identical
    *   behavior to pre-OBO releases. This covers both SP volumes and the
    *   OBO dev-fallback path (where headers were missing).
    * - `userCtx` is a `CallerContext`: wraps `fn` in `runInCallerContext(userCtx)`,
-   *   so SDK calls execute as the end user and `getCurrentUserId()` (and
+   *   so SDK calls execute as the end user and `getCurrentPrincipalId()` (and
    *   therefore cache keys) resolve to the user's ID.
    *
    * The caller is responsible for building `userCtx` exactly once per
@@ -1565,7 +1564,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * `runInCallerContext(userCtx, ...)`. Used by `VolumeHandle.asUser(req)` to
    * force the SDK identity to the end user regardless of the volume's
    * `auth` setting. The policy check baked into each method (via
-   * `createVolumeAPI`) runs inside the same scope, so `getCurrentUserId()`
+   * `createVolumeAPI`) runs inside the same scope, so `getCurrentPrincipalId()`
    * and any cache `userKey` derived from it also resolve to the user.
    *
    * Each wrapped invocation tags the connector's span with
@@ -1842,7 +1841,7 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       // policy must see the user too (not a hardcoded service principal).
       const policyUser: FilePolicyUser = {
         get id() {
-          return getCurrentActorId() ?? ServiceContext.get().serviceUserId;
+          return getCurrentPrincipalId();
         },
         get isServicePrincipal() {
           return getCallerContext() === undefined;

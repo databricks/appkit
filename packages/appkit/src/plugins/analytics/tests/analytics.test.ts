@@ -100,6 +100,10 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as service principal for .sql files (isAsUser: false)", async () => {
+      const warnings: string[] = [];
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation((...args) => warnings.push(args.join(" ")));
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -162,6 +166,10 @@ describe("Analytics Plugin", () => {
       );
 
       expect(mockRes.end).toHaveBeenCalled();
+      expect(warnings).not.toContainEqual(
+        expect.stringContaining("getCurrentUserId is deprecated"),
+      );
+      warn.mockRestore();
     });
 
     test("/query/:query_key should execute as user for .obo.sql files (isAsUser: true)", async () => {
@@ -827,10 +835,12 @@ describe("Analytics Plugin", () => {
       // Warehouse readiness must run through the user-context executor too, so
       // `getWorkspaceClient()` resolves to the user (not the SP) for `.obo.sql`.
       const ensureReadyMock = vi.fn().mockResolvedValue(undefined);
-      const asUserSpy = vi.spyOn(plugin as any, "asUser").mockReturnValue({
-        query: userExecutorQuery,
-        _ensureArrowWarehouseReady: ensureReadyMock,
-      });
+      const asUserSpy = vi
+        .spyOn(plugin as any, "_asUserScoped")
+        .mockReturnValue({
+          query: userExecutorQuery,
+          _ensureArrowWarehouseReady: ensureReadyMock,
+        });
 
       const streamExternalLinksMock = vi.fn(function* (_chunks: unknown) {
         yield new Uint8Array([1, 2, 3]);
@@ -980,7 +990,7 @@ describe("Analytics Plugin", () => {
         .fn()
         .mockRejectedValue(new Error("RESOURCE_DOES_NOT_EXIST"));
       const asUserSpy = vi
-        .spyOn(plugin as any, "asUser")
+        .spyOn(plugin as any, "_asUserScoped")
         .mockReturnValue({ _getColumnNames: userGetColumnNames });
 
       plugin.injectRoutes(router);

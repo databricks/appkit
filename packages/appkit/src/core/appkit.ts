@@ -12,6 +12,11 @@ import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
 import { createRequestScope } from "../context/request-scope";
+import {
+  assertPluginExecution,
+  getPluginResourceTypes,
+  guardPluginApi,
+} from "../context/resource-capabilities";
 import { scopeApi } from "../context/scoped-api";
 import {
   isInternalTelemetryEnabled,
@@ -47,7 +52,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
   /** Execute a block or a single plugin call as the requesting user. */
   asUser(req: import("express").Request) {
-    const scope = createRequestScope(req);
+    const scope = createRequestScope(
+      req,
+      Object.values(this.#pluginInstances).flatMap(getPluginResourceTypes),
+    );
     const kit: Record<string, unknown> = Object.create(null);
     // Memoize each plugin's scoped export for the life of THIS handle only.
     // The map is created per asUser(req) call and captured solely by this
@@ -60,10 +68,16 @@ export class AppKit<TPlugins extends InputPluginMap> {
         enumerable: true,
         get: () => {
           if (!scopedExports.has(name)) {
+            // The app-only guard runs on first access; it is deterministic per
+            // (plugin, scope), so caching the result after it passes is safe,
+            // and if it throws nothing is cached (stays fail-closed).
             scopedExports.set(
               name,
               scopeApi(
-                scope.run(() => plugin.exports?.() ?? {}),
+                scope.run(() => {
+                  assertPluginExecution(plugin, true);
+                  return plugin.exports?.() ?? {};
+                }),
                 scope,
                 plugin,
               ),
@@ -204,12 +218,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
    * to the shared request scope; new code should use the app-level API.
    */
   private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
+    assertPluginExecution(plugin);
     // If plugin doesn't implement exports(), return empty object
     const pluginExports = plugin.exports?.() ?? {};
 
     // If exports is a function, the plugin manages its own asUser pattern
     if (typeof pluginExports === "function") {
-      return pluginExports;
+      return guardPluginApi(plugin, pluginExports);
     }
 
     const objExports = pluginExports as Record<string, unknown>;
@@ -217,10 +232,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     // If plugin doesn't support asUser (no asUser method), return exports as-is
     if (typeof (plugin as any).asUser !== "function") {
-      return objExports;
+      return guardPluginApi(plugin, objExports);
     }
 
-    return {
+    return guardPluginApi(plugin, {
       ...objExports,
       /**
        * @deprecated Use appkit.asUser(req) instead.
@@ -230,7 +245,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
        */
       asUser: (req: import("express").Request) =>
         (plugin as any).asUser(req).exports() as Record<string, unknown>,
-    };
+    });
   }
 
   static async _createApp<

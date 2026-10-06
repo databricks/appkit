@@ -325,7 +325,7 @@ describe("Plugin", () => {
         {},
         // The plugin forwards the resolved user key as the 4th argument to
         // bind the stream to its creator. The test passes `false` as an
-        // explicit override, which propagates through `userKey ?? getCurrentUserId()`.
+        // explicit override, which propagates through `userKey ?? getCurrentPrincipalId()`.
         false,
       );
     });
