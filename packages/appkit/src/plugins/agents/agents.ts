@@ -498,6 +498,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<RegisteredAgent> {
     const adapter = await this.resolveAdapter(def, name);
+    const auth = def.auth ?? this.config.auth;
+    if (
+      isOnBehalfOfUser(auth) &&
+      (await import("../../agents/databricks")).hasFixedWorkspaceClient(adapter)
+    ) {
+      throw new Error(
+        `Agent '${name}' is on-behalf-of-user, but its model adapter has a ` +
+          "fixed workspaceClient, so the model would run as the service " +
+          "principal. Pass `workspaceClient: () => getWorkspaceClient()` " +
+          "to the adapter, or use a model string.",
+      );
+    }
     const skills = await this.resolveAgentSkills(name, def, src);
     const toolIndex = await this.buildToolIndex(name, def, src, skills);
 
@@ -514,9 +526,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       generationParams: def.generationParams,
       ephemeral: def.ephemeral,
       skills,
-      ...((def.auth ?? this.config.auth) && {
-        auth: def.auth ?? this.config.auth,
-      }),
+      ...(auth && { auth }),
     };
   }
 

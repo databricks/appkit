@@ -6,6 +6,7 @@ import type { AgentAdapter, AgentToolDefinition, ToolProvider } from "shared";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 
+import { DatabricksAdapter } from "../../agents/databricks";
 import { CacheManager } from "../../cache";
 import {
   getCallerContext,
@@ -831,4 +832,36 @@ describe("agents on-behalf-of-user mode", () => {
       }
     },
   );
+
+  test("an on-behalf-of-user agent with a fixed-client adapter throws at boot", async () => {
+    const fixed = { apiClient: { request: vi.fn() } };
+    const boot = async (
+      auth: "on-behalf-of-user" | undefined,
+      workspaceClient: typeof fixed | (() => typeof fixed),
+    ) => {
+      await using _app = await createTestApp({
+        plugins: [
+          agents({
+            ...(auth && { auth }),
+            agents: {
+              probe: {
+                instructions: "hi",
+                model: DatabricksAdapter.fromServingEndpoint({
+                  workspaceClient,
+                  endpointName: "my-endpoint",
+                }),
+              },
+            },
+          }),
+        ],
+      });
+    };
+    await expect(boot("on-behalf-of-user", fixed)).rejects.toThrow(
+      /Agent 'probe' is on-behalf-of-user, but its model adapter has a fixed workspaceClient/,
+    );
+    await expect(
+      boot("on-behalf-of-user", () => fixed),
+    ).resolves.toBeUndefined();
+    await expect(boot(undefined, fixed)).resolves.toBeUndefined();
+  });
 });

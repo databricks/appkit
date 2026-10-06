@@ -348,7 +348,7 @@ An on-behalf-of-user agent fails closed:
 
 **Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
 
-**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). An adapter you build yourself keeps the client you gave it; pass a provider so it resolves per call:
+**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). If you build a `DatabricksAdapter` yourself with a fixed `workspaceClient`, an on-behalf-of-user agent throws at boot instead of running the model as the service principal. Pass a provider so the client resolves per call, or use a model string. Mixed agents accept fixed-client adapters as before:
 
 ```ts
 DatabricksAdapter.fromModelServing("my-endpoint", {

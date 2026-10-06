@@ -199,6 +199,25 @@ function clientResolver(
   return typeof source === "function" ? source : () => source;
 }
 
+const fixedClientAdapters = new WeakSet<AgentAdapter>();
+
+/** Record whether an adapter's client is fixed (not a per-call provider). */
+function withClientSource<T extends AgentAdapter>(
+  source: WorkspaceClientSource | undefined,
+  adapter: T,
+): T {
+  if (typeof source !== "function") fixedClientAdapters.add(adapter);
+  return adapter;
+}
+
+/**
+ * @internal True when a Databricks adapter was built with a fixed workspace
+ * client, so it cannot follow the caller in an on-behalf-of-user agent.
+ */
+export function hasFixedWorkspaceClient(adapter: AgentAdapter): boolean {
+  return fixedClientAdapters.has(adapter);
+}
+
 interface ServingEndpointOptions {
   workspaceClient: WorkspaceClientSource;
   endpointName: string;
@@ -402,7 +421,7 @@ export class DatabricksAdapter implements AgentAdapter {
       maxToolArgumentsChars,
     } = options;
     const resolveClient = clientResolver(workspaceClient);
-    return new DatabricksAdapter({
+    const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
         // Cast through the structural shape: the connector types
         // `workspaceClient` as the SDK's concrete `WorkspaceClient`, but we
@@ -420,6 +439,7 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars,
       maxToolArgumentsChars,
     });
+    return withClientSource(workspaceClient, adapter);
   }
 
   /**
@@ -531,7 +551,7 @@ export class DatabricksAdapter implements AgentAdapter {
         }) as unknown as WorkspaceClientLike),
     );
 
-    return new DatabricksAdapter({
+    const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
         // Same structural cast as `fromServingEndpoint`: the connector types
         // the client as the SDK's `WorkspaceClient`, but we only need
@@ -549,6 +569,7 @@ export class DatabricksAdapter implements AgentAdapter {
       maxStreamTextChars,
       maxToolArgumentsChars,
     });
+    return withClientSource(workspaceClient, adapter);
   }
 
   /**
