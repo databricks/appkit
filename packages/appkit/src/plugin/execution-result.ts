@@ -14,4 +14,20 @@
  */
 export type ExecutionResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: number; message: string };
+  | { ok: false; status: number; message: string; readonly error?: unknown };
+
+/** Keep the original failure for internal callers without serializing it. */
+export function executionFailure(
+  error: unknown,
+  status: number,
+  message: string,
+): ExecutionResult<never> {
+  return Object.defineProperty(
+    { ok: false as const, status, message },
+    "error",
+    {
+      value: error,
+      enumerable: false,
+    },
+  );
+}

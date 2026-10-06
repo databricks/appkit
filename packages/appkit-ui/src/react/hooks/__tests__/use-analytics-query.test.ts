@@ -14,7 +14,7 @@ const mockProcessArrowBuffer = vi.fn();
 // Mock connectSSE so the hook does not attempt a real network request.
 // Capture both the full args (used by the arrow/result/error tests) and the
 // individual callbacks/signal (used by the warehouse-status and late-envelope
-// tests). The hook ignores the return value.
+// tests). Keep the transport pending until a test sends a terminal event.
 const mockConnectSSE = vi.fn((args: any): unknown => {
   lastConnectArgs = args;
   capturedCallbacks = {
@@ -22,7 +22,7 @@ const mockConnectSSE = vi.fn((args: any): unknown => {
     onError: args?.onError,
     signal: args?.signal,
   };
-  return () => {};
+  return new Promise<void>(() => {});
 });
 
 vi.mock("@/js", () => ({

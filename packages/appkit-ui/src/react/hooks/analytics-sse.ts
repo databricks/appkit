@@ -9,10 +9,10 @@ export function getDevMode(): string {
 
 /** Map a fetch/SSE transport error to a user-facing message. */
 export function userFacingFetchError(error: unknown): string {
+  if (isAbortError(error)) {
+    return "Request timed out, please try again";
+  }
   if (error instanceof Error) {
-    if (error.name === "AbortError") {
-      return "Request timed out, please try again";
-    }
     if (error.message.includes("Failed to fetch")) {
       return "Network error. Please check your connection.";
     }
@@ -52,6 +52,11 @@ type AnalyticsSseMessage =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAbortError(error: unknown): boolean {
+  // DOMException and cross-realm errors need not inherit our Error constructor.
+  return isRecord(error) && error.name === "AbortError";
 }
 
 function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
@@ -112,6 +117,8 @@ export function parseAnalyticsSseMessage(
 }
 
 export interface AnalyticsSseHandlerContext {
+  /** A terminal outcome belongs to this run; later callbacks cannot replace it. */
+  settled?: boolean;
   source: "useAnalyticsQuery" | "useMetricView";
   resource: Record<string, unknown>;
   defaultExecutionError: string;
@@ -140,7 +147,7 @@ export async function handleAnalyticsSseMessage(
   data: string,
   ctx: AnalyticsSseHandlerContext,
 ): Promise<void> {
-  if (ctx.signal.aborted) return;
+  if (ctx.signal.aborted || ctx.settled) return;
 
   try {
     const message = parseAnalyticsSseMessage(data, ctx.defaultExecutionError);
@@ -151,13 +158,18 @@ export async function handleAnalyticsSseMessage(
     }
 
     if (message.kind === "result") {
+      ctx.settled = true;
       ctx.setLoading(false);
+      ctx.setError(null);
+      ctx.setErrorCode(null);
       ctx.onResult(message);
       ctx.unpublishWarehouseStatus();
+      ctx.abort();
       return;
     }
 
     if (message.kind === "error") {
+      ctx.settled = true;
       ctx.setLoading(false);
       ctx.setError(message.message);
       ctx.unpublishWarehouseStatus();
@@ -169,6 +181,7 @@ export async function handleAnalyticsSseMessage(
           `[${ctx.source}] Code: ${String(message.code)}, Message: ${message.message}`,
         );
       }
+      ctx.abort();
       return;
     }
 
@@ -184,8 +197,11 @@ export async function handleAnalyticsSseMessage(
       );
     }
     failWithGenericError(ctx);
+    ctx.settled = true;
+    ctx.abort();
   } catch (error) {
     console.warn(`[${ctx.source}] Malformed message received`, error);
+    ctx.settled = true;
     ctx.setLoading(false);
     ctx.setError(GENERIC_LOAD_ERROR);
     if (ctx.unpublishOnMalformedMessage) {
@@ -199,8 +215,17 @@ export async function handleAnalyticsSseMessage(
 export function handleAnalyticsSseError(
   error: unknown,
   ctx: AnalyticsSseHandlerContext,
+  willRetry = false,
 ): void {
-  if (ctx.signal.aborted) return;
+  if (ctx.signal.aborted || ctx.settled) return;
+
+  // Let transient network failures reconnect. A connection deadline is
+  // terminal for analytics, so retries cannot restart its loading budget.
+  if (willRetry && !isAbortError(error)) {
+    return;
+  }
+
+  ctx.settled = true;
 
   ctx.setLoading(false);
   ctx.unpublishWarehouseStatus();
@@ -213,4 +238,15 @@ export function handleAnalyticsSseError(
     });
   }
   ctx.setError(userFacingFetchError(error));
+  ctx.abort();
+}
+
+/** Analytics requires a result or error payload; transport EOF alone is not success. */
+export function handleAnalyticsSseEnd(ctx: AnalyticsSseHandlerContext): void {
+  if (ctx.signal.aborted || ctx.settled) return;
+  ctx.settled = true;
+  ctx.setLoading(false);
+  ctx.setError("Response interrupted before completion, please try again");
+  ctx.unpublishWarehouseStatus();
+  ctx.abort();
 }

@@ -1,3 +1,4 @@
+import { ExecutionTimeoutError } from "../../errors/timeout";
 import { createLogger } from "../../logging/logger";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
@@ -15,44 +16,39 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
       timeout_ms: this.timeoutMs,
     });
 
-    // create timeout signal
-    const timeoutController = new AbortController();
+    // Latch the first cancellation eagerly, even if the operation never
+    // listens to the signal. Unobserved AbortSignal.any() composites can
+    // resolve lazily in Node and choose source order instead of abort order.
+    const executionController = new AbortController();
+    const callerSignal = context.signal;
+    const onCallerAbort = () => executionController.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) onCallerAbort();
+    else callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+
+    const timeoutError = new ExecutionTimeoutError(this.timeoutMs);
     const timeoutId = setTimeout(() => {
-      timeoutController.abort(
-        new Error(`Operation timed out after ${this.timeoutMs} ms`),
-      );
+      executionController.abort(timeoutError);
     }, this.timeoutMs);
+    const combinedSignal = executionController.signal;
 
     try {
-      // combine user signal (if exists) with timeout signal
-      const combinedSignal = context.signal
-        ? this._combineSignals([context.signal, timeoutController.signal])
-        : timeoutController.signal;
-
       // execute function with combined signal
       context.signal = combinedSignal;
       return await fn();
+    } catch (error) {
+      // The SDK replaces the signal reason with a generic AbortError. Check
+      // the winning reason, not just whether our timer eventually fired.
+      if (combinedSignal.reason === timeoutError) {
+        throw new ExecutionTimeoutError(
+          this.timeoutMs,
+          error instanceof Error ? error : undefined,
+        );
+      }
+      throw error;
     } finally {
       // cleanup timeout
       clearTimeout(timeoutId);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
     }
-  }
-
-  private _combineSignals(signals: AbortSignal[]): AbortSignal {
-    const controller = new AbortController();
-    for (const signal of signals) {
-      if (signal.aborted) {
-        controller.abort(signal.reason);
-        break;
-      }
-      signal.addEventListener(
-        "abort",
-        () => {
-          controller.abort(signal.reason);
-        },
-        { once: true },
-      );
-    }
-    return controller.signal;
   }
 }

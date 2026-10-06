@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { ExecutionTimeoutError } from "../../errors/timeout";
 import { streamDefaults } from "../defaults";
 import { StreamManager } from "../index";
 
@@ -1282,14 +1283,14 @@ describe("StreamManager", () => {
       return JSON.parse(dataLine) as { code?: string; error?: string };
     }
 
-    test("does not emit an error SSE frame for native AbortError", async () => {
+    test("reports a native AbortError while the caller remains connected", async () => {
       const err = new Error("operation aborted");
       err.name = "AbortError";
       const payload = await captureErrorEvent(streamManager, err);
-      expect(payload).toBeUndefined();
+      expect(payload?.code).toBe("INTERNAL_ERROR");
     });
 
-    test("does not emit an error SSE frame for wrapped abort messages", async () => {
+    test("reports wrapped abort messages while the caller remains connected", async () => {
       class FakeExecutionError extends Error {
         statusCode = 500;
         constructor() {
@@ -1301,7 +1302,34 @@ describe("StreamManager", () => {
         streamManager,
         new FakeExecutionError(),
       );
-      expect(payload).toBeUndefined();
+      expect(payload?.code).toBe("UPSTREAM_ERROR");
+    });
+
+    test("emits a sanitized timeout event", async () => {
+      const payload = await captureErrorEvent(
+        streamManager,
+        new ExecutionTimeoutError(100, new Error("private SDK detail")),
+      );
+      expect(payload).toMatchObject({
+        code: "TIMEOUT",
+        error: "Query timed out, please try again",
+      });
+      expect(JSON.stringify(payload)).not.toContain("private SDK detail");
+    });
+
+    test("silently finalizes a genuinely canceled caller", async () => {
+      const controller = new AbortController();
+      const { mockRes, events } = createMockResponse();
+      async function* generator() {
+        yield { type: "start" };
+        controller.abort();
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+      await streamManager.stream(mockRes as any, generator, {
+        userSignal: controller.signal,
+      });
+      expect(events.join("")).not.toContain("event: error");
+      expect(mockRes.end).toHaveBeenCalled();
     });
 
     test("classifies real upstream API errors as UPSTREAM_ERROR", async () => {
