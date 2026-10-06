@@ -22,6 +22,16 @@ vi.mock("../../../context", () => ({
   },
 }));
 
+vi.mock("../../../context/service-context", () => ({
+  ServiceContext: {
+    createCallerContext: (_token: string, userId: string) => ({
+      principal: { type: "user", userId },
+      client: mockWorkspaceClient,
+      workspaceId: Promise.resolve("test-workspace"),
+    }),
+  },
+}));
+
 vi.mock("../../../logging/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),

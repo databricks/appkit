@@ -228,32 +228,25 @@ BasePlugin.abortActiveOperations
 
 ***
 
-### asUser()
+### ~~asUser()~~
 
 ```ts
 asUser(req: Request): this;
 ```
 
-Execute operations using the user's identity from the request.
-Returns a proxy of this plugin where all method calls execute
-with the user's Databricks credentials instead of the service principal.
-
 #### Parameters
 
-| Parameter | Type | Description |
-| ------ | ------ | ------ |
-| `req` | `Request` | The Express request containing the user token in headers |
+| Parameter | Type |
+| ------ | ------ |
+| `req` | `Request` |
 
 #### Returns
 
 `this`
 
-A proxied plugin instance that executes as the user
+#### Deprecated
 
-#### Throws
-
-AuthenticationError if user token is not available in request headers (production only).
-  In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
+Use appkit.asUser(req) to scope the whole app.
 
 ***
 

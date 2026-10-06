@@ -7,6 +7,9 @@
 
 // Types from shared
 export type {
+  AppKitApi,
+  ScopedPluginMap,
+  UserScopedApp,
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
@@ -40,9 +43,18 @@ export {
   type CallerContext,
   type CallerPrincipal,
   type ExecutionContext,
+  type UserContext,
+  ServiceContext,
+  getCallerContext,
   getCurrentActorId,
   getCurrentPrincipalKey,
+  getCurrentUserId,
   getExecutionContext,
+  getUserContext,
+  isInUserContext,
+  isUserContext,
+  runInCallerContext,
+  runInUserContext,
 } from "./context";
 export { createApp } from "./core";
 export { getWarehouseId } from "./resources";

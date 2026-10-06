@@ -30,6 +30,18 @@ Truncated SHA-256 hash of the caller token, used to detect rotation.
 
 ***
 
+### ~~warehouseId?~~
+
+```ts
+readonly optional warehouseId: Promise<string>;
+```
+
+#### Deprecated
+
+Use getWarehouseId(). Only legacy context access exposes this field.
+
+***
+
 ### workspaceId
 
 ```ts
