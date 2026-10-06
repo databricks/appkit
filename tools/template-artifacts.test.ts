@@ -16,7 +16,10 @@ import { parse } from "yaml";
 
 import { checkTemplateArtifact } from "./check-template-artifact";
 import { preservePackageManagerArtifacts } from "./template-artifacts";
-import { selectSmokePackageManager } from "./template-smoke-runner";
+import {
+  PACKAGE_MANAGER_PLACEHOLDER,
+  selectSmokePackageManager,
+} from "./template-smoke-runner";
 
 const root = resolve(import.meta.dirname, "..");
 const temporaryDirectories: string[] = [];
@@ -63,6 +66,18 @@ test("static variants retain both package managers for the final init", () => {
   ]) {
     expect(readFileSync(join(output, file), "utf-8")).toBe(
       readFileSync(join(source, file), "utf-8"),
+    );
+  }
+});
+
+test("template scripts invoke the package manager selected by apps init", () => {
+  const { scripts } = JSON.parse(
+    readFileSync(join(root, "template/package.json"), "utf-8"),
+  );
+  for (const script of Object.values<string>(scripts)) {
+    // A hardcoded manager would make npm apps shell out to pnpm.
+    expect(script.replaceAll(PACKAGE_MANAGER_PLACEHOLDER, "")).not.toMatch(
+      /(^|[;&|(]\s*)(npm|pnpm|yarn|bun)\s/,
     );
   }
 });
