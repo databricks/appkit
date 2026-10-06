@@ -170,4 +170,70 @@ describe("standalone caller identity", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  test("an on-behalf-of-user agent rejects a run without a caller", async () => {
+    const run = vi.fn(probe.run);
+    const def = createAgent({
+      instructions: "identity",
+      model: { run },
+      auth: "on-behalf-of-user",
+    });
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /user token/,
+    );
+    expect(run).not.toHaveBeenCalled();
+    expect(
+      (await runAgent(def, { messages: "hi", caller: credentials("alice") }))
+        .text,
+    ).toBe("user:alice");
+  });
+
+  test("a string model runs on the caller's client, and a mixed sub-agent never widens", async () => {
+    const used: string[] = [];
+    const real = workspace.createWorkspaceClient;
+    vi.spyOn(workspace, "createWorkspaceClient").mockImplementation(
+      (options) => {
+        const client = real(options);
+        const caller = options?.token ? "user" : "app";
+        client.apiClient.request = (async () => {
+          used.push(caller);
+          return {
+            contents: new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+                  ),
+                );
+                controller.close();
+              },
+            }),
+          };
+        }) as never;
+        return client;
+      },
+    );
+    const child = createAgent({ instructions: "child", model: "my-endpoint" });
+    const delegate: AgentAdapter = {
+      async *run(_input, ctx) {
+        yield {
+          type: "message_delta",
+          content: String(
+            await ctx.executeTool("agent-child", { input: "go" }),
+          ),
+        };
+      },
+    };
+    const parent = (auth?: "on-behalf-of-user") =>
+      createAgent({
+        instructions: "parent",
+        model: delegate,
+        agents: { child },
+        ...(auth && { auth }),
+      });
+    const caller = credentials("alice");
+    await runAgent(parent("on-behalf-of-user"), { messages: "hi", caller });
+    await runAgent(parent(), { messages: "hi", caller });
+    expect(used).toEqual(["user", "app"]);
+  });
 });

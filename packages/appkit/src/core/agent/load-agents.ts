@@ -7,6 +7,7 @@ import type { AgentAdapter } from "shared";
 
 import type { GenerationParams } from "../../agents/databricks";
 import type {
+  AgentAuth,
   AgentDefinition,
   AgentTool,
   BaseSystemPromptOption,
@@ -96,6 +97,7 @@ interface Frontmatter {
   default?: boolean;
   baseSystemPrompt?: false | string;
   ephemeral?: boolean;
+  auth?: AgentAuth;
 }
 
 /**
@@ -143,6 +145,7 @@ const ALLOWED_KEYS = new Set([
   "default",
   "baseSystemPrompt",
   "ephemeral",
+  "auth",
 ]);
 
 /**
@@ -469,6 +472,12 @@ function buildDefinition(
 
   const tools = resolveFrontmatterTools(name, fm, filePath, ctx);
   const model = fm.model ?? fm.endpoint ?? ctx.defaultModel;
+  if (fm.auth !== undefined && fm.auth !== "on-behalf-of-user") {
+    throw new Error(
+      `Agent '${name}' (${filePath}) has invalid 'auth:' frontmatter: ` +
+        `expected "on-behalf-of-user", got ${JSON.stringify(fm.auth)}.`,
+    );
+  }
 
   let baseSystemPrompt: BaseSystemPromptOption | undefined;
   if (fm.baseSystemPrompt === false) baseSystemPrompt = false;
@@ -486,6 +495,7 @@ function buildDefinition(
     generationParams: parseGenerationParams(fm.generationParams, filePath),
     baseSystemPrompt,
     ephemeral: typeof fm.ephemeral === "boolean" ? fm.ephemeral : undefined,
+    auth: fm.auth,
   };
 }
 

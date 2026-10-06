@@ -10,12 +10,18 @@ import type {
   ToolProvider,
 } from "shared";
 
+import type { WorkspaceClientLike } from "../../agents/databricks";
 import {
   isSupervisorTool,
   SUPERVISOR_EXTENSION_KEY,
   type SupervisorTool,
 } from "../../agents/supervisor-api";
-import { type CallerPrincipal, runInCallerContext } from "../../context";
+import {
+  type CallerPrincipal,
+  getCallerContext,
+  getWorkspaceClient,
+  runInCallerContext,
+} from "../../context";
 import { getClientOptions } from "../../context/client-options";
 import { assertPluginExecution } from "../../context/resource-capabilities";
 import { AuthenticationError, ConfigurationError } from "../../errors";
@@ -106,6 +112,16 @@ export async function runAgent(
   def: AgentDefinition,
   input: RunAgentInput,
 ): Promise<RunAgentResult> {
+  // An ambient user scope (e.g. inside a request) counts as the caller.
+  if (
+    def.auth === "on-behalf-of-user" &&
+    !input.caller &&
+    getCallerContext()?.principal.type !== "user"
+  ) {
+    throw AuthenticationError.missingToken(
+      "user token (runAgent caller is required for an on-behalf-of-user agent)",
+    );
+  }
   if (input.caller) {
     const { principal, host, workspaceId } = input.caller;
     const token = input.caller.token.trim();
@@ -150,15 +166,19 @@ async function runStandalone(
   // (e.g. query result caches, connection pools).
   const providerCache = new Map<string, ToolProvider>();
   await initStandalonePlugins(input.plugins ?? [], providerCache);
-  return runAgentInternal(def, input, providerCache);
+  return runAgentInternal(def, input, providerCache, false);
 }
 
 async function runAgentInternal(
   def: AgentDefinition,
   input: RunAgentInput,
   providerCache: Map<string, ToolProvider>,
+  parentOnBehalfOfUser: boolean,
 ): Promise<RunAgentResult> {
-  const adapter = await resolveAdapter(def);
+  // Never widen: under an on-behalf-of-user parent every child stays the user.
+  const onBehalfOfUser =
+    parentOnBehalfOfUser || def.auth === "on-behalf-of-user";
+  const adapter = await resolveAdapter(def, onBehalfOfUser);
   const messages = normalizeMessages(input.messages, def.instructions);
   const toolIndex = buildStandaloneToolIndex(
     def,
@@ -206,6 +226,7 @@ async function runAgentInternal(
         entry.agentDef,
         subInput,
         providerCache,
+        onBehalfOfUser,
       );
       return res.text;
     }
@@ -317,7 +338,10 @@ async function initStandalonePlugins(
   }
 }
 
-async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
+async function resolveAdapter(
+  def: AgentDefinition,
+  onBehalfOfUser: boolean,
+): Promise<AgentAdapter> {
   // Explicit model wins; otherwise fall back to the
   // DATABRICKS_SERVING_ENDPOINT_NAME env default. A string from either source
   // routes by name (system.* → AI Gateway, else Model Serving).
@@ -330,7 +354,13 @@ async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
   }
   if (typeof source === "string") {
     const { adapterFromModelString } = await import("../../agents/databricks");
-    return adapterFromModelString(source);
+    // On behalf of the user the model client is the caller's, per call.
+    return onBehalfOfUser
+      ? adapterFromModelString(source, {
+          workspaceClient: () =>
+            getWorkspaceClient() as unknown as WorkspaceClientLike,
+        })
+      : adapterFromModelString(source);
   }
   return await source;
 }

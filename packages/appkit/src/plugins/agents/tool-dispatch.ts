@@ -5,6 +5,7 @@ import type { AgentRunContext, Message, ResponseStreamEvent } from "shared";
 
 import type { AppKitMcpClient } from "../../connectors/mcp";
 import { normalizeIdentityError } from "../../context/execution-context";
+import { createRequestScope } from "../../context/request-scope";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import type {
@@ -16,6 +17,12 @@ import type { PluginContext } from "../../core/plugin-context";
 import { createLogger } from "../../logging/logger";
 import { buildAdapterExtensions } from "./adapter-extensions";
 import { requiresApproval } from "./approval";
+import {
+  isOboAgentRun,
+  isOnBehalfOfUser,
+  requireOboCaller,
+  runInOboAgentRun,
+} from "./auth-mode";
 import type { EventChannel } from "./event-channel";
 import type { AgentEventTranslator } from "./event-translator";
 import { traceTool } from "./mlflow";
@@ -253,6 +260,14 @@ export async function runSubAgent(
     throw new Error(
       `Sub-agent depth exceeded (limit ${runState.limits.maxSubAgentDepth}). ` +
         `Raise agents({ limits: { maxSubAgentDepth } }) or break the delegation cycle.`,
+    );
+  }
+  // An on-behalf-of-user child opens the user scope; under an on-behalf-of-user
+  // parent the marker is already set, so every child stays the user.
+  if (isOnBehalfOfUser(child.auth) && !isOboAgentRun()) {
+    requireOboCaller(runState.req);
+    return createRequestScope(runState.req).run(() =>
+      runInOboAgentRun(() => runSubAgent(deps, runState, child, args, depth)),
     );
   }
 

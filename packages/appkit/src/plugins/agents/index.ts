@@ -11,6 +11,7 @@ export {
   parseFrontmatter,
 } from "../../core/agent/load-agents";
 export {
+  type AgentAuth,
   type AgentDefinition,
   type AgentsPluginConfig,
   type AgentTool,

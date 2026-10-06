@@ -19,7 +19,11 @@ import type {
 import { isSupervisorTool } from "../../agents/supervisor-api";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
-import { normalizeIdentityError } from "../../context/execution-context";
+import {
+  normalizeIdentityError,
+  runOutsideCallerScope,
+} from "../../context/execution-context";
+import { createRequestScope } from "../../context/request-scope";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { CODE_AGENTS_SOURCE_DIR } from "../../core/agent/load-code-agents";
@@ -45,6 +49,7 @@ import type {
   ResolvedToolEntry,
 } from "../../core/agent/types";
 import { isToolkitEntry } from "../../core/agent/types";
+import { AuthenticationError } from "../../errors";
 import { IdentityExpiredError } from "../../errors/identity-expired";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -57,6 +62,12 @@ import {
   warnOnCapabilityMismatch,
 } from "./adapter-extensions";
 import { requiresApproval } from "./approval";
+import {
+  isOnBehalfOfUser,
+  modelClientProvider,
+  requireOboCaller,
+  runInOboAgentRun,
+} from "./auth-mode";
 import { LOAD_SKILL_TOOL_DEF, READ_SKILL_FILE_TOOL_DEF } from "./builtin-tools";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
@@ -503,6 +514,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       generationParams: def.generationParams,
       ephemeral: def.ephemeral,
       skills,
+      ...((def.auth ?? this.config.auth) && {
+        auth: def.auth ?? this.config.auth,
+      }),
     };
   }
 
@@ -575,7 +589,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     if (typeof source === "string") {
       const { adapterFromModelString } =
         await import("../../agents/databricks");
-      return adapterFromModelString(source, adapterOptions);
+      return adapterFromModelString(source, {
+        ...adapterOptions,
+        // Resolved per call: the caller inside an on-behalf-of-user run, the
+        // app service principal otherwise (unchanged default).
+        workspaceClient: modelClientProvider(),
+      });
     }
     return await source;
   }
@@ -1009,6 +1028,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
+    if (!this.allowsCaller(registered, req, res)) return;
 
     const userId = this.resolveUserId(req);
 
@@ -1052,14 +1072,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(
-      req,
-      res,
-      registered,
-      thread,
-      userId,
-      mlflowRunId,
-      skill,
+    return this.runInAgentScope(registered, req, () =>
+      this._streamAgent(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        mlflowRunId,
+        skill,
+      ),
     );
   }
 
@@ -1112,6 +1134,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(400).json({ error: "No agent registered" });
       return;
     }
+    if (!this.allowsCaller(registered, req, res)) return;
 
     // Pre-flight HITL gate. The non-streaming invoke surface has no way to
     // surface an approval prompt back to the caller and no way to receive
@@ -1178,14 +1201,56 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    return this._runAgentNonStreaming(
-      req,
-      res,
-      registered,
-      thread,
-      userId,
-      mlflowRunId,
+    return this.runInAgentScope(registered, req, () =>
+      this._runAgentNonStreaming(
+        req,
+        res,
+        registered,
+        thread,
+        userId,
+        mlflowRunId,
+      ),
     );
+  }
+
+  /**
+   * Fail closed for an on-behalf-of-user agent: without a forwarded user token
+   * the request is rejected with 401 before any model or tool call, in
+   * production and in development. Other agents are unaffected.
+   */
+  private allowsCaller(
+    registered: RegisteredAgent,
+    req: express.Request,
+    res: express.Response,
+  ): boolean {
+    if (!isOnBehalfOfUser(registered.auth)) return true;
+    try {
+      requireOboCaller(req);
+      return true;
+    } catch (error) {
+      const failure =
+        error instanceof AuthenticationError
+          ? error
+          : AuthenticationError.missingToken("user token");
+      res
+        .status(401)
+        .json({ error: failure.clientMessage, code: failure.code });
+      return false;
+    }
+  }
+
+  /**
+   * Run an on-behalf-of-user agent inside the request's user scope, so the
+   * model call, hand-rolled tools, and sub-agents all act as the user. Other
+   * agents run exactly as before.
+   */
+  private runInAgentScope<T>(
+    registered: RegisteredAgent,
+    req: express.Request,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    if (!isOnBehalfOfUser(registered.auth)) return fn();
+    return createRequestScope(req).run(() => runInOboAgentRun(fn));
   }
 
   private async _streamAgent(
@@ -1323,12 +1388,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
             if (fullContent) {
               span.setOutputs({ role: "assistant", content: fullContent });
-              await this.threadStore.addMessage(thread.id, userId, {
-                id: randomUUID(),
-                role: "assistant",
-                content: fullContent,
-                createdAt: new Date(),
-              });
+              await runOutsideCallerScope(() =>
+                this.threadStore.addMessage(thread.id, userId, {
+                  id: randomUUID(),
+                  role: "assistant",
+                  content: fullContent,
+                  createdAt: new Date(),
+                }),
+              );
             }
 
             // Surface the MLflow trace id so eval runs can attach assessments
@@ -1366,7 +1433,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // finished and the client has the response.
         if (registered.ephemeral) {
           try {
-            await this.threadStore.delete(thread.id, userId);
+            await runOutsideCallerScope(() =>
+              this.threadStore.delete(thread.id, userId),
+            );
           } catch (err) {
             logger.warn(
               "Failed to delete ephemeral thread %s: %O",
@@ -1518,12 +1587,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
           if (fullContent) {
             span.setOutputs({ role: "assistant", content: fullContent });
-            await this.threadStore.addMessage(thread.id, userId, {
-              id: randomUUID(),
-              role: "assistant",
-              content: fullContent,
-              createdAt: new Date(),
-            });
+            await runOutsideCallerScope(() =>
+              this.threadStore.addMessage(thread.id, userId, {
+                id: randomUUID(),
+                role: "assistant",
+                content: fullContent,
+                createdAt: new Date(),
+              }),
+            );
           }
 
           mlflowTraceId = currentTraceId();
@@ -1555,7 +1626,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       this.untrackStream(requestId);
       if (registered.ephemeral) {
         try {
-          await this.threadStore.delete(thread.id, userId);
+          await runOutsideCallerScope(() =>
+            this.threadStore.delete(thread.id, userId),
+          );
         } catch (err) {
           logger.warn(
             "Failed to delete ephemeral thread %s: %O",

@@ -1091,6 +1091,46 @@ describe("DatabricksAdapter", () => {
 });
 
 describe("DatabricksAdapter.fromServingEndpoint", () => {
+  test.each([
+    [
+      "fromServingEndpoint",
+      (workspaceClient: () => { apiClient: unknown }) =>
+        DatabricksAdapter.fromServingEndpoint({
+          workspaceClient: workspaceClient as never,
+          endpointName: "my-model",
+        }),
+    ],
+    [
+      "fromAiGateway",
+      (workspaceClient: () => { apiClient: unknown }) =>
+        DatabricksAdapter.fromAiGateway({
+          workspaceClient: workspaceClient as never,
+          model: "system.ai.claude",
+        }),
+    ],
+  ])("%s resolves a client provider on every run", async (_name, build) => {
+    const clients = ["alice", "bob"].map((user) => ({
+      user,
+      apiClient: {
+        request: vi.fn(async () => ({
+          contents: createReadableStream([textDelta(user), sseChunk("[DONE]")]),
+        })),
+      },
+    }));
+    let next = 0;
+    const adapter = await build(() => clients[next++]);
+    for (const _ of clients) {
+      for await (const _event of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    }
+    expect(clients[0].apiClient.request).toHaveBeenCalledTimes(1);
+    expect(clients[1].apiClient.request).toHaveBeenCalledTimes(1);
+  });
+
   test("routes tool-free chat through apiClient.request with a streaming payload", async () => {
     const apiClient = {
       request: vi.fn().mockResolvedValue({

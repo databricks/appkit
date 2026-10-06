@@ -317,6 +317,46 @@ const result = await runAgent(classifier, {
 
 MCP hosted tools (`mcpServer(...)`) still require `agents()` (they need a live MCP client). Supervisor-API hosted tools (`supervisorTools.*`), by contrast, **work in standalone `runAgent`** — the adapter has everything it needs to execute them server-side. This makes batch-eval / CI use of supervisor agents possible without `createApp`. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
 
+## Execution identity
+
+By default an agent runs **mixed**: the model call and hand-rolled `tool({ execute })` tools run as the app's service principal, and plugin-toolkit tools run as the requesting user. Set `auth: "on-behalf-of-user"` to run the whole agent as the user:
+
+```ts
+agents({ auth: "on-behalf-of-user" });                      // default for every agent
+createAgent({ instructions: "...", auth: "on-behalf-of-user" }); // one agent
+```
+
+In markdown, set `auth: on-behalf-of-user` in the frontmatter. A per-agent value overrides the plugin default. Omitting `auth` keeps the mixed behavior; there is no all-service-principal mode.
+
+| Piece | Default (mixed) | `on-behalf-of-user` |
+|---|---|---|
+| Model call | service principal | user |
+| Plugin-toolkit tools | user | user |
+| Hand-rolled `tool({ execute })` | service principal | user |
+| Sub-agents | own mode | own mode, never service principal |
+| Standalone `runAgent` | service principal, or user tools with `caller` | requires `caller` (or an ambient user scope); model and tools as user |
+| MLflow tracing | service principal | service principal (exception) |
+| Thread store | service principal | service principal (exception) |
+| Missing user token | plugin tools reject; the rest runs as the service principal | the request is rejected with 401 before any model or tool call |
+
+An on-behalf-of-user agent fails closed:
+
+- No forwarded user token: `401` before any model or tool call, in production and in development. There is no service-principal fallback.
+- A `401` from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
+- A sub-agent never widens: under an on-behalf-of-user parent, a mixed sub-agent also runs as the user.
+
+**Exceptions.** MLflow tracing and the thread store are app-owned and stay service principal in every mode; thread rows are keyed by the user id.
+
+**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). An adapter you build yourself keeps the client you gave it; pass a provider so it resolves per call:
+
+```ts
+DatabricksAdapter.fromModelServing("my-endpoint", {
+  workspaceClient: () => getWorkspaceClient(),
+});
+```
+
+**Provisioning.** Each user needs the `model-serving` user API scope on the app, and `CAN_QUERY` on any custom serving endpoint the agent calls. Plugin tools still need their own scopes and grants as in mixed mode.
+
 ## Adding agents to an existing app
 
 Already have an app and want to add agents? What you touch depends on the kind:
@@ -477,6 +517,7 @@ agents({
   agents?: Record<string, AgentDefinition>,  // DEPRECATED — use server/agents/<id>/ discovery
   defaultAgent?: string,
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string,
+  auth?: "on-behalf-of-user",  // default: mixed (see Execution identity)
   tools?: Record<string, AgentTool>,
   autoInheritTools?: boolean | { file?: boolean, code?: boolean },
   autoInheritSkills?: boolean | { file?: boolean, code?: boolean }, // default off
@@ -916,6 +957,7 @@ Skip `--experiment` (and `MLFLOW_EXPERIMENT_ID`) to run evals purely locally wit
 | `maxTokens` | number | Adapter max-token hint. |
 | `generationParams` | object | Adapter generation params (e.g. `temperature`, `top_p`) passed through when AppKit builds the adapter. |
 | `baseSystemPrompt` | false \| string | Per-agent override. `false` disables the AppKit base prompt. |
+| `auth` | string | `on-behalf-of-user` runs this agent as the user. Any other value throws at boot. See [Execution identity](#execution-identity). |
 | `ephemeral` | boolean | If `true`, the thread created for a chat request against this agent is deleted from `ThreadStore` after the stream finishes. Use for stateless one-shot agents (e.g. autocomplete) so history does not accumulate or contaminate future calls. Defaults to `false`. |
 
 Unknown keys are logged and ignored. Invalid YAML and missing plugin/tool references throw at boot.

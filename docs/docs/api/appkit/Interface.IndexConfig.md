@@ -5,7 +5,7 @@
 ### auth?
 
 ```ts
-optional auth: "service-principal" | "on-behalf-of-user";
+optional auth: "on-behalf-of-user" | "service-principal";
 ```
 
 Auth mode for the built-in HTTP routes — "service-principal" (default)

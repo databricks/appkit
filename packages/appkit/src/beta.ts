@@ -87,6 +87,7 @@ export {
 export * from "./evals";
 // Agent types
 export type {
+  AgentAuth,
   AgentDefinition,
   AgentsPluginConfig,
   AgentTool,
