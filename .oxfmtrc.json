@@ -32,6 +32,7 @@
     "**/*.gen.ts",
     "**/typedoc-sidebar.ts",
     "**/template",
-    "**/appkit-types/metric-views.ts"
+    "**/appkit-types/metric-views.ts",
+    ".smoke-test"
   ]
 }

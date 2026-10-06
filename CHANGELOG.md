@@ -170,6 +170,13 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.82.0](https://github.com/databricks/appkit/compare/v0.81.0...v0.82.0) (2026-10-01)
+
+* make the app template package-manager-aware (pnpm-first + npm artifacts + detection) ([#593](https://github.com/databricks/appkit/issues/593)) ([b319233](https://github.com/databricks/appkit/commit/b319233d5949f0c5697a5fa4712c7de12976c0d2))
+
+
 ## [0.81.0](https://github.com/databricks/appkit/compare/v0.80.0...v0.81.0) (2026-09-29)
 
 ### appkit

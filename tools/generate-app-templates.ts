@@ -26,6 +26,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { preservePackageManagerArtifacts } from "./template-artifacts";
+
 const ROOT = resolve(import.meta.dirname, "..");
 
 const OUTPUT_DIR = process.env.APP_TEMPLATES_OUTPUT_DIR
@@ -179,6 +181,8 @@ console.log(
  */
 function postProcess(appDir: string, app: AppTemplate): void {
   console.log(`  Post-processing ${app.name}...`);
+
+  preservePackageManagerArtifacts(TEMPLATE_PATH, appDir);
 
   // 1. Delete .env (contains resolved credentials from the generator's CLI profile)
   //    and write .env.tmpl with a header comment so that `databricks apps init`

@@ -40,26 +40,30 @@ if (templateJson.dependencies) {
   console.log(`✓ template/package.json → ${version}`);
 }
 
-// 2. npm install in template (with retry for registry propagation)
+// 2. Regenerate both lockfiles in template (the template ships both; retry
+// for registry propagation of the just-published version).
 const MAX_ATTEMPTS = 3;
 const templateDir = join(ROOT, "template");
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runNpmInstallWithRetry(): Promise<number> {
+async function runInstallWithRetry(
+  label: string,
+  cmd: string,
+  args: string[],
+): Promise<number> {
   let lastStatus = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const status = run("npm", ["install"], { cwd: templateDir });
+    const status = run(cmd, args, { cwd: templateDir });
     lastStatus = status;
     if (status === 0) {
-      console.log("✓ template/package-lock.json updated (npm install)");
       return 0;
     }
     if (attempt < MAX_ATTEMPTS) {
       const delayMs = 2 ** attempt * 1000;
       console.warn(
-        `npm install failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying in ${delayMs / 1000}s...`,
+        `${label} failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying in ${delayMs / 1000}s...`,
       );
       await sleep(delayMs);
     }
@@ -67,15 +71,47 @@ async function runNpmInstallWithRetry(): Promise<number> {
   return lastStatus;
 }
 
-const installExit = await runNpmInstallWithRetry();
-if (installExit !== 0) {
+// 2a. npm → package-lock.json
+const npmExit = await runInstallWithRetry("npm install", "npm", ["install"]);
+if (npmExit !== 0) {
   console.error(`npm install failed after ${MAX_ATTEMPTS} attempts`);
-  process.exit(installExit);
+  process.exit(npmExit);
 }
+console.log("✓ template/package-lock.json updated (npm install)");
+
+// 2b. pnpm preflight — fail loud rather than silently skip the pnpm lock.
+if (run("pnpm", ["--version"]) !== 0) {
+  console.error(
+    "pnpm is not invokable — cannot regenerate template/pnpm-lock.yaml. " +
+      "Ensure the release runner's pnpm setup ran before this script.",
+  );
+  process.exit(1);
+}
+
+// 2c. pnpm → pnpm-lock.yaml (--no-frozen-lockfile: pnpm defaults to frozen
+// under CI; --lockfile-only: skip the node_modules rebuild).
+const pnpmExit = await runInstallWithRetry("pnpm install", "pnpm", [
+  "install",
+  "--lockfile-only",
+  "--no-frozen-lockfile",
+]);
+if (pnpmExit !== 0) {
+  console.error(`pnpm install failed after ${MAX_ATTEMPTS} attempts`);
+  process.exit(pnpmExit);
+}
+console.log("✓ template/pnpm-lock.yaml updated (pnpm install)");
 
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
-  ["git", ["add", "template/package.json", "template/package-lock.json"]],
+  [
+    "git",
+    [
+      "add",
+      "template/package.json",
+      "template/package-lock.json",
+      "template/pnpm-lock.yaml",
+    ],
+  ],
   [
     "git",
     ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
