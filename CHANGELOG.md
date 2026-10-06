@@ -174,6 +174,23 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.84.0](https://github.com/databricks/appkit/compare/v0.83.0...v0.84.0) (2026-10-06)
+
+### shared
+
+* **shared:** bake execution capabilities into synced plugin manifests ([#623](https://github.com/databricks/appkit/issues/623)) ([3e1b968](https://github.com/databricks/appkit/commit/3e1b9685e71e1f05971671720e98e08340cb5792))
+
+### appkit
+
+* **appkit:** guard app-only resources in caller scopes ([#601](https://github.com/databricks/appkit/issues/601)) ([3d7e58d](https://github.com/databricks/appkit/commit/3d7e58d43f090f18ea2146cb0163160dd9bb0055))
+* **appkit:** add on-behalf-of-user mode for agents ([#631](https://github.com/databricks/appkit/issues/631)) ([97d7660](https://github.com/databricks/appkit/commit/97d766031775ff0b6398cd94b6f9d463c8d09b30))
+* **appkit:** establish ambient user execution scopes ([#594](https://github.com/databricks/appkit/issues/594)) ([028a17b](https://github.com/databricks/appkit/commit/028a17bce9005356a756f7de513f8a341d145e32))
+* **appkit:** support explicit standalone agent caller identity ([#595](https://github.com/databricks/appkit/issues/595)) ([eaf901a](https://github.com/databricks/appkit/commit/eaf901a4e92343ea7191d699a48e575f7ff3e350))
+* **appkit:** surface caller expiry and support local OBO ([#597](https://github.com/databricks/appkit/issues/597)) ([561c948](https://github.com/databricks/appkit/commit/561c948d7eb64c170a03440ea0d4a9c9769ce779))
+
+
 ## [0.83.0](https://github.com/databricks/appkit/compare/v0.82.0...v0.83.0) (2026-10-06)
 
 ### appkit
