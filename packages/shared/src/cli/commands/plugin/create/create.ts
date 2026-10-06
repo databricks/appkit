@@ -5,6 +5,11 @@ import process from "node:process";
 import { Command, Option } from "commander";
 
 import { PLUGIN_NAME_PATTERN } from "../../../../naming";
+import {
+  detectPackageManager,
+  PM_COMMANDS,
+  type PackageManager,
+} from "../../../package-manager";
 import { promptOneResource } from "./prompt-resource";
 import {
   DEFAULT_PERMISSION_BY_TYPE,
@@ -116,7 +121,11 @@ function parseResourcesShorthand(csv: string): SelectedResource[] {
   return types.map(buildResourceFromType);
 }
 
-function printNextSteps(answers: CreateAnswers, targetDir: string): void {
+function printNextSteps(
+  answers: CreateAnswers,
+  targetDir: string,
+  pm: PackageManager,
+): void {
   const relativePath = path.relative(process.cwd(), targetDir);
   const importPath = relativePath.startsWith(".")
     ? relativePath
@@ -133,12 +142,16 @@ function printNextSteps(answers: CreateAnswers, targetDir: string): void {
       `  2. Run \`npx appkit plugin sync --write\` to update appkit.plugins.json.\n`,
     );
   } else {
-    console.log(`  1. cd into the new package and install dependencies:`);
-    console.log(`     cd ${answers.targetPath} && pnpm install`);
-    console.log(`  2. Build: pnpm build`);
-    console.log(
-      `  3. In your app: pnpm add ./${answers.targetPath} @databricks/appkit`,
+    const installCmd = PM_COMMANDS[pm].install;
+    const buildCmd = PM_COMMANDS[pm].build;
+    const addCmd = PM_COMMANDS[pm].add(
+      `./${answers.targetPath} @databricks/appkit`,
     );
+
+    console.log(`  1. cd into the new package and install dependencies:`);
+    console.log(`     cd ${answers.targetPath} && ${installCmd}`);
+    console.log(`  2. Build: ${buildCmd}`);
+    console.log(`  3. In your app: ${addCmd}`);
     console.log(
       `  4. Import and register: import { ${exportName} } from "<package-name>";\n`,
     );
@@ -213,12 +226,16 @@ function runNonInteractive(opts: CreateOptions): void {
     process.exit(1);
   }
 
-  scaffoldPlugin(targetDir, answers, { isolated: placement === "isolated" });
+  const pm = detectPackageManager(process.cwd());
+  scaffoldPlugin(targetDir, answers, {
+    isolated: placement === "isolated",
+    pm,
+  });
 
   console.log(
     `Plugin "${answers.name}" created at ${path.relative(process.cwd(), targetDir)}`,
   );
-  printNextSteps(answers, targetDir);
+  printNextSteps(answers, targetDir, pm);
 }
 
 async function runInteractive(): Promise<void> {
@@ -403,8 +420,10 @@ async function runInteractive(): Promise<void> {
     const s = spinner();
     s.start("Writing files…");
     try {
+      const pm = detectPackageManager(process.cwd());
       scaffoldPlugin(targetDir, answers, {
         isolated: placement === "isolated",
+        pm,
       });
       s.stop("Files written.");
     } catch (err) {
@@ -413,7 +432,8 @@ async function runInteractive(): Promise<void> {
     }
 
     outro("Plugin created successfully.");
-    printNextSteps(answers, targetDir);
+    const pm = detectPackageManager(process.cwd());
+    printNextSteps(answers, targetDir, pm);
   } catch (err) {
     console.error(err);
     process.exit(1);
@@ -485,4 +505,9 @@ Examples:
   );
 
 /** Exported for testing. */
-export { buildResourceFromType, parseResourcesJson, parseResourcesShorthand };
+export {
+  buildResourceFromType,
+  parseResourcesJson,
+  parseResourcesShorthand,
+  printNextSteps,
+};
