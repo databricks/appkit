@@ -6,13 +6,22 @@ import {
   type FilePolicy,
   files,
   genie,
+  getExecutionContext,
   lakebase,
   PolicyDeniedError,
   server,
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch, database, runAgent } from "@databricks/appkit/beta";
+import {
+  agents,
+  aiSearch,
+  database,
+  defineTool,
+  omnigent,
+  runAgent,
+} from "@databricks/appkit/beta";
+import { z } from "zod";
 
 import redactor from "./agents/redactor/agent";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -178,6 +187,35 @@ createApp({
       // are dispatchers or ephemeral and don't make sense as the landing agent).
       defaultAgent: "helper",
     }),
+    // Needs a Python 3.12 venv with omnigent[databricks] (./.venv) and the
+    // harness CLIs; opt in with OMNIGENT_ENABLED=1.
+    ...(process.env.OMNIGENT_ENABLED
+      ? [
+          omnigent({
+            instructions:
+              "You are a helpful data assistant inside the AppKit dev playground. Use the app's tools.",
+            tools: {
+              whoami: defineTool({
+                description:
+                  "Return the workspace user the app's tools run as.",
+                schema: z.object({}),
+                annotations: { effect: "read", requiresUserContext: true },
+                execute: async () => {
+                  const { client } = getExecutionContext();
+                  return client.currentUser.me();
+                },
+              }),
+              save_note: defineTool({
+                description:
+                  "Save a short note (a write, so 'ask' mode pauses for approval).",
+                schema: z.object({ text: z.string() }),
+                annotations: { effect: "write" },
+                execute: async ({ text }) => ({ saved: text }),
+              }),
+            },
+          }),
+        ]
+      : []),
     aiSearch({
       indexes: {
         demo: {
