@@ -1,3 +1,5 @@
+import type { IdentityExpiredError } from "../errors/identity-expired";
+
 /**
  * Discriminated union for plugin execution results.
  *
@@ -14,4 +16,10 @@
  */
 export type ExecutionResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: number; message: string };
+  | {
+      ok: false;
+      status: number;
+      message: string;
+      /** Typed credential expiry without changing the existing failure envelope. */
+      error?: IdentityExpiredError;
+    };

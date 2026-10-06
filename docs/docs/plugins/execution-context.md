@@ -113,3 +113,64 @@ runs with default app credentials, marked `DEV_OBO_FALLBACK`. If a caller scope
 is already open, fallback retains it instead of widening to SP. The marker does
 not leak outside the scope. Production never falls back when credentials are
 missing.
+
+## Credential expiration and telemetry
+
+A structured downstream HTTP 401 inside a caller scope throws
+`IdentityExpiredError` with code `IDENTITY_EXPIRED`. It includes the existing
+token fingerprint, not the token or upstream credential-bearing error. Obtain
+fresh user credentials before retrying. Non-401 failures and SP execution keep
+their existing behavior. Plugin `execute()` preserves its failed-result envelope
+and adds the typed error in the optional `error` field; SSE streams expose `IDENTITY_EXPIRED`
+in the error payload's `errorCode` field.
+
+AppKit-managed spans include `appkit.execution.principal` (`app` or `user`) and
+`appkit.execution.principal_id` (user or SP ID, or `app` before initialization).
+`appkit.execution.actor_id` is present when an initiating user exists. Tokens
+are never attached to these attributes.
+
+## Real user execution locally
+
+Set `DATABRICKS_TOKEN` and `DATABRICKS_HOST` in the app's `.env` to use a user
+token directly:
+
+```dotenv
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your-user-token
+```
+
+When `DATABRICKS_TOKEN` is present, it takes precedence. AppKit uses it directly
+and resolves the user ID from the configured host. Otherwise, set
+`DATABRICKS_CONFIG_PROFILE` to an authenticated user profile for the same
+workspace as the app. The generated template already sets the profile when you
+choose one during scaffolding:
+
+```dotenv
+DATABRICKS_CONFIG_PROFILE=your-user-profile
+```
+
+Then run your usual command:
+
+```sh
+npm run dev
+```
+
+Open the app's normal localhost URL. In development, the server automatically
+adds `x-forwarded-access-token`, `x-forwarded-user`, and optional email headers
+before plugin routes and custom routes run. No separate proxy, target, or port
+is needed. `asUser(req)` uses that user identity. Unscoped operations still use
+the app's configured credentials; injecting headers does not open a caller scope.
+For a genuine SP-versus-user comparison, the app credentials must belong to an
+SP, not the same user profile.
+
+Credentials stay in memory and refresh after 30 seconds of use. Initial auth and
+refresh failures return 401, never a silent SP fallback. Existing forwarded user
+tokens are preserved. Automatic injection runs only in `NODE_ENV=development`
+and only for same-origin loopback requests, including `localhost`. Use it only
+with a trusted local app. It emulates user credentials, not platform consent,
+scope enforcement, or resource provisioning.
+
+Set `APPKIT_DEV_OBO=false` in `.env` to disable automatic injection. Without a
+configured token or profile, injection is also disabled. Tokenless
+`asUser(req)` then keeps the existing `DEV_OBO_FALLBACK` behavior in
+development.
