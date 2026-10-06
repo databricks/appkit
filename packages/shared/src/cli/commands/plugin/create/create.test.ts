@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildResourceFromType,
   parseResourcesJson,
   parseResourcesShorthand,
+  printNextSteps,
 } from "./create";
+import type { CreateAnswers } from "./types";
 
 describe("create non-interactive helpers", () => {
   describe("buildResourceFromType", () => {
@@ -148,6 +150,90 @@ describe("create non-interactive helpers", () => {
       } finally {
         vi.restoreAllMocks();
       }
+    });
+  });
+
+  describe("printNextSteps", () => {
+    let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const answers: CreateAnswers = {
+      placement: "isolated",
+      targetPath: "plugins/my-plugin",
+      name: "myPlugin",
+      displayName: "My Plugin",
+      description: "Test plugin",
+      resources: [],
+      version: "0.1.0",
+    };
+
+    const targetDir = "/home/user/project/plugins/my-plugin";
+
+    it("shows pnpm commands when pm is pnpm", () => {
+      printNextSteps(answers, targetDir, "pnpm");
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("pnpm install"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("pnpm run build"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("pnpm add"),
+      );
+    });
+
+    it("shows npm commands when pm is npm", () => {
+      printNextSteps(answers, targetDir, "npm");
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("npm install"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("npm run build"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("npm install"),
+      );
+    });
+
+    it("shows yarn commands when pm is yarn", () => {
+      printNextSteps(answers, targetDir, "yarn");
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("yarn install"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("yarn run build"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("yarn add"),
+      );
+    });
+
+    it("shows bun commands when pm is bun", () => {
+      printNextSteps(answers, targetDir, "bun");
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("bun install"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("bun run build"),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("bun add"),
+      );
+    });
+
+    it("shows npx for in-repo placement (PM-neutral)", () => {
+      const inRepoAnswers = { ...answers, placement: "in-repo" as const };
+      printNextSteps(inRepoAnswers, targetDir, "npm");
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("npx appkit plugin sync"),
+      );
     });
   });
 });
