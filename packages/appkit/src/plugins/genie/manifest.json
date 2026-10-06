@@ -3,6 +3,7 @@
   "name": "genie",
   "displayName": "Genie Plugin",
   "description": "AI/BI Genie space integration for natural language data queries",
+  "scopes": ["genie"],
   "resources": {
     "required": [
       {

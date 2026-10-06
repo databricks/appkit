@@ -17,7 +17,16 @@ resources:
       lifecycle:
         started: true
 
-{{- if or .plugins.genie .plugins.files .plugins.serving}}
+{{- /* The `else if` plugin block below is a legacy fallback. It is still the
+  only scope source for CLIs older than per-resource auth mode (they never set
+  .bundle.userApiScopes) and for the new CLI in pure service-principal mode,
+  where a genie app still needs a user scope because genie routes always run
+  on behalf of the user. Remove it once the minimum supported CLI includes
+  auth mode AND the CLI emits plugin-level scopes in service-principal mode. */}}
+{{- if .bundle.userApiScopes}}
+      user_api_scopes:
+{{.bundle.userApiScopes}}
+{{- else if or .plugins.genie .plugins.files .plugins.serving}}
       user_api_scopes:
 {{- if .plugins.genie}}
         - dashboards.genie
@@ -29,7 +38,7 @@ resources:
         - serving.serving-endpoints
 {{- end}}
 {{- else}}
-      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files, serving.serving-endpoints
+      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, genie, files, model-serving
       # user_api_scopes:
       #   - sql
 {{- end}}

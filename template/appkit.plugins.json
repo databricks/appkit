@@ -22,6 +22,16 @@
                 "description": "Default LLM serving endpoint name",
                 "origin": "user"
               }
+            },
+            "scope": "model-serving",
+            "binding": {
+              "yamlKey": "serving_endpoint",
+              "varFields": [
+                [
+                  "name",
+                  "name"
+                ]
+              ]
             }
           },
           {
@@ -36,6 +46,15 @@
                 "description": "MLflow experiment id traces are logged to",
                 "origin": "user"
               }
+            },
+            "binding": {
+              "yamlKey": "experiment",
+              "varFields": [
+                [
+                  "experimentId",
+                  "experiment_id"
+                ]
+              ]
             }
           },
           {
@@ -55,6 +74,22 @@
                 },
                 "origin": "user"
               }
+            },
+            "scope": "files",
+            "binding": {
+              "yamlKey": "uc_securable",
+              "varFields": [
+                [
+                  "path",
+                  "securable_full_name"
+                ]
+              ],
+              "staticFields": [
+                [
+                  "securable_type",
+                  "VOLUME"
+                ]
+              ]
             }
           }
         ]
@@ -80,6 +115,22 @@
                 "description": "Three-level UC name of the default index (catalog.schema.index_name)",
                 "origin": "user"
               }
+            },
+            "scope": "vector-search",
+            "binding": {
+              "yamlKey": "uc_securable",
+              "varFields": [
+                [
+                  "id",
+                  "securable_full_name"
+                ]
+              ],
+              "staticFields": [
+                [
+                  "securable_type",
+                  "TABLE"
+                ]
+              ]
             }
           }
         ],
@@ -119,6 +170,16 @@
                 },
                 "origin": "user"
               }
+            },
+            "scope": "sql",
+            "binding": {
+              "yamlKey": "sql_warehouse",
+              "varFields": [
+                [
+                  "id",
+                  "id"
+                ]
+              ]
             }
           }
         ],
@@ -159,6 +220,22 @@
                 },
                 "origin": "user"
               }
+            },
+            "scope": "files",
+            "binding": {
+              "yamlKey": "uc_securable",
+              "varFields": [
+                [
+                  "path",
+                  "securable_full_name"
+                ]
+              ],
+              "staticFields": [
+                [
+                  "securable_type",
+                  "VOLUME"
+                ]
+              ]
             }
           }
         ],
@@ -199,11 +276,28 @@
                 "description": "Genie Space display name",
                 "origin": "user"
               }
+            },
+            "scope": "genie",
+            "binding": {
+              "yamlKey": "genie_space",
+              "varFields": [
+                [
+                  "name",
+                  "name"
+                ],
+                [
+                  "id",
+                  "space_id"
+                ]
+              ]
             }
           }
         ],
         "optional": []
       },
+      "scopes": [
+        "genie"
+      ],
       "scaffolding": {
         "rules": {
           "must": [
@@ -231,6 +325,15 @@
                 "description": "Numeric Databricks job ID. Find it in the Jobs UI or via `databricks jobs list`.",
                 "origin": "user"
               }
+            },
+            "binding": {
+              "yamlKey": "job",
+              "varFields": [
+                [
+                  "id",
+                  "id"
+                ]
+              ]
             }
           }
         ],
@@ -328,6 +431,20 @@
                 "value": "require",
                 "origin": "platform"
               }
+            },
+            "appOnly": true,
+            "binding": {
+              "yamlKey": "postgres",
+              "varFields": [
+                [
+                  "branch",
+                  "branch"
+                ],
+                [
+                  "database",
+                  "database"
+                ]
+              ]
             }
           }
         ],
@@ -372,11 +489,24 @@
                 "description": "Serving endpoint name",
                 "origin": "user"
               }
+            },
+            "scope": "model-serving",
+            "binding": {
+              "yamlKey": "serving_endpoint",
+              "varFields": [
+                [
+                  "name",
+                  "name"
+                ]
+              ]
             }
           }
         ],
         "optional": []
       },
+      "scopes": [
+        "model-serving"
+      ],
       "deprecated": true
     }
   },

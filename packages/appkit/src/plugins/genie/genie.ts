@@ -130,6 +130,15 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     return this.config.spaces?.[alias] ?? null;
   }
 
+  /**
+   * Every route runs on behalf of the requesting user, whatever auth mode the
+   * genie_space resource is bound with. That is why manifest.json declares the
+   * plugin-level `scopes: ["genie"]`: the user token always needs the genie
+   * scope, even when the space is bound to the service principal. If these
+   * routes ever follow the resource's auth mode (as analytics does with
+   * `.obo.sql`), drop that plugin-level scope and let the resource-level scope
+   * from SCOPE_BY_TYPE cover it.
+   */
   injectRoutes(router: IAppRouter) {
     this.route(router, {
       name: "sendMessage",

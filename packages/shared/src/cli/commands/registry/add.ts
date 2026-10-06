@@ -6,6 +6,7 @@ import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
 
+import { SCOPE_BY_TYPE } from "../../../schemas/manifest";
 import { detectPackageManager } from "../../package-manager";
 import {
   fetchRegistryItem,
@@ -682,22 +683,18 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
  * extension). Warn when an added plugin's resource type is known to need one,
  * so the user adds it before deploy.
  */
-/** Resource types known to require a user_api_scope, and the scope each needs. */
-export const SCOPE_BY_RESOURCE_TYPE: Record<string, string> = {
-  genie_space: "dashboards.genie",
-  serving_endpoint: "serving.serving-endpoints",
-  // volumes/files-backed access uses files.files
-  volume: "files.files",
-};
-
 /** Returns the user_api_scopes implied by a set of resource rows (deduped). */
 export function scopesForResources(
   rows: ResourceRequirementRow[],
 ): Map<string, string> {
   const needed = new Map<string, string>();
   for (const row of rows) {
-    const scope = SCOPE_BY_RESOURCE_TYPE[row.type];
-    if (scope) needed.set(row.type, scope);
+    if (Object.hasOwn(SCOPE_BY_TYPE, row.type)) {
+      needed.set(
+        row.type,
+        SCOPE_BY_TYPE[row.type as keyof typeof SCOPE_BY_TYPE],
+      );
+    }
   }
   return needed;
 }

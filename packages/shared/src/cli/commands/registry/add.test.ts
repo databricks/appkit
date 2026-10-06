@@ -236,14 +236,14 @@ describe("scopesForResources", () => {
       resourceRow("volume"),
     ]);
     expect(Object.fromEntries(scopes)).toEqual({
-      genie_space: "dashboards.genie",
-      serving_endpoint: "serving.serving-endpoints",
-      volume: "files.files",
+      genie_space: "genie",
+      serving_endpoint: "model-serving",
+      volume: "files",
     });
   });
 
   it("returns empty for resources that need no scope", () => {
-    expect(scopesForResources([resourceRow("sql_warehouse")]).size).toBe(0);
+    expect(scopesForResources([resourceRow("job")]).size).toBe(0);
   });
 
   it("de-dupes repeated types", () => {
