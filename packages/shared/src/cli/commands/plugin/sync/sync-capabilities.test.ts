@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { scanForPlugins, scanPluginsDir } from "./sync";
+import { discoverLocalPlugins, scanForPlugins, scanPluginsDir } from "./sync";
 
 const probe = {
   name: "probe",
@@ -152,30 +152,61 @@ describe("sync execution capabilities", () => {
     });
   });
 
-  it("fails sync when a binding references a field the resource does not declare", async () => {
-    const bad = {
-      name: "badbind",
-      displayName: "Bad binding",
-      description: "Binding references an undeclared field",
-      resources: {
-        required: [
-          {
-            type: "sql_warehouse",
-            alias: "Warehouse",
-            resourceKey: "sql-warehouse",
-            description: "sql_warehouse binding expects field `id`",
-            permission: "CAN_USE",
-            // Declares `region`, not `id`, so the baked binding varField `id`
-            // would reference an unset variable.
-            fields: { region: { env: "DATABRICKS_REGION" } },
-          },
-        ],
-        optional: [],
-      },
-    };
-    writeManifest(path.join(tmp, "plugins", "badbind"), bad);
-    await expect(
-      scanPluginsDir(path.join(tmp, "plugins"), "@x/pkg", false),
-    ).rejects.toThrow(/binding references manifest field "id"/);
+  // A third-party genie_space that declares only `id` is valid (OBO needs no
+  // binding, and the CLI adds DABs-required vars a manifest omits).
+  const idOnlyGenie = {
+    name: "genie3p",
+    displayName: "Third-party Genie",
+    description: "Declares only the space id",
+    resources: {
+      required: [
+        {
+          type: "genie_space",
+          alias: "Genie Space",
+          resourceKey: "genie-space",
+          description: "Space id only",
+          permission: "CAN_RUN",
+          fields: { id: { env: "DATABRICKS_GENIE_SPACE_ID" } },
+        },
+      ],
+      optional: [],
+    },
+  };
+  const genieBinding = {
+    yamlKey: "genie_space",
+    varFields: [
+      ["name", "name"],
+      ["id", "space_id"],
+    ],
+  };
+
+  it("syncs a genie_space declaring only id via --plugins-dir, with its binding baked", async () => {
+    writeManifest(path.join(tmp, "plugins", "genie3p"), idOnlyGenie);
+    const plugins = await scanPluginsDir(
+      path.join(tmp, "plugins"),
+      "@x/pkg",
+      false,
+    );
+    expect(plugins.genie3p.resources.required[0].binding).toEqual(genieBinding);
+  });
+
+  it("keeps a genie_space declaring only id on the server-file import path", async () => {
+    const serverDir = path.join(tmp, "server");
+    writeManifest(path.join(serverDir, "plugins", "genie3p"), idOnlyGenie);
+    const plugins = await discoverLocalPlugins(
+      [
+        {
+          name: "genie3p",
+          originalName: "genie3p",
+          source: "./plugins/genie3p",
+        },
+      ],
+      serverDir,
+      tmp,
+      false,
+    );
+    expect(plugins.genie3p?.resources.required[0].binding).toEqual(
+      genieBinding,
+    );
   });
 });
