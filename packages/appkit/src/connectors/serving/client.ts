@@ -1,13 +1,19 @@
 import { createLogger } from "../../logging/logger";
-import type { serving, WorkspaceClient } from "../../workspace-client";
+import type {
+  serving,
+  WorkspaceClient,
+  WorkspaceRequest,
+} from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
 const logger = createLogger("connectors:serving");
 
 /**
  * Structural shape of a Databricks SDK client we need for the low-level
- * `apiClient.request` call. Lets `streamPath` be reused by adapters that
- * don't want a hard dependency on the concrete `WorkspaceClient` type.
+ * request call. Lets `streamPath` be reused by adapters that don't want a
+ * hard dependency on the concrete `WorkspaceClient` type. AppKit's own client
+ * provides `request` (modular transport); a caller-supplied legacy SDK client
+ * only has `apiClient.request`, which stays supported.
  */
 export interface ApiClientLike {
   apiClient: {
@@ -16,7 +22,28 @@ export interface ApiClientLike {
       context?: unknown,
     ): Promise<unknown>;
   };
+  request?(req: WorkspaceRequest): Promise<Response>;
 }
+
+// The legacy SDK's `servingEndpoints.query` copied only these fields into the
+// request body and dropped the rest; kept so invocations send the same payload.
+const QUERY_FIELDS = [
+  "client_request_id",
+  "dataframe_records",
+  "dataframe_split",
+  "extra_params",
+  "input",
+  "inputs",
+  "instances",
+  "max_tokens",
+  "messages",
+  "n",
+  "prompt",
+  "stop",
+  "stream",
+  "temperature",
+  "usage_context",
+];
 
 /**
  * Transport shim shared by the agent adapters: given a request body, returns
@@ -31,8 +58,12 @@ export type StreamBody = (
 ) => Promise<ReadableStream<Uint8Array>>;
 
 /**
- * Invokes a serving endpoint using the SDK's high-level query API.
- * Returns a typed QueryEndpointResponse.
+ * Invokes a serving endpoint. Returns the endpoint's JSON response as-is
+ * (model-specific: chat, completions, embeddings, custom), plus the
+ * `served-model-name` response header when present, like the legacy SDK's
+ * `servingEndpoints.query`. Sent raw via `client.request` because the modular
+ * serving SDK has no query method, and a generated unmarshal would strip
+ * model-specific fields.
  */
 export async function invoke(
   client: WorkspaceClient,
@@ -44,22 +75,44 @@ export async function invoke(
 
   logger.debug("Invoking endpoint %s", endpointName);
 
-  return client.servingEndpoints.query({
-    name: endpointName,
-    ...cleanBody,
-  } as serving.QueryEndpointInput);
+  const payload: Record<string, unknown> = {};
+  for (const key of QUERY_FIELDS) {
+    if (Object.hasOwn(cleanBody, key)) payload[key] = cleanBody[key];
+  }
+
+  const response = await client.request({
+    method: "POST",
+    path: `/serving-endpoints/${endpointName}/invocations`,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await response.text();
+  let json: serving.QueryEndpointResponse;
+  try {
+    json = text.length === 0 ? {} : JSON.parse(text);
+  } catch {
+    // Same message (and typo) as the legacy SDK.
+    throw new Error(`Can't parse reponse as JSON: ${text}`);
+  }
+  const servedModelName = response.headers.get("served-model-name");
+  return servedModelName === null
+    ? json
+    : { ...json, "served-model-name": servedModelName };
 }
 
 /**
  * POSTs `body` as JSON to an arbitrary workspace API path and returns the raw
  * SSE byte stream. No parsing is performed — bytes are passed through as-is.
  *
- * Uses the SDK's low-level `apiClient.request({ raw: true })` so callers
- * inherit URL resolution, the SDK credential chain (PAT/OAuth/OIDC), and
- * any future retries/telemetry baked into the SDK transport.
+ * Uses the client's `request` (modular transport) when available, else the
+ * legacy SDK's `apiClient.request({ raw: true })`, so callers inherit URL
+ * resolution and the SDK credential chain (PAT/OAuth/OIDC).
  *
- * When `signal` is provided it is bridged to the SDK's `Context` /
- * `CancellationToken` so aborts cancel the outbound HTTP request.
+ * When `signal` is provided it aborts the outbound HTTP request.
  *
  * @internal
  *
@@ -77,6 +130,23 @@ export async function streamPath(
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   logger.debug("Streaming from path %s", path);
+
+  if (client.request) {
+    const response = await client.request({
+      method: "POST",
+      path,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.body) {
+      throw new Error("Response body is null — streaming not supported");
+    }
+    return response.body;
+  }
 
   const context = contextFromAbortSignal(signal);
 

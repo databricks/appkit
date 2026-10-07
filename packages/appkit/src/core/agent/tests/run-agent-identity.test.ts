@@ -195,10 +195,10 @@ describe("standalone caller identity", () => {
       (options) => {
         const client = real(options);
         const caller = options?.token ? "user" : "app";
-        client.apiClient.request = (async () => {
+        client.request = (async () => {
           used.push(caller);
-          return {
-            contents: new ReadableStream({
+          return new Response(
+            new ReadableStream({
               start(controller) {
                 controller.enqueue(
                   new TextEncoder().encode(
@@ -208,7 +208,7 @@ describe("standalone caller identity", () => {
                 controller.close();
               },
             }),
-          };
+          );
         }) as never;
         return client;
       },

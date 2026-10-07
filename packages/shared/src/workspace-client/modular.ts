@@ -23,6 +23,8 @@
  * the API returns plain `JSON_ARRAY` rows (`[["a", null], ...]`), so the unmarshal
  * schema rejected every real query result. The patch restores `(string | null)[][]`.
  */
+import { STATUS_CODES } from "node:http";
+
 import {
   type Credentials,
   newTokenCredentials,
@@ -279,6 +281,9 @@ export function buildWorkspaceAuth(
       const nullBody = [204, 205, 304].includes(res.statusCode);
       const response = new Response(nullBody ? null : res.body, {
         status: res.statusCode,
+        // The modular transport drops the reason phrase; legacy error messages
+        // include it (see toApiError).
+        statusText: STATUS_CODES[res.statusCode],
         headers: res.headers,
       });
       if (!response.ok) throw await toApiError(response);
@@ -290,20 +295,40 @@ export function buildWorkspaceAuth(
 /**
  * Same error class the legacy `apiClient.request` threw, so existing catch
  * sites (`instanceof ApiError`, `.statusCode`, `.errorCode`) keep working.
+ * Message + code follow the legacy `parseErrorFromResponse` so callers that
+ * surface `err.message` (e.g. the serving plugin's 502 body) are unchanged:
+ * a body without both `error_code` and `message` (plain text, HTML, or a
+ * model-specific error JSON) becomes `Response from server (<status text>) <body>`.
  */
 async function toApiError(response: Response): Promise<ApiError> {
   const text = await response.text();
-  let parsed: { error_code?: string; message?: string } = {};
+  let json:
+    | { error_code?: string; message?: string; error?: string; details?: [] }
+    | undefined;
   try {
-    parsed = JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
-    // Non-JSON error body; fall back to the raw text.
+    // Non-JSON error body (HTML or plain text).
   }
+  if (json?.message && json.error_code) {
+    return new ApiError(
+      json.error || json.message,
+      json.error_code,
+      response.status,
+      json,
+      json.details ?? [],
+    );
+  }
+  const html =
+    text.match(/<pre>(.*)<\/pre>/) ??
+    text.match(/<title>(Error \d+.*?)<\/title>/);
   return new ApiError(
-    parsed.message || text || response.statusText,
-    parsed.error_code ?? "UNKNOWN",
+    html
+      ? html[1].trim().replace(/([\s.])*$/, "")
+      : `Response from server (${response.statusText}) ${text}`,
+    response.statusText || "UNKNOWN",
     response.status,
-    undefined,
+    json ?? text,
     [],
   );
 }
