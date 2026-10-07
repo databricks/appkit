@@ -24,13 +24,10 @@ function createReadableStream(data: string): ReadableStream<Uint8Array> {
 }
 
 function createMockClient(getOpenApiImpl?: (...args: any[]) => any) {
-  const defaultImpl = async () => ({
-    contents: createReadableStream(JSON.stringify(makeValidSpec())),
-  });
+  const defaultImpl = async () =>
+    new Response(createReadableStream(JSON.stringify(makeValidSpec())));
   return {
-    servingEndpoints: {
-      getOpenApi: vi.fn(getOpenApiImpl ?? defaultImpl),
-    },
+    request: vi.fn(getOpenApiImpl ?? defaultImpl),
   } as any;
 }
 
@@ -72,7 +69,7 @@ describe("fetchOpenApiSchema", () => {
   });
 
   test("returns null when response has no contents", async () => {
-    const client = createMockClient(async () => ({ contents: undefined }));
+    const client = createMockClient(async () => new Response(null));
     const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
@@ -81,9 +78,9 @@ describe("fetchOpenApiSchema", () => {
     const spec = makeValidSpec({
       "/serving-endpoints/ep/invocations": { post: { requestBody: {} } },
     });
-    const client = createMockClient(async () => ({
-      contents: createReadableStream(JSON.stringify(spec)),
-    }));
+    const client = createMockClient(
+      async () => new Response(createReadableStream(JSON.stringify(spec))),
+    );
 
     const result = await fetchOpenApiSchema(client, "ep");
     expect(result).not.toBeNull();
@@ -96,9 +93,9 @@ describe("fetchOpenApiSchema", () => {
       "/serving-endpoints/ep/served-models/gpt4/invocations": { post: {} },
       "/serving-endpoints/ep/invocations": { post: {} },
     });
-    const client = createMockClient(async () => ({
-      contents: createReadableStream(JSON.stringify(spec)),
-    }));
+    const client = createMockClient(
+      async () => new Response(createReadableStream(JSON.stringify(spec))),
+    );
 
     const result = await fetchOpenApiSchema(client, "ep", "gpt4");
     expect(result?.pathKey).toBe(
@@ -110,40 +107,44 @@ describe("fetchOpenApiSchema", () => {
     const spec = makeValidSpec({
       "/serving-endpoints/ep/invocations": { post: {} },
     });
-    const client = createMockClient(async () => ({
-      contents: createReadableStream(JSON.stringify(spec)),
-    }));
+    const client = createMockClient(
+      async () => new Response(createReadableStream(JSON.stringify(spec))),
+    );
 
     const result = await fetchOpenApiSchema(client, "ep", "nonexistent-model");
     expect(result?.pathKey).toBe("/serving-endpoints/ep/invocations");
   });
 
   test("returns null for invalid spec structure (missing paths)", async () => {
-    const client = createMockClient(async () => ({
-      contents: createReadableStream(
-        JSON.stringify({ openapi: "3.0.0", info: {} }),
-      ),
-    }));
+    const client = createMockClient(
+      async () =>
+        new Response(
+          createReadableStream(JSON.stringify({ openapi: "3.0.0", info: {} })),
+        ),
+    );
 
     const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
   test("returns null when paths object is empty", async () => {
-    const client = createMockClient(async () => ({
-      contents: createReadableStream(JSON.stringify(makeValidSpec({}))),
-    }));
+    const client = createMockClient(
+      async () =>
+        new Response(createReadableStream(JSON.stringify(makeValidSpec({})))),
+    );
 
     const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("calls SDK getOpenApi with correct endpoint name", async () => {
+  test("GETs the endpoint's openapi path", async () => {
     const client = createMockClient();
     await fetchOpenApiSchema(client, "my-endpoint");
 
-    expect(client.servingEndpoints.getOpenApi).toHaveBeenCalledWith({
-      name: "my-endpoint",
+    expect(client.request).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/2.0/serving-endpoints/my-endpoint/openapi",
+      headers: { Accept: "text/plain" },
     });
   });
 });

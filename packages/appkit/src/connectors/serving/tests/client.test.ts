@@ -6,13 +6,23 @@ import { invoke, stream } from "../client";
 function createMockClient(host = "https://test.databricks.com") {
   return {
     config: { host },
-    servingEndpoints: {
-      query: vi.fn(),
-    },
+    request: vi.fn(),
     apiClient: {
       request: vi.fn(),
     },
   } as any;
+}
+
+function createLegacyClient() {
+  return { apiClient: { request: vi.fn() } } as any;
+}
+
+function jsonResponse(body: unknown, headers?: Record<string, string>) {
+  return new Response(JSON.stringify(body), { headers });
+}
+
+function sentBody(client: any) {
+  return JSON.parse(client.request.mock.calls[0][0].body);
 }
 
 describe("Serving Connector", () => {
@@ -21,27 +31,34 @@ describe("Serving Connector", () => {
   });
 
   describe("invoke", () => {
-    test("calls servingEndpoints.query with endpoint name and body", async () => {
+    test("POSTs the body to the endpoint's invocations path", async () => {
       const client = createMockClient();
       const mockResponse = { choices: [{ message: { content: "Hello" } }] };
-      client.servingEndpoints.query.mockResolvedValue(mockResponse);
+      client.request.mockResolvedValue(jsonResponse(mockResponse));
 
       const result = await invoke(client, "my-endpoint", {
         messages: [{ role: "user", content: "Hi" }],
         temperature: 0.7,
       });
 
-      expect(client.servingEndpoints.query).toHaveBeenCalledWith({
-        name: "my-endpoint",
-        messages: [{ role: "user", content: "Hi" }],
-        temperature: 0.7,
+      expect(client.request).toHaveBeenCalledWith({
+        method: "POST",
+        path: "/serving-endpoints/my-endpoint/invocations",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Hi" }],
+          temperature: 0.7,
+        }),
       });
       expect(result).toEqual(mockResponse);
     });
 
     test("strips stream property from body", async () => {
       const client = createMockClient();
-      client.servingEndpoints.query.mockResolvedValue({});
+      client.request.mockResolvedValue(jsonResponse({}));
 
       await invoke(client, "my-endpoint", {
         messages: [],
@@ -49,28 +66,69 @@ describe("Serving Connector", () => {
         temperature: 0.7,
       });
 
-      const queryArg = client.servingEndpoints.query.mock.calls[0][0];
+      const queryArg = sentBody(client);
       expect(queryArg.stream).toBeUndefined();
       expect(queryArg.temperature).toBe(0.7);
     });
 
-    test("returns typed QueryEndpointResponse", async () => {
+    // The legacy SDK's query() copied only its known request fields.
+    test("sends only the fields the legacy query sent", async () => {
+      const client = createMockClient();
+      client.request.mockResolvedValue(jsonResponse({}));
+
+      await invoke(client, "my-endpoint", {
+        messages: [],
+        max_tokens: 5,
+        top_p: 0.9,
+      });
+
+      expect(sentBody(client)).toEqual({ messages: [], max_tokens: 5 });
+    });
+
+    // Responses are model-specific: nothing may be stripped.
+    test("returns the raw JSON response, unknown fields included", async () => {
       const client = createMockClient();
       const responseData = {
         choices: [{ message: { content: "Hello" } }],
+        usage: { prompt_tokens: 3, completion_tokens: 1 },
         model: "test-model",
+        custom_field: { nested: [1, 2] },
       };
-      client.servingEndpoints.query.mockResolvedValue(responseData);
+      client.request.mockResolvedValue(jsonResponse(responseData));
 
       const result = await invoke(client, "my-endpoint", { messages: [] });
       expect(result).toEqual(responseData);
     });
 
+    test("merges the served-model-name header like the legacy query", async () => {
+      const client = createMockClient();
+      client.request.mockResolvedValue(
+        jsonResponse({ predictions: [1] }, { "served-model-name": "m-1" }),
+      );
+
+      const result = await invoke(client, "my-endpoint", { inputs: [1] });
+      expect(result).toEqual({ predictions: [1], "served-model-name": "m-1" });
+    });
+
+    test("returns {} for an empty body", async () => {
+      const client = createMockClient();
+      client.request.mockResolvedValue(new Response(""));
+
+      expect(await invoke(client, "my-endpoint", {})).toEqual({});
+    });
+
+    test("throws the legacy message for a non-JSON body", async () => {
+      const client = createMockClient();
+      client.request.mockResolvedValue(new Response("oops"));
+
+      await expect(invoke(client, "my-endpoint", {})).rejects.toThrow(
+        "Can't parse reponse as JSON: oops",
+      );
+    });
+
     test("propagates SDK errors", async () => {
       const client = createMockClient();
-      client.servingEndpoints.query.mockRejectedValue(
-        new Error("Endpoint not found"),
-      );
+      client.request.mockRejectedValue(new Error("Endpoint not found"));
 
       await expect(
         invoke(client, "my-endpoint", { messages: [] }),
@@ -78,7 +136,47 @@ describe("Serving Connector", () => {
     });
   });
 
-  describe("stream", () => {
+  describe("stream via client.request", () => {
+    test("POSTs with stream: true and returns the response body", async () => {
+      const client = createMockClient();
+      const body = new ReadableStream<Uint8Array>();
+      client.request.mockResolvedValue(new Response(body));
+      const controller = new AbortController();
+
+      const result = await stream(
+        client,
+        "my endpoint",
+        { messages: [], stream: false },
+        controller.signal,
+      );
+
+      expect(result).toBeInstanceOf(ReadableStream);
+      expect(client.request).toHaveBeenCalledWith({
+        method: "POST",
+        path: "/serving-endpoints/my%20endpoint/invocations",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify({ messages: [], stream: true }),
+        signal: controller.signal,
+      });
+      expect(client.apiClient.request).not.toHaveBeenCalled();
+    });
+
+    test("throws when the response has no body", async () => {
+      const client = createMockClient();
+      client.request.mockResolvedValue(new Response(null));
+
+      await expect(
+        stream(client, "my-endpoint", { messages: [] }),
+      ).rejects.toThrow("streaming not supported");
+    });
+  });
+
+  // Caller-supplied legacy SDK clients (agents' public `WorkspaceClientLike`)
+  // have no `request`, so they keep the `apiClient.request` path.
+  describe("stream via a legacy apiClient", () => {
     test("returns a ReadableStream from apiClient.request", async () => {
       const encoder = new TextEncoder();
       const mockContents = new ReadableStream<Uint8Array>({
@@ -88,7 +186,7 @@ describe("Serving Connector", () => {
         },
       });
 
-      const client = createMockClient();
+      const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({ contents: mockContents });
 
       const result = await stream(client, "my-endpoint", { messages: [] });
@@ -97,7 +195,7 @@ describe("Serving Connector", () => {
     });
 
     test("sends stream: true in payload via apiClient.request", async () => {
-      const client = createMockClient();
+      const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
@@ -116,7 +214,7 @@ describe("Serving Connector", () => {
     });
 
     test("passes SDK Context when AbortSignal is provided", async () => {
-      const client = createMockClient();
+      const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
@@ -133,7 +231,7 @@ describe("Serving Connector", () => {
     });
 
     test("strips user-provided stream and re-injects", async () => {
-      const client = createMockClient();
+      const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
@@ -148,7 +246,7 @@ describe("Serving Connector", () => {
     });
 
     test("throws when response has no contents", async () => {
-      const client = createMockClient();
+      const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({ contents: null });
 
       await expect(
