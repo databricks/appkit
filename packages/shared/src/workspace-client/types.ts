@@ -18,10 +18,12 @@ import type { StatementExecutionClient, WarehousesClient } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
 // modules import them from the wrapper rather than the SDK directly. `sql`
-// stays only for the dev-mode warehouse listing in service-context, which reads
-// the raw (snake_case) `/api/2.0/sql/warehouses` body via the still-legacy
-// `apiClient` and types it as `sql.EndpointInfo[]`. Statement + warehouse
-// service types now come from `./modular`.
+// stays only for the dev-mode warehouse discovery in appkit's
+// `resources/warehouse.ts`, which reads the raw (snake_case)
+// `/api/2.0/sql/warehouses` body via the still-legacy `apiClient` and types it
+// as `sql.EndpointInfo[]`. It is not on the modular `listWarehouses` because
+// that request has no `skip_cannot_use` filter, so it could pick a warehouse
+// the caller can't use. Statement + warehouse service types come from `./modular`.
 export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
 // Modular SDK client + model types (warehouses, statementExecution).
 export type * from "./modular";
