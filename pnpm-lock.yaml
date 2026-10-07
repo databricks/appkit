@@ -12,7 +12,7 @@ overrides:
   size-sensor: 1.0.3
 
 patchedDependencies:
-  '@databricks/sdk-statementexecution@0.46.0': a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d
+  '@databricks/sdk-statementexecution@0.52.0': 9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c
 
 importers:
 
@@ -280,23 +280,23 @@ importers:
         specifier: workspace:*
         version: link:../lakebase
       '@databricks/sdk-auth':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-core':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
       '@databricks/sdk-options':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-statementexecution':
-        specifier: 0.46.0
-        version: 0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)
+        specifier: 0.52.0
+        version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
       '@databricks/sdk-warehouses':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.53.0
+        version: 0.53.0
       '@opentelemetry/api':
         specifier: 1.9.0
         version: 1.9.0
@@ -610,23 +610,23 @@ importers:
         specifier: 1.0.1
         version: 1.0.1
       '@databricks/sdk-auth':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-core':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
       '@databricks/sdk-options':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-statementexecution':
-        specifier: 0.46.0
-        version: 0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)
+        specifier: 0.52.0
+        version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
       '@databricks/sdk-warehouses':
-        specifier: 0.46.0
-        version: 0.46.0
+        specifier: 0.53.0
+        version: 0.53.0
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0
@@ -1992,12 +1992,12 @@ packages:
     engines: {node: ^20 || ^22 || ^24 || ^25, pnpm: '>=10'}
     hasBin: true
 
-  '@databricks/sdk-auth@0.46.0':
-    resolution: {integrity: sha512-cMrwxsFtpiEKFxta5dKHchKdrgmHkQ6upJ2C4OacmlHrOHJ+ChzQBVTpAiVtjX62xj+YjNgp/29IpSdKKYUVDA==}
+  '@databricks/sdk-auth@0.51.0':
+    resolution: {integrity: sha512-CswN+io9XB7rrcHo9BG/2qIdRCUMb8gFjiZmqVDG2qRmyhzY7Wv1tvwzA+U8uBplmdzAcdhuxMvHQ7vKGFWYqQ==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-core@0.46.0':
-    resolution: {integrity: sha512-Q2LAGWYIi+jyeKR9OIqvkgyde2GdzqfSG8lewxA9Xu/C9RJBBFbSfg5Nh8ZC66TKElGIosVOecoEJdbxnNMuxw==}
+  '@databricks/sdk-core@0.51.0':
+    resolution: {integrity: sha512-XzsdLcC5vXB+z5P68IlZ4emnXyp2frvY+aJnIwlpc2i3F/ZCR53a8HDrq7ruZPQG/FgGUR75MSFhku0nnYOysw==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-experimental@0.15.0':
@@ -2008,16 +2008,16 @@ packages:
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
 
-  '@databricks/sdk-options@0.46.0':
-    resolution: {integrity: sha512-UtADlR+41rYEoOCycZvJh1g96uDN6GVWgqQk+72cHBzcxi+koxKSJXHcYRI997Sc4Fcc1d2oyAC2I2ddVhurjA==}
+  '@databricks/sdk-options@0.51.0':
+    resolution: {integrity: sha512-p5uBh64Y1onnvwlEwfRsmKmGRI23Y4Ly8fZiCgNUwVDe4Z9d0ctI0mo1v4gnDqlmBaBml3TZfqn5BJBROCXsEw==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-statementexecution@0.46.0':
-    resolution: {integrity: sha512-VJA3e7UHmxRxN42/mV5VtKeINME0vCz3Na3hrwmta3tZqJWZbBU7XTfUdD1yOQ5Z1JU5UIM65OlWq8gc4IzHFg==}
+  '@databricks/sdk-statementexecution@0.52.0':
+    resolution: {integrity: sha512-ymDGDW67PJ/0VujM89mUrE6mbbrabsKJP5LvPv8ZbgzPR0bm0DwXMcQzvS0XUt0UGITjV2gqbx5jQwP3ijtOmg==}
     engines: {node: '>=22.0.0'}
 
-  '@databricks/sdk-warehouses@0.46.0':
-    resolution: {integrity: sha512-9r/gbdTb6ASiWCiibCwAOF8QizqNacidIw78uwzJYKK9dbdqmWIfNK0pF/jt3BG1sUiXz2b1I6URPdX7Qi0oLg==}
+  '@databricks/sdk-warehouses@0.53.0':
+    resolution: {integrity: sha512-+NlLn/HP3+5YUxTKlp0+zwsbAGaU2GHl8C+8JlWk04VLmBZhJg/PJnr4WlNrQVTAzqH01dy4DmK7MfqyOetHRg==}
     engines: {node: '>=22.0.0'}
 
   '@date-fns/tz@1.4.1':
@@ -14288,12 +14288,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@databricks/sdk-auth@0.46.0':
+  '@databricks/sdk-auth@0.51.0':
     dependencies:
-      '@databricks/sdk-core': 0.46.0
+      '@databricks/sdk-core': 0.51.0
       zod: 4.3.6
 
-  '@databricks/sdk-core@0.46.0':
+  '@databricks/sdk-core@0.51.0':
     dependencies:
       json-bigint: 1.0.0
       zod: 4.3.6
@@ -14316,25 +14316,25 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@databricks/sdk-options@0.46.0':
+  '@databricks/sdk-options@0.51.0':
     dependencies:
-      '@databricks/sdk-auth': 0.46.0
-      '@databricks/sdk-core': 0.46.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
 
-  '@databricks/sdk-statementexecution@0.46.0(patch_hash=a0fde44d73faf28cc107a930fea00967d00dd4e74796002c77686bb5bf56569d)':
+  '@databricks/sdk-statementexecution@0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)':
     dependencies:
-      '@databricks/sdk-auth': 0.46.0
-      '@databricks/sdk-core': 0.46.0
-      '@databricks/sdk-options': 0.46.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
       '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
 
-  '@databricks/sdk-warehouses@0.46.0':
+  '@databricks/sdk-warehouses@0.53.0':
     dependencies:
-      '@databricks/sdk-auth': 0.46.0
-      '@databricks/sdk-core': 0.46.0
-      '@databricks/sdk-options': 0.46.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
       '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
