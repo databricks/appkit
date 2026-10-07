@@ -9,9 +9,7 @@ export { createWorkspaceClient } from "./factory";
 export type {
   CancellationToken,
   ClientOptions,
-  GenieMessage,
   LegacyWorkspaceClient,
-  Waiter,
   WorkspaceClientOptions,
 } from "./legacy";
 // SDK value + type re-exports so AppKit modules import them from the wrapper.

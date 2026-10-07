@@ -13,6 +13,7 @@
         "@databricks/sdk-auth",
         "@databricks/sdk-core",
         "@databricks/sdk-experimental",
+        "@databricks/sdk-genie",
         "@databricks/sdk-options",
         "@databricks/sdk-statementexecution",
         "@databricks/sdk-warehouses",

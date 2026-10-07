@@ -21,7 +21,7 @@ describe("createMockWorkspaceClient", () => {
     // Never-crash is the headline claim, so all nine are asserted, not sampled.
     test.each([
       ["files", "listDirectory", undefined],
-      ["genie", "getMessage", undefined],
+      ["genie", "genieGetConversationMessage", undefined],
       ["jobs", "getRun", undefined],
       ["servingEndpoints", "get", undefined],
       ["warehouses", "getWarehouse", { state: "RUNNING" }],

@@ -8,19 +8,26 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses` and `statementExecution` are migrated; every other service still
+ * `warehouses`, `statementExecution` and `genie` are migrated; every other service still
  * routes through `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
  * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
+ *
+ * NOTE: genie relies on a pinned pnpm patch
+ * (`patches/@databricks__sdk-genie@0.54.0.patch`): the generated model types the
+ * query result's `data_array` as protobuf `ListValue[]` (`{ values: [...] }`), but
+ * the API returns plain `JSON_ARRAY` rows (`[["a", null], ...]`), so the unmarshal
+ * schema rejected every real query result. The patch restores `(string | null)[][]`.
  */
 import {
   newM2mCredentials,
   newPatCredentials,
 } from "@databricks/sdk-auth/credentials";
 import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import { GenieClient } from "@databricks/sdk-genie/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
@@ -156,7 +163,13 @@ export function buildStatementExecutionClient(
   return new StatementExecutionClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Genie client from wrapper options. */
+export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
+  return new GenieClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -180,6 +193,10 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  GenieGetMessageQueryResultResponse,
+  GenieMessage,
+} from "@databricks/sdk-genie/v1";
 export type {
   EndpointHealth,
   EndpointInfo,
