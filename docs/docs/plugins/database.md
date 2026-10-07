@@ -555,7 +555,11 @@ for `remove`) and the `DatabaseApiError` is in `error`, so a handler needs no
 A successful call resolves once the reads it restarts have reloaded, and
 `loading` stays `true` until then. A handler that clears its form after
 `await create(...)` therefore sees the new row already in the lists. A read
-that fails to reload does not fail the write.
+that fails to reload does not fail the write. If another write or a manual
+refetch supersedes a reload, the waiting call follows the current run of each
+read rather than resolving on the cancelled run. Reads with no subscribers
+stop holding the write open. After teardown, remounting the same URL creates
+a new entry, not part of that write's refresh.
 
 Values follow the same [rules](#values) as `databaseApi.create` and `update`.
 Update and delete need a public primary key, like record reads.

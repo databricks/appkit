@@ -7,6 +7,7 @@ import { DatabaseApiError } from "@/js/database/errors";
 import {
   invalidateDatabaseReads,
   mockDatabaseFetch,
+  nextTick,
   page,
   publishDatabase,
   resetDatabaseTestEnvironment,
@@ -265,6 +266,73 @@ describe("database write hooks", () => {
       loading: false,
       data: { id: 2 },
     });
+  });
+
+  test("overlapping writes wait for the latest reload of every read before resolving or onSuccess", async () => {
+    const reads = await mountReads();
+    const createdSuccess = vi.fn();
+    const updatedSuccess = vi.fn();
+    const creator = renderHook(() =>
+      useDatabaseCreate("notes", { onSuccess: createdSuccess }),
+    );
+    const updater = renderHook(() =>
+      useDatabaseUpdate("notes", { onSuccess: updatedSuccess }),
+    );
+    const settled: string[] = [];
+    let created!: Promise<Row | null>;
+    let updated!: Promise<Row | null>;
+    act(() => {
+      created = creator.result.current.create({ body: "new" });
+      void created.then(() => {
+        settled.push("create");
+      });
+    });
+    await act(async () =>
+      sent("POST")[0]?.respond({ id: 2, body: "new" }, 201),
+    );
+    await act(async () => sent("GET")[2]?.respond(page({ id: 1 }, { id: 2 })));
+    expect(settled).toEqual([]);
+
+    act(() => {
+      updated = updater.result.current.update(1, { body: "edited" });
+      void updated.then(() => {
+        settled.push("update");
+      });
+    });
+    await act(async () => {
+      sent("PATCH")[0]?.respond({ id: 1, body: "edited" });
+      await nextTick();
+    });
+    expect(sent("GET")[3]?.signal?.aborted).toBe(true);
+    expect(sent("GET")).toHaveLength(6);
+    expect(settled).toEqual([]);
+    expect(createdSuccess).not.toHaveBeenCalled();
+    expect(creator.result.current.loading).toBe(true);
+    expect(updater.result.current.loading).toBe(true);
+
+    await act(async () => {
+      sent("GET")[5]?.respond(page({ id: "current board" }));
+      sent("GET")[3]?.respond(page({ id: "stale board" }));
+      await nextTick();
+    });
+    expect(settled).toEqual([]);
+    expect(createdSuccess).not.toHaveBeenCalled();
+    expect(updatedSuccess).not.toHaveBeenCalled();
+
+    const freshNotes = page({ id: 1, body: "edited" }, { id: 2, body: "new" });
+    await act(async () => sent("GET")[4]?.respond(freshNotes));
+    await expect(Promise.all([created, updated])).resolves.toEqual([
+      { id: 2, body: "new" },
+      { id: 1, body: "edited" },
+    ]);
+    expect(reads.result.current.notes.data).toEqual(freshNotes);
+    expect(reads.result.current.boards.data).toEqual(
+      page({ id: "current board" }),
+    );
+    expect(createdSuccess).toHaveBeenCalledOnce();
+    expect(updatedSuccess).toHaveBeenCalledOnce();
+    expect(creator.result.current.loading).toBe(false);
+    expect(updater.result.current.loading).toBe(false);
   });
 
   test("a restarted read that fails still lets the write resolve", async () => {

@@ -15,6 +15,32 @@ function makeStore() {
   return { store, run };
 }
 
+function deferredRunner(onStart?: (controls: RequestControls<Snap>) => void) {
+  const runs: {
+    controls: RequestControls<Snap>;
+    complete(value: number): void;
+  }[] = [];
+  const run = (controls: RequestControls<Snap>) =>
+    new Promise<void>((resolve) => {
+      runs.push({
+        controls,
+        complete(value) {
+          if (!controls.signal.aborted) controls.patch({ value });
+          resolve();
+        },
+      });
+      if (controls.signal.aborted) resolve();
+      else
+        controls.signal.addEventListener("abort", () => resolve(), {
+          once: true,
+        });
+      onStart?.(controls);
+    });
+  return { run, runs };
+}
+
+const flushRuns = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 describe("createRequestStore", () => {
   let store: ReturnType<typeof makeStore>["store"];
   let run: ReturnType<typeof makeStore>["run"];
@@ -150,6 +176,154 @@ describe("createRequestStore", () => {
     pending[1]?.();
     await restarted;
     expect(settled).toBe(true);
+  });
+
+  test("overlapping restartStarted calls both wait for the current run", async () => {
+    const pending = deferredRunner();
+    store.retain("k", pending.run);
+    pending.runs[0]?.complete(1);
+
+    const settled: string[] = [];
+    const first = store.restartStarted().then(() => {
+      settled.push("first");
+    });
+    const second = store.restartStarted().then(() => {
+      settled.push("second");
+    });
+    expect(pending.runs[1]?.controls.signal.aborted).toBe(true);
+    await flushRuns();
+    expect(settled).toEqual([]);
+    expect(store.getSnapshot("k").value).toBe(1);
+
+    pending.runs[2]?.complete(3);
+    await Promise.all([first, second]);
+    expect(settled.sort()).toEqual(["first", "second"]);
+    expect(store.getSnapshot("k").value).toBe(3);
+  });
+
+  test("rechecks a key that settled before another restarted key was superseded", async () => {
+    const a = deferredRunner();
+    const b = deferredRunner();
+    store.retain("a", a.run);
+    store.retain("b", b.run);
+    a.runs[0]?.complete(1);
+    b.runs[0]?.complete(1);
+
+    const settled: string[] = [];
+    const first = store.restartStarted().then(() => {
+      settled.push("first");
+    });
+    a.runs[1]?.complete(2);
+    await flushRuns();
+    expect(settled).toEqual([]);
+
+    const second = store.restartStarted().then(() => {
+      settled.push("second");
+    });
+    b.runs[2]?.complete(3);
+    await flushRuns();
+    expect(settled).toEqual([]);
+    expect(store.getSnapshot("a").value).toBe(2);
+
+    a.runs[2]?.complete(3);
+    await Promise.all([first, second]);
+    expect(settled.sort()).toEqual(["first", "second"]);
+    expect(store.getSnapshot("a").value).toBe(3);
+  });
+
+  test("follows a manual start that supersedes a pending restart", async () => {
+    const pending = deferredRunner();
+    store.retain("k", pending.run);
+    pending.runs[0]?.complete(1);
+    let settled = false;
+    const restarted = store.restartStarted().then(() => {
+      settled = true;
+    });
+    store.start("k");
+    await flushRuns();
+    expect(settled).toBe(false);
+
+    pending.runs[2]?.complete(3);
+    await restarted;
+    expect(store.getSnapshot("k").value).toBe(3);
+  });
+
+  test("waits for an original entry re-retained before the refresh barrier settles", async () => {
+    const b = deferredRunner();
+    let releaseB!: () => void;
+    let replaceB = false;
+    const a = deferredRunner(() => {
+      if (!replaceB) return;
+      replaceB = false;
+      releaseB();
+      queueMicrotask(() => {
+        store.retain("b", b.run);
+        store.start("b");
+      });
+    });
+    store.retain("a", a.run);
+    releaseB = store.retain("b", b.run);
+    a.runs[0]?.complete(1);
+    b.runs[0]?.complete(1);
+    replaceB = true;
+
+    let settled = false;
+    const restarted = store.restartStarted().then(() => {
+      settled = true;
+    });
+    a.runs[1]?.complete(2);
+    await flushRuns();
+    expect(b.runs).toHaveLength(2);
+    expect(settled).toBe(false);
+
+    b.runs[1]?.complete(2);
+    await restarted;
+    expect(store.getSnapshot("b").value).toBe(2);
+  });
+
+  test("does not follow a new entry that reuses a reset key", async () => {
+    const pending = deferredRunner();
+    store.retain("k", pending.run);
+    pending.runs[0]?.complete(1);
+    let settled = false;
+    const restarted = store.restartStarted().then(() => {
+      settled = true;
+    });
+    store.reset();
+
+    const replacement = deferredRunner();
+    store.retain("k", replacement.run);
+    await flushRuns();
+    expect(settled).toBe(true);
+    await restarted;
+    expect(pending.runs[1]?.controls.signal.aborted).toBe(true);
+    expect(replacement.runs[0]?.controls.signal.aborted).toBe(false);
+    expect(store.getSnapshot("k")).toBe(IDLE);
+    store.reset();
+  });
+
+  test("waits for a run started synchronously by a snapshot subscriber", async () => {
+    const pending = deferredRunner((controls) => controls.patch({ value: 1 }));
+    store.retain("k", pending.run);
+    pending.runs[0]?.complete(1);
+    let replaced = false;
+    store.subscribe("k", () => {
+      if (replaced) return;
+      replaced = true;
+      store.start("k");
+    });
+
+    let settled = false;
+    const restarted = store.restartStarted().then(() => {
+      settled = true;
+    });
+    await flushRuns();
+    expect(pending.runs[1]?.controls.signal.aborted).toBe(true);
+    expect(settled).toBe(false);
+
+    pending.runs[2]?.complete(3);
+    await restarted;
+    expect(store.getSnapshot("k").value).toBe(3);
   });
 
   test("restartStarted resolves even when a runner rejects", async () => {

@@ -59,9 +59,10 @@ interface RequestStore<S, M> {
   start(key: string): void;
   /**
    * `start` every subscribed entry that has run at least once and that
-   * `match` accepts (every such entry without one), then resolve once each
-   * restarted run settles. An entry retained with `autoStart: false` that
-   * never ran stays idle, and one whose last subscriber left is not restarted.
+   * `match` accepts (every such entry without one), then wait for their current
+   * runs, following any superseding restart. An entry retained with
+   * `autoStart: false` that never ran stays idle, and one whose last subscriber
+   * left is not restarted.
    */
   restartStarted(
     match?: (key: string, meta: M | undefined) => boolean,
@@ -80,6 +81,7 @@ interface Entry<S, M> {
   teardownTimer: ReturnType<typeof setTimeout> | null;
   /** True once `start` has run at least once; guards re-run on late `retain`. */
   started: boolean;
+  pending: Promise<void> | null;
   run: RequestRunner<S>;
 }
 
@@ -116,7 +118,31 @@ export function createRequestStore<S, M = never>(idle: S): RequestStore<S, M> {
       },
     });
     // A runner must not reject; guard anyway so a restart never does.
-    return Promise.resolve(settled).catch(() => {});
+    const pending = Promise.resolve(settled).catch(() => {});
+    // A synchronous snapshot listener may have already started a newer run.
+    if (entry.abortController === abortController) entry.pending = pending;
+    return pending;
+  }
+
+  async function waitForCurrentRuns(
+    targets: [string, Entry<S, M>][],
+  ): Promise<void> {
+    while (true) {
+      const pending = targets.map(([key, entry]) =>
+        entries.get(key) === entry && entry.refCount > 0 ? entry.pending : null,
+      );
+      await Promise.all(pending);
+      // One key may restart after settling while another key is still pending.
+      if (
+        targets.every(
+          ([key, entry], index) =>
+            entries.get(key) !== entry ||
+            entry.refCount <= 0 ||
+            entry.pending === pending[index],
+        )
+      )
+        return;
+    }
   }
 
   function start(key: string): void {
@@ -150,6 +176,7 @@ export function createRequestStore<S, M = never>(idle: S): RequestStore<S, M> {
           abortController: null,
           teardownTimer: null,
           started: false,
+          pending: null,
           run: runner,
         };
         entries.set(key, entry);
@@ -175,15 +202,16 @@ export function createRequestStore<S, M = never>(idle: S): RequestStore<S, M> {
       // Collect first: a restarted run patches, and a patch notifies. An entry
       // with no subscriber is waiting for teardown; restarting it would only
       // send a request that teardown aborts a tick later.
-      const keys = [...entries]
-        .filter(
-          ([key, entry]) =>
-            entry.started &&
-            entry.refCount > 0 &&
-            (!match || match(key, entry.meta)),
-        )
-        .map(([key]) => key);
-      await Promise.all(keys.map(run));
+      const targets = [...entries].filter(
+        ([key, entry]) =>
+          entry.started &&
+          entry.refCount > 0 &&
+          (!match || match(key, entry.meta)),
+      );
+      for (const [key, entry] of targets) {
+        if (entries.get(key) === entry && entry.refCount > 0) start(key);
+      }
+      await waitForCurrentRuns(targets);
     },
 
     subscribe(key, listener) {

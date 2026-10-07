@@ -176,8 +176,9 @@ export function retainDatabaseRead(
  * includes reach them through the relations the server published. `false`
  * restarts none.
  *
- * Resolves once every restarted read has answered, failed, or been
- * superseded; it never rejects.
+ * Resolves once the current runs of those reads have answered, failed, or
+ * been torn down. A superseding refresh is followed rather than counted as
+ * complete; it never rejects.
  *
  * @example
  * ```ts
