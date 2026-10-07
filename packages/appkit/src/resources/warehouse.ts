@@ -78,13 +78,13 @@ async function discoverWarehouseId(client: WorkspaceClient): Promise<string> {
     process.env.DATABRICKS_APPS_AGENTIC_MODE === "1";
 
   if (process.env.NODE_ENV === "development" && !agenticMode) {
-    const response = (await client.apiClient.request({
-      path: "/api/2.0/sql/warehouses",
-      method: "GET",
-      headers: new Headers(),
-      raw: false,
-      query: { skip_cannot_use: "true" },
-    })) as { warehouses: sql.EndpointInfo[] };
+    const response = (await (
+      await client.request({
+        path: "/api/2.0/sql/warehouses",
+        method: "GET",
+        query: { skip_cannot_use: "true" },
+      })
+    ).json()) as { warehouses?: sql.EndpointInfo[] };
 
     const priorities: Record<sql.State, number> = {
       RUNNING: 0,

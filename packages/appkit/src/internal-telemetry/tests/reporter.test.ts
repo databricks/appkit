@@ -9,8 +9,8 @@ function createMockClient(): {
   client: WorkspaceClient;
   request: RequestSpy;
 } {
-  const request = vi.fn().mockResolvedValue({});
-  const client = { apiClient: { request } } as unknown as WorkspaceClient;
+  const request = vi.fn(async () => new Response("{}"));
+  const client = { request } as unknown as WorkspaceClient;
   return { client, request };
 }
 
@@ -43,7 +43,7 @@ afterEach(() => {
 function lastProtoLog(spy: RequestSpy, callIndex = -1) {
   const calls = spy.mock.calls;
   const idx = callIndex < 0 ? calls.length + callIndex : callIndex;
-  const payload = calls[idx][0].payload as { protoLogs: string[] };
+  const payload = JSON.parse(calls[idx][0].body) as { protoLogs: string[] };
   return JSON.parse(payload.protoLogs[0]);
 }
 
@@ -52,7 +52,7 @@ describe("TelemetryReporter", () => {
     expect(TelemetryReporter.getInstance()).toBeNull();
   });
 
-  test("sendStartup emits an APP_STARTUP appkit_log via apiClient.request", async () => {
+  test("sendStartup emits an APP_STARTUP appkit_log via client.request", async () => {
     const opts = baseOpts();
     const reporter = TelemetryReporter.initialize(opts);
     await reporter.sendStartup();
@@ -63,7 +63,7 @@ describe("TelemetryReporter", () => {
       path: "/telemetry-ext",
       method: "POST",
       query: { o: "1234567890" },
-      raw: false,
+      headers: { "Content-Type": "application/json" },
     });
     expect(lastProtoLog(opts.__spy).entry.appkit_log).toMatchObject({
       event_name: "APP_STARTUP",
@@ -95,7 +95,8 @@ describe("TelemetryReporter", () => {
     await reporter.flushRequestMetrics();
 
     expect(opts.__spy).toHaveBeenCalledOnce();
-    const protoLogs = opts.__spy.mock.calls[0][0].payload.protoLogs as string[];
+    const protoLogs = JSON.parse(opts.__spy.mock.calls[0][0].body)
+      .protoLogs as string[];
     expect(protoLogs).toHaveLength(2);
 
     const events = protoLogs

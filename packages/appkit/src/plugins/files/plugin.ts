@@ -1233,10 +1233,10 @@ export class FilesPlugin extends Plugin implements ToolProvider {
         );
         const settings = this._writeSettings(mode);
         // The connector's `upload` resolves `getWorkspaceClient()` and
-        // `client.config.authenticate(headers)` synchronously inside this
+        // sends `client.request(...)` (user-token auth) inside this
         // callback. When `_runWithAuth` wraps us in `runInCallerContext`, that
-        // chain produces user-token Authorization headers on the outgoing
-        // `fetch PUT`. The OBO upload-headers test pins this contract.
+        // chain sends the PUT on the user-token client. The OBO upload
+        // identity test pins this contract.
         const result = await this.trackWrite(() =>
           this.execute(async () => {
             await connector.upload(getWorkspaceClient(), path, webStream);

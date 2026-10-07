@@ -174,13 +174,13 @@ export class TelemetryReporter {
   async #send(logs: AppkitLog[]): Promise<void> {
     if (logs.length === 0) return;
     const workspaceId = await this.#workspaceIdPromise;
-    await this.#client.apiClient.request({
+    const response = await this.#client.request({
       path: "/telemetry-ext",
       method: "POST",
       query: { o: workspaceId },
-      headers: new Headers(),
-      payload: buildAppkitPayload(logs),
-      raw: false,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildAppkitPayload(logs)),
     });
+    await response.body?.cancel();
   }
 }

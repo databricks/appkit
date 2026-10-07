@@ -14,7 +14,11 @@
  * as each service migrates.
  */
 import type { LegacyWorkspaceClient } from "./legacy";
-import type { StatementExecutionClient, WarehousesClient } from "./modular";
+import type {
+  StatementExecutionClient,
+  WarehousesClient,
+  WorkspaceAuth,
+} from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
 // modules import them from the wrapper rather than the SDK directly. `sql`
@@ -36,7 +40,7 @@ export type * from "./modular";
  * Accessors are legacy-typed for now (delegated to the underlying legacy SDK
  * client); see the module docblock.
  */
-export interface WorkspaceClient {
+export interface WorkspaceClient extends WorkspaceAuth {
   /** UC Volumes / Files API. */
   readonly files: LegacyWorkspaceClient["files"];
 
@@ -59,16 +63,16 @@ export interface WorkspaceClient {
   readonly currentUser: LegacyWorkspaceClient["currentUser"];
 
   /**
-   * SDK `Config` — exposes `host` and `authenticate(headers)`. Used by the
-   * files-upload path and agents auth-header stamping, which bypass the typed
-   * services.
+   * Legacy SDK `Config`. Prefer `getHost()` / `authenticate(headers)` (modular,
+   * inherited from `WorkspaceAuth`); kept for structural `WorkspaceClientLike`
+   * callers (supervisor adapter) until they migrate.
    */
   readonly config: LegacyWorkspaceClient["config"];
 
   /**
-   * Low-level HTTP transport (`apiClient.request(...)`). Used for endpoints
-   * without a typed service method: SCIM header probe, warehouse listing,
-   * serving SSE streaming, vector search, internal telemetry.
+   * Legacy low-level HTTP transport. Prefer `request(...)` (modular, inherited
+   * from `WorkspaceAuth`); still used by serving SSE streaming, vector search,
+   * and the agents adapters, which take a structural `apiClient` shape.
    */
   readonly apiClient: LegacyWorkspaceClient["apiClient"];
 

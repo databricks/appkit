@@ -294,49 +294,37 @@ export class FilesConnector {
       const body = contents;
       const overwrite = options?.overwrite ?? true;
 
-      // Workaround: The SDK's files.upload() has two bugs:
-      // 1. It ignores the `contents` field (sets body to undefined)
-      // 2. apiClient.request() checks `instanceof` against its own ReadableStream
-      //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
-      // Bypass both by calling the REST API directly with SDK-provided auth.
-      const hostValue = client.config.host;
-      if (!hostValue) {
-        throw new Error(
-          "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
-        );
-      }
-      const host = hostValue.startsWith("http")
-        ? hostValue
-        : `https://${hostValue}`;
-      const url = new URL(`/api/2.0/fs/files${resolvedPath}`, host);
-      url.searchParams.set("overwrite", String(overwrite));
-
-      const headers = new Headers({
+      // Workaround: the legacy SDK's files.upload() ignores `contents` and
+      // JSON-stringifies standard ReadableStreams, so PUT the REST API directly
+      // through the modular transport (auth + AppKit User-Agent; it sets
+      // `duplex: "half"` for stream bodies).
+      const headers: Record<string, string> = {
         "Content-Type": "application/octet-stream",
-        "User-Agent": client.apiClient.userAgent(),
-      });
-      const fetchOptions: RequestInit = { method: "PUT", headers, body };
-
-      if (body instanceof ReadableStream) {
-        fetchOptions.duplex = "half";
-      } else if (body instanceof Buffer) {
-        headers.set("Content-Length", String(body.length));
+      };
+      if (body instanceof Buffer) {
+        headers["Content-Length"] = String(body.length);
       } else if (typeof body === "string") {
-        headers.set("Content-Length", String(Buffer.byteLength(body)));
+        headers["Content-Length"] = String(Buffer.byteLength(body));
       }
 
-      await client.config.authenticate(headers);
-
-      const res = await fetch(url.toString(), fetchOptions);
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.error(`Upload failed (${res.status}): ${text}`);
-        const safeMessage = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+      try {
+        const res = await client.request({
+          method: "PUT",
+          path: `/api/2.0/fs/files${resolvedPath}`,
+          query: { overwrite: String(overwrite) },
+          headers,
+          body,
+        });
+        await res.body?.cancel();
+      } catch (e) {
+        if (!(e instanceof ApiError)) throw e;
+        logger.error(`Upload failed (${e.statusCode}): ${e.message}`);
+        const safeMessage =
+          e.message.length > 200 ? `${e.message.slice(0, 200)}…` : e.message;
         throw new ApiError(
           `Upload failed: ${safeMessage}`,
           "UPLOAD_FAILED",
-          res.status,
+          e.statusCode,
           undefined,
           [],
         );
