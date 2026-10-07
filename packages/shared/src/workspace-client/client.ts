@@ -15,8 +15,11 @@ import {
 import {
   buildStatementExecutionClient,
   buildWarehousesClient,
+  buildWorkspaceAuth,
   type StatementExecutionClient,
   type WarehousesClient,
+  type WorkspaceAuth,
+  type WorkspaceRequest,
 } from "./modular";
 import type { WorkspaceClient } from "./types";
 
@@ -25,6 +28,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #legacy?: LegacyWorkspaceClient;
   #warehouses?: WarehousesClient;
   #statementExecution?: StatementExecutionClient;
+  #auth?: WorkspaceAuth;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -66,6 +70,19 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getLegacy().currentUser;
   }
 
+  // Modular auth + raw-request seam — built lazily, independent of the legacy client.
+  getHost(): Promise<string> {
+    return this.#getAuth().getHost();
+  }
+
+  authenticate(headers: Headers): Promise<void> {
+    return this.#getAuth().authenticate(headers);
+  }
+
+  request(req: WorkspaceRequest): Promise<Response> {
+    return this.#getAuth().request(req);
+  }
+
   get config() {
     return this.#getLegacy().config;
   }
@@ -76,6 +93,13 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
 
   toLegacyWorkspaceClient(): LegacyWorkspaceClient {
     return this.#getLegacy();
+  }
+
+  #getAuth(): WorkspaceAuth {
+    if (!this.#auth) {
+      this.#auth = buildWorkspaceAuth(this.#opts);
+    }
+    return this.#auth;
   }
 
   #getLegacy(): LegacyWorkspaceClient {

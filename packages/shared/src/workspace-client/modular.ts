@@ -8,8 +8,9 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses` and `statementExecution` are migrated; every other service still
- * routes through `legacy.ts`.
+ * `warehouses` and `statementExecution` are migrated, plus the auth + raw-request
+ * seam ({@link buildWorkspaceAuth}); every other service still routes through
+ * `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
  * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
@@ -17,14 +18,28 @@
  * unmarshal transform would otherwise strip.
  */
 import {
+  type Credentials,
+  newTokenCredentials,
+  type Token,
+  type TokenCredentials,
+  tokenProviderFn,
+} from "@databricks/sdk-auth";
+import {
+  defaultCredentials,
   newM2mCredentials,
   newPatCredentials,
 } from "@databricks/sdk-auth/credentials";
-import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import {
+  type HttpClient,
+  type HttpRequest,
+  newFetchHttpClient,
+} from "@databricks/sdk-core/http";
+import { resolve } from "@databricks/sdk-core/profiles";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
+import { ApiError } from "./errors";
 import type { WorkspaceClientOptions } from "./legacy";
 
 /**
@@ -81,11 +96,9 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
     const envToken = process.env.DATABRICKS_TOKEN;
     if (host && clientId && clientSecret) {
-      clientOptions.credentials = newM2mCredentials({
-        host,
-        clientId,
-        clientSecret,
-      });
+      clientOptions.credentials = withTokenCache(
+        newM2mCredentials({ host, clientId, clientSecret }),
+      );
     } else if (envToken) {
       clientOptions.credentials = newPatCredentials(envToken);
     }
@@ -140,6 +153,149 @@ function buildHttpClient(opts: WorkspaceClientOptions): HttpClient | undefined {
       return base.send(request);
     },
   };
+}
+
+// Same margin as the legacy SDK: refresh 40s early, since Azure Databricks
+// rejects tokens that expire in 30s or less.
+const TOKEN_REFRESH_MARGIN_MS = 40_000;
+
+/**
+ * Cache a token until shortly before it expires. The modular `newM2mCredentials`
+ * caches only the token endpoint and mints a fresh OAuth token on EVERY request;
+ * the legacy SDK reused it until expiry. Concurrent callers share one in-flight
+ * fetch. Like the legacy SDK, a token without an expiry is reused indefinitely.
+ */
+function withTokenCache(credentials: TokenCredentials): TokenCredentials {
+  let current: Token | undefined;
+  let inflight: Promise<Token> | undefined;
+  const isFresh = (t: Token) =>
+    t.expiry === undefined ||
+    t.expiry.getTime() - TOKEN_REFRESH_MARGIN_MS > Date.now();
+  return newTokenCredentials(
+    credentials.name(),
+    tokenProviderFn(async () => {
+      if (current && isFresh(current)) return current;
+      inflight ??= credentials
+        .token()
+        .then((t) => (current = t))
+        .finally(() => {
+          inflight = undefined;
+        });
+      return inflight;
+    }),
+  );
+}
+
+/** A raw REST call against the workspace host. */
+export interface WorkspaceRequest {
+  method: string;
+  /** Path on the workspace host, e.g. `/api/2.0/preview/scim/v2/Me`. */
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: HttpRequest["body"];
+  signal?: AbortSignal;
+}
+
+/** Host, auth headers, and raw requests resolved exactly like the modular clients. */
+export interface WorkspaceAuth {
+  /** Scheme-normalized workspace host, without a trailing slash. */
+  getHost(): Promise<string>;
+  /** Set the auth header(s) (e.g. `Authorization`) on `headers`. */
+  authenticate(headers: Headers): Promise<void>;
+  /**
+   * Send a request through the modular transport (AppKit User-Agent + auth).
+   * Returns the raw `Response` (body unread, so it can stream); throws
+   * {@link ApiError} on a non-2xx status.
+   */
+  request(req: WorkspaceRequest): Promise<Response>;
+}
+
+/**
+ * Build host/credential resolution from {@link mapToClientOptions}, mirroring
+ * the modular SDK's `resolveClientConfig` (sdk-warehouses `dist/v1/transport.js`):
+ * resolve the profile from config file + env, explicit options win, and fall
+ * back to `defaultCredentials` over the resolved profile. Resolved once, lazily;
+ * a failed resolution is retried on the next call.
+ */
+export function buildWorkspaceAuth(
+  opts: WorkspaceClientOptions,
+): WorkspaceAuth {
+  const options = mapToClientOptions(opts);
+  const transport = options.httpClient ?? newFetchHttpClient();
+  let resolved: Promise<{ host: string; credentials: Credentials }> | undefined;
+  const resolveOnce = () => {
+    resolved ??= (async () => {
+      const profile = await resolve(options.profileOptions);
+      const host = normalizeHost(options.host ?? profile.host)?.replace(
+        /\/+$/,
+        "",
+      );
+      if (!host) throw new Error("Host is required.");
+      const credentials =
+        options.credentials ??
+        defaultCredentials({ profile: { ...profile, host } });
+      return { host, credentials };
+    })().catch((e) => {
+      resolved = undefined;
+      throw e;
+    });
+    return resolved;
+  };
+  const authenticate = async (headers: Headers) => {
+    const { credentials } = await resolveOnce();
+    for (const h of await credentials.authHeaders()) {
+      headers.set(h.key, h.value);
+    }
+  };
+  return {
+    getHost: async () => (await resolveOnce()).host,
+    authenticate,
+    async request(req) {
+      const url = new URL(req.path, (await resolveOnce()).host);
+      for (const [k, v] of Object.entries(req.query ?? {})) {
+        url.searchParams.set(k, v);
+      }
+      const headers = new Headers(req.headers);
+      await authenticate(headers);
+      const res = await transport.send({
+        url: url.toString(),
+        method: req.method,
+        headers,
+        body: req.body,
+        signal: req.signal,
+      });
+      // `Response` rejects any body (even empty) on null-body statuses.
+      const nullBody = [204, 205, 304].includes(res.statusCode);
+      const response = new Response(nullBody ? null : res.body, {
+        status: res.statusCode,
+        headers: res.headers,
+      });
+      if (!response.ok) throw await toApiError(response);
+      return response;
+    },
+  };
+}
+
+/**
+ * Same error class the legacy `apiClient.request` threw, so existing catch
+ * sites (`instanceof ApiError`, `.statusCode`, `.errorCode`) keep working.
+ */
+async function toApiError(response: Response): Promise<ApiError> {
+  const text = await response.text();
+  let parsed: { error_code?: string; message?: string } = {};
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Non-JSON error body; fall back to the raw text.
+  }
+  return new ApiError(
+    parsed.message || text || response.statusText,
+    parsed.error_code ?? "UNKNOWN",
+    response.status,
+    undefined,
+    [],
+  );
 }
 
 /** Build a modular Warehouses client from wrapper options. */
