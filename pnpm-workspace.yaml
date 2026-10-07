@@ -19,4 +19,4 @@ allowBuilds:
   esbuild: true
   protobufjs: false
 patchedDependencies:
-  '@databricks/sdk-statementexecution@0.46.0': patches/@databricks__sdk-statementexecution@0.46.0.patch
+  '@databricks/sdk-statementexecution@0.52.0': patches/@databricks__sdk-statementexecution@0.52.0.patch

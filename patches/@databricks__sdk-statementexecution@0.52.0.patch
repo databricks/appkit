@@ -1,8 +1,8 @@
 diff --git a/dist/v1/model.d.ts b/dist/v1/model.d.ts
-index e8d95659ea348b384a3d32b6a3d4f754287b38b6..705b9bed203981a2f3cde5417ed8019ff3a7065c 100644
+index a43af9275af5fed230b9d428ba30b979e4d6aa61..3f6b302871a886158ad18d7d957439a229a8c549 100644
 --- a/dist/v1/model.d.ts
 +++ b/dist/v1/model.d.ts
-@@ -385,6 +385,8 @@ interface QueryTag {
+@@ -384,6 +384,8 @@ interface QueryTag {
   * link is returned.)
   */
  interface ResultData {
