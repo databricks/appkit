@@ -46,7 +46,7 @@ export async function initializeLakebasePool(
     const client = ServiceContext.isInitialized()
       ? ServiceContext.get().client
       : createWorkspaceClient({ clientOptions: getClientOptions() });
-    resolved.workspaceClient = client.toLegacyWorkspaceClient();
+    resolved.workspaceClient = client;
   }
   const [user] = await Promise.all([
     getUsernameWithApiLookup(resolved),

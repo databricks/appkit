@@ -74,16 +74,30 @@ async function compareHosts(
       reason,
     );
   try {
+    const path = `/api/2.0/postgres/${endpoint}`;
+    const lookup =
+      "request" in client
+        ? // AppKit's modular client: throws ApiError (with statusCode) on non-2xx.
+          // `signal` isn't in lakebase's public request type but AppKit honors it.
+          client
+            .request({
+              method: "GET",
+              path,
+              headers: { Accept: "application/json" },
+              signal: controller.signal,
+            } as Parameters<typeof client.request>[0])
+            .then((res) => res.json())
+        : client.apiClient.request(
+            {
+              path,
+              method: "GET",
+              headers: new Headers({ Accept: "application/json" }),
+              raw: false,
+            },
+            contextFromAbortSignal(controller.signal),
+          );
     const response = await Promise.race([
-      client.apiClient.request(
-        {
-          path: `/api/2.0/postgres/${endpoint}`,
-          method: "GET",
-          headers: new Headers({ Accept: "application/json" }),
-          raw: false,
-        },
-        contextFromAbortSignal(controller.signal),
-      ),
+      lookup,
       new Promise<undefined>((resolve) => {
         timer = setTimeout(() => {
           controller.abort();
