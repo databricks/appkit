@@ -274,6 +274,14 @@ describe("EntityClient", () => {
     expect(() => client.where(cyclic as WhereClause)).toThrowError();
     await expect(client.update(1, {})).rejects.toMatchObject({
       category: "INVALID_REQUEST",
+      phase: "write",
+      details: [
+        {
+          path: ["body"],
+          message:
+            "Update must contain at least one field; skip the call when there are no changes",
+        },
+      ],
     });
   });
 

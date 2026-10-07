@@ -17,8 +17,8 @@ import type { DatabaseRegistry } from "./registry";
 export type DatabaseEntity = DatabaseApiEntityFor<DatabaseRegistry>;
 
 /**
- * Entities with a public primary key, the only ones with a detail route.
- * A table whose key is private or absent is listable but not addressable.
+ * Entities with a path-decodable public key, the only ones with a detail route.
+ * Private, missing, boolean, and JSON keys do not address generated HTTP routes.
  */
 export type DatabaseKeyedEntity = KeyedEntityFor<DatabaseRegistry>;
 

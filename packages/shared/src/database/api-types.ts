@@ -17,7 +17,7 @@ export interface DatabaseApiEntry {
     readonly filters: object;
     /** Columns a request may order by; `never` when there are none. */
     readonly orderable: string;
-    /** The public primary key; `never` when it is private or absent. */
+    /** The path-decodable public primary key; `never` for all other keys. */
     readonly key: string;
   };
 }
@@ -71,7 +71,7 @@ type NonEmptyOrder<Keys extends string> = {
 }[Keys];
 
 /**
- * Entities in `R` with a public primary key. Only these have detail, update,
+ * Entities in `R` with a path-decodable public key. Only these have detail, update,
  * and delete routes; `never` while the registry is empty.
  */
 export type KeyedEntityFor<R> = {
@@ -142,7 +142,7 @@ export type RecordParamsFor<R, K> = Pick<
   "select" | "include"
 >;
 
-// An explicit selection narrows the public row; relations add to it.
+// A tuple guarantees its columns; an array names only the possible columns.
 type SelectedOf<R, K, P> = P extends {
   readonly select: infer Columns extends readonly PropertyKey[];
 }

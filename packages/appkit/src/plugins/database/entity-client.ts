@@ -454,7 +454,20 @@ export class EntityClient {
   ): Promise<T> {
     const rejection = byHook ? "INTERNAL" : "INVALID_REQUEST";
     if (kind === "update" && Object.keys(values).length === 0) {
-      throw new DatabasePluginError(rejection, "write");
+      throw new DatabasePluginError(
+        rejection,
+        "write",
+        undefined,
+        byHook
+          ? undefined
+          : [
+              {
+                path: ["body"],
+                message:
+                  "Update must contain at least one field; skip the call when there are no changes",
+              },
+            ],
+      );
     }
     let parsed: Row;
     try {

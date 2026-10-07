@@ -285,9 +285,12 @@ argument, `{ signal }`, cancels the request, and the promise then rejects with
 the abort reason. Cancelling a write does not undo it if the server already
 committed it.
 
-Only tables with a public primary key have `get`, `update`, and `remove`, so
-calling them on a keyless table or a table with a private key is a type error.
-A missing row rejects with `NOT_FOUND`.
+Only tables with a public primary key that the URL path can represent have
+`get`, `update`, and `remove`. Boolean and JSONB primary keys, like private or
+missing keys, are treated as keyless over HTTP: no keyed routes are published,
+although creates and explicitly ordered lists remain available when supported.
+Calling a keyed operation on these tables is a type error. A missing row on a
+supported keyed route rejects with `NOT_FOUND`.
 
 ### Parameters
 
@@ -302,11 +305,20 @@ A missing row rejects with `NOT_FOUND`.
 Private columns, JSON columns in `where` or `order`, and unknown parameters are
 compile errors. An explicit `where` must not be empty, and an undefined nested
 filter value fails rather than broadening the read; omit `where` entirely to
-list all rows. A to-many include adds an array to each row and a to-one include
-adds a row or `null`. JSON carries bigint columns as decimal strings, so rows
-type them as `string`, and filters accept a string or a safe integer. For params
-typed broadly with an optional `select`, row fields may be absent; use a literal
-selection for precise projected row types.
+list all rows. A top-level `where: {}` fails locally with guidance to omit the
+parameter, without sending a request. For optional search controls, for example:
+
+```typescript
+const where = search ? { body: { ilike: `%${search}%` } } : undefined;
+await databaseApi.list("notes", { where });
+```
+
+A to-many include adds an array to each row and a to-one include adds a row or
+`null`. JSON carries bigint columns as decimal strings, so rows type them as
+`string`, and filters accept a string or a safe integer. Dynamic `select` arrays
+return optional properties for their possible columns; a literal tuple returns
+those properties as required. This also applies to detail and included rows.
+Params typed broadly with an optional `select` keep row fields optional.
 
 If a server-side read serializer changes a list or detail row, the schema-based
 return type cannot describe that custom response. Validate or narrow custom
@@ -319,6 +331,15 @@ Private columns, server-generated columns such as `id()`, and unknown fields are
 compile errors, including fields that a spread carries in. Every update field is
 optional, and primary keys and `defaultNow()` or `defaultRandom()` columns
 cannot be updated. Bigint columns accept a decimal string or a safe integer.
+NaN and positive or negative Infinity fail locally before a write is sent,
+including inside JSON values. Use an explicit `null` to clear a nullable column;
+a non-finite number never implicitly becomes null. Query numbers must also be
+finite.
+
+Skip an update when a form has no changes. If an update remains empty after
+`beforeUpdate`, the server returns `INVALID_REQUEST` with a `body` detail
+explaining that at least one field is required. An initially empty patch is
+still allowed when `beforeUpdate` supplies its values.
 
 The answered row is the public row the database holds after any `before*` hook
 ran. A read serializer never reshapes a write's response.
@@ -332,7 +353,7 @@ field. Branch on `code` rather than `message`.
 | `code` | `status` | Meaning |
 | --- | --- | --- |
 | `NOT_EXPOSED` | `null` | No published route for the operation. Nothing was sent |
-| `INVALID_REQUEST` | 400 | Malformed or unsupported parameters |
+| `INVALID_REQUEST` | 400 or `null` | Malformed or unsupported parameters; `null` means local validation rejected the call before sending it |
 | `FORBIDDEN` | 403 | The database refused the operation |
 | `NOT_FOUND` | 404 | No row has this id |
 | `CONFLICT` | 409 | A constraint rejected the change |
