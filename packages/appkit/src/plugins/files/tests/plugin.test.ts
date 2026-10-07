@@ -31,10 +31,7 @@ const { mockClient, MockApiError } = await vi.hoisted(async () => {
 
   const mockClient = {
     files: mockFilesApi,
-    config: {
-      host: "https://test.databricks.com",
-      authenticate: vi.fn(),
-    },
+    request: vi.fn(async () => new Response(null)),
   };
 
   class MockApiError extends Error {
@@ -2658,7 +2655,7 @@ describe("FilesPlugin", () => {
      * while calls outside the user context fall back to the
      * service-principal client from `ServiceContext.get()`. Required to
      * exercise the real `_runWithAuth → runInUserContext → getWorkspaceClient
-     * → client.config.authenticate → fetch headers` chain.
+     * → client.request` chain.
      */
     async function useRealGetWorkspaceClient() {
       const actual =
@@ -2689,49 +2686,26 @@ describe("FilesPlugin", () => {
     });
 
     /**
-     * NON-NEGOTIABLE upload-headers contract.
+     * NON-NEGOTIABLE upload identity contract.
      *
-     * `_handleUpload` does a hand-rolled `fetch PUT` (not a typed SDK call)
-     * via the connector's `upload()`. Inside `_runWithAuth` on an OBO volume,
-     * the chain is:
-     *
-     *     getWorkspaceClient()           → user-token WorkspaceClient
-     *     client.config.authenticate(h)  → injects "Bearer <user-token>"
-     *     fetch(url, { headers })        → outgoing request as the user
-     *
-     * This test pins that chain end-to-end. If any future SDK upgrade or
-     * refactor changes `client.config.authenticate`'s signature, removes the
-     * `runInUserContext` wrap from `_handleUpload`, or rewires
-     * `getWorkspaceClient()` so it returns the SP client inside the OBO
-     * scope, the user-token Authorization header will not reach `fetch` and
-     * this assertion fails. SP-token would silently leak to UC otherwise.
+     * `_handleUpload` does a raw PUT (not a typed SDK call) via the connector's
+     * `upload()`, which sends `client.request(...)` on whatever
+     * `getWorkspaceClient()` returns. Inside `_runWithAuth` on an OBO volume
+     * that must be the user-token client, whose modular transport stamps
+     * "Bearer <user-token>" (PAT stamping is pinned in shared's
+     * modular.test.ts). If a refactor removes the `runInUserContext` wrap or
+     * rewires `getWorkspaceClient()` to the SP client inside the OBO scope, the
+     * PUT goes out on the SP client and this test fails. SP-token would
+     * silently leak to UC otherwise.
      */
-    test("OBO upload: outgoing fetch PUT carries user-token Authorization header (not SP)", async () => {
+    test("OBO upload: outgoing PUT goes through the user-token client (not SP)", async () => {
       await useRealGetCurrentPrincipalId();
       await useRealGetWorkspaceClient();
 
-      // SP-token marker — what the existing mockClient would inject if the
-      // OBO wrap leaked. We assert this NEVER reaches the outgoing fetch.
-      mockClient.config.authenticate.mockImplementation(
-        async (headers: Headers) => {
-          headers.set("Authorization", "Bearer SP-TOKEN");
-        },
-      );
-
-      // User-token marker — what the OBO scope MUST inject.
       const userClient = {
-        config: {
-          host: "https://test.databricks.com",
-          authenticate: vi.fn(async (headers: Headers) => {
-            headers.set("Authorization", "Bearer USER-TOKEN-FOO");
-          }),
-        },
         // `_handleUpload` only routes through the connector's `upload()`,
-        // which uses host + authenticate + apiClient.userAgent() + fetch. No
-        // `files.*` accessor is touched on the user client during this path.
-        apiClient: {
-          userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
-        },
+        // which sends one raw `request`. No `files.*` accessor is touched.
+        request: vi.fn(async () => new Response(null)),
       };
 
       // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to
@@ -2745,12 +2719,6 @@ describe("FilesPlugin", () => {
           workspaceId: serviceContextMock.serviceContext.workspaceId,
         }),
       );
-
-      // Capture the outgoing PUT.
-      const fetchSpy = vi
-        .fn()
-        .mockResolvedValue({ ok: true, status: 200, text: async () => "" });
-      vi.stubGlobal("fetch", fetchSpy);
 
       const plugin = new FilesPlugin({
         volumes: {
@@ -2778,30 +2746,18 @@ describe("FilesPlugin", () => {
         res,
       );
 
-      // The user-token authenticator was consulted exactly when upload ran.
-      expect(userClient.config.authenticate).toHaveBeenCalledTimes(1);
+      // The PUT happened exactly once, on the user-token client.
+      expect(userClient.request).toHaveBeenCalledTimes(1);
+      expect(userClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({ method: "PUT" }),
+      );
 
-      // The hand-rolled fetch PUT happened exactly once.
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const fetchArgs = fetchSpy.mock.calls[0];
-      const init = fetchArgs[1] as RequestInit & { headers: Headers };
-      expect(init.method).toBe("PUT");
-
-      // The contract — proves the user-token Authorization header reached
-      // fetch. Toggling the `_runWithAuth` wrap off in `_handleUpload`
-      // breaks this assertion (fetch would carry "Bearer SP-TOKEN" instead).
-      expect(init.headers.get("Authorization")).toBe("Bearer USER-TOKEN-FOO");
-      expect(init.headers.get("Authorization")).not.toBe("Bearer SP-TOKEN");
-
-      // Defense-in-depth: SP authenticator was NOT called along the OBO path.
-      expect(mockClient.config.authenticate).not.toHaveBeenCalled();
+      // The contract: the SP client never sent it.
+      expect(mockClient.request).not.toHaveBeenCalled();
     });
 
     test("OBO upload + missing token + NODE_ENV=production → 401 before any SDK or fetch call", async () => {
       process.env.NODE_ENV = "production";
-
-      const fetchSpy = vi.fn();
-      vi.stubGlobal("fetch", fetchSpy);
 
       const plugin = new FilesPlugin({
         volumes: {
@@ -2838,9 +2794,9 @@ describe("FilesPlugin", () => {
         plugin: "files",
       });
 
-      // Neither the SDK upload nor the hand-rolled fetch ran.
+      // Neither the SDK upload nor the raw PUT ran.
       expect(mockClient.files.upload).not.toHaveBeenCalled();
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mockClient.request).not.toHaveBeenCalled();
     });
 
     test("OBO mkdir + policy denies → 403 PolicyDeniedError; SDK not invoked", async () => {
@@ -2854,9 +2810,6 @@ describe("FilesPlugin", () => {
       });
       const handler = getRouteHandler(plugin, "post", "/mkdir");
       const res = mockRes();
-
-      const fetchSpy = vi.fn();
-      vi.stubGlobal("fetch", fetchSpy);
 
       await handler(
         mockReq(
@@ -2887,9 +2840,9 @@ describe("FilesPlugin", () => {
         }),
       );
 
-      // SDK + fetch not invoked.
+      // SDK + raw request not invoked.
       expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mockClient.request).not.toHaveBeenCalled();
     });
 
     test("OBO delete + valid token + UC denies → user-token client invoked, error propagated", async () => {
@@ -3219,13 +3172,6 @@ describe("FilesPlugin", () => {
           }
         },
       );
-      mockClient.config.authenticate.mockImplementation(async (h: Headers) => {
-        h.set("Authorization", "Bearer ALICE");
-      });
-      const fetchSpy = vi
-        .fn()
-        .mockResolvedValue({ ok: true, status: 200, text: async () => "" });
-      vi.stubGlobal("fetch", fetchSpy);
 
       // Bob's first list — empty.
       const bobRes1 = mockRes();
@@ -3335,10 +3281,6 @@ describe("FilesPlugin", () => {
         yield { name: "user.txt", path: "/user.txt", is_directory: false };
       });
       const userClient = {
-        config: {
-          host: "https://test.databricks.com",
-          authenticate: vi.fn(),
-        },
         files: { listDirectoryContents: userListSpy },
       };
 
