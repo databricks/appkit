@@ -180,6 +180,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.87.0](https://github.com/databricks/appkit/compare/v0.86.0...v0.87.0) (2026-10-07)
+
+### appkit-ui
+
+* **appkit-ui:** add database React hooks with read invalidation ([#609](https://github.com/databricks/appkit/issues/609)) ([74d5243](https://github.com/databricks/appkit/commit/74d52432bf5c2de10fde6bfcf770f4ed977d6340))
+
+
 ## [0.86.0](https://github.com/databricks/appkit/compare/v0.85.0...v0.86.0) (2026-10-07)
 
 ### appkit-ui
