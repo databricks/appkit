@@ -178,6 +178,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.86.0](https://github.com/databricks/appkit/compare/v0.85.0...v0.86.0) (2026-10-07)
+
+### appkit-ui
+
+* **appkit-ui:** add typed databaseApi client for DatabasePlugin routes ([#608](https://github.com/databricks/appkit/issues/608)) ([a0ab1b7](https://github.com/databricks/appkit/commit/a0ab1b7369b266dc40b56a4e6835927540d3e6d5))
+
+
 ## [0.85.0](https://github.com/databricks/appkit/compare/v0.84.0...v0.85.0) (2026-10-07)
 
 ### appkit
