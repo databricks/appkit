@@ -14,7 +14,11 @@
  * as each service migrates.
  */
 import type { LegacyWorkspaceClient } from "./legacy";
-import type { StatementExecutionClient, WarehousesClient } from "./modular";
+import type {
+  ScimClient,
+  StatementExecutionClient,
+  WarehousesClient,
+} from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
 // modules import them from the wrapper rather than the SDK directly. `sql`
@@ -55,8 +59,8 @@ export interface WorkspaceClient {
   /** Serving Endpoints. */
   readonly servingEndpoints: LegacyWorkspaceClient["servingEndpoints"];
 
-  /** Current user. */
-  readonly currentUser: LegacyWorkspaceClient["currentUser"];
+  /** Current user (modular SDK SCIM client; `me({})` returns the caller). */
+  readonly currentUser: ScimClient;
 
   /**
    * SDK `Config` — exposes `host` and `authenticate(headers)`. Used by the

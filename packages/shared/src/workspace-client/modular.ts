@@ -8,7 +8,7 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses` and `statementExecution` are migrated; every other service still
+ * `warehouses`, `statementExecution` and `currentUser` (SCIM) are migrated; every other service still
  * routes through `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
@@ -22,6 +22,7 @@ import {
 } from "@databricks/sdk-auth/credentials";
 import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
 import type { ClientOptions } from "@databricks/sdk-options/client";
+import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -156,7 +157,16 @@ export function buildStatementExecutionClient(
   return new StatementExecutionClient(mapToClientOptions(opts));
 }
 
+/**
+ * Build a modular SCIM client from wrapper options. Backs the facade's
+ * `currentUser` accessor: legacy `currentUser.me()` is `ScimClient.me({})`.
+ */
+export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
+  return new ScimClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
