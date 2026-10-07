@@ -291,6 +291,9 @@ importers:
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
+      '@databricks/sdk-scim':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-statementexecution':
         specifier: 0.52.0
         version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
@@ -619,6 +622,9 @@ importers:
         specifier: 0.17.0
         version: 0.17.0
       '@databricks/sdk-options':
+        specifier: 0.51.0
+        version: 0.51.0
+      '@databricks/sdk-scim':
         specifier: 0.51.0
         version: 0.51.0
       '@databricks/sdk-statementexecution':
@@ -2010,6 +2016,10 @@ packages:
 
   '@databricks/sdk-options@0.51.0':
     resolution: {integrity: sha512-p5uBh64Y1onnvwlEwfRsmKmGRI23Y4Ly8fZiCgNUwVDe4Z9d0ctI0mo1v4gnDqlmBaBml3TZfqn5BJBROCXsEw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-scim@0.51.0':
+    resolution: {integrity: sha512-WSTpuID4gRoTxVApyxujW+MsI5ANvmn8/DqPK6fXqxCkSINLEbtR+GTk/th8xnADtJekKNIWzeORFblXd3idcg==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-statementexecution@0.52.0':
@@ -14320,6 +14330,15 @@ snapshots:
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
+
+  '@databricks/sdk-scim@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@databricks/sdk-statementexecution@0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)':
     dependencies:

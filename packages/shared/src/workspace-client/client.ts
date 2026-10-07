@@ -13,9 +13,11 @@ import {
   type WorkspaceClientOptions,
 } from "./legacy";
 import {
+  buildScimClient,
   buildStatementExecutionClient,
   buildWarehousesClient,
   buildWorkspaceAuth,
+  type ScimClient,
   type StatementExecutionClient,
   type WarehousesClient,
   type WorkspaceAuth,
@@ -29,6 +31,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #warehouses?: WarehousesClient;
   #statementExecution?: StatementExecutionClient;
   #auth?: WorkspaceAuth;
+  #currentUser?: ScimClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -66,8 +69,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getLegacy().servingEndpoints;
   }
 
-  get currentUser() {
-    return this.#getLegacy().currentUser;
+  // Migrated to the modular SDK (SCIM) — built lazily, independent of the legacy client.
+  get currentUser(): ScimClient {
+    if (!this.#currentUser) {
+      this.#currentUser = buildScimClient(this.#opts);
+    }
+    return this.#currentUser;
   }
 
   // Modular auth + raw-request seam — built lazily, independent of the legacy client.
