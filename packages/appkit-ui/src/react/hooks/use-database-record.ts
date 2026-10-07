@@ -1,4 +1,8 @@
-import { encodeDatabaseRecordQuery, type ExactDatabaseParams } from "shared";
+import {
+  DatabaseQueryEncodingError,
+  encodeDatabaseRecordQuery,
+  type ExactDatabaseParams,
+} from "shared";
 
 import { isDatabaseRow } from "@/js/database/client";
 import type {
@@ -9,6 +13,7 @@ import type {
 } from "@/js/database/types";
 
 import {
+  type DatabaseReadRequest,
   type UseDatabaseReadOptions,
   type UseDatabaseReadResult,
   useDatabaseRead,
@@ -56,12 +61,12 @@ export function useDatabaseRecord<
   const enabled = (options.enabled ?? true) && id !== null && id !== undefined;
   const recordParams = (params ?? {}) as { include?: unknown };
   // Encode only an enabled read: a held read's params may still be incomplete.
-  let query: string | null = "";
+  let query: DatabaseReadRequest["query"] = "";
   if (enabled) {
     try {
       query = encodeDatabaseRecordQuery(recordParams);
-    } catch {
-      query = null;
+    } catch (error) {
+      query = error instanceof DatabaseQueryEncodingError ? error : null;
     }
   }
   const read = useDatabaseRead({

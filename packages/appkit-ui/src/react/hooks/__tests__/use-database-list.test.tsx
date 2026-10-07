@@ -165,6 +165,45 @@ describe("useDatabaseList", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("preserves local validation guidance and changes it only when the failure changes", () => {
+    const { result, rerender } = renderHook(
+      ({ where }: { where: object | undefined }) =>
+        useDatabaseList("notes", { where }),
+      { initialProps: { where: {} as object | undefined } },
+    );
+    expect(result.current.error).toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message: "Filter cannot be empty; omit where to list all rows",
+      details: [
+        {
+          path: ["where"],
+          message: "Filter cannot be empty; omit where to list all rows",
+        },
+      ],
+    });
+    const empty = result.current.error;
+    rerender({ where: {} });
+    expect(result.current.error).toBe(empty);
+
+    rerender({ where: { rank: NaN } });
+    expect(result.current.error).toMatchObject({
+      message: "Database query numbers must be finite",
+      details: [
+        { path: ["where"], message: "Database query numbers must be finite" },
+      ],
+    });
+    const nonFinite = result.current.error;
+    expect(nonFinite).not.toBe(empty);
+    rerender({ where: { rank: NaN } });
+    expect(result.current.error).toBe(nonFinite);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ where: undefined });
+    expect(result.current.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test("keeps an INVALID_REQUEST error stable, so an effect keyed on it runs once", () => {
     const seen: unknown[] = [];
     const { result, rerender } = renderHook(() => {

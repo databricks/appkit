@@ -131,6 +131,23 @@ describe("database write hooks", () => {
     expect(result.current).toMatchObject({ loading: true, error: null });
   });
 
+  test("rejects a non-finite update before sending it or invalidating reads", async () => {
+    const { result } = renderHook(() => useDatabaseUpdate("notes"));
+    let updated!: Row | null;
+    await act(async () => {
+      updated = await result.current.update(7, { rank: NaN });
+    });
+    expect(updated).toBeNull();
+    expect(result.current.error).toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message:
+        "Database write numbers must be finite; use null explicitly to clear a value",
+    });
+    expect(result.current.loading).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("update patches one id and delete removes one without a response body", async () => {
     const { result } = renderHook(() => ({
       update: useDatabaseUpdate("notes"),

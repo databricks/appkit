@@ -105,6 +105,26 @@ describe("useDatabaseRecord", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("reports a non-finite include operand locally with stable field details", () => {
+    const { result, rerender } = renderHook(() =>
+      useDatabaseRecord("notes", 7, {
+        include: { note_events: { where: { rank: NaN } } },
+      }),
+    );
+    expect(result.current.error).toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message: "Database query numbers must be finite",
+      details: [
+        { path: ["include"], message: "Database query numbers must be finite" },
+      ],
+    });
+    const first = result.current.error;
+    rerender();
+    expect(result.current.error).toBe(first);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("reads the new record when the id changes", async () => {
     const { result, rerender } = renderHook(
       ({ id }: { id: number }) => useDatabaseRecord("notes", id),

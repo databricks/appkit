@@ -1,6 +1,7 @@
 import {
   type DatabaseListPage,
   type DatabaseListQuery,
+  DatabaseQueryEncodingError,
   encodeDatabaseListQuery,
   type ExactDatabaseParams,
 } from "shared";
@@ -14,6 +15,7 @@ import type {
 } from "@/js/database/types";
 
 import {
+  type DatabaseReadRequest,
   type UseDatabaseReadOptions,
   type UseDatabaseReadResult,
   useDatabaseRead,
@@ -76,12 +78,12 @@ export function useDatabaseList(
 ): UseDatabaseListResult<unknown> {
   const enabled = (options.enabled ?? true) && params !== null;
   // Encode only an enabled read: a held read's params may still be incomplete.
-  let query: string | null = "";
+  let query: DatabaseReadRequest["query"] = "";
   if (enabled) {
     try {
       query = encodeDatabaseListQuery(params ?? {});
-    } catch {
-      query = null;
+    } catch (error) {
+      query = error instanceof DatabaseQueryEncodingError ? error : null;
     }
   }
   const read = useDatabaseRead({

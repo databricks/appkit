@@ -5,6 +5,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import { DatabaseQueryEncodingError } from "shared";
 
 import {
   type DatabaseOperation,
@@ -106,8 +107,8 @@ export interface DatabaseReadRequest {
   entity: string;
   operation: Extract<DatabaseOperation, "list" | "detail">;
   id: IdLike | undefined;
-  /** The encoded query, or `null` when the params cannot be encoded. */
-  query: string | null;
+  /** Encoded params, a known validation failure, or `null` for an unknown failure. */
+  query: string | DatabaseQueryEncodingError | null;
   /** The params' include tree, to find the tables the read shows. */
   include: unknown;
   enabled: boolean;
@@ -196,16 +197,28 @@ export function useDatabaseRead({
   keepPreviousData,
   shape,
 }: DatabaseReadRequest): UseDatabaseReadResult<unknown> {
+  const encodedQuery = typeof query === "string" ? query : null;
+  // Encoding runs every render; only the safe failure fields define its identity.
+  const parameter =
+    query instanceof DatabaseQueryEncodingError ? query.parameter : undefined;
+  const message =
+    query instanceof DatabaseQueryEncodingError ? query.message : undefined;
   const route = useMemo((): Route => {
     if (!enabled) return null;
-    if (query === null) return { error: invalidDatabaseQuery() };
+    if (encodedQuery === null) {
+      const cause =
+        parameter !== undefined && message !== undefined
+          ? new DatabaseQueryEncodingError(parameter, message)
+          : undefined;
+      return { error: invalidDatabaseQuery(cause) };
+    }
     try {
-      return { url: resolveDatabaseUrl(entity, operation, id, query) };
+      return { url: resolveDatabaseUrl(entity, operation, id, encodedQuery) };
     } catch (error) {
       if (error instanceof DatabaseApiError) return { error };
       throw error;
     }
-  }, [enabled, entity, operation, id, query]);
+  }, [enabled, entity, operation, id, encodedQuery, parameter, message]);
 
   const url = route !== null && "url" in route ? route.url : null;
   const routeError = route !== null && "error" in route ? route.error : null;

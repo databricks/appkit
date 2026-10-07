@@ -176,6 +176,20 @@ test("read hooks type entities, params, and rows from the generated registry", (
       void [title, total, failed, owner, bodies, deep, gatedTitle];
     }
 
+    export function DynamicSelections() {
+      const columns: ("id" | "title")[] = ["id"];
+      const list = useDatabaseList("posts", { select: columns });
+      const record = useDatabaseRecord("posts", 7, { select: columns });
+      if (list.data && record.data) {
+        const maybeTitle: string | undefined = list.data.items[0].title;
+        // @ts-expect-error a dynamic array does not guarantee every possible column
+        const listTitle: string = list.data.items[0].title;
+        // @ts-expect-error the record follows the same dynamic projection rule
+        const recordId: number = record.data.id;
+        void [maybeTitle, listTitle, recordId];
+      }
+    }
+
     export function RejectedLists() {
       // @ts-expect-error entities are generated table names
       useDatabaseList("missing");
