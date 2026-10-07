@@ -186,7 +186,7 @@ export class ServiceContext {
       const [resolvedWorkspaceId, currentUser, resolvedResources] =
         await Promise.all([
           ServiceContext.getWorkspaceId(wsClient),
-          wsClient.currentUser.me(),
+          wsClient.currentUser.me({}),
           WarehouseResource.resolve(wsClient, options?.warehouseId),
         ]);
 
