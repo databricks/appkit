@@ -316,3 +316,69 @@ describe("assertEndpointHostMatches", () => {
     ]);
   });
 });
+
+// AppKit passes its modular workspace client (with `request()`) to lakebase,
+// so in apps the lookup goes through `request`, not the legacy `apiClient`.
+describe("assertEndpointHostMatches with the modular request() client", () => {
+  function modularClient(
+    impl: (req: { signal?: AbortSignal }) => Promise<Response>,
+  ) {
+    const request = vi.fn(impl);
+    return { request, client: { request } as unknown as Client };
+  }
+
+  test("rejects a mismatch read through request()", async () => {
+    const { endpoint, host } = names();
+    const { request, client } = modularClient(async () =>
+      Response.json(endpointWith({ host: "ep-expected.database.example.com" })),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      assertEndpointHostMatches({ endpoint, host, workspaceClient: client }),
+    ).rejects.toThrow(host);
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: `/api/2.0/postgres/${endpoint}`,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  test("warns when request() reports the endpoint no longer exists (404)", async () => {
+    const { endpoint, host } = names();
+    const { client } = modularClient(async () => {
+      throw Object.assign(new Error("not found"), { statusCode: 404 });
+    });
+
+    await assertEndpointHostMatches({
+      endpoint,
+      host,
+      workspaceClient: client,
+    });
+    expect(warnings()).toContain("was not found");
+  });
+
+  test("aborts the request() lookup when the deadline expires", async () => {
+    vi.useFakeTimers();
+    const { endpoint, host } = names();
+    let seen: AbortSignal | undefined;
+    const { client } = modularClient(
+      (req) =>
+        new Promise<Response>(() => {
+          seen = req.signal;
+        }),
+    );
+
+    const check = assertEndpointHostMatches({
+      endpoint,
+      host,
+      workspaceClient: client,
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await check;
+    expect(seen?.aborted).toBe(true);
+    expect(warnings()).toContain("timed out");
+  });
+});

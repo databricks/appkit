@@ -230,13 +230,17 @@ export interface RequestCapableWorkspaceClient {
 export interface LegacyWorkspaceClientLike {
   currentUser: { me(): Promise<{ userName?: string }> };
   apiClient: {
-    request(options: {
-      path: string;
-      method: string;
-      headers: Headers;
-      raw: boolean;
-      payload?: unknown;
-    }): Promise<unknown>;
+    request(
+      options: {
+        path: string;
+        method: string;
+        headers: Headers;
+        raw: boolean;
+        payload?: unknown;
+      },
+      /** The legacy SDK's cancellation `Context` (optional). */
+      context?: unknown,
+    ): Promise<unknown>;
   };
 }
 
