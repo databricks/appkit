@@ -159,27 +159,85 @@ function upsertUpdateValues(
 // nested `cause` rather than the thrown error. Walk a bounded chain to find it.
 const MAX_CAUSE_DEPTH = 5;
 
-function sqlStateOf(error: unknown): string | undefined {
+// Even schema and authorization errors can carry values in message/detail/hint.
+// Admit only the exact identifier-only forms needed to diagnose schema drift.
+const SAFE_COLUMN_ERROR =
+  /^column (?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]* does not exist$/;
+const SAFE_RELATION_ERROR =
+  /^relation "[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?" does not exist$/;
+const SAFE_DNS_ERROR = /^getaddrinfo ENOTFOUND [A-Za-z0-9.-]+$/;
+const MAX_DIAGNOSTIC_LENGTH = 200;
+const SYSTEM_ERROR_CODES = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+]);
+
+interface DriverFailure {
+  readonly sqlState?: string;
+  /** Server-log-only driver text; it never reaches the thrown error. */
+  readonly diagnostic?: string;
+}
+
+/** Never log unvalidated driver text, even for an otherwise known SQLSTATE. */
+function safeDriverText(carrier: object, code: string): string | undefined {
+  try {
+    const message = Reflect.get(carrier, "message");
+    if (typeof message !== "string" || message.length > MAX_DIAGNOSTIC_LENGTH)
+      return undefined;
+    if (code === "42703" && SAFE_COLUMN_ERROR.test(message)) return message;
+    if (code === "42P01" && SAFE_RELATION_ERROR.test(message)) return message;
+    if (
+      code === "ENOTFOUND" &&
+      Reflect.get(carrier, "syscall") === "getaddrinfo" &&
+      SAFE_DNS_ERROR.test(message)
+    )
+      return message;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function driverFailureOf(error: unknown): DriverFailure {
   let current = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
-    if (!current || typeof current !== "object") return undefined;
+    if (!current || typeof current !== "object") return {};
     try {
       const candidate = Reflect.get(current, "code");
+      // Node system errors are untrusted too; only a well-formed DNS host is safe.
+      if (
+        typeof candidate === "string" &&
+        SYSTEM_ERROR_CODES.has(candidate) &&
+        typeof Reflect.get(current, "syscall") === "string"
+      ) {
+        return { diagnostic: safeDriverText(current, candidate) ?? candidate };
+      }
       // SQLSTATE is always a five-character alphanumeric class code.
       if (typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate)) {
-        return candidate;
+        return {
+          sqlState: candidate,
+          diagnostic: safeDriverText(current, candidate),
+        };
       }
       current = Reflect.get(current, "cause");
     } catch {
-      return undefined;
+      return {};
     }
   }
-  return undefined;
+  return {};
 }
 
-/** Classify SQLSTATE without retaining the driver error or its properties. */
+/**
+ * Classify SQLSTATE without retaining the driver error or its properties.
+ * Only allowlisted identifier-only messages enter the server log.
+ */
 function classifyDriverError(error: unknown): DatabasePluginError {
-  const code = sqlStateOf(error);
+  const { sqlState: code, diagnostic } = driverFailureOf(error);
   const category: DatabaseErrorCategory =
     code === "40001" || code === "40P01" || code === "57014"
       ? "TRANSIENT"
@@ -189,9 +247,10 @@ function classifyDriverError(error: unknown): DatabasePluginError {
           ? "CONFLICT"
           : "INTERNAL";
   logger.error(
-    "Database driver error classified as %s (SQLSTATE %s)",
+    "Database driver error classified as %s (SQLSTATE %s)%s",
     category,
     code ?? "unknown",
+    diagnostic ? `: ${diagnostic}` : "",
   );
   return new DatabasePluginError(category, "runtime");
 }

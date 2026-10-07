@@ -31,8 +31,12 @@ server routes. App admission alone does not provide row-level isolation.
 
 Configure a Lakebase `postgres` resource and its connection environment variables
 as described in [Lakebase configuration](./lakebase.md#environment-variables).
-The database tables must already exist and match the declared schema. This plugin
-checks connectivity during setup; it does not create or migrate tables.
+
+When a query fails at runtime, the client receives only a stable message such as
+`Database operation failed`. The server log records the SQLSTATE and only
+identifier-only messages for known missing-column or missing-table errors
+(for example `column notes.board_id does not exist`). Other driver messages,
+details, and hints are omitted because they may contain row values.
 
 Apps scaffolded with the Database plugin selected include an empty
 `config/database/schema.ts`, so `database()` can start without requiring sample

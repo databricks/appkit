@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   initializeLakebasePool: vi.fn(),
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
+  assertSchemaMatchesDatabase: vi.fn(),
 }));
 vi.mock("../../../connectors/lakebase", () => ({
   initializeLakebasePool: mocks.initializeLakebasePool,
@@ -15,6 +16,10 @@ vi.mock("../../../connectors/lakebase", () => ({
 vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
   createDrizzleDb: mocks.createDrizzleDb,
   createDrizzleDataPath: mocks.createDrizzleDataPath,
+}));
+// The catalog comparison has its own suite; these fakes answer no catalog.
+vi.mock("../schema-check", () => ({
+  assertSchemaMatchesDatabase: mocks.assertSchemaMatchesDatabase,
 }));
 
 import {
@@ -156,6 +161,9 @@ describe("createDatabaseState", () => {
     async (stage) => {
       const { pool, execute } = arrange();
       const raw = new Error("secret constraint detail");
+      const errorLog = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
       if (stage === "drizzle")
         mocks.createDrizzleDb.mockImplementationOnce(() => {
           throw raw;
@@ -179,11 +187,40 @@ describe("createDatabaseState", () => {
       expect(error.message).toBe("Database setup failed");
       expect(error.cause).toBeUndefined();
       expect(pool.end).toHaveBeenCalledTimes(1);
+      expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+        raw.message,
+      );
     },
   );
 
+  test("checks the catalog after readiness and keeps a drift failure's reason", async () => {
+    const { pool, path, execute } = arrange();
+    const drift = new DatabasePluginError(
+      "SETUP_FAILED",
+      "setup",
+      "Database setup failed: table public.tags does not exist",
+    );
+    mocks.assertSchemaMatchesDatabase.mockRejectedValueOnce(drift);
+
+    const error = await createDatabaseState(schema, execute).catch(
+      (caught) => caught,
+    );
+
+    expect(path.raw).toHaveBeenCalledTimes(1);
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+    );
+    expect(error).toBe(drift);
+    expect(error.message).toContain("table public.tags does not exist");
+    expect(pool.end).toHaveBeenCalledTimes(1);
+  });
+
   test("sanitizes connector initialization failures", async () => {
     const { execute } = arrange();
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     mocks.initializeLakebasePool.mockRejectedValueOnce(
       new Error("secret host and credential details"),
     );
@@ -195,6 +232,9 @@ describe("createDatabaseState", () => {
     expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
     expect(error.message).toBe("Database setup failed");
     expect(error.cause).toBeUndefined();
+    expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+      "secret host and credential details",
+    );
   });
 
   test("runs root SQL directly, maps failures safely, and rejects after deactivation", async () => {
