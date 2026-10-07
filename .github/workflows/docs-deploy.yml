@@ -19,8 +19,8 @@ concurrency:
 jobs:
   build:
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-public-repos-runner-group-small
+      labels: linux-ubuntu-latest-public-2core-8gb
 
     name: Build Docs
     steps:
@@ -43,8 +43,8 @@ jobs:
 
   deploy:
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-public-repos-runner-group-small
+      labels: linux-ubuntu-latest-public-2core-8gb
 
     name: Deploy to GitHub Pages
     needs: build
