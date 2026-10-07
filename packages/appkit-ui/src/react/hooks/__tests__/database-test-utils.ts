@@ -20,7 +20,7 @@ import type { UseDatabaseWriteState } from "../use-database-write";
 // runtime tests drive the hooks through these string-typed views.
 
 export type Row = Record<string, unknown>;
-export type Page = { items: unknown[]; limit: number; offset: number };
+type Page = { items: unknown[]; limit: number; offset: number };
 
 interface ReadOptions {
   enabled?: boolean;

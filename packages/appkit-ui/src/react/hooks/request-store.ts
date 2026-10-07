@@ -34,7 +34,7 @@ export type RequestRunner<S> = (
 ) => void | Promise<void>;
 
 /** How `retain` creates an entry; ignored when the entry already exists. */
-export interface RetainOptions<M> {
+interface RetainOptions<M> {
   /** Start the request on creation. Default true. */
   autoStart?: boolean;
   /** Caller data kept with the entry and handed to `restartStarted`'s match. */

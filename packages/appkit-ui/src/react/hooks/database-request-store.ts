@@ -43,7 +43,7 @@ type ResponseGuard = (body: unknown) => body is object;
  * its includes reach. `open` marks a read with an include the server did not
  * describe, which any scoped invalidation restarts rather than risk missing.
  */
-export interface DatabaseReadScope {
+interface DatabaseReadScope {
   readonly tables: ReadonlySet<string>;
   readonly open: boolean;
 }

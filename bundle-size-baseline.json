@@ -9,11 +9,11 @@
       "dist": {
         "total": {
           "raw": 4338599,
-          "gzip": 1488135
+          "gzip": 1488134
         },
         "js": {
           "raw": 1289704,
-          "gzip": 457768
+          "gzip": 457767
         },
         "types": {
           "raw": 466539,
@@ -64,11 +64,11 @@
         },
         {
           "id": "./beta",
-          "gzip": 101326,
+          "gzip": 101328,
           "composition": {
-            "initialGzip": 100842,
+            "initialGzip": 100844,
             "lazyGzip": 484,
-            "totalGzip": 101326,
+            "totalGzip": 101328,
             "own": 304570,
             "nodeModules": null,
             "chunks": [
@@ -89,7 +89,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 3397,
+                "gzip": 3399,
                 "kind": "initial"
               },
               {
@@ -109,17 +109,17 @@
               },
               {
                 "label": "supervisor-api.js",
-                "gzip": 192,
+                "gzip": 193,
                 "kind": "lazy"
               },
               {
                 "label": "databricks.js",
-                "gzip": 178,
+                "gzip": 176,
                 "kind": "lazy"
               },
               {
                 "label": "index.js",
-                "gzip": 114,
+                "gzip": 115,
                 "kind": "lazy"
               }
             ]
@@ -137,12 +137,12 @@
             "chunks": [
               {
                 "label": "manifest.js",
-                "gzip": 29311,
+                "gzip": 29312,
                 "kind": "initial"
               },
               {
                 "label": "index.js",
-                "gzip": 10544,
+                "gzip": 10543,
                 "kind": "initial"
               },
               {
@@ -209,13 +209,13 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 406035,
-        "unpacked": 1604441
+        "packed": 406042,
+        "unpacked": 1604427
       },
       "dist": {
         "total": {
-          "raw": 1600496,
-          "gzip": 545804
+          "raw": 1600482,
+          "gzip": 545806
         },
         "js": {
           "raw": 438717,
@@ -223,10 +223,10 @@
         },
         "types": {
           "raw": 272461,
-          "gzip": 100413
+          "gzip": 100415
         },
         "maps": {
-          "raw": 872920,
+          "raw": 872906,
           "gzip": 292174
         },
         "css": {
