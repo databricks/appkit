@@ -9,7 +9,11 @@ import {
 } from "shared";
 
 import { getClientConfig } from "../config";
-import { DatabaseApiError, invalidDatabaseQuery } from "./errors";
+import {
+  DatabaseApiError,
+  invalidDatabaseQuery,
+  invalidDatabaseWrite,
+} from "./errors";
 import type {
   DatabaseEntity,
   DatabaseId,
@@ -281,8 +285,13 @@ function isNoContent(body: unknown): body is undefined {
   return body === undefined;
 }
 
-/** JSON has no bigint; the server reads a bigint value from its decimal string. */
-function bigintAsDecimal(_key: string, value: unknown): unknown {
+/** A write must not lose a non-finite number to JSON's implicit null coercion. */
+function jsonWriteValue(_key: string, value: unknown): unknown {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw invalidDatabaseWrite(
+      "Database write numbers must be finite; use null explicitly to clear a value",
+    );
+  }
   return typeof value === "bigint" ? value.toString() : value;
 }
 
@@ -292,12 +301,17 @@ function jsonWrite(
   values: object,
   signal: AbortSignal | undefined,
 ): RequestInit {
-  return {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(values, bigintAsDecimal),
-    signal,
-  };
+  try {
+    return {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values, jsonWriteValue),
+      signal,
+    };
+  } catch (error) {
+    if (error instanceof DatabaseApiError) throw error;
+    throw invalidDatabaseWrite();
+  }
 }
 
 /**
@@ -364,8 +378,8 @@ async function list(
   let query: string;
   try {
     query = encodeDatabaseListQuery(params ?? {});
-  } catch {
-    throw invalidDatabaseQuery();
+  } catch (error) {
+    throw invalidDatabaseQuery(error);
   }
   const url = resolveDatabaseUrl(entity, "list", undefined, query);
   const page = await requestDatabase(
@@ -388,8 +402,8 @@ async function get<
   let query: string;
   try {
     query = encodeDatabaseRecordQuery(params ?? {});
-  } catch {
-    throw invalidDatabaseQuery();
+  } catch (error) {
+    throw invalidDatabaseQuery(error);
   }
   const url = resolveDatabaseUrl(entity, "detail", id, query);
   const row = await requestDatabase(

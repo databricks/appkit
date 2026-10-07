@@ -143,6 +143,40 @@ describe("databaseApi.list", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("explains an empty filter locally without broadening the read", async () => {
+    await expect(
+      databaseApi.list("notes", { where: {} }),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message: "Filter cannot be empty; omit where to list all rows",
+      details: [
+        {
+          path: ["where"],
+          message: "Filter cannot be empty; omit where to list all rows",
+        },
+      ],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test.each([NaN, Infinity, -Infinity])(
+    "rejects non-finite filter %s before JSON can turn it into null",
+    async (value) => {
+      await expect(
+        databaseApi.list("notes", { where: { rank: { is: value } } }),
+      ).rejects.toMatchObject({
+        code: "INVALID_REQUEST",
+        status: null,
+        message: "Database query numbers must be finite",
+        details: [
+          { path: ["where"], message: "Database query numbers must be finite" },
+        ],
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   test("uses the route path the server published, not a local convention", async () => {
     _resetConfigCache();
     publish({ "notes.list": "/custom/base/notes" });
@@ -404,6 +438,52 @@ describe("databaseApi writes", () => {
     });
 
     expect(sent().init.body).toBe('{"seq":"9007199254740993","note":"x"}');
+  });
+
+  test.each([NaN, Infinity, -Infinity])(
+    "rejects non-finite write %s rather than clearing a nullable value",
+    async (value) => {
+      for (const write of [
+        () => databaseApi.create("notes", { rank: value }),
+        () => databaseApi.update("notes", 7, { rank: value }),
+        () => databaseApi.update("notes", 7, { payload: { scores: [value] } }),
+      ]) {
+        await expect(write()).rejects.toMatchObject({
+          name: "DatabaseApiError",
+          code: "INVALID_REQUEST",
+          status: null,
+          message:
+            "Database write numbers must be finite; use null explicitly to clear a value",
+          details: [
+            {
+              path: ["body"],
+              message:
+                "Database write numbers must be finite; use null explicitly to clear a value",
+            },
+          ],
+        });
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test("keeps an explicit null and finite numbers unchanged", async () => {
+    await databaseApi.update("notes", 7, { rank: null, payload: { score: 0 } });
+    expect(sent().init.body).toBe('{"rank":null,"payload":{"score":0}}');
+  });
+
+  test("sanitizes serialization failures before any write is sent", async () => {
+    const values = {
+      toJSON: () => {
+        throw new Error("private serialization detail");
+      },
+    };
+    await expect(databaseApi.create("notes", values)).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: null,
+      message: "Database write contains an unsupported value",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("reports an unanswered write as unknown because it may have committed", async () => {

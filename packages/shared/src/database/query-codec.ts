@@ -27,10 +27,27 @@ const LIST_PARAMS = [
 const RECORD_PARAMS = ["select", "include"] as const;
 const INTEGER_PARAMS: ReadonlySet<string> = new Set(["limit", "offset"]);
 
-/** JSON has no bigint; the server reads a bigint operand from its decimal string. */
-function bigintAsDecimal(_key: string, value: unknown): unknown {
+/** A known query failure, safe for the client to report without its input values. */
+export class DatabaseQueryEncodingError extends TypeError {
+  constructor(
+    readonly parameter: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "DatabaseQueryEncodingError";
+  }
+}
+
+/** JSON must not broaden a predicate or turn a non-finite operand into null. */
+function jsonQueryValue(value: unknown, parameter: string): unknown {
   if (value === undefined) {
     throw new TypeError("Database query cannot contain undefined values");
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new DatabaseQueryEncodingError(
+      parameter,
+      "Database query numbers must be finite",
+    );
   }
   return typeof value === "bigint" ? value.toString() : value;
 }
@@ -43,11 +60,26 @@ function encode<T extends object>(
   for (const name of names) {
     const value = params[name];
     if (value === undefined) continue;
+    if (
+      name === "where" &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      throw new DatabaseQueryEncodingError(
+        name,
+        "Filter cannot be empty; omit where to list all rows",
+      );
+    }
+    const serializable = jsonQueryValue(value, name);
     search.append(
       name,
       INTEGER_PARAMS.has(name)
-        ? String(value)
-        : JSON.stringify(value, bigintAsDecimal),
+        ? String(serializable)
+        : JSON.stringify(serializable, (_key, child) =>
+            jsonQueryValue(child, name),
+          ),
     );
   }
   return search.toString();

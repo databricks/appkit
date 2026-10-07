@@ -94,6 +94,30 @@ describe("encodeDatabaseListQuery", () => {
     ).toThrow(/undefined/);
   });
 
+  it("rejects an empty top-level filter with guidance to omit it", () => {
+    expect(() => encodeDatabaseListQuery({ where: {} })).toThrow(
+      "Filter cannot be empty; omit where to list all rows",
+    );
+    expect(encodeDatabaseListQuery({ where: undefined })).toBe("");
+  });
+
+  it.each([NaN, Infinity, -Infinity])(
+    "rejects non-finite number %s in filters, includes, and pagination",
+    (value) => {
+      for (const params of [
+        { where: { rank: value } },
+        { where: { rank: { is: value } } },
+        { include: { notes: { where: { rank: value } } } },
+        { limit: value },
+        { offset: value },
+      ]) {
+        expect(() => encodeDatabaseListQuery(params)).toThrow(
+          "Database query numbers must be finite",
+        );
+      }
+    },
+  );
+
   it("encodes a bigint operand as its decimal string", () => {
     const query = encodeDatabaseListQuery({
       where: { total: { gt: 9007199254740993n } },
