@@ -176,6 +176,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.85.0](https://github.com/databricks/appkit/compare/v0.84.0...v0.85.0) (2026-10-07)
+
+### appkit
+
+* **appkit:** report schema drift and Lakebase host mismatches at startup ([#607](https://github.com/databricks/appkit/issues/607)) ([b8c89e9](https://github.com/databricks/appkit/commit/b8c89e9bffa700107c111936707dabe4949bb58d))
+
+
 ## [0.84.0](https://github.com/databricks/appkit/compare/v0.83.0...v0.84.0) (2026-10-06)
 
 ### shared
