@@ -259,6 +259,12 @@ jobs:
       - name: Build SDK tarballs
         run: pnpm pack:prerelease
 
+      # pnpm-patched dependencies are shipped inside the tarballs via
+      # bundledDependencies (tools/bundle-patched-deps.ts). Install each tarball
+      # with npm and pnpm and fail if a consumer would resolve an unpatched copy.
+      - name: Verify bundled patched dependencies
+        run: pnpm exec tsx tools/verify-bundled-patches.ts packages/appkit packages/appkit-ui
+
       - name: Prepare template artifact
         run: pnpm exec tsx tools/prepare-template-artifact.ts
 

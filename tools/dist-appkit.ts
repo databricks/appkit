@@ -2,6 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import {
+  collectDependencyClosure,
+  findInstalledPackage,
+  planBundledPatches,
+  readPatchedDependencies,
+} from "./bundle-patched-deps";
+
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const { values } = parseArgs({
   options: {
@@ -22,6 +29,14 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 // Packages that are workspace-local but published separately — replace workspace:* with real version.
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
 const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
+
+// Snapshot the package's own dependency names before they are rewritten below:
+// they (plus the CLI dependencies from shared) are where the search for
+// pnpm-patched packages to bundle starts. Workspace packages are published as
+// their own tarballs, so their dependency trees are not walked here.
+const ownDependencyNames = Object.keys(pkg.dependencies ?? {}).filter(
+  (name) => name !== "shared" && !WORKSPACE_PACKAGE_REPLACEMENTS.includes(name),
+);
 
 if (prerelease) {
   pkg.version = `${pkg.version}-pr.${prerelease}`;
@@ -63,6 +78,32 @@ if (fs.existsSync(sharedPostinstall)) {
 // Add CLI dependencies from shared package (required for bin commands to work)
 pkg.dependencies = pkg.dependencies || {};
 Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
+
+// Ship every pnpm-patched dependency this package uses inside the tarball via
+// `bundledDependencies` (see tools/bundle-patched-deps.ts for why and how).
+const sharedDir = path.dirname(sharedPkgPath);
+const plan = planBundledPatches({
+  patches: readPatchedDependencies(path.join(__dirname, "..")),
+  closure: collectDependencyClosure([
+    { fromDir: process.cwd(), names: ownDependencyNames },
+    { fromDir: sharedDir, names: Object.keys(CLI_DEPENDENCIES ?? {}) },
+  ]),
+  declared: pkg.dependencies,
+  resolveDeclaredVersion: (name) =>
+    findInstalledPackage(process.cwd(), name)?.version ??
+    findInstalledPackage(sharedDir, name)?.version,
+});
+Object.assign(pkg.dependencies, plan.addDependencies);
+for (const patched of plan.bundle) {
+  // `dereference` copies the real files, not pnpm's store symlink.
+  const dest = path.join("tmp/node_modules", patched.name);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.cpSync(patched.dir, dest, { recursive: true, dereference: true });
+}
+if (plan.bundle.length > 0) {
+  pkg.bundledDependencies = plan.bundle.map((p) => p.name);
+}
 
 fs.writeFileSync("tmp/package.json", JSON.stringify(pkg, null, 2));
 
