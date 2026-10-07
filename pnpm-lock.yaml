@@ -288,6 +288,9 @@ importers:
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-jobs':
+        specifier: 0.57.0
+        version: 0.57.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -618,6 +621,9 @@ importers:
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-jobs':
+        specifier: 0.57.0
+        version: 0.57.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -2007,6 +2013,10 @@ packages:
   '@databricks/sdk-experimental@0.17.0':
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
+
+  '@databricks/sdk-jobs@0.57.0':
+    resolution: {integrity: sha512-LUBLNRhJq0OtUUU6+2T/zRzZMEd4UL0lVm7qTxLIfuDPDNDPy/EHGs3rQ1cXt1Fv0t3Rik7QT/SueZixSsH/Bg==}
+    engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-options@0.51.0':
     resolution: {integrity: sha512-p5uBh64Y1onnvwlEwfRsmKmGRI23Y4Ly8fZiCgNUwVDe4Z9d0ctI0mo1v4gnDqlmBaBml3TZfqn5BJBROCXsEw==}
@@ -14315,6 +14325,15 @@ snapshots:
       semver: 7.7.3
     transitivePeerDependencies:
       - supports-color
+
+  '@databricks/sdk-jobs@0.57.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@databricks/sdk-options@0.51.0':
     dependencies:

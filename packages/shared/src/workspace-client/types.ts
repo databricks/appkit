@@ -14,7 +14,11 @@
  * as each service migrates.
  */
 import type { LegacyWorkspaceClient } from "./legacy";
-import type { StatementExecutionClient, WarehousesClient } from "./modular";
+import type {
+  JobsClient,
+  StatementExecutionClient,
+  WarehousesClient,
+} from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
 // modules import them from the wrapper rather than the SDK directly. `sql`
@@ -24,8 +28,11 @@ import type { StatementExecutionClient, WarehousesClient } from "./modular";
 // as `sql.EndpointInfo[]`. It is not on the modular `listWarehouses` because
 // that request has no `skip_cannot_use` filter, so it could pick a warehouse
 // the caller can't use. Statement + warehouse service types come from `./modular`.
+// `jobs` stays as the wire-shape (snake_case, `number` IDs) type of the jobs
+// plugin's public API; appkit's jobs connector translates the modular client's
+// camelCase/`bigint` models back to it.
 export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
-// Modular SDK client + model types (warehouses, statementExecution).
+// Modular SDK client + model types (warehouses, statementExecution, jobs).
 export type * from "./modular";
 
 /**
@@ -46,8 +53,8 @@ export interface WorkspaceClient {
   /** Genie / dashboards. */
   readonly genie: LegacyWorkspaceClient["genie"];
 
-  /** Jobs. */
-  readonly jobs: LegacyWorkspaceClient["jobs"];
+  /** Jobs (modular SDK, Jobs API 2.2). */
+  readonly jobs: JobsClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;

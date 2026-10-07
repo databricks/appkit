@@ -8,7 +8,7 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses` and `statementExecution` are migrated; every other service still
+ * `warehouses`, `statementExecution` and `jobs` are migrated; every other service still
  * routes through `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
@@ -21,6 +21,7 @@ import {
   newPatCredentials,
 } from "@databricks/sdk-auth/credentials";
 import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import { JobsClient } from "@databricks/sdk-jobs/v2";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
@@ -156,7 +157,13 @@ export function buildStatementExecutionClient(
   return new StatementExecutionClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Jobs (API 2.2) client from wrapper options. */
+export function buildJobsClient(opts: WorkspaceClientOptions): JobsClient {
+  return new JobsClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { JobsClient } from "@databricks/sdk-jobs/v2";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -180,6 +187,13 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  GetJobRequest,
+  GetRunRequest,
+  ListRunsRequest,
+  RunNowRequest,
+  SubmitRunRequest,
+} from "@databricks/sdk-jobs/v2";
 export type {
   EndpointHealth,
   EndpointInfo,

@@ -13,8 +13,10 @@ import {
   type WorkspaceClientOptions,
 } from "./legacy";
 import {
+  buildJobsClient,
   buildStatementExecutionClient,
   buildWarehousesClient,
+  type JobsClient,
   type StatementExecutionClient,
   type WarehousesClient,
 } from "./modular";
@@ -25,6 +27,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #legacy?: LegacyWorkspaceClient;
   #warehouses?: WarehousesClient;
   #statementExecution?: StatementExecutionClient;
+  #jobs?: JobsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -46,8 +49,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getLegacy().genie;
   }
 
-  get jobs() {
-    return this.#getLegacy().jobs;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get jobs(): JobsClient {
+    if (!this.#jobs) {
+      this.#jobs = buildJobsClient(this.#opts);
+    }
+    return this.#jobs;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
