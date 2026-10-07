@@ -169,6 +169,7 @@ export const DABS_BINDING_BY_TYPE = {
 
 /** Capabilities that need a user_api_scope but have no resource ID. */
 export const capabilityScopeSchema = z.enum([
+  "ai-functions",
   "ai-gateway",
   "mcp.external",
   "mcp.functions",

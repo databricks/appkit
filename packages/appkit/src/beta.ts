@@ -120,6 +120,23 @@ export type {
   SearchResponse,
   SearchResult,
 } from "./plugins/ai-search/types";
+// AI Functions plugin config, task, and request/response types (the
+// `aiFunctions` binding itself is exported via the generated barrel above).
+export type {
+  AiFunctionTask,
+  AiFunctionTaskInput,
+  AiFunctionTaskResult,
+  AiFunctionTasks,
+  ClassifyRequest,
+  ClassifyResponse,
+  DecideRequest,
+  DecideResponse,
+  ExtractField,
+  ExtractRequest,
+  ExtractResponse,
+  IAiFunctionsConfig,
+} from "./plugins/ai-functions/types";
+export { citedText, extractValues, scoreLevel } from "shared";
 export * from "./plugins/beta-exports.generated";
 export { database } from "./plugins/database";
 export type {

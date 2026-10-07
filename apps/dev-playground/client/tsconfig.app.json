@@ -29,5 +29,9 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "../shared/appkit-types"]
+  "include": [
+    "src",
+    "../shared/appkit-types",
+    "../shared/ai-functions-examples.ts"
+  ]
 }

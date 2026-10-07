@@ -6,4 +6,5 @@
 // manifests and the synced appkit.plugins.json.
 
 export { agents } from "./agents";
+export { aiFunctions } from "./ai-functions";
 export { aiSearch } from "./ai-search";

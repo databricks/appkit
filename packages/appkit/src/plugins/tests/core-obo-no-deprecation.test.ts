@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ServiceContext } from "../../context/service-context";
+import { AiFunctionsPlugin } from "../ai-functions/ai-functions";
 import { GeniePlugin } from "../genie/genie";
 import { ServingPlugin } from "../serving/serving";
 
@@ -60,6 +61,38 @@ describe("core plugin OBO routes do not warn about deprecated asUser", () => {
     // wrapper has already scoped via _asUserScoped(req), which is the line
     // under test.
     await handler(oboReq({ alias: "unknown" }), createMockResponse());
+
+    expect(deprecationWarnings()).toHaveLength(0);
+  });
+
+  test("aiFunctions user task route scopes without the deprecation warning", async () => {
+    const plugin = new AiFunctionsPlugin({
+      retry: { enabled: false },
+      tasks: {
+        tag: {
+          function: "classify",
+          labels: ["a", "b"],
+          auth: "on-behalf-of-user",
+        },
+      },
+    });
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/:task/invoke");
+
+    // The body must be exactly { content }: any other key is a 400 before the
+    // route scopes to the user, which would skip the line under test.
+    await handler(
+      createMockRequest({
+        params: { task: "tag" },
+        body: { content: "hi" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      }),
+      createMockResponse(),
+    );
 
     expect(deprecationWarnings()).toHaveLength(0);
   });

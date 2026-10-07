@@ -49,7 +49,10 @@ On the agents HTTP execution routes (`/invocations`, `/responses`, and
 `executeTool`, including tool calls made by sub-agents. A plugin tool call without
 usable user credentials rejects; it never runs as the service principal. The
 marked development fallback below is the only missing-token exception. The agent's
-model call and hand-rolled tools are not wrapped in user scope.
+model call and hand-rolled tools are not wrapped in user scope. One plugin tool
+leaves user scope on purpose: in a mixed agent, an AI Functions task with
+`auth: "service-principal"` runs as the app. In an on-behalf-of-user agent, it
+runs as the user.
 
 ## Which built-in surfaces run as the user
 
@@ -59,10 +62,11 @@ The default is the **service principal**. Work runs on behalf of the user only i
 | --- | --- | --- |
 | Genie routes | signed-in user (OBO) | the built-in route runs every call in user scope |
 | Serving plugin (deprecated) routes | signed-in user (OBO) | the built-in route runs every call in user scope; prefer the agents plugin |
+| AI Functions task routes and tools | service principal by default; signed-in user (OBO) when the task sets `auth: "on-behalf-of-user"` | each task declares its identity with `auth`; programmatic methods (`run`, `classify`, `extract`, `decide`) run as the service principal unless you call them inside `appkit.asUser(req)` |
 | Analytics `.obo.sql` queries | signed-in user (OBO) | the `.obo.sql` file name selects the user lane |
 | Analytics `.sql` queries, Files, and other plugin calls | app service principal | user only inside `appkit.asUser(req)`, or for Files volumes configured with `auth: "on-behalf-of-user"` |
 | Agents HTTP routes: the model (LLM) call | app service principal | the model adapter builds its own service-principal client, and the route does not open user scope |
-| Agents HTTP routes: plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO) | `executeTool` opens user scope for each call; without user credentials the call rejects |
+| Agents HTTP routes: plugin-toolkit tool calls (`plugin:<name>`) | signed-in user (OBO), except AI Functions tasks with `auth: "service-principal"` | `executeTool` opens user scope for each call; without user credentials the call rejects. An AI Functions service-principal task runs as the app, except inside an on-behalf-of-user agent, where it runs as the user |
 | Agents HTTP routes: hand-rolled `tool({ execute })` | app service principal | `execute` receives only the validated arguments and runs in the app context, as before |
 | Standalone `runAgent` (no HTTP request) | app service principal by default | there is no request, so no user scope unless you pass `caller` (see [Standalone agents](#standalone-agents)) |
 

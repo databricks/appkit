@@ -1,3 +1,4 @@
+export * from "./ai-functions";
 export * from "./ai-search";
 export * from "./files";
 export * from "./genie";

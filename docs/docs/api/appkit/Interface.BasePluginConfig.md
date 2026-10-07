@@ -6,6 +6,7 @@ Base configuration interface for AppKit plugins
 
 - [`AgentsPluginConfig`](Interface.AgentsPluginConfig.md)
 - [`IAiSearchConfig`](Interface.IAiSearchConfig.md)
+- [`IAiFunctionsConfig`](Interface.IAiFunctionsConfig.md)
 - [`IJobsConfig`](Interface.IJobsConfig.md)
 
 ## Indexable

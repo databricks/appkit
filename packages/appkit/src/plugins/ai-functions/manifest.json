@@ -1,0 +1,85 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "aiFunctions",
+  "displayName": "AI Functions Plugin",
+  "stability": "beta",
+  "description": "Call Databricks AI Functions for classification, extraction, and structured decisions",
+  "scopes": ["ai-functions"],
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "minimum": 1,
+          "default": 60000,
+          "description": "Timeout in milliseconds for one upstream request"
+        },
+        "retry": {
+          "type": "object",
+          "description": "Retry for unavailable (503) responses, and any rate-limit (429) response that reaches the plugin. The Databricks SDK retries 429 internally until `timeout` cancels it, so a sustained rate limit surfaces as 504. Other errors are never retried.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "attempts": {
+              "type": "number",
+              "minimum": 1,
+              "default": 3
+            },
+            "initialDelay": {
+              "type": "number",
+              "minimum": 0,
+              "default": 1000
+            },
+            "maxDelay": {
+              "type": "number",
+              "minimum": 0,
+              "default": 10000
+            }
+          }
+        },
+        "tasks": {
+          "type": "object",
+          "description": "Named tasks: AI Functions requests minus their input. Each is reachable at POST /api/ai-functions/:task/invoke, with useAiFunction, and as the agent tool <task>.invoke.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["function"],
+            "properties": {
+              "function": {
+                "type": "string",
+                "enum": ["classify", "extract", "decide"]
+              },
+              "auth": {
+                "type": "string",
+                "enum": ["service-principal", "on-behalf-of-user"],
+                "default": "service-principal"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "Define tasks in a shared file, such as shared/ai-tasks.ts, and pass aiFunctions({ tasks }) in the server file",
+        "Call tasks from the client with useAiFunction from @databricks/appkit-ui/react/beta"
+      ],
+      "should": [
+        "Use auth: \"on-behalf-of-user\" only when calls should be attributed to the signed-in user"
+      ]
+    }
+  }
+}

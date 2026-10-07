@@ -189,6 +189,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ClassifyRequest",
+          label: "ClassifyRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ClassifyResponse",
+          label: "ClassifyResponse"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.CustomJudgeSpec",
           label: "CustomJudgeSpec"
         },
@@ -216,6 +226,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.DatasetRow",
           label: "DatasetRow"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DecideRequest",
+          label: "DecideRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DecideResponse",
+          label: "DecideResponse"
         },
         {
           type: "doc",
@@ -274,6 +294,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ExtractRequest",
+          label: "ExtractRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ExtractResponse",
+          label: "ExtractResponse"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.FilePolicyUser",
           label: "FilePolicyUser"
         },
@@ -316,6 +346,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.HttpDriverOptions",
           label: "HttpDriverOptions"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.IAiFunctionsConfig",
+          label: "IAiFunctionsConfig"
         },
         {
           type: "doc",
@@ -630,6 +665,26 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AiFunctionTask",
+          label: "AiFunctionTask"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AiFunctionTaskInput",
+          label: "AiFunctionTaskInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AiFunctionTaskResult",
+          label: "AiFunctionTaskResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AiFunctionTasks",
+          label: "AiFunctionTasks"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.AppKitApi",
           label: "AppKitApi"
         },
@@ -687,6 +742,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ExecutionResult",
           label: "ExecutionResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ExtractField",
+          label: "ExtractField"
         },
         {
           type: "doc",
@@ -817,6 +877,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Variable.aiFunctions",
+          label: "aiFunctions"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Variable.aiSearch",
           label: "aiSearch"
         },
@@ -885,6 +950,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.buildAssessments",
           label: "buildAssessments"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.citedText",
+          label: "citedText"
         },
         {
           type: "doc",
@@ -985,6 +1055,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.extractServingEndpoints",
           label: "extractServingEndpoints"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.extractValues",
+          label: "extractValues"
         },
         {
           type: "doc",
@@ -1264,6 +1339,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.runWithRetries",
           label: "runWithRetries"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.scoreLevel",
+          label: "scoreLevel"
         },
         {
           type: "doc",

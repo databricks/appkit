@@ -1,4 +1,6 @@
 export * from "./agent";
+export * from "./ai-functions";
+export * from "./ai-functions-helpers";
 export * from "./cache";
 export {
   createDevOboIdentityProvider,
