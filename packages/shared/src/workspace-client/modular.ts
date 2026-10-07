@@ -16,6 +16,12 @@
  * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
+ *
+ * NOTE: genie relies on a pinned pnpm patch
+ * (`patches/@databricks__sdk-genie@0.54.0.patch`): the generated model types the
+ * query result's `data_array` as protobuf `ListValue[]` (`{ values: [...] }`), but
+ * the API returns plain `JSON_ARRAY` rows (`[["a", null], ...]`), so the unmarshal
+ * schema rejected every real query result. The patch restores `(string | null)[][]`.
  */
 import {
   type Credentials,
@@ -35,6 +41,8 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { resolve } from "@databricks/sdk-core/profiles";
+import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import { GenieClient } from "@databricks/sdk-genie/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -323,6 +331,10 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
 
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { ScimClient } from "@databricks/sdk-scim/v1";
+/** Build a modular Genie client from wrapper options. */
+export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
+  return new GenieClient(mapToClientOptions(opts));
+export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -346,6 +358,10 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  GenieGetMessageQueryResultResponse,
+  GenieMessage,
+} from "@databricks/sdk-genie/v1";
 export type {
   EndpointHealth,
   EndpointInfo,

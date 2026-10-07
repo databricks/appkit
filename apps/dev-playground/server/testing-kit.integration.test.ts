@@ -68,7 +68,7 @@ describe("createMockWorkspaceClient — build the fake client yourself", () => {
     });
     expect(getMock(client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 1 });
     await expect(
-      client.genie.getMessage({ id: "m-1" }),
+      client.genie.genieGetConversationMessage({ messageId: "m-1" }),
     ).resolves.toBeUndefined();
   });
 });

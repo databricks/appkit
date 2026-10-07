@@ -12,6 +12,7 @@ overrides:
   size-sensor: 1.0.3
 
 patchedDependencies:
+  '@databricks/sdk-genie@0.54.0': 664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54
   '@databricks/sdk-statementexecution@0.52.0': 9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c
 
 importers:
@@ -288,6 +289,9 @@ importers:
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-genie':
+        specifier: 0.54.0
+        version: 0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -621,6 +625,9 @@ importers:
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-genie':
+        specifier: 0.54.0
+        version: 0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -2013,6 +2020,10 @@ packages:
   '@databricks/sdk-experimental@0.17.0':
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
+
+  '@databricks/sdk-genie@0.54.0':
+    resolution: {integrity: sha512-xT+dyuXocgwPJ5VA1Kr5/dSdKzzR9hRAkEOybeO2i+v891kuuFzVd/M9OM31PtO2/YZp95vdFH5Sb+jVGtm4nw==}
+    engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-options@0.51.0':
     resolution: {integrity: sha512-p5uBh64Y1onnvwlEwfRsmKmGRI23Y4Ly8fZiCgNUwVDe4Z9d0ctI0mo1v4gnDqlmBaBml3TZfqn5BJBROCXsEw==}
@@ -14325,6 +14336,15 @@ snapshots:
       semver: 7.7.3
     transitivePeerDependencies:
       - supports-color
+
+  '@databricks/sdk-genie@0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@databricks/sdk-options@0.51.0':
     dependencies:
