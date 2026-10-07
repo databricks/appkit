@@ -1,9 +1,9 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
-
+import { isRequestCapable } from "./config";
 import { ValidationError } from "./errors";
 import type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
+  LakebaseWorkspaceClient,
 } from "./types";
 
 /**
@@ -48,10 +48,23 @@ import type {
  * ```
  */
 export async function generateDatabaseCredential(
-  workspaceClient: WorkspaceClient,
+  workspaceClient: LakebaseWorkspaceClient,
   request: GenerateDatabaseCredentialRequest,
 ): Promise<DatabaseCredential> {
   const apiPath = "/api/2.0/postgres/credentials";
+
+  if (isRequestCapable(workspaceClient)) {
+    const response = await workspaceClient.request({
+      method: "POST",
+      path: apiPath,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    return validateCredentialResponse(await response.json());
+  }
 
   const response = await workspaceClient.apiClient.request({
     path: apiPath,

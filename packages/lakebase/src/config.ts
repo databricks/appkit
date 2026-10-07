@@ -1,8 +1,11 @@
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type pg from "pg";
 
 import { ConfigurationError, ValidationError } from "./errors";
-import type { LakebasePoolConfig } from "./types";
+import type {
+  LakebasePoolConfig,
+  LakebaseWorkspaceClient,
+  RequestCapableWorkspaceClient,
+} from "./types";
 
 /** Default configuration values for the Lakebase connector */
 const defaults = {
@@ -109,16 +112,78 @@ function validateSslMode(value: string | undefined): SslMode | undefined {
 /** Get workspace client from config or SDK default auth chain */
 export function getWorkspaceClient(
   config: Partial<LakebasePoolConfig>,
-): WorkspaceClient {
+): LakebaseWorkspaceClient {
   // Priority 1: Explicit workspaceClient in config
   if (config.workspaceClient) {
     return config.workspaceClient;
   }
 
-  // Priority 2: Create with SDK default auth chain
-  // Use empty config to let SDK use .databrickscfg, DATABRICKS_HOST, DATABRICKS_TOKEN, etc.
+  // Priority 2: SDK default auth chain (.databrickscfg, DATABRICKS_HOST, DATABRICKS_TOKEN, etc.)
   // NOTE: config.host is the PostgreSQL host (PGHOST), not the Databricks workspace host
-  return new WorkspaceClient({});
+  return createDefaultWorkspaceClient();
+}
+
+/** True when the client exposes the modular `request` capability (AppKit client). */
+export function isRequestCapable(
+  client: LakebaseWorkspaceClient,
+): client is RequestCapableWorkspaceClient {
+  return (
+    typeof (client as RequestCapableWorkspaceClient).request === "function"
+  );
+}
+
+/**
+ * Default-auth client built on the modular SDK. The SDK is ESM-only, so it is
+ * loaded with a dynamic import (keeps the CJS build working) and only when no
+ * client was passed in. Auth is resolved once, lazily, and retried on failure.
+ */
+function createDefaultWorkspaceClient(): RequestCapableWorkspaceClient {
+  let resolved:
+    | Promise<{
+        host: string;
+        authHeaders: () => Promise<{ key: string; value: string }[]>;
+      }>
+    | undefined;
+  const resolveOnce = () => {
+    resolved ??= (async () => {
+      const [{ resolve }, { defaultCredentials }] = await Promise.all([
+        import("@databricks/sdk-core/profiles"),
+        import("@databricks/sdk-auth/credentials"),
+      ]);
+      const profile = await resolve();
+      const rawHost = profile.host?.trim();
+      if (!rawHost) throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
+      // The legacy SDK prepended https:// to a scheme-less host; the modular SDK does not.
+      const host = (
+        /^https?:\/\//i.test(rawHost) ? rawHost : `https://${rawHost}`
+      ).replace(/\/+$/, "");
+      const credentials = defaultCredentials({ profile: { ...profile, host } });
+      return { host, authHeaders: () => credentials.authHeaders() };
+    })().catch((error) => {
+      resolved = undefined;
+      throw error;
+    });
+    return resolved;
+  };
+
+  return {
+    async request(req) {
+      const { host, authHeaders } = await resolveOnce();
+      const headers = new Headers(req.headers);
+      for (const h of await authHeaders()) headers.set(h.key, h.value);
+      const response = await fetch(new URL(req.path, host), {
+        method: req.method,
+        headers,
+        body: req.body,
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Databricks API ${req.method} ${req.path} failed with ${response.status}: ${await response.text()}`,
+        );
+      }
+      return response;
+    },
+  };
 }
 
 /** Get username synchronously from config or environment */
@@ -173,7 +238,16 @@ export async function getUsernameWithApiLookup(
 
   try {
     const workspaceClient = getWorkspaceClient(config ?? {});
-    const me = await workspaceClient.currentUser.me();
+    if (!isRequestCapable(workspaceClient)) {
+      const me = await workspaceClient.currentUser.me();
+      return me.userName ?? undefined;
+    }
+    const response = await workspaceClient.request({
+      method: "GET",
+      path: "/api/2.0/preview/scim/v2/Me",
+      headers: { Accept: "application/json" },
+    });
+    const me = (await response.json()) as { userName?: string };
     return me.userName ?? undefined;
   } catch {
     return undefined;

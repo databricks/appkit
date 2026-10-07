@@ -8,10 +8,14 @@ export { createTokenRefreshCallback } from "./token-refresh";
 export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
+  LakebaseWorkspaceClient,
+  LakebaseWorkspaceRequest,
+  LegacyWorkspaceClientLike,
   LakebasePoolConfig,
   Logger,
   LoggerConfig,
   RequestedClaims,
+  RequestCapableWorkspaceClient,
   RequestedResource,
 } from "./types";
 export { RequestedClaimsPermissionSet } from "./types";
