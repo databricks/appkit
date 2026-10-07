@@ -417,6 +417,23 @@ describe("generateDatabaseTypes", () => {
           // @ts-expect-error a broad optional selection may omit title
           const unsafeTitle: string = dynamic.items[0].title;
           void unsafeTitle;
+
+          const columns: ("id" | "title")[] = ["id"];
+          const selected = await databaseApi.list("posts", { select: columns });
+          const maybeTitle: string | undefined = selected.items[0].title;
+          // @ts-expect-error an array does not guarantee every possible column is selected
+          const definiteTitle: string = selected.items[0].title;
+          // @ts-expect-error columns outside the array's element type remain absent
+          selected.items[0].score;
+          const record = await databaseApi.get("posts", 1, { select: columns });
+          // @ts-expect-error detail projection follows the same dynamic selection rule
+          const definiteId: number = record.id;
+          const included = await databaseApi.list("users", {
+            include: { posts: { select: columns } },
+          });
+          // @ts-expect-error included rows also have optional dynamically selected columns
+          const includedTitle: string = included.items[0].posts[0].title;
+          void [maybeTitle, definiteTitle, definiteId, includedTitle];
         }
 
         async function rejected() {

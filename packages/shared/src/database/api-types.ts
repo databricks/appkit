@@ -146,7 +146,11 @@ export type RecordParamsFor<R, K> = Pick<
 type SelectedOf<R, K, P> = P extends {
   readonly select: infer Columns extends readonly PropertyKey[];
 }
-  ? Pick<PublicRowOf<R, K>, Columns[number] & keyof PublicRowOf<R, K>>
+  ? number extends Columns["length"]
+    ? Partial<
+        Pick<PublicRowOf<R, K>, Columns[number] & keyof PublicRowOf<R, K>>
+      >
+    : Pick<PublicRowOf<R, K>, Columns[number] & keyof PublicRowOf<R, K>>
   : "select" extends keyof P
     ? Partial<PublicRowOf<R, K>>
     : PublicRowOf<R, K>;
