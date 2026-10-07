@@ -18,11 +18,11 @@ importers:
   .:
     dependencies:
       '@databricks/appkit':
-        specifier: 0.76.1
-        version: 0.76.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
+        specifier: 0.84.0
+        version: 0.84.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
       '@databricks/appkit-ui':
-        specifier: 0.76.1
-        version: 0.76.1(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: 0.84.0
+        version: 0.84.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
@@ -337,15 +337,15 @@ packages:
   '@clack/prompts@1.0.1':
     resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
 
-  '@databricks/appkit-ui@0.76.1':
-    resolution: {integrity: sha512-b9UzfTprx5j8dauhsku5stIG+QeglIjvsRSlPkSO3vTzCxb0es6bpeLGG1h0+0pNvMopHtjmH55VkhHjg3UwWw==}
+  '@databricks/appkit-ui@0.84.0':
+    resolution: {integrity: sha512-FfXuw8q+j0jKYXPVsrGO6qU7pkgL5tRfE1JWtfZrGkv7BehGRoPXMPwZbF7uy1YBCMhljlviQHQHVYbu1FPFtw==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@databricks/appkit@0.76.1':
-    resolution: {integrity: sha512-vXy4tvfXN8+g+Xjq81AbU8yt4TzP7n65uM742oblm5GDtBgnyn/OmEG4tmlMc1NBjhDjxVxhkHyq9nT8qPQqrg==}
+  '@databricks/appkit@0.84.0':
+    resolution: {integrity: sha512-KgivNzVAGHPCr1KvESXRkpF6+OrbUizziccjPlpd88SAW4G9trSVI1pydfMRekVfXL1vKFsKZdRbHv4NAwyjQQ==}
     hasBin: true
     peerDependencies:
       '@mlflow/core': 0.4.0
@@ -4932,7 +4932,7 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@databricks/appkit-ui@0.76.1(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@databricks/appkit-ui@0.84.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
@@ -4986,6 +4986,7 @@ snapshots:
       react-dom: 19.2.4(react@19.2.4)
       react-hook-form: 7.68.0(react@19.2.4)
       react-resizable-panels: 3.0.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      semver: 7.7.3
       sonner: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tailwind-merge: 3.4.0
       vaul: 1.1.2(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -4997,7 +4998,7 @@ snapshots:
       - '@types/react-dom'
       - supports-color
 
-  '@databricks/appkit@0.76.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
+  '@databricks/appkit@0.84.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
