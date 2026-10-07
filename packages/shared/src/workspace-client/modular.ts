@@ -40,6 +40,7 @@ import {
 } from "@databricks/sdk-core/http";
 import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
 import type { ClientOptions } from "@databricks/sdk-options/client";
+import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -490,7 +491,16 @@ export function buildStatementExecutionClient(
 // really throw (status in `httpStatusCode`, not the wrapper's `statusCode`).
 export { ApiError as ModularApiError } from "@databricks/sdk-core/apierror";
 
+/**
+ * Build a modular SCIM client from wrapper options. Backs the facade's
+ * `currentUser` accessor: legacy `currentUser.me()` is `ScimClient.me({})`.
+ */
+export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
+  return new ScimClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
