@@ -8,9 +8,9 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses` and `statementExecution` are migrated, plus the auth + raw-request
- * seam ({@link buildWorkspaceAuth}); every other service still routes through
- * `legacy.ts`.
+ * `warehouses`, `statementExecution`, `currentUser` (SCIM), `genie` and `jobs`
+ * are migrated, plus the auth + raw-request seam ({@link buildWorkspaceAuth});
+ * every other service still routes through `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
  * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
@@ -41,8 +41,8 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { resolve } from "@databricks/sdk-core/profiles";
-import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
 import { GenieClient } from "@databricks/sdk-genie/v1";
+import { JobsClient } from "@databricks/sdk-jobs/v2";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -329,12 +329,20 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
   return new ScimClient(mapToClientOptions(opts));
 }
 
-// ── Client type re-exports (for the facade accessor types) ───────────────
-export type { ScimClient } from "@databricks/sdk-scim/v1";
 /** Build a modular Genie client from wrapper options. */
 export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
   return new GenieClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Jobs (API 2.2) client from wrapper options. */
+export function buildJobsClient(opts: WorkspaceClientOptions): JobsClient {
+  return new JobsClient(mapToClientOptions(opts));
+}
+
+// ── Client type re-exports (for the facade accessor types) ───────────────
 export type { GenieClient } from "@databricks/sdk-genie/v1";
+export type { JobsClient } from "@databricks/sdk-jobs/v2";
+export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -362,6 +370,13 @@ export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
 } from "@databricks/sdk-genie/v1";
+export type {
+  GetJobRequest,
+  GetRunRequest,
+  ListRunsRequest,
+  RunNowRequest,
+  SubmitRunRequest,
+} from "@databricks/sdk-jobs/v2";
 export type {
   EndpointHealth,
   EndpointInfo,

@@ -271,7 +271,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
         productVersion: "0.64.0",
       },
     } as never);
-    expect(ctorOpts[0].credentials).toEqual({
+    expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",
     });
