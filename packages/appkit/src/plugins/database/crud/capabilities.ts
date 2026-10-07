@@ -19,6 +19,15 @@ export interface ColumnHttpCapabilities {
   readonly publicKey: boolean;
 }
 
+const PATH_KEY_KINDS: ReadonlySet<ColumnMeta["kind"]> = new Set([
+  "number",
+  "bigint",
+  "string",
+  "uuid",
+  "enum",
+  "date",
+]);
+
 /** Derive one column's HTTP capabilities from its finalized metadata. */
 export function columnHttpCapabilities(
   meta: ColumnMeta,
@@ -40,6 +49,7 @@ export function columnHttpCapabilities(
     // A private key must not power `GET /:table/:id`: per-id probing would
     // answer 200 or 404 on an identifier the schema hides, so over HTTP the
     // table is keyless — no detail route, and lists must name their own order.
-    publicKey: meta.primaryKey && selectable,
+    // Boolean and JSON keys have no representation the path decoder accepts.
+    publicKey: meta.primaryKey && selectable && PATH_KEY_KINDS.has(meta.kind),
   };
 }

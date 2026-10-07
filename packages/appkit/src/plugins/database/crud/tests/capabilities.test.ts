@@ -42,7 +42,9 @@ const schema = defineSchema((builder) => {
     action: text(),
   });
   const blobs = builder.table("blobs", { payload: jsonb() });
-  return { users, invites, sessions, audits, blobs };
+  const flags = builder.table("flags", { key: boolean().primaryKey() });
+  const documents = builder.table("documents", { key: jsonb().primaryKey() });
+  return { users, invites, sessions, audits, blobs, flags, documents };
 });
 
 /** Property names in one rendered object facet, in declaration order. */
@@ -70,6 +72,26 @@ describe("columnHttpCapabilities", () => {
       columnHttpCapabilities(schema.$tables.audits.$columns.id).publicKey,
     ).toBe(false);
   });
+
+  it.each(["flags", "documents"] as const)(
+    "keeps %s available for creates but never claims its key can address a path",
+    (name) => {
+      const meta = schema.$tables[name].$columns.key;
+      expect(meta.primaryKey).toBe(true);
+      expect(columnHttpCapabilities(meta)).toMatchObject({
+        selectable: true,
+        creatable: true,
+        updatable: false,
+        publicKey: false,
+      });
+      expect(
+        compileCrudTables(schema.$tables).get(name)?.primaryKey,
+      ).toBeUndefined();
+      expect(
+        walkSchema(schema).find((entry) => entry.name === name)?.api.key,
+      ).toBe("never");
+    },
+  );
 
   it("separates generated identities, caller keys, and stamps", () => {
     const { users, invites, sessions } = schema.$tables;

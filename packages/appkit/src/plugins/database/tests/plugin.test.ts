@@ -2,6 +2,7 @@ import type express from "express";
 import { beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 
 import {
+  boolean,
   defineSchema,
   fk,
   id,
@@ -358,6 +359,37 @@ describe("DatabasePlugin", () => {
 
     expect(routes).toEqual(["post /blobs"]);
     expect(plugin.getEndpoints()).not.toHaveProperty("blobs.list");
+  });
+
+  test("never publishes keyed routes for boolean or JSON primary keys", async () => {
+    const unsupported = defineSchema(({ table }) => ({
+      flags: table("flags", { key: boolean().primaryKey(), label: text() }),
+      documents: table("documents", {
+        key: jsonb().primaryKey(),
+        label: text(),
+      }),
+      blobs: table("blobs", { key: jsonb().primaryKey() }),
+    }));
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const plugin = new DatabasePlugin({ schema: unsupported });
+    await plugin.setup();
+    const { router, routes } = fakeRouter();
+    plugin.injectRoutes(router);
+
+    expect(routes).toEqual([
+      "get /flags",
+      "post /flags",
+      "get /documents",
+      "post /documents",
+      "post /blobs",
+    ]);
+    expect(plugin.getEndpoints()).toEqual({
+      "flags.list": "/api/database/flags",
+      "flags.create": "/api/database/flags",
+      "documents.list": "/api/database/documents",
+      "documents.create": "/api/database/documents",
+      "blobs.create": "/api/database/blobs",
+    });
   });
 
   test.each([false, { tables: [] }] as const)(

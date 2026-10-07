@@ -167,6 +167,37 @@ describe("generateDatabaseTypes", () => {
     expect(api("blobs")).toContain("orderable: never;");
   });
 
+  test("treats boolean and JSON primary keys as keyless only over HTTP", async () => {
+    const options = await files(`
+      import { boolean, defineSchema, jsonb, text } from ${JSON.stringify(builder)};
+      export const schema = defineSchema(({ table }) => ({
+        flags: table("flags", { key: boolean().primaryKey(), label: text() }),
+        documents: table("documents", { key: jsonb().primaryKey(), label: text() }),
+      }));
+    `);
+    await generateDatabaseTypes(options);
+    await compileConsumer(
+      options,
+      `
+      import { databaseApi, type DatabaseKeyedEntity } from "@databricks/appkit-ui/js/beta";
+      import type { DatabaseRegistry } from "@databricks/appkit";
+      const trustedKey: DatabaseRegistry["flags"]["hasPrimaryKey"] = true;
+      // @ts-expect-error a boolean key cannot address an HTTP path
+      const keyed: DatabaseKeyedEntity = "flags";
+      // @ts-expect-error JSON keys have no detail route either
+      await databaseApi.get("documents", "x");
+      // @ts-expect-error an HTTP-keyless list needs an explicit order
+      await databaseApi.list("flags");
+      await databaseApi.list("flags", { order: { key: "asc" } });
+      await databaseApi.list("documents", { order: { label: "asc" } });
+      await databaseApi.create("flags", { key: true });
+      await databaseApi.create("documents", { key: { code: "a" } });
+      void [trustedKey, keyed];
+    `,
+      { ui: true },
+    );
+  }, 30_000);
+
   test("binds one registry without importing an optional UI package", async () => {
     const options = await files(completeSchema);
     await generateDatabaseTypes(options);
