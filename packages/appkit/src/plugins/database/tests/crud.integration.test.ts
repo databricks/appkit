@@ -160,17 +160,22 @@ async function mount(hooks: Record<string, EntityHooks>) {
     delete: record("delete"),
   } as unknown as Parameters<typeof plugin.injectRoutes>[0]);
 
-  const post = async (path: string, body: unknown) => {
+  const invoke = async (
+    method: "post" | "patch",
+    path: string,
+    body: unknown,
+    params: Record<string, string> = {},
+  ) => {
     const response = fakeResponse();
-    const handler = handlers.get(`post ${path}`) as unknown as (
+    const handler = handlers.get(`${method} ${path}`) as unknown as (
       req: Request,
       res: Response,
     ) => Promise<void>;
     await handler(
       {
-        originalUrl: path,
-        url: path,
-        params: {},
+        originalUrl: path.replace(":id", params.id ?? ":id"),
+        url: path.replace(":id", params.id ?? ":id"),
+        params,
         body,
         is: () => true,
       } as unknown as Request,
@@ -179,7 +184,10 @@ async function mount(hooks: Record<string, EntityHooks>) {
     return response;
   };
 
-  return { plugin, database, post };
+  const post = (path: string, body: unknown) => invoke("post", path, body);
+  const patch = (path: string, id: string, body: unknown) =>
+    invoke("patch", path, body, { id });
+  return { plugin, database, post, patch };
 }
 
 const notesOf = (plugin: DatabasePlugin<typeof schema>) =>
@@ -270,6 +278,52 @@ describe("generated CRUD over hooked mutations", () => {
     });
     expect(response.sent.body).not.toContain("secret");
     expect(database.committed.notes).toEqual([]);
+    expect(database.log).toEqual(["begin", "rollback"]);
+  });
+
+  test("explains an empty patch without changing the stored row", async () => {
+    const { database, patch } = await mount({});
+    database.committed.notes.push({ id: 1, body: "original" });
+    const response = await patch("/notes/:id", "1", {});
+
+    expect(response.sent.status).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Invalid database request",
+      details: [
+        {
+          path: ["body"],
+          message:
+            "Update must contain at least one field; skip the call when there are no changes",
+        },
+      ],
+    });
+    expect(database.committed.notes).toEqual([{ id: 1, body: "original" }]);
+    expect(database.log).toEqual([]);
+  });
+
+  test("still lets beforeUpdate fill an initially empty patch", async () => {
+    const { database, patch } = await mount({
+      notes: { beforeUpdate: () => ({ body: "from hook" }) },
+    });
+    database.committed.notes.push({ id: 1, body: "original" });
+    const response = await patch("/notes/:id", "1", {});
+
+    expect(response.sent.status).toBe(200);
+    expect(response.json()).toEqual({ id: 1, body: "from hook" });
+    expect(database.committed.notes).toEqual([{ id: 1, body: "from hook" }]);
+    expect(database.log).toEqual(["begin", "update:notes", "commit"]);
+  });
+
+  test("keeps an empty hook-authored patch an opaque server fault", async () => {
+    const { database, patch } = await mount({
+      notes: { beforeUpdate: () => ({}) },
+    });
+    database.committed.notes.push({ id: 1, body: "original" });
+    const response = await patch("/notes/:id", "1", { body: "changed" });
+
+    expect(response.sent.status).toBe(500);
+    expect(response.json()).toEqual({ error: "Database operation failed" });
+    expect(database.committed.notes).toEqual([{ id: 1, body: "original" }]);
     expect(database.log).toEqual(["begin", "rollback"]);
   });
 

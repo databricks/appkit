@@ -1,5 +1,6 @@
 export * from "./agent";
 export * from "./cache";
+export * from "./database";
 export {
   createDevOboIdentityProvider,
   loadDevOboIdentity,

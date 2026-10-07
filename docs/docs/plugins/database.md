@@ -79,8 +79,10 @@ With the server plugin enabled, this registers:
 | PATCH | `/api/database/notes/:id` | Update a row |
 | DELETE | `/api/database/notes/:id` | Delete a row |
 
-A table without a public primary key supports list and create only. `upsert` is
-available to server code but has no generated HTTP route.
+A table without a public primary key supports create and, if it has a sortable
+public column, list with an explicit non-empty `order`. A keyless table with no
+sortable columns has no list route. `upsert` is available to server code but has
+no generated HTTP route.
 
 ## Schema discovery and overrides
 
@@ -229,6 +231,138 @@ a nested hook chain is rejected. PostgreSQL also enforces a 30-second
 The callback deadline does not cancel arbitrary JavaScript, HTTP requests, or
 other external side effects. Avoid putting external side effects in hooks that
 need database rollback semantics.
+
+## Browser client (beta)
+
+`@databricks/appkit-ui/js/beta` provides `databaseApi`, a typed client for the
+generated routes. Entity names, parameters, values, and rows are typed from the
+same generated registry as the server-side client, restricted to what the
+generated routes accept. The client adds no authorization. Anyone who can load
+the page can call the same routes.
+
+### Setup
+
+Run `appkit generate-types` or use the AppKit Vite plugin to write
+`shared/appkit-types/database.d.ts`, and include it in the client's TypeScript
+project. It binds the server registry and a shared global interface used by
+`@databricks/appkit-ui/js/beta`; server-only apps do not need the UI package or
+`skipLibCheck`. Until the file exists, every entity name is a type error.
+
+The client finds routes in the endpoint map the server embeds in the page. When
+the `api` configuration does not expose an operation, a call to it fails with
+`NOT_EXPOSED` and sends no request.
+
+### Calls
+
+```ts
+import { databaseApi } from "@databricks/appkit-ui/js/beta";
+
+const page = await databaseApi.list("notes", {
+  where: { board_id: 7 },
+  order: { created_at: "desc" },
+  limit: 20,
+});
+const board = await databaseApi.get("boards", 7, { select: ["id", "title"] });
+const note = await databaseApi.create("notes", {
+  board_id: board.id,
+  author: "ada",
+  body: "Ship it",
+});
+await databaseApi.update("notes", note.id, { body: "Shipped" });
+await databaseApi.remove("notes", note.id);
+```
+
+| Call | Route | Resolves with |
+| --- | --- | --- |
+| `list(entity, params?)` | `GET /api/database/<entity>` | The list envelope `{ items, limit, offset }` |
+| `get(entity, id, params?)` | `GET /api/database/<entity>/:id` | The row |
+| `create(entity, values)` | `POST /api/database/<entity>` | The created row |
+| `update(entity, id, values)` | `PATCH /api/database/<entity>/:id` | The updated row |
+| `remove(entity, id)` | `DELETE /api/database/<entity>/:id` | Nothing |
+
+A failed call rejects with a [`DatabaseApiError`](#errors). An optional last
+argument, `{ signal }`, cancels the request, and the promise then rejects with
+the abort reason. Cancelling a write does not undo it if the server already
+committed it.
+
+Only tables with a public primary key that the URL path can represent have
+`get`, `update`, and `remove`. Boolean and JSONB primary keys, like private or
+missing keys, are treated as keyless over HTTP: no keyed routes are published,
+although creates and explicitly ordered lists remain available when supported.
+Calling a keyed operation on these tables is a type error. A missing row on a
+supported keyed route rejects with `NOT_FOUND`.
+
+### Parameters
+
+| Parameter | `list` | `get` | Accepts |
+| --- | --- | --- | --- |
+| `where` | Yes | No | Public, queryable columns. A value, or an operator object (`eq`, `neq`, `in`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte` by column kind, `is: null` for nullable columns), combined with `and` and `or` |
+| `order` | Yes | No | Public, queryable columns mapped to `"asc"` or `"desc"`; required and non-empty for keyless lists |
+| `select` | Yes | Yes | Public columns. The row type narrows to them |
+| `include` | Yes | Yes | Exposed relations, `true` or options, at most two edges deep. Only a to-many relation takes a `limit` |
+| `limit`, `offset` | Yes | No | Integers, 0 to 500 and 0 to 10,000 |
+
+Private columns, JSON columns in `where` or `order`, and unknown parameters are
+compile errors. An explicit `where` must not be empty, and an undefined nested
+filter value fails rather than broadening the read; omit `where` entirely to
+list all rows. A top-level `where: {}` fails locally with guidance to omit the
+parameter, without sending a request. For optional search controls, for example:
+
+```typescript
+const where = search ? { body: { ilike: `%${search}%` } } : undefined;
+await databaseApi.list("notes", { where });
+```
+
+A to-many include adds an array to each row and a to-one include adds a row or
+`null`. JSON carries bigint columns as decimal strings, so rows type them as
+`string`, and filters accept a string or a safe integer. Dynamic `select` arrays
+return optional properties for their possible columns; a literal tuple returns
+those properties as required. This also applies to detail and included rows.
+Params typed broadly with an optional `select` keep row fields optional.
+
+If a server-side read serializer changes a list or detail row, the schema-based
+return type cannot describe that custom response. Validate or narrow custom
+read results in the caller; the client does not infer serializer output.
+
+### Values
+
+`create` and `update` accept only the fields the generated route accepts.
+Private columns, server-generated columns such as `id()`, and unknown fields are
+compile errors, including fields that a spread carries in. Every update field is
+optional, and primary keys and `defaultNow()` or `defaultRandom()` columns
+cannot be updated. Bigint columns accept a decimal string or a safe integer.
+NaN and positive or negative Infinity fail locally before a write is sent,
+including inside JSON values. Use an explicit `null` to clear a nullable column;
+a non-finite number never implicitly becomes null. Query numbers must also be
+finite.
+
+Skip an update when a form has no changes. If an update remains empty after
+`beforeUpdate`, the server returns `INVALID_REQUEST` with a `body` detail
+explaining that at least one field is required. An initially empty patch is
+still allowed when `beforeUpdate` supplies its values.
+
+The answered row is the public row the database holds after any `before*` hook
+ran. A read serializer never reshapes a write's response.
+
+### Errors
+
+A `DatabaseApiError` has a stable `code`, the HTTP `status`, a `message`, and
+`details`. Each detail is a `{ path, message }` pair that names a public request
+field. Branch on `code` rather than `message`.
+
+| `code` | `status` | Meaning |
+| --- | --- | --- |
+| `NOT_EXPOSED` | `null` | No published route for the operation. Nothing was sent |
+| `INVALID_REQUEST` | 400 or `null` | Malformed or unsupported parameters; `null` means local validation rejected the call before sending it |
+| `FORBIDDEN` | 403 | The database refused the operation |
+| `NOT_FOUND` | 404 | No row has this id |
+| `CONFLICT` | 409 | A constraint rejected the change |
+| `PAYLOAD_TOO_LARGE` | 413 | The response exceeded the size limit |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | The request body was not JSON |
+| `VALIDATION_FAILED` | 422 | A value failed validation |
+| `TRANSIENT` | 503 or `null` | Temporarily unavailable, or a read received no response |
+| `OUTCOME_UNKNOWN` | `null` or a successful HTTP status | A write received no usable response; it may have committed. Check before retrying |
+| `INTERNAL` | 500 or other | Any other failure |
 
 ## API reference
 

@@ -248,6 +248,9 @@ function decodeWhere(
     reject(parameter, `Expected at most ${MAX_WHERE_DEPTH} nesting levels`);
   }
   if (!isPlainObject(node)) reject(parameter, "Expected an object");
+  if (Object.keys(node).length === 0) {
+    reject(parameter, "Filter cannot be empty");
+  }
 
   const clause: Record<string, WhereValue | WhereClause[]> = {};
   for (const [key, value] of Object.entries(node)) {
