@@ -1094,7 +1094,7 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
   test.each([
     [
       "fromServingEndpoint",
-      (workspaceClient: () => { apiClient: unknown }) =>
+      (workspaceClient: () => { request: unknown }) =>
         DatabricksAdapter.fromServingEndpoint({
           workspaceClient: workspaceClient as never,
           endpointName: "my-model",
@@ -1102,7 +1102,7 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
     ],
     [
       "fromAiGateway",
-      (workspaceClient: () => { apiClient: unknown }) =>
+      (workspaceClient: () => { request: unknown }) =>
         DatabricksAdapter.fromAiGateway({
           workspaceClient: workspaceClient as never,
           model: "system.ai.claude",
@@ -1111,11 +1111,12 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
   ])("%s resolves a client provider on every run", async (_name, build) => {
     const clients = ["alice", "bob"].map((user) => ({
       user,
-      apiClient: {
-        request: vi.fn(async () => ({
-          contents: createReadableStream([textDelta(user), sseChunk("[DONE]")]),
-        })),
-      },
+      request: vi.fn(
+        async () =>
+          new Response(
+            createReadableStream([textDelta(user), sseChunk("[DONE]")]),
+          ),
+      ),
     }));
     let next = 0;
     const adapter = await build(() => clients[next++]);
@@ -1127,19 +1128,23 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
         // drain
       }
     }
-    expect(clients[0].apiClient.request).toHaveBeenCalledTimes(1);
-    expect(clients[1].apiClient.request).toHaveBeenCalledTimes(1);
+    expect(clients[0].request).toHaveBeenCalledTimes(1);
+    expect(clients[1].request).toHaveBeenCalledTimes(1);
   });
 
-  test("routes tool-free chat through apiClient.request with a streaming payload", async () => {
-    const apiClient = {
-      request: vi.fn().mockResolvedValue({
-        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
-      }),
+  test("routes tool-free chat through request() with a streaming payload", async () => {
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+          ),
+        ),
     };
 
     const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { apiClient },
+      workspaceClient: client,
       endpointName: "my-model",
     });
 
@@ -1150,25 +1155,28 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
       // drain
     }
 
-    expect(apiClient.request).toHaveBeenCalledTimes(1);
-    const [requestArgs] = apiClient.request.mock.calls[0];
+    expect(client.request).toHaveBeenCalledTimes(1);
+    const [requestArgs] = client.request.mock.calls[0];
     expect(requestArgs.path).toBe("/serving-endpoints/my-model/invocations");
     expect(requestArgs.method).toBe("POST");
-    expect(requestArgs.raw).toBe(true);
-    expect(requestArgs.payload.stream).toBe(true);
+    expect(JSON.parse(requestArgs.body).stream).toBe(true);
     // Auth + url encoding are the connector's (and the SDK's) concerns — the
     // adapter no longer reaches into the workspace config.
   });
 
   test("URL-encodes endpoint names with special characters", async () => {
-    const apiClient = {
-      request: vi.fn().mockResolvedValue({
-        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
-      }),
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+          ),
+        ),
     };
 
     const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { apiClient },
+      workspaceClient: client,
       endpointName: "my model/with spaces",
     });
 
@@ -1179,7 +1187,7 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
       // drain
     }
 
-    const [requestArgs] = apiClient.request.mock.calls[0];
+    const [requestArgs] = client.request.mock.calls[0];
     expect(requestArgs.path).toBe(
       "/serving-endpoints/my%20model%2Fwith%20spaces/invocations",
     );
@@ -1206,7 +1214,7 @@ describe("DatabricksAdapter.fromModelServing", () => {
       return {
         ...actual,
         createWorkspaceClient: vi.fn().mockImplementation(() => ({
-          apiClient: { request: vi.fn() },
+          request: vi.fn(),
         })),
       };
     });
@@ -1226,14 +1234,18 @@ describe("DatabricksAdapter.fromModelServing", () => {
   test("explicit endpoint name takes precedence over env var", async () => {
     process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "env-model";
 
-    const apiClient = {
-      request: vi.fn().mockResolvedValue({
-        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
-      }),
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+          ),
+        ),
     };
 
     const adapter = await DatabricksAdapter.fromModelServing("explicit-model", {
-      workspaceClient: { apiClient },
+      workspaceClient: client,
     });
 
     expect(adapter).toBeInstanceOf(DatabricksAdapter);
@@ -1245,7 +1257,7 @@ describe("DatabricksAdapter.fromModelServing", () => {
       // drain
     }
 
-    const [requestArgs] = apiClient.request.mock.calls[0];
+    const [requestArgs] = client.request.mock.calls[0];
     expect(requestArgs.path).toBe(
       "/serving-endpoints/explicit-model/invocations",
     );
@@ -1254,15 +1266,19 @@ describe("DatabricksAdapter.fromModelServing", () => {
 
 describe("DatabricksAdapter.fromAiGateway", () => {
   test("routes to the gateway path with `model` in the request body", async () => {
-    const apiClient = {
-      request: vi.fn().mockResolvedValue({
-        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
-      }),
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+          ),
+        ),
     };
 
     const adapter = await DatabricksAdapter.fromAiGateway({
       model: "system.ai.claude-opus-5-5",
-      workspaceClient: { apiClient },
+      workspaceClient: client,
     });
 
     for await (const _ of adapter.run(
@@ -1272,23 +1288,28 @@ describe("DatabricksAdapter.fromAiGateway", () => {
       // drain
     }
 
-    const [requestArgs] = apiClient.request.mock.calls[0];
+    const [requestArgs] = client.request.mock.calls[0];
     expect(requestArgs.path).toBe("/ai-gateway/mlflow/v1/chat/completions");
     expect(requestArgs.method).toBe("POST");
-    expect(requestArgs.raw).toBe(true);
-    expect(requestArgs.payload.model).toBe("system.ai.claude-opus-5-5");
-    expect(requestArgs.payload.stream).toBe(true);
+    expect(JSON.parse(requestArgs.body).model).toBe(
+      "system.ai.claude-opus-5-5",
+    );
+    expect(JSON.parse(requestArgs.body).stream).toBe(true);
   });
 
   test("serving-endpoint path leaves `model` out of the body (non-breaking)", async () => {
-    const apiClient = {
-      request: vi.fn().mockResolvedValue({
-        contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
-      }),
+    const client = {
+      request: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
+          ),
+        ),
     };
 
     const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { apiClient },
+      workspaceClient: client,
       endpointName: "my-model",
     });
 
@@ -1299,8 +1320,8 @@ describe("DatabricksAdapter.fromAiGateway", () => {
       // drain
     }
 
-    const [requestArgs] = apiClient.request.mock.calls[0];
-    expect(requestArgs.payload.model).toBeUndefined();
+    const [requestArgs] = client.request.mock.calls[0];
+    expect(JSON.parse(requestArgs.body).model).toBeUndefined();
   });
 });
 

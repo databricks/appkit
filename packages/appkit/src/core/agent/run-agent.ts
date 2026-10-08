@@ -10,7 +10,6 @@ import type {
   ToolProvider,
 } from "shared";
 
-import type { WorkspaceClientLike } from "../../agents/databricks";
 import {
   isSupervisorTool,
   SUPERVISOR_EXTENSION_KEY,
@@ -357,8 +356,7 @@ async function resolveAdapter(
     // On behalf of the user the model client is the caller's, per call.
     return onBehalfOfUser
       ? adapterFromModelString(source, {
-          workspaceClient: () =>
-            getWorkspaceClient() as unknown as WorkspaceClientLike,
+          workspaceClient: () => getWorkspaceClient(),
         })
       : adapterFromModelString(source);
   }
