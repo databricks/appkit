@@ -1,9 +1,8 @@
 name: CI
 
 on:
+  # No base-branch filter: stacked PRs (base = the PR below them) get CI too.
   pull_request:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
