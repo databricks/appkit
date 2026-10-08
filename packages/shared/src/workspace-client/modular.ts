@@ -17,6 +17,12 @@
  * unmarshal transform would otherwise strip.
  */
 import {
+  newTokenCredentials,
+  type Token,
+  type TokenCredentials,
+  tokenProviderFn,
+} from "@databricks/sdk-auth";
+import {
   newM2mCredentials,
   newPatCredentials,
 } from "@databricks/sdk-auth/credentials";
@@ -37,6 +43,37 @@ function normalizeHost(host: string | undefined): string | undefined {
   const trimmed = host?.trim();
   if (!trimmed) return undefined;
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+// Same margin as the legacy SDK: refresh 40s early, since Azure Databricks
+// rejects tokens that expire in 30s or less.
+const TOKEN_REFRESH_MARGIN_MS = 40_000;
+
+/**
+ * Cache a token until shortly before it expires. The modular `newM2mCredentials`
+ * caches only the token endpoint and mints a fresh OAuth token on EVERY request;
+ * the legacy SDK reused it until expiry. Concurrent callers share one in-flight
+ * fetch. Like the legacy SDK, a token without an expiry is reused indefinitely.
+ */
+function withTokenCache(credentials: TokenCredentials): TokenCredentials {
+  let current: Token | undefined;
+  let inflight: Promise<Token> | undefined;
+  const isFresh = (t: Token) =>
+    t.expiry === undefined ||
+    t.expiry.getTime() - TOKEN_REFRESH_MARGIN_MS > Date.now();
+  return newTokenCredentials(
+    credentials.name(),
+    tokenProviderFn(async () => {
+      if (current && isFresh(current)) return current;
+      inflight ??= credentials
+        .token()
+        .then((t) => (current = t))
+        .finally(() => {
+          inflight = undefined;
+        });
+      return inflight;
+    }),
+  );
 }
 
 /**
@@ -81,11 +118,9 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
     const envToken = process.env.DATABRICKS_TOKEN;
     if (host && clientId && clientSecret) {
-      clientOptions.credentials = newM2mCredentials({
-        host,
-        clientId,
-        clientSecret,
-      });
+      clientOptions.credentials = withTokenCache(
+        newM2mCredentials({ host, clientId, clientSecret }),
+      );
     } else if (envToken) {
       clientOptions.credentials = newPatCredentials(envToken);
     }

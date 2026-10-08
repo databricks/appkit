@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, m2mOpts } = vi.hoisted(() => ({
+const { ctorOpts, patTokens, m2mOpts, m2mMint } = vi.hoisted(() => ({
   ctorOpts: [] as Array<Record<string, unknown>>,
   patTokens: [] as string[],
   m2mOpts: [] as Array<Record<string, unknown>>,
+  // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
+  m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
 }));
 
 vi.mock("@databricks/sdk-warehouses/v1", () => ({
@@ -25,7 +27,13 @@ vi.mock("@databricks/sdk-auth/credentials", () => ({
   }),
   newM2mCredentials: vi.fn((opts: Record<string, unknown>) => {
     m2mOpts.push(opts);
-    return { kind: "m2m", ...opts };
+    return {
+      name: () => "oauth-m2m",
+      token: async () => ({
+        value: `m2m-token-${++m2mMint.count}`,
+        expiry: new Date(Date.now() + m2mMint.ttlMs),
+      }),
+    };
   }),
 }));
 // The default transport: its `send` echoes the final request headers so tests
@@ -79,6 +87,8 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     ctorOpts.length = 0;
     patTokens.length = 0;
     m2mOpts.length = 0;
+    m2mMint.count = 0;
+    m2mMint.ttlMs = 60 * 60 * 1000;
     for (const key of AUTH_ENV) {
       originalEnv[key] = process.env[key];
       delete process.env[key];
@@ -152,13 +162,39 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
         clientSecret: "sp-secret",
       },
     ]);
-    expect(ctorOpts[0].credentials).toEqual({
-      kind: "m2m",
-      host: "https://envhost.cloud.databricks.com",
-      clientId: "sp-client-id",
-      clientSecret: "sp-secret",
-    });
+    // Wrapped in the token cache, so assert the strategy, not identity.
+    expect((ctorOpts[0].credentials as { name(): string }).name()).toBe(
+      "oauth-m2m",
+    );
     expect(patTokens).toEqual([]);
+  });
+
+  test("env M2M: caches the OAuth token until 40s before expiry, then refreshes", async () => {
+    // sdk-auth's newM2mCredentials mints a new OAuth token on every request;
+    // the legacy SDK reused it until expiry.
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildWarehousesClient({});
+    const creds = ctorOpts[0].credentials as {
+      authHeaders(): Promise<Array<{ key: string; value: string }>>;
+    };
+    const bearer = async () =>
+      (await creds.authHeaders()).find((h) => h.key === "Authorization")?.value;
+    expect(await bearer()).toBe("Bearer m2m-token-1");
+    expect(await bearer()).toBe("Bearer m2m-token-1");
+    expect(m2mMint.count).toBe(1);
+
+    // A token inside the 40s refresh margin is replaced on the next request.
+    m2mMint.ttlMs = 30_000;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 60 * 60 * 1000);
+      expect(await bearer()).toBe("Bearer m2m-token-2");
+      expect(await bearer()).toBe("Bearer m2m-token-3");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("falls back to DATABRICKS_TOKEN (PAT) when no client id/secret is set", () => {
