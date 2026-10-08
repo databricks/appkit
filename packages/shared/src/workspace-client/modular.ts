@@ -8,8 +8,8 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses`, `statementExecution`, `currentUser` (SCIM), `genie` and `jobs`
- * are migrated, plus the auth + raw-request seam ({@link buildWorkspaceAuth});
+ * `warehouses`, `statementExecution`, `currentUser` (SCIM), `genie`, `jobs`, `vectorSearch`
+ * and `tables` (UC) are migrated, plus the auth + raw-request seam ({@link buildWorkspaceAuth});
  * every other service still routes through `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
@@ -49,6 +49,8 @@ import { JobsClient } from "@databricks/sdk-jobs/v2";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import { TablesClient } from "@databricks/sdk-uc-tables/v1";
+import { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
 import { ApiError } from "./errors";
@@ -375,12 +377,30 @@ export function buildFilesClient(opts: WorkspaceClientOptions): FilesClient {
   return new FilesClient(mapToClientOptions(opts));
 }
 
+/**
+ * Build a modular Vector Search client from wrapper options. Only index metadata
+ * (`getVectorIndex`) goes typed: the query endpoints use the raw `request()`
+ * seam because the generated model drops `debug_level` / `debug_info`.
+ */
+export function buildVectorSearchClient(
+  opts: WorkspaceClientOptions,
+): VectorSearchClient {
+  return new VectorSearchClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Unity Catalog Tables client from wrapper options. */
+export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
+  return new TablesClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
+export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
 // ── Model type re-exports ────────────────────────────────────────────────
