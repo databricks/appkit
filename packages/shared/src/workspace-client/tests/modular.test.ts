@@ -3,12 +3,25 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, m2mOpts, m2mMint } = vi.hoisted(() => ({
+const {
+  ctorOpts,
+  patTokens,
+  m2mOpts,
+  m2mToken,
+  resolveProfile,
+  defaultCreds,
+  sent,
+  nextResponse,
+} = vi.hoisted(() => ({
   ctorOpts: [] as Array<Record<string, unknown>>,
   patTokens: [] as string[],
   m2mOpts: [] as Array<Record<string, unknown>>,
-  // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
-  m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
+  // Each M2M `token()` call mints a new token, like the real SDK's (uncached).
+  m2mToken: vi.fn(),
+  resolveProfile: vi.fn(),
+  defaultCreds: vi.fn(),
+  sent: [] as Array<{ url: string; method: string; headers: Headers }>,
+  nextResponse: { statusCode: 200, body: "{}" },
 }));
 
 vi.mock("@databricks/sdk-warehouses/v1", () => ({
@@ -23,34 +36,40 @@ vi.mock("@databricks/sdk-statementexecution/v1", () => ({
 vi.mock("@databricks/sdk-auth/credentials", () => ({
   newPatCredentials: vi.fn((token: string) => {
     patTokens.push(token);
-    return { kind: "pat", token };
+    return {
+      kind: "pat",
+      token,
+      authHeaders: async () => [
+        { key: "Authorization", value: `Bearer ${token}` },
+      ],
+    };
   }),
   newM2mCredentials: vi.fn((opts: Record<string, unknown>) => {
     m2mOpts.push(opts);
-    return {
-      name: () => "oauth-m2m",
-      token: async () => ({
-        value: `m2m-token-${++m2mMint.count}`,
-        expiry: new Date(Date.now() + m2mMint.ttlMs),
-      }),
-    };
+    return { name: () => "oauth-m2m", token: m2mToken };
   }),
+  defaultCredentials: defaultCreds,
 }));
-// The default transport: its `send` echoes the final request headers so tests
-// can assert the User-Agent the wrapper set before delegating.
+vi.mock("@databricks/sdk-core/profiles", () => ({ resolve: resolveProfile }));
+// The default transport: records each request and echoes its final headers so
+// tests can assert the User-Agent / auth the wrapper set before delegating.
 vi.mock("@databricks/sdk-core/http", () => ({
   newFetchHttpClient: vi.fn(() => ({
-    send: vi.fn((request: { headers: Headers }) =>
-      Promise.resolve({
-        statusCode: 200,
-        headers: request.headers,
-        body: null,
-      }),
+    send: vi.fn(
+      (request: { url: string; method: string; headers: Headers }) => {
+        sent.push(request);
+        return Promise.resolve({
+          statusCode: nextResponse.statusCode,
+          headers: request.headers,
+          body: new Response(nextResponse.body).body,
+        });
+      },
     ),
   })),
 }));
 
-import { buildWarehousesClient } from "../modular";
+import { ApiError } from "../errors";
+import { buildWarehousesClient, buildWorkspaceAuth } from "../modular";
 
 /** Drive the wrapped httpClient with one request and return the UA it set. */
 async function sentUserAgent(
@@ -87,8 +106,6 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     ctorOpts.length = 0;
     patTokens.length = 0;
     m2mOpts.length = 0;
-    m2mMint.count = 0;
-    m2mMint.ttlMs = 60 * 60 * 1000;
     for (const key of AUTH_ENV) {
       originalEnv[key] = process.env[key];
       delete process.env[key];
@@ -122,13 +139,16 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     buildWarehousesClient({ token: "abc", host: "https://x" });
     expect(patTokens).toEqual(["abc"]);
     expect(ctorOpts[0].host).toBe("https://x");
-    expect(ctorOpts[0].credentials).toEqual({ kind: "pat", token: "abc" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "abc",
+    });
   });
 
   test("an empty-string token still uses PAT (no silent fall-through to default auth)", () => {
     buildWarehousesClient({ token: "", host: "https://x" });
     expect(patTokens).toEqual([""]);
-    expect(ctorOpts[0].credentials).toEqual({ kind: "pat", token: "" });
+    expect(ctorOpts[0].credentials).toMatchObject({ kind: "pat", token: "" });
   });
 
   test("a profile sets profileOptions and defers host to the SDK (ignores env)", () => {
@@ -163,38 +183,10 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       },
     ]);
     // Wrapped in the token cache, so assert the strategy, not identity.
-    expect((ctorOpts[0].credentials as { name(): string }).name()).toBe(
+    expect((ctorOpts[0].credentials as { name: () => string }).name()).toBe(
       "oauth-m2m",
     );
     expect(patTokens).toEqual([]);
-  });
-
-  test("env M2M: caches the OAuth token until 40s before expiry, then refreshes", async () => {
-    // sdk-auth's newM2mCredentials mints a new OAuth token on every request;
-    // the legacy SDK reused it until expiry.
-    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
-    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
-    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
-    buildWarehousesClient({});
-    const creds = ctorOpts[0].credentials as {
-      authHeaders(): Promise<Array<{ key: string; value: string }>>;
-    };
-    const bearer = async () =>
-      (await creds.authHeaders()).find((h) => h.key === "Authorization")?.value;
-    expect(await bearer()).toBe("Bearer m2m-token-1");
-    expect(await bearer()).toBe("Bearer m2m-token-1");
-    expect(m2mMint.count).toBe(1);
-
-    // A token inside the 40s refresh margin is replaced on the next request.
-    m2mMint.ttlMs = 30_000;
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(Date.now() + 60 * 60 * 1000);
-      expect(await bearer()).toBe("Bearer m2m-token-2");
-      expect(await bearer()).toBe("Bearer m2m-token-3");
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   test("falls back to DATABRICKS_TOKEN (PAT) when no client id/secret is set", () => {
@@ -202,7 +194,10 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     process.env.DATABRICKS_TOKEN = "env-pat";
     buildWarehousesClient({});
     expect(patTokens).toEqual(["env-pat"]);
-    expect(ctorOpts[0].credentials).toEqual({ kind: "pat", token: "env-pat" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "env-pat",
+    });
     expect(m2mOpts).toEqual([]);
   });
 
@@ -213,7 +208,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
     buildWarehousesClient({ token: "user-token", host: "https://x" });
     expect(patTokens).toEqual(["user-token"]);
-    expect(ctorOpts[0].credentials).toEqual({
+    expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",
     });
@@ -258,5 +253,190 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
   test("no product configured (build-time) → no httpClient override (SDK default UA)", () => {
     buildWarehousesClient({ host: "https://x" });
     expect(ctorOpts[0].httpClient).toBeUndefined();
+  });
+});
+
+describe("buildWorkspaceAuth (auth + raw-request seam)", () => {
+  const AUTH_ENV = [
+    "DATABRICKS_HOST",
+    "DATABRICKS_CLIENT_ID",
+    "DATABRICKS_CLIENT_SECRET",
+    "DATABRICKS_TOKEN",
+  ] as const;
+  const originalEnv: Record<string, string | undefined> = {};
+  const hour = 3_600_000;
+
+  beforeEach(() => {
+    patTokens.length = 0;
+    m2mOpts.length = 0;
+    sent.length = 0;
+    nextResponse.statusCode = 200;
+    nextResponse.body = "{}";
+    let n = 0;
+    m2mToken.mockReset().mockImplementation(async () => ({
+      value: `m2m-${++n}`,
+      expiry: new Date(Date.now() + hour),
+    }));
+    // Never read the dev machine's ~/.databrickscfg.
+    resolveProfile.mockReset().mockResolvedValue({});
+    defaultCreds.mockReset().mockReturnValue({
+      authHeaders: async () => [{ key: "Authorization", value: "Bearer dflt" }],
+    });
+    for (const key of AUTH_ENV) {
+      originalEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const key of AUTH_ENV) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  });
+
+  async function authHeader(auth: ReturnType<typeof buildWorkspaceAuth>) {
+    const headers = new Headers();
+    await auth.authenticate(headers);
+    return headers.get("Authorization");
+  }
+
+  test("an OBO token wins over env SP credentials — no escalation", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    const auth = buildWorkspaceAuth({ token: "user-token", host: "https://x" });
+    expect(await authHeader(auth)).toBe("Bearer user-token");
+    expect(await auth.getHost()).toBe("https://x");
+    expect(m2mOpts).toEqual([]);
+    expect(defaultCreds).not.toHaveBeenCalled();
+  });
+
+  test("an empty OBO token stays on PAT — never falls through to SP or the default chain", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    const auth = buildWorkspaceAuth({ token: "" });
+    // `Headers` trims the trailing space of "Bearer ".
+    expect(await authHeader(auth)).toBe("Bearer");
+    expect(patTokens).toEqual([""]);
+    expect(m2mOpts).toEqual([]);
+    expect(defaultCreds).not.toHaveBeenCalled();
+  });
+
+  test("a profile resolves host + credentials through the SDK profile resolver", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    resolveProfile.mockResolvedValue({
+      host: "prof.cloud.databricks.com/",
+      token: "p",
+    });
+    const auth = buildWorkspaceAuth({ profile: "myprofile" });
+    // Profile host wins over env, scheme-normalized, trailing slash dropped.
+    expect(await auth.getHost()).toBe("https://prof.cloud.databricks.com");
+    expect(await authHeader(auth)).toBe("Bearer dflt");
+    expect(resolveProfile).toHaveBeenCalledWith({ profile: "myprofile" });
+    expect(defaultCreds).toHaveBeenCalledWith({
+      profile: { host: "https://prof.cloud.databricks.com", token: "p" },
+    });
+    // Resolved once and memoized.
+    await auth.getHost();
+    expect(resolveProfile).toHaveBeenCalledTimes(1);
+  });
+
+  test("a failed resolution is retried instead of cached", async () => {
+    resolveProfile.mockRejectedValueOnce(new Error("bad cfg"));
+    const auth = buildWorkspaceAuth({ profile: "p", host: "https://x" });
+    await expect(auth.getHost()).rejects.toThrow("bad cfg");
+    expect(await auth.getHost()).toBe("https://x");
+  });
+
+  test("no host anywhere → fails loudly", async () => {
+    await expect(buildWorkspaceAuth({}).getHost()).rejects.toThrow(
+      "Host is required.",
+    );
+  });
+
+  test("env M2M: authenticates as the SP with the scheme-normalized host", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    const auth = buildWorkspaceAuth({});
+    expect(await auth.getHost()).toBe("https://envhost.cloud.databricks.com");
+    expect(await authHeader(auth)).toBe("Bearer m2m-1");
+    expect(m2mOpts[0].host).toBe("https://envhost.cloud.databricks.com");
+    expect(defaultCreds).not.toHaveBeenCalled();
+  });
+
+  test("env M2M: caches the OAuth token until 40s before expiry, then refreshes", async () => {
+    // Regression: sdk-auth's newM2mCredentials mints a new token on EVERY
+    // call; the legacy SDK reused it until expiry.
+    vi.useFakeTimers();
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    const auth = buildWorkspaceAuth({});
+
+    // Concurrent first calls share one fetch.
+    const [a, b] = await Promise.all([authHeader(auth), authHeader(auth)]);
+    expect([a, b]).toEqual(["Bearer m2m-1", "Bearer m2m-1"]);
+    vi.advanceTimersByTime(hour - 41_000);
+    expect(await authHeader(auth)).toBe("Bearer m2m-1");
+    expect(m2mToken).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(2_000); // now inside the 40s refresh margin
+    expect(await authHeader(auth)).toBe("Bearer m2m-2");
+    expect(m2mToken).toHaveBeenCalledTimes(2);
+  });
+
+  test("env M2M: a failed token fetch is not cached", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    m2mToken.mockRejectedValueOnce(new Error("token endpoint down"));
+    const auth = buildWorkspaceAuth({});
+    await expect(authHeader(auth)).rejects.toThrow("token endpoint down");
+    expect(await authHeader(auth)).toBe("Bearer m2m-1");
+  });
+
+  test("request: sends through the transport with the AppKit User-Agent, auth, and query", async () => {
+    const auth = buildWorkspaceAuth({
+      host: "ws.cloud.databricks.com",
+      token: "t",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never);
+    nextResponse.body = '{"warehouses":[]}';
+    const res = await auth.request({
+      method: "GET",
+      path: "/api/2.0/sql/warehouses",
+      query: { skip_cannot_use: "true" },
+      headers: { "X-Extra": "1" },
+    });
+    expect(await res.json()).toEqual({ warehouses: [] });
+    expect(sent[0].url).toBe(
+      "https://ws.cloud.databricks.com/api/2.0/sql/warehouses?skip_cannot_use=true",
+    );
+    expect(sent[0].method).toBe("GET");
+    expect(sent[0].headers.get("User-Agent")).toBe("@databricks/appkit/0.64.0");
+    expect(sent[0].headers.get("Authorization")).toBe("Bearer t");
+    expect(sent[0].headers.get("X-Extra")).toBe("1");
+  });
+
+  test("request: a non-2xx status throws the wrapper ApiError with code + status", async () => {
+    nextResponse.statusCode = 403;
+    nextResponse.body = '{"error_code":"PERMISSION_DENIED","message":"nope"}';
+    const auth = buildWorkspaceAuth({ host: "https://x", token: "t" });
+    const error = await auth
+      .request({ method: "GET", path: "/api/x" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      message: "nope",
+      errorCode: "PERMISSION_DENIED",
+      statusCode: 403,
+    });
   });
 });

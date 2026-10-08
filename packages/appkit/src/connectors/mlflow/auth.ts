@@ -49,11 +49,9 @@ async function resolveViaSdk(
     // Mints the OAuth access token (or reuses a PAT from the profile) and adds
     // an `Authorization: Bearer <token>` header — the same call the connectors
     // use before each request.
-    await client.config.authenticate(headers);
+    await client.authenticate(headers);
     const token = options.token ?? extractBearer(headers);
-    const host =
-      options.host ??
-      (await client.config.getHost()).toString().replace(/\/+$/, "");
+    const host = options.host ?? (await client.getHost());
     if (!token || !host) return undefined;
     return { host, token };
   } catch {
