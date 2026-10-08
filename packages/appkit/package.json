@@ -75,6 +75,7 @@
     "@databricks/sdk-core": "0.51.0",
     "@databricks/sdk-experimental": "0.17.0",
     "@databricks/sdk-genie": "0.54.0",
+    "@databricks/sdk-jobs": "0.57.0",
     "@databricks/sdk-options": "0.51.0",
     "@databricks/sdk-scim": "0.51.0",
     "@databricks/sdk-statementexecution": "0.52.0",
