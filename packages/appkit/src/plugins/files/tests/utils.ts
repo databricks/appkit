@@ -1,1 +1,4 @@
-export { streamFromString } from "../../../connectors/files/tests/utils";
+export {
+  headResponse,
+  streamFromString,
+} from "../../../connectors/files/tests/utils";

@@ -58,6 +58,47 @@ export function runWithFilesSpanAttributes<T>(
   return filesSpanAttributesStorage.run(attributes, fn);
 }
 
+/**
+ * The modular SDK throws `@databricks/sdk-core`'s `ApiError` (status on
+ * `httpStatusCode`, code on `.code`), a different class from the wrapper's
+ * `ApiError`. Convert it so `exists()` and the plugin's `instanceof ApiError`
+ * / `.statusCode` mapping keep returning upstream 4xx statuses.
+ */
+function toWrapperApiError(error: unknown): unknown {
+  if (
+    error instanceof Error &&
+    !(error instanceof ApiError) &&
+    "httpStatusCode" in error &&
+    typeof error.httpStatusCode === "number" &&
+    error.httpStatusCode > 0
+  ) {
+    const code = "code" in error ? String(error.code) : "UNKNOWN";
+    return new ApiError(
+      error.message,
+      code,
+      error.httpStatusCode,
+      undefined,
+      [],
+    );
+  }
+  return error;
+}
+
+/** Stream a file, mapped back to the legacy `DownloadResponse` shape. */
+async function downloadFile(
+  client: WorkspaceClient,
+  resolvedPath: string,
+): Promise<DownloadResponse> {
+  const res = await client.files.downloadFile({ filePath: resolvedPath });
+  return {
+    "content-length":
+      res.contentLength === undefined ? undefined : Number(res.contentLength),
+    "content-type": res.contentType,
+    contents: res.contents,
+    "last-modified": res.lastModified,
+  };
+}
+
 interface FilesConnectorConfig {
   defaultVolume?: string;
   timeout?: number;
@@ -157,7 +198,8 @@ export class FilesConnector {
           success = true;
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
-        } catch (error) {
+        } catch (thrown) {
+          const error = toWrapperApiError(thrown);
           span.recordException(error as Error);
           span.setStatus({
             code: SpanStatusCode.ERROR,
@@ -192,10 +234,16 @@ export class FilesConnector {
 
     return this.traced("list", { "files.path": resolvedPath }, async () => {
       const entries: DirectoryEntry[] = [];
-      for await (const entry of client.files.listDirectoryContents({
-        directory_path: resolvedPath,
+      for await (const entry of client.files.listDirectoryContentsIter({
+        directoryPath: resolvedPath,
       })) {
-        entries.push(entry);
+        entries.push({
+          file_size: entry.fileSize,
+          is_directory: entry.isDirectory,
+          last_modified: entry.lastModified,
+          name: entry.name,
+          path: entry.path,
+        });
       }
       return entries;
     });
@@ -239,11 +287,9 @@ export class FilesConnector {
     filePath: string,
   ): Promise<DownloadResponse> {
     const resolvedPath = this.resolvePath(filePath);
-    return this.traced("download", { "files.path": resolvedPath }, async () => {
-      return client.files.download({
-        file_path: resolvedPath,
-      });
-    });
+    return this.traced("download", { "files.path": resolvedPath }, async () =>
+      downloadFile(client, resolvedPath),
+    );
   }
 
   async exists(client: WorkspaceClient, filePath: string): Promise<boolean> {
@@ -267,17 +313,22 @@ export class FilesConnector {
   ): Promise<FileMetadata> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("metadata", { "files.path": resolvedPath }, async () => {
-      const response = await client.files.getMetadata({
-        file_path: resolvedPath,
+      // The modular `getFileMetadata` parses the empty HEAD body and drops the
+      // response headers that carry the metadata, so read them off a raw HEAD.
+      const res = await client.request({
+        method: "HEAD",
+        path: `/api/2.0/fs/files${resolvedPath}`,
       });
+      const contentLength = res.headers.get("content-length");
       return {
-        contentLength: response["content-length"],
+        contentLength:
+          contentLength === null ? undefined : Number(contentLength),
         contentType: contentTypeFromPath(
           filePath,
-          response["content-type"],
+          res.headers.get("content-type") ?? undefined,
           this.customContentTypes,
         ),
-        lastModified: response["last-modified"],
+        lastModified: res.headers.get("last-modified") ?? undefined,
       };
     });
   }
@@ -341,9 +392,7 @@ export class FilesConnector {
       "createDirectory",
       { "files.path": resolvedPath },
       async () => {
-        await client.files.createDirectory({
-          directory_path: resolvedPath,
-        });
+        await client.files.createDirectory({ directoryPath: resolvedPath });
       },
     );
   }
@@ -351,9 +400,7 @@ export class FilesConnector {
   async delete(client: WorkspaceClient, filePath: string): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("delete", { "files.path": resolvedPath }, async () => {
-      await client.files.delete({
-        file_path: resolvedPath,
-      });
+      await client.files.deleteFile({ filePath: resolvedPath });
     });
   }
 
@@ -372,9 +419,7 @@ export class FilesConnector {
         return { ...meta, textPreview: null, isText: false, isImage };
       }
 
-      const response = await client.files.download({
-        file_path: resolvedPath,
-      });
+      const response = await downloadFile(client, resolvedPath);
       if (!response.contents) {
         return { ...meta, textPreview: "", isText: true, isImage: false };
       }
