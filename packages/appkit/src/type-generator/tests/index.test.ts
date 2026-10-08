@@ -298,10 +298,10 @@ describe("generateFromEntryPoint — metric-view emission", () => {
   const metricFile = path.join(metricsDir, "generated", "metric-views.d.ts");
 
   const describeResponse: DatabricksStatementExecutionResponse = {
-    statement_id: "stmt-mock",
+    statementId: "stmt-mock",
     status: { state: "SUCCEEDED" },
     result: {
-      data_array: [
+      dataArray: [
         [
           JSON.stringify({
             columns: [
@@ -460,7 +460,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
           // the statement still PENDING — no rows yet. Previously this fell
           // into the "returned no rows" failure with per-key warns.
           metricFetcher: async () => ({
-            statement_id: "stmt-mock",
+            statementId: "stmt-mock",
             status: { state: "PENDING" },
           }),
         }),
@@ -568,7 +568,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.executeStatement).toHaveBeenCalledWith(
       expect.objectContaining({
         statement: "DESCRIBE TABLE EXTENDED `demo`.`sales`.`revenue` AS JSON",
-        warehouse_id: "wh-1",
+        warehouseId: "wh-1",
       }),
     );
     const declarations = fs.readFileSync(metricFile, "utf-8");
@@ -708,7 +708,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
           warehouseId: "wh-1",
           mode: "blocking",
           metricFetcher: async () => ({
-            statement_id: "stmt-mock",
+            statementId: "stmt-mock",
             status: { state: "PENDING" },
           }),
         }),
@@ -893,7 +893,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     // The fall-through DESCRIBE hits a still-cold warehouse: non-terminal
     // response, which classifies as degraded (never an error).
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "PENDING" },
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1157,10 +1157,10 @@ describe("generateFromEntryPoint — metric cache section", () => {
   const describeResponseFor = (
     measure: string,
   ): DatabricksStatementExecutionResponse => ({
-    statement_id: "stmt-mock",
+    statementId: "stmt-mock",
     status: { state: "SUCCEEDED" },
     result: {
-      data_array: [
+      dataArray: [
         [
           JSON.stringify({
             columns: [
@@ -1494,26 +1494,26 @@ describe("generateFromEntryPoint — metric cache section", () => {
         }
         if (statement.includes("failed_stmt")) {
           return {
-            statement_id: "stmt-mock",
+            statementId: "stmt-mock",
             status: { state: "FAILED", error: { message: "no such table" } },
           };
         }
         if (statement.includes("no_rows")) {
           return {
-            statement_id: "stmt-mock",
+            statementId: "stmt-mock",
             status: { state: "SUCCEEDED" },
-            result: { data_array: [] },
+            result: { dataArray: [] },
           };
         }
         if (statement.includes("no_columns")) {
           return {
-            statement_id: "stmt-mock",
+            statementId: "stmt-mock",
             status: { state: "SUCCEEDED" },
-            result: { data_array: [[JSON.stringify({ unrelated: true })]] },
+            result: { dataArray: [[JSON.stringify({ unrelated: true })]] },
           };
         }
         if (statement.includes("pending")) {
-          return { statement_id: "stmt-mock", status: { state: "PENDING" } };
+          return { statementId: "stmt-mock", status: { state: "PENDING" } };
         }
         return describeResponseFor("total_revenue");
       },
@@ -1573,7 +1573,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "FAILED", error: { message: "no such table" } },
     });
     const firstWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1610,7 +1610,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "FAILED", error: { message: "no such table" } },
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1627,7 +1627,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     vi.clearAllMocks();
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "FAILED", error: { message: "no such table" } },
     });
     const error = await run({ mode: "blocking" }).then(
@@ -1665,7 +1665,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "FAILED", error: { message: "no such table" } },
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1707,7 +1707,7 @@ describe("generateFromEntryPoint — metric cache section", () => {
     writeConfig({ revenue: { source: "demo.sales.revenue" } });
     mocks.getWarehouseState.mockResolvedValue("RUNNING");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "FAILED", error: { message: "no such table" } },
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -2013,7 +2013,7 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
         warehouseId: "wh-1",
         mode: "blocking",
         metricFetcher: async () => ({
-          statement_id: "stmt-mock",
+          statementId: "stmt-mock",
           status: { state: "PENDING" },
         }),
       }),
@@ -2060,10 +2060,10 @@ describe("generateFromEntryPoint — anti-clobber for blocking mode", () => {
     );
 
     const describeResponse: DatabricksStatementExecutionResponse = {
-      statement_id: "stmt-mock",
+      statementId: "stmt-mock",
       status: { state: "SUCCEEDED" },
       result: {
-        data_array: [
+        dataArray: [
           [
             JSON.stringify({
               columns: [
