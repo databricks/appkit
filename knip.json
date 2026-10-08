@@ -16,6 +16,8 @@
         "@databricks/sdk-files",
         "@databricks/sdk-genie",
         "@databricks/sdk-jobs",
+        "@databricks/sdk-uc-tables",
+        "@databricks/sdk-vectorsearch",
         "@databricks/sdk-options",
         "@databricks/sdk-scim",
         "@databricks/sdk-statementexecution",

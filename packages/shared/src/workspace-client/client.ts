@@ -24,6 +24,10 @@ import {
   type JobsClient,
   buildFilesClient,
   type FilesClient,
+  buildTablesClient,
+  type TablesClient,
+  buildVectorSearchClient,
+  type VectorSearchClient,
   type StatementExecutionClient,
   type WarehousesClient,
   type WorkspaceAuth,
@@ -41,6 +45,8 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #genie?: GenieClient;
   #jobs?: JobsClient;
   #files?: FilesClient;
+  #vectorSearch?: VectorSearchClient;
+  #tables?: TablesClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -76,6 +82,23 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#jobs = buildJobsClient(this.#opts);
     }
     return this.#jobs;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get vectorSearch(): VectorSearchClient {
+    if (!this.#vectorSearch) {
+      this.#vectorSearch = buildVectorSearchClient(this.#opts);
+    }
+    return this.#vectorSearch;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get tables(): TablesClient {
+    if (!this.#tables) {
+      this.#tables = buildTablesClient(this.#opts);
+    }
+    return this.#tables;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
