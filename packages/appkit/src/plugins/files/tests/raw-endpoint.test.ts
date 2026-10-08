@@ -28,12 +28,11 @@ describe("FilesPlugin raw endpoint security headers", () => {
     client = createMockWorkspaceClient({
       strict: true,
       responses: {
-        "files.listDirectoryContents": undefined,
-        "files.download": undefined,
-        "files.getMetadata": undefined,
+        "files.listDirectoryContentsIter": undefined,
+        "files.downloadFile": undefined,
         "files.upload": undefined,
         "files.createDirectory": undefined,
-        "files.delete": undefined,
+        "files.deleteFile": undefined,
       },
     });
     serviceContextMock = await setupTestEnv(client);
@@ -48,7 +47,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("data"),
     );
 
@@ -70,7 +69,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("PNG data"),
     );
 
@@ -98,7 +97,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("<html></html>"),
     );
 
@@ -125,7 +124,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("<svg></svg>"),
     );
 
@@ -147,7 +146,7 @@ describe("FilesPlugin raw endpoint security headers", () => {
     const handler = getRouteHandler(plugin, "get", "/raw");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("content"),
     );
 

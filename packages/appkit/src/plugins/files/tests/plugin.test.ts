@@ -21,12 +21,11 @@ import { PolicyDeniedError, policy, type FilePolicyUser } from "../policy";
 
 const { mockClient, MockApiError } = await vi.hoisted(async () => {
   const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
+    listDirectoryContentsIter: vi.fn(),
+    downloadFile: vi.fn(),
     upload: vi.fn(),
     createDirectory: vi.fn(),
-    delete: vi.fn(),
+    deleteFile: vi.fn(),
   };
 
   const mockClient = {
@@ -227,10 +226,10 @@ describe("FilesPlugin", () => {
           for (const item of items) yield item;
         },
       });
-      mockClient.files.listDirectoryContents.mockReturnValueOnce(
+      mockClient.files.listDirectoryContentsIter.mockReturnValueOnce(
         asyncIterable([{ path: "uploads-file" }]),
       );
-      mockClient.files.listDirectoryContents.mockReturnValueOnce(
+      mockClient.files.listDirectoryContentsIter.mockReturnValueOnce(
         asyncIterable([{ path: "exports-file" }]),
       );
 
@@ -700,7 +699,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "file.txt", path: "/file.txt", is_directory: false };
         },
@@ -726,7 +725,7 @@ describe("FilesPlugin", () => {
 
       // Simulate an SDK call that rejects (e.g. network error).
       // Returns an async iterable whose first iteration throws.
-      mockClient.files.listDirectoryContents.mockReturnValue({
+      mockClient.files.listDirectoryContentsIter.mockReturnValue({
         [Symbol.asyncIterator]: () => ({
           next: () => Promise.reject(new Error("network failure")),
         }),
@@ -751,7 +750,9 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/read");
       const res = mockRes();
 
-      mockClient.files.download.mockRejectedValue(new Error("network failure"));
+      mockClient.files.downloadFile.mockRejectedValue(
+        new Error("network failure"),
+      );
 
       const handlerPromise = handler(
         mockReq("uploads", { query: { path: "test.txt" } }),
@@ -773,9 +774,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/exists");
       const res = mockRes();
 
-      mockClient.files.getMetadata.mockRejectedValue(
-        new Error("network failure"),
-      );
+      mockClient.request.mockRejectedValue(new Error("network failure"));
 
       const handlerPromise = handler(
         mockReq("uploads", { query: { path: "test.txt" } }),
@@ -797,9 +796,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/metadata");
       const res = mockRes();
 
-      mockClient.files.getMetadata.mockRejectedValue(
-        new Error("network failure"),
-      );
+      mockClient.request.mockRejectedValue(new Error("network failure"));
 
       const handlerPromise = handler(
         mockReq("uploads", { query: { path: "test.txt" } }),
@@ -821,7 +818,9 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/download");
       const res = mockRes();
 
-      mockClient.files.download.mockRejectedValue(new Error("network failure"));
+      mockClient.files.downloadFile.mockRejectedValue(
+        new Error("network failure"),
+      );
 
       const handlerPromise = handler(
         mockReq("uploads", { query: { path: "big.bin" } }),
@@ -888,7 +887,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockReturnValue({
+      mockClient.files.listDirectoryContentsIter.mockReturnValue({
         [Symbol.asyncIterator]: () => ({
           next: () =>
             Promise.reject(new Error("internal: secret connection string xyz")),
@@ -918,7 +917,7 @@ describe("FilesPlugin", () => {
       let signalWasAborted = false;
       const { promise, capturedReject } = hangingWithAbort();
 
-      mockClient.files.listDirectoryContents.mockReturnValue({
+      mockClient.files.listDirectoryContentsIter.mockReturnValue({
         [Symbol.asyncIterator]: () => ({
           next: () => {
             // Simulate: we set up a timeout that rejects the hanging promise,
@@ -1050,7 +1049,7 @@ describe("FilesPlugin", () => {
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
-        mockClient.files.listDirectoryContents.mockImplementation(
+        mockClient.files.listDirectoryContentsIter.mockImplementation(
           async function* () {
             yield { name: "h.txt", path: "/h.txt", is_directory: false };
           },
@@ -1165,7 +1164,7 @@ describe("FilesPlugin", () => {
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
-        mockClient.files.listDirectoryContents.mockImplementation(
+        mockClient.files.listDirectoryContentsIter.mockImplementation(
           async function* () {
             yield { name: "g.txt", path: "/g.txt", is_directory: false };
           },
@@ -1253,7 +1252,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "a.txt", path: "/a.txt", is_directory: false };
         },
@@ -1289,7 +1288,7 @@ describe("FilesPlugin", () => {
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
-        mockClient.files.listDirectoryContents.mockImplementation(
+        mockClient.files.listDirectoryContentsIter.mockImplementation(
           async function* () {
             yield { name: "b.txt", path: "/b.txt", is_directory: false };
           },
@@ -1310,7 +1309,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "c.txt", path: "/c.txt", is_directory: false };
         },
@@ -1452,7 +1451,7 @@ describe("FilesPlugin", () => {
       const exported = plugin.exports();
       const handle = exported("public");
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "d.txt", path: "/d.txt", is_directory: false };
         },
@@ -1629,7 +1628,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/read");
       const res = mockRes();
 
-      mockClient.files.download.mockResolvedValue({
+      mockClient.files.downloadFile.mockResolvedValue({
         contents: new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode("file content"));
@@ -2061,7 +2060,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "o.txt", path: "/o.txt", is_directory: false };
         },
@@ -2122,7 +2121,7 @@ describe("FilesPlugin", () => {
       // Policy must not have been evaluated and the SDK must not have been
       // called.
       expect(policySpy).not.toHaveBeenCalled();
-      expect(mockClient.files.listDirectoryContents).not.toHaveBeenCalled();
+      expect(mockClient.files.listDirectoryContentsIter).not.toHaveBeenCalled();
     });
 
     test("OBO volume + missing token + NODE_ENV === 'development' → exactly one warn, SP fallback proceeds", async () => {
@@ -2138,7 +2137,7 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "d.txt", path: "/d.txt", is_directory: false };
         },
@@ -2322,7 +2321,7 @@ describe("FilesPlugin", () => {
       // assert that the SDK call ran inside `runInUserContext` with the
       // expected user identity.
       const observedUserIds: string[] = [];
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           // getCurrentPrincipalId() inside the wrapped fn should resolve to alice.
           const ctx = await import("../../../context");
@@ -2361,9 +2360,9 @@ describe("FilesPlugin", () => {
       const handler = getRouteHandler(plugin, "get", "/read");
       const res = mockRes();
 
-      // The connector reads via files.download — return a valid 200-ish
+      // The connector reads via files.downloadFile — return a valid 200-ish
       // response with content body.
-      mockClient.files.download.mockImplementation(async () => ({
+      mockClient.files.downloadFile.mockImplementation(async () => ({
         contents: new ReadableStream({
           start(controller) {
             controller.enqueue(new TextEncoder().encode("hello"));
@@ -2426,7 +2425,7 @@ describe("FilesPlugin", () => {
       });
       const handler = getRouteHandler(plugin, "get", "/list");
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -2455,7 +2454,9 @@ describe("FilesPlugin", () => {
       // Cache is disabled on OBO: `getOrExecute` is bypassed. The SDK
       // must execute on every request — no cross-user staleness possible.
       expect(getOrExecute).not.toHaveBeenCalled();
-      expect(mockClient.files.listDirectoryContents).toHaveBeenCalledTimes(2);
+      expect(mockClient.files.listDirectoryContentsIter).toHaveBeenCalledTimes(
+        2,
+      );
     });
 
     test("SP volume reads still use the cache (cache is only disabled for OBO)", async () => {
@@ -2474,7 +2475,7 @@ describe("FilesPlugin", () => {
 
       const listHandler = getRouteHandler(plugin, "get", "/list");
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -2535,7 +2536,7 @@ describe("FilesPlugin", () => {
       });
       const handler = getRouteHandler(plugin, "get", "/list");
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -2896,7 +2897,7 @@ describe("FilesPlugin", () => {
       await useRealGetCurrentPrincipalId();
       await useRealGetWorkspaceClient();
 
-      // Distinct user-token client with a `files.delete` that mimics a UC
+      // Distinct user-token client with a `files.deleteFile` that mimics a UC
       // failure (e.g. 403 from UC because the user lacks privilege).
       const userClient = {
         config: {
@@ -2906,7 +2907,7 @@ describe("FilesPlugin", () => {
           }),
         },
         files: {
-          delete: vi.fn(async () => {
+          deleteFile: vi.fn(async () => {
             throw new MockApiError("UC denied", 403);
           }),
         },
@@ -2946,8 +2947,8 @@ describe("FilesPlugin", () => {
       );
 
       // The user-token client was used, not the SP one.
-      expect(userClient.files.delete).toHaveBeenCalledTimes(1);
-      expect(mockClient.files.delete).not.toHaveBeenCalled();
+      expect(userClient.files.deleteFile).toHaveBeenCalledTimes(1);
+      expect(mockClient.files.deleteFile).not.toHaveBeenCalled();
 
       // The UC error surfaced as 403 (the ApiError statusCode).
       expect(res.status).toHaveBeenCalledWith(403);
@@ -3208,7 +3209,7 @@ describe("FilesPlugin", () => {
       // [{...}]. We toggle the return AFTER alice's upload has reached
       // the SDK to simulate cross-user freshness.
       let postUploadVisible = false;
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           if (postUploadVisible) {
             yield {
@@ -3329,7 +3330,7 @@ describe("FilesPlugin", () => {
       // `.files` — making any leak through the SP path crash loudly).
       await useRealGetWorkspaceClient();
 
-      // Distinct user-token client whose `listDirectoryContents` is the
+      // Distinct user-token client whose `listDirectoryContentsIter` is the
       // one we expect `asUser` to route through.
       const userListSpy = vi.fn(async function* () {
         yield { name: "user.txt", path: "/user.txt", is_directory: false };
@@ -3339,7 +3340,7 @@ describe("FilesPlugin", () => {
           host: "https://test.databricks.com",
           authenticate: vi.fn(),
         },
-        files: { listDirectoryContents: userListSpy },
+        files: { listDirectoryContentsIter: userListSpy },
       };
 
       // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to
@@ -3405,7 +3406,7 @@ describe("FilesPlugin", () => {
       const spListSpy = vi.fn(async function* () {
         yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
       });
-      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+      mockClient.files.listDirectoryContentsIter.mockImplementation(spListSpy);
 
       // Spy on createUserContext to confirm no wrap happened.
       serviceContextMock.createUserContextSpy.mockClear();
@@ -3442,7 +3443,7 @@ describe("FilesPlugin", () => {
       const spListSpy = vi.fn(async function* () {
         yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
       });
-      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+      mockClient.files.listDirectoryContentsIter.mockImplementation(spListSpy);
 
       serviceContextMock.createUserContextSpy.mockClear();
 
@@ -3497,12 +3498,12 @@ describe("FilesPlugin", () => {
       process.env.NODE_ENV = "development";
       const policySpy = vi.fn().mockReturnValue(true);
 
-      // Use the default mocked SP client; spy on its listDirectoryContents
+      // Use the default mocked SP client; spy on its listDirectoryContentsIter
       // to confirm the SDK call resolved against the SP path.
       const spListSpy = vi.fn(async function* () {
         yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
       });
-      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+      mockClient.files.listDirectoryContentsIter.mockImplementation(spListSpy);
 
       serviceContextMock.createUserContextSpy.mockClear();
 
@@ -3654,7 +3655,7 @@ describe("FilesPlugin", () => {
       });
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3680,7 +3681,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3706,7 +3707,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3743,7 +3744,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3772,7 +3773,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3805,7 +3806,7 @@ describe("FilesPlugin", () => {
       });
       const calls = spyOnTelemetry(plugin);
 
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {
           yield { name: "f.txt", path: "/f.txt", is_directory: false };
         },
@@ -3863,7 +3864,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin({
         volumes: { uploads: { policy: recorder }, exports: {} },
       });
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {},
       );
       const handle = plugin.exports()("uploads");
@@ -3900,7 +3901,7 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin({
         volumes: { uploads: { policy: spOnly }, exports: {} },
       });
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {},
       );
       const handle = plugin.exports()("uploads");
@@ -3914,7 +3915,7 @@ describe("FilesPlugin", () => {
     test("appkit.asUser(req) tags files.auth_mode as on-behalf-of-user", async () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const calls = spyOnTelemetry(plugin);
-      mockClient.files.listDirectoryContents.mockImplementation(
+      mockClient.files.listDirectoryContentsIter.mockImplementation(
         async function* () {},
       );
 

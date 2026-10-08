@@ -45,6 +45,7 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
+import type { FilesClient } from "@databricks/sdk-files/v2";
 import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { JobsClient } from "@databricks/sdk-jobs/v2";
 import type { ClientOptions } from "@databricks/sdk-options/client";
@@ -553,7 +554,21 @@ export function buildJobsClient(opts: WorkspaceClientOptions): JobsClient {
   );
 }
 
+/**
+ * Build a modular Files client from wrapper options. `getFileMetadata` is not
+ * used: its generated HEAD call parses the (empty) body and drops the response
+ * headers that carry the metadata, so the connector issues that HEAD through
+ * {@link WorkspaceAuth.request} instead.
+ */
+export function buildFilesClient(opts: WorkspaceClientOptions): FilesClient {
+  return lazyClient(
+    () => import("@databricks/sdk-files/v2").then((m) => m.FilesClient),
+    mapToClientOptions(opts),
+  );
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
 export type { ScimClient } from "@databricks/sdk-scim/v1";

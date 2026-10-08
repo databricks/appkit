@@ -28,12 +28,11 @@ describe("FilesPlugin download endpoint Content-Disposition", () => {
     client = createMockWorkspaceClient({
       strict: true,
       responses: {
-        "files.listDirectoryContents": undefined,
-        "files.download": undefined,
-        "files.getMetadata": undefined,
+        "files.listDirectoryContentsIter": undefined,
+        "files.downloadFile": undefined,
         "files.upload": undefined,
         "files.createDirectory": undefined,
-        "files.delete": undefined,
+        "files.deleteFile": undefined,
       },
     });
     serviceContextMock = await setupTestEnv(client);
@@ -48,7 +47,7 @@ describe("FilesPlugin download endpoint Content-Disposition", () => {
     const handler = getRouteHandler(plugin, "get", "/download");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("file data"),
     );
 
@@ -70,7 +69,7 @@ describe("FilesPlugin download endpoint Content-Disposition", () => {
     const handler = getRouteHandler(plugin, "get", "/download");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("data"),
     );
 
@@ -92,7 +91,7 @@ describe("FilesPlugin download endpoint Content-Disposition", () => {
     const handler = getRouteHandler(plugin, "get", "/download");
     const res = mockRes();
 
-    getMock(client, "files.download").mockResolvedValue(
+    getMock(client, "files.downloadFile").mockResolvedValue(
       makeStreamResponse("{}"),
     );
 
@@ -132,7 +131,7 @@ describe("FilesPlugin download endpoint Content-Disposition", () => {
     const res = mockRes();
 
     // Response with no contents field (empty file)
-    getMock(client, "files.download").mockResolvedValue({});
+    getMock(client, "files.downloadFile").mockResolvedValue({});
 
     await handler(
       mockReq("uploads", {
