@@ -56,10 +56,10 @@ UC Volumes / Files API.
 ### genie
 
 ```ts
-readonly genie: GenieService;
+readonly genie: GenieClient;
 ```
 
-Genie / dashboards.
+Genie (modular SDK).
 
 ***
 

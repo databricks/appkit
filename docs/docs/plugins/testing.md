@@ -343,7 +343,7 @@ await mock.attach(plugin);
 ```
 
 `options` is:
-- `responses` — seed the mock workspace client with responses keyed by dotted path (`"jobs.getRun"`, `"genie.getMessage"`). A value can be static or a function of call arguments and the abort signal.
+- `responses` — seed the mock workspace client with responses keyed by dotted path (`"jobs.getRun"`, `"genie.genieGetConversationMessage"`). A value can be static or a function of call arguments and the abort signal.
 - `env` — set environment variables scoped to the test; they are restored on plugin detach.
 - `strict` — throw if a handler calls an undeclared workspace-client path (instead of silently resolving `undefined`). The built-in defaults still count as declared.
 
@@ -513,7 +513,7 @@ const client = createMockWorkspaceClient({
 });
 
 await client.jobs.getRun({ run_id: 1 });        // → { state: "TERMINATED" }
-await client.genie.getMessage({ id: "m-1" });   // → undefined, does not throw
+await client.genie.genieGetConversationMessage({ messageId: "m-1" }); // → undefined, does not throw
 ```
 
 `createTestApp` installs one of these for you, so reach for it directly only when you're driving a plugin through `createTestPluginContext` or `mockServiceContext`.
