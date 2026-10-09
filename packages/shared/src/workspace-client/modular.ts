@@ -61,6 +61,7 @@ import type { PostgresClient } from "@databricks/sdk-postgres/v1";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import type { TablesClient } from "@databricks/sdk-uc-tables/v1";
+import type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 import type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -638,6 +639,16 @@ export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   );
 }
 
+/** Build a modular Unity Catalog Volumes client from wrapper options. */
+export function buildVolumesClient(
+  opts: WorkspaceClientOptions,
+): VolumesClient {
+  return lazyClient(
+    () => import("@databricks/sdk-uc-volumes/v1").then((m) => m.VolumesClient),
+    mapToClientOptions(opts),
+  );
+}
+
 /**
  * Build a modular Lakebase Postgres (autoscaling: projects, branches,
  * endpoints) client from wrapper options. Distinct from the provisioned
@@ -665,6 +676,7 @@ export type { PostgresClient } from "@databricks/sdk-postgres/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
+export type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -724,3 +736,7 @@ export type {
   QueryVectorIndexRequest,
   QueryVectorIndexResponse,
 } from "@databricks/sdk-vectorsearch/v1";
+export type {
+  GetVolumeRequest,
+  VolumeInfo,
+} from "@databricks/sdk-uc-volumes/v1";

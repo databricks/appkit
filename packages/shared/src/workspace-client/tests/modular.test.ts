@@ -61,6 +61,12 @@ vi.mock("@databricks/sdk-modelserving/v1", () => ({
     return { opts, getInferenceEndpoint: async () => ({}) };
   }),
 }));
+vi.mock("@databricks/sdk-uc-volumes/v1", () => ({
+  VolumesClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts, getVolume: async () => ({}) };
+  }),
+}));
 vi.mock("@databricks/sdk-postgres/v1", () => ({
   PostgresClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
@@ -132,6 +138,7 @@ import { ApiError } from "../errors";
 import {
   buildGenieClient,
   buildModelServingClient,
+  buildVolumesClient,
   buildWarehousesClient,
   buildPostgresClient,
   buildWorkspaceAuth,
@@ -377,6 +384,38 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       token: "user-token",
       host: "https://x",
     }).getInferenceEndpoint({} as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("volumes: SP env creds → M2M with the scheme-normalized host", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildVolumesClient({}).getVolume({} as never);
+    expect(ctorOpts[0].host).toBe("https://envhost.cloud.databricks.com");
+    expect(m2mOpts).toEqual([
+      {
+        host: "https://envhost.cloud.databricks.com",
+        clientId: "sp-client-id",
+        clientSecret: "sp-secret",
+      },
+    ]);
+    expect((ctorOpts[0].credentials as { name: () => string }).name()).toBe(
+      "oauth-m2m",
+    );
+  });
+
+  test("volumes (asUser) uses the OBO token as PAT", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildVolumesClient({
+      token: "user-token",
+      host: "https://x",
+    }).getVolume({} as never);
     expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",
