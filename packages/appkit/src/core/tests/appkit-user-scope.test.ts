@@ -777,8 +777,8 @@ describe("agents on-behalf-of-user mode", () => {
       const answer = (caller: string) =>
         (async () => {
           used.push(caller);
-          return {
-            contents: new ReadableStream({
+          return new Response(
+            new ReadableStream({
               start(controller) {
                 controller.enqueue(
                   new TextEncoder().encode(
@@ -788,17 +788,17 @@ describe("agents on-behalf-of-user mode", () => {
                 controller.close();
               },
             }),
-          };
+          );
         }) as never;
       // The harness backs the user scope with `client`; the app's own model
       // client comes from createWorkspaceClient.
       const client = createMockWorkspaceClient();
-      client.apiClient.request = answer("user");
+      client.request = answer("user");
       const real = workspace.createWorkspaceClient;
       vi.spyOn(workspace, "createWorkspaceClient").mockImplementation(
         (options) => {
           const sp = real(options);
-          sp.apiClient.request = answer("app");
+          sp.request = answer("app");
           return sp;
         },
       );

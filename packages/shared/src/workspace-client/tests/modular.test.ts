@@ -470,4 +470,31 @@ describe("buildWorkspaceAuth (auth + raw-request seam)", () => {
       statusCode: 403,
     });
   });
+
+  // Same message/code as the legacy SDK's parseErrorFromResponse, which the
+  // serving plugin surfaces verbatim in its 502 body.
+  test.each([
+    [
+      "plain text",
+      "rate limited",
+      "Response from server (Bad Request) rate limited",
+    ],
+    [
+      "non-standard JSON",
+      '{"error":"bad"}',
+      'Response from server (Bad Request) {"error":"bad"}',
+    ],
+    ["HTML <pre>", "<html><pre>Bad thing.  </pre></html>", "Bad thing"],
+  ])(
+    "request: a %s error body keeps the legacy message",
+    async (_l, body, message) => {
+      nextResponse.statusCode = 400;
+      nextResponse.body = body;
+      const auth = buildWorkspaceAuth({ host: "https://x", token: "t" });
+      const error = await auth
+        .request({ method: "GET", path: "/api/x" })
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ message, statusCode: 400 });
+    },
+  );
 });

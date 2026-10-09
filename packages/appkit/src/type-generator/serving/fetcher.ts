@@ -41,7 +41,7 @@ export interface OpenApiSchema {
 }
 
 /**
- * Fetches the OpenAPI schema for a serving endpoint using the SDK.
+ * Fetches the OpenAPI schema for a serving endpoint via the workspace client.
  * Returns null if the endpoint is not found or access is denied.
  */
 export async function fetchOpenApiSchema(
@@ -50,11 +50,13 @@ export async function fetchOpenApiSchema(
   servedModel?: string,
 ): Promise<{ spec: OpenApiSpec; pathKey: string } | null> {
   try {
-    const response = await client.servingEndpoints.getOpenApi({
-      name: endpointName,
+    const response = await client.request({
+      method: "GET",
+      path: `/api/2.0/serving-endpoints/${endpointName}/openapi`,
+      headers: { Accept: "text/plain" },
     });
 
-    if (!response.contents) {
+    if (!response.body) {
       logger.warn(
         "Empty OpenAPI response for '%s', skipping type generation",
         endpointName,
@@ -62,7 +64,7 @@ export async function fetchOpenApiSchema(
       return null;
     }
 
-    const text = await new Response(response.contents).text();
+    const text = await response.text();
     const rawSpec: unknown = JSON.parse(text);
 
     if (
