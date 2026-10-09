@@ -26,8 +26,11 @@ interface DoctorWorkspaceClient {
   jobs: {
     getJob: (r: { jobId: bigint }) => Promise<unknown>;
   };
+  vectorSearch: {
+    getVectorIndex: (r: { name: string }) => Promise<unknown>;
+  };
   /** Raw REST GET for services the facade has no modular client for yet
-   * (serving, volumes, vector search, UC functions). Throws on non-2xx. */
+   * (serving, volumes, UC functions). Throws on non-2xx. */
   request: (r: { method: string; path: string }) => Promise<unknown>;
 }
 
@@ -254,7 +257,7 @@ const probeVectorIndex: ExistenceProbe = async (client, target) => {
   const name = field(target, "indexName", "index_name", "name");
   if (!name) return missingField("indexName");
   try {
-    await getResource(client, "/api/2.0/vector-search/indexes", name);
+    await client.vectorSearch.getVectorIndex({ name });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);

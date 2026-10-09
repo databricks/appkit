@@ -353,8 +353,8 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("vector_search_index: probes via camelCase `indexName`", async () => {
-    const request = vi.fn(async () => ({}));
-    const client = { request };
+    const getVectorIndex = vi.fn(async () => ({}));
+    const client = { vectorSearch: { getVectorIndex } };
     const r = await runExistenceProbe(
       client,
       target({
@@ -363,10 +363,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
       }),
     );
     expect(r.status).toBe("ok");
-    expect(request).toHaveBeenCalledWith({
-      method: "GET",
-      path: "/api/2.0/vector-search/indexes/main.default.idx",
-    });
+    expect(getVectorIndex).toHaveBeenCalledWith({ name: "main.default.idx" });
   });
 
   it("vector_search_index: skips MISSING_FIELD when index name absent", async () => {
