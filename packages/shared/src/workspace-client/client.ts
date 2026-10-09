@@ -28,6 +28,8 @@ import {
   type ModelServingClient,
   buildFilesClient,
   type FilesClient,
+  buildConnectionsClient,
+  type ConnectionsClient,
   buildTablesClient,
   type TablesClient,
   buildVolumesClient,
@@ -56,6 +58,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #tables?: TablesClient;
   #volumes?: VolumesClient;
   #functions?: FunctionsClient;
+  #connections?: ConnectionsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -108,6 +111,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#tables = buildTablesClient(this.#opts);
     }
     return this.#tables;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get connections(): ConnectionsClient {
+    if (!this.#connections) {
+      this.#connections = buildConnectionsClient(this.#opts);
+    }
+    return this.#connections;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

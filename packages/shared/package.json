@@ -56,6 +56,7 @@
     "@databricks/sdk-uc-functions": "0.51.0",
     "@databricks/sdk-jobs": "0.57.0",
     "@databricks/sdk-modelserving": "0.53.0",
+    "@databricks/sdk-uc-connections": "0.52.0",
     "@databricks/sdk-uc-tables": "0.52.0",
     "@databricks/sdk-uc-volumes": "0.51.0",
     "@databricks/sdk-vectorsearch": "0.51.0",

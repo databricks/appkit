@@ -26,6 +26,7 @@ import type {
   TablesClient,
   VolumesClient,
   FunctionsClient,
+  ConnectionsClient,
   VectorSearchClient,
 } from "./modular";
 
@@ -76,6 +77,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Unity Catalog Functions (modular SDK). */
   readonly functions: FunctionsClient;
+
+  /** Unity Catalog Connections (modular SDK). */
+  readonly connections: ConnectionsClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;

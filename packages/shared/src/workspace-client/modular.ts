@@ -50,6 +50,7 @@ import { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import { ConnectionsClient } from "@databricks/sdk-uc-connections/v1";
 import { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 import { TablesClient } from "@databricks/sdk-uc-tables/v1";
 import { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
@@ -417,6 +418,13 @@ export function buildFunctionsClient(
   return new FunctionsClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Unity Catalog Connections client from wrapper options. */
+export function buildConnectionsClient(
+  opts: WorkspaceClientOptions,
+): ConnectionsClient {
+  return new ConnectionsClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
@@ -425,6 +433,7 @@ export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
+export type { ConnectionsClient } from "@databricks/sdk-uc-connections/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
 export type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
@@ -435,6 +444,12 @@ export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 // than the SDK, so the import boundary holds. Type-only: the connector compares
 // state against string literals, which satisfy the SDK's `Enum | (string & {})`
 // field unions — no runtime enum values needed.
+export type {
+  ConnectionInfo,
+  GetConnectionRequest,
+  ListConnectionsRequest,
+  ListConnectionsResponse,
+} from "@databricks/sdk-uc-connections/v1";
 export type {
   ColumnInfo,
   Disposition,

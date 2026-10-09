@@ -73,6 +73,7 @@ const FACADE_SERVICES = [
   "tables",
   "volumes",
   "functions",
+  "connections",
   "statementExecution",
   "modelServing",
   "servingEndpoints",

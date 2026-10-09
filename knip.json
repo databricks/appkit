@@ -18,6 +18,7 @@
         "@databricks/sdk-uc-functions",
         "@databricks/sdk-jobs",
         "@databricks/sdk-modelserving",
+        "@databricks/sdk-uc-connections",
         "@databricks/sdk-uc-tables",
         "@databricks/sdk-uc-volumes",
         "@databricks/sdk-vectorsearch",
