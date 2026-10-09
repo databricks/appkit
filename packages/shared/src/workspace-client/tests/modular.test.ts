@@ -79,6 +79,12 @@ vi.mock("@databricks/sdk-uc-connections/v1", () => ({
     return { opts, getConnection: async () => ({}) };
   }),
 }));
+vi.mock("@databricks/sdk-database/v1", () => ({
+  DatabaseClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts, getDatabaseInstance: async () => ({}) };
+  }),
+}));
 vi.mock("@databricks/sdk-postgres/v1", () => ({
   PostgresClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
@@ -150,6 +156,7 @@ import { ApiError } from "../errors";
 import {
   buildFunctionsClient,
   buildConnectionsClient,
+  buildDatabaseClient,
   buildGenieClient,
   buildModelServingClient,
   buildVolumesClient,
@@ -378,6 +385,41 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(items).toEqual([1, 2]);
     expect(ctorOpts).toHaveLength(1);
     expect(Reflect.get(client, "then")).toBeUndefined();
+  });
+
+  test("database maps host normalization + SP M2M credentials through mapToClientOptions", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildDatabaseClient({
+      host: "ws.cloud.databricks.com",
+    }).getDatabaseInstance({} as never);
+    expect(ctorOpts[0].host).toBe("https://ws.cloud.databricks.com");
+    expect(m2mOpts[0]).toMatchObject({
+      host: "https://ws.cloud.databricks.com",
+      clientId: "sp-client-id",
+      clientSecret: "sp-secret",
+    });
+  });
+
+  test("database (asUser) uses the OBO token as PAT and keeps the AppKit User-Agent", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildDatabaseClient({
+      token: "user-token",
+      host: "https://x",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never).getDatabaseInstance({} as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
+      "@databricks/appkit/0.64.0",
+    );
   });
 
   test("modelServing normalizes the host and passes SP M2M credentials", async () => {

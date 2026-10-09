@@ -68,6 +68,7 @@ const FACADE_SERVICES = [
   "files",
   "warehouses",
   "genie",
+  "database",
   "jobs",
   "vectorSearch",
   "tables",

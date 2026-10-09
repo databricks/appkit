@@ -52,6 +52,7 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
+import type { DatabaseClient } from "@databricks/sdk-database/v1";
 import type { FilesClient } from "@databricks/sdk-files/v2";
 import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -675,6 +676,16 @@ export function buildConnectionsClient(
   );
 }
 
+/** Build a modular Lakebase (provisioned) Database client from wrapper options. */
+export function buildDatabaseClient(
+  opts: WorkspaceClientOptions,
+): DatabaseClient {
+  return lazyClient(
+    () => import("@databricks/sdk-database/v1").then((m) => m.DatabaseClient),
+    mapToClientOptions(opts),
+  );
+}
+
 /**
  * Build a modular Lakebase Postgres (autoscaling: projects, branches,
  * endpoints) client from wrapper options. Distinct from the provisioned
@@ -690,6 +701,7 @@ export function buildPostgresClient(
 }
 
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { DatabaseClient } from "@databricks/sdk-database/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type {
   DirectoryEntry as FilesDirectoryEntry,
@@ -734,6 +746,13 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  DatabaseCredential,
+  DatabaseInstance,
+  GenerateDatabaseCredentialRequest,
+  ListDatabaseInstancesRequest,
+  ListDatabaseInstancesResponse,
+} from "@databricks/sdk-database/v1";
 export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
