@@ -10,7 +10,7 @@ import {
  * a picker instead of blind free-text entry.
  *
  * Flat resource types are listed through the sanctioned `workspace-client`
- * facade: its modular SDK clients where one exists, else a raw REST `GET`.
+ * facade's modular SDK clients.
  * Parent-context types (volume, uc_function, secret, vector_search_index) still
  * shell out to the `databricks` CLI for their drill-down. Every path fails
  * soft: any error returns an empty list and the caller drops to free-text entry.
@@ -70,27 +70,12 @@ async function* paginate(
   } while (pageToken);
 }
 
-/**
- * Lists a REST collection (snake_case body, `page_token`/`next_page_token`),
- * for services the facade has no modular client for yet.
- */
-function restList(
+/** listInferenceEndpoints is unpaginated; adapt its single page. */
+async function* iterateServingEndpoints(
   client: WorkspaceClient,
-  path: string,
-  key: string,
 ): AsyncIterable<unknown> {
-  return paginate(async (pageToken) => {
-    const res = await client.request({
-      method: "GET",
-      path,
-      query: pageToken ? { page_token: pageToken } : undefined,
-    });
-    const body = (await res.json()) as Record<string, unknown>;
-    return {
-      items: body[key] as unknown[] | undefined,
-      next: body.next_page_token as string | undefined,
-    };
-  });
+  const res = await client.modelServing.listInferenceEndpoints({});
+  yield* res.endpoints ?? [];
 }
 
 /** Genie listSpaces returns a single page; follow `nextPageToken`. */
@@ -118,17 +103,15 @@ export const SDK_LISTERS: Record<string, SdkLister> = {
     },
   },
   serving_endpoint: {
-    list: (c) => restList(c, "/api/2.0/serving-endpoints", "endpoints"),
+    list: iterateServingEndpoints,
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
   uc_connection: {
-    list: (c) =>
-      restList(c, "/api/2.1/unity-catalog/connections", "connections"),
-    toChoice: (i) => choiceFrom(i, "name", "full_name"),
+    list: (c) => c.connections.listConnectionsIter({}),
+    toChoice: (i) => choiceFrom(i, "name", "fullName"),
   },
   database: {
-    list: (c) =>
-      restList(c, "/api/2.0/database/instances", "database_instances"),
+    list: (c) => c.database.listDatabaseInstancesIter({}),
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
   genie_space: {
@@ -136,11 +119,11 @@ export const SDK_LISTERS: Record<string, SdkLister> = {
     toChoice: (i) => choiceFrom(i, "spaceId", "title"),
   },
   experiment: {
-    list: (c) => restList(c, "/api/2.0/mlflow/experiments/list", "experiments"),
-    toChoice: (i) => choiceFrom(i, "experiment_id", "name"),
+    list: (c) => c.experiments.listExperimentsIter({}),
+    toChoice: (i) => choiceFrom(i, "experimentId", "name"),
   },
   app: {
-    list: (c) => restList(c, "/api/2.0/apps", "apps"),
+    list: (c) => c.apps.listAppsIter({}),
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
 };

@@ -14,7 +14,7 @@ so the reported problem is the *root* cause, not a symptom.
 | ------------ | ----------------------------------------------------- | ---------------------------------------------------------- |
 | `auth`       | Can we authenticate to the workspace at all?          | validate `DATABRICKS_HOST` is a real URL, then `currentUser.me()` — once, app-wide; a failure skips the live layer |
 | `config`     | Are the resource's field env vars **present**?        | offline presence check of `process.env` (presence only — see note) |
-| `existence`  | Does the resource exist and is it reachable?          | cheapest per-type live probe (`warehouses.getWarehouse`, `GET /api/2.0/serving-endpoints/{name}`, …); Lakebase runs a real `SELECT 1` |
+| `existence`  | Does the resource exist and is it reachable?          | cheapest per-type live probe (`warehouses.getWarehouse`, `modelServing.getInferenceEndpoint`, …); Lakebase runs a real `SELECT 1` |
 
 `config` checks env-var presence only; whether a value points at a real resource
 is the `existence` layer's job. (`DATABRICKS_HOST` is the exception — `auth`

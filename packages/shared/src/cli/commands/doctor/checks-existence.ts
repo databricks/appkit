@@ -2,7 +2,7 @@
  * Layer: existence — per-resource-type probes that prove a declared resource
  * exists and is reachable via the cheapest read the SDK offers.
  *
- * The client is typed structurally (the facade's modular clients + `request()`).
+ * The client is typed structurally against the facade's modular clients.
  */
 
 import {
@@ -29,21 +29,15 @@ interface DoctorWorkspaceClient {
   vectorSearch: {
     getVectorIndex: (r: { name: string }) => Promise<unknown>;
   };
-  /** Raw REST GET for services the facade has no modular client for yet
-   * (serving, volumes, UC functions). Throws on non-2xx. */
-  request: (r: { method: string; path: string }) => Promise<unknown>;
-}
-
-/** A REST `GET` on a resource path, with the name URL-encoded. */
-function getResource(
-  client: DoctorWorkspaceClient,
-  basePath: string,
-  name: string,
-): Promise<unknown> {
-  return client.request({
-    method: "GET",
-    path: `${basePath}/${encodeURIComponent(name)}`,
-  });
+  modelServing: {
+    getInferenceEndpoint: (r: { name: string }) => Promise<unknown>;
+  };
+  volumes: {
+    getVolume: (r: { fullNameArg: string }) => Promise<unknown>;
+  };
+  functions: {
+    getFunction: (r: { fullNameArg: string }) => Promise<unknown>;
+  };
 }
 
 type ExistenceProbe = (
@@ -52,8 +46,8 @@ type ExistenceProbe = (
 ) => Promise<LayerResult>;
 
 // Read the HTTP status / Databricks error code off an ApiError structurally.
-// Two shapes reach here: the wrapper's `ApiError` (from `request()`:
-// `statusCode` / `errorCode`) and the modular SDK's (`httpStatusCode` / `code`).
+// Two shapes can reach here: the wrapper's `ApiError` (`statusCode` /
+// `errorCode`) and the modular SDK's (`httpStatusCode` / `code`).
 function statusCodeOf(err: unknown): number | undefined {
   if (!err || typeof err !== "object") return undefined;
   const e = err as { statusCode?: unknown; httpStatusCode?: unknown };
@@ -183,7 +177,7 @@ const probeServing: ExistenceProbe = async (client, target) => {
   const value = name ?? idOnly;
   if (!value) return missingField("name");
   try {
-    await getResource(client, "/api/2.0/serving-endpoints", value);
+    await client.modelServing.getInferenceEndpoint({ name: value });
     return EXISTENCE_OK;
   } catch (err) {
     const result = classifyError(err, target);
@@ -246,7 +240,7 @@ const probeVolume: ExistenceProbe = async (client, target) => {
     };
   }
   try {
-    await getResource(client, "/api/2.1/unity-catalog/volumes", name);
+    await client.volumes.getVolume({ fullNameArg: name });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
@@ -268,7 +262,7 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   const name = field(target, "name");
   if (!name) return missingField("name");
   try {
-    await getResource(client, "/api/2.1/unity-catalog/functions", name);
+    await client.functions.getFunction({ fullNameArg: name });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
