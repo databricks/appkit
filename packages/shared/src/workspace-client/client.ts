@@ -28,6 +28,8 @@ import {
   type FilesClient,
   buildTablesClient,
   type TablesClient,
+  buildVolumesClient,
+  type VolumesClient,
   buildVectorSearchClient,
   type VectorSearchClient,
   type StatementExecutionClient,
@@ -50,6 +52,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #files?: FilesClient;
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
+  #volumes?: VolumesClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -102,6 +105,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#tables = buildTablesClient(this.#opts);
     }
     return this.#tables;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get volumes(): VolumesClient {
+    if (!this.#volumes) {
+      this.#volumes = buildVolumesClient(this.#opts);
+    }
+    return this.#volumes;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

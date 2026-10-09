@@ -313,6 +313,9 @@ importers:
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
+      '@databricks/sdk-uc-volumes':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
         version: 0.51.0
@@ -667,6 +670,9 @@ importers:
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
+      '@databricks/sdk-uc-volumes':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
         version: 0.51.0
@@ -2084,6 +2090,10 @@ packages:
 
   '@databricks/sdk-uc-tables@0.52.0':
     resolution: {integrity: sha512-Dlqu3+O1krk6ogBX/uJGUDn1xMdt0gVMvrpmf16XkPelmgzwrbdWWtU2LU/zlcCBrb3XvhPPUpxVVHmyNS8Pjg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-volumes@0.51.0':
+    resolution: {integrity: sha512-Vmk+epraPslz+2pP90XOaZN3wxaoz1UY0mgFnvgUJ/AJHbB5Ei1OTQhtL+Mn5JTVkIaLT6LmJD/xmOqAtaRGLw==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-vectorsearch@0.51.0':
@@ -14450,6 +14460,15 @@ snapshots:
       zod: 4.3.6
 
   '@databricks/sdk-uc-tables@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-volumes@0.51.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0

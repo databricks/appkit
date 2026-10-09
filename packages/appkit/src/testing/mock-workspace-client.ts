@@ -71,6 +71,7 @@ const FACADE_SERVICES = [
   "jobs",
   "vectorSearch",
   "tables",
+  "volumes",
   "statementExecution",
   "modelServing",
   "servingEndpoints",
