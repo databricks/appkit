@@ -7,6 +7,10 @@ migrated one at a time behind this stable interface.
 Accessors are legacy-typed for now (delegated to the underlying legacy SDK
 client); see the module docblock.
 
+## Extends
+
+- `WorkspaceAuth`
+
 ## Properties
 
 ### apiClient
@@ -15,9 +19,9 @@ client); see the module docblock.
 readonly apiClient: ApiClient;
 ```
 
-Low-level HTTP transport (`apiClient.request(...)`). Used for endpoints
-without a typed service method: SCIM header probe, warehouse listing,
-serving SSE streaming, vector search, internal telemetry.
+Legacy low-level HTTP transport. Prefer `request(...)` (modular, inherited
+from `WorkspaceAuth`); still used by serving SSE streaming, vector search,
+and the agents adapters, which take a structural `apiClient` shape.
 
 ***
 
@@ -27,19 +31,19 @@ serving SSE streaming, vector search, internal telemetry.
 readonly config: Config;
 ```
 
-SDK `Config` — exposes `host` and `authenticate(headers)`. Used by the
-files-upload path and agents auth-header stamping, which bypass the typed
-services.
+Legacy SDK `Config`. Prefer `getHost()` / `authenticate(headers)` (modular,
+inherited from `WorkspaceAuth`); kept for structural `WorkspaceClientLike`
+callers (supervisor adapter) until they migrate.
 
 ***
 
 ### currentUser
 
 ```ts
-readonly currentUser: CurrentUserService;
+readonly currentUser: ScimClient;
 ```
 
-Current user.
+Current user (modular SDK SCIM client; `me({})` returns the caller).
 
 ***
 
@@ -102,6 +106,80 @@ readonly warehouses: WarehousesClient;
 SQL Warehouses (modular SDK).
 
 ## Methods
+
+### authenticate()
+
+```ts
+authenticate(headers: Headers): Promise<void>;
+```
+
+Set the auth header(s) (e.g. `Authorization`) on `headers`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `headers` | `Headers` |
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.authenticate
+```
+
+***
+
+### getHost()
+
+```ts
+getHost(): Promise<string>;
+```
+
+Scheme-normalized workspace host, without a trailing slash.
+
+#### Returns
+
+`Promise`\<`string`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.getHost
+```
+
+***
+
+### request()
+
+```ts
+request(req: WorkspaceRequest): Promise<Response>;
+```
+
+Send a request through the modular transport (AppKit User-Agent + auth).
+Returns the raw `Response` (body unread, so it can stream); throws
+ApiError on a non-2xx status.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `req` | `WorkspaceRequest` |
+
+#### Returns
+
+`Promise`\<`Response`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.request
+```
+
+***
 
 ### toLegacyWorkspaceClient()
 

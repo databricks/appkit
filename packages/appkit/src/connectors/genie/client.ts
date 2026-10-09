@@ -69,13 +69,17 @@ function toMessageResponse(message: GenieMessage): GenieMessageResponse {
 }
 
 /**
- * The modular SDK returns the statement response camelCased with int64 fields as
- * `bigint`. The SSE contract (`GenieStatementResponse`, read by appkit-ui) is the
- * raw snake_case API shape, and `JSON.stringify` throws on `bigint`, so convert
- * back here. Recurses into objects only; `data_array` rows pass through as-is.
+ * The modular SDK returns the statement response camelCased, but the SSE
+ * contract (`GenieStatementResponse`, read by appkit-ui) is the raw snake_case
+ * API shape, so rename keys back here. `bigint` counts are handled by the SSE
+ * serializer (`sseJsonReplacer`). Recurses into objects only; `data_array` rows
+ * pass through as-is.
+ *
+ * TODO: update appkit-ui (`genie-query-transform.ts`) and `GenieStatementResponse`
+ * to accept the camelCase shape, then drop this conversion (non-breaking path:
+ * read both shapes first, switch the server later).
  */
 function toWireShape(value: unknown): unknown {
-  if (typeof value === "bigint") return Number(value);
   if (Array.isArray(value)) return value.map(toWireShape);
   if (value === null || typeof value !== "object") return value;
   return Object.fromEntries(

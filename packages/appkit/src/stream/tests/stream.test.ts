@@ -97,6 +97,18 @@ describe("StreamManager", () => {
       expect(streamManager.getActiveCount()).toBe(0);
     });
 
+    test("serializes bigint fields (modular SDK int64) as numbers", async () => {
+      const { mockRes, events } = createMockResponse();
+
+      async function* generator() {
+        yield { type: "result", rowCount: 2n };
+      }
+
+      await streamManager.stream(mockRes as any, generator);
+
+      expect(events).toContain('data: {"type":"result","rowCount":2}\n\n');
+    });
+
     test("should use default message type when not provided", async () => {
       const { mockRes, events } = createMockResponse();
 
