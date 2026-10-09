@@ -1,19 +1,30 @@
 import { createLogger } from "../../logging/logger";
-import type {
-  serving,
-  WorkspaceClient,
-  WorkspaceRequest,
-} from "../../workspace-client";
+import type { serving, WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
 const logger = createLogger("connectors:serving");
 
 /**
- * Structural shape of a Databricks SDK client we need for the low-level
- * request call. Lets `streamPath` be reused by adapters that don't want a
- * hard dependency on the concrete `WorkspaceClient` type. AppKit's own client
- * provides `request` (modular transport); a caller-supplied legacy SDK client
- * only has `apiClient.request`, which stays supported.
+ * Structural shape of the AppKit workspace client's raw-request seam
+ * (`createWorkspaceClient().request`): sends through the modular transport
+ * (AppKit User-Agent + auth) and returns the unread fetch `Response`.
+ */
+export interface WorkspaceRequestClientLike {
+  request(req: {
+    method: string;
+    path: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  }): Promise<Response>;
+}
+
+/**
+ * Structural shape of a legacy Databricks SDK client's low-level
+ * `apiClient.request` call.
+ *
+ * @deprecated Pass an AppKit workspace client ({@link WorkspaceRequestClientLike}).
+ * Still accepted so callers passing a raw legacy SDK client keep working.
  */
 export interface ApiClientLike {
   apiClient: {
@@ -22,7 +33,6 @@ export interface ApiClientLike {
       context?: unknown,
     ): Promise<unknown>;
   };
-  request?(req: WorkspaceRequest): Promise<Response>;
 }
 
 // The legacy SDK's `servingEndpoints.query` copied only these fields into the
@@ -44,6 +54,9 @@ const QUERY_FIELDS = [
   "temperature",
   "usage_context",
 ];
+
+/** A client {@link streamPath} can send through. */
+type StreamClientLike = WorkspaceRequestClientLike | ApiClientLike;
 
 /**
  * Transport shim shared by the agent adapters: given a request body, returns
@@ -108,11 +121,9 @@ export async function invoke(
  * POSTs `body` as JSON to an arbitrary workspace API path and returns the raw
  * SSE byte stream. No parsing is performed — bytes are passed through as-is.
  *
- * Uses the client's `request` (modular transport) when available, else the
- * legacy SDK's `apiClient.request({ raw: true })`, so callers inherit URL
- * resolution and the SDK credential chain (PAT/OAuth/OIDC).
- *
- * When `signal` is provided it aborts the outbound HTTP request.
+ * Uses the workspace client's `request()` so callers inherit URL resolution,
+ * the credential chain (PAT/OAuth/OIDC), and the AppKit User-Agent. A non-2xx
+ * status throws `ApiError`. `signal` aborts the outbound HTTP request.
  *
  * @internal
  *
@@ -124,14 +135,14 @@ export async function invoke(
  * `beta.ts` or any other entry point.
  */
 export async function streamPath(
-  client: ApiClientLike,
+  client: StreamClientLike,
   path: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   logger.debug("Streaming from path %s", path);
 
-  if (client.request) {
+  if ("request" in client) {
     const response = await client.request({
       method: "POST",
       path,
@@ -177,14 +188,14 @@ export async function streamPath(
  * `stream: true` in the payload.
  */
 export async function stream(
-  client: WorkspaceClient,
+  client: StreamClientLike,
   endpointName: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   const { stream: _stream, ...cleanBody } = body;
   return streamPath(
-    client as unknown as ApiClientLike,
+    client,
     `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
     { ...cleanBody, stream: true },
     signal,
@@ -201,7 +212,7 @@ export async function stream(
  * fixed path that routes by the body's `model`, so the caller sets it there.
  */
 export async function streamAiGateway(
-  client: ApiClientLike,
+  client: StreamClientLike,
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {

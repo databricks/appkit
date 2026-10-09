@@ -1065,7 +1065,17 @@ describe("SupervisorApiAdapter", () => {
 });
 
 describe("fromSupervisorApi", () => {
-  test("calls ensureResolved on the supplied workspace client", async () => {
+  test("resolves the host on the supplied workspace client", async () => {
+    const getHost = vi.fn(async () => "https://example.databricks.com");
+    const adapter = await fromSupervisorApi({
+      model: "databricks-claude-sonnet-4",
+      workspaceClient: { getHost, request: vi.fn() },
+    });
+    expect(getHost).toHaveBeenCalledTimes(1);
+    expect(adapter).toBeInstanceOf(SupervisorApiAdapter);
+  });
+
+  test("still calls ensureResolved on a legacy SDK client", async () => {
     const ensureResolved = vi.fn(async () => {});
     const adapter = await fromSupervisorApi({
       model: "databricks-claude-sonnet-4",
@@ -1078,7 +1088,7 @@ describe("fromSupervisorApi", () => {
     expect(adapter).toBeInstanceOf(SupervisorApiAdapter);
   });
 
-  test("routes streaming through apiClient.request with the SA path", async () => {
+  test("routes streaming through request() with the SA path", async () => {
     const encoder = new TextEncoder();
     const contents = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -1086,14 +1096,11 @@ describe("fromSupervisorApi", () => {
         controller.close();
       },
     });
-    const request = vi.fn().mockResolvedValue({ contents });
+    const request = vi.fn().mockResolvedValue(new Response(contents));
 
     const adapter = await fromSupervisorApi({
       model: "databricks-claude-sonnet-4",
-      workspaceClient: {
-        config: { ensureResolved: vi.fn(async () => {}) },
-        apiClient: { request },
-      },
+      workspaceClient: { getHost: vi.fn(async () => "h"), request },
     });
 
     await collect(adapter.run(createInput(), { executeTool: vi.fn() }));
@@ -1102,13 +1109,13 @@ describe("fromSupervisorApi", () => {
     const [requestArgs] = request.mock.calls[0];
     expect(requestArgs.path).toBe("/ai-gateway/mlflow/v1/responses");
     expect(requestArgs.method).toBe("POST");
-    expect(requestArgs.raw).toBe(true);
-    expect(requestArgs.payload).toMatchObject({
+    const payload = JSON.parse(requestArgs.body);
+    expect(payload).toMatchObject({
       model: "databricks-claude-sonnet-4",
       input: "Hello",
       stream: true,
     });
-    expect(requestArgs.payload).not.toHaveProperty("tools");
+    expect(payload).not.toHaveProperty("tools");
   });
 });
 

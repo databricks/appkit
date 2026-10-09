@@ -11,6 +11,7 @@ import {
   type ApiClientLike,
   type StreamBody,
   streamPath,
+  type WorkspaceRequestClientLike,
 } from "../connectors/serving/client";
 import { createLogger } from "../logging/logger";
 import { readSseEvents } from "../stream";
@@ -90,16 +91,17 @@ function summariseErrorPayload(payload: unknown): string {
 
 /**
  * Structural shape of a Databricks SDK client used by {@link fromSupervisorApi}.
- * Only what we need: `apiClient.request` for streaming and
- * `config.ensureResolved` to materialise the host/credentials.
+ * Only what we need: `request` for streaming and `getHost` to materialise
+ * the host/credentials up front. A legacy SDK client (`apiClient.request` +
+ * `config.ensureResolved`) is still accepted (deprecated).
  *
  * Exported because {@link SupervisorApiAdapterOptions.workspaceClient} (a
  * public type) references it — callers passing their own client can name
  * the shape they need to satisfy.
  */
-export interface WorkspaceClientLike extends ApiClientLike {
-  config: { ensureResolved(): Promise<void> };
-}
+export type WorkspaceClientLike =
+  | (WorkspaceRequestClientLike & { getHost(): Promise<string> })
+  | (ApiClientLike & { config: { ensureResolved(): Promise<void> } });
 
 // ---------------------------------------------------------------------------
 // Supervisor API tool surface (wire format)
@@ -346,8 +348,8 @@ interface SupervisorApiAdapterCtorOptions {
  * Authentication is handled via the Databricks SDK credential chain — the
  * same mechanism used by `DatabricksAdapter.fromModelServing`. The transport
  * is injected via {@link SupervisorApiAdapterCtorOptions.streamBody}; the
- * {@link fromSupervisorApi} factory wires it through the SDK's
- * `apiClient.request({ raw: true })`.
+ * {@link fromSupervisorApi} factory wires it through the workspace client's
+ * raw `request()`.
  *
  * Set `DEBUG=appkit:agents:supervisor-api` to log the outbound request
  * shape (model, instructions length, input shape, tool count) and to be
@@ -877,22 +879,14 @@ function mapEvent(
 export async function fromSupervisorApi(
   options: SupervisorApiAdapterOptions,
 ): Promise<AgentAdapter> {
-  let client = options.workspaceClient;
-  if (!client) {
-    // The wrapper's client provides everything `WorkspaceClientLike` needs
-    // (`apiClient.request` + `config.ensureResolved`) but its
-    // `apiClient.request` signature is narrower than our structural
-    // `Record<string, unknown>` shape, so a direct assignment doesn't type.
-    // The cast bridges the structural gap — same pattern the serving
-    // connector uses for `ApiClientLike`.
-    client = createWorkspaceClient() as unknown as WorkspaceClientLike;
-  }
+  const resolved: WorkspaceClientLike =
+    options.workspaceClient ?? createWorkspaceClient();
 
-  await client.config.ensureResolved();
+  // Resolve host + credentials now so misconfiguration fails at construction,
+  // not on the first stream.
+  if ("request" in resolved) await resolved.getHost();
+  else await resolved.config.ensureResolved();
 
-  // Capture the resolved client so the closure doesn't depend on the outer
-  // `let` binding being reassigned later.
-  const resolved = client;
   return new SupervisorApiAdapter({
     streamBody: (body, signal) =>
       streamPath(resolved, "/ai-gateway/mlflow/v1/responses", body, signal),
