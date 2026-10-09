@@ -2,8 +2,8 @@
  * Converts Genie's statement_response data into a flat record array
  * suitable for charting.
  *
- * The Genie API returns `{ manifest.schema.columns, result.data_array }`
- * where each column carries a SQL `type_name`. This module parses values
+ * The Genie API returns `{ manifest.schema.columns, result.dataArray }`
+ * where each column carries a SQL `typeName`. This module parses values
  * according to those types so downstream chart code receives proper
  * numbers and strings.
  */
@@ -70,10 +70,13 @@ function parseValue(raw: string | null, category: ColumnCategory): unknown {
  * Expects `data` to have the shape:
  * ```
  * {
- *   manifest: { schema: { columns: [{ name, type_name }, ...] } },
- *   result: { data_array: [["val", ...], ...] }
+ *   manifest: { schema: { columns: [{ name, typeName }, ...] } },
+ *   result: { dataArray: [["val", ...], ...] }
  * }
  * ```
+ *
+ * The legacy snake_case shape (`type_name`, `data_array`) is also accepted, so
+ * this keeps working against servers that predate the modular SDK migration.
  *
  * Returns `null` when the data is empty or malformed.
  */
@@ -87,16 +90,15 @@ export function transformGenieData(
     return null;
   }
 
-  const dataArray = data.result?.data_array;
+  const dataArray = data.result?.dataArray ?? data.result?.data_array;
   if (!dataArray || dataArray.length === 0) {
     return null;
   }
 
-  const columns: GenieColumnMeta[] = rawColumns.map((col) => ({
-    name: col.name,
-    typeName: col.type_name,
-    category: classifySqlType(col.type_name),
-  }));
+  const columns: GenieColumnMeta[] = rawColumns.map((col) => {
+    const typeName = col.typeName ?? col.type_name ?? "";
+    return { name: col.name, typeName, category: classifySqlType(typeName) };
+  });
 
   const rows: Record<string, unknown>[] = dataArray.map((row) => {
     const record: Record<string, unknown> = {};
