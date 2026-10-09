@@ -373,7 +373,7 @@ describe("LakebasePlugin - OBO via RoutingPool", () => {
     await plugin.setup();
 
     const userCtx = {
-      client: { toLegacyWorkspaceClient: () => ({}) } as any,
+      client: {} as any,
       userId: "user-123",
       userEmail: "alice@example.com",
       workspaceId: Promise.resolve("ws-1"),
@@ -402,7 +402,7 @@ describe("LakebasePlugin - OBO via RoutingPool", () => {
     await plugin.setup();
 
     const userCtx = {
-      client: { toLegacyWorkspaceClient: () => ({}) } as any,
+      client: {} as any,
       userId: "user-123",
       userEmail: "alice@example.com",
       workspaceId: Promise.resolve("ws-1"),
@@ -431,7 +431,7 @@ describe("LakebasePlugin - OBO via RoutingPool", () => {
     await plugin.setup();
 
     const userCtx = {
-      client: { toLegacyWorkspaceClient: () => ({}) } as any,
+      client: {} as any,
       userId: "user-123",
       workspaceId: Promise.resolve("ws-1"),
       isUserContext: true as const,
