@@ -18,7 +18,9 @@ import {
   buildWarehousesClient,
   buildWorkspaceAuth,
   type ScimClient,
+  buildFunctionsClient,
   buildGenieClient,
+  type FunctionsClient,
   type GenieClient,
   buildJobsClient,
   type JobsClient,
@@ -53,6 +55,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
   #volumes?: VolumesClient;
+  #functions?: FunctionsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -105,6 +108,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#tables = buildTablesClient(this.#opts);
     }
     return this.#tables;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get functions(): FunctionsClient {
+    if (!this.#functions) {
+      this.#functions = buildFunctionsClient(this.#opts);
+    }
+    return this.#functions;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

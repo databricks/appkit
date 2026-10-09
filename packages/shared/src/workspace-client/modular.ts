@@ -50,6 +50,7 @@ import { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 import { TablesClient } from "@databricks/sdk-uc-tables/v1";
 import { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 import { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
@@ -409,6 +410,13 @@ export function buildVolumesClient(
   return new VolumesClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Unity Catalog Functions client from wrapper options. */
+export function buildFunctionsClient(
+  opts: WorkspaceClientOptions,
+): FunctionsClient {
+  return new FunctionsClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
@@ -416,6 +424,7 @@ export type { JobsClient } from "@databricks/sdk-jobs/v2";
 export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+export type { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
 export type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
@@ -445,6 +454,10 @@ export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
 } from "@databricks/sdk-genie/v1";
+export type {
+  FunctionInfo,
+  GetFunctionRequest,
+} from "@databricks/sdk-uc-functions/v1";
 export type {
   GetJobRequest,
   GetRunRequest,

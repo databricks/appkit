@@ -51,6 +51,12 @@ vi.mock("@databricks/sdk-uc-volumes/v1", () => ({
     return { opts };
   }),
 }));
+vi.mock("@databricks/sdk-uc-functions/v1", () => ({
+  FunctionsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
 vi.mock("@databricks/sdk-auth/credentials", () => ({
   newPatCredentials: vi.fn((token: string) => {
     patTokens.push(token);
@@ -88,6 +94,7 @@ vi.mock("@databricks/sdk-core/http", () => ({
 
 import { ApiError } from "../errors";
 import {
+  buildFunctionsClient,
   buildGenieClient,
   buildModelServingClient,
   buildVolumesClient,
@@ -339,6 +346,28 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
     process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
     buildVolumesClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("functions maps host + SP M2M credentials onto the client", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildFunctionsClient({ host: "my-ws.cloud.databricks.com" } as never);
+    expect(ctorOpts[0].host).toBe("https://my-ws.cloud.databricks.com");
+    expect(ctorOpts[0].credentials).toMatchObject({
+      name: expect.any(Function),
+    });
+    expect(m2mOpts).toHaveLength(1);
+  });
+
+  test("functions (asUser) uses the OBO token as PAT", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildFunctionsClient({ token: "user-token", host: "https://x" } as never);
     expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",

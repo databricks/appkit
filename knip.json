@@ -15,6 +15,7 @@
         "@databricks/sdk-experimental",
         "@databricks/sdk-files",
         "@databricks/sdk-genie",
+        "@databricks/sdk-uc-functions",
         "@databricks/sdk-jobs",
         "@databricks/sdk-modelserving",
         "@databricks/sdk-uc-tables",

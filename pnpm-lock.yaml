@@ -310,6 +310,9 @@ importers:
       '@databricks/sdk-statementexecution':
         specifier: 0.52.0
         version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
+      '@databricks/sdk-uc-functions':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
@@ -667,6 +670,9 @@ importers:
       '@databricks/sdk-statementexecution':
         specifier: 0.52.0
         version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
+      '@databricks/sdk-uc-functions':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
@@ -2086,6 +2092,10 @@ packages:
 
   '@databricks/sdk-statementexecution@0.52.0':
     resolution: {integrity: sha512-ymDGDW67PJ/0VujM89mUrE6mbbrabsKJP5LvPv8ZbgzPR0bm0DwXMcQzvS0XUt0UGITjV2gqbx5jQwP3ijtOmg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-functions@0.51.0':
+    resolution: {integrity: sha512-L5Qq3lB8OIiEOW4h8s9EJQ82VeBFiPnA0F5S2Fhqpd8L8bpx3rjG/e88ZYDtDg3bg4xunOdMQS1VWRxSF9IMxA==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-uc-tables@0.52.0':
@@ -14451,6 +14461,15 @@ snapshots:
       zod: 4.3.6
 
   '@databricks/sdk-statementexecution@0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-functions@0.51.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
