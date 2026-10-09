@@ -447,6 +447,12 @@ export function buildDatabaseClient(
   return new DatabaseClient(mapToClientOptions(opts));
 }
 
+/**
+ * Resolve a `~/.databrickscfg` profile (+ env overlay, unless disabled). Exposed
+ * so the CLI can read a profile offline without importing the SDK directly.
+ */
+export { resolve as resolveProfile } from "@databricks/sdk-core/profiles";
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { DatabaseClient } from "@databricks/sdk-database/v1";
 export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
