@@ -39,5 +39,5 @@
     "docs/**",
     ".github/scripts/**"
   ],
-  "ignoreBinaries": ["tarball"]
+  "ignoreBinaries": ["tarball", "appkit"]
 }
