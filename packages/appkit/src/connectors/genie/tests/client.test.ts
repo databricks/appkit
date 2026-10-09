@@ -169,8 +169,8 @@ describe("GenieConnector", () => {
       const completedMsg = makeGenieMessageWithQuery();
       mockStart(ws, completedMsg);
 
-      // The modular SDK hands back camelCase with int64 counts as bigint; the
-      // SSE payload must be the snake_case wire shape and JSON-serializable.
+      // The modular SDK hands back camelCase; the SSE payload keeps the
+      // snake_case wire shape (bigints are serialized by the SSE writer).
       ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
         statementResponse: {
           statementId: "stmt-1",
@@ -185,9 +185,9 @@ describe("GenieConnector", () => {
         statement_id: "stmt-1",
         manifest: {
           schema: { columns: [{ name: "total", type_name: "DOUBLE" }] },
-          total_row_count: 1,
+          total_row_count: 1n,
         },
-        result: { data_array: [["1234.56", null]], row_count: 1 },
+        result: { data_array: [["1234.56", null]], row_count: 1n },
       };
 
       const events = await collect(
@@ -201,7 +201,6 @@ describe("GenieConnector", () => {
         statementId: "stmt-1",
         data: statementResponse,
       });
-      expect(() => JSON.stringify(queryResult)).not.toThrow();
     });
 
     test("maps a FAILED poll to the table permissions error", async () => {
